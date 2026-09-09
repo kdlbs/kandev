@@ -94,11 +94,8 @@ features:
 
   # High-risk Office per-agent session identity experiment: keys an Office
   # task's session on the run's own agent instead of the runner seat. Off in
-  # every profile because it is an experimental, high-risk, path-scoped change
-  # to durable session identity and existing session rows are not migrated. A
-  # live (task_id, agent_profile_id) pair is guarded in-transaction on the
-  # office session creation path instead of by a table-level constraint.
-  # Pre-existing duplicate rows are retained and resolved by selection.
+  # every profile until the companion (task_id, agent_profile_id) unique-index
+  # fix has shipped, since pre-existing duplicate rows would otherwise be exposed.
   KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
     prod: "false"
     dev:  "false"

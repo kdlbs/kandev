@@ -2,7 +2,7 @@
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
-import type { QueueMeta, QueueOperationToken, SessionSlice, SessionSliceState } from "./types";
+import type { SessionSlice, SessionSliceState } from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
 import {
   buildTaskSessionProjectionActions,
@@ -214,12 +214,7 @@ export const defaultSessionState: SessionSliceState = {
     activeStepByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
-  queue: {
-    bySessionId: {},
-    metaBySessionId: {},
-    activeOperationBySessionId: {},
-    nextOperationGeneration: 0,
-  },
+  queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
@@ -539,9 +534,6 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
         );
       }
       delete draft.pendingActionProjectionsBySessionId[sessionId];
-      delete draft.queue.bySessionId[sessionId];
-      delete draft.queue.metaBySessionId[sessionId];
-      delete draft.queue.activeOperationBySessionId[sessionId];
       // Drop the conversation history owned by this session.
       delete draft.messages.bySession[sessionId];
       delete draft.messages.metaBySession[sessionId];
@@ -560,23 +552,6 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
     });
 }
 
-function resetQueueStateForReincarnation(
-  draft: Pick<SessionSliceState, "queue">,
-  existing: TaskSession | undefined,
-  incoming: Pick<TaskSession, "id" | "queue_incarnation_id">,
-): void {
-  if (
-    !existing ||
-    incoming.queue_incarnation_id === undefined ||
-    existing.queue_incarnation_id === incoming.queue_incarnation_id
-  ) {
-    return;
-  }
-  delete draft.queue.bySessionId[incoming.id];
-  delete draft.queue.metaBySessionId[incoming.id];
-  delete draft.queue.activeOperationBySessionId[incoming.id];
-}
-
 /** Build actions that reconcile complete session snapshots with partial live events. */
 function buildTaskSessionReconciliationActions(set: ImmerSet) {
   return {
@@ -588,7 +563,6 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
       set((draft) => {
         const merged = sessions.map((session) => {
           const existing = draft.taskSessions.items[session.id];
-          resetQueueStateForReincarnation(draft, existing, session);
           const snapshot = mergeTaskSessionSnapshot(
             existing,
             session,
@@ -621,7 +595,6 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           epochs[session.id] = (epochs[session.id] ?? 0) + 1;
         }
         const existing = draft.taskSessions.items[session.id];
-        resetQueueStateForReincarnation(draft, existing, session);
         if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
           // State events intentionally carry partial session rows. When one
           // introduces a new session, let useTaskSessions hydrate fields such
@@ -653,7 +626,6 @@ function buildTaskSessionActions(set: ImmerSet) {
     setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
       set((draft) => {
         const existingSession = draft.taskSessions.items[session.id];
-        resetQueueStateForReincarnation(draft, existingSession, session);
         const mergedSession = mergeOrphanPendingActionProjection(
           draft.pendingActionProjectionsBySessionId,
           existingSession ? mergeTaskSession(existingSession, session) : session,
@@ -688,157 +660,6 @@ function buildTaskSessionActions(set: ImmerSet) {
     setTaskSessionsError: (taskId: string, error: string | null) =>
       set((draft) => {
         (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = error;
-      }),
-  };
-}
-
-type QueueMetaInput = Parameters<SessionSlice["setQueueEntries"]>[2];
-
-function queueMetaIdentityMatches(currentIncarnationId: string | undefined, meta: QueueMetaInput) {
-  return !meta.sessionIncarnationId || currentIncarnationId === meta.sessionIncarnationId;
-}
-
-function canCarryPreviousQueueMeta(
-  previous: QueueMeta | undefined,
-  currentIncarnationId: string | undefined,
-  meta: QueueMetaInput,
-) {
-  return (
-    previous !== undefined &&
-    previous.sessionIncarnationId === currentIncarnationId &&
-    (!meta.sessionIncarnationId || meta.sessionIncarnationId === previous.sessionIncarnationId)
-  );
-}
-
-function isStaleQueueSnapshot(
-  previous: QueueMeta | undefined,
-  meta: QueueMetaInput,
-  establishStatusEpoch: boolean,
-) {
-  if (
-    meta.statusEpoch !== undefined &&
-    previous?.statusEpoch !== undefined &&
-    meta.statusEpoch !== previous.statusEpoch
-  ) {
-    return !establishStatusEpoch;
-  }
-  return (
-    meta.statusEpoch !== undefined &&
-    meta.statusEpoch === previous?.statusEpoch &&
-    meta.statusGeneration !== undefined &&
-    previous.statusGeneration !== undefined &&
-    meta.statusGeneration <= previous.statusGeneration
-  );
-}
-
-function shouldPreserveSessionPolicy(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === "session" &&
-    meta.autoMergeSource === "global"
-  );
-}
-
-function shouldPreservePolicyRevision(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === meta.autoMergeSource &&
-    previous?.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision < previous.autoMergeRevision
-  );
-}
-
-function copyAutoMergePolicy(target: QueueMetaInput, source: QueueMeta) {
-  target.autoMergeAvailable = source.autoMergeAvailable;
-  target.autoMergeEnabled = source.autoMergeEnabled;
-  target.autoMergeSource = source.autoMergeSource;
-  target.autoMergeRevision = source.autoMergeRevision;
-}
-
-function resolveQueueMeta(
-  currentIncarnationId: string | undefined,
-  previous: QueueMeta | undefined,
-  meta: QueueMetaInput,
-  establishStatusEpoch: boolean,
-): QueueMetaInput | null {
-  if (!queueMetaIdentityMatches(currentIncarnationId, meta)) return null;
-  const nextMeta = { ...meta };
-  if (canCarryPreviousQueueMeta(previous, currentIncarnationId, meta)) {
-    Object.assign(nextMeta, previous, meta);
-  }
-  if (isStaleQueueSnapshot(previous, meta, establishStatusEpoch)) return null;
-  if (
-    previous &&
-    (shouldPreserveSessionPolicy(previous, meta) || shouldPreservePolicyRevision(previous, meta))
-  ) {
-    copyAutoMergePolicy(nextMeta, previous);
-  }
-  return nextMeta;
-}
-
-function buildQueueActions(set: ImmerSet) {
-  return {
-    setQueueEntries: (
-      sessionId: Parameters<SessionSlice["setQueueEntries"]>[0],
-      entries: Parameters<SessionSlice["setQueueEntries"]>[1],
-      meta: QueueMetaInput,
-      options?: Parameters<SessionSlice["setQueueEntries"]>[3],
-    ) =>
-      set((draft) => {
-        const nextMeta = resolveQueueMeta(
-          draft.taskSessions.items[sessionId]?.queue_incarnation_id,
-          draft.queue.metaBySessionId[sessionId],
-          meta,
-          options?.establishStatusEpoch === true,
-        );
-        if (!nextMeta) return;
-        draft.queue.bySessionId[sessionId] = entries;
-        draft.queue.metaBySessionId[sessionId] = nextMeta;
-      }),
-    removeQueueEntry: (sessionId: string, entryId: string) =>
-      set((draft) => {
-        const list = draft.queue.bySessionId[sessionId];
-        if (!list) return;
-        draft.queue.bySessionId[sessionId] = list.filter((entry) => entry.id !== entryId);
-        const meta = draft.queue.metaBySessionId[sessionId];
-        if (meta) meta.count = draft.queue.bySessionId[sessionId].length;
-      }),
-    beginQueueOperation: (sessionId: string, sessionIncarnationId: string) => {
-      let token: QueueOperationToken | null = null;
-      set((draft) => {
-        const session = draft.taskSessions.items[sessionId];
-        if (
-          session?.queue_incarnation_id !== sessionIncarnationId ||
-          draft.queue.activeOperationBySessionId[sessionId]
-        ) {
-          return;
-        }
-        token = {
-          sessionIncarnationId,
-          generation: ++draft.queue.nextOperationGeneration,
-        };
-        draft.queue.activeOperationBySessionId[sessionId] = token;
-      });
-      return token;
-    },
-    finishQueueOperation: (sessionId: string, token: QueueOperationToken) =>
-      set((draft) => {
-        const current = draft.queue.activeOperationBySessionId[sessionId];
-        const session = draft.taskSessions.items[sessionId];
-        if (
-          current?.generation === token.generation &&
-          current.sessionIncarnationId === token.sessionIncarnationId &&
-          session?.queue_incarnation_id === token.sessionIncarnationId
-        ) {
-          delete draft.queue.activeOperationBySessionId[sessionId];
-        }
-      }),
-    clearQueueStatus: (sessionId: string) =>
-      set((draft) => {
-        delete draft.queue.bySessionId[sessionId];
-        delete draft.queue.metaBySessionId[sessionId];
-        delete draft.queue.activeOperationBySessionId[sessionId];
       }),
   };
 }
@@ -883,5 +704,29 @@ export const createSessionSlice: StateCreator<
     }),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),
-  ...buildQueueActions(set),
+  setQueueEntries: (sessionId, entries, meta) =>
+    set((draft) => {
+      draft.queue.bySessionId[sessionId] = entries;
+      draft.queue.metaBySessionId[sessionId] = meta;
+    }),
+  removeQueueEntry: (sessionId, entryId) =>
+    set((draft) => {
+      const list = draft.queue.bySessionId[sessionId];
+      if (!list) return;
+      draft.queue.bySessionId[sessionId] = list.filter((entry) => entry.id !== entryId);
+      const meta = draft.queue.metaBySessionId[sessionId];
+      if (meta) {
+        meta.count = draft.queue.bySessionId[sessionId].length;
+      }
+    }),
+  setQueueLoading: (sessionId, loading) =>
+    set((draft) => {
+      draft.queue.isLoading[sessionId] = loading;
+    }),
+  clearQueueStatus: (sessionId) =>
+    set((draft) => {
+      delete draft.queue.bySessionId[sessionId];
+      delete draft.queue.metaBySessionId[sessionId];
+      delete draft.queue.isLoading[sessionId];
+    }),
 });

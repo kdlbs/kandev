@@ -106,11 +106,11 @@ type Services struct {
 	Office       *officeservice.Service
 	OfficeSvcs   *office.Services
 	// OrchScheduler is the office SchedulerIntegration constructed by
-	// startSchedulingRuntime. Exposed here so registerRoutes can
+	// startOfficeSchedulersAndGC. Exposed here so registerRoutes can
 	// wire SetTaskContextProvider after the HandoffService is built.
 	OrchScheduler *officeservice.SchedulerIntegration
-	// WorktreeMgr is the worktree manager. Exposed here so the install-wide
-	// storage-maintenance composition can reach it for workspace cleanup.
+	// WorktreeMgr is the worktree manager. Exposed so the office GC can
+	// consult it as the authoritative inventory of live worktrees.
 	WorktreeMgr *worktree.Manager
 	// Terminal is the first-class user-terminal service (rename, park, etc.).
 	// Wired into the gateway once lifecycle.Manager is up so the PTY backend

@@ -24,8 +24,7 @@ test.describe("Mobile sidebar — queued prompt count", () => {
       state: "IDLE",
       agentProfileId: seedData.agentProfileId,
     });
-    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
-    await apiClient.queueMessage(queueIdentity, "Mobile queued prompt");
+    await apiClient.queueMessage(task.id, sessionId, "Mobile queued prompt");
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);

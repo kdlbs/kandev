@@ -98,10 +98,15 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
-	// The payload carries no child summaries: the prompt path derives the
-	// child list at assembly time. Nothing here can fail, so no read for the
-	// briefing can stop a wake that readiness already judged due.
-	payload := engine.OnChildrenCompletedPayload{}
+	payload, err := h.buildPayload(ctx, svc, c.ParentTaskID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: build payload failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
 
 	currentKey, err := svc.repo.GetChildSetKey(ctx, c.ParentTaskID)
 	if err != nil {
@@ -137,6 +142,38 @@ func (h *ParentWakeReconciler) reconcileOne(
 	}
 
 	h.recordReceipt(ctx, svc, c, operationID)
+}
+
+// buildPayload assembles the typed payload expected by the workflow engine's
+// on_children_completed trigger. GetChildSummaries counts all children, and
+// the candidate query separately excludes archived children from readiness.
+func (h *ParentWakeReconciler) buildPayload(
+	ctx context.Context, svc *Service, parentTaskID string,
+) (engine.OnChildrenCompletedPayload, error) {
+	children, truncated, err := svc.repo.GetChildSummaries(ctx, parentTaskID)
+	if err != nil {
+		return engine.OnChildrenCompletedPayload{}, fmt.Errorf("get child summaries: %w", err)
+	}
+
+	prsByTask := svc.lookupChildPRLinks(ctx, children)
+	summaries := make([]engine.ChildSummary, 0, len(children))
+	for _, c := range children {
+		summaries = append(summaries, engine.ChildSummary{
+			TaskID:  c.TaskID,
+			Status:  c.State,
+			Summary: c.LastComment,
+			PRLinks: prsByTask[c.TaskID],
+		})
+	}
+
+	if truncated {
+		// The engine payload has no truncation field. The list is already
+		// capped by the repository, so the available summaries remain the
+		// same as the normal edge-triggered path.
+		h.logger.Debug("wake sweep: child summaries truncated",
+			zap.String("parent_task_id", parentTaskID))
+	}
+	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, nil
 }
 
 // recordReceipt stores the operation-backed receipt after the workflow engine

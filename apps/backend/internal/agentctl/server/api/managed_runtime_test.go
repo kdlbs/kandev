@@ -12,33 +12,23 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
-func TestManagedRuntimeCacheRepairUsesProbeEnvironmentAndExactTree(t *testing.T) {
+func TestManagedRuntimeCacheRepairUsesAgentEnvironmentAndExactTree(t *testing.T) {
 	server := newTestServer(t)
-	instanceCacheRoot := t.TempDir()
-	probeCacheRoot := t.TempDir()
-	server.cfg.AgentEnv = []string{"NPM_CONFIG_CACHE=" + instanceCacheRoot}
+	cacheRoot := t.TempDir()
+	server.cfg.AgentEnv = []string{"NPM_CONFIG_CACHE=" + cacheRoot}
 
 	packageSpec := "@scope/managed-acp@1.2.3"
-	probeNpxRoot := filepath.Join(probeCacheRoot, "_npx")
-	target := filepath.Join(probeNpxRoot, managedruntime.NpxExecutionCacheKey(packageSpec))
-	sibling := filepath.Join(probeNpxRoot, "0123456789abcdef")
-	instanceTarget := filepath.Join(
-		instanceCacheRoot, "_npx", managedruntime.NpxExecutionCacheKey(packageSpec),
-	)
+	npxRoot := filepath.Join(cacheRoot, "_npx")
+	target := filepath.Join(npxRoot, managedruntime.NpxExecutionCacheKey(packageSpec))
+	sibling := filepath.Join(npxRoot, "0123456789abcdef")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(sibling, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(instanceTarget, 0o755); err != nil {
-		t.Fatal(err)
-	}
 
-	body, err := json.Marshal(map[string]any{
-		"package_spec": packageSpec,
-		"env":          map[string]string{"NPM_CONFIG_CACHE": probeCacheRoot},
-	})
+	body, err := json.Marshal(map[string]string{"package_spec": packageSpec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +45,5 @@ func TestManagedRuntimeCacheRepairUsesProbeEnvironmentAndExactTree(t *testing.T)
 	}
 	if _, err := os.Stat(sibling); err != nil {
 		t.Fatalf("unrelated tree was removed: %v", err)
-	}
-	if _, err := os.Stat(instanceTarget); err != nil {
-		t.Fatalf("instance-environment tree was removed instead of probe tree: %v", err)
 	}
 }

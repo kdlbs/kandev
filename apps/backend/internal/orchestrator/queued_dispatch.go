@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"context"
 	"errors"
 	"sync/atomic"
 
@@ -23,7 +22,6 @@ const (
 type queuedDispatchReservation struct {
 	sessionID string
 	entryID   string
-	identity  messagequeue.QueueSessionIdentity
 	source    *messagequeue.QueuedMessage
 	phase     atomic.Uint32
 	// liveEligible is set only for Send Now reservations. It allows the
@@ -38,15 +36,10 @@ type queuedDispatchReservation struct {
 	successorTurn atomic.Value
 }
 
-func newQueuedDispatchReservation(
-	sessionID, entryID string,
-	identity messagequeue.QueueSessionIdentity,
-	source *messagequeue.QueuedMessage,
-) *queuedDispatchReservation {
+func newQueuedDispatchReservation(sessionID, entryID string, source *messagequeue.QueuedMessage) *queuedDispatchReservation {
 	reservation := &queuedDispatchReservation{
 		sessionID: sessionID,
 		entryID:   entryID,
-		identity:  identity,
 		source:    source,
 	}
 	reservation.phase.Store(uint32(queuedDispatchPending))
@@ -91,7 +84,7 @@ func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
 	if sessionID == "" || entryID == "" {
 		return nil
 	}
-	reservation := newQueuedDispatchReservation(sessionID, entryID, messagequeue.QueueSessionIdentity{}, source)
+	reservation := newQueuedDispatchReservation(sessionID, entryID, source)
 	if previous, ok := s.dispatchingQueued.Load(sessionID); ok {
 		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
 			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
@@ -104,37 +97,6 @@ func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
 	s.acceptedQueuedDispatch.Delete(sessionID)
 	s.dispatchingQueued.Store(sessionID, reservation)
 	return reservation
-}
-
-func (s *Service) markQueuedDispatchInFlightWithIdentityLocked(
-	identity messagequeue.QueueSessionIdentity,
-	entryID string,
-	source *messagequeue.QueuedMessage,
-) *queuedDispatchReservation {
-	if identity.TaskID == "" || identity.SessionID == "" ||
-		identity.SessionIncarnationID == "" || entryID == "" {
-		return nil
-	}
-	reservation := newQueuedDispatchReservation(identity.SessionID, entryID, identity, source)
-	if previous, ok := s.dispatchingQueued.Load(identity.SessionID); ok {
-		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
-			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
-		}
-	}
-	s.acceptedQueuedDispatch.Delete(identity.SessionID)
-	s.dispatchingQueued.Store(identity.SessionID, reservation)
-	return reservation
-}
-
-func (reservation *queuedDispatchReservation) matchesSessionIdentity(
-	taskID, sessionID, incarnationID string,
-) bool {
-	if reservation == nil || reservation.identity.SessionIncarnationID == "" {
-		return true
-	}
-	return reservation.identity.TaskID == taskID &&
-		reservation.identity.SessionID == sessionID &&
-		reservation.identity.SessionIncarnationID == incarnationID
 }
 
 func (s *Service) pendingQueuedDispatch(sessionID string) *queuedDispatchReservation {
@@ -330,22 +292,6 @@ func (s *Service) clearQueuedDispatchInFlightIfCurrent(
 		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
 		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 	}
-}
-
-func (s *Service) markQueuedDispatchDrainPending(sessionID string) {
-	if sessionID != "" {
-		s.queuedDispatchDrainPending.Store(sessionID, struct{}{})
-	}
-}
-
-func (s *Service) drainQueuedDispatchIfPending(sessionID string) {
-	if sessionID == "" {
-		return
-	}
-	if _, pending := s.queuedDispatchDrainPending.LoadAndDelete(sessionID); !pending {
-		return
-	}
-	s.drainQueuedMessageForPromptableSession(context.Background(), sessionID)
 }
 
 // releaseQueuedDispatchPendingIfCurrent is used by the fast prompt-claim

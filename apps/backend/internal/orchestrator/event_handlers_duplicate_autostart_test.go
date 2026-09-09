@@ -133,7 +133,7 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		repo:           repo,
 		taskRepo:       taskRepo,
 		agentManager:   agentMgr,
-		messageQueue:   newAuthoritativeMemoryQueue(repo, testLogger()),
+		messageQueue:   messagequeue.NewServiceMemory(testLogger()),
 		executor:       exec,
 		messageCreator: msgCreator,
 	}
@@ -441,7 +441,7 @@ func TestAutoStartTransientError_AutoResumesWhenAgentDead(t *testing.T) {
 		repo:           repo,
 		taskRepo:       taskRepo,
 		agentManager:   agentMgr,
-		messageQueue:   newAuthoritativeMemoryQueue(repo, testLogger()),
+		messageQueue:   messagequeue.NewServiceMemory(testLogger()),
 		executor:       exec,
 		messageCreator: msgCreator,
 	}
@@ -586,7 +586,7 @@ func TestAutoStartCreatedLaunch_QueuesPromptWhenAgentAlreadyRunning(t *testing.T
 		t.Fatalf("set session profile: %v", err)
 	}
 
-	err = svc.autoStartStepPrompt(ctx, taskID, session, step, "Do the work", false, true, nil)
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, "Do the work", false, true)
 	if err == nil {
 		t.Fatal("expected autoStartStepPrompt to return the launch error")
 	}
@@ -664,7 +664,7 @@ func TestAutoStartCreatedLaunch_DoesNotRestoreHandoffAfterQueueingMergedPrompt(t
 		t.Fatalf("seed handoff message: %v", err)
 	}
 
-	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true, nil)
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true)
 	if err == nil {
 		t.Fatal("expected autoStartStepPrompt to return the launch error")
 	}

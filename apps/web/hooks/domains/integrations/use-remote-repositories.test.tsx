@@ -436,7 +436,7 @@ describe("useRemoteRepositories provider eligibility changes", () => {
     await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
     expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
     expect(mocks.listAzureDevOpsProjects).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(result.current.availableProviders).toEqual(["github"]));
+    expect(result.current.availableProviders).toEqual(["github"]);
   });
 });
 

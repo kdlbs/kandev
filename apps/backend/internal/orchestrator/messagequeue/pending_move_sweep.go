@@ -19,8 +19,7 @@ import (
 // ListPendingMoves returns every armed deferred move, keyed by session.
 func (r *sqliteRepository) ListPendingMoves(ctx context.Context) ([]PendingMoveRecord, error) {
 	rows, err := r.ro.QueryxContext(ctx, `
-		SELECT session_id, move_id, session_incarnation_id, task_id, workflow_id,
-		       workflow_step_id, step_position, queued_at, actor, sender_session_id
+		SELECT session_id, move_id, task_id, workflow_id, workflow_step_id, step_position, queued_at, actor, sender_session_id
 		FROM pending_moves
 	`)
 	if err != nil {
@@ -31,29 +30,26 @@ func (r *sqliteRepository) ListPendingMoves(ctx context.Context) ([]PendingMoveR
 	var records []PendingMoveRecord
 	for rows.Next() {
 		var (
-			sessionID, moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
-			position                                                                    int
-			queuedAt                                                                    time.Time
-			actor, senderSessionID                                                      string
+			sessionID, moveID, taskID, workflowID, workflowStepID string
+			position                                              int
+			queuedAt                                              time.Time
+			actor, senderSessionID                                string
 		)
-		if err := rows.Scan(
-			&sessionID, &moveID, &sessionIncarnationID, &taskID, &workflowID,
-			&workflowStepID, &position, &queuedAt, &actor, &senderSessionID,
-		); err != nil {
+		if err := rows.Scan(&sessionID, &moveID, &taskID, &workflowID, &workflowStepID,
+			&position, &queuedAt, &actor, &senderSessionID); err != nil {
 			return nil, fmt.Errorf("scan pending move: %w", err)
 		}
 		records = append(records, PendingMoveRecord{
 			SessionID: sessionID,
 			Move: PendingMove{
-				MoveID:               moveID,
-				SessionIncarnationID: sessionIncarnationID,
-				TaskID:               taskID,
-				WorkflowID:           workflowID,
-				WorkflowStepID:       workflowStepID,
-				Position:             position,
-				QueuedAt:             queuedAt,
-				Actor:                actor,
-				SenderSessionID:      senderSessionID,
+				MoveID:          moveID,
+				TaskID:          taskID,
+				WorkflowID:      workflowID,
+				WorkflowStepID:  workflowStepID,
+				Position:        position,
+				QueuedAt:        queuedAt,
+				Actor:           actor,
+				SenderSessionID: senderSessionID,
 			},
 		})
 	}
@@ -86,8 +82,8 @@ func (r *sqliteRepository) DeletePendingMoveIfMatch(
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM pending_moves
-		WHERE session_id = ? AND move_id = ? AND session_incarnation_id = ? AND queued_at = ?
-	`), expected.SessionID, expected.Move.MoveID, expected.Move.SessionIncarnationID, expected.Move.QueuedAt)
+		WHERE session_id = ? AND move_id = ? AND queued_at = ?
+	`), expected.SessionID, expected.Move.MoveID, expected.Move.QueuedAt)
 	if err != nil {
 		return false, fmt.Errorf("delete pending move: %w", err)
 	}
@@ -140,10 +136,7 @@ func (r *memoryRepository) DeletePendingMoveIfMatch(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	stored, ok := r.pendingMoves[expected.SessionID]
-	if !ok ||
-		stored.MoveID != expected.Move.MoveID ||
-		stored.SessionIncarnationID != expected.Move.SessionIncarnationID ||
-		!stored.QueuedAt.Equal(expected.Move.QueuedAt) {
+	if !ok || stored.MoveID != expected.Move.MoveID || !stored.QueuedAt.Equal(expected.Move.QueuedAt) {
 		return false, nil
 	}
 	delete(r.pendingMoves, expected.SessionID)

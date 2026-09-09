@@ -1307,6 +1307,41 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
+	censusTool := mcp.NewToolWithRawSchema(
+		"get_message_queue_census_kandev",
+		"Inspect the calling session's pending FIFO queue without reading message bodies. Returns ordered immutable entry IDs, opaque claims, safe provenance, content hashes and sizes, capacity, and the before count. Use the returned id and claim unchanged with dispose_message_queue_entries_kandev.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	censusTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	censusTool.Annotations.DestructiveHint = mcp.ToBoolPtr(false)
+	censusTool.Annotations.IdempotentHint = mcp.ToBoolPtr(true)
+	censusTool.Annotations.OpenWorldHint = mcp.ToBoolPtr(false)
+	s.mcpServer.AddTool(
+		censusTool,
+		s.wrapHandler("get_message_queue_census_kandev", s.getMessageQueueCensusHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("dispose_message_queue_entries_kandev",
+			mcp.WithDescription("Remove exact unchanged entries from the calling session's FIFO queue. First call get_message_queue_census_kandev, select entries, and pass each returned id and opaque claim unchanged. Results are per entry: removed, changed, or not_found, with atomic before/after counts. There is no clear-all, body, force, task, or session control."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithArray("entries", mcp.Required(), mcp.MinItems(1),
+				mcp.Description("Exact census claims to dispose"),
+				mcp.Items(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":    map[string]any{"type": "string", "minLength": 1},
+						"claim": map[string]any{"type": "string", "minLength": 1},
+					},
+					"required":             []string{"id", "claim"},
+					"additionalProperties": false,
+				}),
+			),
+		),
+		s.wrapHandler("dispose_message_queue_entries_kandev", s.disposeMessageQueueEntriesHandler()),
+	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
 			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
@@ -1706,10 +1741,10 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 func (s *Server) registerStepCompleteTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("step_complete_kandev",
-			mcp.WithDescription(`Signal that every requirement for the current workflow step is complete. Call this as the step's final action; do not call before asking the user or during partial work. If you cannot make further progress without input, describe the issue in blockers. The signal is idempotent within a step, and any configured transition runs asynchronously at turn end. A new user message cancels a pending signal. The summary is shown to the user and is recorded on the step-transition history.`),
+			mcp.WithDescription(`Signal that every requirement for the current workflow step is complete. Call this as the step's final action; do not call before asking the user, during partial work, or with an unresolved blocker. The signal is idempotent within a step, and any configured transition runs asynchronously at turn end. A new user message cancels a pending signal. The summary is shown to the user and may be forwarded to the next step.`),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
-			mcp.WithString("handoff", mcp.Description("Optional context for the immediately-following step's agent, delivered once in that step's first prompt and not carried beyond it. Up to 8,192 bytes; longer values are truncated.")),
-			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Recorded on this step's transition history, not delivered to the next step's agent — do not use it to pass context forward. Use sparingly, only when you cannot make further progress without input. Up to 8,192 bytes; longer values are truncated.")),
+			mcp.WithString("handoff", mcp.Description("Optional context the next step's agent will need to pick up where you left off (decisions, open files, follow-ups).")),
+			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Use sparingly — only when the step is complete in the sense that you cannot make further progress without input, not for normal partial work.")),
 		),
 		s.wrapHandler("step_complete_kandev", s.stepCompleteHandler()),
 	)

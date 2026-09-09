@@ -51,33 +51,6 @@ func (r *lifecycleClaimSequenceRepository) ClaimPromptableTaskSessionIfActive(
 	return r.repoStore.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
 }
 
-func (r *lifecycleClaimSequenceRepository) ClaimPromptableTaskSessionIfActiveForIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-) (models.PromptableTaskSessionClaim, error) {
-	if r.claimCalls < len(r.claimErrors) {
-		err := r.claimErrors[r.claimCalls]
-		r.claimCalls++
-		if err != nil {
-			return models.PromptableTaskSessionClaim{}, err
-		}
-	}
-	return r.repoStore.ClaimPromptableTaskSessionIfActiveForIdentity(
-		ctx, taskID, sessionID, incarnationID,
-	)
-}
-
-func (r *lifecycleClaimSequenceRepository) UpdateTaskSessionStateIfCurrentIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-	expected, state models.TaskSessionState,
-	errorMessage string,
-) (bool, time.Time, error) {
-	return r.repoStore.UpdateTaskSessionStateIfCurrentIdentity(
-		ctx, taskID, sessionID, incarnationID, expected, state, errorMessage,
-	)
-}
-
 type lifecycleClaimBarrierRepository struct {
 	repoStore
 	claimEntered chan struct{}
@@ -120,26 +93,33 @@ type hookedMessageCreator struct {
 }
 
 // archiveBeforeLifecycleRetryRepository commits an archive after a lifecycle
-// entry has been reserved and its claim failed, but before the exact retry
-// releases that reservation. The channels make that schedule explicit without
-// sleeps.
+// entry has been dequeued and its claim failed, but before the generic retry
+// insert runs. The channels make that schedule explicit without sleeps.
 type archiveBeforeLifecycleRetryRepository struct {
 	messagequeue.Repository
 	archive          func(context.Context) error
 	requeueStarted   chan struct{}
 	archiveCommitted chan struct{}
+	lifecycleCalls   int
 }
 
-func (r *archiveBeforeLifecycleRetryRepository) RequeuePreservingFIFO(
+func (r *archiveBeforeLifecycleRetryRepository) InsertOrReplaceLifecycleByCoalesceKey(
 	ctx context.Context,
-	_ *messagequeue.QueuedMessage,
-) error {
+	msg *messagequeue.QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*messagequeue.QueuedMessage, bool, error) {
+	r.lifecycleCalls++
+	if r.lifecycleCalls == 1 {
+		return r.Repository.InsertOrReplaceLifecycleByCoalesceKey(ctx, msg, coalesceKey, maxPerSession, allowInsert)
+	}
 	r.requeueStarted <- struct{}{}
 	if err := r.archive(ctx); err != nil {
-		return err
+		return nil, false, err
 	}
 	r.archiveCommitted <- struct{}{}
-	return messagequeue.ErrTaskInactive
+	return nil, false, messagequeue.ErrTaskInactive
 }
 
 func (r *lifecycleClaimBarrierRepository) ClaimPromptableTaskSessionIfActive(
@@ -150,28 +130,6 @@ func (r *lifecycleClaimBarrierRepository) ClaimPromptableTaskSessionIfActive(
 	return r.repoStore.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
 }
 
-func (r *lifecycleClaimBarrierRepository) ClaimPromptableTaskSessionIfActiveForIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-) (models.PromptableTaskSessionClaim, error) {
-	r.claimEntered <- struct{}{}
-	<-r.allowClaim
-	return r.repoStore.ClaimPromptableTaskSessionIfActiveForIdentity(
-		ctx, taskID, sessionID, incarnationID,
-	)
-}
-
-func (r *lifecycleClaimBarrierRepository) UpdateTaskSessionStateIfCurrentIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-	expected, state models.TaskSessionState,
-	errorMessage string,
-) (bool, time.Time, error) {
-	return r.repoStore.UpdateTaskSessionStateIfCurrentIdentity(
-		ctx, taskID, sessionID, incarnationID, expected, state, errorMessage,
-	)
-}
-
 func (r *lifecycleClaimHookRepository) ClaimPromptableTaskSessionIfActive(
 	ctx context.Context, sessionID string,
 ) (models.PromptableTaskSessionClaim, error) {
@@ -180,30 +138,6 @@ func (r *lifecycleClaimHookRepository) ClaimPromptableTaskSessionIfActive(
 		r.afterClaim()
 	}
 	return claim, err
-}
-
-func (r *lifecycleClaimHookRepository) ClaimPromptableTaskSessionIfActiveForIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-) (models.PromptableTaskSessionClaim, error) {
-	claim, err := r.repoStore.ClaimPromptableTaskSessionIfActiveForIdentity(
-		ctx, taskID, sessionID, incarnationID,
-	)
-	if err == nil && claim.Status == models.PromptableTaskSessionClaimed && r.afterClaim != nil {
-		r.afterClaim()
-	}
-	return claim, err
-}
-
-func (r *lifecycleClaimHookRepository) UpdateTaskSessionStateIfCurrentIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-	expected, state models.TaskSessionState,
-	errorMessage string,
-) (bool, time.Time, error) {
-	return r.repoStore.UpdateTaskSessionStateIfCurrentIdentity(
-		ctx, taskID, sessionID, incarnationID, expected, state, errorMessage,
-	)
 }
 
 func (r *lifecycleResolveHookRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
@@ -293,8 +227,8 @@ func TestExecuteQueuedMessage_LifecycleRequeueAfterArchiveIsDiscardedBeforeUnarc
 		t.Fatal("lifecycle entry was not dequeued")
 	}
 
-	// The failed claim reaches the exact reservation retry. Its repository
-	// barrier commits the archive before that release is allowed to proceed.
+	// The failed claim reaches the generic requeue. Its repository barrier
+	// commits the archive before that insert is allowed to proceed.
 	svc.executeQueuedMessage("s1", queued)
 	<-queueRepo.requeueStarted
 	<-queueRepo.archiveCommitted
@@ -319,167 +253,6 @@ func TestExecuteQueuedMessage_LifecycleRequeueAfterArchiveIsDiscardedBeforeUnarc
 	}
 	if got := len(agentMgr.capturedPrompts); got != 0 {
 		t.Errorf("lifecycle prompts after archive/unarchive = %d, want 0", got)
-	}
-}
-
-func TestDrainQueuedBeforeWorkflowTransition_DoesNotSuppressTransitionWhenAdmissionSkips(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t-queue-admission", "s-queue-admission", "step1")
-
-	session, err := repo.GetTaskSession(ctx, "s-queue-admission")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	session.State = models.TaskSessionStateWaitingForInput
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("set session waiting: %v", err)
-	}
-	task, err := repo.GetTask(ctx, "t-queue-admission")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.QueuedForStepID = "step1"
-	task.WIPAdmitted = false
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("set task WIP wait: %v", err)
-	}
-
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	if _, err := svc.messageQueue.QueueMessage(
-		ctx,
-		"s-queue-admission",
-		"t-queue-admission",
-		"queued while waiting for WIP admission",
-		"",
-		"user",
-		false,
-		nil,
-	); err != nil {
-		t.Fatalf("queue message: %v", err)
-	}
-
-	if drained := svc.drainQueuedBeforeWorkflowTransition(
-		ctx,
-		"t-queue-admission",
-		"s-queue-admission",
-		session,
-	); drained {
-		t.Fatal("workflow transition was suppressed without dispatching a queued message")
-	}
-	if got := svc.messageQueue.GetStatus(ctx, "s-queue-admission").Count; got != 1 {
-		t.Fatalf("queue count after skipped drain = %d, want 1", got)
-	}
-}
-
-func TestExecuteQueuedMessage_DiscardsReservedLifecycleMessageForRecreatedSession(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
-	session, err := repo.GetTaskSession(ctx, "s1")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	session.State = models.TaskSessionStateWaitingForInput
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("make session promptable: %v", err)
-	}
-
-	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
-	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
-	if err != nil {
-		t.Fatalf("resolve queue identity: %v", err)
-	}
-	creator := &mockMessageCreator{}
-	svc.messageCreator = creator
-	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
-		ctx, "s1", "t1", "must not reach replacement", "", messagequeue.QueuedByWorkflow,
-		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin},
-		"github-pr:repo:1:merged", true,
-	)
-	if err != nil || !accepted {
-		t.Fatalf("queue lifecycle message: accepted=%v err=%v", accepted, err)
-	}
-	queued, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
-	if err != nil || !ok {
-		t.Fatalf("reserve lifecycle message: ok=%v err=%v", ok, err)
-	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
-
-	if _, err := repo.DB().ExecContext(
-		ctx,
-		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
-		"replacement-incarnation",
-		session.ID,
-	); err != nil {
-		t.Fatalf("replace session incarnation: %v", err)
-	}
-	svc.executeQueuedMessageWithReservation("s1", queued, reservation)
-
-	if got := len(agentMgr.capturedPrompts); got != 0 {
-		t.Fatalf("replacement session prompts = %d, want 0", got)
-	}
-	if got := len(creator.userMessages); got != 0 {
-		t.Fatalf("replacement session user messages = %d, want 0", got)
-	}
-	if svc.messageQueue.IsCurrentLifecycleReservation(ctx, queued) {
-		t.Fatal("stale lifecycle reservation remained hidden after worker exit")
-	}
-}
-
-func TestFinishQueuedMessageExecution_SuccessLeavesRecreatedSessionQueueEmpty(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-	session, err := repo.GetTaskSession(ctx, "s1")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-
-	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
-	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
-	if err != nil {
-		t.Fatalf("resolve queue identity: %v", err)
-	}
-	svc.messageCreator = &mockMessageCreator{}
-	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
-		ctx, "s1", "t1", "survive stale completion", "", messagequeue.QueuedByWorkflow,
-		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin},
-		"github-pr:repo:1:merged", true,
-	)
-	if err != nil || !accepted {
-		t.Fatalf("queue lifecycle message: accepted=%v err=%v", accepted, err)
-	}
-	queued, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
-	if err != nil || !ok || queued == nil {
-		t.Fatalf("reserve lifecycle message: queued=%+v ok=%v err=%v", queued, ok, err)
-	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
-
-	if _, err := repo.DB().ExecContext(
-		ctx,
-		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
-		"replacement-incarnation",
-		session.ID,
-	); err != nil {
-		t.Fatalf("replace session incarnation: %v", err)
-	}
-	svc.finishQueuedMessageExecution(ctx, "s1", "s1", queued, reservation, true, false, nil)
-
-	replacement := identity
-	replacement.SessionIncarnationID = "replacement-incarnation"
-	entries, _, err := svc.messageQueue.SnapshotSessionForIdentity(ctx, replacement)
-	if err != nil {
-		t.Fatalf("snapshot replacement queue: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("replacement session retained stale queue state: %+v", entries)
 	}
 }
 
@@ -747,9 +520,9 @@ func TestHandleAgentReady_PassthroughAcknowledgesLifecycleOnlyAfterPTYAcceptance
 			wantQueued: 0,
 		},
 		{
-			name:           "ordinary PTY failure releases retained entry",
+			name:           "ordinary PTY failure keeps legacy destructive dequeue",
 			passthroughErr: errors.New("PTY write failed"),
-			wantQueued:     1,
+			wantQueued:     0,
 		},
 	}
 
@@ -903,36 +676,6 @@ func TestArchiveTask_PersistentQueueCallbackDoesNotPurgeReacceptedGeneration(t *
 	}
 	if generation != 1 {
 		t.Fatalf("lifecycle generation after archive = %d, want 1", generation)
-	}
-}
-
-func TestQueueStatusSnapshotForIdentityRejectsReplacementSession(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t-status", "s-status", "step-status")
-	db := sqlx.NewDb(repo.DB(), "sqlite3")
-	persistentRepo, err := messagequeue.NewSQLiteRepository(db, db)
-	if err != nil {
-		t.Fatalf("new persistent queue repository: %v", err)
-	}
-	queue := messagequeue.NewService(persistentRepo, messagequeue.DefaultMaxPerSession, testLogger())
-	identity, err := queue.ResolveSessionIdentity(ctx, "t-status", "s-status")
-	if err != nil {
-		t.Fatalf("resolve initial identity: %v", err)
-	}
-	if _, err := repo.DB().Exec(
-		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
-		"replacement-incarnation",
-		"s-status",
-	); err != nil {
-		t.Fatalf("replace session incarnation: %v", err)
-	}
-	service := &Service{repo: repo, messageQueue: queue}
-	if _, err := service.queueStatusSnapshotForIdentity(ctx, identity); !errors.Is(
-		err,
-		messagequeue.ErrSessionIdentityMismatch,
-	) {
-		t.Fatalf("stale identity snapshot error = %v, want identity mismatch", err)
 	}
 }
 
@@ -1117,16 +860,8 @@ func TestExecuteQueuedMessage_LifecycleResetAfterClaimRestoresStateAndRetryDrain
 		ID: "lifecycle-reset-claim", SessionID: "s1", TaskID: "t1", Content: "retry after reset",
 		Metadata: map[string]interface{}{"origin": githubPRAutomationOrigin},
 	}
-	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t1", "s1")
-	if err != nil {
-		t.Fatalf("resolve queue identity: %v", err)
-	}
-	lock, release := svc.acquireCancelInFlightGuard("s1")
-	lock.Lock()
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, nil)
-	lock.Unlock()
-	release()
-	svc.executeQueuedMessageWithReservation("s1", queued, reservation)
+	svc.markQueuedDispatchInFlight("s1", queued.ID)
+	svc.executeQueuedMessage("s1", queued)
 
 	persisted, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {

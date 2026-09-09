@@ -62,27 +62,6 @@ describe("task.deleted cleanup", () => {
     expect(state.tasks.pinnedSessionId).toBeNull();
     expect(state.tasks.lastSessionByTaskId).not.toHaveProperty("t1");
     expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", SESS_OTHER);
-    expect(state.clearQueueStatus).toHaveBeenCalledWith(SESS_PINNED);
-  });
-
-  it("clears normalized sessions even when no queue metadata was fetched", () => {
-    const store = makeStore({
-      taskSessions: {
-        items: {
-          "sess-normalized": {
-            id: "sess-normalized",
-            task_id: "t1",
-            queue_incarnation_id: "inc-normalized",
-          },
-        },
-      },
-    } as unknown as Partial<AppState>);
-
-    registerTasksHandlers(store)["task.deleted"]!(
-      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }),
-    );
-
-    expect(store.getState().clearQueueStatus).toHaveBeenCalledWith("sess-normalized");
   });
 
   it("removes deleted tasks from the archived sidebar projection", () => {

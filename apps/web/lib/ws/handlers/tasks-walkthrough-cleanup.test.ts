@@ -20,7 +20,6 @@ function makeStore() {
       lastSessionByTaskId: {},
     },
     taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {} },
-    taskSessions: { items: {} },
     environmentIdBySessionId: {},
     walkthroughs: {
       byTaskId: {
@@ -42,7 +41,6 @@ function makeStore() {
     setTaskDeletedNotification: vi.fn(),
     upsertQuickChatSessionFromEvent: vi.fn(),
     removeQuickChatSessionsForTask: vi.fn(),
-    clearQueueStatus: vi.fn(),
   } as unknown as AppState;
 
   const listeners = new Set<Listener>();

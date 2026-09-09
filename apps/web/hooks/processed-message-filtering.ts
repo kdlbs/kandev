@@ -260,58 +260,6 @@ export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
   });
 }
 
-const EMPTY_TURN_SUPERSEDING_TYPES: Set<MessageType> = new Set([
-  "tool_call",
-  "tool_edit",
-  "tool_read",
-  "tool_search",
-  "tool_execute",
-  "agent_plan",
-  "todo",
-  "permission_request",
-  "clarification_request",
-]);
-
-/** Mirrors the backend's turnHadAgentOutput allowlist (service_turns.go): agent-authored
- *  output that counts as real, user-visible turn content. Lifecycle "status" /
- *  "script_execution" / "thinking" rows never count. */
-function isRealAgentOutput(message: Message): boolean {
-  if (message.author_type !== "agent") return false;
-  if (!message.type || message.type === "message" || message.type === "content") {
-    return message.content.trim() !== "";
-  }
-  return EMPTY_TURN_SUPERSEDING_TYPES.has(message.type);
-}
-
-function isEmptyTurnNotice(message: Message): boolean {
-  return (message.metadata as { empty_turn?: boolean } | undefined)?.empty_turn === true;
-}
-
-/** Drops an empty-turn notice once its turn has since received real agent output —
- *  the notice is emitted once at turn-completion time and nothing else retracts it,
- *  so a late-arriving reply (e.g. a subagent race) would otherwise render alongside
- *  its own "no output" contradiction. `outputSourceMessages` defaults to `messages`
- *  for standalone use, but the visibility pipeline passes the pre-filter array: a
- *  superseding permission_request or clarification_request can already be hidden by
- *  `filterVisibleMessages` (approved/denied/cancelled, or not the active one) by the
- *  time it would otherwise reach this step. */
-export function dropSupersededEmptyTurnNotices(
-  messages: Message[],
-  outputSourceMessages: Message[] = messages,
-): Message[] {
-  const turnsWithOutput = new Set<string>();
-  for (const message of outputSourceMessages) {
-    if (message.turn_id && isRealAgentOutput(message)) {
-      turnsWithOutput.add(message.turn_id);
-    }
-  }
-  if (turnsWithOutput.size === 0) return messages;
-  return messages.filter((message) => {
-    if (!isEmptyTurnNotice(message)) return true;
-    return !(message.turn_id && turnsWithOutput.has(message.turn_id));
-  });
-}
-
 function findActiveClarification(
   messages: Message[],
   scope?: PendingClarificationScope,
@@ -357,9 +305,6 @@ export function filterVisibleMessages(
     return false;
   });
   return collapseTodoSnapshotsPerTurn(
-    dropSupersededEmptyTurnNotices(
-      deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
-      messages,
-    ),
+    deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
   );
 }

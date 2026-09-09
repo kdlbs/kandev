@@ -27,15 +27,16 @@ const (
 	eventKeyWorkspaceID    = "workspace_id"
 )
 
-// markAgentWorking flips an agent to "working" as its run is handed to the
-// adapter, recording runID as the owning run. It also takes ownership from
-// a predecessor that is still recorded "working" but is no longer in-flight.
-// A false result means the agent was neither idle nor holding an abandoned
-// owner, so it was genuinely busy or in a non-launchable status.
+// markAgentWorking flips an idle agent to "working" as its run is handed to
+// the adapter, recording runID as the owning run.
 //
-// Called BEFORE the launch so a completion event cannot clear a status that
-// the launch has not marked. The caller clears the status when launch does
-// not happen.
+// Called BEFORE the launch rather than after it: the completion event for a
+// fast run can be processed as soon as the adapter is invoked, and a
+// mark-after-launch would race that reset and strand the agent showing
+// "working" forever — the exact failure this feature must not introduce,
+// since a stuck "working" reads as progress that is not happening.
+// The caller clears the status when the launch turns out not to have
+// happened.
 //
 // runID must be non-empty: it is the only way a later clearAgentWorking call
 // can tell this run's own reset apart from a stale one belonging to a

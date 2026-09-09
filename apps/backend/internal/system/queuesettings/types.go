@@ -31,10 +31,9 @@ var (
 )
 
 type Settings struct {
-	MaxPerSession     int   `json:"max_per_session"`
-	MergeEnabled      bool  `json:"merge_enabled"`
-	AutoMergeEnabled  bool  `json:"auto_merge_enabled"`
-	AutoMergeRevision int64 `json:"-"`
+	MaxPerSession    int  `json:"max_per_session"`
+	MergeEnabled     bool `json:"merge_enabled"`
+	AutoMergeEnabled bool `json:"auto_merge_enabled"`
 }
 
 // SettingsPatch is a partial update to Settings: a nil field means "leave

@@ -232,7 +232,7 @@ func TestTaskUsageEventsSchema_SessionDeleteSetsNull(t *testing.T) {
 	createUsageEventsTestSession(t, repo, "session-setnull", "task-setnull")
 	insertUsageEventRow(t, repo, "evt-setnull", "task-setnull", "session-setnull")
 
-	if err := deleteTaskSessionForTest(t, repo, context.Background(), "session-setnull"); err != nil {
+	if err := repo.DeleteTaskSession(context.Background(), "session-setnull"); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
 

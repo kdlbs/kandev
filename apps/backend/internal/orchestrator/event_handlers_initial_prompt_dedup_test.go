@@ -158,7 +158,7 @@ func TestWorkflowAutoStartCreatedNonEmptyPromptPreservesQueuedHandoff(t *testing
 
 	if err := fixture.svc.autoStartStepPrompt(
 		context.Background(), fixture.taskID, fixture.session, fixture.step,
-		fixture.step.Prompt, false, true, nil,
+		fixture.step.Prompt, false, true,
 	); err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestWorkflowAutoStartPlanModeOnlyPromptForCreatedSession(t *testing.T) {
 	}
 
 	if err := fixture.svc.autoStartStepPrompt(
-		context.Background(), fixture.taskID, fixture.session, fixture.step, "", true, true, nil,
+		context.Background(), fixture.taskID, fixture.session, fixture.step, "", true, true,
 	); err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestWorkflowAutoStartAttachmentOnlyHandoffIsRecorded(t *testing.T) {
 
 			if err := fixture.svc.autoStartStepPrompt(
 				context.Background(), fixture.taskID, fixture.session, fixture.step,
-				"", false, true, nil,
+				"", false, true,
 			); err != nil {
 				t.Fatalf("autoStartStepPrompt returned error: %v", err)
 			}

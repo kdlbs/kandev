@@ -469,8 +469,8 @@ func TestEnsureSessionForAgent_TerminalRowsCreateFresh(t *testing.T) {
 }
 
 // TestEnsureSessionForAgent_RejectsMissingAgentID reports an error rather
-// than silently creating an unkeyed row that the per-agent lookup cannot
-// reuse.
+// than silently inserting a row with an empty agent_profile_id (which would
+// defeat the partial unique index).
 func TestEnsureSessionForAgent_RejectsMissingAgentID(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

@@ -45,7 +45,8 @@ func setWorkingRunID(t *testing.T, db *sqlx.DB, agentID, runID string) {
 	}
 }
 
-// TestMarkAgentWorking_FromIdle covers the core working-status write.
+// TestMarkAgentWorking_FromIdle is the core DR-14 write: before this method
+// existed, no production code path could ever produce this status.
 func TestMarkAgentWorking_FromIdle(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -83,7 +84,10 @@ func TestClearAgentWorking_ReturnsToIdle(t *testing.T) {
 
 // TestClearAgentWorking_MismatchedRunID_DoesNotClobberSuccessor is the
 // interleaving regression: a stale or duplicate terminal event for a run
-// that has already finished must not reset an agent a successor run owns.
+// that has already finished must not be able to reset an agent a SUCCESSOR
+// run has since marked working. Before working_run_id existed, this exact
+// sequence flipped a live run's agent back to "idle" — reintroducing DR-14's
+// invisibility bug in a narrower window.
 func TestClearAgentWorking_MismatchedRunID_DoesNotClobberSuccessor(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -133,9 +137,11 @@ func TestClearAgentWorking_MismatchedRunID_DoesNotClobberSuccessor(t *testing.T)
 	}
 }
 
-// TestClearAgentWorking_DoesNotResurrectPausedAgent guards the interaction
-// between failure cleanup and automatic pausing. The clear must not turn a
-// paused agent back to idle.
+// TestClearAgentWorking_DoesNotResurrectPausedAgent guards the highest-risk
+// interaction in DR-14. HandleAgentFailure clears "working" on the same code
+// path that auto-pauses an agent after consecutive failures. If the reset
+// were an unconditional UPDATE rather than a CAS, a paused agent would be
+// silently flipped back to idle and would resume picking up runs.
 func TestClearAgentWorking_DoesNotResurrectPausedAgent(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -197,137 +203,5 @@ func TestClearAgentWorking_IsIdempotent(t *testing.T) {
 	}
 	if got := statusOf(t, repo, "agent-double-clear"); got != models.AgentStatusIdle {
 		t.Fatalf("status = %q, want idle", got)
-	}
-}
-
-// TestMarkAgentWorking_SuccessorTakeover covers successor ownership.
-// Run A finishes (leaves 'claimed', making the agent claimable again) before
-// its own clearAgentWorking runs. In that window, run B is claimed and
-// launched for the same agent: B's MarkAgentWorking must take ownership from
-// A instead of no-oping, so A's later clear (scoped to A's own runID) cannot
-// touch B's ownership and strand the agent showing "idle" while B is in
-// flight.
-func TestMarkAgentWorking_SuccessorTakeover(t *testing.T) {
-	repo := newTestRepo(t)
-	ctx := context.Background()
-	agent := workingStatusAgent(t, repo, "agent-successor", "idle")
-
-	runA := &models.Run{ID: "run-a", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
-	if err := repo.CreateRun(ctx, runA); err != nil {
-		t.Fatalf("create run A: %v", err)
-	}
-	claimedA, err := repo.ClaimRun(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("claim run A: %v", err)
-	}
-	if _, err := repo.MarkAgentWorking(ctx, agent.ID, claimedA.ID); err != nil {
-		t.Fatalf("mark working (run A): %v", err)
-	}
-
-	// Run A leaves 'claimed' (finishes) but its own clearAgentWorking has not
-	// run yet — the un-transacted window handleAgentCompleted leaves open.
-	if err := repo.FinishRun(ctx, claimedA.ID, string(models.RunStatusFinished), nil); err != nil {
-		t.Fatalf("finish run A: %v", err)
-	}
-
-	// Run B is claimed and launched for the same agent inside that window.
-	runB := &models.Run{ID: "run-b", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
-	if err := repo.CreateRun(ctx, runB); err != nil {
-		t.Fatalf("create run B: %v", err)
-	}
-	claimedB, err := repo.ClaimRun(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("claim run B: %v", err)
-	}
-	changed, err := repo.MarkAgentWorking(ctx, agent.ID, claimedB.ID)
-	if err != nil {
-		t.Fatalf("mark working (run B): %v", err)
-	}
-	if !changed {
-		t.Fatal("changed = false, want true: run B must take ownership from a finished run A")
-	}
-
-	// Run A's own clearAgentWorking now runs, scoped to A's runID.
-	clearedByA, err := repo.ClearAgentWorking(ctx, agent.ID, claimedA.ID)
-	if err != nil {
-		t.Fatalf("clear working (run A): %v", err)
-	}
-	if clearedByA {
-		t.Fatal("run A's clear reported a change: it must no-op once run B owns \"working\"")
-	}
-	if got := statusOf(t, repo, agent.ID); got != models.AgentStatusWorking {
-		t.Fatalf("status after run A's clear = %q, want %q (run B still in flight)", got, models.AgentStatusWorking)
-	}
-
-	// Run B's own terminal clear correctly resets the agent.
-	clearedByB, err := repo.ClearAgentWorking(ctx, agent.ID, claimedB.ID)
-	if err != nil {
-		t.Fatalf("clear working (run B): %v", err)
-	}
-	if !clearedByB {
-		t.Fatal("run B's own clear should have changed the status")
-	}
-	if got := statusOf(t, repo, agent.ID); got != models.AgentStatusIdle {
-		t.Fatalf("status after run B clear = %q, want %q", got, models.AgentStatusIdle)
-	}
-}
-
-// TestMarkAgentWorking_NoTheftFromLiveOwner is the inverse of the takeover
-// case: while the recorded owner run is still 'claimed' (genuinely in
-// flight), a second MarkAgentWorking call for a different run must not steal
-// ownership.
-func TestMarkAgentWorking_NoTheftFromLiveOwner(t *testing.T) {
-	repo := newTestRepo(t)
-	ctx := context.Background()
-	agent := workingStatusAgent(t, repo, "agent-live-owner", "idle")
-
-	runA := &models.Run{ID: "run-live-a", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
-	if err := repo.CreateRun(ctx, runA); err != nil {
-		t.Fatalf("create run A: %v", err)
-	}
-	claimedA, err := repo.ClaimRun(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("claim run A: %v", err)
-	}
-	if _, err := repo.MarkAgentWorking(ctx, agent.ID, claimedA.ID); err != nil {
-		t.Fatalf("mark working (run A): %v", err)
-	}
-
-	// Run A is still 'claimed' — no finish, no clear. A second run's mark
-	// attempt (e.g. a duplicate/misrouted event) must not take ownership.
-	changed, err := repo.MarkAgentWorking(ctx, agent.ID, "run-live-b")
-	if err != nil {
-		t.Fatalf("mark working (run B attempt): %v", err)
-	}
-	if changed {
-		t.Fatal("changed = true, want false: run A is still claimed and in flight")
-	}
-	if got := statusOf(t, repo, agent.ID); got != models.AgentStatusWorking {
-		t.Fatalf("status = %q, want working (unchanged)", got)
-	}
-}
-
-// TestMarkAgentWorking_DoesNotResurrectPausedAgent guards the widened
-// predicate's status scope: it must still only ever transition an idle or
-// (abandoned-owner) working agent, never a paused/stopped/pending-approval
-// one.
-func TestMarkAgentWorking_DoesNotResurrectPausedAgent(t *testing.T) {
-	repo := newTestRepo(t)
-	ctx := context.Background()
-
-	for _, status := range []string{"paused", "stopped", "pending_approval"} {
-		id := "agent-mark-guard-" + status
-		workingStatusAgent(t, repo, id, status)
-
-		changed, err := repo.MarkAgentWorking(ctx, id, "run-1")
-		if err != nil {
-			t.Fatalf("%s: mark working: %v", status, err)
-		}
-		if changed {
-			t.Fatalf("%s: changed = true, want false: only idle/abandoned-working agents may be marked", status)
-		}
-		if got := statusOf(t, repo, id); string(got) != status {
-			t.Fatalf("%s: status = %q, want it left untouched", status, got)
-		}
 	}
 }

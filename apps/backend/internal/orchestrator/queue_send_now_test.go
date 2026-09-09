@@ -13,7 +13,6 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
-	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -183,126 +182,6 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 	}
 	if !svc.messageQueue.GetStatus(ctx, "session-1").AutoRun {
 		t.Fatal("restoring accepted Send Now claim reverted Auto-run")
-	}
-}
-
-func TestExecuteSendNowClaimRejectsRecreatedSessionBeforePrompt(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
-	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
-	session, err := repo.GetTaskSession(ctx, "session-1")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
-	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
-	if err != nil {
-		t.Fatalf("resolve queue identity: %v", err)
-	}
-	messageCreator := &mockMessageCreator{}
-	svc.messageCreator = messageCreator
-	source, err := svc.messageQueue.QueueMessageWithMetadataForSession(
-		ctx, identity, "old prompt", "", messagequeue.QueuedByUser, false, nil, nil,
-	)
-	if err != nil {
-		t.Fatalf("queue old prompt: %v", err)
-	}
-	claim, err := svc.messageQueue.ClaimSendNowForSession(
-		ctx,
-		identity,
-		[]messagequeue.QueuedMessage{*source},
-	)
-	if err != nil {
-		t.Fatalf("claim old prompt: %v", err)
-	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, claim.Dispatch.ID, nil)
-	reservation.liveEligible.Store(true)
-
-	if _, err := repo.DB().ExecContext(
-		ctx,
-		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
-		"replacement-incarnation",
-		session.ID,
-	); err != nil {
-		t.Fatalf("replace session incarnation: %v", err)
-	}
-	svc.executeSendNowClaimWithContext(ctx, claim, reservation)
-
-	if got := len(agentMgr.capturedPrompts); got != 0 {
-		t.Fatalf("replacement session prompts = %d, want 0", got)
-	}
-	if got := len(messageCreator.userMessages); got != 0 {
-		t.Fatalf("replacement user messages = %d, want 0", got)
-	}
-	if got := svc.messageQueue.GetStatus(ctx, identity.SessionID).Count; got != 0 {
-		t.Fatalf("old claim restored into replacement queue: count=%d", got)
-	}
-}
-
-func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "task-1", "session-1", "step-1")
-	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
-	session, err := repo.GetTaskSession(ctx, "session-1")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	session.State = models.TaskSessionStateWaitingForInput
-	session.AgentExecutionID = "exec-1"
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("set session waiting: %v", err)
-	}
-
-	stepGetter := newMockStepGetter()
-	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
-		ID: "step-1", WorkflowID: "wf-1", Name: "Step 1", Position: 0,
-		Events: wfmodels.StepEvents{
-			OnTurnStart: []wfmodels.OnTurnStartAction{
-				{Type: wfmodels.OnTurnStartMoveToNext},
-			},
-		},
-	}
-	stepGetter.steps["step-2"] = &wfmodels.WorkflowStep{
-		ID: "step-2", WorkflowID: "wf-1", Name: "Step 2", Position: 1,
-	}
-	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-
-	claim := &messagequeue.SendNowClaim{
-		Dispatch: messagequeue.QueuedMessage{
-			ID:        "q-1",
-			SessionID: "session-1",
-			TaskID:    "task-1",
-			Content:   "already admitted",
-			Metadata: map[string]interface{}{
-				MetaKeyTurnStartAlreadyProcessed: true,
-			},
-		},
-	}
-	reservation := svc.markQueuedDispatchInFlight("session-1", claim.Dispatch.ID)
-	if tracked, err := svc.claimQueuedDispatchForExecution("session-1", claim.Dispatch.ID, reservation); err != nil || !tracked {
-		t.Fatalf("claim send-now dispatch: tracked=%v err=%v", tracked, err)
-	}
-
-	if err := svc.promptSendNowClaim(ctx, claim); err != nil {
-		t.Fatalf("prompt send-now claim: %v", err)
-	}
-
-	task, err := repo.GetTask(ctx, "task-1")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if task.WorkflowStepID != "step-1" {
-		t.Fatalf("on_turn_start fired a second time: task moved to %q, want it to stay on step-1", task.WorkflowStepID)
-	}
-	if len(agentMgr.capturedPrompts) != 1 {
-		t.Fatalf("expected the prompt to reach PromptAgent once, captured=%d", len(agentMgr.capturedPrompts))
 	}
 }
 

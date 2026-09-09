@@ -17,7 +17,9 @@ import (
 
 // ErrTaskNotFound is returned (wrapped) by repository task lookups when the
 // task row is absent. Callers that must distinguish "row missing" from
-// "lookup failed" should check with errors.Is.
+// "lookup failed" should check with errors.Is — this is the positive
+// signal the office GC uses to classify a kandev-managed container as
+// safely removable.
 var ErrTaskNotFound = errors.New("task not found")
 
 // Automation runs never appear in a task list: they are hidden by their

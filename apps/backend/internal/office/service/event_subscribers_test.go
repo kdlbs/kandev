@@ -80,34 +80,11 @@ func newTestServiceWithBus(t *testing.T) (*service.Service, bus.EventBus) {
 	return newTestServiceWithBusLogger(t, logger.Default())
 }
 
-// newTestServiceWithBusAndPRs is newTestServiceWithBus with a PR lister wired,
-// so a test can observe whether a producer reaches for child pull-request links.
-func newTestServiceWithBusAndPRs(
-	t *testing.T, prs service.TaskPRLister,
-) (*service.Service, bus.EventBus) {
-	t.Helper()
-	return newTestServiceWithBusOpts(t, service.ServiceOptions{
-		Logger: logger.Default(), TaskPRs: prs,
-	})
-}
-
 func newTestServiceWithBusLogger(
 	t *testing.T, log *logger.Logger,
 ) (*service.Service, bus.EventBus) {
 	t.Helper()
-	return newTestServiceWithBusOpts(t, service.ServiceOptions{Logger: log})
-}
-
-func newTestServiceWithBusOpts(
-	t *testing.T, opts service.ServiceOptions,
-) (*service.Service, bus.EventBus) {
-	t.Helper()
-	log := opts.Logger
-	if log == nil {
-		log = logger.Default()
-		opts.Logger = log
-	}
-	svc := newTestService(t, opts)
+	svc := newTestService(t, service.ServiceOptions{Logger: log})
 	svc.SetSyncHandlers(true)
 	eb := bus.NewMemoryEventBus(log)
 	if err := svc.RegisterEventSubscribers(eb); err != nil {

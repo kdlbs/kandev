@@ -10,7 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,69 +68,6 @@ func TestSetQueueAutoRunOnDispatchesPromptableHead(t *testing.T) {
 	case <-agentManager.promptDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for resumed queue dispatch")
-	}
-	assert.Equal(t, 0, svc.messageQueue.GetStatus(ctx, "session-1").Count)
-}
-
-func TestExecuteQueuedMessageDrainsNextMessageAfterCompletion(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "task-1", "session-1", "step-1")
-	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
-	session, err := repo.GetTaskSession(ctx, "session-1")
-	require.NoError(t, err)
-	session.State = models.TaskSessionStateWaitingForInput
-	require.NoError(t, repo.UpdateTaskSession(ctx, session))
-
-	prompts := make(chan string, 2)
-	agentManager := &mockAgentManager{
-		isAgentRunning:         true,
-		repoForExecutionLookup: repo,
-		promptAgentFunc: func(ctx context.Context, _ string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
-			// Model the ready event that can arrive before the queue worker
-			// releases its in-flight reservation.
-			current, getErr := repo.GetTaskSession(ctx, "session-1")
-			if getErr != nil {
-				return nil, getErr
-			}
-			current.State = models.TaskSessionStateWaitingForInput
-			if updateErr := repo.UpdateTaskSession(ctx, current); updateErr != nil {
-				return nil, updateErr
-			}
-			prompts <- prompt
-			return &executor.PromptResult{}, nil
-		},
-	}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
-	svc.messageCreator = &mockMessageCreator{}
-	svc.messageQueue.SetAutoMergeEnabled(false)
-	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, "session-1", true))
-	for _, prompt := range []string{"first queued", "second queued"} {
-		_, err := svc.messageQueue.QueueMessage(
-			ctx, "session-1", "task-1", prompt, "", messagequeue.QueuedByUser, false, nil,
-		)
-		require.NoError(t, err)
-	}
-
-	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "task-1", "session-1")
-	require.NoError(t, err)
-	queued, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
-	require.NoError(t, err)
-	require.True(t, ok)
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
-
-	svc.executeQueuedMessageWithReservation("session-1", queued, reservation)
-
-	for i := 0; i < 2; i++ {
-		select {
-		case <-prompts:
-		case <-time.After(5 * time.Second):
-			agentManager.mu.Lock()
-			captured := append([]string(nil), agentManager.capturedPrompts...)
-			agentManager.mu.Unlock()
-			t.Fatalf("timed out waiting for queued prompt %d: queue_count=%d captured=%q", i+1, svc.messageQueue.GetStatus(ctx, "session-1").Count, captured)
-		}
 	}
 	assert.Equal(t, 0, svc.messageQueue.GetStatus(ctx, "session-1").Count)
 }

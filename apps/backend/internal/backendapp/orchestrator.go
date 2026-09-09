@@ -109,14 +109,13 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	queueResolution := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg))
-	queueSettings := queueResolution.Effective
+	queueSettings := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg)).Effective
 	maxPerSession := queueSettings.MaxPerSession
 	mergeEnabled := queueSettings.MergeEnabled
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
-	msgQueue.SetAutoMergePolicy(autoMergeEnabled, queueResolution.Settings.AutoMergeRevision)
+	msgQueue.SetAutoMergeEnabled(autoMergeEnabled)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
 		zap.Bool("merge_enabled", mergeEnabled),

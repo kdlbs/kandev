@@ -67,7 +67,10 @@ func TestQueueAndInterruptForPeerMessage_StoppedSessionResumesAgent(t *testing.T
 		t.Fatalf("UpsertExecutorRunning: %v", err)
 	}
 
-	queued, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "subtask status update", map[string]interface{}{"sender_task_id": "subtask-1"})
+	queued, dispatched, err := svc.QueueAndInterruptForPeerMessage(
+		ctx, "task1", "session1", "subtask status update",
+		map[string]interface{}{"sender_task_id": "subtask-1"},
+	)
 	if err != nil {
 		t.Fatalf("queue and interrupt for peer message: %v", err)
 	}

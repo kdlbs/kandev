@@ -18,13 +18,11 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
-	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
-	"github.com/kandev/kandev/internal/common/npmresolution"
 	"go.uber.org/zap"
 )
 
@@ -520,18 +518,12 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
 			zap.Error(err))
 	}
-	var cleanupOnce sync.Once
-	cleanup := func() {
-		cleanupOnce.Do(func() { cleanupACPCommand(ctx, cmd, lifecycle, e.logger) })
-	}
-	defer cleanup()
+	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	resp, err := e.probeACPSessionWithContext(
 		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions,
 	)
 	if err != nil {
-		cleanup()
-		stderrTail := stderr.tail()
 		// The tail goes to the log rather than into the response: handlers
 		// deliberately keep subprocess diagnostics and tmp paths out of client
 		// payloads. An empty tail is itself a result — the child produced no
@@ -539,12 +531,11 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		e.logger.Error("ACP probe failed",
 			zap.String("agent_id", req.AgentID),
 			zap.Error(err),
-			zap.String("stderr", stderrTail))
+			zap.String("stderr", stderr.tail()))
 		return &ProbeResponse{
-			Success:     false,
-			Error:       err.Error(),
-			FailureCode: managedRuntimeProbeFailureCode(cfg.Command, stderrTail),
-			DurationMs:  int(time.Since(startTime).Milliseconds()),
+			Success:    false,
+			Error:      err.Error(),
+			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
 	if len(resp.Models) == 0 && isOpenCode {
@@ -557,25 +548,6 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
 	return resp, nil
-}
-
-func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailureCode {
-	packageSpec, ok := managedRuntimeProbePackageSpec(command)
-	if !ok || !npmresolution.MatchesExactPackage(stderr, packageSpec) {
-		return ""
-	}
-	return ProbeFailureManagedRuntimeNPMResolution
-}
-
-func managedRuntimeProbePackageSpec(command []string) (string, bool) {
-	if len(command) < 4 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" {
-		return "", false
-	}
-	packageSpec := command[3]
-	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
-		return "", false
-	}
-	return packageSpec, true
 }
 
 // isOpenCodeACPCommand reports whether the configured ACP probe command is

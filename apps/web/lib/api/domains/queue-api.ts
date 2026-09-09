@@ -136,15 +136,8 @@ export function rethrowQueueError(err: unknown): never {
   throw err instanceof Error ? err : new Error(String(err));
 }
 
-export type QueueSessionIdentity = {
-  task_id: string;
-  session_id: string;
-  session_incarnation_id: string;
-};
-
 export type QueueMessageParams = {
   session_id: string;
-  session_incarnation_id: string;
   task_id: string;
   content: string;
   model?: string;
@@ -177,26 +170,25 @@ export async function queueMessage(params: QueueMessageParams): Promise<QueuedMe
 }
 
 /** Clear every pending entry for the session. */
-export async function clearQueue(identity: QueueSessionIdentity): Promise<{ removed: number }> {
+export async function clearQueue(sessionId: string): Promise<{ removed: number }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  return client.request<{ removed: number }>("message.queue.cancel", identity);
+  return client.request<{ removed: number }>("message.queue.cancel", { session_id: sessionId });
 }
 
 /** Dispatch one queued entry now when the session is ready for input. */
-export async function drainQueuedMessage(
-  identity: QueueSessionIdentity,
-): Promise<{ drained: boolean }> {
+export async function drainQueuedMessage(sessionId: string): Promise<{ drained: boolean }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  return client.request<{ drained: boolean }>("message.queue.drain", identity);
+  return client.request<{ drained: boolean }>("message.queue.drain", { session_id: sessionId });
 }
 
-export type SendQueuedNowParams = QueueSessionIdentity & {
+export type SendQueuedNowParams = {
+  session_id: string;
   scope: "entry" | "all";
   entry_id?: string;
 };
@@ -222,7 +214,7 @@ export async function sendQueuedNow(
 
 /** Persist the per-session queue Auto-run policy and start the queue when enabling it. */
 export async function setQueueAutoRun(
-  identity: QueueSessionIdentity,
+  sessionId: string,
   enabled: boolean,
 ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
   const client = getWebSocketClient();
@@ -231,48 +223,28 @@ export async function setQueueAutoRun(
   }
   return client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
     "message.queue.auto_run.set",
-    { ...identity, enabled },
+    { session_id: sessionId, enabled },
   );
 }
-export type QueueAutoMergePolicyResponse = QueueSessionIdentity & {
-  auto_merge_enabled: boolean;
-  auto_merge_source: "global" | "session";
-  auto_merge_revision: number;
-};
 
-/** Persist an explicit automatic-merge policy for one immutable session. */
-export async function setQueueAutoMerge(
-  identity: QueueSessionIdentity,
-  enabled: boolean,
-): Promise<QueueAutoMergePolicyResponse> {
+/** Fetch the full queue snapshot (entries + capacity). */
+export async function getQueueStatus(sessionId: string): Promise<QueueStatus> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  return client.request<QueueAutoMergePolicyResponse>("message.queue.auto_merge.set", {
-    ...identity,
-    enabled,
-  });
-}
-
-/** Fetch the full queue snapshot for one immutable session identity. */
-export async function getQueueStatus(identity: QueueSessionIdentity): Promise<QueueStatus> {
-  const client = getWebSocketClient();
-  if (!client) {
-    throw new Error(WS_CLIENT_UNAVAILABLE);
-  }
-  return client.request<QueueStatus>("message.queue.get", identity);
+  return client.request<QueueStatus>("message.queue.get", { session_id: sessionId });
 }
 
 /** Append content onto the tail entry when the same caller authored it; otherwise insert a new entry. */
-export async function appendToQueue(
-  params: QueueSessionIdentity & {
-    content: string;
-    model?: string;
-    plan_mode?: boolean;
-    user_id?: string;
-  },
-): Promise<{ entry_id: string; was_append: boolean }> {
+export async function appendToQueue(params: {
+  session_id: string;
+  task_id: string;
+  content: string;
+  model?: string;
+  plan_mode?: boolean;
+  user_id?: string;
+}): Promise<{ entry_id: string; was_append: boolean }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
@@ -288,23 +260,22 @@ export async function appendToQueue(
 }
 
 /** Replace the content/attachments of a queued entry. Throws QueueEntryNotFoundError if drained. */
-export async function updateQueuedMessage(
-  params: QueueSessionIdentity & {
-    entry_id: string;
-    content: string;
-    attachments?: Array<{
-      type: string;
-      data?: string;
-      attachment_id?: string;
-      mime_type: string;
-      name?: string;
-      size_bytes?: number;
-      delivery_mode?: "prompt" | "path";
-    }>;
-    entity_references?: EntityReference[];
-    user_id?: string;
-  },
-): Promise<{ entry_id: string }> {
+export async function updateQueuedMessage(params: {
+  session_id: string;
+  entry_id: string;
+  content: string;
+  attachments?: Array<{
+    type: string;
+    data?: string;
+    attachment_id?: string;
+    mime_type: string;
+    name?: string;
+    size_bytes?: number;
+    delivery_mode?: "prompt" | "path";
+  }>;
+  entity_references: EntityReference[];
+  user_id?: string;
+}): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
@@ -320,9 +291,10 @@ export async function updateQueuedMessage(
 }
 
 /** Remove a single queued entry by id. Throws QueueEntryNotFoundError if drained. */
-export async function removeQueuedEntry(
-  params: QueueSessionIdentity & { entry_id: string },
-): Promise<{ entry_id: string }> {
+export async function removeQueuedEntry(params: {
+  session_id: string;
+  entry_id: string;
+}): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
@@ -335,9 +307,11 @@ export async function removeQueuedEntry(
 }
 
 /** Fold a queued entry into the entry directly above it. Throws QueueEntryNotFoundError if drained. */
-export async function mergeQueuedEntry(
-  params: QueueSessionIdentity & { entry_id: string; user_id?: string },
-): Promise<{ entry_id: string }> {
+export async function mergeQueuedEntry(params: {
+  session_id: string;
+  entry_id: string;
+  user_id?: string;
+}): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
@@ -352,9 +326,10 @@ export async function mergeQueuedEntry(
 /** Rewrite the visible pending order of a session's queue. Throws
  * QueueReorderError when the queue changed since the client's snapshot; the
  * reorder was rejected atomically and the caller should refetch. */
-export async function reorderQueuedEntries(
-  params: QueueSessionIdentity & { ordered_ids: string[] },
-): Promise<{ session_id: string; reordered: number }> {
+export async function reorderQueuedEntries(params: {
+  session_id: string;
+  ordered_ids: string[];
+}): Promise<{ session_id: string; reordered: number }> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);

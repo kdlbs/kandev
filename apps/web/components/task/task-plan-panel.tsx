@@ -46,21 +46,6 @@ type TaskPlanPanelProps = {
   mobileBottomOffset?: string;
 };
 
-type TaskOwnedEditor = {
-  taskId: string | null;
-  editor: Editor;
-} | null;
-
-export function getAvailableTaskEditor(
-  ownedEditor: TaskOwnedEditor,
-  selectedTaskId: string | null,
-): Editor | null {
-  if (!ownedEditor || ownedEditor.taskId !== selectedTaskId || ownedEditor.editor.isDestroyed) {
-    return null;
-  }
-  return ownedEditor.editor;
-}
-
 function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   const {
     plan,
@@ -87,8 +72,8 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   const isAgentBusy = sessionState === "STARTING" || sessionState === "RUNNING";
 
   const editorWrapperRef = useRef<HTMLDivElement>(null);
-  const [ownedEditor, setOwnedEditor] = useState<TaskOwnedEditor>(null);
-  const editorInstance = getAvailableTaskEditor(ownedEditor, taskId);
+  const editorInstanceRef = useRef<Editor | null>(null);
+  const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
   const {
     draftContent,
     setDraftContent,
@@ -101,10 +86,10 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   const commentState = usePlanComments(activeSessionId);
   const selectionState = usePlanSelection(activeSessionId, commentState);
 
-  const handleEditorReady = useCallback(
-    (editor: Editor) => setOwnedEditor({ taskId, editor }),
-    [taskId],
-  );
+  const handleEditorReady = useCallback((editor: Editor) => {
+    editorInstanceRef.current = editor;
+    setEditorInstance(editor);
+  }, []);
 
   const handleCommentDeleted = useCallback(
     (ids: string[]) => {
@@ -150,6 +135,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     isAgentBusy,
     isAgentCreatingPlan,
     editorWrapperRef,
+    editorInstanceRef,
     editorInstance,
     revisions,
     isLoadingRevisions,
@@ -210,7 +196,7 @@ function PlanPanelContent({
   mobileBottomOffset?: string;
 }) {
   const { t } = useTranslation();
-  const { editorWrapperRef, editorInstance, selectionState } = state;
+  const { editorWrapperRef, editorInstanceRef, editorInstance, selectionState } = state;
   const { textSelection, setTextSelection } = selectionState;
   // Ctrl+F in-document find (registers a keydown listener on the editor wrapper)
   const planSearch = usePlanFindShortcut(editorWrapperRef, editorInstance);
@@ -285,7 +271,7 @@ function PlanPanelContent({
         activeSessionId={state.activeSessionId}
         taskId={taskId}
         commentState={state.commentState}
-        editor={editorInstance}
+        editorRef={editorInstanceRef}
         onClose={selectionState.handleSelectionClose}
       />
     </PanelRoot>
@@ -293,7 +279,7 @@ function PlanPanelContent({
 }
 
 function removeCommentMark(editor: Editor | null, commentId: string) {
-  if (!editor || editor.isDestroyed) return;
+  if (!editor) return;
   const markType = editor.state.schema.marks.commentMark;
   if (!markType) return;
   const { tr } = editor.state;
@@ -307,14 +293,14 @@ function PlanSelectionPopoverWrapper({
   activeSessionId,
   taskId,
   commentState,
-  editor,
+  editorRef,
   onClose,
 }: {
   textSelection: TextSelection | null;
   activeSessionId: string | null | undefined;
   taskId: string | null;
   commentState: ReturnType<typeof usePlanComments>;
-  editor: Editor | null;
+  editorRef: React.RefObject<Editor | null>;
   onClose: () => void;
 }) {
   const { runComment } = useRunComment({
@@ -327,7 +313,8 @@ function PlanSelectionPopoverWrapper({
       const from = textSelection?.from;
       const to = textSelection?.to;
       const id = commentState.handleAddComment(comment, selectedText, from, to);
-      if (id && editor && !editor.isDestroyed && from != null && to != null) {
+      const editor = editorRef.current;
+      if (id && editor && from != null && to != null) {
         editor
           .chain()
           .setTextSelection({ from, to })
@@ -336,7 +323,7 @@ function PlanSelectionPopoverWrapper({
       }
       return id;
     },
-    [commentState, textSelection, editor],
+    [commentState, textSelection, editorRef],
   );
 
   const handleAdd = useCallback(
@@ -373,7 +360,7 @@ function PlanSelectionPopoverWrapper({
   const onDelete = commentState.editingCommentId
     ? () => {
         const id = commentState.editingCommentId!;
-        removeCommentMark(editor, id);
+        removeCommentMark(editorRef.current, id);
         commentState.handleDeleteComment(id);
       }
     : undefined;

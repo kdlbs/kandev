@@ -2,127 +2,16 @@ package sqlite
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func seedAttachmentTask(t *testing.T, repo *Repository, taskID, workspaceID string) {
-	t.Helper()
-	if err := repo.CreateTask(context.Background(), &models.Task{
-		ID: taskID, WorkspaceID: workspaceID, Title: taskID,
-	}); err != nil {
-		t.Fatalf("CreateTask(%s): %v", taskID, err)
-	}
-}
-
-func TestReleaseUnreferencedTaskAttachmentClaimsTxStagesQueueOnlyClaims(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedWorkspace(t, repo, "workspace-attachments")
-	attachment := &models.TaskMessageAttachment{
-		ID: "attachment-archive-queue-only", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
-		Name: "notes.txt", MimeType: "text/plain", Kind: "resource", DeliveryMode: "path",
-		SizeBytes: 16, StorageKey: "attachment-archive-queue-only", State: models.AttachmentStateClaimed,
-		TaskID: "task-archive", SessionID: "session-archive", CreatedAt: time.Now().UTC(),
-	}
-	if err := repo.CreateMessageAttachment(ctx, attachment); err != nil {
-		t.Fatal(err)
-	}
-	tx, err := repo.db.BeginTxx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.releaseUnreferencedTaskAttachmentClaimsTx(ctx, tx, attachment.TaskID, map[string]struct{}{attachment.ID: {}}); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	got, err := repo.GetMessageAttachment(ctx, attachment.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.State != models.AttachmentStateStaged || got.TaskID != attachment.TaskID || got.SessionID != attachment.SessionID {
-		t.Fatalf("released archive claim = %+v", got)
-	}
-}
-
-func TestReleaseUnreferencedTaskAttachmentClaimsTxPreservesDirectClaims(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedWorkspace(t, repo, "workspace-attachments")
-	attachment := &models.TaskMessageAttachment{
-		ID: "attachment-archive-direct", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
-		Name: "notes.txt", MimeType: "text/plain", Kind: "resource", DeliveryMode: "path",
-		SizeBytes: 16, StorageKey: "attachment-archive-direct", State: models.AttachmentStateClaimed,
-		TaskID: "task-archive", SessionID: "session-archive", CreatedAt: time.Now().UTC(),
-	}
-	if err := repo.CreateMessageAttachment(ctx, attachment); err != nil {
-		t.Fatal(err)
-	}
-	tx, err := repo.db.BeginTxx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.releaseUnreferencedTaskAttachmentClaimsTx(ctx, tx, attachment.TaskID, nil); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	got, err := repo.GetMessageAttachment(ctx, attachment.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.State != models.AttachmentStateClaimed {
-		t.Fatalf("direct claim state = %q, want claimed", got.State)
-	}
-}
-
-func TestDeleteMessageAttachmentsByWorkspaceTxRemovesRegistryRowsBeforeCascade(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedWorkspace(t, repo, "workspace-attachments")
-	attachment := &models.TaskMessageAttachment{
-		ID: "attachment-workspace-delete", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
-		Name: "notes.txt", MimeType: "text/plain", Kind: "resource", DeliveryMode: "path",
-		SizeBytes: 16, StorageKey: "attachment-workspace-delete", State: models.AttachmentStateClaimed,
-		TaskID: "task-1", SessionID: "session-1", CreatedAt: time.Now().UTC(),
-	}
-	if err := repo.CreateMessageAttachment(ctx, attachment); err != nil {
-		t.Fatal(err)
-	}
-	tx, err := repo.db.BeginTxx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	removed, err := repo.DeleteMessageAttachmentsByWorkspaceTx(ctx, tx, "workspace-attachments")
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if len(removed) != 1 || removed[0].ID != attachment.ID {
-		_ = tx.Rollback()
-		t.Fatalf("removed attachments = %+v", removed)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.GetMessageAttachment(ctx, attachment.ID); err == nil {
-		t.Fatal("workspace attachment registry row still exists")
-	}
-}
-
 func TestClaimMessageAttachments_IsIdempotentForSameTaskSession(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-attachments")
-	seedAttachmentTask(t, repo, "task-1", "workspace-attachments")
 	now := time.Now().UTC()
 	attachment := &models.TaskMessageAttachment{
 		ID: "attachment-idempotent", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
@@ -152,7 +41,6 @@ func TestClaimMessageAttachments_AllowsTaskScopedClaimForSameTaskSession(t *test
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-attachments")
-	seedAttachmentTask(t, repo, "task-1", "workspace-attachments")
 	now := time.Now().UTC()
 	attachment := &models.TaskMessageAttachment{
 		ID: "attachment-task-scoped", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
@@ -182,7 +70,6 @@ func TestClaimMessageAttachments_RejectsDifferentSessionAfterSessionClaim(t *tes
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-attachments")
-	seedAttachmentTask(t, repo, "task-1", "workspace-attachments")
 	now := time.Now().UTC()
 	attachment := &models.TaskMessageAttachment{
 		ID: "attachment-session-scoped", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
@@ -205,7 +92,6 @@ func TestClaimMessageAttachments_AllowsSeparateSubmissionsToReachTheLimit(t *tes
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-attachments")
-	seedAttachmentTask(t, repo, "task-1", "workspace-attachments")
 	now := time.Now().UTC()
 	first := &models.TaskMessageAttachment{
 		ID: "attachment-first", OwnerID: "owner-1", WorkspaceID: "workspace-attachments",
@@ -234,7 +120,6 @@ func TestClaimMessageAttachments_AllowsSeparateSubmissionsToReachTheLimit(t *tes
 func TestClaimMessageAttachments_RejectsExpiredStagedDescriptor(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
-
 	seedWorkspace(t, repo, "workspace-attachments")
 	now := time.Now().UTC()
 	attachment := &models.TaskMessageAttachment{
@@ -255,35 +140,6 @@ func TestClaimMessageAttachments_RejectsExpiredStagedDescriptor(t *testing.T) {
 	}
 	if got.State != models.AttachmentStateStaged {
 		t.Fatalf("expired attachment state = %q, want staged", got.State)
-	}
-}
-func TestDeleteTaskSessionWithAttachmentsReturnsDeletedClaimDescriptors(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedWorkspace(t, repo, "workspace-session-attachments")
-	seedAttachmentTask(t, repo, "task-session-attachments", "workspace-session-attachments")
-	session := &models.TaskSession{ID: "session-attachments", TaskID: "task-session-attachments"}
-	if err := repo.CreateTaskSession(ctx, session); err != nil {
-		t.Fatalf("CreateTaskSession: %v", err)
-	}
-	attachment := &models.TaskMessageAttachment{
-		ID: "attachment-session-delete", OwnerID: "owner", WorkspaceID: "workspace-session-attachments",
-		Name: "session.txt", MimeType: "text/plain", Kind: "resource", DeliveryMode: "path",
-		SizeBytes: 4, StorageKey: "attachment-session-delete", State: models.AttachmentStateClaimed,
-		TaskID: session.TaskID, SessionID: session.ID, CreatedAt: time.Now().UTC(),
-	}
-	if err := repo.CreateMessageAttachment(ctx, attachment); err != nil {
-		t.Fatalf("CreateMessageAttachment: %v", err)
-	}
-	deleted, err := repo.DeleteTaskSessionWithAttachments(ctx, session)
-	if err != nil {
-		t.Fatalf("DeleteTaskSessionWithAttachments: %v", err)
-	}
-	if len(deleted) != 1 || deleted[0].ID != attachment.ID {
-		t.Fatalf("deleted attachments = %+v, want %s", deleted, attachment.ID)
-	}
-	if _, err := repo.GetMessageAttachment(ctx, attachment.ID); !errors.Is(err, models.ErrAttachmentNotFound) {
-		t.Fatalf("attachment registry row still exists: %v", err)
 	}
 }
 

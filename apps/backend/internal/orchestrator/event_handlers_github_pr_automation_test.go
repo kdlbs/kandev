@@ -33,12 +33,6 @@ func (r *lifecycleQueueFailureRepository) InsertOrReplaceLifecycleByCoalesceKey(
 	return nil, false, r.err
 }
 
-func (r *lifecycleQueueFailureRepository) InsertOrReplaceLifecycleByCoalesceKeyForSession(
-	context.Context, messagequeue.QueueSessionIdentity, *messagequeue.QueuedMessage, string, int, bool,
-) (*messagequeue.QueuedMessage, bool, error) {
-	return nil, false, r.err
-}
-
 // lifecycleAcknowledgingRepository exposes the durable lifecycle completion
 // boundary. ReserveHead intentionally retains lifecycle entries until the
 // executor accepts the prompt and AcknowledgeByID commits the removal.
@@ -51,18 +45,6 @@ func (r *lifecycleAcknowledgingRepository) AcknowledgeByID(
 	ctx context.Context, sessionID, entryID string,
 ) error {
 	if err := r.Repository.AcknowledgeByID(ctx, sessionID, entryID); err != nil {
-		return err
-	}
-	close(r.acknowledged)
-	return nil
-}
-
-func (r *lifecycleAcknowledgingRepository) AcknowledgeByIDForSession(
-	ctx context.Context,
-	identity messagequeue.QueueSessionIdentity,
-	entryID string,
-) error {
-	if err := r.Repository.AcknowledgeByIDForSession(ctx, identity, entryID); err != nil {
 		return err
 	}
 	close(r.acknowledged)
@@ -96,28 +78,6 @@ func (r *lifecycleClaimObservingRepository) ClaimPromptableTaskSessionIfActive(
 	return claim, err
 }
 
-func (r *lifecycleClaimObservingRepository) ClaimPromptableTaskSessionIfActiveForIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-) (models.PromptableTaskSessionClaim, error) {
-	claim, err := r.repoStore.ClaimPromptableTaskSessionIfActiveForIdentity(
-		ctx, taskID, sessionID, incarnationID,
-	)
-	r.claimed <- claim.Status == models.PromptableTaskSessionClaimed
-	return claim, err
-}
-
-func (r *lifecycleClaimObservingRepository) UpdateTaskSessionStateIfCurrentIdentity(
-	ctx context.Context,
-	taskID, sessionID, incarnationID string,
-	expected, state models.TaskSessionState,
-	errorMessage string,
-) (bool, time.Time, error) {
-	return r.repoStore.UpdateTaskSessionStateIfCurrentIdentity(
-		ctx, taskID, sessionID, incarnationID, expected, state, errorMessage,
-	)
-}
-
 func (r *archiveDuringLifecycleQueueRepository) InsertOrReplaceByCoalesceKey(
 	ctx context.Context,
 	msg *messagequeue.QueuedMessage,
@@ -140,23 +100,6 @@ func (r *archiveDuringLifecycleQueueRepository) InsertOrReplaceLifecycleByCoales
 	coalesceKey string,
 	maxPerSession int,
 	allowInsert bool,
-) (*messagequeue.QueuedMessage, bool, error) {
-	if !r.archived {
-		r.archived = true
-		if err := r.archive(ctx); err != nil {
-			return nil, false, err
-		}
-	}
-	return nil, false, messagequeue.ErrTaskInactive
-}
-
-func (r *archiveDuringLifecycleQueueRepository) InsertOrReplaceLifecycleByCoalesceKeyForSession(
-	ctx context.Context,
-	_ messagequeue.QueueSessionIdentity,
-	_ *messagequeue.QueuedMessage,
-	_ string,
-	_ int,
-	_ bool,
 ) (*messagequeue.QueuedMessage, bool, error) {
 	if !r.archived {
 		r.archived = true
@@ -372,7 +315,7 @@ func TestDispatchTaskPRAgentPrompt_ReadySessionsDrainImmediately(t *testing.T) {
 			agent := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agent)
 			acknowledgingRepo := &lifecycleAcknowledgingRepository{
-				Repository:   newAuthoritativeMemoryRepository(repo),
+				Repository:   messagequeue.NewMemoryRepository(),
 				acknowledged: make(chan struct{}),
 			}
 			svc.messageQueue = messagequeue.NewService(
@@ -526,7 +469,7 @@ func TestEvalTaskPRLifecycle_RecordsCheckpointOnlyAfterQueueAcceptance(t *testin
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	queueErr := errors.New("queue unavailable")
 	svc.messageQueue = messagequeue.NewService(&lifecycleQueueFailureRepository{
-		Repository: newAuthoritativeMemoryRepository(repo), err: queueErr,
+		Repository: messagequeue.NewMemoryRepository(), err: queueErr,
 	}, messagequeue.DefaultMaxPerSession, testLogger())
 
 	delivered, err := svc.evalTaskPRLifecycle(ctx, pr, options, ghSvc)
@@ -537,7 +480,7 @@ func TestEvalTaskPRLifecycle_RecordsCheckpointOnlyAfterQueueAcceptance(t *testin
 		t.Fatalf("checkpoint recorded after failed queue acceptance: %+v", prompts)
 	}
 
-	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
+	svc.messageQueue = messagequeue.NewServiceMemory(testLogger())
 	delivered, err = svc.evalTaskPRLifecycle(ctx, pr, options, ghSvc)
 	if err != nil || !delivered {
 		t.Fatalf("accepted queue = delivered %v, err %v", delivered, err)
@@ -558,7 +501,7 @@ func TestEvalTaskPRLifecycle_ArchiveWinningAfterActivityCheckDoesNotQueueOrClaim
 	}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageQueue = messagequeue.NewService(&archiveDuringLifecycleQueueRepository{
-		Repository: newAuthoritativeMemoryRepository(repo),
+		Repository: messagequeue.NewMemoryRepository(),
 		archive: func(ctx context.Context) error {
 			return repo.ArchiveTask(ctx, "task-1")
 		},

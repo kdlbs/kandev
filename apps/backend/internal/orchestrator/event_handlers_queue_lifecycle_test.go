@@ -3,86 +3,14 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
-	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
-	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
-
-type bootReadyRequeueBarrierRepo struct {
-	*sqliterepo.Repository
-	lookupStarted chan struct{}
-	allowLookup   chan struct{}
-	lookupOnce    sync.Once
-}
-
-func (r *bootReadyRequeueBarrierRepo) GetExecutorRunningBySessionID(
-	ctx context.Context,
-	sessionID string,
-) (*models.ExecutorRunning, error) {
-	r.lookupOnce.Do(func() {
-		close(r.lookupStarted)
-		<-r.allowLookup
-	})
-	return nil, models.ErrExecutorRunningNotFound
-}
-
-func TestAgentBootReadyDrainsAfterInFlightRuntimeUnavailableRequeue(t *testing.T) {
-	ctx := context.Background()
-	baseRepo := setupTestRepo(t)
-	seedTaskAndSession(t, baseRepo, "t1", "s1", models.TaskSessionStateWaitingForInput)
-	repo := &bootReadyRequeueBarrierRepo{
-		Repository:    baseRepo,
-		lookupStarted: make(chan struct{}),
-		allowLookup:   make(chan struct{}),
-	}
-	agentMgr := &mockAgentManager{repoForExecutionLookup: baseRepo}
-	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.repo = repo
-	svc.executor = executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{})
-
-	if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued prompt", "", messagequeue.QueuedByUser, false, nil); err != nil {
-		t.Fatalf("queue prompt: %v", err)
-	}
-	queued, ok := svc.messageQueue.ReserveQueued(ctx, "s1")
-	if !ok {
-		t.Fatal("reserve queued prompt")
-	}
-	reservation := svc.markQueuedDispatchInFlightWithSource("s1", queued.ID, queued)
-
-	var completions atomic.Int32
-	secondExecutionDone := make(chan struct{})
-	svc.onQueuedMessageExecutionComplete = func() {
-		if completions.Add(1) == 2 {
-			close(secondExecutionDone)
-		}
-	}
-	go svc.executeQueuedMessageWithReservation("s1", queued, reservation)
-	select {
-	case <-repo.lookupStarted:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for runtime lookup barrier")
-	}
-
-	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
-	close(repo.allowLookup)
-
-	select {
-	case <-secondExecutionDone:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("boot-ready did not retry after in-flight requeue, executions=%d", completions.Load())
-	}
-	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
-		t.Fatalf("runtime-unavailable retry queue count = %d, want 1", got)
-	}
-}
 
 type turnStartSignalService struct {
 	TurnService

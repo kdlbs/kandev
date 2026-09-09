@@ -464,52 +464,6 @@ func TestProfileReconciler_SeedsDefaultProfile(t *testing.T) {
 	}
 }
 
-// Existing-behavior contract coverage for AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.7.
-func TestProfileReconciler_PreservesProfileRouteWhenProbeFails(t *testing.T) {
-	st := newFakeStore()
-	dbAgent := &models.Agent{Name: "opencode-acp"}
-	if err := st.CreateAgent(context.Background(), dbAgent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-	existing := &models.AgentProfile{
-		AgentID:       dbAgent.ID,
-		Name:          "OpenCode custom",
-		Model:         "provider/model",
-		FallbackModel: "provider/fallback",
-		Mode:          "plan",
-		Enabled:       true,
-	}
-	if err := st.CreateAgentProfile(context.Background(), existing); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	st.created = nil
-
-	ag := &mockInferenceAgent{id: "opencode-acp", displayName: "OpenCode", enabled: true}
-	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{
-		"opencode-acp": {
-			AgentType: "opencode-acp",
-			Status:    hostutility.StatusFailed,
-			Error:     "managed runtime recovery failed",
-		},
-	}}
-	reconciler := newReconciler(t, st, caps, ag)
-
-	if err := reconciler.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(st.updated) != 0 {
-		t.Fatalf("failed probe rewrote profile: %+v", st.updated)
-	}
-	stored, err := st.GetAgentProfile(context.Background(), existing.ID)
-	if err != nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if stored.Model != existing.Model || stored.FallbackModel != existing.FallbackModel ||
-		stored.Mode != existing.Mode || stored.Enabled != existing.Enabled {
-		t.Fatalf("profile route changed: got %+v, want %+v", stored, existing)
-	}
-}
-
 func TestProfileReconciler_SeedsDynamicVirtualFamily(t *testing.T) {
 	st := newFakeStore()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})

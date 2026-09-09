@@ -57,8 +57,6 @@ func TestClaimedAttachmentCleanupReturnsOnlyMatchingRows(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace")
-	seedAttachmentTask(t, repo, "task", "workspace")
-	seedAttachmentTask(t, repo, "other-task", "workspace")
 	expires := time.Now().UTC().Add(time.Hour)
 	for _, attachment := range []*models.TaskMessageAttachment{
 		{ID: "attachment-matching", OwnerID: "owner", WorkspaceID: "workspace", Name: "matching", SizeBytes: 1, ExpiresAt: expires},

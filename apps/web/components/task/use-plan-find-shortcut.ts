@@ -5,10 +5,6 @@ import type { Editor } from "@tiptap/core";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { planSearchPluginKey } from "@/components/editors/tiptap/search-highlight-extension";
 
-function isEditorAvailable(editor: Editor | null): editor is Editor {
-  return editor !== null && !editor.isDestroyed;
-}
-
 /** Ctrl+F find-in-plan shortcut + editor wiring. Returns the search-bar state
  * the panel renders into `<PanelSearchBar>`. */
 export function usePlanFindShortcut(
@@ -20,7 +16,7 @@ export function usePlanFindShortcut(
   const [matchInfo, setMatchInfo] = useState({ current: 0, total: 0 });
 
   const readMatchInfo = useCallback(() => {
-    if (!isEditorAvailable(editor)) return;
+    if (!editor) return;
     const s = planSearchPluginKey.getState(editor.state);
     if (!s) return;
     const next = {
@@ -36,36 +32,33 @@ export function usePlanFindShortcut(
   }, [editor]);
 
   useEffect(() => {
-    if (!isEditorAvailable(editor)) return;
+    if (!editor) return;
     const handler = () => readMatchInfo();
     editor.on("transaction", handler);
     return () => {
-      if (!isEditorAvailable(editor)) return;
       editor.off("transaction", handler);
     };
   }, [editor, readMatchInfo]);
 
   useEffect(() => {
-    if (!isEditorAvailable(editor)) return;
+    if (!editor) return;
     if (!isOpen) return;
     editor.commands.setPlanSearchQuery(query);
   }, [query, isOpen, editor]);
 
   useEffect(() => {
     if (isOpen) return;
-    if (!isEditorAvailable(editor)) return;
+    if (!editor) return;
     editor.commands.clearPlanSearch();
   }, [isOpen, editor]);
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
   const findNext = useCallback(() => {
-    if (!isEditorAvailable(editor)) return;
-    editor.commands.planSearchNext();
+    editor?.commands.planSearchNext();
   }, [editor]);
   const findPrev = useCallback(() => {
-    if (!isEditorAvailable(editor)) return;
-    editor.commands.planSearchPrev();
+    editor?.commands.planSearchPrev();
   }, [editor]);
 
   usePanelSearch({ containerRef: wrapperRef, isOpen, onOpen: open, onClose: close });

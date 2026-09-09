@@ -1,5 +1,5 @@
 ---
-status: active
+status: draft
 system: agents
 created: 2026-08-24
 owners:
@@ -14,8 +14,7 @@ Managed npm runtimes use exact reviewed package versions. Stale npm metadata
 can hide a published version and stop the agent before ACP initialization.
 
 Kandev repairs this error without requiring the end user to operate npm. The
-same behavior applies to host capability probes and to agent launches on local
-PC, local Docker, and remote SSH executors.
+same behavior applies on local PC, local Docker, and remote SSH executors.
 
 ## Terminology
 
@@ -38,9 +37,6 @@ PC, local Docker, and remote SSH executors.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.3:** A successful retry shall continue the original session without a failure card or user action.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.4:** The retry shall preserve the trusted package, exact version, registry, command prefix, ACP arguments, model, permissions, executor, and session identity.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.5:** When the retry fails, Kandev shall report the npm preparation error and offer one **Retry runtime** action.
-- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6:** When a host capability probe reports the same strict npm `ETARGET` evidence, Kandev shall repair the trusted execution tree and retry the same probe once with online-preferred metadata before it publishes a failed capability status.
-- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.7:** Capability-probe recovery and failure shall not change a persisted profile's selected model, fallback model, mode, active runtime version, or enabled state.
-- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.8:** When the host capability-probe retry succeeds, Kandev shall publish the recovered capability catalogue without requiring a task launch, restart, or user action.
 
 ### REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002: Scoped executor-local repair
 

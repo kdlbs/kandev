@@ -11,11 +11,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	queueStatusScopeKey  = "queue_status_scope"
-	queueStatusScopeTask = "task"
-)
-
 type TaskEventBroadcaster struct {
 	hub           *Hub
 	subscriptions []bus.Subscription
@@ -292,9 +287,6 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	case ws.ActionMessageQueueStatusChanged:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
-			return nil
-		}
-		if extractStringField(data, queueStatusScopeKey) == queueStatusScopeTask {
 			return nil
 		}
 	case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:

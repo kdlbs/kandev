@@ -174,7 +174,7 @@ func TestDeleteTaskSessionRemovesPromptHistoryClaim(t *testing.T) {
 	if err != nil || !claimed {
 		t.Fatalf("initial fallback claim = %t, %v; want claimed", claimed, err)
 	}
-	if err := deleteTaskSessionForTest(t, repo, ctx, "session-session-reuse"); err != nil {
+	if err := repo.DeleteTaskSession(ctx, "session-session-reuse"); err != nil {
 		t.Fatalf("delete session: %v", err)
 	}
 

@@ -194,18 +194,6 @@ func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	}
 }
 
-func TestTaskSessionDTOsProjectQueueIncarnation(t *testing.T) {
-	session := &models.TaskSession{
-		ID: "session-1", TaskID: "task-1", QueueIncarnationID: "incarnation-1",
-	}
-	if got := FromTaskSession(session).QueueIncarnationID; got != session.QueueIncarnationID {
-		t.Fatalf("full queue incarnation = %q, want %q", got, session.QueueIncarnationID)
-	}
-	if got := FromTaskSessionSummary(session).QueueIncarnationID; got != session.QueueIncarnationID {
-		t.Fatalf("summary queue incarnation = %q, want %q", got, session.QueueIncarnationID)
-	}
-}
-
 // TestFromTaskSession_CopiesRollupColumns pins docs/specs/task-cost-ledger/
 // spec.md AC-28/AC-29: TaskSessionDTO (the full session detail shape) must
 // surface the four usage/cost rollup columns internal/task/usage's writer

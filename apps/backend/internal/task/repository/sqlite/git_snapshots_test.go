@@ -747,7 +747,7 @@ func TestGitSnapshotsAndCommitsCascadeOnSessionDelete(t *testing.T) {
 		t.Fatalf("CreateSessionCommit: %v", err)
 	}
 
-	if err := deleteTaskSessionForTest(t, repo, ctx, "session-cascade"); err != nil {
+	if err := repo.DeleteTaskSession(ctx, "session-cascade"); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
 

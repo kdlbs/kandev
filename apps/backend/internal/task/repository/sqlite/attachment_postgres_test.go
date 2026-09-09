@@ -19,9 +19,6 @@ func TestPostgresMessageAttachmentLifecycle(t *testing.T) {
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-attachments-pg", Name: "Attachments PG"}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	if err := repo.CreateTask(ctx, &models.Task{ID: "task-pg", WorkspaceID: "workspace-attachments-pg", Title: "Attachment PG"}); err != nil {
-		t.Fatalf("seed task: %v", err)
-	}
 
 	t.Run("claim and release", func(t *testing.T) {
 		now := time.Now().UTC()

@@ -110,11 +110,9 @@ func newProfileSwitchFixture(t *testing.T, startPolicy models.WorkflowProfileSes
 			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-" + req.AgentProfileID}, nil
 		},
 	}
-	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
-	svc.messageQueue = newAuthoritativeMemoryQueue(repo, svc.logger)
 	return &profileSwitchFixture{
 		repo: repo, stepGetter: stepGetter, current: current, agentMgr: agentMgr, startPolicy: startPolicy, endPolicy: endPolicy,
-		svc: svc,
+		svc: createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr),
 	}
 }
 
@@ -795,11 +793,6 @@ func TestSwitchSessionForStep_ParkOnEndRestoresQueueAfterReuseParkingFails(t *te
 	); err != nil {
 		t.Fatalf("queue reuse handoff: %v", err)
 	}
-	if _, err := fixture.svc.messageQueue.QueueMessage(
-		ctx, fixture.current.ID, "t1", "destination arrival", "", messagequeue.QueuedByUser, false, nil,
-	); err != nil {
-		t.Fatalf("queue destination arrival: %v", err)
-	}
 
 	fixture.svc.repo = failParkIntentRepo{repoStore: fixture.repo, remover: fixture.repo, marker: fixture.repo}
 	fixture.stepGetter.workflowAgentProfileID = "profile-a"
@@ -822,8 +815,8 @@ func TestSwitchSessionForStep_ParkOnEndRestoresQueueAfterReuseParkingFails(t *te
 		t.Fatalf("source queue after reuse parking failure = %+v, want queued reuse handoff restored", status.Entries)
 	}
 	originalAStatus := fixture.svc.messageQueue.GetStatus(ctx, fixture.current.ID)
-	if originalAStatus.Count != 1 || originalAStatus.Entries[0].Content != "destination arrival" {
-		t.Fatalf("reused destination queue after rollback = %+v, want destination arrival preserved", originalAStatus.Entries)
+	if originalAStatus.Count != 0 {
+		t.Fatalf("reused destination queue after rollback = %+v, want empty", originalAStatus.Entries)
 	}
 }
 

@@ -396,7 +396,7 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
+		messageQueue:       messagequeue.NewServiceMemory(log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -412,13 +412,11 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 	); err != nil {
 		t.Fatalf("queue hand-off prompt: %v", err)
 	}
-	if err := svc.messageQueue.SetPendingMove(ctx, reviewSessionID, &messagequeue.PendingMove{
+	svc.messageQueue.SetPendingMove(ctx, reviewSessionID, &messagequeue.PendingMove{
 		TaskID:         "task-1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: stepInProgressID,
-	}); err != nil {
-		t.Fatalf("set pending move: %v", err)
-	}
+	})
 
 	return &pendingMoveScenario{
 		ctx:              ctx,

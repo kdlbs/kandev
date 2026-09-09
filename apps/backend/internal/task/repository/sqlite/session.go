@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
-	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -472,7 +471,7 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 // ADR 0005: agent_profile_id is the single column for both kanban (FK to a
 // shallow profile) and office (FK to a per-workspace rich profile) sessions —
 // the two column names that used to live here have collapsed into one.
-const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
+const taskSessionSelectCols = `ts.id, ts.task_id,
 	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
 	ts.agent_profile_id, ts.execution_profile_id, ts.route_generation, ts.route_state, ts.route_reason, ts.downstream_acp_session_id,
 	ts.executor_id, ts.executor_profile_id, ts.environment_id,
@@ -900,9 +899,6 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
-	if session.QueueIncarnationID == "" {
-		session.QueueIncarnationID = uuid.New().String()
-	}
 	now := time.Now().UTC()
 	// Only default StartedAt / UpdatedAt when the caller hasn't supplied
 	// one. The test harness backdates StartedAt so completed sessions
@@ -950,7 +946,7 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	}
 	_, err = exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
-			id, task_id, queue_incarnation_id, agent_profile_id, execution_profile_id, route_generation, route_state, route_reason, downstream_acp_session_id,
+			id, task_id, agent_profile_id, execution_profile_id, route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -959,10 +955,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
-	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
+	`), session.ID, session.TaskID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
@@ -1004,8 +999,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	var lastReadMessageID sql.NullString
 
 	err := row.Scan(
-		&session.ID, &session.TaskID, &session.QueueIncarnationID,
-		&session.AgentExecutionID, &session.ContainerID, &agentProfileID,
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
@@ -1121,23 +1115,6 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 // prompt while its task is still active. It intentionally performs no agent
 // I/O; callers dispatch only after this bounded database claim commits.
 func (r *Repository) ClaimPromptableTaskSessionIfActive(ctx context.Context, id string) (models.PromptableTaskSessionClaim, error) {
-	return r.claimPromptableTaskSessionIfActive(ctx, id, "", "")
-}
-
-func (r *Repository) ClaimPromptableTaskSessionIfActiveForIdentity(
-	ctx context.Context,
-	taskID, id, incarnationID string,
-) (models.PromptableTaskSessionClaim, error) {
-	if taskID == "" || id == "" || incarnationID == "" {
-		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
-	}
-	return r.claimPromptableTaskSessionIfActive(ctx, id, taskID, incarnationID)
-}
-
-func (r *Repository) claimPromptableTaskSessionIfActive(
-	ctx context.Context,
-	id, taskID, incarnationID string,
-) (models.PromptableTaskSessionClaim, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return models.PromptableTaskSessionClaim{}, err
@@ -1150,9 +1127,7 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 		SELECT ts.state, t.archived_at IS NULL
 		FROM task_sessions ts JOIN tasks t ON t.id = ts.task_id
 		WHERE ts.id = ?
-		  AND (? = '' OR ts.task_id = ?)
-		  AND (? = '' OR ts.queue_incarnation_id = ?)
-	`), id, taskID, taskID, incarnationID, incarnationID).Scan(&state, &active)
+	`), id).Scan(&state, &active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
 	}
@@ -1169,11 +1144,8 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET state = ?, completed_at = NULL, updated_at = ?
 		WHERE id = ? AND state = ?
-		  AND (? = '' OR task_id = ?)
-		  AND (? = '' OR queue_incarnation_id = ?)
 		  AND EXISTS (SELECT 1 FROM tasks WHERE tasks.id = task_sessions.task_id AND tasks.archived_at IS NULL)
-	`), models.TaskSessionStateRunning, time.Now().UTC(), id, state,
-		taskID, taskID, incarnationID, incarnationID)
+	`), models.TaskSessionStateRunning, time.Now().UTC(), id, state)
 	if err != nil {
 		return models.PromptableTaskSessionClaim{}, err
 	}
@@ -1182,7 +1154,7 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 		return models.PromptableTaskSessionClaim{}, err
 	}
 	if changed == 0 {
-		claim, err := r.classifyPromptableTaskSessionClaimForIdentity(ctx, tx, id, taskID, incarnationID)
+		claim, err := r.classifyPromptableTaskSessionClaim(ctx, tx, id)
 		if err != nil {
 			return models.PromptableTaskSessionClaim{}, err
 		}
@@ -1204,17 +1176,7 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 // It must run in the claim transaction so the result describes the same
 // ownership window as the failed UPDATE.
 func (r *Repository) classifyPromptableTaskSessionClaim(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	id string,
-) (models.PromptableTaskSessionClaim, error) {
-	return r.classifyPromptableTaskSessionClaimForIdentity(ctx, tx, id, "", "")
-}
-
-func (r *Repository) classifyPromptableTaskSessionClaimForIdentity(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	id, taskID, incarnationID string,
+	ctx context.Context, tx *sqlx.Tx, id string,
 ) (models.PromptableTaskSessionClaim, error) {
 	var state models.TaskSessionState
 	var active bool
@@ -1222,9 +1184,7 @@ func (r *Repository) classifyPromptableTaskSessionClaimForIdentity(
 		SELECT ts.state, t.archived_at IS NULL
 		FROM task_sessions ts JOIN tasks t ON t.id = ts.task_id
 		WHERE ts.id = ?
-		  AND (? = '' OR ts.task_id = ?)
-		  AND (? = '' OR ts.queue_incarnation_id = ?)
-	`), id, taskID, taskID, incarnationID, incarnationID).Scan(&state, &active)
+	`), id).Scan(&state, &active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
 	}
@@ -1608,30 +1568,6 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	return rows > 0, now, nil
 }
 
-func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
-	ctx context.Context,
-	taskID, id, incarnationID string,
-	expected, status models.TaskSessionState,
-	errorMessage string,
-) (bool, time.Time, error) {
-	now := time.Now().UTC()
-	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions
-		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND task_id = ? AND queue_incarnation_id = ? AND state = ?
-	`), string(status), errorMessage, completedAt, now,
-		id, taskID, incarnationID, string(expected))
-	if err != nil {
-		return false, time.Time{}, err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, time.Time{}, err
-	}
-	return rows > 0, now, nil
-}
-
 // UpdateTaskSessionDynamicRouteIfCurrent changes only the route projection
 // while the session generation and projected route state still match the
 // caller's observation. It avoids writing a stale full session row after an
@@ -1658,11 +1594,10 @@ func (r *Repository) UpdateTaskSessionDynamicRouteIfCurrent(
 	return rows > 0, now, nil
 }
 
-// CancelActiveTaskSession atomically transitions one active session, including
-// a parked IDLE session, to CANCELLED. A false result means the row exists in
-// a non-active state, or it was concurrently changed before this conditional
-// write; callers re-read to distinguish those cases from a missing row. The
-// returned timestamp belongs
+// CancelActiveTaskSession atomically transitions one active session to
+// CANCELLED. A false result means the row exists in a non-active state or was
+// concurrently changed before this conditional write; callers re-read to
+// distinguish those cases from a missing row. The returned timestamp belongs
 // to the committed cancellation, so accepting callers never need a fallible
 // post-write read before scheduling teardown.
 func (r *Repository) CancelActiveTaskSession(ctx context.Context, id, reason string) (bool, time.Time, error) {
@@ -1671,7 +1606,7 @@ func (r *Repository) CancelActiveTaskSession(ctx context.Context, id, reason str
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ?
-			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT', 'IDLE')
+			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 	`), string(models.TaskSessionStateCancelled), reason, now, now, id)
 	if err != nil {
 		return false, time.Time{}, err
@@ -2855,8 +2790,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	var lastReadMessageID sql.NullString
 
 	err := rows.Scan(
-		&session.ID, &session.TaskID, &session.QueueIncarnationID,
-		&session.AgentExecutionID, &session.ContainerID, &agentProfileID,
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
@@ -2916,107 +2850,45 @@ func unmarshalSessionSnapshots(
 	return unmarshalSessionJSON(repositorySnapshotJSON, &session.RepositorySnapshot, "repository snapshot")
 }
 
-// DeleteTaskSession deletes the exact session incarnation and its pending queue
-// rows. The session identity fences delayed deletion from removing a replacement
-// that reuses the same textual session ID.
-func (r *Repository) DeleteTaskSession(ctx context.Context, session *models.TaskSession) error {
-	_, err := r.DeleteTaskSessionWithAttachments(ctx, session)
-	return err
-}
-
-// DeleteTaskSessionWithAttachments also returns claimed attachment descriptors
-// whose registry rows were removed, allowing the service layer to remove their
-// private bytes after the transaction commits.
-func (r *Repository) DeleteTaskSessionWithAttachments(
-	ctx context.Context,
-	session *models.TaskSession,
-) ([]*models.TaskMessageAttachment, error) {
-	if session == nil || session.ID == "" || session.TaskID == "" || session.QueueIncarnationID == "" {
-		return nil, errors.New("task session identity is required")
-	}
+// DeleteTaskSession deletes an agent session by ID and any pending queue rows
+// keyed to that session. Without the queue purge, orphan rows keep inflating
+// task-scoped queued_prompt_count after the session is gone.
+func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
-		return nil, err
-	}
-	deletedAttachments, err := r.purgeTaskSessionStateTx(ctx, tx, session)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
 	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return deletedAttachments, nil
-}
-
-// Task Session Worktree operations
-func (r *Repository) confirmTaskSessionDeletionIdentityTx(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	session *models.TaskSession,
-) error {
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET updated_at = updated_at WHERE id = ?
-	`), session.TaskID); err != nil {
-		return fmt.Errorf("lock deleted session task: %w", err)
-	}
-	var found string
-	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT id
-		FROM task_sessions
-		WHERE id = ? AND task_id = ? AND queue_incarnation_id = ?
-	`), session.ID, session.TaskID, session.QueueIncarnationID).Scan(&found)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("agent session not found: %s", session.ID)
-	}
-	if err != nil {
-		return fmt.Errorf("confirm deleted session identity: %w", err)
-	}
-	return nil
-}
-
-func (r *Repository) purgeTaskSessionStateTx(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	session *models.TaskSession,
-) ([]*models.TaskMessageAttachment, error) {
-	identity := messagequeue.QueueSessionIdentity{
-		TaskID:               session.TaskID,
-		SessionID:            session.ID,
-		SessionIncarnationID: session.QueueIncarnationID,
-	}
-	if err := messagequeue.DeleteSessionInTransaction(ctx, tx, r.db, identity); err != nil {
-		if !db.IsMissingTableError(err) {
-			return nil, fmt.Errorf("purge deleted session queue: %w", err)
-		}
-	}
-	deletedAttachments, err := r.deleteUnreferencedSessionAttachmentClaimsTx(ctx, tx, session.TaskID, session.ID)
-	if err != nil {
-		return nil, fmt.Errorf("purge deleted session attachment claims: %w", err)
-	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM task_sessions
-		WHERE id = ? AND task_id = ? AND queue_incarnation_id = ?
-	`), session.ID, session.TaskID, session.QueueIncarnationID)
-	if err != nil {
-		return nil, err
+		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return nil, fmt.Errorf("agent session not found: %s", session.ID)
+		return fmt.Errorf("agent session not found: %s", id)
 	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_prompt_seq WHERE task_session_id = ?`), session.ID); err != nil {
+	// task_session_prompt_seq intentionally has no foreign key because it was
+	// added by a replay-safe migration. Remove its session-scoped admission
+	// state explicitly so a later session that reuses this ID starts fresh.
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_prompt_seq WHERE task_session_id = ?`), id); err != nil {
+		// Isolated unit tests may omit the prompt-sequence schema. Production
+		// always has it; treat a missing table as already-cleaned.
 		if !db.IsMissingTableError(err) {
-			return nil, fmt.Errorf("purge prompt history for session %s: %w", session.ID, err)
+			return fmt.Errorf("purge prompt history for session %s: %w", id, err)
 		}
 	}
-	return deletedAttachments, nil
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), id); err != nil {
+		// Isolated unit tests may omit the messagequeue schema. Production
+		// always has queued_messages; treat a missing table as already-purged.
+		if !db.IsMissingTableError(err) {
+			return fmt.Errorf("purge queued messages for session %s: %w", id, err)
+		}
+	}
+	return tx.Commit()
 }
 
+// Task Session Worktree operations
 //
 // Sessions reference worktrees only through task_sessions.task_environment_id;
 // the physical worktree records live on task_environment_repos (owned by the

@@ -22,7 +22,6 @@ export function makeStore(initial: Partial<AppState> = {}) {
       resumeSkippedSessionIds: {},
     },
     taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {} },
-    taskSessions: { items: {} },
     environmentIdBySessionId: {},
     setActiveSession: vi.fn((taskId: string, sessionId: string | null) => {
       state = {
@@ -52,7 +51,6 @@ export function makeStore(initial: Partial<AppState> = {}) {
     setTaskDeletedNotification: vi.fn(),
     upsertQuickChatSessionFromEvent: vi.fn(),
     removeQuickChatSessionsForTask: vi.fn(),
-    clearQueueStatus: vi.fn(),
     ...initial,
   } as unknown as AppState;
 

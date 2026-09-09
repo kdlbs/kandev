@@ -31,7 +31,9 @@ func TestQueueAndInterruptForPeerMessage_DispatchesSurvivingAutoMergedID(t *test
 		t.Fatalf("queue target: %v", err)
 	}
 
-	queued, dispatched, err := queueAndInterruptForPeerMessage(service, ctx, "task1", "session1", "second parent message", metadata)
+	queued, dispatched, err := service.QueueAndInterruptForPeerMessage(
+		ctx, "task1", "session1", "second parent message", metadata,
+	)
 	if err != nil || !dispatched {
 		t.Fatalf("queue and interrupt: dispatched=%v err=%v", dispatched, err)
 	}

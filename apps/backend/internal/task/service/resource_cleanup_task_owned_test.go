@@ -84,7 +84,7 @@ func TestDeleteTaskCleanupFindsWorktreeAfterLastSessionDeletedAndRestart(t *test
 	worktreeID := created.ID
 
 	// Delete the only session through the orchestrator-style deletion.
-	if err := repo.DeleteTaskSession(ctx, session); err != nil {
+	if err := repo.DeleteTaskSession(ctx, "session-zero-session"); err != nil {
 		t.Fatalf("delete session: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestDeleteTaskCleanupRemovesEveryWorktreeAfterLastSessionDeletedAndRestart(
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link task session: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, session); err != nil {
+	if err := repo.DeleteTaskSession(ctx, sessionID); err != nil {
 		t.Fatalf("delete task session: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestArchiveCleanupFindsWorktreeAfterLastSessionDeleted(t *testing.T) {
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("link session: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, session); err != nil {
+	if err := repo.DeleteTaskSession(ctx, "session-archive-zero"); err != nil {
 		t.Fatalf("delete session: %v", err)
 	}
 

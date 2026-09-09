@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -13,7 +12,6 @@ import (
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
-	"go.uber.org/zap"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -126,80 +124,6 @@ func TestStderrBufferSurvivesConcurrentUse(t *testing.T) {
 
 	if buf.tail() == "" {
 		t.Fatal("tail is empty after concurrent writes")
-	}
-}
-
-// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
-func TestProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test uses a POSIX npx fixture")
-	}
-
-	binDir := t.TempDir()
-	npxPath := filepath.Join(binDir, "npx")
-	fixture := "#!/bin/sh\n" +
-		"printf '%s\\n' 'npm error code ETARGET' " +
-		"'npm error notarget No matching version found for @scope/managed-acp@1.2.3.' >&2\n" +
-		"exit 1\n"
-	if err := os.WriteFile(npxPath, []byte(fixture), 0o755); err != nil {
-		t.Fatalf("write npx fixture: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	executor := NewACPInferenceExecutor(zap.NewNop())
-	response, err := executor.Probe(context.Background(), &ProbeRequest{
-		AgentID: "managed-acp",
-		InferenceConfig: &InferenceConfigDTO{
-			Command: []string{"npx", "--yes", "--prefer-offline", "@scope/managed-acp@1.2.3"},
-			WorkDir: t.TempDir(),
-		},
-	})
-	if err != nil {
-		t.Fatalf("Probe: %v", err)
-	}
-	if response.FailureCode != ProbeFailureManagedRuntimeNPMResolution {
-		t.Fatalf("failure code = %q, want %q", response.FailureCode, ProbeFailureManagedRuntimeNPMResolution)
-	}
-	if strings.Contains(response.Error, "@scope/managed-acp") || strings.Contains(response.Error, "npm error") {
-		t.Fatalf("probe error exposed subprocess diagnostics: %q", response.Error)
-	}
-}
-
-func TestManagedRuntimeProbeFailureCodeRejectsUntrustedEvidence(t *testing.T) {
-	matching := "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3."
-	tests := []struct {
-		name    string
-		command []string
-		stderr  string
-	}{
-		{
-			name:    "unversioned package",
-			command: []string{"npx", "--yes", "--prefer-offline", "managed-acp"},
-			stderr:  matching,
-		},
-		{
-			name:    "online command",
-			command: []string{"npx", "--yes", "--prefer-online", "managed-acp@1.2.3"},
-			stderr:  matching,
-		},
-		{
-			name:    "different package",
-			command: []string{"npx", "--yes", "--prefer-offline", "managed-acp@1.2.3"},
-			stderr:  "npm error code ETARGET\nnpm error notarget No matching version found for dependency@9.9.9.",
-		},
-		{
-			name:    "different npm error",
-			command: []string{"npx", "--yes", "--prefer-offline", "managed-acp@1.2.3"},
-			stderr:  "npm error code ECONNREFUSED",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := managedRuntimeProbeFailureCode(test.command, test.stderr); got != "" {
-				t.Fatalf("failure code = %q, want empty", got)
-			}
-		})
 	}
 }
 

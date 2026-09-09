@@ -3,14 +3,12 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -107,23 +105,7 @@ func (r *Repository) ClaimMessageAttachments(ctx context.Context, ids []string, 
 		return fmt.Errorf("begin attachment claim: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if taskID != "" {
-		result, err := tx.ExecContext(ctx, tx.Rebind(`
-			UPDATE tasks SET updated_at = updated_at WHERE id = ?
-		`), taskID)
-		if err != nil {
-			return fmt.Errorf("lock attachment task %q: %w", taskID, err)
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
-		}
-	}
-	if sessionID != "" {
-		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-			return err
-		}
-	}
+
 	now := time.Now().UTC()
 	selection, err := r.selectAttachmentsForClaim(ctx, tx, ids, ownerID, workspaceID, taskID, sessionID, now)
 	if err != nil {
@@ -237,50 +219,14 @@ func (r *Repository) DeleteClaimedMessageAttachments(ctx context.Context, ids []
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	queueTablePresent, err := r.tableExists("queued_messages")
-	if err != nil {
-		return nil, fmt.Errorf("probe queue attachment references: %w", err)
-	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := []interface{}{ownerID, taskID, sessionID, models.AttachmentStateClaimed}
+	args = append(args, idsToInterfaces(ids)...)
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin claimed attachment release: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if sessionID != "" {
-		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-			return nil, err
-		}
-	}
-	if queueTablePresent {
-		if err := lockAttachmentQueueSession(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-			return nil, err
-		}
-	}
-	referenced, err := referencedAttachmentIDsTx(ctx, r, tx, taskID, sessionID, queueTablePresent)
-	if err != nil {
-		return nil, err
-	}
-	releasable := make([]string, 0, len(ids))
-	seen := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		if id == "" {
-			continue
-		}
-		if _, ok := referenced[id]; ok {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		releasable = append(releasable, id)
-	}
-	if len(releasable) == 0 {
-		return nil, nil
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(releasable)), ",")
-	args := []interface{}{ownerID, taskID, sessionID, models.AttachmentStateClaimed}
-	args = append(args, idsToInterfaces(releasable)...)
 	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
 		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
 		WHERE owner_id = ? AND task_id = ? AND session_id = ? AND state = ?
@@ -327,248 +273,6 @@ func (r *Repository) DeleteClaimedMessageAttachments(ctx context.Context, ids []
 	return released, nil
 }
 
-func lockAttachmentQueueSession(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	driverName, sessionID string,
-) error {
-	if sessionID == "" || !dialect.IsPostgres(driverName) {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO queue_session_locks (session_id) VALUES ($1)
-		ON CONFLICT(session_id) DO NOTHING
-	`, sessionID); err != nil {
-		return fmt.Errorf("ensure attachment queue session lock %q: %w", sessionID, err)
-	}
-	var lockedSessionID string
-	if err := tx.GetContext(
-		ctx,
-		&lockedSessionID,
-		`SELECT session_id FROM queue_session_locks WHERE session_id = $1 FOR UPDATE`,
-		sessionID,
-	); err != nil {
-		return fmt.Errorf("lock attachment queue session %q: %w", sessionID, err)
-	}
-	return nil
-}
-
-type attachmentReference struct {
-	AttachmentID string `json:"attachment_id"`
-}
-
-func referencedAttachmentIDsTx(
-	ctx context.Context,
-	r *Repository,
-	tx *sqlx.Tx,
-	taskID, sessionID string,
-	queueTablePresent bool,
-) (map[string]struct{}, error) {
-	referenced := make(map[string]struct{})
-	//nolint:nestif // durable queue and transcript references use separate optional tables.
-	if queueTablePresent {
-		rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-			SELECT attachments_json FROM queued_messages WHERE task_id = ? AND session_id = ?
-		`), taskID, sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("list queued attachment references: %w", err)
-		}
-		for rows.Next() {
-			var encoded string
-			if err := rows.Scan(&encoded); err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("scan queued attachment references: %w", err)
-			}
-			var attachments []attachmentReference
-			if err := json.Unmarshal([]byte(encoded), &attachments); err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("decode queued attachment references: %w", err)
-			}
-			addAttachmentReferences(referenced, attachments)
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("iterate queued attachment references: %w", err)
-		}
-		if err := rows.Close(); err != nil {
-			return nil, fmt.Errorf("close queued attachment references: %w", err)
-		}
-	}
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-		SELECT metadata FROM task_session_messages WHERE task_id = ? AND task_session_id = ?
-	`), taskID, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("list transcript attachment references: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var encoded string
-		if err := rows.Scan(&encoded); err != nil {
-			return nil, fmt.Errorf("scan transcript attachment references: %w", err)
-		}
-		var metadata struct {
-			Attachments []attachmentReference `json:"attachments"`
-		}
-		if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
-			return nil, fmt.Errorf("decode transcript attachment references: %w", err)
-		}
-		addAttachmentReferences(referenced, metadata.Attachments)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate transcript attachment references: %w", err)
-	}
-	return referenced, nil
-}
-
-func (r *Repository) queuedAttachmentIDsForTaskTx(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	taskID string,
-) (map[string]struct{}, error) {
-	ids := make(map[string]struct{})
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-		SELECT attachments_json FROM queued_messages WHERE task_id = ?
-	`), taskID)
-	if err != nil {
-		return nil, fmt.Errorf("list queued attachment references for archive: %w", err)
-	}
-	for rows.Next() {
-		var encoded string
-		if err := rows.Scan(&encoded); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("scan queued attachment references for archive: %w", err)
-		}
-		var attachments []attachmentReference
-		if err := json.Unmarshal([]byte(encoded), &attachments); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("decode queued attachment references for archive: %w", err)
-		}
-		addAttachmentReferences(ids, attachments)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, fmt.Errorf("iterate queued attachment references for archive: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close queued attachment references for archive: %w", err)
-	}
-	return ids, nil
-}
-
-// releaseUnreferencedTaskAttachmentClaimsTx stages queue-owned claims that no
-// transcript message references. Only IDs present in queuedIDs are eligible:
-// a direct prompt Claim commits before its transcript row exists, so staging
-// every unreferenced claimed row would release an in-flight direct claim whose
-// message inserts after the archive commits. Queue admission claims atomically
-// with its queue row, so the pre-purge queued set is the exact ownership
-// boundary. Rows are collected before any UPDATE so no cursor stays open
-// across statements on a single-connection Postgres transaction.
-func (r *Repository) releaseUnreferencedTaskAttachmentClaimsTx(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	taskID string,
-	queuedIDs map[string]struct{},
-) error {
-	if len(queuedIDs) == 0 {
-		return nil
-	}
-	referenced := make(map[string]struct{})
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-		SELECT metadata FROM task_session_messages WHERE task_id = ?
-	`), taskID)
-	if err != nil {
-		return fmt.Errorf("list task attachment references for archive: %w", err)
-	}
-	for rows.Next() {
-		var encoded string
-		if err := rows.Scan(&encoded); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("scan task attachment references for archive: %w", err)
-		}
-		var metadata struct {
-			Attachments []attachmentReference `json:"attachments"`
-		}
-		if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("decode task attachment references for archive: %w", err)
-		}
-		addAttachmentReferences(referenced, metadata.Attachments)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return fmt.Errorf("iterate task attachment references for archive: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close task attachment references for archive: %w", err)
-	}
-	var unreferenced []string
-	for id := range queuedIDs {
-		if _, ok := referenced[id]; !ok {
-			unreferenced = append(unreferenced, id)
-		}
-	}
-	now := time.Now().UTC()
-	for _, attachmentID := range unreferenced {
-		if _, err := tx.ExecContext(ctx, tx.Rebind(`
-			UPDATE task_message_attachments
-			SET state = ?, expires_at = ?, updated_at = ?
-			WHERE id = ? AND task_id = ? AND state = ?
-		`), models.AttachmentStateStaged, now, now, attachmentID, taskID, models.AttachmentStateClaimed); err != nil {
-			return fmt.Errorf("release task attachment claim for archive: %w", err)
-		}
-	}
-	return nil
-}
-
-func (r *Repository) deleteUnreferencedSessionAttachmentClaimsTx(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	taskID, sessionID string,
-) ([]*models.TaskMessageAttachment, error) {
-	// The session, its transcript, and its queue rows are deleted by this
-	// transaction. Return descriptors before deleting their registry rows so
-	// the caller can remove private bytes after commit.
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-		SELECT `+attachmentSelectColumns+`
-		FROM task_message_attachments
-		WHERE task_id = ? AND session_id = ? AND state = ?
-	`), taskID, sessionID, models.AttachmentStateClaimed)
-	if err != nil {
-		return nil, fmt.Errorf("list deleted-session attachment claims: %w", err)
-	}
-	var attachments []*models.TaskMessageAttachment
-	for rows.Next() {
-		attachment := &models.TaskMessageAttachment{}
-		if err := rows.StructScan(attachment); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("scan deleted-session attachment claim: %w", err)
-		}
-		attachments = append(attachments, attachment)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, fmt.Errorf("iterate deleted-session attachment claims: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close deleted-session attachment claims: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		DELETE FROM task_message_attachments
-		WHERE task_id = ? AND session_id = ? AND state = ?
-	`), taskID, sessionID, models.AttachmentStateClaimed); err != nil {
-		return nil, fmt.Errorf("delete deleted-session attachment claims: %w", err)
-	}
-	return attachments, nil
-}
-
-func addAttachmentReferences(target map[string]struct{}, attachments []attachmentReference) {
-	for _, attachment := range attachments {
-		if attachment.AttachmentID != "" {
-			target[attachment.AttachmentID] = struct{}{}
-		}
-	}
-}
-
 func (r *Repository) DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error) {
 	if taskID == "" {
 		return nil, nil
@@ -605,42 +309,6 @@ func (r *Repository) DeleteMessageAttachmentsByTask(ctx context.Context, taskID 
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit task attachment cleanup: %w", err)
-	}
-	return attachments, nil
-}
-
-func (r *Repository) DeleteMessageAttachmentsByWorkspaceTx(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	workspaceID string,
-) ([]*models.TaskMessageAttachment, error) {
-	if workspaceID == "" {
-		return nil, nil
-	}
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-		SELECT `+attachmentSelectColumns+` FROM task_message_attachments WHERE workspace_id = ?
-	`), workspaceID)
-	if err != nil {
-		return nil, fmt.Errorf("list workspace attachments for cleanup: %w", err)
-	}
-	var attachments []*models.TaskMessageAttachment
-	for rows.Next() {
-		attachment := &models.TaskMessageAttachment{}
-		if err := rows.StructScan(attachment); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("scan workspace attachment for cleanup: %w", err)
-		}
-		attachments = append(attachments, attachment)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, fmt.Errorf("iterate workspace attachments for cleanup: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close workspace attachments for cleanup: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_message_attachments WHERE workspace_id = ?`), workspaceID); err != nil {
-		return nil, fmt.Errorf("delete workspace attachments: %w", err)
 	}
 	return attachments, nil
 }

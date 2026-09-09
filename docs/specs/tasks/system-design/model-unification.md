@@ -265,11 +265,7 @@ history visible. Default actions for office workflows:
     "target": "agent_profile_id:{workspace.ceo_agent}",
     "task_id": "this",
     "reason": "agent_error",
-    "payload": {
-      "failed_agent_id": "...",
-      "failed_session_id": "...",
-      "error": "..."
-    } },
+    "payload": { "failed_agent_id": "...", "error_message": "..." } },
   { "kind": "create_inbox_item", "kind": "agent_error" }
 ]
 ```

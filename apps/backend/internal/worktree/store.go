@@ -393,7 +393,10 @@ func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, err
 }
 
 // ListActiveWorktreePaths returns the worktree_path of every active,
-// non-deleted environment-repository row that has a non-empty path.
+// non-deleted environment-repository row that has a non-empty path. The
+// office GC uses this set as the authoritative inventory of live worktrees;
+// any directory under the worktree base that does not appear here (and is
+// older than the GC grace period) is considered orphaned.
 func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
 	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
 		SELECT worktree_path

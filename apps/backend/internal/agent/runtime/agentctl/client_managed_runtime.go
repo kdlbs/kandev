@@ -14,9 +14,7 @@ import (
 // RepairManagedRuntimeCacheRequest is the authenticated agentctl maintenance
 // request for one exact managed npm package specification.
 type RepairManagedRuntimeCacheRequest struct {
-	PackageSpec string            `json:"package_spec"`
-	Env         map[string]string `json:"env,omitempty"`
-	StripEnv    []string          `json:"strip_env,omitempty"`
+	PackageSpec string `json:"package_spec"`
 }
 
 // RepairManagedRuntimeCacheResponse is the typed success response from the
@@ -29,28 +27,13 @@ type RepairManagedRuntimeCacheResponse struct {
 // RepairManagedRuntimeCache asks the colocated agentctl process to resolve its
 // npm cache and remove only the exact execution tree for packageSpec.
 func (c *Client) RepairManagedRuntimeCache(ctx context.Context, packageSpec string) error {
-	return c.RepairManagedRuntimeCacheWithEnvironment(ctx, packageSpec, nil, nil)
-}
-
-// RepairManagedRuntimeCacheWithEnvironment resolves npm's cache with the same
-// overrides and removals used by the failed managed-runtime process.
-func (c *Client) RepairManagedRuntimeCacheWithEnvironment(
-	ctx context.Context,
-	packageSpec string,
-	env map[string]string,
-	stripEnv []string,
-) error {
 	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
 		return err
 	}
 	ctx, span := tracing.TraceHTTPRequest(ctx, http.MethodPost, "/api/v1/agent/managed-runtime/cache-repair", c.executionID)
 	defer span.End()
 
-	body, err := json.Marshal(RepairManagedRuntimeCacheRequest{
-		PackageSpec: packageSpec,
-		Env:         env,
-		StripEnv:    stripEnv,
-	})
+	body, err := json.Marshal(RepairManagedRuntimeCacheRequest{PackageSpec: packageSpec})
 	if err != nil {
 		tracing.TraceHTTPResponse(span, 0, err)
 		return err

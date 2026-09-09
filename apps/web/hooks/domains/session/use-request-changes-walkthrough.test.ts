@@ -36,11 +36,8 @@ function storeState(sessionState: string, planMode = false, foregroundActivity?:
   return {
     taskSessions: {
       items: {
-        "session-1": {
-          state: sessionState,
-          foreground_activity: foregroundActivity,
-          queue_incarnation_id: "inc-1",
-        },
+        "session-1": { state: sessionState, foreground_activity: foregroundActivity },
+        "other-session": { state: "RUNNING", foreground_activity: "generating" },
       },
     },
     chatInput: { planModeBySessionId: { "session-1": planMode } },

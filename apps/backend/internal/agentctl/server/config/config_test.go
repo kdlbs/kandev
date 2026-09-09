@@ -517,62 +517,6 @@ func TestConsumeNonce(t *testing.T) {
 	})
 }
 
-func TestBootstrapNonceDiagnosticsSurviveNonceBurn(t *testing.T) {
-	t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "nonce-abc123")
-
-	cfg, err := LoadWithStartup(commonconfig.AgentctlStartupConfig{
-		Configured:                true,
-		IdleTimeout:               time.Hour,
-		IdleReaperInterval:        time.Minute,
-		NotificationQueueCapacity: 4096,
-	})
-	if err != nil {
-		t.Fatalf("LoadWithStartup: %v", err)
-	}
-
-	if !cfg.BootstrapNonceConfigured() {
-		t.Fatal("BootstrapNonceConfigured() = false, want true when AGENTCTL_BOOTSTRAP_NONCE is set")
-	}
-	wantFingerprint := commonconfig.NonceFingerprint("nonce-abc123")
-	if got := cfg.BootstrapNonceFingerprint(); got != wantFingerprint {
-		t.Fatalf("BootstrapNonceFingerprint() = %q, want %q", got, wantFingerprint)
-	}
-
-	if token := cfg.ConsumeNonce("nonce-abc123"); token == "" {
-		t.Fatal("ConsumeNonce() with the correct nonce returned empty")
-	}
-
-	// The whole point of tracking these separately from BootstrapNonce: a
-	// rejected handshake after the nonce was burned must still be able to
-	// report that bootstrap mode was configured, and with which fingerprint.
-	if !cfg.BootstrapNonceConfigured() {
-		t.Fatal("BootstrapNonceConfigured() = false after nonce burn, want true (must survive burning)")
-	}
-	if got := cfg.BootstrapNonceFingerprint(); got != wantFingerprint {
-		t.Fatalf("BootstrapNonceFingerprint() after nonce burn = %q, want %q (must survive burning)", got, wantFingerprint)
-	}
-}
-
-func TestBootstrapNonceDiagnosticsUnconfigured(t *testing.T) {
-	t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "")
-	cfg, err := LoadWithStartup(commonconfig.AgentctlStartupConfig{
-		Configured:                true,
-		IdleTimeout:               time.Hour,
-		IdleReaperInterval:        time.Minute,
-		NotificationQueueCapacity: 4096,
-	})
-	if err != nil {
-		t.Fatalf("LoadWithStartup: %v", err)
-	}
-
-	if cfg.BootstrapNonceConfigured() {
-		t.Fatal("BootstrapNonceConfigured() = true, want false when AGENTCTL_BOOTSTRAP_NONCE is unset")
-	}
-	if got := cfg.BootstrapNonceFingerprint(); got != "" {
-		t.Fatalf("BootstrapNonceFingerprint() = %q, want empty when bootstrap nonce mode was never configured", got)
-	}
-}
-
 func TestGenerateSelfToken(t *testing.T) {
 	token := generateSelfToken()
 	if len(token) != 64 { // 32 bytes hex-encoded = 64 chars

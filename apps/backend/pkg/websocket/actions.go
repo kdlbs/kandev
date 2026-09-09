@@ -146,7 +146,6 @@ const (
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
-	ActionMessageQueueAutoMergeSet  = "message.queue.auto_merge.set" // Persist a per-session automatic-merge override
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -514,6 +513,8 @@ const (
 	ActionMCPSpawnSession                = "mcp.spawn_session"
 	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
+	ActionMCPGetMessageQueueCensus       = "mcp.get_message_queue_census"
+	ActionMCPDisposeMessageQueueEntries  = "mcp.dispose_message_queue_entries"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
 )

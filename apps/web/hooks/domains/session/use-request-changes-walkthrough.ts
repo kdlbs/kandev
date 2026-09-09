@@ -39,13 +39,11 @@ async function loadChangesWalkthroughPromptTemplate(): Promise<string> {
 async function queueWalkthroughRequest(params: {
   taskId: string;
   sessionId: string;
-  sessionIncarnationId: string;
   content: string;
   planModeEnabled: boolean;
 }) {
   await queueMessage({
     session_id: params.sessionId,
-    session_incarnation_id: params.sessionIncarnationId,
     task_id: params.taskId,
     content: params.content,
     ...planModePayload(params.planModeEnabled),
@@ -110,13 +108,9 @@ export function useRequestChangesWalkthrough({
       const template = await loadChangesWalkthroughPromptTemplate();
       const content = buildChangesWalkthroughPrompt(template);
       if (inputMode === "queue") {
-        if (!activeSession?.queue_incarnation_id) {
-          throw new Error("Session is not available for input");
-        }
         await queueWalkthroughRequest({
           taskId,
           sessionId,
-          sessionIncarnationId: activeSession.queue_incarnation_id,
           content,
           planModeEnabled,
         });

@@ -40,6 +40,7 @@ type Services struct {
 	TreeControls *officeservice.Service
 	Workspaces   *officeservice.Service
 	Documents    *taskservice.DocumentService
+	GC           *infra.GarbageCollector
 	Reconciler   *infra.Reconciler
 	Repo         *sqlite.Repository
 	GitManager   *configloader.GitManager

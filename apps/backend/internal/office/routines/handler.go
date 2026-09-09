@@ -252,8 +252,7 @@ func (h *Handler) fireWebhookTrigger(c *gin.Context) {
 		return
 	}
 
-	run, err := h.svc.DispatchRoutineRunWithIdempotencyKey(
-		ctx, routine, trigger, "webhook", vars, c.GetHeader("Idempotency-Key"))
+	run, err := h.svc.DispatchRoutineRun(ctx, routine, trigger, "webhook", vars)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -108,7 +108,7 @@ func TestAutomationRunLiveNormalizesMissingTaskAndSession(t *testing.T) {
 				}
 			}
 			if tt.deleteSession {
-				if err := repo.DeleteTaskSession(ctx, session); err != nil {
+				if err := repo.DeleteTaskSession(ctx, session.ID); err != nil {
 					t.Fatal(err)
 				}
 			}

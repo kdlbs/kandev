@@ -60,7 +60,6 @@ func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSp
 		Args:       spec.Args,
 		WorkingDir: spec.Dir,
 		Env:        spec.Env,
-		StripEnv:   spec.StripEnv,
 		PipeStderr: true,
 	})
 	if err != nil {

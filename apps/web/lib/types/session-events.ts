@@ -204,20 +204,12 @@ export type ProcessStatusPayload = {
 };
 
 export type QueueStatusChangedPayload = {
-  task_id?: string;
   session_id: string;
-  session_incarnation_id?: string;
-  status_epoch?: string;
-  status_generation?: number;
   entries?: QueuedMessage[] | null;
   count?: number;
   max?: number;
   merge_enabled?: boolean;
   auto_run?: boolean;
-  auto_merge_available?: boolean;
-  auto_merge_enabled?: boolean;
-  auto_merge_source?: "global" | "session";
-  auto_merge_revision?: number;
 };
 
 export type AvailableCommandPayload = {

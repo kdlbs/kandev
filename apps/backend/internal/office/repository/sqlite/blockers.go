@@ -197,15 +197,6 @@ func (r *Repository) DeleteTaskBlockersForTask(ctx context.Context, taskID strin
 	return err
 }
 
-// Task lifecycle state values as stored in the shared `tasks` table,
-// shared by every office-repo reader of terminal task state
-// (IsTaskInTerminalStep, GetTaskTerminalStatus).
-const (
-	taskStateCompleted = "COMPLETED"
-	taskStateFailed    = "FAILED"
-	taskStateCancelled = "CANCELLED"
-)
-
 func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error) {
 	var state string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
@@ -213,7 +204,7 @@ func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (b
 	if err != nil {
 		return false, err
 	}
-	return state == taskStateCompleted || state == taskStateFailed || state == taskStateCancelled, nil
+	return state == "COMPLETED" || state == "CANCELLED", nil
 }
 
 // GetTaskAssignee returns the agent currently driving a task. Resolves
@@ -295,73 +286,52 @@ func (r *Repository) ListChildStates(ctx context.Context, parentID string) ([]Ch
 
 // ChildSummary holds summary data for a completed child task.
 type ChildSummary struct {
-	TaskID      string `db:"id" json:"id"`
-	Identifier  string `db:"identifier" json:"identifier"`
-	Title       string `db:"title" json:"title"`
-	State       string `db:"state" json:"state"`
-	LastComment string `db:"last_comment" json:"last_comment,omitempty"`
+	TaskID                 string `db:"id" json:"id"`
+	Identifier             string `db:"identifier" json:"identifier"`
+	Title                  string `db:"title" json:"title"`
+	State                  string `db:"state" json:"state"`
+	AssigneeAgentProfileID string `db:"assignee_agent_profile_id" json:"assignee_agent_profile_id"`
+	LastComment            string `db:"last_comment" json:"last_comment,omitempty"`
 }
 
 // maxChildSummaries is the maximum number of child summaries returned.
 const maxChildSummaries = 20
 
-// maxCommentChars is the display limit for a last-comment summary, counted in
-// Unicode code points. The query reads one code point beyond it so a caller can
-// tell a body that was cut from one that happens to end exactly at the limit.
+// maxCommentChars is the maximum length of a last-comment summary.
 const maxCommentChars = 500
 
-// childSummaryRow carries the per-parent live-child count alongside each row.
-// The count rides on the rows rather than being a second statement so both come
-// from one snapshot: a child archived between two statements would otherwise
-// leave a total above the cap while the capped select already covered every
-// live child.
-type childSummaryRow struct {
-	ChildSummary
-	LiveChildCount int `db:"live_child_count"`
-}
-
-// GetChildSummaries returns summary data for a parent's live direct children,
-// ordered by creation time then id, at most maxChildSummaries rows, with a flag
-// reporting whether live children were left out.
-//
-// Membership is not filtered by state: a child that left a terminal state is
-// still the parent's child and is reported with the state it now holds.
-// Archived children are excluded from both the rows and the count. A parent id
-// with no tasks row yields no rows, because parent_id carries no foreign key
-// and child rows outlive a deleted parent.
+// GetChildSummaries returns summary data for all children of a parent task.
+// Each child includes its last comment (truncated to 500 chars). Returns at
+// most 20 rows and a truncated flag indicating whether more exist.
 func (r *Repository) GetChildSummaries(ctx context.Context, parentID string) ([]ChildSummary, bool, error) {
-	var rows []childSummaryRow
-	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+	// Count total children first to determine truncation.
+	var total int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COUNT(*) FROM tasks WHERE parent_id = ?`), parentID).Scan(&total)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var summaries []ChildSummary
+	err = r.ro.SelectContext(ctx, &summaries, r.ro.Rebind(`
 		SELECT
 			t.id,
 			COALESCE(t.identifier, '') AS identifier,
 			COALESCE(t.title, '') AS title,
 			COALESCE(t.state, '') AS state,
+			`+RunnerProjection("t")+` AS assignee_agent_profile_id,
 			COALESCE((
 				SELECT SUBSTR(c.body, 1, ?) FROM task_comments c
-				WHERE c.task_id = t.id
-				ORDER BY c.created_at DESC, c.id DESC LIMIT 1
-			), '') AS last_comment,
-			(
-				SELECT COUNT(*) FROM tasks lc
-				WHERE lc.parent_id = ? AND lc.archived_at IS NULL
-			) AS live_child_count
+				WHERE c.task_id = t.id ORDER BY c.created_at DESC LIMIT 1
+			), '') AS last_comment
 		FROM tasks t
 		WHERE t.parent_id = ?
-			AND t.archived_at IS NULL
-			AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = ?)
-		ORDER BY t.created_at ASC, t.id ASC
+		ORDER BY t.created_at
 		LIMIT ?
-	`), maxCommentChars+1, parentID, parentID, parentID, maxChildSummaries)
+	`), maxCommentChars, parentID, maxChildSummaries)
 	if err != nil {
 		return nil, false, err
 	}
 
-	summaries := make([]ChildSummary, 0, len(rows))
-	for _, row := range rows {
-		summaries = append(summaries, row.ChildSummary)
-	}
-	// No rows means nothing to truncate, including when the parent is gone.
-	truncated := len(rows) > 0 && rows[0].LiveChildCount > maxChildSummaries
-	return summaries, truncated, nil
+	return summaries, total > maxChildSummaries, nil
 }

@@ -1,18 +1,15 @@
 ---
-status: deprecated
+status: active
 system: ui
 created: 2026-08-16
 owners:
   - kandev
 ---
-
 # Control Pending Message Auto-run Requirements
 
 ## Overview
 
 The queue header presents **Run next** and bulk **Send Now** as separate ways to move pending work. **Run next** directly takes only one FIFO head, but normal turn completion then keeps taking later entries. The label describes one backend step rather than the user's real outcome: putting the queue in motion.
-
-Deprecated by [Message Queue Automation Controls](message-queue-automation-controls.md), which preserves the execution behavior and replaces the expanded-header contract.
 
 ## Requirements
 

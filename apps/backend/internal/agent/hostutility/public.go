@@ -66,12 +66,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
 		},
 	}
-	release, err := inst.acquireOperation(ctx, false)
-	if err != nil {
-		return nil, err
-	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
-	release()
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +186,7 @@ func (m *Manager) resolveModelConfigFlight(
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
-	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, command, probeReq)
+	resp, err := inst.client.Probe(probeCtx, probeReq)
 	if err != nil {
 		return nil, err
 	}
@@ -346,12 +341,7 @@ func (m *Manager) ExecutePromptWithMCP(
 		},
 		MCPServers: mcpServers,
 	}
-	release, err := inst.acquireOperation(ctx, false)
-	if err != nil {
-		return nil, err
-	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
-	release()
 	if err != nil {
 		return nil, err
 	}

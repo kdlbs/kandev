@@ -238,7 +238,7 @@ func TestBuildPrompt_ChildrenCompleted_NoSummaries(t *testing.T) {
 	if !strings.Contains(prompt, "All child tasks") {
 		t.Errorf("prompt missing header:\n%s", prompt)
 	}
-	if strings.Contains(prompt, "Child tasks:") {
+	if strings.Contains(prompt, "Completed children:") {
 		t.Errorf("no summaries section when children are empty:\n%s", prompt)
 	}
 }

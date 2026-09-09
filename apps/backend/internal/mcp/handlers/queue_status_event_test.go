@@ -16,18 +16,11 @@ func TestPublishQueueStatusEventIncludesQueuePolicy(t *testing.T) {
 	eventBus := &mcpRecordingEventBus{}
 	handlers := &Handlers{eventBus: eventBus}
 
-	identity, err := queue.ResolveSessionIdentity(ctx, "task-policy", "session-policy")
-	require.NoError(t, err)
-	handlers.publishQueueStatusEvent(ctx, identity, queue)
+	handlers.publishQueueStatusEvent(ctx, "session-policy", queue)
 
 	require.Len(t, eventBus.events, 1)
 	data, ok := eventBus.events[0].Data.(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, false, data["auto_run"])
 	require.Equal(t, false, data["merge_enabled"])
-	require.Equal(t, "task-policy", data["task_id"])
-	require.Equal(t, identity.SessionIncarnationID, data["session_incarnation_id"])
-	require.NotEmpty(t, data["status_epoch"])
-	require.NotEqual(t, identity.SessionIncarnationID, data["status_epoch"])
-	require.Equal(t, true, data["auto_merge_available"])
 }

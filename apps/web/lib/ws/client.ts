@@ -103,19 +103,16 @@ export class WebSocketClient {
     this.intentionalClose = false;
     this.clearReconnectTimer();
     this.setStatus("connecting");
-    const socket = new WebSocket(this.url);
-    this.socket = socket;
+    this.socket = new WebSocket(this.url);
 
-    socket.onopen = () => {
-      if (this.socket !== socket) return;
+    this.socket.onopen = () => {
       this.reconnectAttempts = 0;
       this.setStatus("connected");
       this.resubscribe();
       this.flushQueue();
     };
 
-    socket.onmessage = (event) => {
-      if (this.socket !== socket) return;
+    this.socket.onmessage = (event) => {
       const parts = (event.data as string).split("\n");
       for (const part of parts) {
         const trimmed = part.trim();
@@ -129,10 +126,11 @@ export class WebSocketClient {
       }
     };
 
-    socket.onerror = () => (this.socket === socket ? this.setStatus("error") : undefined);
+    this.socket.onerror = () => {
+      this.setStatus("error");
+    };
 
-    socket.onclose = (event) => {
-      if (this.socket !== socket) return;
+    this.socket.onclose = (event) => {
       this.socket = null;
       this.handleDisconnect(event);
     };

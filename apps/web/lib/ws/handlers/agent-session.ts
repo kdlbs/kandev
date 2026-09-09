@@ -2,7 +2,6 @@
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
-import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
   sessionId as toSessionId,
@@ -636,130 +635,8 @@ function handleCancellationPendingMessage(
   applyCancellationPending(store, payload);
 }
 
-function isCompleteQueueStatus(payload: QueueStatusChangedPayload): boolean {
-  return (
-    payload.task_id !== undefined &&
-    payload.session_incarnation_id !== undefined &&
-    payload.status_epoch !== undefined &&
-    payload.status_generation !== undefined &&
-    payload.entries !== undefined &&
-    typeof payload.count === "number" &&
-    typeof payload.max === "number" &&
-    typeof payload.merge_enabled === "boolean" &&
-    typeof payload.auto_run === "boolean"
-  );
-}
-
-// eslint-disable-next-line complexity -- incarnation, epoch, and generation form one ordering boundary.
-function rejectsQueueStatus(
-  state: AppState,
-  payload: QueueStatusChangedPayload,
-  previousMeta: QueueMeta | undefined,
-): boolean {
-  const currentSession = state.taskSessions.items[payload.session_id];
-  if (currentSession?.queue_incarnation_id && payload.session_incarnation_id === undefined) {
-    return true;
-  }
-  if (
-    payload.session_incarnation_id !== undefined &&
-    (!currentSession ||
-      currentSession.task_id !== payload.task_id ||
-      currentSession.queue_incarnation_id !== payload.session_incarnation_id)
-  ) {
-    return true;
-  }
-  const statusEpochChanged =
-    payload.status_epoch !== undefined &&
-    previousMeta?.statusEpoch !== undefined &&
-    payload.status_epoch !== previousMeta.statusEpoch;
-  if (statusEpochChanged && payload.status_epoch !== undefined) {
-    if (previousMeta.retiredStatusEpochs?.includes(payload.status_epoch)) {
-      return true;
-    }
-    return !isCompleteQueueStatus(payload);
-  }
-  return (
-    payload.status_generation !== undefined &&
-    previousMeta?.statusGeneration !== undefined &&
-    payload.status_generation <= previousMeta.statusGeneration
-  );
-}
-
-// eslint-disable-next-line complexity -- status-epoch replacement retains every prior epoch.
-function queueIdentityMeta(
-  payload: QueueStatusChangedPayload,
-  previousMeta: QueueMeta | undefined,
-) {
-  if (
-    payload.session_incarnation_id === undefined &&
-    previousMeta?.sessionIncarnationId === undefined
-  ) {
-    return {};
-  }
-  const statusEpoch = payload.status_epoch ?? previousMeta?.statusEpoch;
-  const statusEpochChanged =
-    payload.status_epoch !== undefined &&
-    previousMeta?.statusEpoch !== undefined &&
-    payload.status_epoch !== previousMeta.statusEpoch;
-  const retiredStatusEpochs = statusEpochChanged
-    ? [...(previousMeta?.retiredStatusEpochs ?? []), previousMeta?.statusEpoch]
-        .filter((epoch): epoch is string => epoch !== undefined && epoch !== statusEpoch)
-        .filter((epoch, index, epochs) => epochs.indexOf(epoch) === index)
-    : previousMeta?.retiredStatusEpochs;
-  return {
-    taskId: payload.task_id ?? previousMeta?.taskId,
-    sessionIncarnationId: payload.session_incarnation_id ?? previousMeta?.sessionIncarnationId,
-    statusEpoch,
-    statusGeneration: payload.status_generation ?? previousMeta?.statusGeneration,
-    retiredStatusEpochs,
-  };
-}
-
-function resolveQueuePolicyValue<T>(
-  preserveSessionPolicy: boolean,
-  previousValue: T | undefined,
-  incomingValue: T | undefined,
-): T | undefined {
-  return preserveSessionPolicy ? previousValue : (incomingValue ?? previousValue);
-}
-
-function queueAutoMergeMeta(
-  payload: QueueStatusChangedPayload,
-  previousMeta: QueueMeta | undefined,
-) {
-  if (
-    payload.auto_merge_available === undefined &&
-    previousMeta?.autoMergeAvailable === undefined
-  ) {
-    return {};
-  }
-  const preserveSessionPolicy =
-    previousMeta?.sessionIncarnationId === payload.session_incarnation_id &&
-    previousMeta?.autoMergeSource === "session" &&
-    payload.auto_merge_source === "global";
-  return {
-    autoMergeAvailable: payload.auto_merge_available ?? previousMeta?.autoMergeAvailable,
-    autoMergeEnabled: resolveQueuePolicyValue(
-      preserveSessionPolicy,
-      previousMeta?.autoMergeEnabled,
-      payload.auto_merge_enabled,
-    ),
-    autoMergeSource: resolveQueuePolicyValue(
-      preserveSessionPolicy,
-      previousMeta?.autoMergeSource,
-      payload.auto_merge_source,
-    ),
-    autoMergeRevision: resolveQueuePolicyValue(
-      preserveSessionPolicy,
-      previousMeta?.autoMergeRevision,
-      payload.auto_merge_revision,
-    ),
-  };
-}
-
 /** Writes a message.queue.status_changed broadcast into the queue slice,
  * preserving known policy values when an older publisher omits them. */
-// eslint-disable-next-line complexity -- one handler atomically establishes a queue snapshot.
 function handleQueueStatusChangedMessage(
   store: StoreApi<AppState>,
   payload: QueueStatusChangedPayload,
@@ -768,28 +645,19 @@ function handleQueueStatusChangedMessage(
     console.warn("[Queue] Missing session_id in queue status change event");
     return;
   }
-  const state = store.getState();
-  const previousMeta = state.queue.metaBySessionId[payload.session_id];
-  if (rejectsQueueStatus(state, payload, previousMeta)) return;
-
   const entries = payload.entries ?? [];
-  const meta = {
-    count: typeof payload.count === "number" ? payload.count : entries.length,
-    max: typeof payload.max === "number" ? payload.max : 0,
-    mergeEnabled: payload.merge_enabled ?? previousMeta?.mergeEnabled ?? true,
-    autoRun: payload.auto_run ?? previousMeta?.autoRun ?? true,
-    ...queueIdentityMeta(payload, previousMeta),
-    ...queueAutoMergeMeta(payload, previousMeta),
-  };
-  const establishesStatusEpoch =
-    payload.status_epoch !== undefined &&
-    previousMeta?.statusEpoch !== undefined &&
-    payload.status_epoch !== previousMeta.statusEpoch;
-  if (establishesStatusEpoch) {
-    state.setQueueEntries(payload.session_id, entries, meta, { establishStatusEpoch: true });
-    return;
-  }
-  state.setQueueEntries(payload.session_id, entries, meta);
+  const count = typeof payload.count === "number" ? payload.count : entries.length;
+  const max = typeof payload.max === "number" ? payload.max : 0;
+  const previousMeta = store.getState().queue.metaBySessionId[payload.session_id];
+  const mergeEnabled =
+    typeof payload.merge_enabled === "boolean"
+      ? payload.merge_enabled
+      : (previousMeta?.mergeEnabled ?? true);
+  const autoRun =
+    typeof payload.auto_run === "boolean" ? payload.auto_run : (previousMeta?.autoRun ?? true);
+  store
+    .getState()
+    .setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled, autoRun });
 }
 
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */

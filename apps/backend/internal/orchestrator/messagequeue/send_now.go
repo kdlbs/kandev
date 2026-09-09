@@ -43,14 +43,12 @@ var (
 
 // SendNowClaim is the durable handoff for an interrupt-and-replace dispatch.
 // Sources are retained in FIFO order so every ordinary entry can be restored
-// at its original position and every durable lifecycle row can be acknowledged
-// only after the replacement prompt is accepted.
+// at its original position and every durable lifecycle or routine row can be
+// acknowledged only after the replacement prompt is accepted.
 type SendNowClaim struct {
-	Identity            QueueSessionIdentity `json:"identity"`
-	OperationGeneration int64                `json:"operation_generation"`
-	Sources             []QueuedMessage      `json:"sources"`
-	Dispatch            QueuedMessage        `json:"dispatch"`
-	SourceGenerations   map[string]int64     `json:"source_generations,omitempty"`
+	Sources           []QueuedMessage  `json:"sources"`
+	Dispatch          QueuedMessage    `json:"dispatch"`
+	SourceGenerations map[string]int64 `json:"source_generations,omitempty"`
 }
 
 func sendNowSourceGenerationChanged(claim *SendNowClaim, source QueuedMessage, current int64) bool {
@@ -129,22 +127,6 @@ func validateSendNowSnapshot(selected []*QueuedMessage, expected []QueuedMessage
 	return nil
 }
 
-func bindSendNowLifecycleReservations(
-	sources []QueuedMessage,
-	identity QueueSessionIdentity,
-) {
-	if identity.SessionIncarnationID == "" {
-		return
-	}
-	for index := range sources {
-		if !sources[index].IsDurableLifecycle() {
-			continue
-		}
-		sources[index].reservedLifecycleDelivery = true
-		sources[index].reservationIdentity = identity
-	}
-}
-
 // BuildSendNowEnvelope validates and combines an exact, FIFO-ordered source
 // snapshot. It performs no repository mutation, which lets callers validate a
 // bulk selection before interrupting an active turn.
@@ -158,7 +140,6 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 	seenReferences := make(map[string]struct{})
 	references := make([]apiv1.EntityReference, 0)
 	sources := make([]map[string]interface{}, 0, len(entries))
-	var handoffText string
 
 	for _, entry := range entries {
 		if entry.Content != "" {
@@ -172,12 +153,6 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 			}
 			seenReferences[reference.Ref] = struct{}{}
 			references = append(references, reference)
-		}
-
-		if handoffText == "" {
-			if text, ok := entry.Metadata[MetadataStepHandoff].(string); ok && text != "" {
-				handoffText = text
-			}
 		}
 
 		sources = append(sources, map[string]interface{}{
@@ -196,11 +171,6 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 		delete(metadata, MetadataEntityReferences)
 	} else {
 		metadata[MetadataEntityReferences] = references
-	}
-	if handoffText == "" {
-		delete(metadata, MetadataStepHandoff)
-	} else {
-		metadata[MetadataStepHandoff] = handoffText
 	}
 	metadata[MetadataSendNowSources] = sources
 

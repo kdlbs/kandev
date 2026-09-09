@@ -406,8 +406,20 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
 ) (int, int, *SSHPortForwarder, string, error) {
+	nonce, err := generateBootstrapNonce()
+	if err != nil {
+		return 0, 0, nil, "", fmt.Errorf("ssh: generate bootstrap nonce: %w", err)
+	}
+	// Keep only the managed broker values in the long-lived remote process.
+	// sshAgentctlLaunchEnv adds the bootstrap credentials required for the
+	// authenticated control handshake without forwarding profile secrets.
+	env := sshAgentctlLaunchEnv(
+		managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
+		nonce,
+		req.AgentctlStartupConfig,
+	)
 	shell := sshShellForRemote(req.Metadata, platform)
-	controlPort, pid, authToken, err := r.startAgentctlAndHandshake(ctx, client, shell, agentctlBin, taskDir, sessionDir, req)
+	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
 		return 0, 0, nil, "", err
@@ -418,6 +430,11 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	// The per-instance server's workspace is the remote task dir, not the
 	// host-side req.WorkspacePath (which is meaningless on the remote).
 	// Passed explicitly so we don't briefly mutate the caller's request.
+	authToken, ierr := remoteControlHandshake(ctx, client, controlPort, nonce)
+	if ierr != nil {
+		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
+		return 0, 0, nil, "", ierr
+	}
 	instancePort, ierr := createRemoteAgentInstance(
 		ctx, client, controlPort, taskDir, agentctlBin, req, authToken, r.logger,
 	)
@@ -442,66 +459,6 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	r.report(req.OnProgress, "Connecting to agent controller", PrepareStepCompleted,
 		fmt.Sprintf("local:%d -> remote:%d", fwd.LocalPort(), instancePort))
 	return instancePort, pid, fwd, authToken, nil
-}
-
-// startAgentctlAndHandshake starts a fresh agentctl instance and completes
-// its bootstrap handshake, retrying with a brand-new instance (fresh nonce,
-// fresh port) when the handshake is rejected by whatever is listening on the
-// picked port — see retryAgentctlHandshake. Any other failure is terminal.
-func (r *SSHExecutor) startAgentctlAndHandshake(
-	ctx context.Context,
-	client *ssh.Client,
-	shell, agentctlBin, taskDir, sessionDir string,
-	req *ExecutorCreateRequest,
-) (int, int, string, error) {
-	attempt := func() (int, int, string, error) {
-		nonce, err := generateBootstrapNonce()
-		if err != nil {
-			return 0, 0, "", fmt.Errorf("ssh: generate bootstrap nonce: %w", err)
-		}
-		nonceFingerprint := commonconfig.NonceFingerprint(nonce)
-		// Keep only the managed broker values in the long-lived remote
-		// process. sshAgentctlLaunchEnv adds the bootstrap credentials
-		// required for the authenticated control handshake without
-		// forwarding profile secrets.
-		env := sshAgentctlLaunchEnv(
-			managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
-			nonce,
-			req.AgentctlStartupConfig,
-		)
-		port, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
-		if err != nil {
-			// Preserve port/pid so retryAgentctlHandshake's "if pid > 0"
-			// teardown fires even for a start-time failure (e.g. a
-			// ready-timeout) that left a live process behind.
-			return port, pid, "", err
-		}
-		r.logger.Debug("ssh: sending agentctl bootstrap handshake",
-			zap.Int("port", port), zap.Int("pid", pid),
-			zap.String("nonce_fingerprint", nonceFingerprint))
-		token, err := remoteControlHandshake(ctx, client, port, nonce)
-		if err != nil {
-			if errors.Is(err, errSSHAgentctlHandshakeRejected) {
-				// The fingerprint lets this rejection be correlated against
-				// agentctl's own handshake log line for the same nonce —
-				// distinguishing a mismatch/already-burned nonce from
-				// bootstrap mode never having been configured on the remote.
-				logCtx, logCancel := sshRemoteCleanupContext(ctx)
-				logTail := readRemoteAgentctlLogTail(logCtx, client, sessionDir)
-				logCancel()
-				err = fmt.Errorf("%w (port %d, pid %d, nonce %s); log:\n%s",
-					err, port, pid, nonceFingerprint, logTail)
-			}
-			return port, pid, "", err
-		}
-		return port, pid, token, nil
-	}
-	teardown := func(_, pid int) error {
-		cleanupCtx, cleanupCancel := sshRemoteCleanupContext(ctx)
-		defer cleanupCancel()
-		return stopRemoteAgentctl(cleanupCtx, client, sessionDir, pid)
-	}
-	return retryAgentctlHandshake(ctx, attempt, teardown, sleepOrContextDone)
 }
 
 func sshAgentctlLaunchEnv(base map[string]string, nonce string, startup ...commonconfig.AgentctlStartupConfig) map[string]string {

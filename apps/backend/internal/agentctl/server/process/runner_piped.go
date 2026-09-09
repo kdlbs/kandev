@@ -23,7 +23,6 @@ type PipedStartRequest struct {
 	Args       []string
 	WorkingDir string
 	Env        map[string]string
-	StripEnv   []string
 	PipeStderr bool
 }
 
@@ -61,7 +60,7 @@ func (r *ProcessRunner) StartPiped(req PipedStartRequest) (*PipedProcess, error)
 	id := uuid.New().String()
 	cmd := exec.Command(req.Command, req.Args...)
 	cmd.Dir = req.WorkingDir
-	cmd.Env = mergeEnvWithStrip(req.Env, req.StripEnv)
+	cmd.Env = mergeEnv(req.Env)
 	setManagedProcGroup(cmd)
 
 	streams, err := newPipedCommandStreams(cmd)

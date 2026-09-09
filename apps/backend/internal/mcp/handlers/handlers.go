@@ -191,7 +191,7 @@ type SessionLauncher interface {
 	// this call actually dispatched the message immediately; callers must
 	// not report "sent" when it's false — the message is still only
 	// queued, to be delivered later by whichever drain gets to it.
-	QueueAndInterruptForPeerMessage(ctx context.Context, identity messagequeue.QueueSessionIdentity, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
+	QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
 	// RenameSession sets the user-visible session tab label and broadcasts
 	// the change. Used by spawn_session_kandev's optional name parameter.
 	RenameSession(ctx context.Context, sessionID, name string) error
@@ -218,11 +218,21 @@ type TaskTitleBranchRenamer interface {
 	RenameGeneratedBranchesForTaskTitle(ctx context.Context, taskID, sessionID, title string) (orchestrator.TitleBranchRenameResult, error)
 }
 
-// MessageQueuer owns session-incarnation-bound move handoffs and pending moves.
+// MessageQueuer queues a prompt message for delivery to a session on its next turn.
+// TakeQueued is exposed so move_task can roll back the hand-off prompt when the
+// underlying MoveTask call fails — without it, a queued "you were moved..."
+// message would survive a failed move and be delivered on the next agent turn.
 type MessageQueuer interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
-	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove) error
-	RemoveEntryForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, entryID string) (*messagequeue.QueueRemovalResult, error)
+	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove)
+	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
+}
+
+// CoordinatorQueueManager is the narrow, content-free self-session queue
+// management boundary used by the guarded census and exact disposition tools.
+type CoordinatorQueueManager interface {
+	Census(ctx context.Context, sessionID string) (*messagequeue.QueueCensus, error)
+	DisposeExact(ctx context.Context, sessionID string, claims []messagequeue.QueueEntryClaim) (*messagequeue.QueueDispositionResult, error)
 }
 
 // messageMetadataQueuer is an optional extension implemented by the
@@ -270,6 +280,7 @@ type Handlers struct {
 	titleBranchRenamer   TaskTitleBranchRenamer
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
+	queueManager         CoordinatorQueueManager
 	promptResolver       PromptReferenceResolver
 	promptReader         PromptReader
 	userSettingsProvider UserSettingsProvider
@@ -360,6 +371,9 @@ func NewHandlers(
 		sessionLauncher:    sessionLauncher,
 		messageQueue:       messageQueue,
 		logger:             log.WithFields(zap.String("component", "mcp-handlers")),
+	}
+	if manager, ok := messageQueue.(CoordinatorQueueManager); ok {
+		h.queueManager = manager
 	}
 	if taskSvc != nil {
 		h.stopTaskGetter = taskSvc.GetTask
@@ -473,6 +487,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
+	d.RegisterFunc(ws.ActionMCPGetMessageQueueCensus, h.handleGetMessageQueueCensus)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
 }
@@ -489,6 +504,7 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPDisposeMessageQueueEntries, h.handleDisposeMessageQueueEntries)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 
@@ -2313,14 +2329,12 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
 	}
 
-	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
-	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
 		StepID:     launchStepID,
 		Source:     models.StepCompletionSourceAgent,
 		Summary:    strings.TrimSpace(req.Summary),
-		Handoff:    boundedHandoff,
-		Blockers:   boundedBlockers,
+		Handoff:    strings.TrimSpace(req.Handoff),
+		Blockers:   strings.TrimSpace(req.Blockers),
 		SignaledAt: time.Now().UTC(),
 	}
 	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
@@ -2352,23 +2366,11 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	response := map[string]interface{}{
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
-	}
-	var truncatedFields []string
-	if handoffTruncated {
-		truncatedFields = append(truncatedFields, "handoff")
-	}
-	if blockersTruncated {
-		truncatedFields = append(truncatedFields, "blockers")
-	}
-	if len(truncatedFields) > 0 {
-		response["truncated"] = truncatedFields
-		response["truncation_limit_bytes"] = stepCompletionSignalFieldLimitBytes
-	}
-	return ws.NewResponse(msg.ID, msg.Action, response)
+	})
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
@@ -2627,6 +2629,18 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
 	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
+	if err := applyScheduledRoutineWakeMetadata(
+		ctx, prompt, senderTask, req.SenderSessionID, targetTask, session, req.SessionID != "", senderMeta,
+	); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), map[string]interface{}{
+			"routine_scope": map[string]interface{}{
+				"workspace_id":      targetTask.WorkspaceID,
+				"target_task_id":    targetTask.ID,
+				"target_session_id": session.ID,
+				"status":            "denied",
+			},
+		})
+	}
 	if req.ReplyToQuestionID != "" {
 		senderMeta[models.MetaKeyParentQuestionID] = req.ReplyToQuestionID
 		senderMeta[models.MetaKeyParentQuestionResponse] = req.Prompt
@@ -2692,11 +2706,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	response := map[string]interface{}{
 		"task_id":         req.TaskID,
 		"session_id":      result.sessionID,
 		stopTaskStatusKey: result.status,
-	})
+	}
+	if result.routineReceipt != nil {
+		response["routine_wake"] = result.routineReceipt
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for
@@ -2937,7 +2955,6 @@ const (
 	keyBaseBranch       = "base_branch"
 	keyCheckoutBranch   = "checkout_branch"
 	keyPosition         = "position"
-	keyAutoMergeEnabled = "auto_merge_enabled"
 )
 
 // taskMessageStatusSent is the taskMessageDispatchResult.status value used
@@ -2975,9 +2992,10 @@ const (
 // InterruptForPeerMessage's doc comment. Never serialized to the wire; the
 // MCP response only reads status/sessionID (see handleMessageTask).
 type taskMessageDispatchResult struct {
-	status        string
-	sessionID     string
-	queuedEntryID string
+	status         string
+	sessionID      string
+	queuedEntryID  string
+	routineReceipt *messagequeue.RoutineWakeReceipt
 }
 
 type taskMessageReviewRollback struct {
@@ -2993,8 +3011,6 @@ type taskMessageReviewRollback struct {
 
 type taskMessageSessionRollback struct {
 	sessionID            string
-	taskID               string
-	sessionIncarnationID string
 	state                models.TaskSessionState
 	error                string
 	completedAt          *time.Time
@@ -3006,7 +3022,6 @@ type taskMessageSessionRollback struct {
 }
 
 type taskMessageQueueRollback struct {
-	identity       messagequeue.QueueSessionIdentity
 	entries        []messagequeue.QueuedMessage
 	hadPendingMove bool
 	pendingMove    *messagequeue.PendingMove
@@ -3021,12 +3036,8 @@ type taskMessageSessionRollbackRepository interface {
 		expected models.TaskSessionState,
 	) (bool, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
-	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
+	DeleteTaskSession(ctx context.Context, id string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
-}
-
-type taskMessageSessionAttachmentDeleter interface {
-	DeleteTaskSessionWithAttachments(ctx context.Context, session *models.TaskSession) ([]*models.TaskMessageAttachment, error)
 }
 
 var errTaskMessageRollbackSuperseded = errors.New("task message rollback superseded by coordinator cancellation")
@@ -3067,21 +3078,12 @@ func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *me
 	}
 	queues := make(map[string]taskMessageQueueRollback, len(r.sessions))
 	for _, session := range r.sessions {
-		identity, err := queue.ResolveSessionIdentity(ctx, session.taskID, session.sessionID)
-		if err != nil {
-			return fmt.Errorf("resolve session queue identity: %w", err)
-		}
-		if session.sessionIncarnationID != "" &&
-			identity.SessionIncarnationID != session.sessionIncarnationID {
-			return messagequeue.ErrSessionIdentityMismatch
-		}
-		entries, move, err := queue.SnapshotSessionForIdentity(ctx, identity)
+		entries, move, err := queue.SnapshotSession(ctx, session.sessionID)
 		if err != nil {
 			return err
 		}
 		snapshot := taskMessageQueueRollback{
-			identity: identity,
-			entries:  cloneTaskMessageQueuedMessages(entries),
+			entries: cloneTaskMessageQueuedMessages(entries),
 		}
 		if move != nil {
 			snapshot.hadPendingMove = true
@@ -3108,8 +3110,6 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 	}
 	snapshot := taskMessageSessionRollback{
 		sessionID:            session.ID,
-		taskID:               session.TaskID,
-		sessionIncarnationID: session.QueueIncarnationID,
 		state:                session.State,
 		error:                session.ErrorMessage,
 		completedAt:          completedAt,
@@ -3304,23 +3304,28 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 	if queue == nil {
 		return taskMessageDispatchResult{}, errors.New("message queue not available")
 	}
-	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
-	if err != nil {
-		return taskMessageDispatchResult{}, fmt.Errorf("resolve queue session identity: %w", err)
+	var queued *messagequeue.QueuedMessage
+	var err error
+	routineWake, _ := metadata[messagequeue.MetadataRoutineWake].(bool)
+	coalesceKey, _ := metadata[messagequeue.MetadataCoalesceKey].(string)
+	if routineWake && coalesceKey != "" {
+		var replaced bool
+		queued, replaced, err = queue.QueueMessageWithCoalesceKey(
+			ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata, coalesceKey, true,
+		)
+		if err == nil && replaced {
+			h.logger.Info("coalesced identical pending routine wake",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("entry_id", queued.ID),
+				zap.String("routine_identity", fmt.Sprint(metadata[messagequeue.MetadataRoutineIdentity])))
+		}
+	} else {
+		queued, err = queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
 	}
-	if session.QueueIncarnationID != "" &&
-		identity.SessionIncarnationID != session.QueueIncarnationID {
-		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
-	}
-	queued, err := queue.QueueMessageWithMetadataForSession(
-		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
-	)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			status, statusErr := queue.Snapshot(ctx, identity)
-			if statusErr != nil {
-				return taskMessageDispatchResult{}, fmt.Errorf("read full queue status: %w", statusErr)
-			}
+			status := queue.GetStatus(ctx, session.ID)
 			return taskMessageDispatchResult{}, &queueFullDispatchError{
 				sessionID: session.ID,
 				queueSize: status.Count,
@@ -3330,8 +3335,11 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		}
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
-	h.publishQueueStatusEvent(ctx, identity, queue)
-	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
+	h.publishQueueStatusEvent(ctx, session.ID, queue)
+	return taskMessageDispatchResult{
+		status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID,
+		routineReceipt: messagequeue.RoutineWakeReceiptFromMessage(queued),
+	}, nil
 }
 
 // queueThenInterruptTaskMessage atomically queues prompt for a running/
@@ -3369,25 +3377,11 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 // "queued" status avoids inviting that duplicate. The failure is still
 // logged server-side for operators.
 func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
-	queue := h.sessionLauncher.GetMessageQueue()
-	if queue == nil {
-		return taskMessageDispatchResult{}, errors.New("message queue not available")
-	}
-	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
-	if err != nil {
-		return taskMessageDispatchResult{}, fmt.Errorf("resolve queue session identity: %w", err)
-	}
-	if session.QueueIncarnationID != "" &&
-		identity.SessionIncarnationID != session.QueueIncarnationID {
-		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
-	}
-	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, identity, prompt, metadata)
+	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, taskID, session.ID, prompt, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			status, statusErr := queue.Snapshot(ctx, identity)
-			if statusErr != nil {
-				return taskMessageDispatchResult{}, fmt.Errorf("read full queue status: %w", statusErr)
-			}
+			queue := h.sessionLauncher.GetMessageQueue()
+			status := queue.GetStatus(ctx, session.ID)
 			return taskMessageDispatchResult{}, &queueFullDispatchError{
 				sessionID: session.ID,
 				queueSize: status.Count,
@@ -3565,25 +3559,7 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 			return err
 		}
 	}
-	return h.deleteTaskMessageRollbackSession(ctx, repo, selected)
-}
-
-func (h *Handlers) deleteTaskMessageRollbackSession(
-	ctx context.Context,
-	repo taskMessageSessionRollbackRepository,
-	session *models.TaskSession,
-) error {
-	if deleter, ok := repo.(taskMessageSessionAttachmentDeleter); ok {
-		attachments, err := deleter.DeleteTaskSessionWithAttachments(ctx, session)
-		if err != nil {
-			return err
-		}
-		if attachmentSvc := h.taskSvc.AttachmentService(); attachmentSvc != nil {
-			attachmentSvc.RemoveBytes(attachments)
-		}
-		return nil
-	}
-	return repo.DeleteTaskSession(ctx, session)
+	return repo.DeleteTaskSession(ctx, rollback.selectedID)
 }
 
 func (r taskMessageReviewRollback) primarySessionID() string {
@@ -3616,7 +3592,7 @@ func (h *Handlers) restoreTaskMessageQueue(ctx context.Context, queue *messagequ
 	if snapshot.hadPendingMove {
 		pendingMove = cloneTaskMessagePendingMove(snapshot.pendingMove)
 	}
-	return queue.RestoreSessionForIdentity(ctx, snapshot.identity, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
+	return queue.RestoreSession(ctx, sessionID, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
 }
 
 func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID, primaryID string) error {
@@ -3624,38 +3600,9 @@ func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID,
 	if queue == nil {
 		return nil
 	}
-	selected, err := h.sessionRepo.GetTaskSession(ctx, selectedID)
-	if err != nil {
-		return fmt.Errorf("load selected queue owner: %w", err)
-	}
-	if selected == nil {
-		return fmt.Errorf("load selected queue owner %q: not found", selectedID)
-	}
-	primary, err := h.sessionRepo.GetTaskSession(ctx, primaryID)
-	if err != nil {
-		return fmt.Errorf("load primary queue owner: %w", err)
-	}
-	if primary == nil {
-		return fmt.Errorf("load primary queue owner %q: not found", primaryID)
-	}
-	selectedIdentity, err := queue.ResolveSessionIdentity(ctx, selected.TaskID, selected.ID)
-	if err != nil {
-		return fmt.Errorf("resolve selected queue owner: %w", err)
-	}
-	if selected.QueueIncarnationID != "" &&
-		selectedIdentity.SessionIncarnationID != selected.QueueIncarnationID {
-		return messagequeue.ErrSessionIdentityMismatch
-	}
-	primaryIdentity, err := queue.ResolveSessionIdentity(ctx, primary.TaskID, primary.ID)
-	if err != nil {
-		return fmt.Errorf("resolve primary queue owner: %w", err)
-	}
-	if primary.QueueIncarnationID != "" &&
-		primaryIdentity.SessionIncarnationID != primary.QueueIncarnationID {
-		return messagequeue.ErrSessionIdentityMismatch
-	}
-	return queue.TransferSessionIdentities(ctx, selectedIdentity, primaryIdentity)
+	return queue.TransferSession(ctx, selectedID, primaryID)
 }
+
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
 	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
 	if err != nil {
@@ -3803,44 +3750,22 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend
 // can update the queue indicator.
-func (h *Handlers) publishQueueStatusEvent(
-	ctx context.Context,
-	identity messagequeue.QueueSessionIdentity,
-	queue *messagequeue.Service,
-) {
+func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string, queue *messagequeue.Service) {
 	if h.eventBus == nil {
 		return
 	}
-	status, err := queue.Snapshot(ctx, identity)
-	if err != nil {
-		return
-	}
-	eventData := map[string]interface{}{
-		keyTaskID:                status.TaskID,
-		keySessionID:             status.SessionID,
-		"session_incarnation_id": status.SessionIncarnationID,
-		"status_epoch":           status.StatusEpoch,
-		"status_generation":      status.StatusGeneration,
-		"entries":                status.Entries,
-		"count":                  status.Count,
-		"max":                    status.Max,
-		"auto_run":               status.AutoRun,
-		"merge_enabled":          status.MergeEnabled,
-		"auto_merge_available":   status.AutoMergeAvailable,
-	}
-	if status.AutoMergeEnabled != nil {
-		eventData[keyAutoMergeEnabled] = *status.AutoMergeEnabled
-	}
-	if status.AutoMergeSource != "" {
-		eventData["auto_merge_source"] = status.AutoMergeSource
-	}
-	if status.AutoMergeRevision != nil {
-		eventData["auto_merge_revision"] = *status.AutoMergeRevision
-	}
+	status := queue.GetStatus(ctx, sessionID)
 	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
 		events.MessageQueueStatusChanged,
 		"mcp-handlers",
-		eventData,
+		map[string]interface{}{
+			"session_id":    sessionID,
+			"entries":       status.Entries,
+			"count":         status.Count,
+			"max":           status.Max,
+			"auto_run":      status.AutoRun,
+			"merge_enabled": status.MergeEnabled,
+		},
 	))
 }
 

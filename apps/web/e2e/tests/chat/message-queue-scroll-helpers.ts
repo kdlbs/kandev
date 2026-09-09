@@ -28,11 +28,11 @@ export async function seedFullQueueTask(
     state: "IDLE",
     agentProfileId: seedData.agentProfileId,
   });
-  const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
 
   for (let index = 0; index < FULL_QUEUE_SIZE; index++) {
     await apiClient.queueMessage(
-      queueIdentity,
+      task.id,
+      sessionId,
       `Queued item ${index + 1}\nSecond line keeps every queue row realistically tall.`,
     );
   }

@@ -10,7 +10,6 @@ import { toast } from "sonner";
 import { simulateReorderDrag } from "./queued-ghost-list.test-helpers";
 
 const useQueueMock = vi.fn();
-const STATE_ATTRIBUTE = "data-state";
 
 vi.mock("@/hooks/domains/session/use-queue", () => ({
   useQueue: (sessionId: string | null) => useQueueMock(sessionId),
@@ -93,13 +92,10 @@ function baseState(entries: QueuedMessage[]) {
     isFull: false,
     mergeEnabled: true,
     autoRun: true,
-    autoMerge: true,
-    autoMergeAvailable: true,
     isLoading: false,
     queue: vi.fn(async () => {}),
     clearAll: vi.fn(async () => {}),
     setAutoRun: vi.fn(async () => {}),
-    setAutoMerge: vi.fn(async () => {}),
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
     mergeEntry: vi.fn(async () => {}),
@@ -218,20 +214,20 @@ describe("QueueAffordance", () => {
     expect(state.clearAll).toHaveBeenCalledTimes(1);
   });
 
-  it("shows compact Auto-run and Auto-merge controls without legacy dispatch actions", () => {
+  it("shows Auto-run and removes legacy header dispatch actions", () => {
     const state = queueState([entry()]);
     useQueueMock.mockReturnValue(state);
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
 
     const autoRun = screen.getByTestId(AUTO_RUN_BUTTON_ID);
-    const autoMerge = screen.getByTestId("queue-auto-merge");
-    expect(autoRun.getAttribute(STATE_ATTRIBUTE)).toBe("checked");
-    expect(autoMerge.getAttribute(STATE_ATTRIBUTE)).toBe("checked");
-    expect(autoRun.parentElement?.className).toContain("rounded-full");
-    expect(autoMerge.parentElement?.className).toContain("rounded-full");
+    expect(autoRun.getAttribute("data-state")).toBe("checked");
+    const autoRunHelpId = autoRun.getAttribute("aria-describedby");
+    expect(autoRunHelpId).toBeTruthy();
+    expect(document.getElementById(autoRunHelpId!)).toBeTruthy();
+    expect(screen.getByText("Runs queued messages one at a time.")).toBeTruthy();
     expect(autoRun.className).toContain("[@media(pointer:coarse)]:after:-inset-y-3.5");
-    expect(autoMerge.className).toContain("[@media(pointer:coarse)]:after:-inset-y-3.5");
+    expect(autoRun.parentElement?.className).toContain("[@media(pointer:coarse)]:min-h-11");
     expect(screen.queryByTestId("queue-drain-next")).toBeNull();
     expect(screen.queryByTestId("queue-send-now")).toBeNull();
   });
@@ -257,12 +253,11 @@ describe("QueueAffordance Send Now", () => {
   it.each([
     ["queue mutation", { isLoading: true }],
     ["cancellation", { cancellationPending: true }],
-  ])("disables row Send Now and both policy controls during %s", (_name, extra) => {
+  ])("disables row Send Now and Auto-run during %s", (_name, extra) => {
     useQueueMock.mockReturnValue(queueState([entry()], extra));
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
     expect((screen.getByTestId(AUTO_RUN_BUTTON_ID) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId("queue-auto-merge") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId(SEND_NOW_BUTTON_ID) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -272,19 +267,12 @@ describe("QueueAffordance Send Now", () => {
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
     const autoRun = screen.getByTestId(AUTO_RUN_BUTTON_ID);
-    expect(autoRun.getAttribute(STATE_ATTRIBUTE)).toBe("unchecked");
+    expect(autoRun.getAttribute("data-state")).toBe("unchecked");
+    expect(
+      screen.getByText("Finishes the current response, then queued messages wait."),
+    ).toBeTruthy();
     fireEvent.click(autoRun);
     expect(state.setAutoRun).toHaveBeenCalledWith(true);
-  });
-  it("changes the backend-owned Auto-merge policy", () => {
-    const state = queueState([entry()], { autoMerge: false });
-    useQueueMock.mockReturnValue(state);
-    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
-    fireEvent.click(screen.getByTestId(CHIP_ID));
-    const autoMerge = screen.getByTestId("queue-auto-merge");
-    expect(autoMerge.getAttribute(STATE_ATTRIBUTE)).toBe("unchecked");
-    fireEvent.click(autoMerge);
-    expect(state.setAutoMerge).toHaveBeenCalledWith(true);
   });
 
   it("reports an Auto-run update failure", async () => {

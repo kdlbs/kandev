@@ -119,32 +119,6 @@ func TestService_AutoMergeFoldsCompatibleAdmissionAtCapacity(t *testing.T) {
 	}
 }
 
-func TestService_AutoMergeFoldsInlineAttachmentAdmissionAtCapacity(t *testing.T) {
-	repository := NewMemoryRepository()
-	identity := QueueSessionIdentity{
-		TaskID: "task", SessionID: "session", SessionIncarnationID: "incarnation",
-	}
-	seedQueueSessionIdentity(t, repository, identity)
-	svc := newAutoMergeTestServiceWithRepository(t, repository, 1)
-	first, err := svc.QueueMessageWithMetadataForSession(
-		context.Background(), identity, "first", "", QueuedByUser, false, nil, nil,
-	)
-	if err != nil {
-		t.Fatalf("queue first: %v", err)
-	}
-	inline := MessageAttachment{Type: "image", Data: "aW1hZ2U=", MimeType: "image/png"}
-	second, err := svc.QueueMessageWithMetadataForSessionWithClaim(
-		context.Background(), identity, "second", "", QueuedByUser, false,
-		[]MessageAttachment{inline}, nil, QueueAttachmentClaim{},
-	)
-	if err != nil {
-		t.Fatalf("inline attachment admission at capacity = %v, want fold", err)
-	}
-	if second.ID != first.ID || len(second.Attachments) != 1 || second.Attachments[0] != inline {
-		t.Fatalf("second admission = %+v, want folded inline attachment on %s", second, first.ID)
-	}
-}
-
 func TestService_AutoMergeAtFullQueueRejectsIncompatibleAdmission(t *testing.T) {
 	svc := newAutoMergeTestService(t, 1)
 	if _, err := svc.QueueMessage(context.Background(), "session", "task", "first", "model-a", QueuedByUser, false, nil); err != nil {
@@ -197,10 +171,6 @@ func (r *autoMergeCandidateErrorRepository) AutoMergeCandidateIntoAbove(context.
 	return nil, false, r.err
 }
 
-func (r *autoMergeCandidateErrorRepository) AutoMergeCandidateIntoAboveForSession(context.Context, QueueSessionIdentity, *QueuedMessage) (*QueuedMessage, bool, error) {
-	return nil, false, r.err
-}
-
 // failNextInsertRepository fails the next N Insert calls with ErrQueueFull,
 // simulating a cross-process admission that observed a stale full count while
 // the underlying queue already drained.
@@ -219,17 +189,6 @@ func (r *failNextInsertRepository) Insert(ctx context.Context, msg *QueuedMessag
 	}
 	r.mu.Unlock()
 	return r.Repository.Insert(ctx, msg, maxPerSession)
-}
-
-func (r *failNextInsertRepository) InsertForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, maxPerSession int) error {
-	r.mu.Lock()
-	if r.failNext > 0 {
-		r.failNext--
-		r.mu.Unlock()
-		return ErrQueueFull
-	}
-	r.mu.Unlock()
-	return r.Repository.InsertForSession(ctx, identity, msg, maxPerSession)
 }
 
 func TestService_AutoMergeFullQueueRetriesInsertAfterFoldSkip(t *testing.T) {
@@ -499,52 +458,6 @@ type autoMergeErrorRepository struct {
 
 func (r *autoMergeErrorRepository) AutoMergeIntoAbove(context.Context, string, string) (*QueuedMessage, bool, error) {
 	return nil, false, r.err
-}
-
-func (r *autoMergeErrorRepository) AutoMergeIntoAboveForSession(context.Context, QueueSessionIdentity, string) (*QueuedMessage, bool, error) {
-	return nil, false, r.err
-}
-
-func TestService_SetSessionAutoMergeWaitsForAdmissionGate(t *testing.T) {
-	ctx := context.Background()
-	svc := newAutoMergeTestService(t, 10)
-	if _, err := svc.QueueMessage(ctx, "session", "task", "first", "", QueuedByUser, false, nil); err != nil {
-		t.Fatal(err)
-	}
-	identity, err := svc.ResolveSessionIdentity(ctx, "task", "session")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	held := make(chan struct{})
-	release := make(chan struct{})
-	admissionDone := make(chan error, 1)
-	go func() {
-		admissionDone <- svc.WithSessionAdmission(ctx, identity.SessionID, func(context.Context) error {
-			close(held)
-			<-release
-			return nil
-		})
-	}()
-	<-held
-
-	overrideDone := make(chan error, 1)
-	go func() {
-		_, setErr := svc.SetSessionAutoMerge(ctx, identity, false)
-		overrideDone <- setErr
-	}()
-	select {
-	case err := <-overrideDone:
-		t.Fatalf("session override bypassed admission gate: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(release)
-	if err := <-admissionDone; err != nil {
-		t.Fatal(err)
-	}
-	if err := <-overrideDone; err != nil {
-		t.Fatal(err)
-	}
 }
 
 func newAutoMergeTestService(t *testing.T, max int) *Service {

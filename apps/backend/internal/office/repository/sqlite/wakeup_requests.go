@@ -10,15 +10,14 @@ import (
 )
 
 // Wakeup request status constants — kept in sync with the spec's
-// "queued" | "claimed" | "coalesced" | "skipped" | "failed" enum.
-// Terminal states all stamp finished_at; only "queued" is visible to the
-// dispatcher's claim path.
+// "queued" | "claimed" | "coalesced" | "skipped" enum. Terminal states
+// (claimed, coalesced, skipped) all stamp finished_at; only "queued"
+// is visible to the dispatcher's claim path.
 const (
 	WakeupStatusQueued    = "queued"
 	WakeupStatusClaimed   = "claimed"
 	WakeupStatusCoalesced = "coalesced"
 	WakeupStatusSkipped   = "skipped"
-	WakeupStatusFailed    = "failed"
 )
 
 // ErrWakeupIdempotencyConflict is returned by CreateWakeupRequest when
@@ -293,19 +292,6 @@ func (r *Repository) MarkWakeupRequestSkipped(
 		SET status = ?, reason = ?, finished_at = ?
 		WHERE id = ?
 	`), WakeupStatusSkipped, reason, now, id)
-	return err
-}
-
-// MarkWakeupRequestFailed transitions a request to a terminal failed state
-// when direct dispatch cannot claim it. This prevents a queued row from
-// appearing healthy when no background poller can retry it.
-func (r *Repository) MarkWakeupRequestFailed(ctx context.Context, id, reason string) error {
-	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE agent_wakeup_requests
-		SET status = ?, reason = ?, finished_at = ?
-		WHERE id = ? AND status = ?
-	`), WakeupStatusFailed, reason, now, id, WakeupStatusQueued)
 	return err
 }
 

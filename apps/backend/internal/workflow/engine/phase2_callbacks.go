@@ -294,7 +294,7 @@ func (c QueueRunCallback) resolveCEO(ctx context.Context, in ActionInput, taskID
 		return nil, fmt.Errorf("queue_run: workspace has no CEO agent profile for task %s", taskID)
 	}
 	if in.Trigger == TriggerOnAgentError {
-		if payload, ok := agentErrorPayload(in.Payload); ok && payload.FailedAgentID == id {
+		if payload, ok := in.Payload.(OnAgentErrorPayload); ok && payload.FailedAgentID == id {
 			c.recordCEOSelfEscalationSkipped(taskID, id)
 			return nil, nil
 		}
@@ -400,8 +400,6 @@ func queueActionDigest(in ActionInput) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// queueRunPayload combines trigger metadata with workflow-authored fields.
-// Typed failure metadata provides defaults, while authored fields override it.
 func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
 	out := make(map[string]any, len(actionPayload))
 	comment, ok := commentPayload(in.Payload)
@@ -413,20 +411,8 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 			out["author_id"] = comment.AuthorID
 		}
 	}
-	if agentErr, aok := agentErrorPayload(in.Payload); aok {
-		if agentErr.FailedAgentID != "" {
-			out["failed_agent_id"] = agentErr.FailedAgentID
-		}
-		if agentErr.FailedSessionID != "" {
-			out["failed_session_id"] = agentErr.FailedSessionID
-		}
-		if agentErr.ErrorMessage != "" {
-			out["error"] = agentErr.ErrorMessage
-		}
-	}
 	// Workflow-authored payload fields are explicit overrides. The trigger's
-	// comment_id/author_id/failed_agent_id/etc. only provide defaults for
-	// their respective wake kinds.
+	// comment_id/author_id only provide defaults for ordinary comment wakes.
 	for k, v := range actionPayload {
 		out[k] = v
 	}
@@ -452,19 +438,6 @@ func commentPayload(payload any) (OnCommentPayload, bool) {
 		}
 	}
 	return OnCommentPayload{}, false
-}
-
-// agentErrorPayload normalizes value and pointer trigger payloads.
-func agentErrorPayload(payload any) (OnAgentErrorPayload, bool) {
-	switch p := payload.(type) {
-	case OnAgentErrorPayload:
-		return p, true
-	case *OnAgentErrorPayload:
-		if p != nil {
-			return *p, true
-		}
-	}
-	return OnAgentErrorPayload{}, false
 }
 
 // ClearDecisionsCallback executes the clear_decisions action by deleting all

@@ -192,42 +192,17 @@ export type QueueMeta = {
   max: number;
   /** Backend-owned queue motion policy. Missing server state defaults to on. */
   autoRun: boolean;
-  /** Mirrors the server's manual merge setting. */
+  /** Mirrors the server's message queue merge_enabled setting; hides the
+   * "Merge with above" affordance without a separate settings fetch. */
   mergeEnabled: boolean;
-  taskId?: string;
-  sessionIncarnationId?: string;
-  statusEpoch?: string;
-  statusGeneration?: number;
-  retiredStatusEpochs?: string[];
-  autoMergeAvailable?: boolean;
-  autoMergeEnabled?: boolean;
-  autoMergeSource?: "global" | "session";
-  autoMergeRevision?: number;
-};
-
-export type QueueMetaUpdateOptions = {
-  establishStatusEpoch?: boolean;
 };
 
 export type QueueStatus = {
   entries: QueuedMessage[];
   count: number;
   max: number;
-  task_id?: string;
-  session_id?: string;
-  session_incarnation_id?: string;
-  status_epoch?: string;
-  status_generation?: number;
   merge_enabled: boolean;
   auto_run?: boolean;
-  auto_merge_available?: boolean;
-  auto_merge_enabled?: boolean;
-  auto_merge_source?: "global" | "session";
-  auto_merge_revision?: number;
-};
-export type QueueOperationToken = {
-  sessionIncarnationId: string;
-  generation: number;
 };
 
 export type QueueState = {
@@ -235,8 +210,7 @@ export type QueueState = {
   bySessionId: Record<string, QueuedMessage[]>;
   /** Per-session capacity snapshot from the latest server response. */
   metaBySessionId: Record<string, QueueMeta>;
-  activeOperationBySessionId: Record<string, QueueOperationToken>;
-  nextOperationGeneration: number;
+  isLoading: Record<string, boolean>;
 };
 
 export type SessionSliceState = {
@@ -402,18 +376,9 @@ export type SessionSliceActions = {
   setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
   markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
-  setQueueEntries: (
-    sessionId: string,
-    entries: QueuedMessage[],
-    meta: QueueMeta,
-    options?: QueueMetaUpdateOptions,
-  ) => void;
+  setQueueEntries: (sessionId: string, entries: QueuedMessage[], meta: QueueMeta) => void;
   removeQueueEntry: (sessionId: string, entryId: string) => void;
-  beginQueueOperation: (
-    sessionId: string,
-    sessionIncarnationId: string,
-  ) => QueueOperationToken | null;
-  finishQueueOperation: (sessionId: string, token: QueueOperationToken) => void;
+  setQueueLoading: (sessionId: string, loading: boolean) => void;
   clearQueueStatus: (sessionId: string) => void;
 };
 

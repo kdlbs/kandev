@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,22 +28,6 @@ func TestArchiveTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 		t.Fatalf("logger: %v", err)
 	}
 	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
-	identity := queueIdentityForSession(t, repo, "session-1")
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, identity, false); err != nil {
-		t.Fatalf("SetAutoMergeOverride: %v", err)
-	}
-	if err := queue.SetPendingMove(ctx, identity.SessionID, &messagequeue.PendingMove{
-		MoveID:               "archive-pending-move",
-		SessionIncarnationID: identity.SessionIncarnationID,
-		TaskID:               identity.TaskID,
-	}); err != nil {
-		t.Fatalf("SetPendingMove: %v", err)
-	}
-	staleIdentity := identity
-	staleIdentity.SessionIncarnationID = "stale-incarnation"
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, staleIdentity, true); !errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
-		t.Fatalf("stale SetAutoMergeOverride error = %v, want identity mismatch", err)
-	}
 	if _, err := queue.QueueMessage(ctx, "session-1", "task-queue-purge-notify", "follow up", "", "user", false, nil); err != nil {
 		t.Fatalf("QueueMessage: %v", err)
 	}
@@ -72,12 +55,6 @@ func TestArchiveTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	if got, err := queue.CountPendingByTask(ctx, "task-queue-purge-notify"); err != nil || got != 0 {
 		t.Fatalf("pending after archive = %d err=%v, want 0", got, err)
 	}
-	if override, err := mqRepo.GetAutoMergeOverride(ctx, identity); err != nil || override == nil || override.Enabled {
-		t.Fatalf("archive override = %+v err=%v, want preserved OFF", override, err)
-	}
-	if move, ok := queue.GetPendingMove(ctx, identity.SessionID); ok || move != nil {
-		t.Fatalf("archive pending move = %+v exists=%t, want absent", move, ok)
-	}
 
 	task, err := repo.GetTask(ctx, "task-queue-purge-notify")
 	if err != nil {
@@ -102,10 +79,6 @@ func TestDeleteTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 		t.Fatalf("logger: %v", err)
 	}
 	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
-	identity := queueIdentityForSession(t, repo, "session-1")
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, identity, false); err != nil {
-		t.Fatalf("SetAutoMergeOverride: %v", err)
-	}
 	if _, err := queue.QueueMessage(ctx, "session-1", "task-delete-purge-notify", "follow up", "", "user", false, nil); err != nil {
 		t.Fatalf("QueueMessage: %v", err)
 	}
@@ -125,10 +98,6 @@ func TestDeleteTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	}
 	if _, err := repo.GetTask(ctx, "task-delete-purge-notify"); err == nil {
 		t.Fatal("expected task gone after DeleteTask")
-	}
-	override, err := mqRepo.GetAutoMergeOverride(ctx, identity)
-	if override != nil || !errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
-		t.Fatalf("deleted task override = %+v err=%v, want fail-closed identity mismatch", override, err)
 	}
 }
 
@@ -150,17 +119,6 @@ func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
 		t.Fatalf("logger: %v", err)
 	}
 	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
-	dropIdentity := queueIdentityForSession(t, repo, "session-drop")
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, dropIdentity, false); err != nil {
-		t.Fatalf("SetAutoMergeOverride: %v", err)
-	}
-	if err := queue.SetPendingMove(ctx, dropIdentity.SessionID, &messagequeue.PendingMove{
-		MoveID:               "session-delete-pending-move",
-		SessionIncarnationID: dropIdentity.SessionIncarnationID,
-		TaskID:               dropIdentity.TaskID,
-	}); err != nil {
-		t.Fatalf("SetPendingMove: %v", err)
-	}
 	if _, err := queue.QueueMessage(ctx, "session-drop", "task-session-queue-purge", "orphan me", "", "user", false, nil); err != nil {
 		t.Fatalf("QueueMessage drop: %v", err)
 	}
@@ -168,7 +126,7 @@ func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
 		t.Fatalf("QueueMessage keep: %v", err)
 	}
 
-	if err := deleteTaskSessionForTest(t, repo, ctx, "session-drop"); err != nil {
+	if err := repo.DeleteTaskSession(ctx, "session-drop"); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
 	if got := queue.GetStatus(ctx, "session-drop").Count; got != 0 {
@@ -176,12 +134,6 @@ func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
 	}
 	if got, err := queue.CountPendingByTask(ctx, "task-session-queue-purge"); err != nil || got != 1 {
 		t.Fatalf("pending after session delete = %d err=%v, want 1 (kept session)", got, err)
-	}
-	if override, err := mqRepo.GetAutoMergeOverride(ctx, dropIdentity); !errors.Is(err, messagequeue.ErrSessionIdentityMismatch) || override != nil {
-		t.Fatalf("deleted session override = %+v err=%v, want identity mismatch", override, err)
-	}
-	if move, ok := queue.GetPendingMove(ctx, dropIdentity.SessionID); ok || move != nil {
-		t.Fatalf("deleted session pending move = %+v exists=%t, want absent", move, ok)
 	}
 }
 
@@ -193,22 +145,5 @@ func seedLiveSessionForQueue(t *testing.T, repo *Repository, sessionID, taskID s
 		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
-	}
-}
-
-func queueIdentityForSession(
-	t *testing.T,
-	repo *Repository,
-	sessionID string,
-) messagequeue.QueueSessionIdentity {
-	t.Helper()
-	session, err := repo.GetTaskSession(context.Background(), sessionID)
-	if err != nil {
-		t.Fatalf("GetTaskSession(%s): %v", sessionID, err)
-	}
-	return messagequeue.QueueSessionIdentity{
-		TaskID:               session.TaskID,
-		SessionID:            session.ID,
-		SessionIncarnationID: session.QueueIncarnationID,
 	}
 }

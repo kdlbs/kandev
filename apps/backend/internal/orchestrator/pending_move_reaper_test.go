@@ -95,7 +95,7 @@ func TestPendingMove_ExpiredMoveIsNotReplayed(t *testing.T) {
 
 	// Re-arm the move the scenario queued, aged past the TTL. The hand-off
 	// prompt the scenario queued alongside it stays as it was.
-	requireSetPendingMove(t, sc.svc, sc.ctx, sc.reviewSessionID, &messagequeue.PendingMove{
+	sc.svc.messageQueue.SetPendingMove(sc.ctx, sc.reviewSessionID, &messagequeue.PendingMove{
 		TaskID:         "task-1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: stepInProgressID,
@@ -203,18 +203,13 @@ func TestPendingMove_ReadFailurePreservesTurnForRetry(t *testing.T) {
 
 func TestPendingMove_ReplaysReplacementAfterClaimRace(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
-	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
-	if err != nil {
-		t.Fatalf("load review session: %v", err)
-	}
 	queueRepo := messagequeue.NewMemoryRepository()
 	initialMove := &messagequeue.PendingMove{
-		MoveID:               "move-initial",
-		SessionIncarnationID: session.QueueIncarnationID,
-		TaskID:               "task-1",
-		WorkflowID:           "wf1",
-		WorkflowStepID:       stepInProgressID,
-		QueuedAt:             time.Now().UTC().Add(-time.Minute),
+		MoveID:         "move-initial",
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+		QueuedAt:       time.Now().UTC().Add(-time.Minute),
 	}
 	replacement := *initialMove
 	replacement.MoveID = "move-replacement"
@@ -245,7 +240,7 @@ func TestPendingMove_ReplaysReplacementAfterClaimRace(t *testing.T) {
 // TTL check: a move armed moments ago must still apply exactly as before.
 func TestPendingMove_FreshMoveStillReplays(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
-	requireSetPendingMove(t, sc.svc, sc.ctx, sc.reviewSessionID, &messagequeue.PendingMove{
+	sc.svc.messageQueue.SetPendingMove(sc.ctx, sc.reviewSessionID, &messagequeue.PendingMove{
 		TaskID:         "task-1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: stepInProgressID,
@@ -285,7 +280,7 @@ func TestDiscardStalePendingMove(t *testing.T) {
 
 	t.Run("stale move is discarded without mutating the caller", func(t *testing.T) {
 		move := &messagequeue.PendingMove{TaskID: "task-1", QueuedAt: staleQueuedAt()}
-		requireSetPendingMove(t, svc, ctx, "sess-1", move)
+		svc.messageQueue.SetPendingMove(ctx, "sess-1", move)
 		stale, retryPending := svc.discardStalePendingMove(ctx, "task-1", "sess-1", move)
 		if !stale || retryPending {
 			t.Fatal("stale move was not discarded")
@@ -320,30 +315,8 @@ func seedPendingMoveSession(t *testing.T, repo *sqliterepo.Repository, taskID, s
 	}
 }
 
-func requireSetPendingMove(
-	t *testing.T,
-	svc *Service,
-	ctx context.Context,
-	sessionID string,
-	move *messagequeue.PendingMove,
-) {
-	t.Helper()
-	if move.SessionIncarnationID == "" {
-		identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, move.TaskID, sessionID)
-		if err == nil {
-			move.SessionIncarnationID = identity.SessionIncarnationID
-		} else {
-			move.SessionIncarnationID = "test:" + sessionID
-		}
-	}
-	if err := svc.messageQueue.SetPendingMove(ctx, sessionID, move); err != nil {
-		t.Fatalf("set pending move: %v", err)
-	}
-}
-
-func armPendingMove(t *testing.T, svc *Service, sessionID, taskID, stepID string, queuedAt time.Time) {
-	t.Helper()
-	requireSetPendingMove(t, svc, context.Background(), sessionID, &messagequeue.PendingMove{
+func armPendingMove(svc *Service, sessionID, taskID, stepID string, queuedAt time.Time) {
+	svc.messageQueue.SetPendingMove(context.Background(), sessionID, &messagequeue.PendingMove{
 		MoveID:         "move-" + sessionID,
 		TaskID:         taskID,
 		WorkflowID:     "wf1",
@@ -376,38 +349,25 @@ func TestReapStalePendingMoves(t *testing.T) {
 	fresh := time.Now().UTC().Add(-time.Minute)
 
 	seedPendingMoveSession(t, repo, "task-expired", "sess-expired")
-	armPendingMove(t, svc, "sess-expired", "task-expired", "step-blocked", staleQueuedAt())
+	armPendingMove(svc, "sess-expired", "task-expired", "step-blocked", staleQueuedAt())
 
 	seedPendingMoveSession(t, repo, "task-fresh", "sess-fresh")
-	armPendingMove(t, svc, "sess-fresh", "task-fresh", "step-work", fresh)
-
-	seedPendingMoveSession(t, repo, "task-replaced", "sess-replaced")
-	if err := svc.messageQueue.SetPendingMove(ctx, "sess-replaced", &messagequeue.PendingMove{
-		MoveID:               "move-replaced",
-		SessionIncarnationID: "superseded-incarnation",
-		TaskID:               "task-replaced",
-		WorkflowID:           "wf1",
-		WorkflowStepID:       "step-work",
-		QueuedAt:             fresh,
-	}); err != nil {
-		t.Fatalf("SetPendingMove: %v", err)
-	}
+	armPendingMove(svc, "sess-fresh", "task-fresh", "step-work", fresh)
 
 	// Orphan: armed well within the TTL, but the keyed session is gone.
-	armPendingMove(t, svc, "sess-orphan", "task-orphan", "step-human-qa", fresh)
+	armPendingMove(svc, "sess-orphan", "task-orphan", "step-human-qa", fresh)
 
 	// One task, two sessions: one stale, one fresh.
 	seedPendingMoveSession(t, repo, "task-multi", "sess-multi-stale")
 	seedPendingMoveSession(t, repo, "task-multi", "sess-multi-fresh")
-	armPendingMove(t, svc, "sess-multi-stale", "task-multi", "step-ci-fixup", staleQueuedAt())
-	armPendingMove(t, svc, "sess-multi-fresh", "task-multi", "step-work", fresh)
+	armPendingMove(svc, "sess-multi-stale", "task-multi", "step-ci-fixup", staleQueuedAt())
+	armPendingMove(svc, "sess-multi-fresh", "task-multi", "step-work", fresh)
 
 	svc.reapStalePendingMovesOnce(ctx)
 
 	for sessionID, wantArmed := range map[string]bool{
 		"sess-expired":     false, // aged past the TTL
 		"sess-orphan":      false, // keyed session no longer exists
-		"sess-replaced":    false, // immutable session incarnation no longer matches
 		"sess-multi-stale": false, // aged past the TTL
 		"sess-fresh":       true,  // healthy
 		"sess-multi-fresh": true,  // healthy sibling of a reaped row
@@ -431,7 +391,7 @@ func TestReapStalePendingMoves_PreservesRowOnSessionLookupError(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	ctx := context.Background()
 
-	armPendingMove(t, svc, "sess-unknown", "task-1", "step-blocked", time.Now().UTC().Add(-time.Minute))
+	armPendingMove(svc, "sess-unknown", "task-1", "step-blocked", time.Now().UTC().Add(-time.Minute))
 
 	// Close the database so GetTaskSession fails with a real infrastructure
 	// error rather than sql.ErrNoRows. Only ErrNoRows becomes
@@ -472,7 +432,7 @@ func TestReapStalePendingMoves_RetriesAfterPromptRemovalFailure(t *testing.T) {
 	); err != nil {
 		t.Fatalf("queue hand-off prompt: %v", err)
 	}
-	requireSetPendingMove(t, svc, ctx, sessionID, &messagequeue.PendingMove{
+	svc.messageQueue.SetPendingMove(ctx, sessionID, &messagequeue.PendingMove{
 		MoveID: moveID, TaskID: taskID, WorkflowID: "wf", WorkflowStepID: "target",
 		QueuedAt: staleQueuedAt(),
 	})
@@ -502,14 +462,14 @@ func TestReapStalePendingMoves_PreservesReplacementBetweenListAndDelete(t *testi
 	queueRepo := &replaceBeforePendingMoveDeleteRepository{
 		Repository: messagequeue.NewMemoryRepository(),
 		replacement: &messagequeue.PendingMove{
-			MoveID: "move-b", SessionIncarnationID: "memory:sess-replaced",
-			TaskID: "task-a", WorkflowID: "wf-b", WorkflowStepID: "step-b", QueuedAt: queuedAtB,
+			MoveID: "move-b", TaskID: "task-b", WorkflowID: "wf-b",
+			WorkflowStepID: "step-b", QueuedAt: queuedAtB,
 		},
 	}
 	svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
 	ctx := context.Background()
 	const sessionID = "sess-replaced"
-	requireSetPendingMove(t, svc, ctx, sessionID, &messagequeue.PendingMove{
+	svc.messageQueue.SetPendingMove(ctx, sessionID, &messagequeue.PendingMove{
 		MoveID: "move-a", TaskID: "task-a", WorkflowID: "wf-a",
 		WorkflowStepID: "step-a", QueuedAt: staleQueuedAt(),
 	})
@@ -520,19 +480,13 @@ func TestReapStalePendingMoves_PreservesReplacementBetweenListAndDelete(t *testi
 	if !exists {
 		t.Fatal("fresh replacement move B was removed by stale move A's sweep")
 	}
-	if got.MoveID != "move-b" || got.TaskID != "task-a" || !got.QueuedAt.Equal(queuedAtB) {
+	if got.MoveID != "move-b" || got.TaskID != "task-b" || !got.QueuedAt.Equal(queuedAtB) {
 		t.Fatalf("replacement move B changed: %+v", got)
 	}
 }
 
-func armPendingMoveInWorkflow(
-	t *testing.T,
-	svc *Service,
-	sessionID, taskID, workflowID string,
-	queuedAt time.Time,
-) {
-	t.Helper()
-	requireSetPendingMove(t, svc, context.Background(), sessionID, &messagequeue.PendingMove{
+func armPendingMoveInWorkflow(svc *Service, sessionID, taskID, workflowID string, queuedAt time.Time) {
+	svc.messageQueue.SetPendingMove(context.Background(), sessionID, &messagequeue.PendingMove{
 		MoveID:         "move-" + sessionID,
 		TaskID:         taskID,
 		WorkflowID:     workflowID,
@@ -564,17 +518,17 @@ func TestReapStalePendingMoves_IsRowLocalAcrossWorkflows(t *testing.T) {
 	// Workflow A: one stale row and one healthy row.
 	seedPendingMoveSession(t, repo, "task-a-stale", "sess-a-stale")
 	seedPendingMoveSession(t, repo, "task-a-fresh", "sess-a-fresh")
-	armPendingMoveInWorkflow(t, svc, "sess-a-stale", "task-a-stale", workflowA, staleQueuedAt())
-	armPendingMoveInWorkflow(t, svc, "sess-a-fresh", "task-a-fresh", workflowA, fresh)
+	armPendingMoveInWorkflow(svc, "sess-a-stale", "task-a-stale", workflowA, staleQueuedAt())
+	armPendingMoveInWorkflow(svc, "sess-a-fresh", "task-a-fresh", workflowA, fresh)
 
 	// Workflow B: the same shapes, plus an orphan within the TTL. Production
 	// had exactly this — an orphan in a workflow other than the one under
 	// investigation.
 	seedPendingMoveSession(t, repo, "task-b-stale", "sess-b-stale")
 	seedPendingMoveSession(t, repo, "task-b-fresh", "sess-b-fresh")
-	armPendingMoveInWorkflow(t, svc, "sess-b-stale", "task-b-stale", workflowB, staleQueuedAt())
-	armPendingMoveInWorkflow(t, svc, "sess-b-fresh", "task-b-fresh", workflowB, fresh)
-	armPendingMoveInWorkflow(t, svc, "sess-b-orphan", "task-b-orphan", workflowB, fresh)
+	armPendingMoveInWorkflow(svc, "sess-b-stale", "task-b-stale", workflowB, staleQueuedAt())
+	armPendingMoveInWorkflow(svc, "sess-b-fresh", "task-b-fresh", workflowB, fresh)
+	armPendingMoveInWorkflow(svc, "sess-b-orphan", "task-b-orphan", workflowB, fresh)
 
 	svc.reapStalePendingMovesOnce(ctx)
 
