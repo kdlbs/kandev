@@ -76,7 +76,7 @@ type StuckParentCandidate struct {
 //     wave-member change. A separate clause keeps a parent-scoped (not
 //     per-row) compatibility path for pre-upgrade rows: only when the
 //     parent has no task_children_completed run carrying a wave identity
-//     at all (wake_wave_key <> ''), in any status, does a terminal run
+//     at all (wake_wave_key is empty), in any status, does a terminal run
 //     requested at or after newest_child_updated_at still block under the
 //     original timestamp rule — this is R3-A's fix, replacing a plain "any
 //     terminal run ever" check that let one finished run permanently

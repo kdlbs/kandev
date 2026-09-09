@@ -101,7 +101,7 @@ func seedWakeRunAt(t *testing.T, repo *sqlite.Repository, ctx context.Context, r
 // seedWakeRunWithWave is seedWakeRunAt plus the two wave-identity columns,
 // so tests can simulate a run recorded by a wave-identity-aware producer
 // (Tasks 03-05) rather than a pre-upgrade run (wake_wave_key/wake_wave_string
-// left at their '' default).
+// left empty).
 func seedWakeRunWithWave(
 	t *testing.T, repo *sqlite.Repository, ctx context.Context,
 	runID, parentID, reason, status, requestedAtExpr, waveKey, waveString string,
