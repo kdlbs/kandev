@@ -29,7 +29,9 @@ type TaskChangeRequestSummary struct {
 	State        string     `json:"state"`
 	Draft        *bool      `json:"draft,omitempty"`
 	BaseRef      string     `json:"base_ref,omitempty"`
+	BaseSHA      string     `json:"base_sha"`
 	HeadRef      string     `json:"head_ref,omitempty"`
+	HeadSHA      string     `json:"head_sha"`
 	MergedAt     *time.Time `json:"merged_at,omitempty"`
 	ClosedAt     *time.Time `json:"closed_at,omitempty"`
 }

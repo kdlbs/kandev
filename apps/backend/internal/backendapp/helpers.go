@@ -1858,7 +1858,9 @@ func (a mcpTaskMRListerAdapter) ListTaskMRsByTaskIDs(
 				State:        mr.State,
 				Draft:        mr.Draft,
 				BaseRef:      mr.BaseBranch,
+				BaseSHA:      mr.BaseSHA,
 				HeadRef:      mr.HeadBranch,
+				HeadSHA:      mr.HeadSHA,
 				MergedAt:     mr.MergedAt,
 				ClosedAt:     mr.ClosedAt,
 			})

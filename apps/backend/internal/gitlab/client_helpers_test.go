@@ -28,6 +28,19 @@ func TestConvertRawMRHydratesLabels(t *testing.T) {
 	}
 }
 
+func TestConvertRawMRHydratesCommitSHAs(t *testing.T) {
+	raw := &rawMR{SHA: "legacy-head-sha"}
+	raw.DiffRefs.BaseSHA = "base-sha"
+	raw.DiffRefs.HeadSHA = "head-sha"
+	mr := convertRawMR(raw)
+	if got, want := mr.HeadSHA, "head-sha"; got != want {
+		t.Fatalf("HeadSHA = %q, want %q", got, want)
+	}
+	if got, want := mr.BaseSHA, "base-sha"; got != want {
+		t.Fatalf("BaseSHA = %q, want %q", got, want)
+	}
+}
+
 func TestConvertRawMR_DetailedMergeStatus(t *testing.T) {
 	// Present (GitLab 15.6+).
 	mr := convertRawMR(&rawMR{DetailedMergeStatus: "mergeable", BlockingDiscussionsResolved: true})

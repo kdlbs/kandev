@@ -27,7 +27,11 @@ type rawMR struct {
 	SourceBranch                string `json:"source_branch"`
 	TargetBranch                string `json:"target_branch"`
 	SHA                         string `json:"sha"`
-	References                  struct {
+	DiffRefs                    struct {
+		BaseSHA string `json:"base_sha"`
+		HeadSHA string `json:"head_sha"`
+	} `json:"diff_refs"`
+	References struct {
 		Full string `json:"full"`
 	} `json:"references"`
 	Author             rawUser    `json:"author"`
@@ -149,6 +153,10 @@ func convertRawMR(raw *rawMR) *MR {
 	if targetProjectID == 0 {
 		targetProjectID = raw.ProjectID
 	}
+	headSHA := raw.SHA
+	if raw.DiffRefs.HeadSHA != "" {
+		headSHA = raw.DiffRefs.HeadSHA
+	}
 	mr := &MR{
 		ID:                          raw.ID,
 		IID:                         raw.IID,
@@ -158,8 +166,9 @@ func convertRawMR(raw *rawMR) *MR {
 		WebURL:                      raw.WebURL,
 		State:                       state,
 		HeadBranch:                  raw.SourceBranch,
-		HeadSHA:                     raw.SHA,
+		HeadSHA:                     headSHA,
 		BaseBranch:                  raw.TargetBranch,
+		BaseSHA:                     raw.DiffRefs.BaseSHA,
 		AuthorUsername:              raw.Author.Username,
 		ProjectNamespace:            namespace,
 		ProjectPath:                 projectPath,

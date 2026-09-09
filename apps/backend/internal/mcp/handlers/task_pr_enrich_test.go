@@ -79,7 +79,7 @@ func TestEnrichTasksWithGitLabMRsAddsProviderNeutralChangeRequests(t *testing.T)
 	lister := &fakeTaskMRLister{byTask: map[string][]TaskMRInfo{
 		"task-1": {{
 			RepositoryID: "repo-gl", Number: 224, URL: "https://gitlab.example.test/group/project/-/merge_requests/224",
-			Title: "Ship MR", State: "merged", Draft: true, BaseRef: "main", HeadRef: "feature", MergedAt: &merged,
+			Title: "Ship MR", State: "merged", Draft: true, BaseRef: "main", BaseSHA: "base-sha", HeadRef: "feature", HeadSHA: "head-sha", MergedAt: &merged,
 		}},
 	}}
 	h := &Handlers{taskMRLister: lister, logger: testLogger(t).WithFields()}
@@ -98,7 +98,9 @@ func TestEnrichTasksWithGitLabMRsAddsProviderNeutralChangeRequests(t *testing.T)
 	require.NotNil(t, got.Draft)
 	assert.True(t, *got.Draft)
 	assert.Equal(t, "main", got.BaseRef)
+	assert.Equal(t, "base-sha", got.BaseSHA)
 	assert.Equal(t, "feature", got.HeadRef)
+	assert.Equal(t, "head-sha", got.HeadSHA)
 	require.NotNil(t, got.MergedAt)
 }
 

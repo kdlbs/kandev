@@ -324,7 +324,7 @@ func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MR
 	return &TaskMR{
 		TaskID: taskID, RepositoryID: repositoryID, Host: host,
 		ProjectPath: projectPath, MRIID: mr.IID, MRURL: mr.WebURL, MRTitle: mr.Title,
-		HeadBranch: mr.HeadBranch, BaseBranch: mr.BaseBranch, AuthorUsername: mr.AuthorUsername,
+		HeadBranch: mr.HeadBranch, HeadSHA: mr.HeadSHA, BaseBranch: mr.BaseBranch, BaseSHA: mr.BaseSHA, AuthorUsername: mr.AuthorUsername,
 		State: mr.State, ApprovalState: status.ApprovalState, PipelineState: status.PipelineState,
 		MergeStatus: status.MergeStatus, Draft: mr.Draft, ApprovalCount: status.ApprovalCount,
 		RequiredApprovals: status.RequiredApprovals, PipelineJobsTotal: status.PipelineJobsTotal,

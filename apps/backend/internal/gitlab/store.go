@@ -80,7 +80,9 @@ const createTablesSQL = `
 		mr_url TEXT NOT NULL,
 		mr_title TEXT NOT NULL,
 		head_branch TEXT NOT NULL,
+		head_sha TEXT NOT NULL DEFAULT '',
 		base_branch TEXT NOT NULL,
+		base_sha TEXT NOT NULL DEFAULT '',
 		author_username TEXT NOT NULL DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'open',
 		approval_state TEXT NOT NULL DEFAULT '',
@@ -238,6 +240,9 @@ func (s *Store) createTables() error {
 		return err
 	}
 	if err := s.migrateTaskMRAutomationFields(); err != nil {
+		return err
+	}
+	if err := s.migrateTaskMRSHAColumns(); err != nil {
 		return err
 	}
 	if err := s.migrateMRWatchUniqueKey(); err != nil {
@@ -475,6 +480,23 @@ func (s *Store) migrateConfigRevision() error {
 	return nil
 }
 
+func (s *Store) migrateTaskMRSHAColumns() error {
+	columns, err := s.tableColumns("gitlab_task_mrs")
+	if err != nil {
+		return err
+	}
+	for _, column := range []string{"head_sha", "base_sha"} {
+		if _, ok := columns[column]; ok {
+			continue
+		}
+		statement := fmt.Sprintf("ALTER TABLE gitlab_task_mrs ADD COLUMN %s TEXT NOT NULL DEFAULT ''", column)
+		if _, err := s.db.Exec(gitlabSchemaSQLForDriver(statement, s.db.DriverName())); err != nil {
+			return fmt.Errorf("migrate gitlab_task_mrs.%s: %w", column, err)
+		}
+	}
+	return nil
+}
+
 func (s *Store) migrateWatchColumns() error {
 	columns := []struct {
 		name string
@@ -585,7 +607,7 @@ func (s *Store) GetMentionScope(ctx context.Context, workspaceID string) (*Menti
 // still have dropped columns (older revisions defined `unresolved_threads`
 // and `discussion_count` here) don't break sqlx struct binding.
 const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid,
-	mr_url, mr_title, head_branch, base_branch, author_username, state,
+	mr_url, mr_title, head_branch, head_sha, base_branch, base_sha, author_username, state,
 	approval_state, pipeline_state, merge_status, draft, approval_count,
 	required_approvals, pipeline_jobs_total, pipeline_jobs_pass,
 	detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
@@ -596,7 +618,7 @@ const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid
 // updated_at).
 const taskMRSelectColsQualified = `gtm.id, gtm.task_id, gtm.repository_id,
 	gtm.host, gtm.project_path, gtm.mr_iid, gtm.mr_url, gtm.mr_title,
-	gtm.head_branch, gtm.base_branch, gtm.author_username, gtm.state,
+	gtm.head_branch, gtm.head_sha, gtm.base_branch, gtm.base_sha, gtm.author_username, gtm.state,
 	gtm.approval_state, gtm.pipeline_state, gtm.merge_status, gtm.draft,
 	gtm.approval_count, gtm.required_approvals, gtm.pipeline_jobs_total,
 	gtm.pipeline_jobs_pass, gtm.detailed_merge_status, gtm.reviewer_count,
@@ -619,14 +641,14 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	rows, err := s.db.NamedQueryContext(ctx, `
 		INSERT INTO gitlab_task_mrs (
 			id, task_id, repository_id, host, project_path, mr_iid, mr_url, mr_title,
-			head_branch, base_branch, author_username, state, approval_state, pipeline_state,
+			head_branch, head_sha, base_branch, base_sha, author_username, state, approval_state, pipeline_state,
 			merge_status, draft, approval_count, required_approvals,
 			pipeline_jobs_total, pipeline_jobs_pass,
 			detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at
 		) VALUES (
 			:id, :task_id, :repository_id, :host, :project_path, :mr_iid, :mr_url, :mr_title,
-			:head_branch, :base_branch, :author_username, :state, :approval_state, :pipeline_state,
+			:head_branch, :head_sha, :base_branch, :base_sha, :author_username, :state, :approval_state, :pipeline_state,
 			:merge_status, CASE WHEN :draft THEN 1 ELSE 0 END, :approval_count, :required_approvals,
 			:pipeline_jobs_total, :pipeline_jobs_pass,
 			:detailed_merge_status, :reviewer_count, :unapproved_reviewers, :unresolved_discussions,
@@ -634,7 +656,7 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 		)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
 			host = excluded.host, mr_url = excluded.mr_url, mr_title = excluded.mr_title,
-			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
+			head_branch = excluded.head_branch, head_sha = excluded.head_sha, base_branch = excluded.base_branch, base_sha = excluded.base_sha,
 			author_username = excluded.author_username, state = excluded.state,
 			approval_state = excluded.approval_state, pipeline_state = excluded.pipeline_state,
 			merge_status = excluded.merge_status, draft = excluded.draft,

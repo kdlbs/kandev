@@ -22,7 +22,9 @@ type TaskPRInfo struct {
 	State        string // open, closed, merged
 	Draft        *bool
 	BaseRef      string
+	BaseSHA      string
 	HeadRef      string
+	HeadSHA      string
 	MergedAt     *time.Time
 	ClosedAt     *time.Time
 }
@@ -37,7 +39,9 @@ type TaskMRInfo struct {
 	State        string
 	Draft        bool
 	BaseRef      string
+	BaseSHA      string
 	HeadRef      string
+	HeadSHA      string
 	MergedAt     *time.Time
 	ClosedAt     *time.Time
 }
@@ -139,7 +143,9 @@ func (h *Handlers) addMRSummaries(ctx context.Context, taskIDs []string, out tas
 				State:        mr.State,
 				Draft:        &draft,
 				BaseRef:      mr.BaseRef,
+				BaseSHA:      mr.BaseSHA,
 				HeadRef:      mr.HeadRef,
+				HeadSHA:      mr.HeadSHA,
 				MergedAt:     mr.MergedAt,
 				ClosedAt:     mr.ClosedAt,
 			})
