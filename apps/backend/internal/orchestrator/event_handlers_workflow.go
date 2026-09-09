@@ -535,6 +535,8 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		if !ok {
 			return
 		}
+		// The legacy engine-less path settles before dispatch. The engine-backed
+		// path preserves an admitted turn's RUNNING state in its transition hook.
 		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
 	}
 }

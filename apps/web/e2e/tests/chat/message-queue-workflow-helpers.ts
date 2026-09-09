@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 
@@ -33,12 +34,12 @@ export async function expectSendNowWorkflowRunning(
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle();
-  await expect
-    .poll(
-      async () =>
-        (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)?.state,
-    )
-    .toBe("WAITING_FOR_INPUT");
+  await waitForSessionState(api, {
+    taskId: task.id,
+    sessionId,
+    expectedState: "WAITING_FOR_INPUT",
+    message: "queued workflow session should settle before queue setup",
+  });
   await api.updateWorkflowStep(review.id, {
     events: { on_turn_start: [{ type: "move_to_step", config: { step_id: working.id } }] },
   });
@@ -68,12 +69,12 @@ export async function expectSendNowWorkflowRunning(
 
   const agentBodies = chat.locator("[data-agent-message-body][data-message-id]");
   await expect(agentBodies.filter({ hasText: "replacement is active" })).toBeVisible();
-  await expect
-    .poll(
-      async () =>
-        (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)?.state,
-    )
-    .toBe("RUNNING");
+  await waitForSessionState(api, {
+    taskId: task.id,
+    sessionId,
+    expectedState: "RUNNING",
+    message: "Send Now should keep the queued workflow turn running",
+  });
   const runningTask = await api.getTask(task.id);
   expect(runningTask.state).toBe("IN_PROGRESS");
   expect(runningTask.workflow_step_id).toBe(working.id);
@@ -96,15 +97,13 @@ export async function expectSendNowWorkflowRunning(
   ).toBeVisible();
   if (mobile) await page.keyboard.press("Escape");
 
-  await expect(agentBodies.filter({ hasText: "replacement finished" })).toBeVisible({
-    timeout: 30_000,
+  await waitForSessionState(api, {
+    taskId: task.id,
+    sessionId,
+    expectedState: "WAITING_FOR_INPUT",
+    message: "queued workflow turn should settle after its replacement prompt",
   });
-  await expect
-    .poll(
-      async () =>
-        (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)?.state,
-    )
-    .toBe("WAITING_FOR_INPUT");
+  await expect(agentBodies.filter({ hasText: "replacement finished" })).toBeVisible();
   await expect.poll(async () => (await api.getTask(task.id)).state).toBe("REVIEW");
   await expect(session.cancelAgentButton()).toBeHidden();
 }
