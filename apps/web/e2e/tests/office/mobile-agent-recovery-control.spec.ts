@@ -16,6 +16,7 @@ test.describe("Agent recovery control on mobile", () => {
     const box = await recoveryControl.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
 
     const recovered = waitForHttp(
       testPage,

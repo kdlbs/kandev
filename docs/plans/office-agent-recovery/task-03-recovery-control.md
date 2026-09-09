@@ -1,7 +1,7 @@
 ---
 id: "03-recovery-control"
 title: "Present operator recovery on the agent detail surface"
-status: pending
+status: done
 wave: 2
 depends_on: ["02-status-mutation-client"]
 plan: "plan.md"
@@ -46,7 +46,9 @@ handles the in-flight and failure paths without an optimistic write.
 
 - Any backend change or new endpoint call beyond the status mutation.
 - Failure-counter resets, inbox dismissal, and run re-queueing.
-- Browser coverage, which Task 04 owns.
+- Browser coverage: delivered alongside this task as
+  `apps/web/e2e/tests/office/agents.spec.ts` and
+  `mobile-agent-recovery-control.spec.ts` rather than a separate work order.
 - A control for `pending_approval`, `working`, or any pause/stop direction.
 
 ## Acceptance

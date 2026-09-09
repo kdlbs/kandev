@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { toast } from "@/lib/toast/sonner";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { selectOfficeAgentProfile } from "@/lib/state/slices/office/selectors";
 import { updateAgentStatus } from "@/lib/api/domains/office-api";
@@ -29,23 +29,33 @@ export function AgentRecoveryControl({ agentId }: Props) {
   const { isFinePointer } = useResponsiveBreakpoint();
   const agent = useAppStore((s) => selectOfficeAgentProfile(s, agentId));
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
+  const storeApi = useAppStoreApi();
   const [recovering, setRecovering] = useState(false);
 
   const handleRecover = useCallback(async () => {
     if (!agent) return;
+    const requestedFromStatus = agent.status;
     setRecovering(true);
     try {
       const updated = await updateAgentStatus(agent.id, "idle");
-      updateStore(agent.workspaceId as string, agent.id, {
-        status: updated.status,
-        pauseReason: updated.pauseReason,
-      });
+      // Something other than this request (a WS-triggered refetch, another
+      // client's write) may have moved the store row while the request was
+      // in flight. Applying this response then would clobber a newer status
+      // with the one it superseded, so only patch the store if the row is
+      // still exactly where this request left it.
+      const current = selectOfficeAgentProfile(storeApi.getState(), agent.id);
+      if (current?.status === requestedFromStatus) {
+        updateStore(agent.workspaceId as string, agent.id, {
+          status: updated.status,
+          pauseReason: updated.pauseReason,
+        });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("office:failedToReturnAgentToService"));
     } finally {
       setRecovering(false);
     }
-  }, [agent, t, updateStore]);
+  }, [agent, storeApi, t, updateStore]);
 
   if (!agent?.status || !RECOVERABLE_STATUSES.has(agent.status)) return null;
 

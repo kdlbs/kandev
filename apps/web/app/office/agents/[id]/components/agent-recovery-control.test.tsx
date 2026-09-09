@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StateProvider } from "@/components/state-provider";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { StoreApi } from "zustand";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
 import { updateAgentStatus } from "@/lib/api/domains/office-api";
+import type { AppState } from "@/lib/state/store";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
+import { selectOfficeAgentProfile } from "@/lib/state/slices/office/selectors";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { AgentRecoveryControl } from "./agent-recovery-control";
+// The component imports `toast` from "@/lib/toast/sonner", a thin Proxy
+// wrapper whose `.error` forwards to the underlying "sonner" module (see
+// that file) — mocking "sonner" here intercepts calls made through it.
+import { toast } from "sonner";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api/domains/office-api", async () => {
@@ -69,6 +76,31 @@ function renderControl(agent: AgentProfile, agents: AgentProfile[] = [agent]) {
 
 function getControlButton() {
   return screen.getByTestId(CONTROL_TESTID) as HTMLButtonElement;
+}
+
+function StoreCapture({ onReady }: { onReady: (store: StoreApi<AppState>) => void }) {
+  onReady(useAppStoreApi());
+  return null;
+}
+
+function renderControlWithStore(agent: AgentProfile) {
+  let store: StoreApi<AppState> | undefined;
+  const view = render(
+    <StateProvider
+      initialState={{
+        workspaces: { activeId: WORKSPACE_ID, items: [] },
+        office: {
+          ...defaultOfficeState.office,
+          agentProfilesByWorkspaceId: { [WORKSPACE_ID]: [agent] },
+        },
+      }}
+    >
+      <StoreCapture onReady={(s) => (store = s)} />
+      <AgentRecoveryControl agentId={agent.id} />
+    </StateProvider>,
+  );
+  if (!store) throw new Error("store capture did not run");
+  return { ...view, store };
 }
 
 describe("AgentRecoveryControl visibility", () => {
@@ -199,6 +231,7 @@ describe("AgentRecoveryControl activation", () => {
     await waitFor(() => expect(button.disabled).toBe(false));
     expect(screen.getByTestId(CONTROL_TESTID)).toBeTruthy();
     expect(screen.getByTestId(PAUSE_REASON_TESTID).textContent).toBe(PAUSE_REASON_TEXT);
+    expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
 
     // Retry is accepted.
     vi.mocked(updateAgentStatus).mockResolvedValueOnce({
@@ -210,5 +243,36 @@ describe("AgentRecoveryControl activation", () => {
     await waitFor(() => {
       expect(screen.queryByTestId(CONTROL_TESTID)).toBeNull();
     });
+  });
+
+  it("does not let a deferred response overwrite a status a concurrent update already moved on from", async () => {
+    let resolveRequest: (value: AgentProfile) => void = () => {};
+    vi.mocked(updateAgentStatus).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+    const { store } = renderControlWithStore(baseAgent);
+
+    const button = getControlButton();
+    fireEvent.click(button);
+    await waitFor(() => expect(button.disabled).toBe(true));
+
+    // A newer update (e.g. a WS-triggered refetch) supersedes ours while our
+    // request is still in flight.
+    act(() => {
+      store.getState().updateOfficeAgentProfile(WORKSPACE_ID, AGENT_ID, { status: "working" });
+    });
+    expect(screen.queryByTestId(CONTROL_TESTID)).toBeNull();
+
+    // Our own, now-stale response resolves with the status it targeted; it
+    // must not clobber the status the newer update already applied.
+    await act(async () => {
+      resolveRequest({ ...baseAgent, status: "idle", pauseReason: "" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(selectOfficeAgentProfile(store.getState(), AGENT_ID)?.status).toBe("working");
   });
 });

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-08
-status: draft
+status: done
 requirements:
   - REQ-OFFICE-AGENT-RECOVERY-001
   - REQ-OFFICE-AGENT-RECOVERY-002
@@ -125,47 +125,58 @@ Traditional Chinese pair.
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| `AC-OFFICE-AGENT-RECOVERY-001.1` | `agent-recovery-control.test.tsx` renders the control for `paused` and `stopped`; sub-route presence is proven in `e2e/tests/office/agent-recovery.spec.ts` |
+| `AC-OFFICE-AGENT-RECOVERY-001.1` | `agent-recovery-control.test.tsx` renders the control for `paused` and `stopped`; the control lives in the shared `layout.tsx` identity strip, so every sub-route inherits it by construction, and `e2e/tests/office/agents.spec.ts` exercises the `dashboard` sub-route |
 | `AC-OFFICE-AGENT-RECOVERY-001.2` | `agent-recovery-control.test.tsx`, table over `idle`, `working`, `pending_approval`, `""`, and an unrecognized value |
 | `AC-OFFICE-AGENT-RECOVERY-001.3` | `office-agent-status-api.test.ts` asserts method, URL, and an exact `{"status":"idle"}` body |
 | `AC-OFFICE-AGENT-RECOVERY-001.4` | `agent-recovery-control.test.tsx` with a deferred response: no status change is rendered before it resolves |
-| `AC-OFFICE-AGENT-RECOVERY-001.5` | `agent-recovery-control.test.tsx` (control unmounts after the response) and `agent-recovery.spec.ts` (no reload) |
+| `AC-OFFICE-AGENT-RECOVERY-001.5` | `agent-recovery-control.test.tsx` (control unmounts after the response) and `agents.spec.ts` (control hidden after recovery, no reload) |
 | `AC-OFFICE-AGENT-RECOVERY-001.6` | `agent-recovery-control.test.tsx`, non-empty and empty `pauseReason` |
-| `AC-OFFICE-AGENT-RECOVERY-001.7` | `agent-recovery-control.test.tsx` with an empty `pause_reason` in the response; also `agent-recovery.spec.ts` |
+| `AC-OFFICE-AGENT-RECOVERY-001.7` | `agent-recovery-control.test.tsx` with an empty `pause_reason` in the response; also `agents.spec.ts` |
 | `AC-OFFICE-AGENT-RECOVERY-001.8` | `office-agent-status-api.test.ts` asserts exactly one request is issued and that it targets the status endpoint; no dismissal or run-queue call is made |
-| `AC-OFFICE-AGENT-RECOVERY-001.9` | `agent-recovery-control.test.tsx` queries by role and accessible name; `mobile-agent-recovery.spec.ts` activates by keyboard |
+| `AC-OFFICE-AGENT-RECOVERY-001.9` | `agent-recovery-control.test.tsx` queries by role and accessible name; keyboard operability relies on native `<button>` semantics (no custom key handling) and is not separately E2E-tested |
 | `AC-OFFICE-AGENT-RECOVERY-002.1` | `agent-recovery-control.test.tsx` with a deferred response: a second activation issues no second request and the control reports progress |
-| `AC-OFFICE-AGENT-RECOVERY-002.2` | `agent-recovery-control.test.tsx` with a rejected response: status and pause reason unchanged, error surfaced, control re-enabled |
+| `AC-OFFICE-AGENT-RECOVERY-002.2` | `agent-recovery-control.test.tsx` with a rejected response: status and pause reason unchanged, error surfaced, control re-enabled, `toast.error` called |
 | `AC-OFFICE-AGENT-RECOVERY-002.3` | `service_status_transition_test.go`, `idle -> idle` accepted |
 | `AC-OFFICE-AGENT-RECOVERY-002.4` | `service_status_transition_test.go`, same-status acceptance is what makes the second writer converge |
-| `AC-OFFICE-AGENT-RECOVERY-002.5` | `office-agent-status-api.test.ts` (target is the caller's constant) and `agent-recovery.spec.ts` (status changed server-side between render and activation) |
+| `AC-OFFICE-AGENT-RECOVERY-002.5` | `office-agent-status-api.test.ts` (target is the caller's constant, never a rendered status) and `agent-recovery-control.test.tsx` (a response for a since-superseded status is not applied to the store) |
 | `AC-OFFICE-AGENT-RECOVERY-002.6` | `service_status_transition_test.go` (refused transition, unknown source) and `agent-recovery-control.test.tsx` (a `400` is the failure path) |
-| `AC-OFFICE-AGENT-RECOVERY-003.1` | `agent-recovery.spec.ts` navigates from the agent list to a `paused` agent's detail surface |
-| `AC-OFFICE-AGENT-RECOVERY-003.2` | `agent-recovery.spec.ts` drives the browser session with no additional credential |
+| `AC-OFFICE-AGENT-RECOVERY-003.1` | Architectural: no status filter in `listAgents`/`agents-page-client.tsx`/`selectOfficeAgentProfiles` (verified by reading the code); not covered by a dedicated navigation test |
+| `AC-OFFICE-AGENT-RECOVERY-003.2` | Architectural: the handler adds no permission check beyond the route's existing workspace-membership gate (verified by reading `handler.go`); not covered by a dedicated test |
 
 ## E2E tests
 
-- Chromium, `apps/web/e2e/tests/office/agent-recovery.spec.ts`: recover a
-  `paused` agent from the detail surface; assert the control is absent for an
-  `idle` agent; assert the control is present on a non-dashboard sub-route;
-  assert a server-side status change between render and activation still
-  resolves to `idle`; navigate from the agent list to a `paused` agent.
-  Covers `AC-...-001.1`, `.5`, `.7`, `AC-...-002.5`, `AC-...-003.1`, `.2`.
-- Mobile Chrome, `apps/web/e2e/tests/office/mobile-agent-recovery.spec.ts`:
-  recover a `paused` agent on a Pixel 5; assert no horizontal document overflow
-  and a 44px minimum control hitbox; activate by keyboard.
-  Covers `AC-...-001.1`, `.9`.
+- Chromium, `apps/web/e2e/tests/office/agents.spec.ts`: recover a `paused`
+  agent from the `dashboard` sub-route and assert the control disappears;
+  assert the control is absent for an `idle` agent and reappears after a
+  manual stop. Covers `AC-...-001.1`, `.5`, `.7`.
+- Mobile Chrome, `apps/web/e2e/tests/office/mobile-agent-recovery-control.spec.ts`:
+  recover a `paused` agent on a Pixel 5 by tap; assert a 44px minimum control
+  hitbox (height and width) and the real backend result. Covers `AC-...-001.1`.
+
+Coverage narrower than first planned: sub-route presence beyond `dashboard`,
+list-to-detail navigation, and keyboard activation are architectural
+guarantees confirmed by reading the code (see the Tests table) rather than
+dedicated E2E cases; tracked as test-rigor debt, not a production defect.
 
 ## Work orders
 
-- [ ] [Task 01: Pin the agent status transition contract](task-01-pin-status-transitions.md)
-- [ ] [Task 02: Add the Office agent status mutation client](task-02-status-mutation-client.md)
-- [ ] [Task 03: Present operator recovery on the agent detail surface](task-03-recovery-control.md)
-- [ ] [Task 04: Browser coverage for operator agent recovery](task-04-recovery-e2e.md)
+- [x] [Task 01: Pin the agent status transition contract](task-01-pin-status-transitions.md)
+- [x] [Task 02: Add the Office agent status mutation client](task-02-status-mutation-client.md)
+- [x] [Task 03: Present operator recovery on the agent detail surface](task-03-recovery-control.md)
+
+Browser coverage (originally planned as a separate Task 04) was delivered
+inside Task 03 as `agents.spec.ts` and `mobile-agent-recovery-control.spec.ts`
+rather than a standalone work order; no `task-04-recovery-e2e.md` exists.
 
 ## Verification results
 
-Pending.
+Delivered on PR [#3534](https://github.com/kdlbs/kandev/pull/3534). Backend
+pin: `go test -tags fts5 ./internal/office/agents/...` (5/5). Web unit:
+`agent-recovery-control.test.tsx` + `office-agent-status-api.test.ts`
+(vitest, all green). E2E: `agents.spec.ts` (chromium) and
+`mobile-agent-recovery-control.spec.ts` (mobile-chrome), both green against a
+real backend. `eslint --max-warnings 0`, `tsc --noEmit`, and `i18n:check`
+clean.
 
 ## Risks
 

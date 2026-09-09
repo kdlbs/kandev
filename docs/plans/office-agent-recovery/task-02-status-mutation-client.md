@@ -1,7 +1,7 @@
 ---
 id: "02-status-mutation-client"
 title: "Add the Office agent status mutation client"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

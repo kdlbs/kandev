@@ -1,7 +1,7 @@
 ---
 id: "01-pin-status-transitions"
 title: "Pin the agent status transition contract"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
