@@ -11,6 +11,7 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 )
 
@@ -140,7 +141,7 @@ func TestChannelBackendClientEmptyPayloadWithResultSinkErrors(t *testing.T) {
 	var result map[string]interface{}
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- client.RequestPayload(context.Background(), "test.action", map[string]any{"secret": "value"}, &result)
+		errCh <- client.RequestPayload(context.Background(), "test.action", map[string]any{"secret": "canary-leak-9f3a"}, &result)
 	}()
 	request := <-client.GetRequestChannel()
 
@@ -157,6 +158,7 @@ func TestChannelBackendClientEmptyPayloadWithResultSinkErrors(t *testing.T) {
 
 	entries := observed.FilterMessage(emptyBackendPayloadLogMessage).All()
 	require.Len(t, entries, 1)
+	require.Equal(t, zapcore.WarnLevel, entries[0].Level)
 	fields := entries[0].ContextMap()
 	require.Equal(t, request.ID, fields["request_id"])
 	require.Equal(t, "test.action", fields["action"])
@@ -166,6 +168,7 @@ func TestChannelBackendClientEmptyPayloadWithResultSinkErrors(t *testing.T) {
 	logJSON, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NotContains(t, string(logJSON), "secret")
+	require.NotContains(t, string(logJSON), "canary-leak-9f3a")
 }
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.3

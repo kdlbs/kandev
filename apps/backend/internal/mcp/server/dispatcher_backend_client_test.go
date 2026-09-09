@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 )
 
@@ -131,7 +132,7 @@ func TestDispatcherBackendClient_EmptyPayloadWithResultSinkErrors(t *testing.T) 
 	client := NewDispatcherBackendClient(d, log)
 
 	var result map[string]interface{}
-	respErr := client.RequestPayload(context.Background(), "test.action", map[string]any{"secret": "value"}, &result)
+	respErr := client.RequestPayload(context.Background(), "test.action", map[string]any{"secret": "canary-leak-9f3a"}, &result)
 	require.Error(t, respErr)
 	require.ErrorIs(t, respErr, ErrEmptyBackendPayload)
 	require.Contains(t, respErr.Error(), "test.action")
@@ -143,6 +144,7 @@ func TestDispatcherBackendClient_EmptyPayloadWithResultSinkErrors(t *testing.T) 
 
 	entries := observed.FilterMessage(emptyBackendPayloadLogMessage).All()
 	require.Len(t, entries, 1)
+	require.Equal(t, zapcore.WarnLevel, entries[0].Level)
 	fields := entries[0].ContextMap()
 	require.Equal(t, outboundID, fields["request_id"])
 	require.Equal(t, "test.action", fields["action"])
@@ -154,6 +156,7 @@ func TestDispatcherBackendClient_EmptyPayloadWithResultSinkErrors(t *testing.T) 
 	logJSON, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NotContains(t, string(logJSON), "secret")
+	require.NotContains(t, string(logJSON), "canary-leak-9f3a")
 }
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.3
