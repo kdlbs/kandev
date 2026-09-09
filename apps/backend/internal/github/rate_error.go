@@ -216,6 +216,17 @@ func OperationRateLimitFromError(err error, now time.Time) (*OperationRateLimitD
 			kind, deferred.Resource, retryAt, deferred.RetrySource, now,
 		), true
 	}
+
+	var waited *AdmissionWaitError
+	if errors.As(err, &waited) {
+		kind, ok := operationRateLimitKind("", waited.Reason)
+		if !ok {
+			return nil, false
+		}
+		return newOperationRateLimitDetails(
+			kind, waited.Resource, waited.RetryAt, waited.RetrySource, now,
+		), true
+	}
 	return nil, false
 }
 

@@ -180,6 +180,51 @@ func TestHTTPForceSyncReturnsRateLimitDetailsWithFailedOperation(t *testing.T) {
 	assert.Equal(t, "retry_after_header", body.RateLimit.Source)
 }
 
+func TestHTTPForceSyncReturnsRateLimitDetailsWhenAdmissionWaitIsCanceled(t *testing.T) {
+	now := time.Date(2026, 8, 30, 11, 18, 0, 0, time.UTC)
+	retryAt := now.Add(2 * time.Minute)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	svc := NewService(
+		setupTestStore(t),
+		failingGitHubClients{err: &github.AdmissionWaitError{
+			Resource: github.ResourceCore, RetryAt: retryAt,
+			RetrySource: github.RetrySourceRetryAfter,
+			Reason:      "observed_secondary_rate_limit", Cause: context.Canceled,
+		}},
+		nil, &fakeApplier{}, log,
+	)
+	svc.now = func() time.Time { return now }
+	configureWorkspace(t, svc, victimWorkspace)
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workflow-sync/sync?workspace_id="+victimWorkspace,
+		nil,
+	)
+	newTestRouter(t, svc).ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code, "response body: %s", resp.Body.String())
+	var body struct {
+		Error     string `json:"error"`
+		ErrorCode string `json:"error_code"`
+		RateLimit struct {
+			Kind     string    `json:"kind"`
+			Resource string    `json:"resource"`
+			RetryAt  time.Time `json:"retry_at"`
+			Source   string    `json:"source"`
+		} `json:"rate_limit"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	assert.Equal(t, "GitHub operation is rate limited", body.Error)
+	assert.Equal(t, "github_rate_limited", body.ErrorCode)
+	assert.Equal(t, "secondary_throttle", body.RateLimit.Kind)
+	assert.Equal(t, "core", body.RateLimit.Resource)
+	assert.Equal(t, retryAt, body.RateLimit.RetryAt)
+	assert.Equal(t, "retry_after_header", body.RateLimit.Source)
+}
+
 // @covers AC-INTEGRATIONS-GITHUB-RATE-004.3
 func TestHTTPForceSyncSuccessOmitsRateLimitDetails(t *testing.T) {
 	svc, _ := setupTestService(t, seededMockClient())

@@ -86,6 +86,35 @@ func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersWithoutHoldingWorker
 	}
 }
 
+func TestRateCoordinatorInteractiveAdmissionCancellationPreservesRateDetails(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "interactive-user",
+	}, nil)
+	retryAt := time.Now().Add(time.Hour).UTC()
+	tracker.ObserveSecondary(ResourceCore, retryAt, RetrySourceRetryAfter, "fixture")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := admission.acquire(ctx, ResourceCore)
+	if err == nil {
+		t.Fatal("interactive admission unexpectedly succeeded")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("admission error = %v, want context cancellation", err)
+	}
+	details, ok := OperationRateLimitFromError(err, time.Now().UTC())
+	if !ok {
+		t.Fatalf("operation rate details missing from canceled admission: %v", err)
+	}
+	if details.Kind != OperationRateLimitSecondaryThrottle || details.Resource != ResourceCore {
+		t.Fatalf("operation rate details = %+v", details)
+	}
+	if details.RetryAt == nil || !details.RetryAt.Equal(retryAt) {
+		t.Fatalf("retry_at = %v, want %s", details.RetryAt, retryAt)
+	}
+}
+
 func TestRateCoordinatorNonBlockingBackgroundAdmissionWaitsForLocalPacing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		coordinator := NewRateCoordinator(nil, nil)

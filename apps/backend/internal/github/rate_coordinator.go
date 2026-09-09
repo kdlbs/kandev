@@ -24,6 +24,7 @@ const (
 	rateLimitBlockBackgroundBusy     = "background_in_flight"
 	rateLimitBlockInteractiveWaiting = "interactive_priority"
 	rateLimitBlockBackgroundPacing   = "background_pacing"
+	rateLimitBlockProviderRetry      = "provider_retry"
 )
 
 type rateAdmissionDecision struct {
@@ -57,6 +58,22 @@ func (e *AdmissionDeferredError) Unwrap() error { return ErrBackgroundAdmissionD
 func (e *AdmissionDeferredError) Wait(ctx context.Context) error {
 	return waitForAdmissionChange(ctx, e.Delay, e.TrackerChanged, e.Changed)
 }
+
+// AdmissionWaitError preserves a provider retry boundary when an interactive
+// request is canceled while waiting for local admission.
+type AdmissionWaitError struct {
+	Resource    Resource
+	RetryAt     time.Time
+	RetrySource RetrySource
+	Reason      string
+	Cause       error
+}
+
+func (e *AdmissionWaitError) Error() string {
+	return fmt.Sprintf("github admission wait: %s: %v", e.Reason, e.Cause)
+}
+
+func (e *AdmissionWaitError) Unwrap() error { return e.Cause }
 
 // RateCoordinator owns rate observations by GitHub's upstream quota identity,
 // rather than by Kandev workspace or credential generation.
@@ -275,7 +292,7 @@ func backgroundDeferralReason(
 	case nextBackgroundAt.After(now):
 		return rateLimitBlockBackgroundPacing
 	default:
-		return "provider_retry"
+		return rateLimitBlockProviderRetry
 	}
 }
 
@@ -356,7 +373,7 @@ func (a *RateAdmission) acquireBackground(ctx context.Context, resource Resource
 			case state.nextBackgroundAt.After(time.Now()):
 				deferralReason = rateLimitBlockBackgroundPacing
 			default:
-				deferralReason = "provider_retry"
+				deferralReason = rateLimitBlockProviderRetry
 			}
 			deferralRecorded = true
 		}
@@ -385,8 +402,27 @@ func (a *RateAdmission) waitForProviderWindow(ctx context.Context, resource Reso
 			return func() {}, nil
 		}
 		if err := waitForAdmissionChange(ctx, wait, trackerChanged, nil); err != nil {
+			if ctx.Err() != nil {
+				return nil, a.interactiveWaitError(resource, ctx.Err())
+			}
 			return nil, err
 		}
+	}
+}
+
+func (a *RateAdmission) interactiveWaitError(resource Resource, cause error) error {
+	now := time.Now().UTC()
+	reason := rateLimitBlockProviderRetry
+	if secondary := a.principal.tracker.Secondary(resource); secondary.RetryAt.After(now) {
+		reason = rateLimitBlockSecondary
+	} else if snapshot, known := a.principal.tracker.Snapshot(resource); known &&
+		snapshot.ResetAt.After(now) && primaryRateExhausted(snapshot) {
+		reason = rateLimitBlockPrimary
+	}
+	retryAt, retrySource := a.retryBoundary(resource, reason, now, a.principal.tracker.WaitDuration(resource))
+	return &AdmissionWaitError{
+		Resource: resource, RetryAt: retryAt, RetrySource: retrySource,
+		Reason: reason, Cause: cause,
 	}
 }
 
