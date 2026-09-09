@@ -1,7 +1,7 @@
 ---
 id: "02-bound-and-stream-capture"
 title: "Bound and stream capture"
-status: done
+status: blocked
 wave: 2
 depends_on:
   - "01-measure-capture-phases"
@@ -65,8 +65,8 @@ Run these tests and record their expected failures before implementation.
 - Report memory storage and `flush_timeout: true` for the fallback capture.
 - Page the existing `timestamp_ms` index with timestamp and primary-key
   continuation.
-- Record a persisted primary-key upper boundary after the capture flush and
-  apply it to every page.
+- Establish a persisted primary-key boundary at receipt before the capture
+  flush, and retain exact primary keys for the receipt-prefix rows.
 - Filter the requested identity without a complete-partition sort.
 - Reuse prepared byte counts for page bounds.
 - Add `capture_timeout_ms` to the backend WS notification.
@@ -120,6 +120,14 @@ make -C apps/backend lint
 - Task 01 must record the complete phase table.
 - Task 01 must show that backend locking does not require a separate repair.
 
+## Dependency revision
+
+Task 01 did not collect the required evidence, so this work order cannot claim
+that the implementation addresses the confirmed root cause. The bounded
+capture implementation remains in the branch as a mitigation based on the
+available trace and isolated benchmark. Task 02 remains blocked until Task 01
+records the phase tables and applies the backend gate.
+
 ## Risks
 
 - Timestamp and primary-key continuation can skip equal-timestamp entries.
@@ -148,15 +156,17 @@ make -C apps/backend lint
   entries, and the notification omitted the relative timeout.
 - GREEN: capture now freezes the staging watermark, waits one second, and uses
   a receipt-time memory snapshot when the wait expires. Persistence continues.
-- GREEN: the store reads the timestamp index with timestamp and primary-key
-  continuation and a persisted upper primary-key boundary. It preserves identity
-  filtering, equal-timestamp order, and global retention bounds while excluding
-  writes that arrive between page transactions.
+- GREEN: the store starts a serialized receipt boundary before the prefix flush,
+  passes the boundary key and exact prefix append keys to each page, and reads
+  the timestamp index with `continuePrimaryKey()` for equal-timestamp
+  continuation. It preserves identity filtering, equal-timestamp order, and
+  global retention bounds while excluding writes that arrive between page
+  transactions.
 - GREEN: capture uploads a 128 KiB first page, waits for each upload before the
   next read, uses 800 KiB later pages, and aborts at the monotonic deadline.
 - GREEN: the backend notification includes the absolute deadline and a capped
   relative duration.
-- Verification passed: 4 frontend files and 40 focused tests, focused ESLint,
+- Verification passed: 4 frontend files and 45 focused tests, focused ESLint,
   web typecheck, 23 log-bundle tests, 23 log-bundle race tests, `gofmt -l`, and
   `git diff --check`.
 - The repository-wide backend test target was run twice. Both runs failed in

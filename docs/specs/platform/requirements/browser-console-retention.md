@@ -63,7 +63,11 @@ retained history after every log batch.
   capture shall enumerate the requested identity partition in chronological
   batches bounded by the upload target. Each batch shall become available
   before the capture enumerates or serializes the remainder of the partition.
-  Entries committed after notification receipt shall not appear in any batch.
+  The frontend shall establish the persisted upper boundary at notification
+  receipt before it flushes the receipt prefix. Entries committed after
+  notification receipt shall not appear in any batch. If the frontend cannot
+  prove this boundary, it shall use the bounded memory snapshot for the
+  capture.
 - **AC-PLATFORM-BROWSER-CONSOLE-RETENTION-001.11:** A capture shall wait no more
   than one second for the serialized drain to persist its capture watermark.
   When this wait expires, the capture shall use its bounded memory snapshot and

@@ -87,20 +87,28 @@ reference-free entry to staging and schedules the loop.
 
 ## Incremental capture reads
 
+At receipt, the runtime starts a `readwrite` boundary transaction on an already
+open IndexedDB connection. The transaction is serialized with append
+transactions and records the highest committed object-store primary key before
+the receipt-prefix drain starts. If the runtime cannot start or complete this
+boundary transaction, the capture uses its receipt memory snapshot.
+
 After the fixed-prefix drain completes, the runtime selects one snapshot source
 for the capture. IndexedDB mode reads through the existing `timestamp_ms`
-index. Memory mode reads the prepared entries from the receipt snapshot.
+index. Memory mode reads the prepared entries from the receipt snapshot. The
+drain returns the exact primary keys that it persisted through the receipt
+watermark. The capture uses the boundary key for prior rows and the returned
+keys for receipt-prefix rows. Thus, a row written by another tab between the
+boundary transaction and the prefix drain cannot enter the capture.
 
-Before the first IndexedDB page, the runtime records the highest persisted
-object-store primary key. This persisted high-water key is an upper boundary for
-the capture. Every page excludes rows with a larger primary key, so entries
-written after receipt cannot enter a later page even when their timestamps sort
-before earlier rows. A capture with no persisted rows uses an empty IndexedDB
-source.
+Every page excludes rows with a larger primary key, so entries written after
+receipt cannot enter a later page even when their timestamps sort before
+earlier rows. A capture with no persisted rows uses an empty IndexedDB source.
 
 Each IndexedDB page uses one readonly transaction. A continuation token contains
-the timestamp index key and the object-store primary key. This pair gives a
-stable order when entries have equal timestamps.
+the timestamp index key and the object-store primary key. The index cursor uses
+`continuePrimaryKey()` to seek past an equal-timestamp continuation pair. This
+pair gives a stable order without rescanning the start of a timestamp group.
 
 The cursor scans forward from that token and includes only the requested
 identity. The store holds at most 10,000 entries or 20 MiB across all

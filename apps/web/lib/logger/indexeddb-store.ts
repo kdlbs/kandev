@@ -10,6 +10,8 @@ const MAX_ENTRIES = 10_000;
 const MAX_BYTES = 20 * 1024 * 1024;
 // i18n-exempt: internal IndexedDB diagnostic, never rendered to a user.
 const INDEXEDDB_CURSOR_ERROR = "IndexedDB cursor failed";
+// i18n-exempt: internal IndexedDB diagnostic, never rendered to a user.
+const INDEXEDDB_BOUNDARY_ERROR = "IndexedDB capture boundary unavailable";
 
 type PersistedEntry = {
   id?: number;
@@ -35,8 +37,9 @@ const EMPTY_TOTALS: RetentionTotals = { count: 0, bytes: 0 };
 
 export class IndexedDBLogStore {
   private database: Promise<IDBDatabase> | null = null;
+  private databaseHandle: IDBDatabase | null = null;
 
-  async append(entries: readonly PreparedLogEntry[]): Promise<void> {
+  async append(entries: readonly PreparedLogEntry[]): Promise<number[]> {
     const persistedEntries = entries.flatMap(({ entry, bytes }) => {
       const identity = entry.identity_scope;
       if (!identity) return [];
@@ -51,12 +54,13 @@ export class IndexedDBLogStore {
         } satisfies PersistedEntry,
       ];
     });
-    if (persistedEntries.length === 0) return;
+    if (persistedEntries.length === 0) return [];
 
     const database = await this.open();
     const transaction = database.transaction([STORE_NAME, METADATA_STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
     const metadataStore = transaction.objectStore(METADATA_STORE_NAME);
+    const primaryKeys: number[] = [];
     const storedMetadata = await requestResult<RetentionMetadata | undefined>(
       metadataStore.get(RETENTION_METADATA_KEY),
     );
@@ -65,7 +69,11 @@ export class IndexedDBLogStore {
       : await scanTotals(store);
 
     for (const entry of persistedEntries) {
-      store.add(entry);
+      const request = store.add(entry);
+      request.onsuccess = () => {
+        const primaryKey = Number(request.result);
+        if (Number.isSafeInteger(primaryKey)) primaryKeys.push(primaryKey);
+      };
       totals.count += 1;
       totals.bytes += entry.bytes;
     }
@@ -75,6 +83,7 @@ export class IndexedDBLogStore {
     await deleteOldestUntilWithinBounds(store.index("timestamp_ms"), totals);
     metadataStore.put({ key: RETENTION_METADATA_KEY, ...totals } satisfies RetentionMetadata);
     await transactionDone(transaction);
+    return primaryKeys;
   }
 
   async snapshot(identityScope: string): Promise<LogEntry[]> {
@@ -90,9 +99,16 @@ export class IndexedDBLogStore {
     return entries;
   }
 
-  async readHighWatermark(): Promise<number | null> {
-    const database = await this.open();
-    const transaction = database.transaction(STORE_NAME, "readonly");
+  beginCaptureBoundary(): Promise<number | null> {
+    const database = this.databaseHandle;
+    if (!database) return Promise.reject(new Error(INDEXEDDB_BOUNDARY_ERROR));
+
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(STORE_NAME, "readwrite");
+    } catch (error) {
+      return Promise.reject(error);
+    }
     const store = transaction.objectStore(STORE_NAME);
     let highWatermark: number | null = null;
 
@@ -116,8 +132,11 @@ export class IndexedDBLogStore {
     maxBytes: number,
     after: LogPageCursor | null = null,
     maxPrimaryKey?: number | null,
+    additionalPrimaryKeys?: ReadonlySet<number>,
   ): Promise<LogPage> {
-    if (maxPrimaryKey === null) return { entries: [], nextCursor: null, done: true };
+    if (maxPrimaryKey === null && (!additionalPrimaryKeys || additionalPrimaryKeys.size === 0)) {
+      return { entries: [], nextCursor: null, done: true };
+    }
 
     const database = await this.open();
     const transaction = database.transaction(STORE_NAME, "readonly");
@@ -127,6 +146,7 @@ export class IndexedDBLogStore {
     const pageLimit = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : MAX_BYTES;
     const page: LogPage = { entries: [], nextCursor: null, done: false };
     let pageBytes = 0;
+    let afterApplied = after === null || startTimestamp > after.timestamp_ms;
 
     return new Promise<LogPage>((resolve, reject) => {
       const request = index.openCursor(IDBKeyRange.lowerBound(startTimestamp));
@@ -137,13 +157,29 @@ export class IndexedDBLogStore {
           page.done = true;
           return;
         }
-        const record = cursor.value as PersistedEntry;
         const primaryKey = Number(cursor.primaryKey);
-        if (maxPrimaryKey !== undefined && primaryKey > maxPrimaryKey) {
-          cursor.continue();
-          return;
+        if (!afterApplied) {
+          afterApplied = true;
+          if (
+            after &&
+            Number(cursor.key) === after.timestamp_ms &&
+            primaryKey <= after.primary_key
+          ) {
+            if (primaryKey === after.primary_key) {
+              cursor.continue();
+            } else {
+              cursor.continuePrimaryKey(after.timestamp_ms, after.primary_key + 1);
+            }
+            return;
+          }
         }
-        if (!isAfterCursor(record, primaryKey, after)) {
+        const record = cursor.value as PersistedEntry;
+        if (
+          maxPrimaryKey !== undefined &&
+          maxPrimaryKey !== null &&
+          primaryKey > maxPrimaryKey &&
+          !additionalPrimaryKeys?.has(primaryKey)
+        ) {
           cursor.continue();
           return;
         }
@@ -213,7 +249,12 @@ export class IndexedDBLogStore {
           database.close();
           return;
         }
-        database.onversionchange = () => database.close();
+        database.onversionchange = () => {
+          if (this.databaseHandle === database) this.databaseHandle = null;
+          if (this.database === databasePromise) this.database = null;
+          database.close();
+        };
+        this.databaseHandle = database;
         resolve(database);
       };
       request.onerror = () => fail(request.error ?? new Error("IndexedDB open failed"));
@@ -221,18 +262,6 @@ export class IndexedDBLogStore {
     this.database = databasePromise;
     return databasePromise;
   }
-}
-
-function isAfterCursor(
-  record: PersistedEntry,
-  primaryKey: number,
-  after: LogPageCursor | null,
-): boolean {
-  if (!after) return true;
-  return (
-    record.timestamp_ms > after.timestamp_ms ||
-    (record.timestamp_ms === after.timestamp_ms && primaryKey > after.primary_key)
-  );
 }
 
 function createEntriesStore(database: IDBDatabase): IDBObjectStore {

@@ -13,6 +13,8 @@ const MAX_BYTES = 20 * 1024 * 1024;
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 const IDENTITY_A = "identity-a";
 const IDENTITY_B = "identity-b";
+const BEFORE_RECEIPT_MESSAGE = "before-receipt";
+const RECEIPT_PREFIX_MESSAGE = "receipt-prefix";
 
 type PersistedTestEntry = {
   id?: number;
@@ -101,7 +103,7 @@ describe("IndexedDB log retention planning and schema", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await expect(
       store.append(prepareEntries([logEntry("a", Date.now(), "retried")])),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual(expect.any(Array));
     await expect(store.snapshot("a")).resolves.toEqual([
       expect.objectContaining({ message: "retried" }),
     ]);
@@ -222,7 +224,41 @@ describe("IndexedDB log paging", () => {
     expect(messages).toEqual(["first", "second", "third"]);
     expect(pageCount).toBe(3);
   });
+});
 
+describe("IndexedDB cursor continuation bounds", () => {
+  it("keeps equal-timestamp cursor visits linear across pages", async () => {
+    const timestamp = Date.now();
+    const store = new IndexedDBLogStore();
+    const entries = Array.from({ length: 64 }, (_, index) =>
+      logEntry(IDENTITY_A, timestamp, `entry-${String(index).padStart(2, "0")}`),
+    );
+    await store.append(prepareEntries(entries));
+
+    const cursorContinue = vi.spyOn(IDBCursor.prototype, "continue");
+    const cursorContinuePrimaryKey = vi.spyOn(IDBCursor.prototype, "continuePrimaryKey");
+    try {
+      let cursor: import("./indexeddb-store").LogPageCursor | null = null;
+      let done = false;
+      let pageCount = 0;
+      while (!done) {
+        const page = await store.readPage(IDENTITY_A, prepareLogEntry(entries[0]).bytes, cursor);
+        cursor = page.nextCursor;
+        done = page.done;
+        pageCount += 1;
+      }
+
+      expect(pageCount).toBe(entries.length);
+      expect(cursorContinuePrimaryKey).toHaveBeenCalledTimes(entries.length - 2);
+      expect(cursorContinue.mock.calls.length).toBeLessThanOrEqual(entries.length * 3);
+    } finally {
+      cursorContinue.mockRestore();
+      cursorContinuePrimaryKey.mockRestore();
+    }
+  });
+});
+
+describe("IndexedDB capture boundaries", () => {
   it("excludes records persisted after the capture upper bound", async () => {
     const timestamp = Date.now();
     const store = new IndexedDBLogStore();
@@ -230,7 +266,7 @@ describe("IndexedDB log paging", () => {
     const second = logEntry(IDENTITY_A, timestamp, "second");
     await store.append(prepareEntries([first, second]));
 
-    const maxPrimaryKey = await store.readHighWatermark();
+    const maxPrimaryKey = await store.beginCaptureBoundary();
     const firstPage = await store.readPage(
       IDENTITY_A,
       prepareLogEntry(first).bytes,
@@ -250,6 +286,52 @@ describe("IndexedDB log paging", () => {
     );
     expect(secondPage.entries.map(({ entry }) => entry.message)).toEqual(["second"]);
     expect(secondPage.done).toBe(true);
+  });
+
+  it("freezes the boundary before a later tab commits a row", async () => {
+    const firstStore = new IndexedDBLogStore();
+    const secondStore = new IndexedDBLogStore();
+    const timestamp = Date.now();
+    await firstStore.append(
+      prepareEntries([logEntry(IDENTITY_A, timestamp, BEFORE_RECEIPT_MESSAGE)]),
+    );
+    await secondStore.readPage(IDENTITY_A, MAX_BYTES);
+
+    const boundaryPromise = firstStore.beginCaptureBoundary();
+    const laterAppend = secondStore.append(
+      prepareEntries([logEntry(IDENTITY_A, timestamp, "after-receipt")]),
+    );
+    const maxPrimaryKey = await boundaryPromise;
+    await laterAppend;
+
+    const page = await firstStore.readPage(IDENTITY_A, MAX_BYTES, null, maxPrimaryKey);
+    expect(page.entries.map(({ entry }) => entry.message)).toEqual([BEFORE_RECEIPT_MESSAGE]);
+    expect(page.done).toBe(true);
+  });
+
+  it("excludes another tab write interleaved before the receipt prefix", async () => {
+    const firstStore = new IndexedDBLogStore();
+    const secondStore = new IndexedDBLogStore();
+    const timestamp = Date.now();
+    await firstStore.append(
+      prepareEntries([logEntry(IDENTITY_A, timestamp, BEFORE_RECEIPT_MESSAGE)]),
+    );
+    await secondStore.readPage(IDENTITY_A, MAX_BYTES);
+
+    const boundary = await firstStore.beginCaptureBoundary();
+    await secondStore.append(
+      prepareEntries([logEntry(IDENTITY_A, timestamp, "interleaved-write")]),
+    );
+    const prefix = await firstStore.append(
+      prepareEntries([logEntry(IDENTITY_A, timestamp, RECEIPT_PREFIX_MESSAGE)]),
+    );
+
+    const page = await firstStore.readPage(IDENTITY_A, MAX_BYTES, null, boundary, new Set(prefix));
+    expect(page.entries.map(({ entry }) => entry.message)).toEqual([
+      BEFORE_RECEIPT_MESSAGE,
+      RECEIPT_PREFIX_MESSAGE,
+    ]);
+    expect(page.done).toBe(true);
   });
 });
 

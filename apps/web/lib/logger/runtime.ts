@@ -16,8 +16,11 @@ const COLLECTION_WINDOW_MS = 250;
 const IDLE_DEADLINE_MS = 1_000;
 const CAPTURE_FLUSH_TIMEOUT_MS = 1_000;
 const POST_COLLECTION_IDLE_TIMEOUT_MS = IDLE_DEADLINE_MS - COLLECTION_WINDOW_MS;
+const SNAPSHOT_PAGE_BYTES = 20 * 1024 * 1024;
 
 type Staged = PreparedLogEntry & { sequence: number };
+type DrainResult = { completed: boolean; primaryKeys: number[] };
+type CaptureBoundaryResult = { proven: boolean; maxPrimaryKey: number | null };
 
 export type BrowserLogCapture = {
   storageMode: "indexeddb" | "memory";
@@ -34,7 +37,7 @@ let collectionTimer: ReturnType<typeof setTimeout> | null = null;
 let idleCallbackHandle: number | null = null;
 let idleFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let idleGeneration = 0;
-let drainPromise: Promise<void> | null = null;
+let drainPromise: Promise<DrainResult> | null = null;
 let nextSequence = 0;
 let storageMode: "indexeddb" | "memory" = "indexeddb";
 let persistenceFailures = 0;
@@ -61,22 +64,37 @@ export function stageLogEntry(entry: Omit<LogEntry, "identity_scope">): void {
 export async function beginBrowserLogCapture(scope: string): Promise<BrowserLogCapture> {
   const watermark = nextSequence;
   const memoryEntries = snapshotPreparedLogs(scope);
-  const flushed = await waitForCaptureFlush(flushStaging(watermark));
-  if (!flushed || storageMode === "memory") {
-    return { storageMode: "memory", flushTimeout: !flushed, memoryEntries, readPage: null };
+  const boundaryPromise = captureBoundary();
+  let flushResult: DrainResult | undefined;
+  let boundaryResult: CaptureBoundaryResult | undefined;
+  const flushAndBoundary = Promise.all([
+    flushStaging(watermark).then((result) => {
+      flushResult = result;
+    }),
+    boundaryPromise.then((result) => {
+      boundaryResult = result;
+    }),
+  ]);
+  const completed = await waitForCaptureFlush(flushAndBoundary);
+  const completedFlush = flushResult;
+  const completedBoundary = boundaryResult;
+  if (
+    !completed ||
+    storageMode === "memory" ||
+    !completedFlush ||
+    !completedFlush.completed ||
+    !completedBoundary ||
+    !completedBoundary.proven
+  ) {
+    return { storageMode: "memory", flushTimeout: !completed, memoryEntries, readPage: null };
   }
-  let maxPrimaryKey: number | null;
-  try {
-    maxPrimaryKey = await store.readHighWatermark();
-  } catch {
-    degradePersistence();
-    return { storageMode: "memory", flushTimeout: false, memoryEntries, readPage: null };
-  }
+  const receiptPrimaryKeys = new Set(completedFlush.primaryKeys);
   return {
     storageMode: "indexeddb",
     flushTimeout: false,
     memoryEntries,
-    readPage: (maxBytes, after) => store.readPage(scope, maxBytes, after, maxPrimaryKey),
+    readPage: (maxBytes, after) =>
+      store.readPage(scope, maxBytes, after, completedBoundary.maxPrimaryKey, receiptPrimaryKeys),
   };
 }
 
@@ -86,7 +104,7 @@ export async function snapshotBrowserLogs(scope: string): Promise<LogEntry[]> {
     return capture.memoryEntries.map(({ entry }) => entry);
   }
   try {
-    return await store.snapshot(scope);
+    return await readCapturePages(capture);
   } catch {
     degradePersistence();
     return capture.memoryEntries.map(({ entry }) => entry);
@@ -170,9 +188,11 @@ function schedulePostWindowDrain(): void {
   }, POST_COLLECTION_IDLE_TIMEOUT_MS);
 }
 
-function requestDrain(maxSequence = nextSequence): Promise<void> {
+function requestDrain(maxSequence = nextSequence): Promise<DrainResult> {
   if (drainPromise) return drainPromise;
-  if (storageMode === "memory" || !hasStagedThrough(maxSequence)) return Promise.resolve();
+  if (storageMode === "memory" || !hasStagedThrough(maxSequence)) {
+    return Promise.resolve(emptyDrainResult());
+  }
   drainPromise = drainLoop(maxSequence).finally(() => {
     drainPromise = null;
     if (storageMode === "indexeddb" && staging.length > 0) scheduleDrain();
@@ -180,14 +200,20 @@ function requestDrain(maxSequence = nextSequence): Promise<void> {
   return drainPromise;
 }
 
-async function drainLoop(maxSequence: number): Promise<void> {
+async function drainLoop(maxSequence: number): Promise<DrainResult> {
+  let primaryKeys: number[] = [];
   while (storageMode === "indexeddb" && hasStagedThrough(maxSequence)) {
-    if (!(await drainBatch(maxSequence))) return;
+    const result = await drainBatch(maxSequence);
+    primaryKeys = primaryKeys.concat(result.primaryKeys);
+    if (!result.completed) return { completed: false, primaryKeys };
   }
+  return { completed: true, primaryKeys };
 }
 
-async function drainBatch(maxSequence: number): Promise<boolean> {
-  if (storageMode === "memory" || !hasStagedThrough(maxSequence)) return true;
+async function drainBatch(maxSequence: number): Promise<DrainResult> {
+  if (storageMode === "memory" || !hasStagedThrough(maxSequence)) {
+    return emptyDrainResult();
+  }
   const batch: Staged[] = [];
   let bytes = 0;
   while (
@@ -203,31 +229,38 @@ async function drainBatch(maxSequence: number): Promise<boolean> {
     bytes += next.bytes;
   }
   try {
-    await store.append(batch);
+    const persistedPrimaryKey = await store.append(batch);
+    return {
+      completed: true,
+      primaryKeys: normalizePrimaryKeys(persistedPrimaryKey),
+    };
   } catch {
     for (const item of batch.reverse()) {
       staging.unshift(item);
       stagingBytes += item.bytes;
     }
     degradePersistence();
-    return false;
+    return { completed: false, primaryKeys: [] };
   }
-  return true;
 }
 
 function hasStagedThrough(maxSequence: number): boolean {
   return staging.some((item) => item.sequence <= maxSequence);
 }
 
-async function flushStaging(maxSequence = nextSequence): Promise<void> {
+async function flushStaging(maxSequence = nextSequence): Promise<DrainResult> {
   cancelCollectionTimer();
   cancelIdleCallback();
+  let result = emptyDrainResult();
   while (drainPromise || (storageMode === "indexeddb" && hasStagedThrough(maxSequence))) {
-    await requestDrain(maxSequence);
+    const drainResult = await requestDrain(maxSequence);
+    result = mergeDrainResults(result, drainResult);
+    if (!drainResult.completed) break;
   }
+  return result;
 }
 
-function waitForCaptureFlush(flush: Promise<void>): Promise<boolean> {
+function waitForCaptureFlush(flush: Promise<unknown>): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -246,6 +279,52 @@ function waitForCaptureFlush(flush: Promise<void>): Promise<boolean> {
       () => finish(true),
     );
   });
+}
+
+function captureBoundary(): Promise<CaptureBoundaryResult> {
+  if (storageMode === "memory") return Promise.resolve(unprovenBoundary());
+  try {
+    return store.beginCaptureBoundary().then(
+      (maxPrimaryKey) => ({ proven: true, maxPrimaryKey }),
+      () => unprovenBoundary(),
+    );
+  } catch {
+    return Promise.resolve(unprovenBoundary());
+  }
+}
+
+async function readCapturePages(capture: BrowserLogCapture): Promise<LogEntry[]> {
+  if (!capture.readPage) return capture.memoryEntries.map(({ entry }) => entry);
+  const entries: LogEntry[] = [];
+  let cursor: LogPageCursor | null = null;
+  let done = false;
+  while (!done) {
+    const page = await capture.readPage(SNAPSHOT_PAGE_BYTES, cursor);
+    entries.push(...page.entries.map(({ entry }) => entry));
+    cursor = page.nextCursor;
+    done = page.done;
+  }
+  return entries;
+}
+
+function emptyDrainResult(): DrainResult {
+  return { completed: true, primaryKeys: [] };
+}
+
+function mergeDrainResults(left: DrainResult, right: DrainResult): DrainResult {
+  return {
+    completed: left.completed && right.completed,
+    primaryKeys: left.primaryKeys.concat(right.primaryKeys),
+  };
+}
+
+function normalizePrimaryKeys(value: readonly number[] | undefined): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((primaryKey) => Number.isSafeInteger(primaryKey));
+}
+
+function unprovenBoundary(): CaptureBoundaryResult {
+  return { proven: false, maxPrimaryKey: null };
 }
 
 function cancelCollectionTimer(): void {

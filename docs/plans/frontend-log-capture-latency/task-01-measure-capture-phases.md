@@ -1,7 +1,7 @@
 ---
 id: "01-measure-capture-phases"
 title: "Measure capture phases"
-status: done
+status: blocked
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -26,8 +26,8 @@ system_design:
 ## Summary
 
 Measure the frontend and backend phases that make one capture exceed 30
-seconds. Record enough timing data to identify the dominant phases before the
-capture implementation changes.
+seconds. This work order remains blocked until the required captures and phase
+tables identify the dominant phases before the capture implementation changes.
 
 ## In scope
 
@@ -106,13 +106,29 @@ None.
 - The isolated Chromium benchmark used 10,000 entries and about 20 MiB of
   data. The old eager read, sort, and chunk preparation took 1.08 seconds on
   the first read and 0.20 to 0.54 seconds on later reads.
-- A repeat of the active-profile capture was not possible. The available debug
-  backend had no attached Chromium client, so no new phase markers were
-  available for flush, IndexedDB, serialization, upload, lock wait, or file
-  writes. These timings do not prove a backend lock bottleneck.
-- The evidence supports bounded staging, incremental IndexedDB reads, and
-  incremental uploads. No separate backend lock work order was created.
+- The required two active-profile captures were not collected. The available
+  debug backend had no attached Chromium client.
+- The required two isolated-profile captures were not collected. The old
+  Chromium benchmark is context only and does not provide the required phase
+  markers.
+- The frontend phase table is missing notification-to-flush, persistence,
+  IndexedDB, filtering, serialization, and upload durations.
+- The backend phase table is missing body decoding, stream claim, lock wait,
+  validation, file write, and response completion durations.
+- The 90 percent accounting cannot be calculated. Request sizes and request
+  counts for both profiles are also missing.
+- The 250 millisecond and 10 percent backend gate was not applied. These
+  results do not prove or rule out a backend lock bottleneck.
+- Task 02 is a bounded mitigation based on the available trace and isolated
+  benchmark. It does not claim that Task 01 identified the root cause.
 - The temporary measurement code was not retained. The task leaves only these
   results and the bounded implementation in Task 02.
-- Verification passed: web typecheck, log-bundle tests, focused logger tests,
-  focused ESLint, `gofmt -l`, and `git diff --check`.
+- Related verification passed: web typecheck, log-bundle tests, focused logger
+  tests, focused ESLint, `gofmt -l`, and `git diff --check`.
+
+## Blocker
+
+Run the temporary measurement procedure in an active browser profile and in an
+isolated 10,000-entry profile. Record two captures for each profile, all phase
+durations, request sizes and counts, 90 percent accounting, and the backend
+250 millisecond / 10 percent gate result. Then update this task and Task 02.

@@ -237,21 +237,30 @@ The browser records a capture watermark when it receives the notification. It
 also keeps a bounded memory snapshot for that watermark. Entries that arrive
 later remain in normal staging and cannot extend this capture.
 
+At receipt, the browser starts a `readwrite` boundary transaction on its already
+open IndexedDB connection. The transaction is serialized with append
+transactions before the receipt-prefix drain starts. If the browser cannot
+prove this boundary, it uses the receipt-time memory snapshot.
+
 The browser waits at most one second for the serialized persistence drain to
 reach the watermark. If this wait expires, the browser uses the receipt-time
 memory snapshot. The persistence drain continues and its storage mode does not
 change. The upload uses `storage_mode: memory`. Its final metadata includes
 `flush_timeout: true`.
 
-After the fixed drain completes, IndexedDB capture records the highest persisted
-object-store primary key. This key is the capture's upper boundary. Every page
-excludes rows with a larger primary key, including rows written between page
+The fixed-prefix drain returns the exact persisted object-store primary keys.
+IndexedDB capture uses the receipt boundary key for prior rows and those exact
+prefix keys for later rows. A row written by another tab between the boundary
+transaction and the prefix drain is not in that key set. Every page excludes
+other rows written after receipt, including rows written between page
 transactions. A capture with no persisted rows sends an empty IndexedDB page.
 
 IndexedDB capture reads use the existing `timestamp_ms` index. Each page resumes
-with the prior timestamp and primary key. The cursor filters the requested
-identity while it scans the globally bounded store. The browser does not use
-an unbounded `getAll` or sort the complete partition in memory.
+with the prior timestamp and primary key. The index cursor uses
+`continuePrimaryKey()` when it resumes inside an equal-timestamp group. The
+cursor filters the requested identity while it scans the globally bounded
+store. The browser does not use an unbounded `getAll` or sort the complete
+partition in memory.
 
 The first page uses a 128 KiB entry-data target. Later pages use the existing
 800 KiB target. A server value less than either target lowers that target. The

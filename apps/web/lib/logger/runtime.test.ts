@@ -10,19 +10,18 @@ import {
 
 const storeMocks = vi.hoisted(() => ({
   append: vi.fn(),
-  readHighWatermark: vi.fn(),
+  beginCaptureBoundary: vi.fn(),
   readPage: vi.fn(),
-  snapshot: vi.fn(),
 }));
 const TEST_SOURCE = "test";
 const TEST_SCOPE = "default-user";
+const RECEIPT_MESSAGE = "receipt-entry";
 
 vi.mock("./indexeddb-store", () => ({
   IndexedDBLogStore: class {
     append = storeMocks.append;
-    readHighWatermark = storeMocks.readHighWatermark;
+    beginCaptureBoundary = storeMocks.beginCaptureBoundary;
     readPage = storeMocks.readPage;
-    snapshot = storeMocks.snapshot;
   },
 }));
 
@@ -30,13 +29,12 @@ beforeEach(() => {
   _resetForTesting();
   _resetRuntimeForTesting();
   storeMocks.append.mockReset();
-  storeMocks.readHighWatermark.mockReset().mockResolvedValue(0);
+  storeMocks.beginCaptureBoundary.mockReset().mockResolvedValue(0);
   storeMocks.readPage.mockReset().mockResolvedValue({
     entries: [],
     nextCursor: null,
     done: true,
   });
-  storeMocks.snapshot.mockReset().mockResolvedValue([]);
 });
 
 describe("browser logger scheduling", () => {
@@ -318,16 +316,61 @@ describe("browser logger runtime", () => {
 });
 
 describe("browser logger capture", () => {
-  it("keeps the persisted capture boundary fixed for every page", async () => {
-    storeMocks.readHighWatermark.mockResolvedValue(17);
+  it("establishes the receipt boundary before flushing the receipt prefix", async () => {
+    const order: string[] = [];
+    storeMocks.beginCaptureBoundary.mockImplementation(async () => {
+      order.push("boundary");
+      return 17;
+    });
+    storeMocks.append.mockImplementation(async () => {
+      order.push("append");
+      return [18];
+    });
+
+    stageLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      source: TEST_SOURCE,
+      message: RECEIPT_MESSAGE,
+    });
 
     const capture = await beginBrowserLogCapture(TEST_SCOPE);
     await capture.readPage?.(256, null);
 
-    expect(storeMocks.readHighWatermark).toHaveBeenCalledTimes(1);
-    expect(storeMocks.readPage).toHaveBeenCalledWith(TEST_SCOPE, 256, null, 17);
+    expect(storeMocks.beginCaptureBoundary).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["boundary", "append"]);
+    expect(storeMocks.readPage).toHaveBeenCalledWith(TEST_SCOPE, 256, null, 17, new Set([18]));
   });
 
+  it("keeps the persisted capture boundary fixed for every page", async () => {
+    storeMocks.beginCaptureBoundary.mockResolvedValue(17);
+
+    const capture = await beginBrowserLogCapture(TEST_SCOPE);
+    await capture.readPage?.(256, null);
+
+    expect(storeMocks.beginCaptureBoundary).toHaveBeenCalledTimes(1);
+    expect(storeMocks.readPage).toHaveBeenCalledWith(TEST_SCOPE, 256, null, 17, new Set());
+  });
+
+  it("uses the receipt memory snapshot when the boundary cannot be proven", async () => {
+    storeMocks.beginCaptureBoundary.mockRejectedValueOnce(new Error("boundary unavailable"));
+    stageLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      source: TEST_SOURCE,
+      message: RECEIPT_MESSAGE,
+    });
+
+    const capture = await beginBrowserLogCapture(TEST_SCOPE);
+
+    expect(capture.storageMode).toBe("memory");
+    expect(capture.flushTimeout).toBe(false);
+    expect(capture.memoryEntries.map(({ entry }) => entry.message)).toEqual([RECEIPT_MESSAGE]);
+    expect(browserLogMetadata()).toMatchObject({ storage_mode: "indexeddb" });
+  });
+});
+
+describe("browser logger capture flush", () => {
   it("keeps a capture flush at the receipt watermark", async () => {
     vi.useFakeTimers();
     let releaseFirstAppend: (() => void) | undefined;
@@ -387,7 +430,7 @@ describe("browser logger capture", () => {
         timestamp: new Date().toISOString(),
         level: "info",
         source: TEST_SOURCE,
-        message: "receipt-entry",
+        message: RECEIPT_MESSAGE,
       });
       const snapshot = snapshotBrowserLogs(TEST_SCOPE).then((entries) => {
         result = entries;
@@ -406,7 +449,7 @@ describe("browser logger capture", () => {
 
       await vi.advanceTimersByTimeAsync(1);
       await Promise.resolve();
-      expect(result?.map((entry) => entry.message)).toEqual(["receipt-entry"]);
+      expect(result?.map((entry) => entry.message)).toEqual([RECEIPT_MESSAGE]);
       expect(browserLogMetadata()).toMatchObject({ storage_mode: "indexeddb" });
 
       releaseFirstAppend?.();

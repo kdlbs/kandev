@@ -1,7 +1,7 @@
 ---
 created: 2026-09-08
 updated: 2026-09-09
-status: done
+status: blocked
 requirements:
   - REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
   - REQ-PLATFORM-BROWSER-CONSOLE-RETENTION-001
@@ -16,9 +16,10 @@ legacy_specs: []
 
 ## Overview
 
-Review the available capture evidence before the implementation starts. Then
-make capture work finite and incremental. The implementation freezes one
-capture watermark and gives its persistence flush one second.
+Review the available capture evidence before the implementation starts. The
+required active-profile evidence is not available, so Task 01 remains blocked.
+Task 02 is implemented as a bounded mitigation based on the available trace
+and isolated benchmark. It does not claim root-cause confirmation.
 
 It then uploads one chronological page before it reads the next page. The
 backend supplies a relative duration for a monotonic local deadline.
@@ -66,8 +67,9 @@ reported delay. The current evidence does not separate these possible costs:
 - Request-body serialization and transfer.
 - Backend lock wait and file writes.
 
-Task 01 records these phases before Task 02 starts. The phrase "confirmed root
-cause" does not apply until this table is complete.
+Task 01 remains blocked because the required phase tables, 90 percent timing
+accounting, request sizes and counts, and backend gate results are missing. The
+phrase "confirmed root cause" does not apply until this evidence is complete.
 
 ## Requirement conformance
 
@@ -111,9 +113,9 @@ The frontend intervals do not overlap. Their total covers notification receipt
 through the fetch response. The backend intervals subdivide the server request
 and do not add to the frontend total.
 
-If backend lock wait or file writes exceed either threshold, Task 01 stops the
-package. The thresholds are 250 milliseconds and 10 percent of request time.
-Then update this package with a backend work order before Task 02 starts.
+The backend gate is 250 milliseconds and 10 percent of request time for lock
+wait and file writes. Task 01 has not applied this gate because its backend
+phase table is missing. No backend lock work order can be ruled out.
 
 ### Fixed capture watermark
 
@@ -122,6 +124,8 @@ staged entry. Each drain request owns a fixed maximum sequence number. Entries
 that arrive later start a later drain.
 
 At notification receipt, save the current sequence number and a bounded memory
+snapshot. Start a serialized IndexedDB boundary transaction before the
+receipt-prefix drain. If the boundary cannot be proven, use the memory
 snapshot. Join the active drain and persist only through that sequence number.
 Wait at most one second. If the wait expires, use the saved memory snapshot and
 let persistence continue. Report memory storage for this capture and include
@@ -129,18 +133,22 @@ let persistence continue. Report memory storage for this capture and include
 
 ### Existing-index snapshot pages
 
-In `apps/web/lib/logger/indexeddb-store.ts`, keep database version 2. Read the
-existing `timestamp_ms` index with a continuation pair of timestamp and primary
-key. Filter the requested identity while the cursor scans the globally bounded
+In `apps/web/lib/logger/indexeddb-store.ts`, keep database version 2. Start the
+receipt boundary on the already-open database connection. Pass its upper key
+and the exact keys returned by receipt-prefix append batches to every page.
+Read the existing `timestamp_ms` index with a continuation pair of timestamp
+and primary key. Use `continuePrimaryKey()` for equal-timestamp continuation.
+Filter the requested identity while the cursor scans the globally bounded
 store.
 
 Return one page and close its readonly transaction before the uploader asks for
 the next page. Use stored prepared-byte counts for page limits. Do not use
 `getAll` or sort the complete identity partition.
 
-Before the first page, record the highest persisted primary key. Pass this fixed
-upper boundary to every page read so entries written after receipt cannot enter
-the capture between page transactions.
+Start the fixed boundary transaction at receipt, before the prefix flush. Pass
+the combined boundary key to every page read so entries written after receipt
+cannot enter the capture between page transactions. Use receipt memory when the
+boundary transaction cannot be proven.
 
 ### Upload budget and page sizes
 
@@ -178,16 +186,17 @@ with tests for the streaming capture behavior.
 
 ## Work orders
 
-- [x] [Task 01: Measure Capture Phases](task-01-measure-capture-phases.md)
-- [x] [Task 02: Bound and Stream Capture](task-02-bound-and-stream-capture.md)
+- [ ] [Task 01: Measure Capture Phases](task-01-measure-capture-phases.md)
+- [ ] [Task 02: Bound and Stream Capture](task-02-bound-and-stream-capture.md)
 
-Task 02 uses the available phase evidence. The active-profile phase table could
-not be reproduced because this workspace had no attached browser session.
+Task 02 has an implementation and focused verification, but its work order
+remains blocked by the missing Task 01 evidence. The active-profile phase table
+could not be reproduced because this workspace had no attached browser session.
 
 ## Verification results
 
 - `pnpm install --frozen-lockfile` completed from `apps`.
-- The focused frontend logger suite passed: 4 files and 40 tests.
+- The focused frontend logger suite passed: 4 files and 45 tests.
 - `pnpm run typecheck` passed from `apps/web`.
 - The log-bundle package tests passed: 23 tests.
 - The log-bundle package race tests passed: 23 tests.
@@ -196,10 +205,44 @@ not be reproduced because this workspace had no attached browser session.
 - The repository-wide backend test target was run twice. Both runs failed in
   unrelated process-probe, configuration-discovery, launcher, and Office
   migration tests. The first run also used the workspace home configuration.
+- The required active-profile phase tables, 90 percent accounting, request
+  sizes and counts, and backend 250 millisecond / 10 percent gate results
+  remain uncollected.
+
+## Execution TODO
+
+- [ ] Collect two active-profile captures and the isolated-profile phase tables.
+- [ ] Account for at least 90 percent of frontend and backend timing.
+- [ ] Apply the backend 250 millisecond and 10 percent gate.
+- [x] Implement Task 02 bounded, paged capture with regression tests.
+- [x] Run the exact task-defined checks and update work-order/plan status.
+- [ ] Commit the current remediation with hooks and push the feature branch.
+- [ ] Run PR fixup for the current remediation head.
+
+## Previous PR Fixup Result (superseded)
+
+- PR #3540: https://github.com/kdlbs/kandev/pull/3540
+- Fixup commit: `105549d3f79f3527719275669b5f0c4f178e12d4`
+- Final exact-head CI: 54 passed, 0 failed, 0 pending; snapshot complete.
+- Final review state: 0 unresolved threads, 0 hidden unresolved threads, and 0 actionable issue comments. All six original threads were explicitly resolved.
+- Final mergeability: `MERGEABLE / CLEAN`. The `main` base advanced during CI; local `git merge-tree --write-tree` validation completed without conflicts.
+
+## Current remediation
+
+- Replaced the post-flush high-watermark read with a receipt-started serialized
+  boundary and receipt-prefix primary-key tracking.
+- Replaced equal-timestamp rescans with `continuePrimaryKey()` and added a
+  cursor-visit bound regression.
+- Reopened Task 01 and this plan. The missing phase evidence remains an
+  explicit blocker, and Task 02 is a bounded mitigation rather than a root
+  cause claim.
+- Local remediation tests passed. Remote CI and review checks for the new head
+  are pending.
 
 ## Risks
 
 - A timestamp cursor can skip or duplicate entries when timestamps are equal.
+- An IndexedDB boundary can be unavailable when its connection is not open.
 - A slow active write can continue after capture selects its memory fallback.
 - A delayed notification can leave less server time than the relative client
   budget. The backend can reject the late request.
