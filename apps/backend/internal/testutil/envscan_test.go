@@ -122,6 +122,28 @@ func read() string { return stdos.Getenv("FOO") }
 	}
 }
 
+// TestUncoveredEnvReadsIgnoresShadowedAliasedOSImport ensures a local binding
+// with the import's spelling does not turn an unrelated Getenv method into an
+// environment read.
+func TestUncoveredEnvReadsIgnoresShadowedAliasedOSImport(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import stdos "os"
+
+type reader struct{}
+
+func (reader) Getenv(string) string { return "" }
+
+func read(stdos reader) string { return stdos.Getenv("BAR") }
+func genuineRead() string { return stdos.Getenv("REAL") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 1 || !strings.Contains(messages[0], "REAL") {
+		t.Fatalf("expected only the genuine aliased os read, got %v", messages)
+	}
+}
+
 func TestUncoveredEnvReadsUncoveredDotImportedOS(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
@@ -154,6 +176,23 @@ func lookupenv() (string, bool) { return LookupEnv("BAR") }
 	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, []string{"BAR"})
 	if len(messages) != 0 {
 		t.Fatalf("covered dot-imported reads reported as uncovered: %v", messages)
+	}
+}
+
+// TestUncoveredEnvReadsIgnoresShadowedDotImportedOS ensures a local Getenv
+// binding does not turn an unrelated function value into an environment read.
+func TestUncoveredEnvReadsIgnoresShadowedDotImportedOS(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import . "os"
+
+func read(Getenv func(string) string) string { return Getenv("BAR") }
+func genuineRead() string { return Getenv("REAL") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 1 || !strings.Contains(messages[0], "REAL") {
+		t.Fatalf("expected only the genuine dot-imported os read, got %v", messages)
 	}
 }
 
