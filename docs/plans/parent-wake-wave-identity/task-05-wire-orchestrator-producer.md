@@ -1,7 +1,7 @@
 ---
 id: "05-wire-orchestrator-producer"
 title: "Wire orchestrator (P4) onto wave identity"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-wave-identity-primitives", "04-wire-engine-routed-producers"]
 plan: "plan.md"
@@ -94,4 +94,21 @@ task is a small, additive change to one existing function.
 
 ## Results
 
-Pending.
+Done, in `feat(orchestrator): derive wave identity in the children-completed
+producer`. `childCompletionPayload(parentID string, rows
+[]models.ChildCompletionRow)` derives `WaveKey`/`WaveString` via a new
+`childCompletionWaveIdentity` helper (copies row ids into a fresh slice,
+`sort.Strings`, then `waveidentity.WaveKey`/`WaveString` — never mutates
+`rows`, so `childCompletionOperationID`'s created_at-ordered derivation,
+called earlier in `processOnChildrenCompleted`, is unaffected regardless of
+call order). No new read: `readyChildCompletionRows` already applies the
+same predicate `ListWaveMembers` does and already confirms terminality
+before `rows` reaches `evaluateChildrenCompleted`; it also already gates on
+`len(rows) == 0`, so `childCompletionPayload` never runs against zero wave
+members in production (AC-...-001.7 holds by construction, no extra guard
+needed).
+
+`go test ./internal/orchestrator/...` (full package, ~84s) and
+`golangci-lint run ./internal/orchestrator/...
+--new-from-rev=cd78236315f28982848de4938d56f7722c7f632f` both clean.
+`TestProcessOnChildrenCompleted_DedupedAcrossReinit` passes unmodified.
