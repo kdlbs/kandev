@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/maintenance"
 )
 
@@ -76,6 +77,7 @@ func runMaintenance(argv []string, _ BuildInfo) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
+	applyMaintenanceHomeDirOverride(cfg, args.HomeDir)
 
 	homeDir := resolveHomeDirForConfig(cfg)
 	databasePath := resolveDatabasePathForConfig(cfg)
@@ -88,11 +90,20 @@ func runMaintenance(argv []string, _ BuildInfo) int {
 
 	outcome, err := maintenance.Run(context.Background(), homeDir, cfg.Database.Driver, databasePath, opts, nil)
 	if err != nil {
+		if outcome.Executed {
+			printMaintenanceOutcome(outcome)
+		}
 		printMaintenanceFailure(err)
 		return 1
 	}
 	printMaintenanceOutcome(outcome)
 	return 0
+}
+
+func applyMaintenanceHomeDirOverride(cfg *config.Config, homeDir string) {
+	if cfg != nil && strings.TrimSpace(homeDir) != "" {
+		cfg.HomeDir = homeDir
+	}
 }
 
 func parseMaintenanceDatabaseArgs(argv []string) (maintenanceDatabaseArgs, error) {

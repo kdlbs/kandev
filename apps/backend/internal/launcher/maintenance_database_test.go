@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/maintenance"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -130,6 +131,40 @@ func TestRunMaintenanceDryRunEndToEndReportsCandidates(t *testing.T) {
 	}
 	if !strings.Contains(output, "mode: dry run") {
 		t.Fatalf("output = %q, want a dry-run mode line", output)
+	}
+}
+
+func TestMaintenanceHomeDirOverrideSetsDefaultDatabaseLocation(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
+	homeDir := t.TempDir()
+	writeLauncherConfig(t, filepath.Join(homeDir, "config.yaml"), "database:\n  driver: sqlite\n")
+
+	cfg, err := loadBootstrapConfigWithHome(homeDir)
+	if err != nil {
+		t.Fatalf("loadBootstrapConfigWithHome: %v", err)
+	}
+	if cfg.HomeDir != "" {
+		t.Fatalf("config home directory = %q, want config to rely on the CLI override", cfg.HomeDir)
+	}
+	applyMaintenanceHomeDirOverride(cfg, homeDir)
+	if got := resolveHomeDirForConfig(cfg); got != homeDir {
+		t.Fatalf("resolved home = %q, want %q", got, homeDir)
+	}
+	if got, want := resolveDatabasePathForConfig(cfg), filepath.Join(homeDir, "data", "kandev.db"); got != want {
+		t.Fatalf("default database path = %q, want %q", got, want)
+	}
+}
+
+func TestPrintMaintenanceOutcomeReportsExecutedPartialProgress(t *testing.T) {
+	output := captureLauncherStdout(t, func() {
+		printMaintenanceOutcome(maintenance.Outcome{
+			Executed:   true,
+			BackupPath: "/tmp/backup.db",
+			Execution:  maintenance.ExecutionResult{DeletedGitSnapshots: 2},
+		})
+	})
+	if !strings.Contains(output, "backup:                       /tmp/backup.db") || !strings.Contains(output, "deleted git snapshots:        2") {
+		t.Fatalf("partial progress output = %q, want backup and deletion details", output)
 	}
 }
 

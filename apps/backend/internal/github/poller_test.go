@@ -606,6 +606,29 @@ func TestRefreshStaleBranches_PreservesSameRepositoryMultiBranchWatches(t *testi
 	}
 }
 
+func TestRefreshStaleBranches_RemovesSearchingWatchMissingFromMultiBranchSet(t *testing.T) {
+	poller, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "t1", false)
+	for _, watch := range []*PRWatch{
+		{SessionID: "s1", TaskID: "t1", RepositoryID: "repo-1", Owner: "myorg", Repo: "myrepo", Branch: "feature-a"},
+		{SessionID: "s2", TaskID: "t1", RepositoryID: "repo-1", Owner: "myorg", Repo: "myrepo", Branch: "feature-b"},
+	} {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+			t.Fatalf("create PR watch %s: %v", watch.Branch, err)
+		}
+	}
+	poller.SetTaskBranchProvider(&mockTaskBranchProvider{branches: map[string]string{"repo-1": "feature-a"}, branchSets: map[string][]string{"repo-1": {"feature-a", "feature-c"}}})
+	poller.refreshStaleBranches(ctx)
+	watches, err := store.ListPRWatchesByTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 1 || watches[0].Branch != "feature-a" {
+		t.Fatalf("watches after removing obsolete branch = %+v, want only feature-a", watches)
+	}
+}
+
 func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
 	poller, _, _, store := setupPollerTest(t)
 	ctx := context.Background()

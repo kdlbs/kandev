@@ -572,7 +572,7 @@ func branchSetPreservesWatch(ctx context.Context, provider TaskBranchProvider, w
 	if len(branches) == 0 {
 		return false
 	}
-	return branchListContains(branches, watch.Branch) || len(branches) != 1
+	return branchListContains(branches, watch.Branch)
 }
 
 func branchListContains(branches []string, branch string) bool {

@@ -215,8 +215,8 @@ func TestPRWatchMigration_PrefersDiscoveredOverSearching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get searching watch: %v", err)
 	}
-	if stillSearching != nil {
-		t.Fatalf("expected searching duplicate to be removed, got %+v", stillSearching)
+	if stillSearching == nil || stillSearching.ID != "watch-searching" {
+		t.Fatalf("searching watch = %+v, want independent searching identity", stillSearching)
 	}
 }
 
@@ -264,6 +264,32 @@ func TestPRWatchMigration_MergesCrossBranchDiscoveredCollision(t *testing.T) {
 	}
 	if all[0].LastCheckStatus != "success" {
 		t.Fatalf("survivor LastCheckStatus = %q, want newest (success)", all[0].LastCheckStatus)
+	}
+}
+
+func TestPRWatchMigration_PreservesDistinctDiscoveredWatchesOnSameBranch(t *testing.T) {
+	db := openLegacyGitHubDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, "INSERT INTO workspaces (id) VALUES ('ws-1'); INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')"); err != nil {
+		t.Fatalf("seed workspace/task: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, watch := range []*PRWatch{
+		{ID: "watch-pr-1", SessionID: "session-a", TaskID: "task-1", Owner: "acme", Repo: "repo", PRNumber: 1, Branch: "feature/x", CreatedAt: now, UpdatedAt: now},
+		{ID: "watch-pr-2", SessionID: "session-b", TaskID: "task-1", Owner: "acme", Repo: "repo", PRNumber: 2, Branch: "feature/x", CreatedAt: now, UpdatedAt: now},
+	} {
+		seedLegacyPRWatch(t, db, watch)
+	}
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("migrate legacy store: %v", err)
+	}
+	watches, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 2 {
+		t.Fatalf("watches remaining = %d, want 2 distinct discovered PR identities", len(watches))
 	}
 }
 

@@ -3,6 +3,7 @@ package workflowsync
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/github"
@@ -30,6 +31,9 @@ func classifySyncErr(err error) authcircuit.FailureClass {
 
 	var ghErr *github.GitHubAPIError
 	if errors.As(err, &ghErr) {
+		if ghErr.StatusCode == http.StatusForbidden && githubRateLimitBody(ghErr.Body) {
+			return authcircuit.FailureClassTransient
+		}
 		return classifyStatusCode(ghErr.StatusCode)
 	}
 	var glErr *gitlab.APIError
@@ -43,6 +47,11 @@ func classifySyncErr(err error) authcircuit.FailureClass {
 		return authcircuit.FailureClassAuth
 	}
 	return authcircuit.FailureClassTransient
+}
+
+func githubRateLimitBody(body string) bool {
+	body = strings.ToLower(body)
+	return strings.Contains(body, "rate limit") || strings.Contains(body, "abuse detection")
 }
 
 func classifyStatusCode(status int) authcircuit.FailureClass {

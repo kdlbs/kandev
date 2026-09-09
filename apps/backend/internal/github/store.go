@@ -1965,6 +1965,10 @@ func dedupPRWatchesForTaskOwnership(all []*PRWatch) (toDelete map[string]bool, s
 	type branchKey struct{ taskID, repositoryID, branch string }
 	branchGroups := map[branchKey][]*PRWatch{}
 	for _, w := range all {
+		if w.PRNumber != 0 {
+			survivors[w.ID] = w
+			continue
+		}
 		k := branchKey{w.TaskID, w.RepositoryID, w.Branch}
 		branchGroups[k] = append(branchGroups[k], w)
 	}

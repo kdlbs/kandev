@@ -51,6 +51,11 @@ func TestClassifySyncErr_GitHubAPIErrorByStatus(t *testing.T) {
 	}
 }
 
+func TestClassifySyncErr_GitHubRateLimit403IsTransient(t *testing.T) {
+	err := &github.GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/repos/x/y", Body: "API rate limit exceeded for installation"}
+	assert.Equal(t, authcircuit.FailureClassTransient, classifySyncErr(err))
+}
+
 func TestClassifySyncErr_GitLabAPIErrorByStatus(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,14 +101,16 @@ func compact(ctx context.Context, writer *sqlx.DB, closeConnections func() error
 	// database being replaced may - move them alongside the rollback file
 	// (rather than leave them stranded at the old name) so the rollback
 	// artifact is self-consistent if ever restored.
-	moveSidecarIfExists(dbPath+"-wal", rollbackPath+"-wal")
-	moveSidecarIfExists(dbPath+"-shm", rollbackPath+"-shm")
+	movedSidecars, err := moveCompactionSidecars(dbPath, rollbackPath)
+	if err != nil {
+		restoreErr := restoreCompactionFiles(rollbackPath, dbPath, movedSidecars)
+		_ = os.Remove(stagedPath)
+		return CompactionResult{}, fmt.Errorf("move live database sidecars aside for rollback: %w", errors.Join(err, restoreErr))
+	}
 
 	if err := os.Rename(stagedPath, dbPath); err != nil {
-		// Best-effort restore of the original so a failed swap doesn't
-		// leave the install without any database at dbPath.
-		_ = os.Rename(rollbackPath, dbPath)
-		return CompactionResult{}, fmt.Errorf("swap staged database into place: %w", err)
+		restoreErr := restoreCompactionFiles(rollbackPath, dbPath, movedSidecars)
+		return CompactionResult{}, fmt.Errorf("swap staged database into place: %w", errors.Join(err, restoreErr))
 	}
 	fsyncDir(filepath.Dir(dbPath))
 
@@ -148,14 +151,37 @@ func verifySQLiteIntegrity(path string) error {
 	return fmt.Errorf("%w: %s", ErrIntegrityCheckFailed, strings.Join(messages, "; "))
 }
 
-// moveSidecarIfExists renames a WAL/SHM sidecar file if present, silently
-// doing nothing if it doesn't exist (the common case for a WAL-checkpointed
-// database at rest under exclusive access).
-func moveSidecarIfExists(from, to string) {
-	if _, err := os.Stat(from); err != nil {
-		return
+// moveCompactionSidecars moves existing WAL/SHM files to the rollback name.
+// A missing sidecar is normal; every other inspection or rename error aborts
+// the swap so an old sidecar cannot be paired with the compacted database.
+func moveCompactionSidecars(dbPath, rollbackPath string) ([]string, error) {
+	var moved []string
+	for _, suffix := range []string{"-wal", "-shm"} {
+		from, to := dbPath+suffix, rollbackPath+suffix
+		if _, err := os.Stat(from); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return moved, err
+		}
+		if err := os.Rename(from, to); err != nil {
+			return moved, err
+		}
+		moved = append(moved, suffix)
 	}
-	_ = os.Rename(from, to)
+	return moved, nil
+}
+
+func restoreCompactionFiles(rollbackPath, dbPath string, movedSidecars []string) error {
+	var restoreErr error
+	if err := os.Rename(rollbackPath, dbPath); err != nil {
+		restoreErr = errors.Join(restoreErr, fmt.Errorf("restore database: %w", err))
+	}
+	for _, suffix := range movedSidecars {
+		if err := os.Rename(rollbackPath+suffix, dbPath+suffix); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore %s sidecar: %w", suffix, err))
+		}
+	}
+	return restoreErr
 }
 
 // fsyncDir best-effort fsyncs a directory so the preceding renames are

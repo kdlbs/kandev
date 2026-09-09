@@ -402,6 +402,29 @@ func TestCompactAbortsOnIntegrityCheckFailure(t *testing.T) {
 	}
 }
 
+func TestMoveCompactionSidecarsMovesRollbackSetTogether(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "live.db")
+	rollbackPath := filepath.Join(dir, "rollback.db")
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.WriteFile(dbPath+suffix, []byte(suffix), 0o600); err != nil {
+			t.Fatalf("write sidecar %s: %v", suffix, err)
+		}
+	}
+	moved, err := moveCompactionSidecars(dbPath, rollbackPath)
+	if err != nil {
+		t.Fatalf("moveCompactionSidecars: %v", err)
+	}
+	if got, want := strings.Join(moved, ","), "-wal,-shm"; got != want {
+		t.Fatalf("moved = %q, want %q", got, want)
+	}
+	for _, suffix := range moved {
+		if _, err := os.Stat(rollbackPath + suffix); err != nil {
+			t.Fatalf("rollback sidecar %s missing: %v", suffix, err)
+		}
+	}
+}
+
 func alwaysEnoughDiskUsage(_ context.Context, _ string) (metrics.DiskCapacity, error) {
 	return metrics.DiskCapacity{TotalBytes: 1 << 40, AvailableBytes: 1 << 40, UsedBytes: 0, UsedPercent: 0}, nil
 }
