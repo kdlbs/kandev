@@ -362,7 +362,7 @@ spec's E2E decision explicitly leaves to Go-level coverage.
 - [x] [Task 03: Wire cascade (P1) onto wave identity](task-03-wire-cascade-producer.md)
 - [x] [Task 04: Wire engine-routed producers (P2, P3) onto wave identity](task-04-wire-engine-routed-producers.md)
 - [x] [Task 05: Wire orchestrator (P4) onto wave identity](task-05-wire-orchestrator-producer.md)
-- [ ] [Task 06: Backstop admission compares wave identity](task-06-backstop-admission.md)
+- [x] [Task 06: Backstop admission compares wave identity](task-06-backstop-admission.md)
 - [ ] [Task 07: Race, parity, and regression coverage](task-07-race-and-regression-coverage.md)
 
 ## Verification results

@@ -1,7 +1,7 @@
 ---
 id: "06-backstop-admission"
 title: "Backstop admission compares wave identity"
-status: pending
+status: done
 wave: 4
 depends_on: ["01-wave-identity-primitives", "02-wave-identity-persistence"]
 plan: "plan.md"
@@ -107,4 +107,61 @@ Task 01 (wave-member predicate, matched exactly), Task 02 (`wake_wave_key`/
 
 ## Results
 
-Pending.
+Done, in `feat(office): compare wave identity in the backstop reconciler`.
+
+`internal/db/dialect/aggregate.go` (new file, not `json.go` — a distinct
+aggregate-vs-extraction theme) adds `OrderedIDConcat(driver, where string)
+string`, hardcoded to `tasks.id` per "simplest implementation that fully
+meets the current requirement" rather than a generic group-concat builder.
+SQLite orders via an `ORDER BY` inside the `GROUP_CONCAT` subquery;
+PostgreSQL via `string_agg(... ORDER BY ...)` in the aggregate call itself.
+`TestOrderedIDConcat_FragmentShape` checks both dialects' exact fragment
+text; `TestOrderedIDConcat_SQLite_OrdersAscendingByID` and its
+`KANDEV_TEST_POSTGRES_DSN`-gated Postgres twin insert UUID-shaped ids out
+of order and assert the concatenated result is byte-identical and
+ascending across both dialects, per the Risks section's collation-drift
+warning.
+
+`ListStuckParents` gained a `wave_string` CTE column
+(`p.id || '|' || COALESCE(OrderedIDConcat(...), '')`) over the wave-member
+predicate (not archived, not ephemeral, not automation-origin — matching
+`ListWaveMembers`), plus a second `EXISTS` gate applying that same
+predicate to remove parents with no possible wave from candidacy
+(AC-...-003.9), added beside — not replacing — the existing archived-only
+`EXISTS`. The second `NOT EXISTS` arm is now: queued/claimed blocks
+unconditionally; a terminal run whose `wake_wave_string` matches the
+parent's current one blocks (across any unrelated, non-wave-member child
+edit, unblocked only by a genuine wave-member change); a separate
+`AND (EXISTS(...) OR NOT EXISTS(...))` clause keeps the pre-upgrade
+timestamp fallback but scopes it to the parent as a whole
+(`wake_wave_key <> ''` for *any* row for that parent, any status, any
+wave), not per-row — so a parent's first wave-keyed run retires the
+timestamp rule for it permanently, even against an older, still-recent
+pre-upgrade row for the same parent (AC-...-003.6).
+
+New tests in `wake_receipts_wave_identity_test.go`:
+`TestListStuckParents_WaveMatchBlocksAcrossNonMemberChildEdit_UnblockedOnWaveMemberChange`
+(table-driven over finished/failed/cancelled — delivered-unchanged-wave not
+a candidate, an automation-origin child completing doesn't unblock it, a
+real wave-member joining does),
+`TestListStuckParents_ExcludesParentWithOnlyNonWaveMemberChildren`
+(ephemeral-only, automation-origin-only, and mixed non-member-only parents
+are all excluded, with a control candidate), and
+`TestListStuckParents_KeyedRunRetiresTimestampFallbackForParent` (a recent
+pre-upgrade terminal run that would otherwise still block under the
+timestamp rule is bypassed once any wave-keyed run — even for an unrelated,
+stale wave — exists for the parent).
+
+All 8 pre-existing `TestListStuckParents_*` tests (and their subtests)
+pass unmodified, confirming the rewrite is backward-compatible with every
+scenario that predates wave identity (their fixture runs never set
+`wake_wave_key`, so they exercise the compatibility/timestamp-fallback
+path exactly as before).
+
+`go build ./...`, `go test ./internal/office/repository/sqlite/...
+./internal/db/dialect/...` (full packages), and `golangci-lint run
+./internal/office/repository/sqlite/... ./internal/db/dialect/...
+--new-from-rev=cd78236315f28982848de4938d56f7722c7f632f` all clean. The
+gated `TestOrderedIDConcat_Postgres_OrdersAscendingByID` skips on this
+runner (no `KANDEV_TEST_POSTGRES_DSN`), consistent with not provisioning
+Docker/Postgres for this card.
