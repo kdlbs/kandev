@@ -208,3 +208,43 @@ describe("AgentSkillsTab save", () => {
     expect(saveButton.disabled).toBe(false);
   });
 });
+
+describe("AgentSkillsTab explicit skill IDs", () => {
+  it("preserves an explicitly assigned skill ID while excluding a desired-only ID", async () => {
+    const explicitSkill: Skill = {
+      ...skill,
+      id: "skill-explicit",
+      slug: "explicit-skill",
+      name: "Explicit",
+    };
+    const otherSkill: Skill = { ...skill, id: "skill-2", slug: "other-skill", name: "Other" };
+    const agentWithExplicitSkill = {
+      ...agentDesiredOnly,
+      skillIds: [explicitSkill.id],
+    } as AgentProfile;
+    vi.mocked(listSkills).mockResolvedValue({ skills: [skill, explicitSkill, otherSkill] });
+    renderSkillsTab(agentWithExplicitSkill, [skill, explicitSkill, otherSkill]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId(`skill-toggle-checkbox-${skill.slug}`).getAttribute(DATA_STATE),
+      ).toBe(CHECKED);
+      expect(
+        screen.getByTestId(`skill-toggle-checkbox-${explicitSkill.slug}`).getAttribute(DATA_STATE),
+      ).toBe(CHECKED);
+    });
+
+    fireEvent.click(screen.getByTestId(`skill-toggle-checkbox-${otherSkill.slug}`));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(updateAgentProfile).toHaveBeenCalledWith(
+        agentWithExplicitSkill.id,
+        expect.objectContaining({
+          skillIds: [explicitSkill.id, otherSkill.id],
+          desiredSkills: expect.arrayContaining([skill.slug, otherSkill.slug]),
+        }),
+      );
+    });
+  });
+});
