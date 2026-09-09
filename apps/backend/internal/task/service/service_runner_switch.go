@@ -227,20 +227,18 @@ func (s *Service) SwitchTaskRunner(ctx context.Context, taskID, executorProfileI
 		return nil, err
 	}
 
-	compat, err := s.resolveRunnerCompatibility(ctx, taskID, executor)
-	if err != nil {
-		return nil, err
-	}
+	compat := s.resolveRunnerCompatibility(ctx, taskID, executor)
 
 	req := models.RunnerSwitchRequest{
-		TaskID:                      taskID,
-		ExecutorProfileID:           executorProfileID,
-		CompatibilityApplicable:     compat.applicable,
-		CompatibilityChecked:        compat.checked,
-		CompatibilityCloneURLFound:  compat.cloneURLFound,
-		ResolvedRepositoryID:        compat.repositoryID,
-		ResolvedRepositoryUpdatedAt: compat.repositoryUpdatedAt,
-		GroupMembershipChecker:      s.runnerGroupMembershipChecker,
+		TaskID:                        taskID,
+		ExecutorProfileID:             executorProfileID,
+		CompatibilityApplicable:       compat.applicable,
+		CompatibilityChecked:          compat.checked,
+		CompatibilityResolutionFailed: compat.resolutionFailed,
+		CompatibilityCloneURLFound:    compat.cloneURLFound,
+		ResolvedRepositoryID:          compat.repositoryID,
+		ResolvedRepositoryUpdatedAt:   compat.repositoryUpdatedAt,
+		GroupMembershipChecker:        s.runnerGroupMembershipChecker,
 	}
 
 	result, err := s.tasks.SwitchTaskRunner(ctx, req)
@@ -299,8 +297,16 @@ type runnerCompatibilityResolution struct {
 	// layer uses this to tell "the gate never applied to this executor" from
 	// "the gate applied but the repository shape did not allow resolution",
 	// which must be re-validated rather than silently skipped.
-	applicable          bool
-	checked             bool
+	applicable bool
+	checked    bool
+	// resolutionFailed is true when the gate applies but a lookup it needed
+	// (a repository read, or the clone-URL candidate lookup) errored or timed
+	// out, rather than being skipped because the repository shape did not
+	// allow evaluation. Carried into the transaction and reported only after
+	// the mutability gate has passed, at the same ordered position a
+	// determinate verdict would report at, so it can never preempt a stable
+	// mutability conflict.
+	resolutionFailed    bool
 	cloneURLFound       bool
 	repositoryID        string
 	repositoryUpdatedAt time.Time
@@ -314,30 +320,33 @@ type runnerCompatibilityResolution struct {
 // task does not have exactly one repository attachment right now, resolution
 // is skipped but stays applicable, so the repository layer re-checks the
 // shape from inside the transaction rather than trusting a stale skip. A
-// candidate lookup that errors or times out aborts the whole switch as
-// evaluation_unavailable immediately, rather than being carried forward as a
-// "no URL found" verdict.
-func (s *Service) resolveRunnerCompatibility(ctx context.Context, taskID string, executor *models.Executor) (runnerCompatibilityResolution, error) {
+// candidate lookup that errors or times out is carried forward as a failed
+// resolution rather than aborting here: outcome precedence requires the
+// mutability gate, re-evaluated inside the transaction, to be checked before
+// this failure is reported, so a task that is also ineligible for a stable
+// reason (e.g. session_exists) never gets told to retry a lookup failure
+// instead.
+func (s *Service) resolveRunnerCompatibility(ctx context.Context, taskID string, executor *models.Executor) runnerCompatibilityResolution {
 	if s.executorCapabilityProber == nil || !s.executorCapabilityProber.RequiresCloneURL(string(executor.Type)) {
-		return runnerCompatibilityResolution{}, nil
+		return runnerCompatibilityResolution{}
 	}
 
 	links, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
 	if err != nil {
-		return runnerCompatibilityResolution{}, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
+		return runnerCompatibilityResolution{applicable: true, resolutionFailed: true}
 	}
 	if len(links) != 1 {
-		return runnerCompatibilityResolution{applicable: true}, nil
+		return runnerCompatibilityResolution{applicable: true}
 	}
 	link := links[0]
 	repo, err := s.repoEntities.GetRepository(ctx, link.RepositoryID)
 	if err != nil {
-		return runnerCompatibilityResolution{}, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
+		return runnerCompatibilityResolution{applicable: true, resolutionFailed: true}
 	}
 
 	found, err := runnerRepositoryHasCloneURL(ctx, repo)
 	if err != nil {
-		return runnerCompatibilityResolution{}, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
+		return runnerCompatibilityResolution{applicable: true, resolutionFailed: true}
 	}
 	return runnerCompatibilityResolution{
 		applicable:          true,
@@ -345,7 +354,7 @@ func (s *Service) resolveRunnerCompatibility(ctx context.Context, taskID string,
 		cloneURLFound:       found,
 		repositoryID:        link.RepositoryID,
 		repositoryUpdatedAt: link.UpdatedAt,
-	}, nil
+	}
 }
 
 // runnerRepositoryHasCloneURL resolves candidates in the launch path's order

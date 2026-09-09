@@ -158,6 +158,72 @@ func TestSwitchTaskRunner_EligibleTopLevelSingleRepoWritesNewProfile(t *testing.
 	}
 }
 
+// TestSwitchTaskRunner_ResultUpdatedAtMatchesPersistedValue pins
+// AC-TASKS-RUNNER-SWITCH-002.19: the event and the response the caller
+// receives must carry the task's updated-at value from the committing
+// transaction, not an independently-sampled approximation of it.
+func TestSwitchTaskRunner_ResultUpdatedAtMatchesPersistedValue(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{
+		Metadata: `{"executor_profile_id":"profile-old"}`,
+	})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	taskRepo := seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	result, err := repo.SwitchTaskRunner(ctx, baseRunnerSwitchRequest("task-1", "profile-new", taskRepo))
+	if err != nil {
+		t.Fatalf("SwitchTaskRunner error = %v, want nil", err)
+	}
+
+	reloaded, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if !result.Task.UpdatedAt.Equal(reloaded.UpdatedAt) {
+		t.Fatalf("result.Task.UpdatedAt = %v, want the persisted value %v", result.Task.UpdatedAt, reloaded.UpdatedAt)
+	}
+}
+
+// TestSwitchTaskRunner_UnrelatedMetadataSurvivesMerge pins AC-002.4: the
+// switch writes executor_profile_id through a single-key JSON merge, so
+// every other key already stored on the task's metadata column must come
+// back unchanged, not be dropped by a whole-object overwrite.
+func TestSwitchTaskRunner_UnrelatedMetadataSurvivesMerge(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{
+		Metadata: `{"executor_profile_id":"profile-old","custom_key":"custom_value","nested":{"a":1}}`,
+	})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	taskRepo := seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	result, err := repo.SwitchTaskRunner(ctx, baseRunnerSwitchRequest("task-1", "profile-new", taskRepo))
+	if err != nil {
+		t.Fatalf("SwitchTaskRunner error = %v, want nil", err)
+	}
+	if got := result.Task.Metadata["custom_key"]; got != "custom_value" {
+		t.Fatalf("result.Task metadata custom_key = %v, want custom_value", got)
+	}
+	nested, ok := result.Task.Metadata["nested"].(map[string]interface{})
+	if !ok || nested["a"] != float64(1) {
+		t.Fatalf("result.Task metadata nested = %v, want map with a=1", result.Task.Metadata["nested"])
+	}
+
+	reloaded, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got := reloaded.Metadata["custom_key"]; got != "custom_value" {
+		t.Fatalf("persisted custom_key = %v, want custom_value", got)
+	}
+	if got := reloaded.Metadata[models.MetaKeyExecutorProfileID]; got != "profile-new" {
+		t.Fatalf("persisted executor_profile_id = %v, want profile-new", got)
+	}
+}
+
 func TestSwitchTaskRunner_NoOpWhenAlreadyStoredProfile(t *testing.T) {
 	repo := newRunnerSwitchTestRepo(t)
 	ctx := context.Background()
@@ -471,6 +537,63 @@ func TestSwitchTaskRunner_SkipsCompatibilityRecheckWhenGateInapplicable(t *testi
 	if !result.Changed {
 		t.Fatal("SwitchTaskRunner Changed = false, want true")
 	}
+}
+
+// TestSwitchTaskRunner_EvaluationUnavailableWhenCompatibilityResolutionFailed
+// covers a compatibility-gate resolution that errored or timed out
+// pre-transaction (a git subprocess failure, for example) rather than being
+// skipped for a shape reason: with the mutability gate otherwise passing,
+// the switch must still reject as retriable.
+func TestSwitchTaskRunner_EvaluationUnavailableWhenCompatibilityResolutionFailed(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	req := models.RunnerSwitchRequest{
+		TaskID:                        "task-1",
+		ExecutorProfileID:             "profile-new",
+		CompatibilityApplicable:       true,
+		CompatibilityResolutionFailed: true,
+	}
+
+	_, err := repo.SwitchTaskRunner(ctx, req)
+	if !errors.Is(err, repoerrors.ErrRunnerEvaluationUnavailable) {
+		t.Fatalf("SwitchTaskRunner error = %v, want ErrRunnerEvaluationUnavailable", err)
+	}
+}
+
+// TestSwitchTaskRunner_MutabilityConflictOutranksCompatibilityResolutionFailure
+// pins AC-TASKS-RUNNER-SWITCH-002.17's outcome precedence: when a task is
+// both mutability-ineligible (session exists) and its compatibility-gate
+// resolution failed, the stable mutability reason must be reported, not the
+// retriable evaluation_unavailable one. Reversing this order would tell a
+// caller with a genuinely stable conflict to just retry.
+func TestSwitchTaskRunner_MutabilityConflictOutranksCompatibilityResolutionFailure(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{})
+	seedRunnerSwitchRepository(t, repo, "repo-1", "ws-1")
+	seedRunnerSwitchTaskRepository(t, repo, "task-1", "repo-1")
+
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	req := models.RunnerSwitchRequest{
+		TaskID:                        "task-1",
+		ExecutorProfileID:             "profile-new",
+		CompatibilityApplicable:       true,
+		CompatibilityResolutionFailed: true,
+	}
+
+	_, err := repo.SwitchTaskRunner(ctx, req)
+	assertRunnerMutabilityConflict(t, err, models.RunnerReasonSessionExists)
 }
 
 func assertRunnerMutabilityConflict(t *testing.T, err error, wantReason string) {

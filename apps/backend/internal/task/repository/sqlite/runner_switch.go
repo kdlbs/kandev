@@ -47,6 +47,14 @@ func (r *Repository) SwitchTaskRunner(ctx context.Context, req models.RunnerSwit
 	}
 
 	switch {
+	case req.CompatibilityResolutionFailed:
+		// The gate applies to this target, but a lookup pre-transaction
+		// resolution needed (a repository read, or the clone-URL candidate
+		// lookup) errored or timed out. Reported only here, after the
+		// mutability gate above has already passed, so a task that is also
+		// ineligible for a stable reason reports that reason instead of this
+		// retriable one.
+		return nil, fmt.Errorf("%w: compatibility resolution failed", repoerrors.ErrRunnerEvaluationUnavailable)
 	case req.CompatibilityChecked:
 		if err := runnerSwitchConfirmCompatibility(req, repoSnapshot); err != nil {
 			return nil, err
@@ -174,14 +182,15 @@ func (r *Repository) runnerSwitchApply(
 	if stored == executorProfileID {
 		return &models.RunnerSwitchResult{Task: task, Changed: false}, nil
 	}
-	if err := r.setTaskMetadataKeyWithExecutor(ctx, tx, task.ID, models.MetaKeyExecutorProfileID, executorProfileID); err != nil {
+	now := time.Now().UTC()
+	if err := r.setTaskMetadataKeyWithExecutor(ctx, tx, task.ID, models.MetaKeyExecutorProfileID, executorProfileID, now); err != nil {
 		return nil, fmt.Errorf("%w: %v", repoerrors.ErrRunnerEvaluationUnavailable, err)
 	}
 	if task.Metadata == nil {
 		task.Metadata = map[string]interface{}{}
 	}
 	task.Metadata[models.MetaKeyExecutorProfileID] = executorProfileID
-	task.UpdatedAt = time.Now().UTC()
+	task.UpdatedAt = now
 	return &models.RunnerSwitchResult{Task: task, Changed: true}, nil
 }
 
@@ -191,8 +200,12 @@ func (r *Repository) runnerSwitchApply(
 // none accepts a transaction, but the switch's write must happen inside the
 // serialized transaction or it would land even when the transaction rolls
 // back, defeating the guarantee that a rejected switch persists nothing.
+// updatedAt is supplied by the caller, rather than sampled here, so the
+// value written to the row and the value the caller carries forward (into
+// the returned task and the published event) are the same instant rather
+// than two independent clock reads either side of the write.
 func (r *Repository) setTaskMetadataKeyWithExecutor(
-	ctx context.Context, exec taskSessionExecutor, taskID, key string, value interface{},
+	ctx context.Context, exec taskSessionExecutor, taskID, key string, value interface{}, updatedAt time.Time,
 ) error {
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -208,7 +221,7 @@ func (r *Repository) setTaskMetadataKeyWithExecutor(
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		path = jsonPath(key)
 	}
-	_, err = exec.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID)
+	_, err = exec.ExecContext(ctx, r.db.Rebind(query), path, string(payload), updatedAt, taskID)
 	return err
 }
 

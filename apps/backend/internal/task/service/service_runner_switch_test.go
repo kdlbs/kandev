@@ -319,6 +319,90 @@ func TestSwitchTaskRunner_SuccessAssignsAndPublishesEvent(t *testing.T) {
 	}
 }
 
+// TestSwitchTaskRunner_NoSessionEnvironmentOrExecutorSideEffects pins
+// AC-003.2: a runner switch changes only the task's stored
+// executor_profile_id metadata. It must not create a session, an
+// environment, an executors_running row, or a workspace folder as a side
+// effect of the write.
+func TestSwitchTaskRunner_NoSessionEnvironmentOrExecutorSideEffects(t *testing.T) {
+	svc, _, repo, _ := newRunnerSwitchTestService(t)
+	task := seedRunnerSwitchTask(t, svc, repo)
+	seedRunnerSwitchExecutor(t, repo, "executor-active-4", "profile-target-2", models.ExecutorStatusActive)
+
+	if _, err := svc.SwitchTaskRunner(context.Background(), task.ID, "profile-target-2"); err != nil {
+		t.Fatalf("SwitchTaskRunner = %v, want success", err)
+	}
+
+	sessions, err := repo.ListTaskSessions(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions after switch = %d, want 0", len(sessions))
+	}
+
+	env, err := repo.GetTaskEnvironmentByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironmentByTaskID: %v", err)
+	}
+	if env != nil {
+		t.Fatalf("task environment after switch = %+v, want none", env)
+	}
+
+	running, err := repo.ListExecutorsRunningByTaskID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListExecutorsRunningByTaskID: %v", err)
+	}
+	if len(running) != 0 {
+		t.Fatalf("executors_running after switch = %d, want 0", len(running))
+	}
+
+	folders, err := repo.ListTaskWorkspaceFolders(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListTaskWorkspaceFolders: %v", err)
+	}
+	if len(folders) != 0 {
+		t.Fatalf("workspace folders after switch = %d, want 0", len(folders))
+	}
+}
+
+// TestSwitchTaskRunner_EventPayloadCarriesRunnerMutabilityFields pins
+// AC-003.3: the published task.updated event's payload must carry the
+// task's real runner_editable/runner_ineligible_reason values, not merely
+// exist as an event of the right type.
+func TestSwitchTaskRunner_EventPayloadCarriesRunnerMutabilityFields(t *testing.T) {
+	svc, eventBus, repo, _ := newRunnerSwitchTestService(t)
+	task := seedRunnerSwitchTask(t, svc, repo)
+	seedRunnerSwitchExecutor(t, repo, "executor-active-5", "profile-target-3", models.ExecutorStatusActive)
+	eventBus.ClearEvents()
+
+	if _, err := svc.SwitchTaskRunner(context.Background(), task.ID, "profile-target-3"); err != nil {
+		t.Fatalf("SwitchTaskRunner = %v, want success", err)
+	}
+
+	var payload map[string]interface{}
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskUpdated {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("task.updated event Data = %T, want map[string]interface{}", evt.Data)
+		}
+		payload = data
+	}
+	if payload == nil {
+		t.Fatal("no task.updated event published")
+	}
+	editable, ok := payload["runner_editable"].(bool)
+	if !ok || !editable {
+		t.Fatalf("runner_editable = %v, want true", payload["runner_editable"])
+	}
+	if reason, _ := payload["runner_ineligible_reason"].(string); reason != models.RunnerReasonEligible {
+		t.Fatalf("runner_ineligible_reason = %q, want %q", reason, models.RunnerReasonEligible)
+	}
+}
+
 // TestReplaceTaskRepositoriesBypassesRunnerMutabilityGate pins F19's accepted
 // risk: replaceTaskRepositories (reached through UpdateTask's Repositories
 // field) is a third writer of task_repositories that does not consult the

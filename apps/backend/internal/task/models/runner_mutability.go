@@ -165,6 +165,12 @@ type RunnerSwitchRequest struct {
 	// is true, the gate was applicable but unresolved (the repository shape
 	// did not allow evaluation) and ResolvedRepository* are unused.
 	CompatibilityChecked bool
+	// CompatibilityResolutionFailed is true when the gate applies but
+	// resolution could not complete (a repository read failed, or the
+	// clone-URL lookup errored or timed out) rather than being skipped for a
+	// shape reason. Reported only after the mutability gate has passed, so a
+	// resolution failure never preempts a stable mutability conflict.
+	CompatibilityResolutionFailed bool
 	// CompatibilityCloneURLFound is meaningful only when CompatibilityChecked
 	// is true: whether resolution found a usable clone URL for
 	// ResolvedRepositoryID.
