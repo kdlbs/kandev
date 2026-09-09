@@ -526,6 +526,16 @@ func (s *Service) handleTasklessAgentCompleted(
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Same reasoning as handleAgentCompleted's and handleAgentFailed's
+			// ErrNoRows exits: no claimed run resolves, so nothing reaches
+			// this function's own clear below, but the agent may still be
+			// "working" from the launch. Scoped to data.RunID for the same
+			// reason.
+			agentProfileID := data.AgentProfileID
+			if agentProfileID == "" {
+				agentProfileID = data.AgentID
+			}
+			s.clearAgentWorking(ctx, agentProfileID, data.RunID)
 			return nil
 		}
 		return err
@@ -687,8 +697,10 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		"session_id":    data.SessionID,
 		"error_message": data.ErrorMessage,
 	})
+	// Clear before routing can make the run claimable again. This prevents
+	// cleanup from this attempt from matching a relaunch that reuses its run ID.
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
-		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return nil
 	}
 	// Office failure path (v1): every agent error is terminal. The

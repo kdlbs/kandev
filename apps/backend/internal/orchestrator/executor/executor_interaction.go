@@ -176,6 +176,9 @@ func (e *Executor) stopSession(
 	}
 
 	e.logStop(session, executionID, reason, force)
+	if e.onExecutionStopOwnerRegistration != nil {
+		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
+	}
 
 	changed, finalState, stateErr := e.transitionSessionState(
 		ctx,

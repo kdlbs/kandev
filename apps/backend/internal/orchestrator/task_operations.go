@@ -75,6 +75,11 @@ const resumeReasonFailedSessionResumable = "failed_session_resumable"
 // instead of staying stuck on read-only workspace restore.
 const resumeReasonArchiveCancelledResumable = "archive_cancelled_resumable"
 
+// resumeReasonTaskArchived tells clients that recovery is unavailable until
+// the owning task is unarchived. It is intentionally distinct from a runtime
+// failure so archived history never enters recovery UI.
+const resumeReasonTaskArchived = "task_archived"
+
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
@@ -2923,6 +2928,20 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 // tell the two apart.
 const sessionNotFoundStatus = "session not found"
 
+func (s *Service) ensureTaskNotArchived(ctx context.Context, taskID string) error {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to load task: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("failed to load task: task %s is nil", taskID)
+	}
+	if task.ArchivedAt != nil {
+		return executor.ErrTaskArchived
+	}
+	return nil
+}
+
 // GetTaskSessionStatus returns the status of a task session including whether it's resumable
 func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID string) (dto.TaskSessionStatusResponse, error) {
 	s.logger.Debug("checking task session status",
@@ -2953,9 +2972,21 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		return resp, nil
 	}
 
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return resp, fmt.Errorf("failed to load task: %w", err)
+	}
+	if task == nil {
+		return resp, fmt.Errorf("failed to load task: task %s is nil", taskID)
+	}
+
 	resp.State = string(session.State)
 	resp.UpdatedAt = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	resp.AgentProfileID = session.AgentProfileID
+	if task.ArchivedAt != nil {
+		resp.ResumeReason = resumeReasonTaskArchived
+		return resp, nil
+	}
 	s.populateExecutorStatusInfo(ctx, session, &resp)
 
 	running, runErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
@@ -3437,6 +3468,26 @@ func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 	return s.executor.StopByTaskID(ctx, taskID, reason, force)
+}
+
+// CancelTaskExecutionSynchronously stops every active session for a task and
+// waits for each runtime process to exit. Archive and delete cascades use this
+// boundary so an unarchive cannot race a late asynchronous stop callback.
+func (s *Service) CancelTaskExecutionSynchronously(ctx context.Context, taskID, reason string, force bool) error {
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	var lastErr error
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if err := s.StopSessionSynchronously(ctx, session.ID, reason, force); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
 }
 
 // StopSession stops agent execution for a specific session

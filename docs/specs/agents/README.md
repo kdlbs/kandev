@@ -38,3 +38,4 @@ canonical requirement and system-design documents. Use the catalog command to fi
 - [Tasks](../tasks/README.md): consumes agent profiles for task execution.
 - [Office](../office/README.md): consumes agent identities for autonomous work.
 - [Platform](../platform/README.md): owns shared process and runtime services.
+

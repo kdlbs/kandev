@@ -46,7 +46,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithHandoff(
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		return false
 	}
-	if s.messageQueue == nil || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
+	if !s.canDrainQueuedMessage(sessionID) {
 		return false
 	}
 	identity := messagequeue.QueueSessionIdentity{
@@ -67,6 +67,12 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithHandoff(
 		}
 	}
 	return s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok)
+}
+
+func (s *Service) canDrainQueuedMessage(sessionID string) bool {
+	return s.messageQueue != nil &&
+		!s.isQueuedDispatchInFlight(sessionID) &&
+		!s.isSteerInFlight(sessionID)
 }
 
 // withStepHandoffMetadata returns a shallow copy of msg carrying handoffText

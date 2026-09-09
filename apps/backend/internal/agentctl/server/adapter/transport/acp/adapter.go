@@ -513,9 +513,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 

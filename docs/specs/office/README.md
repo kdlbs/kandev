@@ -37,3 +37,4 @@ canonical requirement and system-design documents. Use the catalog command to fi
 - [Agents](../agents/README.md): supplies agent profiles and permission policy.
 - [Integrations](../integrations/README.md): supplies provider connections.
 
+

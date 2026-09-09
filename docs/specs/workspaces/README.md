@@ -35,3 +35,4 @@ canonical requirement and system-design documents. Use the catalog command to fi
 
 - [Tasks](../tasks/README.md): consumes workspace repositories and worktrees.
 - [Integrations](../integrations/README.md): supplies remote repository identity.
+

@@ -981,8 +981,16 @@ export class ApiClient {
     return this.request("GET", `/api/v1/secrets${suffix ? `?${suffix}` : ""}`);
   }
 
-  async deleteSecret(secretId: string, workspaceId?: string): Promise<void> {
-    const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  async deleteSecret(
+    secretId: string,
+    workspaceId?: string,
+    options?: { force?: boolean },
+  ): Promise<void> {
+    const query = new URLSearchParams();
+    if (workspaceId) query.set("workspace_id", workspaceId);
+    if (options?.force) query.set("force", "true");
+    const encodedQuery = query.toString();
+    const suffix = encodedQuery ? `?${encodedQuery}` : "";
     const response = await this.rawRequest("DELETE", `/api/v1/secrets/${secretId}${suffix}`);
     if (!response.ok) {
       throw new Error(

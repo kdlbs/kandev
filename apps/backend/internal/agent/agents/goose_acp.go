@@ -141,7 +141,7 @@ func (a *GooseACP) RemoteAuth() *RemoteAuth {
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{
-				Type:  "files",
+				Type:  remoteAuthMethodTypeFiles,
 				Label: "Copy Goose config files",
 				SourceFiles: map[string][]string{
 					"darwin": {".config/goose/config.yaml", ".config/goose/extensions.yaml", ".config/goose/secrets.yaml"},
