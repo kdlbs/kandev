@@ -33,6 +33,12 @@ For UI rendering bugs, prefer extracting or using a pure helper and testing that
 
 ## Determine test scope
 
+When implementing a UI work order, read its ASCII UI preview and linked plan
+before changing the surface. Use the structural requirements to guide the
+existing rendered checks; do not test ASCII whitespace or treat it as exact
+pixel geometry. Keep any design revisions synchronized through
+`docs/specs/guide/plans-and-work-orders.md#ascii-ui-previews`.
+
 - **Go unit** (`apps/backend/`): test file next to source as `*_test.go`. Run:
   ```bash
   cd apps/backend && go test -v -run TestName ./internal/path/to/package/...

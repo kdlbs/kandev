@@ -91,6 +91,10 @@ Each work order must contain:
 Work orders do not name a worker role or model tier. Waves can identify
 parallel-safe candidates. They do not authorize subagents.
 
+For rendered UI changes, include ASCII previews in the plan and relevant UI
+work orders through `/plan`. Follow the shared contract in
+`docs/specs/guide/plans-and-work-orders.md#ascii-ui-previews`.
+
 ## Design-package handoff
 
 Before implementation, report:
@@ -100,6 +104,8 @@ Before implementation, report:
 - The plan and work-order paths.
 - Dependency order and exact verification commands.
 - Open risks and exclusions.
+- For UI changes, a compact inline ASCII preview of the proposed UI, with a
+  distinct phone view when composition differs, plus links to the full previews.
 
 Then end the turn. Do not ask the user to approve the package or switch models.
 The user reviews the files and sends a later implementation request.

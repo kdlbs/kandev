@@ -23,7 +23,6 @@ import {
   listWorkflowStepsAction,
   getStepTaskCount,
   getWorkflowTaskCount,
-  exportWorkflowAction,
   bulkMoveTasks,
 } from "@/app/actions/workspaces";
 
@@ -123,6 +122,19 @@ function createRemoveWorkflowStepHandler(
   const isNewWorkflow = params.isNewWorkflow ?? workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   return async (stepId: string) => {
     if (readOnly) return;
+    const dependentStep = workflowSteps.find(
+      (step) => step.session_target?.kind === "step" && step.session_target.step_id === stepId,
+    );
+    if (dependentStep) {
+      toast({
+        title: t("workflows:sessionTargetDependentMustBeRepaired"),
+        description: t("workflows:sessionTargetDependentRepairDescription", {
+          stepName: dependentStep.name,
+        }),
+        variant: "error",
+      });
+      return;
+    }
     const proposedSteps = workflowSteps
       .filter((step) => step.id !== stepId)
       .map((step, position) => ({ ...step, position }));
@@ -331,6 +343,7 @@ async function createMissingSteps(
       profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
         step.profile_session_end_policy,
       ),
+      session_target: undefined,
       auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     });
     mappings.set(step.id, created.id);
@@ -376,6 +389,10 @@ function remapDraftStep(
     workflow_id: persistedWorkflowId as WorkflowStep["workflow_id"],
     position,
     pull_from_step_id: remapId(step.pull_from_step_id),
+    session_target:
+      step.session_target?.kind === "step"
+        ? { kind: "step", step_id: remapId(step.session_target.step_id)! }
+        : (step.session_target ?? null),
     events: remapStepReferences(step.events, mappings),
   };
 }
@@ -421,6 +438,7 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    session_target: step.session_target ?? null,
     auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     wip_limit: step.wip_limit ?? 0,
@@ -629,30 +647,4 @@ export function useStepDeleteHandlers({
   };
 
   return { handleMigrateAndDeleteStep, handleDeleteStepAndTasks };
-}
-
-type WorkflowExportActionsParams = {
-  workflowId: string;
-  setExportYaml: (yaml: string) => void;
-  setExportOpen: (open: boolean) => void;
-  toast: ReturnType<typeof useToast>["toast"];
-};
-
-export async function handleExportWorkflow({
-  workflowId,
-  setExportYaml,
-  setExportOpen,
-  toast,
-}: WorkflowExportActionsParams) {
-  try {
-    const yamlText = await exportWorkflowAction(workflowId);
-    setExportYaml(yamlText);
-    setExportOpen(true);
-  } catch (error) {
-    toast({
-      title: t("workflows:failedToExportWorkflow"),
-      description: fallbackErrorMessage(error),
-      variant: "error",
-    });
-  }
 }

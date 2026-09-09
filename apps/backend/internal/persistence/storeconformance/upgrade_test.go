@@ -129,16 +129,19 @@ func validateOwnerRowCoverage(fixture upgradeFixture, knownMissing []string) err
 			return fmt.Errorf("owner row names unknown catalog store %q", row.Owner)
 		}
 		if _, ok := missing[row.Owner]; ok {
-			return fmt.Errorf("owner row exists for known-missing store %q", row.Owner)
+			// A stable fixture can contain rows for a store whose current
+			// descriptor gained an additional required table. The inventory check
+			// below still proves that the older fixture lacks that table.
+			continue
 		}
 		present[row.Owner] = true
 	}
 	for _, descriptor := range requiredstores.Catalog() {
 		_, expectedMissing := missing[descriptor.ID]
+		if expectedMissing {
+			continue
+		}
 		if present[descriptor.ID] == expectedMissing {
-			if expectedMissing {
-				return fmt.Errorf("known-missing store %q has an owner row", descriptor.ID)
-			}
 			return fmt.Errorf("present store %q has no owner row", descriptor.ID)
 		}
 	}

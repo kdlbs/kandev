@@ -102,6 +102,9 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
+	if err := r.migrateWorkflowSessionBindings(); err != nil {
+		return err
+	}
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	r.migrate.Apply("tasks.autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
@@ -299,6 +302,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
 	r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'complete'`)
+	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The

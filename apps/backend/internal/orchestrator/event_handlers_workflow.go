@@ -2353,6 +2353,9 @@ func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskS
 // resolveStepAgentProfile returns the effective agent profile ID for a step.
 // Resolution order: step override -> workflow default -> empty (use current session's profile).
 func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	if step != nil && step.SessionTarget != nil {
+		return ""
+	}
 	if step.AgentProfileID != "" {
 		return step.AgentProfileID
 	}
@@ -2953,6 +2956,9 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, fmt.Errorf("workflow step is nil")
 	}
 	ctx = withWorkflowMetaCache(ctx)
+	if step.SessionTarget != nil {
+		return s.prepareExplicitWorkflowSession(ctx, taskID, session, step, sourceStep)
+	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
 		if effectiveProfile != "" {
@@ -2969,6 +2975,9 @@ func (s *Service) prepareWorkflowStepSession(
 				session.IsPrimary = true
 			}
 		}
+		if err := s.recordWorkflowSourceBinding(ctx, taskID, step, session); err != nil {
+			return nil, false, err
+		}
 		return session, false, nil
 	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
@@ -2978,6 +2987,9 @@ func (s *Service) prepareWorkflowStepSession(
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
 	newSession, err := s.switchSessionForStepWithPolicies(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession); err != nil {
 		return nil, false, err
 	}
 	return newSession, true, nil
@@ -2993,6 +3005,26 @@ func (s *Service) preflightWorkflowStepCredentials(
 		return nil
 	}
 	ctx = withWorkflowMetaCache(ctx)
+	if targetStep.SessionTarget != nil {
+		resolution, err := s.resolveWorkflowSessionTarget(ctx, taskID, targetStep)
+		if err != nil {
+			return err
+		}
+		targetSession := currentSession
+		if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
+			targetSession = resolution.session
+		}
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("get task for explicit credential preflight: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task %s not found for explicit credential preflight", taskID)
+		}
+		return s.executor.PreflightManagedGitCredentials(
+			ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+		)
+	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
 	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
 		return nil
@@ -3142,7 +3174,6 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	ctx = context.WithoutCancel(ctx)
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
-
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
@@ -3206,7 +3237,6 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	if dispatchResult.aborted {
 		return
 	}
-
 	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched)
 }
 
@@ -4452,10 +4482,13 @@ func (s *Service) autoStartStepPrompt(
 	prompt = mergedPrompt
 	agentPrompt := AppendEntityReferenceContext(prompt, references)
 	effectiveAgentPrompt := s.effectivePromptForSession(sessionID, agentPrompt, planMode, session)
-	if strings.TrimSpace(effectiveAgentPrompt) == "" && len(attachments) == 0 && queuedHandoff == "" {
-		// The session is already running after ensureSessionRunning; no prompt
-		// means we leave it waiting for the first user message rather than
-		// auto-starting. Attachment-only handoffs are admitted below.
+	if strings.TrimSpace(effectiveAgentPrompt) == "" && len(attachments) == 0 && queuedHandoff == "" &&
+		session.State != models.TaskSessionStateCreated {
+		// Existing sessions are already running after ensureSessionRunning; no
+		// prompt means we leave them waiting for the first user message rather
+		// than auto-starting. A CREATED session is different: the explicit
+		// auto-start action must launch its prepared workspace even when the step
+		// has no prompt, while recordAutoStartMessage still skips an empty row.
 		return nil
 	}
 

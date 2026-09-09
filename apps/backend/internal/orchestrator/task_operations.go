@@ -1068,6 +1068,47 @@ func (s *Service) StartTaskWithRoute(
 	return err
 }
 
+func (s *Service) prepareExplicitWorkflowStartRoute(
+	ctx context.Context,
+	taskID string,
+	workflowSessionConfigStepID string,
+	callerProfileID string,
+) (*models.TaskSession, string, *models.WorkflowSessionRoute, bool, error) {
+	if workflowSessionConfigStepID == "" || s.workflowStepGetter == nil {
+		return nil, "", nil, false, nil
+	}
+
+	candidateStep, err := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID)
+	if err != nil {
+		return nil, "", nil, false, fmt.Errorf("load workflow step for session target: %w", err)
+	}
+	if candidateStep == nil || candidateStep.SessionTarget == nil {
+		return nil, "", nil, false, nil
+	}
+
+	selectedSession, profileID, err := s.selectExplicitWorkflowStartSession(ctx, taskID, candidateStep)
+	if err != nil {
+		return nil, "", nil, false, err
+	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, profileID); err != nil {
+			return nil, "", nil, false, err
+		}
+	}
+
+	startPolicy := s.resolveStepProfileSessionStartPolicy(candidateStep)
+	route := &models.WorkflowSessionRoute{
+		OperationID:       workflowSessionRouteID(taskID, candidateStep.ID, "", candidateStep.SessionTarget, startPolicy),
+		DestinationStepID: candidateStep.ID,
+		TargetKind:        string(candidateStep.SessionTarget.Kind),
+		TargetStepID:      candidateStep.SessionTarget.StepID,
+		AgentProfileID:    profileID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+	s.persistWorkflowSessionRoute(ctx, taskID, *route)
+	return selectedSession, profileID, route, profileID != callerProfileID, nil
+}
+
 //nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
 func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
@@ -1211,6 +1252,24 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		task.Priority = priority
 	}
 
+	var explicitStartRoute *models.WorkflowSessionRoute
+	var selectedExplicitSession *models.TaskSession
+	var explicitProfileID string
+	var explicitRouteApplied bool
+	selectedExplicitSession, explicitProfileID, explicitStartRoute, explicitRouteApplied, err = s.prepareExplicitWorkflowStartRoute(
+		ctx,
+		task.ID,
+		workflowSessionConfigStepID,
+		callerProfileID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if explicitRouteApplied {
+		agentProfileID = explicitProfileID
+		overrideApplied = agentProfileID != callerProfileID
+	}
+
 	// Use provided prompt, fall back to task description
 	effectivePrompt := prompt
 	if effectivePrompt == "" {
@@ -1220,9 +1279,33 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
-	if err != nil {
-		return nil, err
+	var sessionID string
+	var sessionCreated bool
+	if selectedExplicitSession != nil {
+		if err := s.preflightWorkflowSessionTarget(ctx, task.ID, selectedExplicitSession); err != nil {
+			return nil, err
+		}
+		promoted, promoteErr := s.setNonterminalSessionPrimary(ctx, selectedExplicitSession.ID)
+		if promoteErr != nil {
+			return nil, fmt.Errorf("promote explicit workflow session: %w", promoteErr)
+		}
+		if promoted {
+			sessionID = selectedExplicitSession.ID
+			s.tagSessionAsWorkflowSwitched(ctx, sessionID)
+		} else {
+			selectedExplicitSession = nil
+		}
+	}
+	if sessionID == "" {
+		sessionID, sessionCreated, err = s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if explicitStartRoute != nil {
+		explicitStartRoute.DestinationID = sessionID
+		explicitStartRoute.Phase = workflowSessionRouteCommitted
+		s.persistWorkflowSessionRoute(ctx, task.ID, *explicitStartRoute)
 	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the

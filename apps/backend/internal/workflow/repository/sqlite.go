@@ -76,6 +76,7 @@ func (r *Repository) initSchema() error {
 		profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
 		wip_limit INTEGER NOT NULL DEFAULT 0,
 		pull_from_step_id TEXT NOT NULL DEFAULT '',
+		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 		cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
@@ -131,6 +132,7 @@ func (r *Repository) initSchema() error {
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.wip_limit", `ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.pull_from_step_id", `ALTER TABLE workflow_steps ADD COLUMN pull_from_step_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
 	r.migrate.Apply("idx_workflow_steps_pull_from", `
 		CREATE INDEX IF NOT EXISTS idx_workflow_steps_pull_from
 		ON workflow_steps(pull_from_step_id)
@@ -245,15 +247,15 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 			if _, err := r.db.Exec(r.db.Rebind(`
 				INSERT INTO workflow_steps (
 					id, workflow_id, name, position, color,
-				prompt, events, allow_manual_move, is_start_step, show_in_command_panel, agent_profile_id, profile_session_start_policy, profile_session_end_policy, wip_limit, pull_from_step_id, auto_advance_requires_signal, cancel_triggers_turn_complete, created_at, updated_at
+				prompt, events, allow_manual_move, is_start_step, show_in_command_panel, agent_profile_id, profile_session_start_policy, profile_session_end_policy, wip_limit, pull_from_step_id, session_target, auto_advance_requires_signal, cancel_triggers_turn_complete, created_at, updated_at
 				) VALUES (
 					?, ?, ?, ?, ?, ?, ?, ?, ?,
-					?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 				)
 			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
 				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
-				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), now, now,
+				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), marshalSessionTarget(models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap)), dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), now, now,
 			); err != nil {
 				return err
 			}
@@ -617,6 +619,7 @@ func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *
 	step.UpdatedAt = now
 	step.ProfileSessionStartPolicy = taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy))
 	step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy))
+	sessionTargetJSON := marshalSessionTarget(step.SessionTarget)
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
@@ -640,11 +643,11 @@ func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, wip_limit, pull_from_step_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, wip_limit, pull_from_step_id, session_target, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), step.WIPLimit, step.PullFromStepID, step.CreatedAt, step.UpdatedAt)
+		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.CreatedAt, step.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -666,6 +669,17 @@ func normalizeStageType(s models.StageType) string {
 	return string(models.StageTypeCustom)
 }
 
+func marshalSessionTarget(target *models.WorkflowSessionTarget) interface{} {
+	if target == nil {
+		return nil
+	}
+	data, err := json.Marshal(target)
+	if err != nil {
+		return nil
+	}
+	return string(data)
+}
+
 // scanStep scans a single workflow step row including JSON events parsing.
 func (r *Repository) scanStep(row interface {
 	Scan(dest ...interface{}) error
@@ -673,10 +687,10 @@ func (r *Repository) scanStep(row interface {
 	step := &models.WorkflowStep{}
 	var allowManualMove, isStartStep, showInCommandPanel, autoAdvanceRequiresSignal, cancelTriggersTurnComplete int
 	var autoArchiveAfterHours sql.NullInt64
-	var color, prompt, eventsJSON, agentProfileID, profileSessionStartPolicy, profileSessionEndPolicy, stageType, pullFromStepID sql.NullString
+	var color, prompt, eventsJSON, agentProfileID, profileSessionStartPolicy, profileSessionEndPolicy, stageType, pullFromStepID, sessionTargetJSON sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &profileSessionStartPolicy, &profileSessionEndPolicy, &stageType, &autoAdvanceRequiresSignal, &cancelTriggersTurnComplete, &step.WIPLimit, &pullFromStepID, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &profileSessionStartPolicy, &profileSessionEndPolicy, &stageType, &autoAdvanceRequiresSignal, &cancelTriggersTurnComplete, &step.WIPLimit, &pullFromStepID, &sessionTargetJSON, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -703,6 +717,11 @@ func (r *Repository) scanStep(row interface {
 	if pullFromStepID.Valid {
 		step.PullFromStepID = pullFromStepID.String
 	}
+	if sessionTargetJSON.Valid && sessionTargetJSON.String != "" && sessionTargetJSON.String != "null" {
+		if err := json.Unmarshal([]byte(sessionTargetJSON.String), &step.SessionTarget); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal session target: %w", err)
+		}
+	}
 	if color.Valid {
 		step.Color = color.String
 	}
@@ -718,7 +737,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, wip_limit, pull_from_step_id, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, wip_limit, pull_from_step_id, session_target, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -749,6 +768,7 @@ func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *
 	step.UpdatedAt = time.Now().UTC()
 	step.ProfileSessionStartPolicy = taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy))
 	step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy))
+	sessionTargetJSON := marshalSessionTarget(step.SessionTarget)
 
 	eventsJSON, err := json.Marshal(step.Events)
 	if err != nil {
@@ -773,11 +793,11 @@ func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, profile_session_start_policy = ?, profile_session_end_policy = ?, stage_type = ?, auto_advance_requires_signal = ?, cancel_triggers_turn_complete = ?, wip_limit = ?, pull_from_step_id = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, profile_session_start_policy = ?, profile_session_end_policy = ?, stage_type = ?, auto_advance_requires_signal = ?, cancel_triggers_turn_complete = ?, wip_limit = ?, pull_from_step_id = ?, session_target = ?, updated_at = ?
 		WHERE id = ?
 	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), step.WIPLimit, step.PullFromStepID, step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.UpdatedAt, step.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -987,7 +1007,7 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
-			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.profile_session_start_policy, ws.profile_session_end_policy, ws.stage_type, ws.auto_advance_requires_signal, ws.cancel_triggers_turn_complete, ws.wip_limit, ws.pull_from_step_id, ws.created_at, ws.updated_at
+			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.profile_session_start_policy, ws.profile_session_end_policy, ws.stage_type, ws.auto_advance_requires_signal, ws.cancel_triggers_turn_complete, ws.wip_limit, ws.pull_from_step_id, ws.session_target, ws.created_at, ws.updated_at
 		FROM workflow_steps ws
 		JOIN workflows w ON ws.workflow_id = w.id
 		WHERE w.workspace_id = ?

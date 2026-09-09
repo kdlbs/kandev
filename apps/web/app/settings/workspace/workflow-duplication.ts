@@ -88,6 +88,10 @@ function cloneWorkflowStep(
     auto_advance_requires_signal: source.auto_advance_requires_signal,
     cancel_triggers_turn_complete: source.cancel_triggers_turn_complete,
     wip_limit: source.wip_limit,
+    session_target:
+      source.session_target?.kind === "step"
+        ? { kind: "step", step_id: remapStepId(source.session_target.step_id)! }
+        : (source.session_target ?? null),
     pull_from_step_id: remapStepId(source.pull_from_step_id),
     stage_type: source.stage_type,
     created_at: "",

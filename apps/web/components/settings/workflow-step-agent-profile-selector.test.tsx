@@ -7,6 +7,7 @@ const breakpoint = { isMobile: false };
 const ARIA_PRESSED = "aria-pressed";
 const ARIA_TRUE = "true";
 const START_NEW_TEST_ID = "step-1-profile-session-start-new";
+const SOURCE_TARGET_TEST_ID = "step-2-session-target-step-step-1";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => breakpoint,
@@ -56,13 +57,18 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderSelector(overrides: Partial<WorkflowStep> = {}, readOnly = false) {
+function renderSelector(
+  overrides: Partial<WorkflowStep> = {},
+  readOnly = false,
+  steps: WorkflowStep[] = [],
+) {
   const onUpdate = vi.fn();
   const currentStep = { ...step, ...overrides };
   render(
     <WorkflowStepAgentProfileSelector
       step={currentStep}
       savedStep={step}
+      steps={steps}
       onUpdate={onUpdate}
       readOnly={readOnly}
     />,
@@ -151,5 +157,81 @@ describe("WorkflowStepAgentProfileSelector", () => {
     expect((screen.getByTestId(START_NEW_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId(START_NEW_TEST_ID));
     expect(onUpdate).toHaveBeenCalledWith({ profile_session_start_policy: "new" });
+  });
+});
+
+describe("workflow session targets", () => {
+  it("selects the initial workflow session and clears the profile override", () => {
+    const { onUpdate, trigger } = renderSelector();
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByTestId("step-1-session-target-initial"));
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      session_target: { kind: "initial" },
+      agent_profile_id: "",
+    });
+  });
+
+  it("offers earlier direct-profile steps as session targets", () => {
+    const destination = {
+      ...step,
+      id: "step-2",
+      name: "Review",
+      position: 1,
+      agent_profile_id: "",
+      session_target: null,
+    } as WorkflowStep;
+
+    const { onUpdate, trigger } = renderSelector(destination, false, [step, destination]);
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId(SOURCE_TARGET_TEST_ID)).toBeTruthy();
+    fireEvent.click(screen.getByTestId(SOURCE_TARGET_TEST_ID));
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      session_target: { kind: "step", step_id: "step-1" },
+      agent_profile_id: "",
+    });
+  });
+
+  it("keeps target choices available in the mobile picker", () => {
+    breakpoint.isMobile = true;
+    const destination = {
+      ...step,
+      id: "step-2",
+      position: 1,
+      agent_profile_id: "",
+      session_target: null,
+    } as WorkflowStep;
+    const { onUpdate, trigger } = renderSelector(destination, false, [step, destination]);
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId(SOURCE_TARGET_TEST_ID)).toBeTruthy();
+    fireEvent.click(screen.getByTestId(SOURCE_TARGET_TEST_ID));
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      session_target: { kind: "step", step_id: "step-1" },
+      agent_profile_id: "",
+    });
+  });
+
+  it("shows repair actions when a source step is no longer earlier", () => {
+    const source = { ...step, position: 2 } as WorkflowStep;
+    const destination = {
+      ...step,
+      id: "step-2",
+      name: "Review",
+      position: 1,
+      agent_profile_id: "",
+      session_target: { kind: "step", step_id: "step-1" },
+    } as WorkflowStep;
+    const { onUpdate } = renderSelector(destination, false, [source, destination]);
+
+    expect(screen.getByTestId("workflow-session-target-repair")).toBeTruthy();
+    expect(screen.getByText("The source step must stay earlier than this step.")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("workflow-session-target-clear"));
+    expect(onUpdate).toHaveBeenCalledWith({ session_target: null, agent_profile_id: "" });
   });
 });

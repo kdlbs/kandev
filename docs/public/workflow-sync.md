@@ -78,7 +78,7 @@ The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_war
 
 Sync reads only immediate files in the configured directory. It does not recurse. Extensions are case-insensitive: `.yml` and `.yaml` use YAML decoding, while `.json` uses JSON decoding; other files and directory entries are ignored. Paths are processed in sorted order.
 
-Every file must use the version 1 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
+Every file must use the version 1 or version 2 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). Use version 2 when a step has an explicit session target. A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
 
 ```yaml
 version: 1
@@ -122,6 +122,12 @@ These rules matter when editing definitions:
 - Synced workflows are read-only in normal workflow mutation paths. Edit the repository and sync again. Every run performs a full reconciliation, so it also repairs drift; the stored content hash is for status/observability, not a skip condition.
 
 The portable format does not carry every internal or Office field. Sync reconciles the portable Kanban fields, including `cancel_triggers_turn_complete`, and preserves non-portable internal stage type. Changing that field in the repository changes whether an explicit user cancellation can run the step's normal completion actions on the next sync. Pending clarifications and non-user interruption/failure paths remain ineligible. Do not use this facility as an Office-workflow backup.
+
+Version 2 can also select an explicit session recipient. Use `session_target:
+{kind: initial}` for the task's launch conversation. Use `session_target: {kind:
+step, step_position: N}` for an earlier direct-profile step. Sync remaps the
+position to the new step ID. It rejects missing, later, indirect, and inherited
+sources. Fix the source file and sync again when a target becomes invalid.
 
 ### Invalid and empty sources
 

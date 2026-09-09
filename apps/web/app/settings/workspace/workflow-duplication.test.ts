@@ -70,6 +70,7 @@ function sourceSteps(): WorkflowStep[] {
       show_in_command_panel: false,
       auto_archive_after_hours: 0,
       agent_profile_id: "",
+      session_target: { kind: "step", step_id: REVIEW_STEP_ID },
       auto_advance_requires_signal: false,
       cancel_triggers_turn_complete: false,
       wip_limit: 0,
@@ -166,6 +167,7 @@ describe("createWorkflowDuplication", () => {
       workflow_id: result.workflow.id,
     });
     expect(copiedDone.pull_from_step_id).toBe(copiedReview.id);
+    expect(copiedDone.session_target).toEqual({ kind: "step", step_id: copiedReview.id });
     expect(copiedReview.events?.on_turn_complete).toEqual([
       {
         type: "move_to_step",

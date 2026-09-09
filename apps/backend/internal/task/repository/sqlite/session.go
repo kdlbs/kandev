@@ -917,6 +917,11 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if session.State == "" {
 		session.State = models.TaskSessionStateCreated
 	}
+	if tx, ok := exec.(*sqlx.Tx); ok {
+		if err := r.prepareWorkflowInitialSessionTx(ctx, tx, session); err != nil {
+			return err
+		}
+	}
 
 	metadataJSON, err := json.Marshal(session.Metadata)
 	if err != nil {
@@ -972,6 +977,77 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
 	return err
+}
+
+// prepareWorkflowInitialSessionTx elects the first task session and records
+// its immutable workflow-routing snapshot in the same transaction as the
+// session insert. Later callers cannot replace the snapshot or leave a stale
+// origin marker on a session created after the first one.
+func (r *Repository) prepareWorkflowInitialSessionTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
+	var sessionCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
+	), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before workflow snapshot: %w", err)
+	}
+	if sessionCount == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+		_, err := r.setTaskMetadataKeyIfAbsentWithoutTimestampWithExecutor(ctx, tx, session.TaskID, models.MetaKeyWorkflowInitialSession, models.WorkflowInitialSessionSnapshot{
+			SessionID:      session.ID,
+			AgentProfileID: session.AgentProfileID,
+		})
+		return err
+	}
+	if models.IsOriginalTaskSession(session.Metadata) {
+		delete(session.Metadata, models.SessionMetaKeyOrigin)
+	}
+	return nil
+}
+
+func (r *Repository) setTaskMetadataKeyIfAbsentWithoutTimestampWithExecutor(ctx context.Context, exec taskSessionExecutor, taskID, key string, value interface{}) (bool, error) {
+	return r.setTaskMetadataKeyIfAbsentWithExecutorOptions(ctx, exec, taskID, key, value, false)
+}
+
+func (r *Repository) setTaskMetadataKeyIfAbsentWithExecutorOptions(ctx context.Context, exec taskSessionExecutor, taskID, key string, value interface{}, updateTaskTimestamp bool) (bool, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	args := []interface{}{}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks
+			SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text`
+		if updateTaskTimestamp {
+			query += `, updated_at = ?`
+		}
+		query += ` WHERE id = ? AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) IS NULL`
+	} else {
+		query = `UPDATE tasks
+			SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?))`
+		if updateTaskTimestamp {
+			query += `, updated_at = ?`
+		}
+		query += ` WHERE id = ? AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL`
+	}
+	path := key
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(key)
+	}
+	args = append(args, path, string(payload))
+	if updateTaskTimestamp {
+		args = append(args, time.Now().UTC())
+	}
+	args = append(args, taskID, path)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 // unmarshalSessionJSON deserializes a JSON string into dest, skipping empty/placeholder values.
@@ -2946,6 +3022,15 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	deletedAttachments, err := r.purgeTaskSessionStateTx(ctx, tx, session)
 	if err != nil {
 		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workflow_session_bindings
+		SET session_id = NULL, updated_at = ?
+		WHERE session_id = ?
+	`), r.nowUTC(), session.ID); err != nil {
+		if !db.IsMissingTableError(err) {
+			return nil, fmt.Errorf("clear workflow session binding: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

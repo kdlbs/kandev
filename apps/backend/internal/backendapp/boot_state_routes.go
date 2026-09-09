@@ -749,6 +749,7 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"agent_profile_id":             nullString(step.AgentProfileID),
 		"profile_session_start_policy": string(step.ProfileSessionStartPolicy),
 		"profile_session_end_policy":   string(step.ProfileSessionEndPolicy),
+		"session_target":               step.SessionTarget,
 		"stage_type":                   nullString(step.StageType),
 		"wip_limit":                    step.WIPLimit,
 		"pull_from_step_id":            nullString(step.PullFromStepID),

@@ -23,6 +23,7 @@ function stepFromPayload(step: any) {
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,
+    session_target: step.session_target ?? null,
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
     ),

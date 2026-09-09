@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { StepConfigPanel } from "./workflow-pipeline-editor-panels";
 import { isWorkflowStepDirty } from "./workflow-dirty-state";
 import { WorkflowCycleDiagnostic } from "./workflow-cycle-diagnostic";
+import { getWorkflowSessionTargetIssue } from "./workflow-session-target-validation";
 
 type WorkflowPipelineEditorProps = {
   steps: WorkflowStep[];
@@ -72,16 +73,28 @@ type PipelineNodeProps = {
   step: WorkflowStep;
   isDirty: boolean;
   isReplayCycleAffected: boolean;
+  isInvalidSessionTarget: boolean;
   isSelected: boolean;
   onSelect: () => void;
   onRemove: () => void;
   readOnly?: boolean;
 };
 
+function InvalidSessionTargetIndicator() {
+  const { t } = useTranslation();
+  return (
+    <IconAlertTriangle
+      className="h-3.5 w-3.5 shrink-0 text-destructive"
+      aria-label={t("workflows:sessionTargetRepairTitle")}
+    />
+  );
+}
+
 function PipelineNode({
   step,
   isDirty,
   isReplayCycleAffected,
+  isInvalidSessionTarget,
   isSelected,
   onSelect,
   onRemove,
@@ -109,6 +122,7 @@ function PipelineNode({
       onClick={onSelect}
       data-settings-dirty={isDirty}
       data-workflow-replay-cycle={isReplayCycleAffected}
+      data-workflow-invalid-session-target={isInvalidSessionTarget}
       data-settings-dirty-level="container"
       data-testid={`workflow-step-node-${step.id}`}
     >
@@ -124,6 +138,7 @@ function PipelineNode({
           </Tooltip>
         </TooltipProvider>
       )}
+      {isInvalidSessionTarget && <InvalidSessionTargetIndicator />}
       <button
         type="button"
         className={cn(
@@ -226,6 +241,7 @@ function PipelineArea({
             step={step}
             isDirty={isWorkflowStepDirty(step, savedStepsById.get(step.id))}
             isReplayCycleAffected={affectedStepIds.has(step.id)}
+            isInvalidSessionTarget={getWorkflowSessionTargetIssue(step, steps) !== undefined}
             isSelected={selectedStepId === step.id}
             onSelect={() => onSelectStep(step.id)}
             onRemove={() => onRemoveStep(step.id)}
@@ -268,6 +284,75 @@ function WorkflowCycleAlerts({ diagnostics }: { diagnostics: WorkflowReplayCycle
 
 const EMPTY_DIAGNOSTICS: WorkflowReplayCycleDiagnostic[] = [];
 
+type RestoreWorkflowSourceStepParams = {
+  steps: WorkflowStep[];
+  savedSteps: WorkflowStep[];
+  savedStepsById: ReadonlyMap<string, WorkflowStep>;
+  sourceStepId: string;
+  onReorderSteps: (steps: WorkflowStep[]) => void;
+};
+
+function restoreWorkflowSourceStep({
+  steps,
+  savedSteps,
+  savedStepsById,
+  sourceStepId,
+  onReorderSteps,
+}: RestoreWorkflowSourceStepParams) {
+  const savedSource = savedStepsById.get(sourceStepId);
+  if (!savedSource || !steps.some((step) => step.id === sourceStepId)) return;
+
+  const savedOrder = new Map(
+    [...savedSteps]
+      .sort((left, right) => left.position - right.position)
+      .map((step, index) => [step.id, index]),
+  );
+  const restored = [...steps]
+    .map((step) =>
+      step.id === sourceStepId
+        ? {
+            ...step,
+            agent_profile_id: savedSource.agent_profile_id,
+            session_target: savedSource.session_target ?? null,
+          }
+        : step,
+    )
+    .sort(
+      (left, right) =>
+        (savedOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (savedOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+    )
+    .map((step, position) => ({ ...step, position }));
+  onReorderSteps(restored);
+}
+
+function removeWorkflowStep(
+  stepId: string,
+  selectedStepId: string | null,
+  onRemoveStep: (stepId: string) => void,
+  setSelectedStepId: (stepId: string | null) => void,
+) {
+  onRemoveStep(stepId);
+  if (selectedStepId === stepId) setSelectedStepId(null);
+}
+
+function reorderWorkflowSteps(
+  event: DragEndEvent,
+  steps: WorkflowStep[],
+  readOnly: boolean,
+  onReorderSteps: (steps: WorkflowStep[]) => void,
+) {
+  if (readOnly) return;
+  const { active, over } = event;
+  if (!over || active.id === over.id) return;
+  const oldIndex = steps.findIndex((step) => step.id === active.id);
+  const newIndex = steps.findIndex((step) => step.id === over.id);
+  if (oldIndex === -1 || newIndex === -1) return;
+  onReorderSteps(
+    arrayMove(steps, oldIndex, newIndex).map((step, index) => ({ ...step, position: index })),
+  );
+}
+
 // --- Main Pipeline Editor ---
 
 export function WorkflowPipelineEditor({
@@ -283,7 +368,6 @@ export function WorkflowPipelineEditor({
 }: WorkflowPipelineEditorProps) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [prevStepCount, setPrevStepCount] = useState(steps.length);
-
   if (steps.length !== prevStepCount) {
     if (steps.length > prevStepCount && steps.length > 0)
       setSelectedStepId(steps[steps.length - 1].id);
@@ -304,25 +388,22 @@ export function WorkflowPipelineEditor({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    if (readOnly) return;
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = steps.findIndex((step) => step.id === active.id);
-    const newIndex = steps.findIndex((step) => step.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    onReorderSteps(
-      arrayMove(steps, oldIndex, newIndex).map((step, index) => ({ ...step, position: index })),
-    );
-  };
+  const handleDragEnd = (event: DragEndEvent) =>
+    reorderWorkflowSteps(event, steps, readOnly, onReorderSteps);
 
   const handleSelectStep = (stepId: string) =>
     setSelectedStepId((prev) => (prev === stepId ? null : stepId));
+  const handleRemoveStep = (stepId: string) =>
+    removeWorkflowStep(stepId, selectedStepId, onRemoveStep, setSelectedStepId);
 
-  const handleRemoveStep = (stepId: string) => {
-    onRemoveStep(stepId);
-    if (selectedStepId === stepId) setSelectedStepId(null);
-  };
+  const handleRestoreSourceStep = (sourceStepId: string) =>
+    restoreWorkflowSourceStep({
+      steps,
+      savedSteps,
+      savedStepsById,
+      sourceStepId,
+      onReorderSteps,
+    });
 
   const selectedStep = steps.find((s) => s.id === selectedStepId);
   const pipelineArea = (
@@ -364,6 +445,7 @@ export function WorkflowPipelineEditor({
           savedStep={savedStepsById.get(selectedStep.id)}
           steps={steps}
           onUpdate={(updates) => onUpdateStep(selectedStep.id, updates)}
+          onRestoreSourceStep={handleRestoreSourceStep}
           onRemove={() => handleRemoveStep(selectedStep.id)}
           readOnly={readOnly}
           onSessionConfigResolutionPendingChange={onSessionConfigResolutionPendingChange}

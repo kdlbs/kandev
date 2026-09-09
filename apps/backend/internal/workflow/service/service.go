@@ -390,6 +390,7 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			AgentProfileID:             stepDef.AgentProfileID,
 			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)),
 			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)),
+			SessionTarget:              models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap),
 			AutoAdvanceRequiresSignal:  stepDef.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: stepDef.CancelTriggersTurnComplete,
 			WIPLimit:                   stepDef.WIPLimit,
@@ -786,6 +787,9 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		}
 		steps = append(steps, step)
 	}
+	if err := validateWorkflowSessionTargets(steps); err != nil {
+		return nil, fmt.Errorf("validate workflow session targets: %w", err)
+	}
 
 	wf, err := s.workflowProvider.CreateWorkflow(ctx, workspaceID, pw.Name, pw.Description)
 	if err != nil {
@@ -848,6 +852,34 @@ func (s *Service) validateImportedStepReferences(
 	return nil
 }
 
+func validateWorkflowSessionTargets(steps []*models.WorkflowStep) error {
+	byID := make(map[string]*models.WorkflowStep, len(steps))
+	for _, step := range steps {
+		if step != nil {
+			byID[step.ID] = step
+		}
+	}
+	for _, step := range steps {
+		if step == nil || step.SessionTarget == nil || step.SessionTarget.Kind != models.WorkflowSessionTargetStep {
+			continue
+		}
+		source, ok := byID[step.SessionTarget.StepID]
+		if !ok || source == nil {
+			return fmt.Errorf("step %q session target source %q was not found", step.Name, step.SessionTarget.StepID)
+		}
+		if source.WorkflowID != step.WorkflowID {
+			return fmt.Errorf("step %q session target source must be in the same workflow", step.Name)
+		}
+		if source.Position >= step.Position {
+			return fmt.Errorf("step %q session target source %q must be earlier", step.Name, source.Name)
+		}
+		if source.AgentProfileID == "" || source.SessionTarget != nil {
+			return fmt.Errorf("step %q session target source %q must use a direct agent profile", step.Name, source.Name)
+		}
+	}
+	return nil
+}
+
 // stepFromPortable builds a WorkflowStep from its portable form, remapping
 // position-based references to the step IDs in posToID and matching the
 // step-level agent profile when a matcher is wired. existingProfileID is the
@@ -877,6 +909,7 @@ func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepP
 		AutoArchiveAfterHours:      sp.AutoArchiveAfterHours,
 		ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(sp.ProfileSessionStartPolicy)),
 		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(sp.ProfileSessionEndPolicy)),
+		SessionTarget:              sp.WorkflowSessionTarget(posToID),
 		AutoAdvanceRequiresSignal:  sp.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: sp.CancelTriggersTurnComplete,
 		WIPLimit:                   sp.WIPLimit,

@@ -159,12 +159,18 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	// Validate the complete desired step set before mutating workflow fields or
 	// persisting any step. A malformed later step must leave the synced workflow
 	// untouched so the next sync can retry after the source is fixed.
+	desiredSteps := make([]*models.WorkflowStep, 0, len(pw.Steps))
 	for _, sp := range pw.Steps {
 		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existingByName[sp.Name])
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err))
 			return
 		}
+		desiredSteps = append(desiredSteps, step)
+	}
+	if err := validateWorkflowSessionTargets(desiredSteps); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid workflow session targets: %v", wf.Name, err))
+		return
 	}
 
 	changed, err := s.applyWorkflowFields(ctx, wf, pw)
@@ -363,6 +369,7 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		existing.AgentProfileID == desired.AgentProfileID &&
 		existing.ProfileSessionStartPolicy == desired.ProfileSessionStartPolicy &&
 		existing.ProfileSessionEndPolicy == desired.ProfileSessionEndPolicy &&
+		models.EqualWorkflowSessionTarget(existing.SessionTarget, desired.SessionTarget) &&
 		existing.WIPLimit == desired.WIPLimit &&
 		existing.PullFromStepID == desired.PullFromStepID &&
 		existing.AutoAdvanceRequiresSignal == desired.AutoAdvanceRequiresSignal &&

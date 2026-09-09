@@ -75,7 +75,7 @@ workflows:
 
 | Field | Type | Validation |
 |-------|------|------------|
-| `version` | integer | Must be exactly `1`. |
+| `version` | integer | Must be `1` or `2`. Use `2` when any step has `session_target`. |
 | `type` | string | Must be exactly `kandev_workflow`. |
 | `workflows` | list | Must contain at least one item. |
 
@@ -130,6 +130,9 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
     agent_name: Claude Code
   profile_session_start_policy: reuse
   profile_session_end_policy: park
+  session_target:
+    kind: initial
+    # A source-step target uses: kind: step and step_position: 1
 ```
 
 | Field | Type | Exact behavior |
@@ -146,10 +149,21 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `agent_profile` | object | Omitted when unset; exact-match behavior is below. |
 | `profile_session_start_policy` | enum | `reuse` or `new`; controls whether this destination step reuses the newest eligible nonterminal session for its profile or always starts a fresh conversation. Missing or unknown values use `reuse`. |
 | `profile_session_end_policy` | enum | `complete` or `park`; controls whether this source step's session is closed or kept available when the workflow leaves it for a different profile. Missing or unknown values use `complete`. |
+| `session_target` | object | Optional explicit recipient. Use `{kind: initial}` for the task's launch conversation. Use `{kind: step, step_position: N}` for an earlier direct-profile step. Source-step references use positions so import can remap step IDs. |
 | `auto_advance_requires_signal` | boolean | Always exported. `true` makes `on_turn_complete` transitions wait for `step_complete_kandev`; missing input is `false`. |
 | `cancel_triggers_turn_complete` | boolean | Always exported. `true` lets an explicit user cancellation run the step's normal `on_turn_complete` actions after the cancelled turn settles; missing input is `false`. Pending clarification and non-user interruption/failure paths are not eligible. |
 | `wip_limit` | integer | Omitted when `0`. Must be non-negative; `0` is unlimited. |
 | `pull_from_step_position` | integer | Optional feeder reference using another step's `position`. It must exist, cannot point to itself, and cannot form a pull cycle. |
+
+Version 1 is the legacy format. It remains valid for workflows without an
+explicit session target. Version 2 adds `session_target`. An initial target has
+only `kind: initial`. A source-step target has `kind: step` and an earlier
+`step_position`. The source step must select a profile directly and must not
+target another session.
+
+If a source step is missing, later than its target, or invalid after a sync
+edit, import and sync report a validation error. Kandev does not silently pick
+another conversation.
 
 `stage_type`, Office participants, recorded decisions, task data, and step history are not portable. Imported steps receive new UUIDs and the default internal stage type.
 
