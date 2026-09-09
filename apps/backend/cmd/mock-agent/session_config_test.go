@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -40,7 +41,7 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 func TestLoadSessionReturnsCapabilitiesForResumedSession(t *testing.T) {
 	sessionID := acp.SessionId("session-load-test")
 	agent := &mockAgent{
-		conn:            &promptCancelUpdater{},
+		conn:            &promptCancelUpdater{started: make(chan struct{})},
 		sessions:        make(map[acp.SessionId]bool),
 		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
 		commandsEmitted: make(map[acp.SessionId]bool),
@@ -49,6 +50,11 @@ func TestLoadSessionReturnsCapabilitiesForResumedSession(t *testing.T) {
 	response, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{SessionId: sessionID})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
+	}
+	select {
+	case <-agent.conn.(*promptCancelUpdater).started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resumed-session commands")
 	}
 	if len(response.ConfigOptions) == 0 {
 		t.Fatal("LoadSession() returned no config options")
