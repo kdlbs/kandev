@@ -123,14 +123,10 @@ func TestPostgresListStuckParentsExcludesCoveredParent(t *testing.T) {
 	}
 }
 
-// newPostgresWakeRepo opens an isolated Postgres schema and initialises the
-// settings, task, and workflow repositories before the office one, mirroring
-// production boot order: agent_profiles belongs to the settings store schema,
-// tasks and runs belong to the task repository's schema init, and
-// workflow_step_participants.created_at (which RunnerProjection's third
-// COALESCE arm orders by) is added by the workflow repository's migration —
-// see participant_claim_postgres_test.go's newPostgresWakeRepo-equivalent
-// setup for the same ordering contract.
+// newPostgresWakeRepo opens an isolated Postgres schema and initializes the
+// settings, task, and workflow repositories before the office one. These
+// repositories provide the schema dependencies that ListStuckParents reads:
+// agent_profiles, tasks, runs, and workflow_step_participants.created_at.
 func newPostgresWakeRepo(t *testing.T) (*sqlite.Repository, context.Context) {
 	t.Helper()
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))

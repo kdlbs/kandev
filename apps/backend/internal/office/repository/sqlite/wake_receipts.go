@@ -268,13 +268,10 @@ func (r *Repository) GetChildSetKeyTx(
 	return formatChildSetKey(rows), nil
 }
 
-// childSetKeyAggregate renders the "id:state" concatenation ListStuckParents
-// compares against a stored receipt. Its output must match formatChildSetKey
-// byte for byte: receipts are written from the Go form and compared against
-// this SQL form, so any difference in separator or ordering makes every
-// receipt look stale and re-wakes the parent on every tick. Postgres does not
-// inherit input ordering from the subquery's ORDER BY, so the ordering is
-// restated inside the aggregate.
+// childSetKeyAggregate renders the deterministic child-set key used by
+// ListStuckParents. Its output must match formatChildSetKey byte for byte.
+// Postgres requires ORDER BY inside STRING_AGG because subquery ordering does
+// not define aggregate input order.
 func childSetKeyAggregate(driver string) string {
 	if dialect.IsPostgres(driver) {
 		return `STRING_AGG(c.id || ':' || c.state, ',' ORDER BY c.id)`
