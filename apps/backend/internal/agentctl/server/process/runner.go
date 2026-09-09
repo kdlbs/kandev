@@ -145,22 +145,23 @@ func (b *ringBuffer) snapshot() []ProcessOutputChunk {
 
 // commandProcess represents a single running background process and its state.
 type commandProcess struct {
-	info        ProcessInfo // Process metadata and current status
-	requestID   string
-	fingerprint string
-	cmd         *exec.Cmd // Underlying OS process (nil after completion)
-	processCtx  context.Context
-	cancel      context.CancelFunc
-	stdin       io.WriteCloser
-	buffer      *ringBuffer   // Memory-bounded output storage
-	stopOnce    sync.Once     // Ensures stopSignal is only closed once
-	stopSignal  chan struct{} // Signals output readers to exit before process termination
-	done        chan struct{} // Closed after cmd.Wait returns and lifecycle cleanup finishes
-	pgid        int
-	lifecycle   processLifecycleHandle
-	waitErr     error
-	reapErr     error
-	mu          sync.Mutex // Protects info fields during updates
+	info          ProcessInfo // Process metadata and current status
+	requestID     string
+	fingerprint   string
+	cmd           *exec.Cmd // Underlying OS process (nil after completion)
+	processCtx    context.Context
+	cancel        context.CancelFunc
+	stdin         io.WriteCloser
+	buffer        *ringBuffer    // Memory-bounded output storage
+	stopOnce      sync.Once      // Ensures stopSignal is only closed once
+	stopSignal    chan struct{}  // Signals output readers to exit before process termination
+	done          chan struct{}  // Closed after cmd.Wait returns and lifecycle cleanup finishes
+	outputReaders sync.WaitGroup // Tracks output readers owned by the runner
+	pgid          int
+	lifecycle     processLifecycleHandle
+	waitErr       error
+	reapErr       error
+	mu            sync.Mutex // Protects info fields during updates
 }
 
 type workspaceStreamNotifier interface {
@@ -483,13 +484,21 @@ func (r *ProcessRunner) startAndActivate(
 	proc.mu.Unlock()
 	r.publishStatus(proc)
 	if consumeStdout {
-		go r.readOutput(proc, stdout, "stdout")
+		r.startOutputReader(proc, stdout, "stdout")
 	}
 	if consumeStderr {
-		go r.readOutput(proc, stderr, "stderr")
+		r.startOutputReader(proc, stderr, "stderr")
 	}
 	go r.wait(proc)
 	return nil
+}
+
+func (r *ProcessRunner) startOutputReader(proc *commandProcess, reader io.ReadCloser, stream string) {
+	proc.outputReaders.Add(1)
+	go func() {
+		defer proc.outputReaders.Done()
+		r.readOutput(proc, reader, stream)
+	}()
 }
 
 // Stop attempts to gracefully terminate a process, escalating to force-kill if needed.
@@ -806,12 +815,10 @@ func (r *ProcessRunner) wait(proc *commandProcess) {
 		zap.Error(err),
 	)
 
-	// Update process info with final status
+	// Record the wait error before cleanup so piped callers can inspect it after
+	// the done channel closes, even if process-group reaping needs a retry.
 	proc.mu.Lock()
 	proc.waitErr = err
-	proc.info.Status = status
-	proc.info.ExitCode = &exitCode
-	proc.info.UpdatedAt = time.Now().UTC()
 	proc.mu.Unlock()
 
 	// A terminal process remains owned by the runner until its full process
@@ -820,11 +827,24 @@ func (r *ProcessRunner) wait(proc *commandProcess) {
 	if err := r.ensureProcessGroupReaped(context.Background(), proc); err != nil {
 		proc.mu.Lock()
 		proc.reapErr = err
+		proc.info.Status = status
+		proc.info.ExitCode = &exitCode
+		proc.info.UpdatedAt = time.Now().UTC()
 		proc.mu.Unlock()
 		r.logger.Error("workspace process group was not reaped",
 			zap.String("process_id", proc.info.ID), zap.Error(err))
 		return
 	}
+
+	// cmd.Wait can return before the runner-owned stdout/stderr readers have
+	// appended their final bytes. Publish terminal state only after those
+	// readers finish so retained output is complete when callers observe it.
+	proc.outputReaders.Wait()
+	proc.mu.Lock()
+	proc.info.Status = status
+	proc.info.ExitCode = &exitCode
+	proc.info.UpdatedAt = time.Now().UTC()
+	proc.mu.Unlock()
 
 	// Publish final status to WebSocket clients only after process-group reap.
 	r.publishStatus(proc)
