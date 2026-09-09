@@ -151,6 +151,7 @@ func TestManagedAgentsHonorExactVersionCommandOption(t *testing.T) {
 		{"opencode", NewOpenCodeACP()},
 		{"copilot", NewCopilotACP()},
 		{"gemini", NewGemini()},
+		{"pi", NewPiACP()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
