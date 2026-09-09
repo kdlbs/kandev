@@ -281,7 +281,7 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO", zap.Error(err))
 		return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
@@ -538,7 +538,7 @@ func (h *TaskHandlers) wsUpdateTaskRunner(ctx context.Context, msg *ws.Message) 
 		return runnerSwitchWSError(msg, err, h.logger)
 	}
 
-	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO after runner switch", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to load updated task", nil)
