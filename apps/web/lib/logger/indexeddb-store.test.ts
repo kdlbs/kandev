@@ -11,6 +11,8 @@ const RETENTION_KEY = "retention";
 const MAX_ENTRIES = 10_000;
 const MAX_BYTES = 20 * 1024 * 1024;
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+const IDENTITY_A = "identity-a";
+const IDENTITY_B = "identity-b";
 
 type PersistedTestEntry = {
   id?: number;
@@ -163,13 +165,60 @@ describe("IndexedDB log retention writes", () => {
     const store = new IndexedDBLogStore();
     await store.append(
       prepareEntries([
-        logEntry("identity-a", Date.now(), "a"),
-        logEntry("identity-b", Date.now() + 1, "b"),
+        logEntry(IDENTITY_A, Date.now(), "a"),
+        logEntry(IDENTITY_B, Date.now() + 1, "b"),
       ]),
     );
 
-    await expect(store.snapshot("identity-a")).resolves.toHaveLength(1);
-    await expect(store.snapshot("identity-b")).resolves.toHaveLength(1);
+    await expect(store.snapshot(IDENTITY_A)).resolves.toHaveLength(1);
+    await expect(store.snapshot(IDENTITY_B)).resolves.toHaveLength(1);
+  });
+
+  it("reads identity snapshots through the chronological timestamp index", async () => {
+    const now = Date.now();
+    const store = new IndexedDBLogStore();
+    const first = logEntry(IDENTITY_A, now, "first");
+    const other = logEntry(IDENTITY_B, now, "other");
+    const second = logEntry(IDENTITY_A, now, "second");
+    await store.append(prepareEntries([first, other, second]));
+
+    const getAll = vi.spyOn(IDBIndex.prototype, "getAll");
+    const openCursor = vi.spyOn(IDBIndex.prototype, "openCursor");
+    try {
+      await expect(store.snapshot(IDENTITY_A)).resolves.toEqual([first, second]);
+      expect(getAll).not.toHaveBeenCalled();
+      expect(openCursor).toHaveBeenCalled();
+    } finally {
+      getAll.mockRestore();
+      openCursor.mockRestore();
+    }
+  });
+
+  it("continues pages by timestamp and primary key without gaps or duplicates", async () => {
+    const timestamp = Date.now();
+    const store = new IndexedDBLogStore();
+    const entries = [
+      logEntry(IDENTITY_A, timestamp, "first"),
+      logEntry(IDENTITY_B, timestamp, "other"),
+      logEntry(IDENTITY_A, timestamp, "second"),
+      logEntry(IDENTITY_A, timestamp, "third"),
+    ];
+    await store.append(prepareEntries(entries));
+
+    const messages: string[] = [];
+    let cursor: import("./indexeddb-store").LogPageCursor | null = null;
+    let pageCount = 0;
+    let done = false;
+    while (!done) {
+      const page = await store.readPage(IDENTITY_A, 1, cursor);
+      messages.push(...page.entries.map(({ entry }) => entry.message));
+      cursor = page.nextCursor;
+      done = page.done;
+      pageCount += 1;
+    }
+
+    expect(messages).toEqual(["first", "second", "third"]);
+    expect(pageCount).toBe(3);
   });
 });
 

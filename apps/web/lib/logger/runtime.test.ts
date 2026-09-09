@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { encodedBytes, _resetForTesting, MAX_ENTRY_BYTES } from "./buffer";
+import { encodedBytes, _resetForTesting, MAX_ENTRY_BYTES, type LogEntry } from "./buffer";
 import {
   _resetRuntimeForTesting,
   browserLogMetadata,
@@ -296,9 +296,103 @@ describe("browser logger runtime", () => {
       releaseFirstAppend?.();
 
       await snapshot;
-      expect(storeMocks.append).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(2));
       expect(maximumActiveAppends).toBe(1);
     } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("browser logger capture", () => {
+  it("keeps a capture flush at the receipt watermark", async () => {
+    vi.useFakeTimers();
+    let releaseFirstAppend: (() => void) | undefined;
+    const firstAppend = new Promise<void>((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    let appendCalls = 0;
+    storeMocks.append.mockImplementation(async () => {
+      appendCalls += 1;
+      if (appendCalls === 1) await firstAppend;
+    });
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "at-receipt",
+      });
+      const snapshot = snapshotBrowserLogs(TEST_SCOPE);
+      await Promise.resolve();
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "after-receipt",
+      });
+      releaseFirstAppend?.();
+
+      await snapshot;
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+      expect(storeMocks.append.mock.calls[0]?.[0]).toEqual([
+        expect.objectContaining({
+          entry: expect.objectContaining({ message: "at-receipt" }),
+        }),
+      ]);
+    } finally {
+      releaseFirstAppend?.();
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the receipt memory snapshot after the one-second flush timeout", async () => {
+    vi.useFakeTimers();
+    let releaseFirstAppend: (() => void) | undefined;
+    const firstAppend = new Promise<void>((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    storeMocks.append.mockImplementation(() => firstAppend);
+    let result: LogEntry[] | undefined;
+
+    try {
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "receipt-entry",
+      });
+      const snapshot = snapshotBrowserLogs(TEST_SCOPE).then((entries) => {
+        result = entries;
+      });
+      await Promise.resolve();
+      expect(storeMocks.append).toHaveBeenCalledTimes(1);
+
+      stageLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        source: TEST_SOURCE,
+        message: "later-entry",
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(result).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+      expect(result?.map((entry) => entry.message)).toEqual(["receipt-entry"]);
+      expect(browserLogMetadata()).toMatchObject({ storage_mode: "indexeddb" });
+
+      releaseFirstAppend?.();
+      await snapshot;
+      await vi.waitFor(() => expect(storeMocks.append).toHaveBeenCalledTimes(2));
+    } finally {
+      releaseFirstAppend?.();
       vi.runOnlyPendingTimers();
       vi.useRealTimers();
     }

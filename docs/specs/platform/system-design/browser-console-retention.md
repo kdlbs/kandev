@@ -3,31 +3,33 @@ status: current
 system: platform
 requirements:
   - REQ-PLATFORM-BROWSER-CONSOLE-RETENTION-001
+  - REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
 ---
 
 # Browser Console Retention System Design
 
 ## Purpose and boundaries
 
-This design makes browser-log retention incremental. It preserves the existing
-diagnostic limits, identity partitions, capture protocol, and memory fallback.
-It changes IndexedDB bookkeeping and the per-tab drain coordinator.
+This design makes browser-log retention and explicit bundle snapshots
+incremental. It preserves the existing diagnostic limits, identity partitions,
+and memory fallback. The capture notification adds a relative time budget. The
+IndexedDB schema and normal write transaction do not change.
 
 ## Requirement mapping
 
 | Requirement                                  | Design section                                                                                                                                                                       |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `REQ-PLATFORM-BROWSER-CONSOLE-RETENTION-001` | [IndexedDB model](#indexeddb-model), [Write transaction](#write-transaction), [Per-tab drain ownership](#per-tab-drain-ownership), [Migration and recovery](#migration-and-recovery) |
+| `REQ-PLATFORM-DIAGNOSTIC-LOGGING-001` | [Incremental capture reads](#incremental-capture-reads) |
 
 ## IndexedDB model
 
 `apps/web/lib/logger/indexeddb-store.ts` keeps the database name
 `kandev-diagnostic-logs-v1` so existing profiles retain their history. The
-IndexedDB schema version increases from 1 to 2.
+schema version remains 2.
 
-The existing `entries` store and its `identity_scope` and `timestamp_ms`
-indexes remain. A new metadata object store owns one retention record with
-these fields:
+The `entries` store keeps its `identity_scope` and `timestamp_ms` indexes. The
+metadata object store owns one retention record with these fields:
 
 ```text
 key: "retention"
@@ -36,7 +38,7 @@ bytes: number
 ```
 
 The totals cover all identity partitions. They use each entry's stored `bytes`
-field, which is the existing serialized-size measure.
+field. This field contains the serialized size of the entry.
 
 ## Write transaction
 
@@ -61,16 +63,68 @@ evict. `clear()` uses both stores in one transaction and writes zero totals.
 
 ## Per-tab drain ownership
 
-`apps/web/lib/logger/runtime.ts` owns one in-flight drain promise. Idle and
-timeout callbacks request work from the same drain loop. They do not start a
-second `store.append()` while the first call is pending.
+`apps/web/lib/logger/runtime.ts` owns one active drain promise. Idle and timeout
+callbacks request work from the same drain loop. They do not start a second
+`store.append()` while the first call is pending.
 
-The loop removes one bounded batch, waits for its append transaction, and then
-continues if staging still contains entries. `flushStaging()` awaits that same
-loop before a diagnostic snapshot. It does not create a parallel writer.
+Each staged entry receives a local increasing sequence number. Each drain
+request records the newest sequence number that it owns. The drain stops after
+it processes that fixed prefix. Entries that arrive later start a new drain.
+
+At capture receipt, the runtime records the current sequence number. It also
+takes a bounded prepared-entry snapshot from the memory buffer. The capture
+then joins the active drain and requests persistence through the recorded
+sequence number. Entries that arrive after receipt do not extend this wait.
+
+The capture waits at most one second for this fixed drain prefix. If the wait
+expires, the capture uses the memory snapshot that it took at receipt. The
+active persistence drain continues. This fallback does not change the normal
+storage mode or erase staged entries. The upload reports `storage_mode: memory`
+and records `flush_timeout: true` in its final capture metadata.
 
 The console interception path remains synchronous and bounded. It only adds a
 reference-free entry to staging and schedules the loop.
+
+## Incremental capture reads
+
+After the fixed-prefix drain completes, the runtime selects one snapshot source
+for the capture. IndexedDB mode reads through the existing `timestamp_ms`
+index. Memory mode reads the prepared entries from the receipt snapshot.
+
+Each IndexedDB page uses one readonly transaction. A continuation token contains
+the timestamp index key and the object-store primary key. This pair gives a
+stable order when entries have equal timestamps.
+
+The cursor scans forward from that token and includes only the requested
+identity. The store holds at most 10,000 entries or 20 MiB across all
+identities. Thus, one complete capture scans no more than the existing global
+retention limit. A new write index is not necessary.
+
+The cursor stops before the next matching entry exceeds the requested page
+size. The browser uploads the page before it opens the next transaction. Thus,
+the browser does not clone or sort the complete identity partition.
+
+Persisted and memory records carry their prepared UTF-8 byte count. Page
+accounting reuses that count. The request encoder performs the one required
+payload serialization.
+
+The first page uses a 128 KiB entry-data target. Later pages use the existing
+800 KiB target. Both targets use a lower value when the server advertises a
+smaller maximum. This layout adds at most one request to a maximum-size capture
+and gives slow links a smaller first transfer.
+
+The notification supplies `capture_timeout_ms`. The frontend converts this
+duration to a local deadline with `performance.now()`. The frontend checks this
+deadline before each page and upload. An `AbortController` cancels an active
+upload when the local deadline expires.
+
+The backend still closes collection at its absolute `capture_deadline`. It can
+reject a late request even when transport delay leaves time in the frontend
+budget. The frontend does not retry this request.
+
+If an IndexedDB read fails before upload, the capture uses its receipt-time
+memory snapshot. If a read fails after upload, the capture stops. It does not
+switch sources and duplicate entries.
 
 ### Burst collection and entry preparation
 
@@ -92,10 +146,9 @@ change which log levels a diagnostic bundle contains.
 
 ## Migration and recovery
 
-The version-2 upgrade transaction creates the metadata store and walks the
-existing entries once to calculate count and bytes. It writes the retention
-record before the upgrade commits. An interrupted upgrade rolls back as one
-IndexedDB transaction.
+The version-2 upgrade transaction creates the metadata store and walks existing
+entries once. It calculates the count and byte totals before the transaction
+commits. This capture change does not open a database upgrade.
 
 If a version-2 database lacks a valid retention record, the next write rebuilds
 the totals in one repair transaction before it accepts normal incremental
@@ -114,11 +167,17 @@ scope. Vitest uses the dev-only `fake-indexeddb` package so these tests exercise
 real IndexedDB request and transaction behavior without a product dependency.
 
 Runtime tests hold the first append promise while more entries arrive. They
-confirm that append concurrency stays at one and that a snapshot waits for the
-same drain. Fake-time tests also prove that browser idle time cannot split one
-collection window into one-entry transactions, and that a snapshot bypasses
-the wait. Entry-preparation tests prove that the memory and IndexedDB paths use
-the same encoded byte count.
+show that append concurrency stays at one. They also prove that capture
+drains only its fixed sequence prefix. Fake-time tests prove the one-second
+memory fallback and continued background persistence.
+
+Capture tests populate more than one page across identities and timestamp ties.
+They prove that continuation has no gaps or duplicates. They also prove that
+the browser uploads the 128 KiB first page before it reads the next page.
+
+Protocol tests prove that the backend sends both deadline fields. Fake-time
+frontend tests use a wall-clock skew and a monotonic clock. They prove that the
+relative budget controls capture and cancels an active upload.
 
 ## Related decisions
 
