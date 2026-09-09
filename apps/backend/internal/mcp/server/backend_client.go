@@ -20,10 +20,6 @@ import (
 // zero length always means the body was dropped or truncated in transit.
 var ErrEmptyBackendPayload = errors.New("mcp backend response payload was empty")
 
-// emptyBackendPayloadLogMessage is shared by both backend clients so a
-// log-based alert can match the same message across transports.
-const emptyBackendPayloadLogMessage = "mcp backend response payload was empty"
-
 // MCPRequest represents an MCP request to be sent to the backend.
 type MCPRequest struct {
 	ID      string          `json:"id"`
@@ -251,7 +247,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			return nil
 		}
 		if len(resp.Payload) == 0 {
-			c.logger.Warn(emptyBackendPayloadLogMessage,
+			c.logger.Warn(ErrEmptyBackendPayload.Error(),
 				zap.String("request_id", id),
 				zap.String("action", action),
 				zap.String("session_id", response.sessionID),

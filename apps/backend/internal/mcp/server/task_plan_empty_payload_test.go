@@ -3,7 +3,7 @@ package mcp
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.5
@@ -17,6 +17,6 @@ func TestGetTaskPlan_EmptyObjectPayloadStillRendersNoPlan(t *testing.T) {
 
 	result := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{})
 
-	assert.False(t, result.IsError)
-	assert.Equal(t, "No plan exists for this task yet.", resultText(t, result))
+	require.False(t, result.IsError)
+	require.Equal(t, "No plan exists for this task yet.", resultText(t, result))
 }

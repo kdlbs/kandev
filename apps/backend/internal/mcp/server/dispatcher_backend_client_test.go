@@ -142,7 +142,7 @@ func TestDispatcherBackendClient_EmptyPayloadWithResultSinkErrors(t *testing.T) 
 	outboundID := d.calls[0].ID
 	require.NotEmpty(t, outboundID)
 
-	entries := observed.FilterMessage(emptyBackendPayloadLogMessage).All()
+	entries := observed.FilterMessage(ErrEmptyBackendPayload.Error()).All()
 	require.Len(t, entries, 1)
 	require.Equal(t, zapcore.WarnLevel, entries[0].Level)
 	fields := entries[0].ContextMap()
