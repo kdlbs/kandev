@@ -5,8 +5,10 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { selectOfficeAgentProfile } from "@/lib/state/slices/office/selectors";
 import { updateAgentStatus } from "@/lib/api/domains/office-api";
+import { cn } from "@/lib/utils";
 import type { AgentStatus } from "@/lib/state/slices/office/types";
 
 const RECOVERABLE_STATUSES: ReadonlySet<AgentStatus> = new Set(["paused", "stopped"]);
@@ -24,6 +26,7 @@ type Props = { agentId: string };
  */
 export function AgentRecoveryControl({ agentId }: Props) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const agent = useAppStore((s) => selectOfficeAgentProfile(s, agentId));
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
   const [recovering, setRecovering] = useState(false);
@@ -64,7 +67,7 @@ export function AgentRecoveryControl({ agentId }: Props) {
         onClick={handleRecover}
         disabled={recovering}
         aria-busy={recovering}
-        className="cursor-pointer shrink-0"
+        className={cn("cursor-pointer shrink-0", !isFinePointer && "min-h-11")}
       >
         {recovering ? t("office:returningAgentToService") : t("office:returnAgentToService")}
       </Button>

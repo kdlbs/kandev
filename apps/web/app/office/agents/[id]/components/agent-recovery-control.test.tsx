@@ -18,9 +18,15 @@ vi.mock("@/lib/api/domains/office-api", async () => {
   };
 });
 
+const pointerMode = vi.hoisted(() => ({ isFinePointer: true }));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isFinePointer: pointerMode.isFinePointer }),
+}));
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  pointerMode.isFinePointer = true;
 });
 
 const WORKSPACE_ID = "ws-1";
@@ -109,6 +115,18 @@ describe("AgentRecoveryControl visibility", () => {
 
     renderControl({ ...baseAgent, status: "stopped" });
     expect(getControlButton().textContent).toBe(pausedName);
+  });
+
+  it("uses a coarse-pointer-sized (44px) hit area on a touch viewport", () => {
+    pointerMode.isFinePointer = false;
+    renderControl(baseAgent);
+    expect(getControlButton().className).toContain("min-h-11");
+  });
+
+  it("keeps the compact desktop button density on a fine-pointer viewport", () => {
+    pointerMode.isFinePointer = true;
+    renderControl(baseAgent);
+    expect(getControlButton().className).not.toContain("min-h-11");
   });
 });
 
