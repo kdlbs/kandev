@@ -341,12 +341,6 @@ type repoStore interface {
 type sessionExecutorStore interface {
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
-	// GetPendingActionsBySessionIDs reports, per session, whether it currently
-	// carries a durable clarification/permission request — used to tell a
-	// genuine "waiting on the operator to decide" turn end apart from an
-	// ordinary "turn finished, nothing pending" one when reconciling task
-	// state (see writeTaskReviewState and reconcileActiveSessionOnStartup).
-	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
 	// HasUserPromptHistory reads the durable prompt sequence without scanning
 	// the session transcript. Empty workflow steps use it to decide whether the
 	// task description is still eligible as the initial prompt.
@@ -3203,13 +3197,6 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session)
 }
 
-// reconcileActiveSessionOnStartup repairs an active (STARTING/RUNNING/
-// WAITING_FOR_INPUT) session found on backend boot: it flips the session to
-// WAITING_FOR_INPUT for lazy resume and, if the owning task is stuck
-// IN_PROGRESS, moves it forward. The task lands on TaskStateWaitingForInput
-// rather than TaskStateReview when sessionID has a genuine pending
-// clarification or permission request outstanding, so a decision the agent
-// was waiting on before the restart doesn't silently read as "done" after it.
 func (s *Service) reconcileActiveSessionOnStartup(
 	ctx context.Context,
 	running *models.ExecutorRunning,
@@ -3244,43 +3231,19 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// in-memory Add on the next launch, closing the divergence window we set out
 	// to fix in this refactor.
 
-	// Ensure task is out of a stuck IN_PROGRESS state. If the session being
-	// reconciled to WAITING_FOR_INPUT above is blocked on a genuine
-	// clarification/permission question, land the task in WAITING_FOR_INPUT
-	// too rather than REVIEW — otherwise a backend restart silently turns a
-	// pending decision into a "ready to review" checkmark and the operator
-	// never sees that the agent is still waiting on them.
+	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if running.TaskID != "" {
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
-			targetState := v1.TaskStateReview
-			skipStateWrite := false
-			if pendingActions, pendingErr := s.repo.GetPendingActionsBySessionIDs(ctx, []string{sessionID}); pendingErr != nil {
-				// Fail closed, not open: a lookup error is not evidence that
-				// nothing is pending. Defaulting to REVIEW here would silently
-				// reproduce the exact bug this reconciliation exists to fix
-				// whenever the pending-action query itself errors on startup.
-				// Skip the write; a later reconcile pass gets another chance.
-				s.logger.Warn("failed to check pending action before startup state reconcile; skipping state write",
-					zap.String("task_id", running.TaskID),
-					zap.String("session_id", sessionID),
-					zap.Error(pendingErr))
-				skipStateWrite = true
-			} else if action, ok := pendingActions[sessionID]; ok &&
-				(action == models.TaskPendingActionClarification || action == models.TaskPendingActionPermission) {
-				targetState = v1.TaskStateWaitingForInput
-			}
 			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
 			// so the write is atomic against archived_at: the taskArchived guard
 			// above reads the row before this call, and ArchiveTask can commit in
 			// that window without changing task.State, so only an archive-aware
 			// conditional write closes the race.
-			if !skipStateWrite {
-				if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, targetState, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
-					s.logger.Warn("failed to update task state on startup",
-						zap.String("task_id", running.TaskID),
-						zap.Error(updateErr))
-				}
+			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
+				s.logger.Warn("failed to update task to REVIEW on startup",
+					zap.String("task_id", running.TaskID),
+					zap.Error(updateErr))
 			}
 		}
 	}
