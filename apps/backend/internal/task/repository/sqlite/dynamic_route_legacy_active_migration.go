@@ -79,11 +79,11 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 	`); err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: backfill dynamic_route_states: %w", err)
 	}
-	// Scoped to the rows the UPDATE above just backfilled to 'active', not to
-	// every IDLE+starting projection: a session whose authoritative route row
-	// is 'action_required' or 'waiting' (e.g. routeDynamicAgentFailure wrote
-	// the durable row but the projection write failed) must keep its
-	// projection untouched, or this backfill would erase a live Retry banner.
+	// Scoped to sessions whose dynamic_route_states row is now 'active' (whether
+	// just backfilled or already active before this migration ran). A session whose
+	// authoritative route row is 'action_required' or 'waiting' (e.g.
+	// routeDynamicAgentFailure wrote the durable row but the projection write failed)
+	// must keep its projection untouched, or this backfill would erase a live Retry banner.
 	if _, err := tx.Exec(`
 		UPDATE task_sessions
 		SET route_state = 'active'
