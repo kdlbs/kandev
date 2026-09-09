@@ -48,6 +48,8 @@ snapshot. Existing cleanup audits still protect resources that remain or reappea
    cannot establish absence.
 3. The worker completes fully absent resources and retains archive recovery
    metadata. Existing dirty, shared, unique-commit, and replacement safeguards pass.
+   Snapshot worktrees do not bypass identity-aware batch cleanup through the
+   legacy environment destroyer.
 
 ## Implementation sequence
 
@@ -110,14 +112,14 @@ From `apps/backend`, run the new regressions before the correction:
 
 ```bash
 rtk go test -tags fts5 ./internal/worktree -run '^TestCaptureCleanupHeadOIDs_' -count=1 -v
-rtk go test -tags fts5 ./internal/task/service -run '^(TestPrepareTaskResourceCleanup_MissingWorktree|TestTaskLifecycleCleanup_MissingWorktree)$' -count=1 -v
+rtk go test -tags fts5 ./internal/task/service -run '^(TestPrepareTaskResourceCleanup_MissingWorktree|TestTaskLifecycleCleanup_MissingWorktree|TestTaskLifecycleCleanup_MissingWorktree_ReplacementBranchStaysRetryable|TestTaskLifecycleCleanup_MissingWorktree_ReplacementCheckoutStaysRetryable)$' -count=1 -v
 ```
 
 After the correction, run the focused checks from `apps/backend`:
 
 ```bash
 rtk go test -race -tags fts5 ./internal/worktree -run '^(TestCaptureCleanupHeadOIDs_|TestCleanupWorktrees)' -count=1
-rtk go test -race -tags fts5 ./internal/task/service -run '^(TestPrepareTaskResourceCleanup_MissingWorktree|TestTaskLifecycleCleanup_MissingWorktree|TestPreparedCascadeCleanupSnapshotPersistsWorktreeTaskDirNames|TestArchiveAndDeleteCleanupRemainPreparedUntilMutationCommits|TestTaskResourceCleanupMissingResourcesSucceed|TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup)$' -count=1
+rtk go test -race -tags fts5 ./internal/task/service -run '^(TestPrepareTaskResourceCleanup_MissingWorktree|TestTaskLifecycleCleanup_MissingWorktree|TestTaskLifecycleCleanup_MissingWorktree_ReplacementBranchStaysRetryable|TestTaskLifecycleCleanup_MissingWorktree_ReplacementCheckoutStaysRetryable|TestPreparedCascadeCleanupSnapshotPersistsWorktreeTaskDirNames|TestArchiveAndDeleteCleanupRemainPreparedUntilMutationCommits|TestTaskResourceCleanupMissingResourcesSucceed|TestUnarchiveCancelsAndJoinsClaimedArchiveCleanup)$' -count=1
 ```
 
 Before the first package command in a fresh worktree, run from `apps`:
@@ -188,12 +190,15 @@ path with `Lstat`, uses bounded exact-ref enumeration for an absent directory,
 and omits only a confirmed-absent local branch identity. Strict parsing rejects
 diagnostics, malformed records, missing objects, invalid commit IDs, and
 non-commit refs. The full worktree inventory remains in the durable snapshot.
+The worker marks omitted identities as unavailable, fails closed when a
+replacement checkout reappears, and routes snapshot worktrees through the
+identity-aware batch cleaner instead of the legacy environment destroyer.
 
 Validation completed:
 
 - `go test -tags fts5` manager capture regressions pass.
 - `go test -tags fts5` preparation and direct/cascade lifecycle regressions pass,
-  including replacement-branch retry safety.
+  including replacement-branch and replacement-checkout retry safety.
 - The required worktree race matrix passes in 34 seconds.
 - The required service race matrix passes in 13 seconds.
 - Chromium card-menu archive/delete flow passes 5 tests.

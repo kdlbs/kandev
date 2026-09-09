@@ -74,6 +74,11 @@ func TestCaptureCleanupHeadOIDs_MissingWorktree(t *testing.T) {
 			Path:           filepath.Join(t.TempDir(), "missing-last"),
 			Branch:         "feature/not-present",
 		},
+		{
+			ID:             "no-branch",
+			RepositoryPath: repoPath,
+			Path:           filepath.Join(t.TempDir(), "no-branch"),
+		},
 	}
 
 	refsBefore := strings.TrimSpace(runGit(t, repoPath, "show-ref", "--heads"))
@@ -95,7 +100,7 @@ func TestCaptureCleanupHeadOIDs_MissingWorktree(t *testing.T) {
 			t.Errorf("identity[%q] = %q, want %q", id, got[id], wantOID)
 		}
 	}
-	for _, id := range []string{"missing-first", "descendant-only", "tag-only", "missing-last"} {
+	for _, id := range []string{"missing-first", "descendant-only", "tag-only", "missing-last", "no-branch"} {
 		if _, ok := got[id]; ok {
 			t.Errorf("identity[%q] unexpectedly captured for an absent exact branch", id)
 		}
@@ -106,8 +111,11 @@ func TestCaptureCleanupHeadOIDs_MissingWorktree(t *testing.T) {
 		t.Fatalf("branch refs changed during capture:\nbefore:\n%s\nafter:\n%s", refsBefore, refsAfter)
 	}
 	for _, wt := range worktrees {
-		if wt.Path == "" || wt.RepositoryPath == "" || wt.Branch == "" {
+		if wt.Path == "" || wt.RepositoryPath == "" {
 			t.Fatalf("test worktree %q is incomplete", wt.ID)
+		}
+		if wt.Branch == "" {
+			continue
 		}
 		if _, err := os.Lstat(wt.Path); err == nil && wt.ID != "healthy" {
 			t.Errorf("capture unexpectedly created path for %q", wt.ID)

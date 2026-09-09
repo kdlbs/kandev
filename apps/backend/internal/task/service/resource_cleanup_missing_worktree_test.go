@@ -207,6 +207,48 @@ func TestTaskLifecycleCleanup_MissingWorktree_ReplacementBranchStaysRetryable(t 
 	}
 }
 
+func TestTaskLifecycleCleanup_MissingWorktree_ReplacementCheckoutStaysRetryable(t *testing.T) {
+	ctx := context.Background()
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	fixture := newMissingWorktreeCleanupFixture(t, repo, "task-replacement-checkout-after-preparation")
+	taskSvc.SetWorktreeCleanup(fixture.manager)
+	taskSvc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: fixture.manager})
+	const operationID = "archive:replacement-checkout-after-preparation"
+	if err := taskSvc.PrepareTaskResourceCleanup(
+		ctx, fixture.taskID, models.TaskResourceCleanupTriggerArchive, operationID, true,
+	); err != nil {
+		t.Fatalf("PrepareTaskResourceCleanup: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, fixture.taskID); err != nil {
+		t.Fatalf("ArchiveTask mutation: %v", err)
+	}
+	runGitTestCmd(t, fixture.repositoryA, "branch", fixture.worktreeA.Branch, "main")
+	runGitTestCmd(t, fixture.repositoryA, "worktree", "add", fixture.worktreeA.Path, fixture.worktreeA.Branch)
+	if err := taskSvc.StartPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		t.Fatalf("StartPreparedTaskResourceCleanup: %v", err)
+	}
+	job := latestCleanupJob(t, repo, fixture.taskID, models.TaskResourceCleanupTriggerArchive)
+	if err := taskSvc.processTaskResourceCleanupJob(ctx, job.ID); err == nil {
+		t.Fatal("processTaskResourceCleanupJob error = nil, want replacement-checkout safety error")
+	}
+	job, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("reload cleanup job: %v", err)
+	}
+	if job.State != models.TaskResourceCleanupStateRetryWait {
+		t.Fatalf("cleanup state = %q, want retry_wait", job.State)
+	}
+	if _, err := os.Stat(fixture.worktreeA.Path); err != nil {
+		t.Fatalf("replacement checkout was removed after preparation: %v", err)
+	}
+	if got := strings.TrimSpace(string(runGitTestCmd(
+		t, fixture.repositoryA, "branch", "--list", fixture.worktreeA.Branch,
+	))); got == "" {
+		t.Fatalf("replacement branch %q was removed after preparation", fixture.worktreeA.Branch)
+	}
+}
+
 func newMissingWorktreeCleanupFixture(
 	t *testing.T,
 	repo *sqliterepo.Repository,

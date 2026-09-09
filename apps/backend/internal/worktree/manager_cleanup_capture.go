@@ -40,6 +40,7 @@ func parseCleanupBranchRefOutput(output, wantedRef string) (string, bool, error)
 		if len(fields) != 3 || !strings.HasPrefix(fields[0], "refs/") || fields[1] == "" || fields[2] == "" {
 			return "", false, fmt.Errorf("malformed local branch inspection output")
 		}
+		// Validate every returned line for fail-closed safety; skip non-matching refs.
 		if fields[2] != "commit" {
 			return "", false, fmt.Errorf("local branch %q resolved to object type %q", fields[0], fields[2])
 		}

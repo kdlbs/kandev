@@ -50,4 +50,7 @@ and safe when runtimes or task rows are already gone.
   its local branch are absent, cleanup preparation shall permit task archive
   or deletion. This applies to direct and cascade operations, including tasks
   with other healthy repositories. Remaining resources shall retain their
-  ownership checks and cleanup guarantees.
+  ownership checks and cleanup guarantees. If the omitted identity's path or
+  registration reappears before execution, cleanup shall remain retryable and
+  shall not adopt the live checkout without an immutable identity captured
+  during preparation.

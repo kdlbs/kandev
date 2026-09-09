@@ -220,7 +220,7 @@ func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
 	if wt.BaseBranch == "" {
 		wt.BaseBranch = cached.BaseBranch
 	}
-	if wt.CleanupHeadOID == "" {
+	if wt.CleanupHeadOID == "" && !wt.CleanupHeadOIDUnavailable {
 		wt.CleanupHeadOID = cached.CleanupHeadOID
 	}
 }
@@ -249,6 +249,11 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 		if !pathPresent {
 			branch := strings.TrimSpace(wt.Branch)
 			if branch == "" {
+				m.logger.Warn("cleanup worktree path is absent and branch is unknown",
+					zap.String("task_id", wt.TaskID),
+					zap.String("worktree_id", wt.ID),
+					zap.String("repository_path", wt.RepositoryPath),
+					zap.String("reason", "empty branch on environment row"))
 				continue
 			}
 			branchRef := "refs/heads/" + branch
@@ -258,6 +263,7 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 			}
 			if !found {
 				m.logger.Warn("cleanup worktree path and branch are absent",
+					zap.String("task_id", wt.TaskID),
 					zap.String("worktree_id", wt.ID),
 					zap.String("repository_path", wt.RepositoryPath),
 					zap.String("branch", branch),

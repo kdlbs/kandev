@@ -46,9 +46,12 @@ change to prepared-job activation and reconciliation.
 The cleanup worker revalidates the recorded resource through its existing
 path, registration, branch, commit, and shared-reference audits. An absent
 path, branch, and registration complete through the existing idempotent path.
-Competing or unverifiable registrations remain retryable. A replacement branch
-without the required immutable identity cannot authorize destructive cleanup.
-Archive retains its existing branch-preservation disposition.
+Competing or unverifiable registrations remain retryable. Worktrees present in
+the durable snapshot are sent through the identity-aware batch cleaner; task
+environment teardown does not send those same IDs through its legacy ID-only
+destroyer. A replacement branch or checkout without the required immutable
+identity cannot authorize destructive cleanup. Archive retains its existing
+branch-preservation disposition.
 
 These checks preserve the [fail-closed cleanup decision](../../../decisions/0009-fail-closed-gc-semantics.md)
 and [task-owned worktree lifetime](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md).

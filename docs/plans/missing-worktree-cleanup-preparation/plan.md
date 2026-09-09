@@ -115,6 +115,12 @@ An exact branch result supplies its immutable commit identity.
 An absent branch omits only its identity-map entry and emits a bounded warning
 with the task/worktree IDs and the absence reason.
 
+At execution, snapshot worktrees use the identity-aware batch cleanup path. The
+task-environment teardown path skips those same worktree IDs so its legacy
+ID-only destroyer cannot adopt a checkout that reappeared after preparation.
+The worker keeps such a replacement retryable when no immutable identity is
+available.
+
 Do not use `Manager.branchExists` to establish absence in preparation.
 That helper currently maps generic command failures to `false` outside timeout
 handling. Changing its wider behavior is outside this repair.
