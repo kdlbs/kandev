@@ -80,6 +80,16 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			wantErr:       `requested model "requested" is unavailable (reason: selection_unsupported)`,
 		},
 		{
+			name:          "auto fallback allows unsupported model selection",
+			state:         modelState("requested"),
+			policy:        StartModelPolicy{Model: "requested", AutoFallback: true},
+			applierErrors: []error{methodNotFoundErr()},
+			wantCalls:     []string{"requested"},
+			wantOutcome:   ModelSelectionOutcomeProviderDefault,
+			wantReason:    ModelSelectionReasonSelectionUnsupported,
+			wantWarning:   true,
+		},
+		{
 			name:        "auto fallback allows absent requested model",
 			state:       modelState("executor-default"),
 			policy:      StartModelPolicy{Model: "host-only-model", AutoFallback: true},

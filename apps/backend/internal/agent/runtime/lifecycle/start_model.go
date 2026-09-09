@@ -140,6 +140,13 @@ func applyStartModelPolicy(
 	decision.SetModelCalled = true
 	if err := applier.SetModel(ctx, policy.Model); err != nil {
 		if sessionmodel.IsMethodNotFound(err) {
+			if policy.AutoFallback {
+				log.Debug("agent does not support model selection, continuing on provider default",
+					zap.String("model", policy.Model), zap.Error(err))
+				decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
+				decision.SetModelCalled = true
+				return decision, nil
+			}
 			unsupported, unavailableErr := unavailableStartModel(state, policy, ModelSelectionReasonSelectionUnsupported)
 			unsupported.SetModelCalled = true
 			return unsupported, unavailableErr
