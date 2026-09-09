@@ -12,7 +12,6 @@ import (
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/subproc"
-	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -43,9 +42,10 @@ type RunnerMutabilityView struct {
 // WorkspaceGroupMembershipReader is the narrow slice of the office
 // workspace-group repository the runner-mutability evaluator and switch
 // action need: whether a task currently holds an active (non-released)
-// group membership. Satisfied structurally by *officesqlite.Repository.
+// group membership. Existence-only, so it never needs office's
+// WorkspaceGroup model. Satisfied structurally by *officesqlite.Repository.
 type WorkspaceGroupMembershipReader interface {
-	GetWorkspaceGroupForTask(ctx context.Context, taskID string) (*orchmodels.WorkspaceGroup, error)
+	HasWorkspaceGroupForTask(ctx context.Context, taskID string) (bool, error)
 	GetActiveWorkspaceGroupTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 }
 
@@ -262,11 +262,7 @@ func (s *Service) runnerGroupMembershipChecker(ctx context.Context, taskID strin
 	if s.wsGroupMembership == nil {
 		return false, nil
 	}
-	group, err := s.wsGroupMembership.GetWorkspaceGroupForTask(ctx, taskID)
-	if err != nil {
-		return false, err
-	}
-	return group != nil, nil
+	return s.wsGroupMembership.HasWorkspaceGroupForTask(ctx, taskID)
 }
 
 // resolveExecutorForProfile resolves and validates the target executor: it

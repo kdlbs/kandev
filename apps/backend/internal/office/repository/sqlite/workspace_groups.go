@@ -444,6 +444,19 @@ func (r *Repository) GetWorkspaceGroupForTask(ctx context.Context, taskID string
 	return &g, nil
 }
 
+// HasWorkspaceGroupForTask reports whether a task currently holds an active
+// (non-released) workspace-group membership, without exposing the group
+// itself. Adapts GetWorkspaceGroupForTask to the existence-only contract
+// task-tier callers (the runner-mutability evaluator) need, so they can read
+// office's workspace-group membership without importing office's models.
+func (r *Repository) HasWorkspaceGroupForTask(ctx context.Context, taskID string) (bool, error) {
+	g, err := r.GetWorkspaceGroupForTask(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return g != nil, nil
+}
+
 // GetActiveWorkspaceGroupTaskIDs reports, for each of taskIDs, whether the
 // task holds an active (non-released) workspace-group membership — the same
 // predicate GetWorkspaceGroupForTask applies for one task, batched behind a
