@@ -302,3 +302,96 @@ func TestSchedulerIntegration_PrepareAndLaunch_PauseGateError_ReleasesCheckoutAn
 		t.Fatalf("checkout_agent_id = %q, want released (nil)", *checkoutAgentID)
 	}
 }
+
+// -- Working status on the pause gates (mirrors
+// TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPreLaunchGate for the
+// tree-hold gate, in agent_working_status_test.go) --
+
+// TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsProcessRunPauseGate proves
+// processRun's pause branch clears a stale "working" status left by an
+// earlier launch on this same run (e.g. a post-start provider fallback
+// requeue), not only a freshly-claimed run whose agent was never marked.
+// Without the clear, that agent would stay "working" forever once the
+// workspace pauses.
+func TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsProcessRunPauseGate(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	taskID := "task-requeued-process-pause"
+	agent := launchedWorkingAgent(t, svc, ctx, "worker-requeued-process-pause", taskID)
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "after the first launch")
+
+	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
+
+	// Mirror RequeueRunForNextCandidate (repository/sqlite/run_routing.go):
+	// a post-start provider fallback puts the run back in the queue without
+	// touching agent status.
+	svc.ExecSQL(t, `UPDATE runs SET status = 'queued', session_id = '',
+		claimed_at = NULL, finished_at = NULL WHERE id = ?`, run.ID)
+
+	svc.SetPauseGate(&fakePauseGate{active: []*models.WorkspacePause{
+		{ID: "pause-1", WorkspaceID: "ws-1"},
+	}})
+
+	service.RunSchedulerTick(svc, ctx)
+
+	got, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	assertOutcome(t, got, service.RunOutcomeWorkspacePaused)
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after the requeued run hit the pause gate in processRun")
+}
+
+// TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPrepareAndLaunchPauseGate
+// mirrors the above for the second, later pause gate site immediately
+// before launch: a requeued run whose agent is still marked working from an
+// earlier launch must still clear that status when THIS dispatch is blocked
+// at the final gate, not only when processRun's earlier gate catches it.
+func TestAgentStatus_ReturnsToIdleWhenRequeuedRunHitsPrepareAndLaunchPauseGate(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	taskID := "task-requeued-launch-pause"
+	agent := launchedWorkingAgent(t, svc, ctx, "worker-requeued-launch-pause", taskID)
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusWorking, "after the first launch")
+
+	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
+
+	svc.ExecSQL(t, `UPDATE runs SET status = 'queued', session_id = '',
+		claimed_at = NULL, finished_at = NULL WHERE id = ?`, run.ID)
+
+	claimed, err := svc.ClaimNextRun(ctx)
+	if err != nil {
+		t.Fatalf("re-claim: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected the requeued run to be re-claimed")
+	}
+
+	// Clean at processRun's earlier read, paused at prepareAndLaunch's
+	// final read immediately before launch. A single ProcessRunForTest
+	// pass (rather than RunSchedulerTick) consumes the script exactly
+	// once, as in TestSchedulerIntegration_PrepareAndLaunch_BlockedByPause_ReleasesCheckoutAndFinishes.
+	svc.SetPauseGate(&fakePauseGate{active: []*models.WorkspacePause{
+		nil,
+		{ID: "pause-1", WorkspaceID: "ws-1"},
+	}})
+
+	service.ProcessRunForTest(svc, ctx, claimed)
+
+	if mock.callCount() != 1 {
+		t.Fatalf("StartTask calls = %d, want 1 (only the first launch)", mock.callCount())
+	}
+
+	got, err := svc.GetRun(ctx, claimed.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	assertOutcome(t, got, service.RunOutcomeWorkspacePaused)
+	assertAgentStatus(t, svc, ctx, agent.ID, models.AgentStatusIdle,
+		"after the requeued run hit the pause gate in prepareAndLaunch")
+}
