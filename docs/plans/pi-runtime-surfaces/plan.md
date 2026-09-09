@@ -8,9 +8,10 @@ status: complete
 
 ## Overview
 
-Pi's built-in definition assigns `npx -y pi-acp` to both structured ACP
-execution and interactive passthrough. Registry metadata confirms that
-`pi-acp` publishes the ACP adapter binary, while
+Pi's built-in definition assigns the managed command
+`npx --yes --prefer-offline pi-acp@<effective-version>` to structured ACP
+execution, while interactive passthrough uses `pi`. Registry metadata confirms
+that `pi-acp` publishes the ACP adapter binary, while
 `@earendil-works/pi-coding-agent` publishes the interactive `pi` binary. The
 repair keeps the ACP adapter on structured and inference paths, launches `pi`
 for passthrough, and makes installation and discovery agree on that executable.
@@ -29,7 +30,7 @@ and the observable behavior is specified in
 
 - Update `apps/backend/internal/agent/agents/pi_acp.go` so
   `BuildCommand`, `Runtime().Cmd`, and `InferenceConfig().Command` remain
-  `npx -y pi-acp`.
+  `npx --yes --prefer-offline pi-acp@<effective-version>`.
 - Change `PassthroughConfig.PassthroughCmd` to the globally installed `pi`
   executable. Do not route the passthrough path through managed ACP package or
   version resolution.
@@ -50,7 +51,8 @@ and the observable behavior is specified in
 
 ## Tests
 
-- **What:** Structured Pi chat and inference remain on `npx -y pi-acp`, while
+- **What:** Structured Pi chat and inference use
+  `npx --yes --prefer-offline pi-acp@<effective-version>`, while
   `PassthroughCmd` is exactly `pi`; the install recipe and detection binary
   match the interactive package.
   **File:** `apps/backend/internal/agent/agents/new_acp_agents_test.go`.

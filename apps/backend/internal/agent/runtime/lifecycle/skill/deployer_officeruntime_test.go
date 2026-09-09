@@ -55,9 +55,10 @@ func TestDeploy_OfficeRuntimeGatesSystemSkills(t *testing.T) {
 				ID:       "routine-agent",
 				SkillIDs: string(skillIDsJSON),
 			},
-			ExecutorType:  "worktree",
-			WorkspacePath: worktree,
-			OfficeRuntime: officeRuntime,
+			ExecutorType:         "worktree",
+			WorkspacePath:        worktree,
+			AdditionalSkillSlugs: []string{skill.ReservedDecisionSkillSlug},
+			OfficeRuntime:        officeRuntime,
 		}); err != nil {
 			t.Fatalf("Deploy: %v", err)
 		}

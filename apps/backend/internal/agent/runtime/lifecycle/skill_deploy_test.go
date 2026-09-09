@@ -3,9 +3,12 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
+	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
@@ -29,6 +32,17 @@ type recordingDeployer struct {
 	last   SkillDeployRequest
 	result SkillDeployResult
 	err    error
+}
+
+type lifecycleSkillReader struct {
+	skill *runtimeskill.Skill
+}
+
+func (r *lifecycleSkillReader) GetSkillFromConfig(_ context.Context, key string) (*runtimeskill.Skill, error) {
+	if key == r.skill.Slug {
+		return r.skill, nil
+	}
+	return nil, nil
 }
 
 func (r *recordingDeployer) DeploySkills(_ context.Context, req SkillDeployRequest) (SkillDeployResult, error) {
@@ -63,10 +77,10 @@ func TestRunSkillDeploy_NoOpWithoutReader(t *testing.T) {
 	}
 }
 
-// TestRunSkillDeploy_FastPathEmptyProfile verifies that a shallow / kanban
-// profile (empty skill_ids, empty desired_skills) short-circuits before
-// invoking the deployer.
-func TestRunSkillDeploy_FastPathEmptyProfile(t *testing.T) {
+// TestRunSkillDeploy_EmptyProfileInvokesDeployerForCleanup verifies that a
+// shallow / kanban profile still reaches the deployer so it can remove a
+// launch-scoped skill left by an earlier seat run.
+func TestRunSkillDeploy_EmptyProfileInvokesDeployerForCleanup(t *testing.T) {
 	mgr := newSkillDeployTestManager(t)
 	rec := &recordingDeployer{}
 	mgr.skillDeployer = rec
@@ -78,8 +92,70 @@ func TestRunSkillDeploy_FastPathEmptyProfile(t *testing.T) {
 		&LaunchRequest{AgentProfileID: "p1"},
 		&LaunchRequest{WorkspacePath: "/tmp/ws", ExecutorType: "local_pc"})
 
-	if rec.called.Load() != 0 {
-		t.Errorf("shallow profile should fast-path, deployer was called %d times", rec.called.Load())
+	if rec.called.Load() != 1 {
+		t.Errorf("empty profile should invoke cleanup, deployer was called %d times", rec.called.Load())
+	}
+}
+
+func TestRunSkillDeploy_AdditionalSkillSlugInvokesDeployerForEmptyProfile(t *testing.T) {
+	mgr := newSkillDeployTestManager(t)
+	rec := &recordingDeployer{}
+	mgr.skillDeployer = rec
+	mgr.agentProfileReader = &fakeProfileReader{
+		profile: &settingsmodels.AgentProfile{ID: "p1", AgentID: "a1"},
+	}
+
+	mgr.runSkillDeploy(context.Background(),
+		&LaunchRequest{
+			AgentProfileID:       "p1",
+			AdditionalSkillSlugs: []string{"kandev-step-decision"},
+		},
+		&LaunchRequest{WorkspacePath: "/tmp/ws", ExecutorType: "local_pc"})
+
+	if rec.called.Load() != 1 {
+		t.Fatalf("expected deployer once, got %d", rec.called.Load())
+	}
+	if len(rec.last.AdditionalSkillSlugs) != 1 || rec.last.AdditionalSkillSlugs[0] != "kandev-step-decision" {
+		t.Fatalf("additional skill slugs = %v", rec.last.AdditionalSkillSlugs)
+	}
+}
+
+func TestRunSkillDeploy_SeatThenNonSeatCleansMaterializedDecisionSkill(t *testing.T) {
+	base := t.TempDir()
+	worktree := t.TempDir()
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	deployer, err := runtimeskill.New(runtimeskill.Config{
+		Logger:   log,
+		BasePath: base,
+		SkillReader: &lifecycleSkillReader{skill: &runtimeskill.Skill{
+			Slug: runtimeskill.ReservedDecisionSkillSlug, Content: "# decision",
+		}},
+		ProjectSkillDirResolver: func(string) string { return ".claude/skills" },
+	})
+	if err != nil {
+		t.Fatalf("skill.New: %v", err)
+	}
+	mgr := newSkillDeployTestManager(t)
+	mgr.skillDeployer = NewSkillDeployerAdapter(deployer)
+	mgr.agentProfileReader = &fakeProfileReader{
+		profile: &settingsmodels.AgentProfile{ID: "seat-profile", AgentID: "claude-acp"},
+	}
+	prepared := &LaunchRequest{WorkspacePath: worktree, ExecutorType: "local_pc"}
+
+	mgr.runSkillDeploy(context.Background(), &LaunchRequest{
+		AgentProfileID: "seat-profile",
+		AdditionalSkillSlugs: []string{
+			runtimeskill.ReservedDecisionSkillSlug,
+		},
+	}, prepared)
+	decisionPath := filepath.Join(worktree, ".claude", "skills", "kandev-step-decision", "SKILL.md")
+	if _, err := os.Stat(decisionPath); err != nil {
+		t.Fatalf("seat launch did not materialize decision skill: %v", err)
+	}
+
+	mgr.runSkillDeploy(context.Background(), &LaunchRequest{AgentProfileID: "seat-profile"}, prepared)
+	if _, err := os.Stat(decisionPath); !os.IsNotExist(err) {
+		t.Fatalf("non-seat launch left decision skill at %s", decisionPath)
 	}
 }
 

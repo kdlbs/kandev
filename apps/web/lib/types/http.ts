@@ -564,6 +564,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   task_id: TaskId;
   /** Immutable queue ownership identity; changes when a textual session ID is recreated. */
   queue_incarnation_id?: string;
+  /** Frontend-only owner for an in-flight optimistic resume projection. */
+  resume_projection_id?: string;
   /** Optional user-supplied label shown on the session tab. */
   name?: string;
   agent_profile_id?: AgentProfileId;

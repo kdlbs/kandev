@@ -1,8 +1,8 @@
 // Package skill is the runtime-tier implementation of per-profile skill
 // and instruction-file deployment introduced in ADR 0005 Wave A. The
 // package owns the manifest builder and the per-executor delivery
-// strategies (local filesystem symlinks, Docker bind-mount, Sprites
-// upload). Wave E moved this code out of internal/office into the
+// strategies (local filesystem, Docker bind-mount, Sprites upload,
+// SSH/SFTP upload). Wave E moved this code out of internal/office into the
 // runtime so every launch (kanban or office) goes through the same
 // path.
 //

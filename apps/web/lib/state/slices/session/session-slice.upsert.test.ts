@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- session slice coverage shares one store harness. */
+
 import { describe, it, expect } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
@@ -29,6 +31,8 @@ function makeStore() {
 const TASK_ID = toTaskId("task-1");
 const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
+const LATER_TS = "2026-04-20T00:01:00Z";
+const INCARNATION_ID = "incarnation-1";
 
 type SessionOverrides = Partial<Omit<TaskSession, "id" | "agent_profile_id" | "repository_id">> & {
   id?: string;
@@ -159,6 +163,50 @@ describe("upsertTaskSessionFromEvent", () => {
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
     expect(store.getState().taskSessions.items[SESSION_ID].repository_id).toBe("repo-1");
+  });
+});
+
+describe("resume projection ownership", () => {
+  it("revokes an optimistic resume projection when an authoritative event arrives", () => {
+    const store = makeStore();
+    store.getState().setTaskSession(
+      makeSession({
+        state: "IDLE",
+        queue_incarnation_id: INCARNATION_ID,
+      }),
+    );
+
+    const projectedSession = Object.assign(
+      makeSession({
+        state: "STARTING",
+        queue_incarnation_id: INCARNATION_ID,
+      }),
+      { resume_projection_id: "projection-1" },
+    );
+    store.getState().setTaskSession(projectedSession);
+    expect(
+      (
+        store.getState().taskSessions.items[SESSION_ID] as TaskSession & {
+          resume_projection_id?: string;
+        }
+      ).resume_projection_id,
+    ).toBe("projection-1");
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        state: "STARTING",
+        queue_incarnation_id: INCARNATION_ID,
+        updated_at: LATER_TS,
+      }),
+    );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.state).toBe("STARTING");
+    expect(session.updated_at).toBe(LATER_TS);
+    expect(
+      (session as TaskSession & { resume_projection_id?: string }).resume_projection_id,
+    ).toBeUndefined();
   });
 });
 
@@ -324,7 +372,7 @@ describe("setTaskSessionsForTask reconciles active turns", () => {
       .getState()
       .setTaskSessionsForTask(
         TASK_ID,
-        [makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" })],
+        [makeSession({ state: "WAITING_FOR_INPUT", updated_at: LATER_TS })],
         {},
       );
 
@@ -348,7 +396,7 @@ describe("setTaskSessionsForTask reconciles active turns", () => {
       .getState()
       .upsertTaskSessionFromEvent(
         TASK_ID,
-        makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" }),
+        makeSession({ state: "WAITING_FOR_INPUT", updated_at: LATER_TS }),
       );
 
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-new");
@@ -589,7 +637,7 @@ describe("queue actions", () => {
 describe("queue snapshot actions", () => {
   it("requires an authoritative snapshot to replace the accepted status epoch", () => {
     const store = makeStore();
-    store.getState().setTaskSession(makeSession({ queue_incarnation_id: "incarnation-1" }));
+    store.getState().setTaskSession(makeSession({ queue_incarnation_id: INCARNATION_ID }));
     const currentEntries = [makeEntry({ id: "current" })];
     store.getState().setQueueEntries(SESSION_ID, currentEntries, {
       count: 1,
@@ -597,7 +645,7 @@ describe("queue snapshot actions", () => {
       mergeEnabled: true,
       autoRun: true,
       taskId: TASK_ID,
-      sessionIncarnationId: "incarnation-1",
+      sessionIncarnationId: INCARNATION_ID,
       statusEpoch: "epoch-1",
     });
     const replacementEntries = [makeEntry({ id: "replacement" })];
@@ -606,7 +654,7 @@ describe("queue snapshot actions", () => {
       max: 10,
       mergeEnabled: false,
       autoRun: false,
-      sessionIncarnationId: "incarnation-1",
+      sessionIncarnationId: INCARNATION_ID,
       statusEpoch: "epoch-2",
     };
 

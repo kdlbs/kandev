@@ -34,7 +34,8 @@ Antigravity has no automated install: Google distributes `agy_acp_server.par` (`
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use `npx -y pi-acp`.
+- Structured ACP sessions and one-shot inference use
+  `npx --yes --prefer-offline pi-acp@<effective-version>`.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -52,8 +53,8 @@ The status shown on this page is authoritative for the current host. A CLI that 
 
 ### Update a managed agent runtime
 
-The update icon is available on managed Claude, Codex, OpenCode, Copilot, and
-Gemini agent cards. It updates the runtime on the Kandev host.
+The update icon is available on managed Claude, Codex, OpenCode, Copilot,
+Gemini, and Pi agent cards. It updates the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
