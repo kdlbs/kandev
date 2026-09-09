@@ -37,6 +37,36 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 	}
 }
 
+func TestLoadSessionReturnsCapabilitiesForResumedSession(t *testing.T) {
+	sessionID := acp.SessionId("session-load-test")
+	agent := &mockAgent{
+		conn:            &promptCancelUpdater{},
+		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+
+	response, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{SessionId: sessionID})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if len(response.ConfigOptions) == 0 {
+		t.Fatal("LoadSession() returned no config options")
+	}
+	if response.Modes == nil || len(response.Modes.AvailableModes) == 0 {
+		t.Fatal("LoadSession() returned no session modes")
+	}
+	values := make(map[string]string, len(response.ConfigOptions))
+	for _, option := range response.ConfigOptions {
+		if option.Select != nil {
+			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
+		}
+	}
+	if values["model"] != modelFast {
+		t.Fatalf("loaded model = %q, want %q", values["model"], modelFast)
+	}
+}
+
 func TestSetSessionConfigOptionRejectsUnknownValue(t *testing.T) {
 	sessionID := acp.SessionId("session-config-test")
 	agent := &mockAgent{

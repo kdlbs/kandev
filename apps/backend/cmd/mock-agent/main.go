@@ -304,13 +304,22 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 		}
 	}
 	a.mu.Lock()
-	a.sessions[req.SessionId] = true
+	if a.sessions == nil {
+		a.sessions = make(map[acp.SessionId]bool)
+	}
 	if a.sessionConfig == nil {
 		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
 	}
-	if _, ok := a.sessionConfig[req.SessionId]; !ok {
-		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+	if a.commandsEmitted == nil {
+		a.commandsEmitted = make(map[acp.SessionId]bool)
 	}
+	a.sessions[req.SessionId] = true
+	configOptions, ok := a.sessionConfig[req.SessionId]
+	if !ok {
+		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+		configOptions = a.sessionConfig[req.SessionId]
+	}
+	responseConfigOptions := cloneSessionConfigOptions(configOptions)
 	// Reset emit state so the resume re-advertises commands (matches real
 	// agents which re-emit on session/load).
 	delete(a.commandsEmitted, req.SessionId)
@@ -320,7 +329,10 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	// Re-emit available commands after the session/load response flushes.
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
 
-	return acp.LoadSessionResponse{}, nil
+	return acp.LoadSessionResponse{
+		ConfigOptions: responseConfigOptions,
+		Modes:         mockSessionModes(),
+	}, nil
 }
 
 // Prompt processes a user message and streams responses via SessionUpdate.

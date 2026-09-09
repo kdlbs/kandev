@@ -226,12 +226,9 @@ test.describe("Session recovery", () => {
     // Click "Start fresh session"
     await session.recoveryFreshButton().click();
 
-    // Recovery briefly exposes the idle placeholder before the replacement
-    // agent starts. Observe the starting phase before treating the composer as
-    // ready so that transient idle state cannot satisfy the assertion.
-    const freshStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-    await expect(freshStarting).toBeVisible({ timeout: 30_000 });
-    await expect(freshStarting).not.toBeVisible({ timeout: 30_000 });
+    // Native session resume can move directly from recovery into an editable
+    // replacement session, so assert stable readiness instead of a transient
+    // placeholder that may be skipped.
     await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
       "contenteditable",
       "true",
