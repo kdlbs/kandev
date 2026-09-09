@@ -76,6 +76,7 @@ func TestAutoStartStepPrompt_LeavesHandoffQueuedWhenAutoRunPaused(t *testing.T) 
 		autoStart,
 		false,
 		false,
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -105,4 +106,17 @@ func TestPublishTaskQueueStatusEventIncludesQueuePolicy(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, false, data["auto_run"])
 	require.Equal(t, false, data["merge_enabled"])
+}
+
+func TestPublishTaskQueueStatusEventMarksTaskOnlyFallbackScope(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	eventBus := &recordingEventBus{}
+	svc.eventBus = eventBus
+
+	svc.publishTaskQueueStatusEvent(context.Background(), "missing-task", "")
+
+	require.Len(t, eventBus.events, 1)
+	data, ok := eventBus.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "task", data["queue_status_scope"])
 }

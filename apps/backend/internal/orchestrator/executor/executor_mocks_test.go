@@ -991,7 +991,9 @@ func (m *mockRepository) CountActiveTaskSessionsByRepository(ctx context.Context
 func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	return 0, nil
 }
-func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) DeleteTaskSession(ctx context.Context, session *models.TaskSession) error {
+	return nil
+}
 
 // Workflow-related session operations
 func (m *mockRepository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {

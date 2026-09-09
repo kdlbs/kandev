@@ -41,6 +41,7 @@ func (a *skillDeployerAdapter) DeploySkills(ctx context.Context, req SkillDeploy
 		WorkspaceID:          req.WorkspaceID,
 		SessionID:            req.SessionID,
 		AdditionalSkillSlugs: append([]string(nil), req.AdditionalSkillSlugs...),
+		OfficeRuntime:        req.OfficeRuntime,
 	})
 	if err != nil {
 		return SkillDeployResult{}, err

@@ -11,6 +11,7 @@ import (
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 )
 
 // fakeProfileReader returns a canned profile (or error) so we can drive the
@@ -246,6 +247,64 @@ func TestRunSkillDeploy_MergesMetadataOnPreparedRequest(t *testing.T) {
 	}
 	if got := prepared.Metadata[MetadataKeyInstructionsDir]; got != "/tmp/kandev/runtime/default/instructions/p1" {
 		t.Errorf("instructions dir metadata = %v", got)
+	}
+}
+
+// TestRunSkillDeploy_OfficeRuntimeRequiresOfficeMode verifies that system
+// skills are enabled only for an Office-mode launch with a usable CLI path.
+func TestRunSkillDeploy_OfficeRuntimeRequiresOfficeMode(t *testing.T) {
+	rich := &settingsmodels.AgentProfile{ID: "p1", AgentID: "a1", SkillIDs: `["sk-foo"]`}
+
+	tests := []struct {
+		name string
+		mode string
+		env  map[string]string
+		want bool
+	}{
+		{
+			name: "Office mode with CLI",
+			mode: mcpmode.Office,
+			env:  map[string]string{"KANDEV_CLI": "/usr/local/bin/agentctl"},
+			want: true,
+		},
+		{
+			name: "task mode with CLI",
+			mode: mcpmode.Task,
+			env:  map[string]string{"KANDEV_CLI": "/usr/local/bin/agentctl"},
+			want: false,
+		},
+		{
+			name: "Office mode with whitespace CLI",
+			mode: mcpmode.Office,
+			env:  map[string]string{"KANDEV_CLI": "   "},
+			want: false,
+		},
+		{
+			name: "Office mode without CLI",
+			mode: mcpmode.Office,
+			env:  map[string]string{"GITLAB_TOKEN": "x"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := newSkillDeployTestManager(t)
+			rec := &recordingDeployer{}
+			mgr.skillDeployer = rec
+			mgr.agentProfileReader = &fakeProfileReader{profile: rich}
+
+			mgr.runSkillDeploy(context.Background(),
+				&LaunchRequest{AgentProfileID: "p1"},
+				&LaunchRequest{WorkspacePath: "/tmp/ws", Env: tt.env, McpMode: tt.mode})
+
+			if rec.called.Load() != 1 {
+				t.Fatalf("expected deployer once, got %d", rec.called.Load())
+			}
+			if rec.last.OfficeRuntime != tt.want {
+				t.Errorf("OfficeRuntime = %t, want %t", rec.last.OfficeRuntime, tt.want)
+			}
+		})
 	}
 }
 

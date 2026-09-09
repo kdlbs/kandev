@@ -23,7 +23,9 @@ const ReservedDecisionSkillSlug = "kandev-step-decision"
 // SkillIDs (the new merged column) and DesiredSkills (legacy office
 // column) and union the two into a single list of slugs / IDs. Empty
 // slots and launch-reserved skill slugs are dropped before lookup.
-func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.AgentProfile, workspaceSlug string, additionalSkillSlugs []string) *Manifest {
+// System skills are included only for Office launches, whose runtime env
+// provides the protocol they depend on.
+func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.AgentProfile, workspaceSlug string, additionalSkillSlugs []string, officeRuntime bool) *Manifest {
 	// Profile.AgentID IS the agent type ID after ADR 0005 — the
 	// agent_profiles row's agent_id column points at the agents
 	// table (claude-acp, codex-acp, ...). No extra resolver needed.
@@ -34,7 +36,7 @@ func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.Ag
 		AgentID:         profile.ID,
 		ProjectSkillDir: d.resolveProjectSkillDir(agentTypeID),
 	}
-	d.appendSkills(ctx, manifest, profile, additionalSkillSlugs)
+	d.appendSkills(ctx, manifest, profile, additionalSkillSlugs, officeRuntime)
 	d.appendInstructions(ctx, manifest, profile.ID)
 	return manifest
 }
@@ -42,7 +44,10 @@ func (d *Deployer) buildManifest(ctx context.Context, profile *settingsmodels.Ag
 // appendSkills resolves every desired slug / id on the profile to a
 // runtime Skill record. Lookups that fail are logged at debug level
 // and dropped — a missing skill must never abort a launch.
-func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile *settingsmodels.AgentProfile, additionalSkillSlugs []string) {
+// System skills (bundled Office protocol/task-ops skills) are skipped unless
+// officeRuntime is true: their instructions depend on Office runtime env
+// that only the Office scheduler launch path provides.
+func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile *settingsmodels.AgentProfile, additionalSkillSlugs []string, officeRuntime bool) {
 	if d.skillReader == nil {
 		return
 	}
@@ -77,6 +82,11 @@ func (d *Deployer) appendSkills(ctx context.Context, manifest *Manifest, profile
 					zap.String("key", key), zap.String("slug", skill.Slug))
 				continue
 			}
+		}
+		if skill.IsSystem && !officeRuntime {
+			d.logger.Debug("skip system skill: no office runtime env",
+				zap.String("key", key))
+			continue
 		}
 		manifest.Skills = append(manifest.Skills, *skill)
 	}

@@ -33,6 +33,10 @@ type SkillDeployRequest struct {
 	WorkspaceID          string
 	SessionID            string
 	AdditionalSkillSlugs []string
+	// OfficeRuntime reports whether backend selected Office mode and the
+	// finalized launch env contains a non-empty KANDEV_CLI. Office launch
+	// validation checks the remaining runtime variables before this hook runs.
+	OfficeRuntime bool
 }
 
 // SkillDeployResult carries the side-effects a successful deploy produced

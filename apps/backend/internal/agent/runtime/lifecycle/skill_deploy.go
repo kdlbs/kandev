@@ -2,8 +2,11 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/mcpmode"
 )
 
 // MetadataKeyInstructionsDir carries the per-launch path where the
@@ -41,6 +44,7 @@ func (m *Manager) runSkillDeploy(ctx context.Context, original, prepared *Launch
 		WorkspaceID:          profile.WorkspaceID,
 		SessionID:            original.SessionID,
 		AdditionalSkillSlugs: append([]string(nil), original.AdditionalSkillSlugs...),
+		OfficeRuntime:        prepared.McpMode == mcpmode.Office && strings.TrimSpace(prepared.Env["KANDEV_CLI"]) != "",
 	}
 	result, err := m.skillDeployer.DeploySkills(ctx, req)
 	if err != nil {

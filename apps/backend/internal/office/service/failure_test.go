@@ -381,6 +381,71 @@ func TestMarkAgentPausedFixed_UsesPauseSnapshot(t *testing.T) {
 	}
 }
 
+// A task reassigned to a different agent after the failure must not be
+// requeued for the original agent, and the stale recovery row for it
+// must be discarded (recoverPausedTask's assignee-mismatch branch).
+func TestMarkAgentPausedFixed_DiscardsRecoveryForReassignedTask(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-reassigned-from")
+	reassignedTaskID := "reassigned-task"
+	insertSyntheticTask(t, svc, reassignedTaskID, "ws-1", "agent-reassigned-from")
+	failedRun := queueAndReadRun(t, svc, "agent-reassigned-from", reassignedTaskID)
+	if err := svc.HandleAgentFailure(ctx, failedRun, "boom"); err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	// Two more failures (on other tasks) to cross the default threshold
+	// of 3 and auto-pause the agent, with the reassigned task's failed
+	// run captured in the pause snapshot.
+	autoPauseAgent(t, svc, "ws-1", "agent-reassigned-from", 2)
+
+	// Precondition: the pause snapshot must include the reassigned task,
+	// otherwise the negative assertions below would pass vacuously (there
+	// would be nothing to discard).
+	var preCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&preCount,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+		"agent-reassigned-from", reassignedTaskID,
+	); err != nil {
+		t.Fatalf("query pre-fix snapshot: %v", err)
+	}
+	if preCount != 1 {
+		t.Fatalf(
+			"test setup error: expected exactly one recovery row for reassigned task, found %d",
+			preCount,
+		)
+	}
+
+	setTestTaskAssignee(t, svc, reassignedTaskID, "agent-reassigned-to")
+
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-reassigned-from"); err != nil {
+		t.Fatalf("mark fixed: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonManualResumeAfterFailure &&
+			taskIDFromPayload(t, run.Payload) == reassignedTaskID {
+			t.Fatalf("queued recovery run for reassigned task %s", reassignedTaskID)
+		}
+	}
+
+	var recoveryCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&recoveryCount,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+		"agent-reassigned-from", reassignedTaskID,
+	); err != nil {
+		t.Fatalf("query pause recoveries: %v", err)
+	}
+	if recoveryCount != 0 {
+		t.Fatalf("expected recovery row for reassigned task to be deleted, found %d", recoveryCount)
+	}
+}
+
 // Threshold-agnostic: the fix must not assume the default threshold
 // of 3. A per-agent override to a different value must still recover.
 func TestMarkAgentPausedFixed_ThresholdAgnostic(t *testing.T) {
