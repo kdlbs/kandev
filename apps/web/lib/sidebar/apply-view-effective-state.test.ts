@@ -401,4 +401,32 @@ describe("applyView — effective state consistency (integration)", () => {
     expect(out.groups.find((group) => group.key === "COMPLETED")?.tasks).toEqual([parent]);
     expect(out.subTasksByParentId.get("parent")).toBeUndefined();
   });
+
+  it("resolves each deep-tree edge once", () => {
+    const depth = 2_000;
+    const tasks = Array.from({ length: depth }, (_, index) =>
+      task({
+        id: `deep-${index}`,
+        parentTaskId: index === 0 ? undefined : `deep-${index - 1}`,
+        state: index === depth - 1 ? "IN_PROGRESS" : "COMPLETED",
+        sessionState: index === depth - 1 ? "RUNNING" : "COMPLETED",
+      }),
+    );
+    class CountingSubtaskMap extends Map<string, TaskSwitcherItem[]> {
+      lookups = 0;
+
+      override get(key: string): TaskSwitcherItem[] | undefined {
+        this.lookups += 1;
+        return super.get(key);
+      }
+    }
+    const subMap = new CountingSubtaskMap();
+    for (let index = 0; index < depth - 1; index += 1) {
+      subMap.set(`deep-${index}`, [tasks[index + 1]]);
+    }
+
+    applySort(tasks, { key: "state", direction: "asc" }, [], subMap);
+
+    expect(subMap.lookups).toBeLessThan(depth * 4);
+  });
 });

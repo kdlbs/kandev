@@ -28,8 +28,8 @@ presentation. It complements the task system's
 - `TaskSwitcherItem` carries each task's persisted task state, projected session state, and parent
   identity without adding an aggregate-state field.
 - `separateSubtasks` builds the included parent-to-children map after sidebar filters run.
-- A pure resolver in `apply-view.ts` traverses an included root tree and returns its effective
-  group identity and sort bucket.
+- The pure resolver in `effective-task-tree-state.ts` builds an iterative, memoized aggregate for
+  each included task and returns its effective group identity and sort bucket.
 - `applySort` and `applyGroup` consume the same resolved value so their state semantics cannot
   diverge.
 - `TaskSwitcher` and `SessionTaskSwitcherSheet` render the shared grouped result on desktop and
@@ -37,8 +37,10 @@ presentation. It complements the task system's
 
 ## Effective-state resolution
 
-The resolver traverses every included descendant, not only direct children. A visited-task set
-prevents malformed parent cycles from causing unbounded recursion.
+The resolver traverses every included descendant, not only direct children. It builds the reachable
+task graph once, then resolves each task's aggregate with an iterative postorder walk. Memoized
+aggregates keep shared descendants linear in the number of tasks and edges. An active-path set
+prevents malformed parent cycles from scheduling an unbounded walk.
 
 Resolution follows these rules:
 
@@ -63,7 +65,8 @@ not part of the included tree and cannot move its visible ancestor between group
 
 The resolver returns both the state-group key and the action bucket needed by state sorting.
 `applyView` computes this value from the filtered tree map and reuses it for root sorting and state
-group creation.
+group creation. The resolver's action-bucket ordering and state-group ordering remain private to
+the state module so the two consumers cannot drift.
 
 The current implementation independently minimizes `STATE_BUCKET_ORDER` in both paths. Because
 the `review` bucket includes `COMPLETED`, `FAILED`, `CANCELLED`, and waiting session states and is
@@ -88,7 +91,7 @@ required for this state-only correction.
 
 `apply-view-effective-state.test.ts` covers completed, review, waiting-for-input, and missing-state
 parents with running descendants. It also covers nested descendants, completion gating, filtering,
-and agreement between state sorting and grouping.
+agreement between state sorting and grouping, and linear child-map lookups for a deep chain.
 
 `sidebar-subtask-state-sort.spec.ts` seeds a completed parent with an in-progress child and asserts
 through the rendered sidebar that the whole tree is under the `IN_PROGRESS` group. The existing

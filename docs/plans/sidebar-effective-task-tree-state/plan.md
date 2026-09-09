@@ -24,7 +24,8 @@ and the existing rendered sidebar regression.
 - Let running and scheduling descendants override parent review, waiting, failure, cancellation,
   and completion for state grouping and state sorting.
 - Prevent the Completed group from containing a tree with an included non-completed member.
-- Apply the same recursive derivation on desktop and mobile through the shared `applyView` path.
+- Apply the same iterative, memoized derivation on desktop and mobile through the shared `applyView`
+  path.
 - Add targeted unit and desktop Playwright regression coverage.
 
 ### Out of scope
@@ -37,11 +38,12 @@ and the existing rendered sidebar regression.
 
 ## Technical approach
 
-Refactor `apps/web/lib/sidebar/apply-view.ts` so one cycle-safe tree resolver traverses the filtered
-`subTasksByParentId` map. It returns the exact state-group key and its action bucket. Active work
-takes precedence over parent review and terminal buckets; Completed remains valid only when every
-included tree member is completed. `applySort` and `applyGroup` reuse this result instead of each
-minimizing `STATE_BUCKET_ORDER` independently.
+Extract `apps/web/lib/sidebar/effective-task-tree-state.ts` as the focused state resolver. It builds
+the filtered `subTasksByParentId` graph once and uses an iterative, cycle-safe postorder walk with
+memoized aggregates, so each task and edge is processed once. It returns the exact state-group key
+and action bucket. Active work takes precedence over parent review and terminal buckets; Completed
+remains valid only when every included tree member is completed. `applySort` and `applyGroup` reuse
+this result instead of each minimizing `STATE_BUCKET_ORDER` independently.
 
 Keep original `TaskSwitcherItem` objects in the grouped output so row-level status presentation is
 unchanged. Preserve the existing behavior that filters run before descendant maps are built.
@@ -50,7 +52,8 @@ unchanged. Preserve the existing behavior that filters run before descendant map
 
 - `apps/web/lib/sidebar/apply-view-effective-state.test.ts` maps
   `AC-UI-SIDEBAR-EFFECTIVE-TASK-TREE-STATE-001.1` through `.7` to pure grouping, sorting,
-  recursion, filtering, completion, and row-object-preservation cases.
+  deep traversal, filtering, completion, and row-object-preservation cases. Its deep-chain case
+  guards the linear traversal contract.
 - The regression test must fail before the correction for completed, review, and
   waiting-for-input parents with a running child.
 
@@ -76,6 +79,13 @@ unchanged. Preserve the existing behavior that filters run before descendant map
   passed (1 test), confirming the shared mobile rendering path.
 - Related sidebar unit tests passed (142 tests), TypeScript typecheck passed, targeted ESLint and
   Prettier checks passed, and the E2E sleep ratchet passed.
+
+## Review follow-up
+
+- Replaced the recursive per-task walk with the iterative memoized resolver in
+  `apps/web/lib/sidebar/effective-task-tree-state.ts`.
+- The deep-chain regression measures child-map lookups and fails the prior implementation's
+  quadratic traversal; the focused effective-state suite passes with 27 tests.
 
 ## Risks
 

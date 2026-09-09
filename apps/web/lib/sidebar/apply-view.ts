@@ -1,9 +1,6 @@
-import { classifyTask, type TaskBucket } from "@/components/task/task-classify";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { t } from "@/lib/i18n";
-import { formatTaskStateLabel } from "@/lib/ui/state-labels";
-import type { TaskState } from "@/lib/types/http";
 import type {
   FilterClause,
   FilterDimension,
@@ -14,6 +11,14 @@ import type {
   SortKey,
   SortSpec,
 } from "@/lib/state/slices/ui/sidebar-view-types";
+import {
+  getStateBucket,
+  getTaskStateGroup,
+  resolveEffectiveStateMap,
+  STATE_BUCKET_ORDER,
+  STATE_GROUP_ORDER,
+  type EffectiveTaskTreeState,
+} from "./effective-task-tree-state";
 
 export type SidebarGroup = {
   key: string;
@@ -40,22 +45,6 @@ export type SidebarTaskPrefs = {
 };
 
 type DimensionExtractor = (task: TaskSwitcherItem) => FilterValue | undefined;
-
-const STATE_BUCKET_ORDER: Record<TaskBucket, number> = {
-  review: 0,
-  in_progress: 1,
-  backlog: 2,
-};
-
-function getStateBucket(task: TaskSwitcherItem): TaskBucket {
-  return classifyTask(task.sessionState, task.state);
-}
-
-type EffectiveTaskTreeState = {
-  groupKey: string;
-  label: string;
-  bucket: TaskBucket;
-};
 
 const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   archived: (t) => t.isArchived === true,
@@ -212,30 +201,14 @@ export function applySort(
  * deps for the same reason.
  *
  * Only `label` is copy. The group `key`s below (`__multi__`, the
- * `__repo_combination__:<json>` keys, `__unassigned__`, `__all__`,
- * `__not_started__`) are identity: they are compared in
- * `mergeSingleRepoUnassigned` / `sortRepoGroups`, index `STATE_GROUP_ORDER`, and
- * are persisted in the view's `collapsedGroups`. They are never translated.
+ * `__repo_combination__:<json>` keys, `__unassigned__`, `__all__`) are identity:
+ * they are compared in `mergeSingleRepoUnassigned` / `sortRepoGroups` and are
+ * persisted in the view's `collapsedGroups`. They are never translated.
  */
 const UNASSIGNED_LABEL_KEY = "sidebar:groupUnassigned";
 const MULTI_REPO_LABEL_KEY = "sidebar:groupMultiRepo";
 const ALL_GROUP_LABEL_KEY = "sidebar:groupAll";
-const NOT_STARTED_STATE_GROUP_KEY = "__not_started__";
 const REPOSITORY_COMBINATION_PREFIX = "__repo_combination__:";
-
-const STATE_GROUP_ORDER: Record<string, number> = {
-  [NOT_STARTED_STATE_GROUP_KEY]: 0,
-  CREATED: 1,
-  SCHEDULING: 2,
-  TODO: 3,
-  IN_PROGRESS: 4,
-  WAITING_FOR_INPUT: 5,
-  REVIEW: 6,
-  BLOCKED: 7,
-  FAILED: 8,
-  COMPLETED: 9,
-  CANCELLED: 10,
-};
 
 type GroupExtractor = (task: TaskSwitcherItem) => { key: string; label: string };
 
@@ -257,88 +230,6 @@ function hasMultipleRepositoryLinks(task: TaskSwitcherItem): boolean {
 
 function repositoryCombinationKey(repositories: string[]): string {
   return `${REPOSITORY_COMBINATION_PREFIX}${JSON.stringify(repositories)}`;
-}
-
-function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string } {
-  if (!task.state)
-    return { key: NOT_STARTED_STATE_GROUP_KEY, label: formatTaskStateLabel(undefined) };
-  return { key: task.state, label: formatTaskStateLabel(task.state) };
-}
-
-function collectTaskTree(
-  task: TaskSwitcherItem,
-  subMap: Map<string, TaskSwitcherItem[]>,
-  visited: Set<string>,
-  members: TaskSwitcherItem[],
-): void {
-  if (visited.has(task.id)) return;
-  visited.add(task.id);
-  members.push(task);
-  for (const subtask of subMap.get(task.id) ?? []) {
-    collectTaskTree(subtask, subMap, visited, members);
-  }
-}
-
-function getStateGroupForKey(key: TaskState): { key: string; label: string } {
-  return { key, label: formatTaskStateLabel(key) };
-}
-
-function compareStateCandidates(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
-  const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
-  if (bucket !== 0) return bucket;
-  return (
-    (STATE_GROUP_ORDER[a.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99) -
-    (STATE_GROUP_ORDER[b.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99)
-  );
-}
-
-/**
- * Resolve the placement state for one included task tree. Active work has
- * precedence over review and terminal states, while non-active states retain
- * the previous bucket and lifecycle ordering.
- */
-function resolveEffectiveTaskTreeState(
-  task: TaskSwitcherItem,
-  subMap: Map<string, TaskSwitcherItem[]>,
-): EffectiveTaskTreeState {
-  const members: TaskSwitcherItem[] = [];
-  collectTaskTree(task, subMap, new Set<string>(), members);
-
-  if (
-    members.some((member) => member.state === "IN_PROGRESS" || member.sessionState === "RUNNING")
-  ) {
-    const stateGroup = getStateGroupForKey("IN_PROGRESS");
-    return { groupKey: stateGroup.key, label: stateGroup.label, bucket: "in_progress" };
-  }
-  if (members.some((member) => member.state === "SCHEDULING")) {
-    const stateGroup = getStateGroupForKey("SCHEDULING");
-    return { groupKey: stateGroup.key, label: stateGroup.label, bucket: "in_progress" };
-  }
-
-  const allCompleted = members.every((member) => member.state === "COMPLETED");
-  // Keep the root as a fallback candidate, ignore members without a state,
-  // and exclude completed members until every included member is completed.
-  const candidates = members.filter(
-    (member, index) =>
-      (index === 0 || member.state !== undefined) && (allCompleted || member.state !== "COMPLETED"),
-  );
-  const bestTask = candidates.reduce(
-    (best, candidate) => (compareStateCandidates(candidate, best) < 0 ? candidate : best),
-    candidates[0] ?? members.find((member) => member.state !== "COMPLETED") ?? task,
-  );
-  const stateGroup = getTaskStateGroup(bestTask);
-  return { groupKey: stateGroup.key, label: stateGroup.label, bucket: getStateBucket(bestTask) };
-}
-
-function resolveEffectiveStateMap(
-  tasks: TaskSwitcherItem[],
-  subMap: Map<string, TaskSwitcherItem[]>,
-): Map<string, EffectiveTaskTreeState> {
-  const resolved = new Map<string, EffectiveTaskTreeState>();
-  for (const task of tasks) {
-    resolved.set(task.id, resolveEffectiveTaskTreeState(task, subMap));
-  }
-  return resolved;
 }
 
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {

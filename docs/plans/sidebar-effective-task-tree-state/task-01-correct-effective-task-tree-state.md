@@ -23,14 +23,15 @@ system_design:
 
 ## Summary
 
-Replace the direct-child bucket minimum with one recursive effective-state resolver shared by
-sidebar state grouping and sorting. Prove that active child work keeps the tree active while each
+Replace the direct-child bucket minimum with one iterative, memoized effective-state resolver shared
+by sidebar state grouping and sorting. Prove that active child work keeps the tree active while each
 row retains its own state.
 
 ## In scope
 
 - Add the regression cases before changing production logic.
-- Resolve active and completed tree states across every included descendant with cycle protection.
+- Resolve active and completed tree states across every included descendant with cycle protection,
+  without recursive stack growth or repeated subtree traversal.
 - Reuse the resolved group identity and action bucket in state grouping and state sorting.
 - Extend the existing desktop sidebar E2E regression.
 
@@ -60,6 +61,7 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-su
 ## Files likely touched
 
 - `apps/web/lib/sidebar/apply-view.ts`
+- `apps/web/lib/sidebar/effective-task-tree-state.ts`
 - `apps/web/lib/sidebar/apply-view-effective-state.test.ts`
 - `apps/web/e2e/tests/task/sidebar-subtask-state-sort.spec.ts`
 
@@ -97,3 +99,6 @@ None.
   passes on the shared mobile task-tree renderer.
 - Related sidebar unit tests pass (8 files, 142 tests); TypeScript typecheck, targeted ESLint,
   Prettier, and the E2E sleep ratchet pass.
+- Review follow-up: the resolver is now iterative and memoized in
+  `effective-task-tree-state.ts`; the deep-chain regression passes and enforces linear child-map
+  lookups. The focused effective-state suite passes with 27 tests.
