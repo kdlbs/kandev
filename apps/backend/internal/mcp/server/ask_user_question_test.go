@@ -15,6 +15,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	mcpsrv "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -468,4 +469,91 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 	}
 	assert.GreaterOrEqual(t, progressSeen, 1, "expected at least one keepalive progress notification")
 	assert.True(t, finalSeen, "expected the final tool result to be delivered")
+}
+
+// askThroughTransport drives a real tools/call JSON-RPC frame through the mcp-go
+// server (hooks included) on behalf of the given client session and returns the
+// payload the ask_user_question handler forwarded to the backend.
+func askThroughTransport(t *testing.T, s *Server, backend *testBackend, session mcpsrv.ClientSession, rawID string) map[string]interface{} {
+	t.Helper()
+	ctx := context.Background()
+	if session != nil {
+		ctx = s.mcpServer.WithContext(ctx, session)
+	}
+	frame := `{"jsonrpc":"2.0","id":` + rawID + `,"method":"tools/call","params":{"name":"ask_user_question_kandev","arguments":{"questions":[{"prompt":"Which color?","options":[{"label":"Red","description":"R"},{"label":"Blue","description":"B"}]}]}}}`
+	response := s.mcpServer.HandleMessage(ctx, []byte(frame))
+	raw, err := json.Marshal(response)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "not found")
+	require.Equal(t, ws.ActionMCPAskUserQuestion, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok, "backend payload should be a map, got %T", backend.lastPayload)
+	return payload
+}
+
+func newAskTransportSession(id string) *providerRefreshTestSession {
+	return &providerRefreshTestSession{id: id, notifications: make(chan mcplib.JSONRPCNotification, 8)}
+}
+
+// TestAskUserQuestion_RetryKeyIsStableForExactTransportRetry proves the
+// production path (JSON-RPC frame -> BeforeCallTool hook -> handler -> backend
+// payload) forwards the same retry_key when the agent re-sends the same request
+// id on the same MCP connection, and a different key otherwise.
+func TestAskUserQuestion_RetryKeyIsStableForExactTransportRetry(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+	conn := newAskTransportSession("conn-a")
+
+	first := askThroughTransport(t, s, backend, conn, "7")
+	firstKey, _ := first["retry_key"].(string)
+	require.NotEmpty(t, firstKey, "retry_key must be forwarded when connection and request id are known")
+	assert.Contains(t, firstKey, "conn-a/")
+	assert.Contains(t, firstKey, "int64:7")
+
+	retry := askThroughTransport(t, s, backend, conn, "7")
+	assert.Equal(t, firstKey, retry["retry_key"], "exact retry must reuse the identity")
+
+	next := askThroughTransport(t, s, backend, conn, "8")
+	assert.NotEqual(t, firstKey, next["retry_key"], "a different request id must not alias")
+
+	stringID := askThroughTransport(t, s, backend, conn, `"7"`)
+	assert.NotEqual(t, firstKey, stringID["retry_key"], "string and numeric ids are distinct JSON-RPC ids")
+}
+
+// TestAskUserQuestion_RetryKeyIsScopedToConnection guards the collision case
+// where a reconnecting client restarts its JSON-RPC ids at the same value.
+func TestAskUserQuestion_RetryKeyIsScopedToConnection(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	onA := askThroughTransport(t, s, backend, newAskTransportSession("conn-a"), "1")
+	onB := askThroughTransport(t, s, backend, newAskTransportSession("conn-b"), "1")
+	require.NotEmpty(t, onA["retry_key"])
+	require.NotEmpty(t, onB["retry_key"])
+	assert.NotEqual(t, onA["retry_key"], onB["retry_key"])
+}
+
+// TestAskUserQuestion_RetryKeyOmittedWithoutConnection keeps the backend on its
+// random identity when the call has no client session (direct handler use).
+func TestAskUserQuestion_RetryKeyOmittedWithoutConnection(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	payload := askThroughTransport(t, s, backend, nil, "7")
+	_, present := payload["retry_key"]
+	assert.False(t, present, "retry_key must be absent without a connection scope")
+}
+
+func TestStampTransportRequestID_PreservesExistingMeta(t *testing.T) {
+	req := &mcplib.CallToolRequest{}
+	req.Params.Meta = &mcplib.Meta{ProgressToken: "tok", AdditionalFields: map[string]any{"other": 1}}
+	stampTransportRequestID(req, float64(3))
+	assert.Equal(t, mcplib.ProgressToken("tok"), req.Params.Meta.ProgressToken)
+	assert.Equal(t, 1, req.Params.Meta.AdditionalFields["other"])
+	assert.Equal(t, "int64:3", req.Params.Meta.AdditionalFields[transportRequestIDMetaKey])
+
+	stampTransportRequestID(nil, 1)
+	untouched := &mcplib.CallToolRequest{}
+	stampTransportRequestID(untouched, nil)
+	assert.Nil(t, untouched.Params.Meta, "a nil id must not allocate meta")
 }

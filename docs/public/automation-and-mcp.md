@@ -776,6 +776,24 @@ Each returned bundle carries `pending_id`, `task_id`, `session_id`, `created_at`
 `context`, and an ordered `questions` array; each question carries `question_id`, `title`,
 `prompt`, `status`, and its `options` (`option_id`, `label`, `description`).
 
+The bundle's `pending_id` is the durable identity of the visible question group. If the request
+carrying an `ask_user_question_kandev` call is interrupted or times out while the call is waiting,
+the question remains durably recorded. It stays visible and answerable while its bundle belongs to
+the session's current turn and the session is non-terminal. When the agent re-sends the same
+JSON-RPC request (same request id) within the same MCP session, Kandev maps the retry to the bundle
+its interrupted call created: no second question is published, the bundle is marked attached again
+if the interruption had detached it, and a previously recorded answer, rejection, or cancellation
+is reconciled instead of opening another wait. A superseded bundle or a bundle on a completed,
+failed, or cancelled session is reported as no longer active.
+
+Registration and answer delivery use one atomic handoff. If an answer commits during retry
+reconciliation, it either reaches the re-registered tool waiter or continues through detached
+delivery, never both. When detached delivery won first, the retry reports that delivery is already
+in progress instead of returning a duplicate tool response. A new MCP session (for example after a
+stdio agent restarts or a client drops its `Mcp-Session-Id`) starts fresh: a re-sent request id is a
+new question there. A call with a new request id is a new question; an identical question re-asked
+while the original is still pending is deduplicated to the pending bundle.
+
 After the person answers, pass the bundle's `pending_id` plus one entry per question to
 `answer_question_kandev`:
 

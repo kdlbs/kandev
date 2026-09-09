@@ -22,9 +22,10 @@ const maxStartedDeliveryConfirmationWait = 5 * time.Minute
 // Store manages pending clarification requests.
 // It provides thread-safe storage and notification when responses arrive.
 type Store struct {
-	mu      sync.RWMutex
-	pending map[string]*PendingClarification
-	timeout time.Duration
+	mu             sync.RWMutex
+	pending        map[string]*PendingClarification
+	deliveryMisses map[string]time.Time
+	timeout        time.Duration
 
 	// onWaitEntered, if non-nil, is invoked inside WaitForResponse after the
 	// initial pending lookup and before the select blocks. Tests use it to
@@ -63,8 +64,9 @@ func NewStore(timeout time.Duration) *Store {
 		timeout = 2 * time.Hour // Default timeout — long enough for user to respond to clarification
 	}
 	return &Store{
-		pending: make(map[string]*PendingClarification),
-		timeout: timeout,
+		pending:        make(map[string]*PendingClarification),
+		deliveryMisses: make(map[string]time.Time),
+		timeout:        timeout,
 	}
 }
 
@@ -92,6 +94,37 @@ func (s *Store) SetOnRespondLoaded(fn func(pendingID string)) {
 func (s *Store) CreateRequest(req *Request) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createRequestLocked(req)
+}
+
+// CreateRetryRequest registers a transport retry before its durable bundle is
+// reconciled. deliveryMissed is true when a durable responder already found no
+// live waiter and therefore chose detached delivery. That receipt makes the
+// handoff linearizable: the retry must not open a second waiter or return the
+// same answer through the tool call while detached delivery is in flight.
+func (s *Store) CreateRetryRequest(req *Request) (pendingID string, isNew, deliveryMissed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneDeliveryMissesLocked(time.Now())
+	if req.PendingID != "" {
+		if _, missed := s.deliveryMisses[req.PendingID]; missed {
+			return req.PendingID, false, true
+		}
+	}
+	pendingID, isNew = s.createRequestLocked(req)
+	return pendingID, isNew, false
+}
+
+// ClearDeliveryMiss removes a detached-delivery receipt after durable
+// delivery recovery restored the bundle to pending. A later exact retry can
+// then adopt the restored question normally.
+func (s *Store) ClearDeliveryMiss(pendingID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.deliveryMisses, pendingID)
+}
+
+func (s *Store) createRequestLocked(req *Request) (string, bool) {
 
 	// Normalise in-place so dedup keys are stable even when the caller
 	// hasn't assigned IDs yet.
@@ -105,7 +138,15 @@ func (s *Store) CreateRequest(req *Request) (string, bool) {
 		}
 	}
 
-	if req.PendingID == "" {
+	// A preset identity that is already live is joined, never replaced:
+	// overwriting the map entry would orphan its waiters on a done channel
+	// nobody closes. Exact retries carry identical questions and are caught
+	// above; this guards a client that reused a request id for another call.
+	if req.PendingID != "" {
+		if existing, ok := s.pending[req.PendingID]; ok {
+			return existing.Request.PendingID, false
+		}
+	} else {
 		req.PendingID = uuid.New().String()
 	}
 	req.CreatedAt = time.Now()
@@ -118,6 +159,16 @@ func (s *Store) CreateRequest(req *Request) (string, bool) {
 	}
 
 	return req.PendingID, true
+}
+
+func (s *Store) pruneDeliveryMissesLocked(now time.Time) {
+	retention := max(s.timeout, maxStartedDeliveryConfirmationWait)
+	cutoff := now.Add(-retention)
+	for pendingID, missedAt := range s.deliveryMisses {
+		if missedAt.Before(cutoff) {
+			delete(s.deliveryMisses, pendingID)
+		}
+	}
 }
 
 // GetRequest returns a pending clarification request by ID.
@@ -263,11 +314,16 @@ func (s *Store) respond(
 	resp *Response,
 	confirm func() error,
 ) error {
-	s.mu.RLock()
+	s.mu.Lock()
 	pending, ok := s.pending[pendingID]
 	hook := s.onRespondEntered
 	loadedHook := s.onRespondLoaded
-	s.mu.RUnlock()
+	if !ok && confirm != nil {
+		now := time.Now()
+		s.pruneDeliveryMissesLocked(now)
+		s.deliveryMisses[pendingID] = now
+	}
+	s.mu.Unlock()
 	if hook != nil {
 		hook(pendingID)
 	}
@@ -283,6 +339,7 @@ func (s *Store) respond(
 
 	if pending.cancelled {
 		pending.mu.Unlock()
+		s.recordDeliveryMissAfterCancellation(pendingID, pending, confirm != nil)
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	}
 	if pending.resolved {
@@ -304,6 +361,7 @@ func (s *Store) respond(
 	select {
 	case <-pending.CancelCh:
 		pending.mu.Unlock()
+		s.recordDeliveryMissAfterCancellation(pendingID, pending, confirm != nil)
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	default:
 	}
@@ -343,6 +401,29 @@ func (s *Store) respond(
 		pending.mu.Unlock()
 		s.deletePendingIfCurrent(pendingID, pending)
 		return fmt.Errorf("wait for clarification delivery confirmation: %w", waitCtx.Err())
+	}
+}
+
+// recordDeliveryMissAfterCancellation closes a replacement retry that raced
+// between cancellation of the waiter we loaded and observing that cancellation.
+// Detached delivery has already won for this durable identity, so leaving the
+// replacement live would strand it: the responder still holds the old entry
+// and will never signal the replacement's done channel.
+func (s *Store) recordDeliveryMissAfterCancellation(
+	pendingID string,
+	loaded *PendingClarification,
+	record bool,
+) {
+	if !record {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.pruneDeliveryMissesLocked(now)
+	s.deliveryMisses[pendingID] = now
+	if replacement := s.pending[pendingID]; replacement != nil && replacement != loaded {
+		s.cancelPendingLocked(pendingID, replacement)
 	}
 }
 
