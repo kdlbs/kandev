@@ -638,3 +638,62 @@ func TestGitOperatorPushReportsMismatchAfterBaselinePublication(t *testing.T) {
 		t.Errorf("task branch published as %q, want unpublished", got)
 	}
 }
+
+// TestGitOperatorPushReportsPlainMismatchAtSecondVerification drives the other
+// outcome of the second verification: a mismatch that did not follow a
+// baseline publication. An explicit push target to a remote other than
+// "origin" is never baseline-eligible, so moving HEAD in the window between
+// the first and second verification must still be caught, and must carry
+// plain push_branch_mismatch rather than the after-baseline code.
+func TestGitOperatorPushReportsPlainMismatchAtSecondVerification(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git PATH shim is a POSIX shell script")
+	}
+	repoDir, _, backupDir, operator := setupPushRemotesRepo(t)
+	realGit, err := osExec.LookPath("git")
+	if err != nil {
+		t.Fatalf("LookPath(git) = %v", err)
+	}
+	// The explicit-target, no-baseline path issues exactly two "symbolic-ref
+	// HEAD" reads: the first verification inside resolvePushPlan, and the
+	// second verification immediately before the push. Move HEAD right after
+	// answering the first one.
+	shimDir := t.TempDir()
+	counterPath := filepath.Join(shimDir, "count")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1 $2\" = 'symbolic-ref HEAD' ]; then\n" +
+		"  n=$(cat " + counterPath + " 2>/dev/null || echo 0)\n" +
+		"  n=$((n+1))\n" +
+		"  echo $n > " + counterPath + "\n" +
+		"  " + realGit + " \"$@\"; rc=$?\n" +
+		"  if [ \"$n\" = \"1\" ]; then\n" +
+		"    " + realGit + " -C " + repoDir + " symbolic-ref HEAD refs/heads/switched\n" +
+		"  fi\n" +
+		"  exit $rc\n" +
+		"fi\n" +
+		"exec " + realGit + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := operator.Push(context.Background(), PushOptions{Remote: "backup", ExpectedBranch: "feature/work"})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if result.Success {
+		t.Fatalf("Push() succeeded, want a second-verification mismatch refusal: %+v", result)
+	}
+	if result.ErrorCode != pushBranchMismatchErrorCode {
+		t.Fatalf("ErrorCode = %q, want %q", result.ErrorCode, pushBranchMismatchErrorCode)
+	}
+	if result.BaselinePublished {
+		t.Error("BaselinePublished = true, want false: backup is never baseline-eligible")
+	}
+	if result.ExpectedBranch != "feature/work" || result.CurrentBranch != "switched" {
+		t.Errorf("branches = (%q, %q), want (feature/work, switched)", result.ExpectedBranch, result.CurrentBranch)
+	}
+	if got := remoteBranchSHA(t, backupDir, "feature/work"); got != "" {
+		t.Errorf("backup gained %q, want untouched", got)
+	}
+}
