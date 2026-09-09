@@ -126,6 +126,14 @@ func (ss *SchedulerService) ApplyTaskMutation(
 					zap.String("reason", c.Reason))
 				return
 			}
+			if errors.Is(err, shared.ErrPauseGateUnavailable) {
+				// A transient gate-read failure, not a reactivity failure —
+				// the gate site that returned it already logged a Warn.
+				ss.logger.Warn("reactivity run skipped (pause gate unavailable)",
+					zap.String("agent", agentID),
+					zap.String("reason", c.Reason))
+				return
+			}
 			ss.logger.Error("reactivity run failed",
 				zap.String("agent", agentID),
 				zap.String("reason", c.Reason),

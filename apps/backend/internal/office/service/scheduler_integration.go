@@ -244,6 +244,10 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	}
 	if paused {
 		pause.RecordBlocked("process_run")
+		// This run may have been requeued after an earlier launch marked
+		// the agent working (see the comment on the mark-before-launch
+		// call below); the CAS makes this a safe no-op otherwise.
+		si.svc.clearAgentWorking(ctx, agent.ID, runID)
 		_ = si.svc.FinishRun(ctx, runID, RunOutcomeWorkspacePaused)
 		return
 	}
@@ -397,6 +401,10 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	if paused {
 		pause.RecordBlocked("prepare_and_launch")
 		si.releaseCheckoutIfNeeded(ctx, run)
+		// Safe no-op via CAS on a run that never launched; guards the case
+		// where an earlier launch attempt on this same run marked the
+		// agent working before this requeue.
+		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeWorkspacePaused)
 		return
 	}
