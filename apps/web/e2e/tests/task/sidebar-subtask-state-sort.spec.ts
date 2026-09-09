@@ -25,11 +25,9 @@ test.describe("Sidebar subtasks — effective state sort", () => {
   test.beforeEach(async ({ apiClient }) => {
     const { settings } = await apiClient.getUserSettings();
     originalSidebarSettings = {
-      sidebar_views: Array.isArray(settings.sidebar_views) ? settings.sidebar_views : undefined,
+      sidebar_views: Array.isArray(settings.sidebar_views) ? settings.sidebar_views : [],
       sidebar_active_view_id:
-        typeof settings.sidebar_active_view_id === "string"
-          ? settings.sidebar_active_view_id
-          : undefined,
+        typeof settings.sidebar_active_view_id === "string" ? settings.sidebar_active_view_id : "",
     };
   });
 
@@ -98,7 +96,9 @@ test.describe("Sidebar subtasks — effective state sort", () => {
       "[data-testid='sidebar-group-header'][data-group-key='IN_PROGRESS']",
     );
     await expect(inProgressHeader).toBeVisible({ timeout: 10_000 });
-    const inProgressGroup = inProgressHeader.locator("..");
+    const inProgressGroup = session.sidebar.locator(
+      "[data-testid='sidebar-group'][data-group-key='IN_PROGRESS']",
+    );
 
     // Both active roots must be rendered inside the same effective group.
     const parentBlock = inProgressGroup.locator(

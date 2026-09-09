@@ -316,6 +316,8 @@ function resolveEffectiveTaskTreeState(
   }
 
   const allCompleted = members.every((member) => member.state === "COMPLETED");
+  // Keep the root as a fallback candidate, ignore members without a state,
+  // and exclude completed members until every included member is completed.
   const candidates = members.filter(
     (member, index) =>
       (index === 0 || member.state !== undefined) && (allCompleted || member.state !== "COMPLETED"),

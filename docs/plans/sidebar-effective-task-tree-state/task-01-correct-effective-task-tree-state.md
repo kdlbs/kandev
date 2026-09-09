@@ -54,6 +54,7 @@ row retains its own state.
 ```bash
 cd apps/web && pnpm exec vitest run lib/sidebar/apply-view-effective-state.test.ts
 cd apps/web && pnpm e2e:run tests/task/sidebar-subtask-state-sort.spec.ts
+cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-subtasks.spec.ts
 ```
 
 ## Files likely touched
