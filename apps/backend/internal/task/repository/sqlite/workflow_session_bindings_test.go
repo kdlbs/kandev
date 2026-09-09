@@ -109,6 +109,38 @@ func TestWorkflowSessionBindingRejectsEqualTimestampReplacement(t *testing.T) {
 	require.Equal(t, "operation-first", binding.OperationID)
 }
 
+func TestWorkflowSessionBindingAllowsNewerSessionWithinSameEntry(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-workflow-binding-same-entry"
+	const targetKey = "step:implement"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Same entry"}))
+	first := &models.TaskSession{ID: "session-same-entry-first", TaskID: taskID, AgentProfileID: "profile-a", State: models.TaskSessionStateRunning}
+	second := &models.TaskSession{ID: "session-same-entry-second", TaskID: taskID, AgentProfileID: "profile-a", State: models.TaskSessionStateRunning}
+	require.NoError(t, repo.CreateTaskSession(ctx, first))
+	require.NoError(t, repo.CreateTaskSession(ctx, second))
+
+	entryOperation := "workflow-step-entry-v2:entry:00000000000000000021"
+	firstStamp := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	secondStamp := firstStamp.Add(time.Second)
+	accepted, err := repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID: taskID, TargetKey: targetKey, WorkflowID: "workflow-same-entry", AgentProfileID: "profile-a",
+		SessionID: first.ID, OperationID: entryOperation, UpdatedAt: firstStamp,
+	})
+	require.NoError(t, err)
+	require.True(t, accepted)
+	accepted, err = repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID: taskID, TargetKey: targetKey, WorkflowID: "workflow-same-entry", AgentProfileID: "profile-a",
+		SessionID: second.ID, OperationID: entryOperation, UpdatedAt: secondStamp,
+	})
+	require.NoError(t, err)
+	require.True(t, accepted)
+
+	binding, err := repo.GetWorkflowSessionBinding(ctx, taskID, targetKey)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, binding.SessionID)
+}
+
 func TestWorkflowSessionBindingsCascadeWithTask(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

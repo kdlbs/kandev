@@ -22,6 +22,18 @@ type workflowSessionBindingStore interface {
 	UpsertWorkflowSessionBinding(context.Context, *models.WorkflowSessionBinding) (bool, error)
 }
 
+type workflowSessionRouteCreator interface {
+	CreateTaskSessionWithWorkflowSessionRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type workflowSessionRoutePromoter interface {
+	SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(context.Context, string, models.WorkflowSessionRoute) (bool, error)
+}
+
+type workflowStepTransitionReader interface {
+	GetLatestTaskStepTransitionID(context.Context, string) (int64, error)
+}
+
 type workflowSessionTargetResolution struct {
 	session   *models.TaskSession
 	profileID string
@@ -195,10 +207,60 @@ func (s *Service) loadRecordedWorkflowSessionRoute(
 	if err != nil {
 		return nil, nil, fmt.Errorf("load recorded workflow session route destination: %w", err)
 	}
-	if session == nil || session.TaskID != taskID || session.AgentProfileID != profileID || isTerminalSessionState(session.State) {
+	if session == nil || session.TaskID != taskID || session.AgentProfileID != profileID {
+		return nil, nil, fmt.Errorf("recorded workflow session route destination %q is unavailable", route.DestinationID)
+	}
+	if isTerminalSessionState(session.State) {
+		// A terminal conversation is a valid historical destination, but it
+		// cannot satisfy reuse. Let the caller allocate the target profile's
+		// fresh fallback and replace this bounded route record.
 		return &route, nil, nil
 	}
 	return &route, session, nil
+}
+
+func (s *Service) supportsAtomicWorkflowSessionRouteCreation() bool {
+	_, ok := s.repo.(workflowSessionRouteCreator)
+	return ok
+}
+
+// promoteWorkflowSessionRoute combines destination promotion and route commit
+// when the repository supports it. The compatibility path preserves the
+// prepared route if a legacy adapter cannot provide the combined transaction.
+func (s *Service) promoteWorkflowSessionRoute(
+	ctx context.Context,
+	taskID string,
+	destination *models.TaskSession,
+	route *models.WorkflowSessionRoute,
+) (bool, error) {
+	if destination == nil {
+		return false, nil
+	}
+	if promoter, ok := s.repo.(workflowSessionRoutePromoter); ok && route != nil {
+		committed := *route
+		committed.DestinationID = destination.ID
+		committed.Phase = workflowSessionRouteCommitted
+		promoted, err := promoter.SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(ctx, destination.ID, committed)
+		if err != nil || !promoted {
+			return promoted, err
+		}
+		s.publishPrimarySessionUpdate(ctx, taskID, destination.ID)
+		return true, nil
+	}
+	promoted, err := s.setNonterminalSessionPrimary(ctx, destination.ID)
+	if err != nil || !promoted {
+		return promoted, err
+	}
+	if route != nil {
+		committed := *route
+		committed.DestinationID = destination.ID
+		committed.Phase = workflowSessionRouteCommitted
+		if err := s.persistWorkflowSessionRoute(ctx, taskID, committed); err != nil {
+			return false, err
+		}
+	}
+	s.publishPrimarySessionUpdate(ctx, taskID, destination.ID)
+	return true, nil
 }
 
 func workflowSessionRouteMatchesStep(route *models.WorkflowSessionRoute, step *wfmodels.WorkflowStep, profileID string) bool {
@@ -223,7 +285,16 @@ func (s *Service) reuseRecordedWorkflowSession(
 		return recordedSession, recordedSession.ID != currentSession.ID, nil
 	}
 	if recordedSession.ID == currentSession.ID {
-		return nil, false, nil
+		preparedRoute := *recordedRoute
+		preparedRoute.Phase = workflowSessionRoutePrepared
+		promoted, err := s.promoteWorkflowSessionRoute(ctx, taskID, currentSession, &preparedRoute)
+		if err != nil {
+			return nil, false, err
+		}
+		if !promoted {
+			return nil, false, errReusableSessionNoLongerActive
+		}
+		return currentSession, false, nil
 	}
 
 	preparedRoute := *recordedRoute
@@ -234,12 +305,8 @@ func (s *Service) reuseRecordedWorkflowSession(
 	if err := s.preflightWorkflowSessionTarget(ctx, taskID, recordedSession); err != nil {
 		return nil, false, err
 	}
-	reused, err := s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, recordedSession, endPolicy)
+	reused, err := s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, recordedSession, endPolicy, &preparedRoute)
 	if err == nil {
-		preparedRoute.Phase = workflowSessionRouteCommitted
-		if err := s.persistWorkflowSessionRoute(ctx, taskID, preparedRoute); err != nil {
-			return nil, false, err
-		}
 		return reused, true, nil
 	}
 	if !errors.Is(err, errReusableSessionNoLongerActive) {
@@ -248,14 +315,43 @@ func (s *Service) reuseRecordedWorkflowSession(
 	return nil, false, nil
 }
 
-func workflowSessionRouteID(taskID, stepID, currentSessionID string, target *wfmodels.WorkflowSessionTarget, startPolicy models.WorkflowProfileSessionStartPolicy) string {
+func workflowSessionRouteID(taskID, stepID, entryIdentity string, target *wfmodels.WorkflowSessionTarget, startPolicy models.WorkflowProfileSessionStartPolicy) string {
 	targetID := ""
 	targetKind := ""
 	if target != nil {
 		targetKind = string(target.Kind)
 		targetID = target.StepID
 	}
-	return fmt.Sprintf("workflow-session:%s:%s:%s:%s:%s:%s", taskID, stepID, currentSessionID, targetKind, targetID, startPolicy)
+	return fmt.Sprintf("workflow-session:%s:%s:%s:%s:%s:%s", taskID, stepID, entryIdentity, targetKind, targetID, startPolicy)
+}
+
+// workflowEntryIdentity is the durable identity of one workflow-step entry.
+// Transition deliveries carry the immutable ledger id directly. Direct/manual
+// starts use the task's latest transition, while creation entries fall back to
+// the task creation stamp. The identity must not depend on the current primary
+// session because a retry can legitimately reload a different primary.
+func (s *Service) workflowEntryIdentity(ctx context.Context, taskID string, entryIDs ...int64) string {
+	if len(entryIDs) > 0 && entryIDs[0] > 0 {
+		return fmt.Sprintf("entry:%020d", entryIDs[0])
+	}
+	if reader, ok := s.repo.(workflowStepTransitionReader); ok {
+		if transitionID, err := reader.GetLatestTaskStepTransitionID(ctx, taskID); err == nil && transitionID > 0 {
+			return fmt.Sprintf("entry:%020d", transitionID)
+		}
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err == nil && task != nil {
+		if task.WorkflowStepTransitionID > 0 {
+			return fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID)
+		}
+		if !task.CreatedAt.IsZero() {
+			return "created:" + task.CreatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if !task.UpdatedAt.IsZero() {
+			return "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	return "legacy:unknown"
 }
 
 func (s *Service) reuseResolvedWorkflowSession(
@@ -281,15 +377,11 @@ func (s *Service) reuseResolvedWorkflowSession(
 	if err := s.preflightWorkflowSessionTarget(ctx, taskID, targetSession); err != nil {
 		return nil, false, err
 	}
-	reused, err := s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, targetSession, endPolicy)
+	reused, err := s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, targetSession, endPolicy, baseRoute)
 	if errors.Is(err, errReusableSessionNoLongerActive) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, err
-	}
-	baseRoute.Phase = workflowSessionRouteCommitted
-	if err := s.persistWorkflowSessionRoute(ctx, taskID, *baseRoute); err != nil {
 		return nil, false, err
 	}
 	return reused, true, nil
@@ -301,6 +393,7 @@ func (s *Service) prepareExplicitWorkflowSession(
 	currentSession *models.TaskSession,
 	step *wfmodels.WorkflowStep,
 	sourceStep *wfmodels.WorkflowStep,
+	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
 	resolution, err := s.resolveWorkflowSessionTarget(ctx, taskID, step)
 	if err != nil {
@@ -312,7 +405,8 @@ func (s *Service) prepareExplicitWorkflowSession(
 	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-	operationID := workflowSessionRouteID(taskID, step.ID, currentSession.ID, step.SessionTarget, startPolicy)
+	entryIdentity := s.workflowEntryIdentity(ctx, taskID, entryIDs...)
+	operationID := workflowSessionRouteID(taskID, step.ID, entryIdentity, step.SessionTarget, startPolicy)
 	recordedRoute, recordedSession, err := s.loadRecordedWorkflowSessionRoute(ctx, taskID, operationID, step, targetProfile)
 	if err != nil {
 		return nil, false, err
@@ -340,16 +434,13 @@ func (s *Service) prepareExplicitWorkflowSession(
 	}
 
 	baseRoute.Phase = workflowSessionRoutePrepared
-	if err := s.persistWorkflowSessionRoute(ctx, taskID, baseRoute); err != nil {
-		return nil, false, err
+	if !s.supportsAtomicWorkflowSessionRouteCreation() {
+		if err := s.persistWorkflowSessionRoute(ctx, taskID, baseRoute); err != nil {
+			return nil, false, err
+		}
 	}
-	newSession, err := s.createNewSessionForStepWithEndPolicy(ctx, taskID, currentSession, targetProfile, endPolicy)
+	newSession, err := s.createNewSessionForStepWithEndPolicyAndRoute(ctx, taskID, currentSession, targetProfile, endPolicy, &baseRoute)
 	if err != nil {
-		return nil, false, err
-	}
-	baseRoute.DestinationID = newSession.ID
-	baseRoute.Phase = workflowSessionRouteCommitted
-	if err := s.persistWorkflowSessionRoute(ctx, taskID, baseRoute); err != nil {
 		return nil, false, err
 	}
 	return newSession, true, nil
@@ -360,6 +451,7 @@ func (s *Service) recordWorkflowSourceBinding(
 	taskID string,
 	step *wfmodels.WorkflowStep,
 	session *models.TaskSession,
+	entryIDs ...int64,
 ) error {
 	if step == nil || session == nil || step.AgentProfileID == "" || step.SessionTarget != nil {
 		return nil
@@ -375,8 +467,13 @@ func (s *Service) recordWorkflowSourceBinding(
 	if task == nil || (task.WorkflowStepID != "" && task.WorkflowStepID != step.ID) {
 		return nil
 	}
-	now := time.Now().UTC()
-	operationID := fmt.Sprintf("workflow-step-entry:%s:%s:%s:%d", taskID, step.ID, session.ID, now.UnixNano())
+	updatedAt := task.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	operationID := workflowSourceBindingOperationID(
+		s.workflowEntryIdentity(ctx, taskID, entryIDs...),
+	)
 	accepted, err := store.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
 		TaskID:         taskID,
 		TargetKey:      workflowSessionBindingTargetKey(step.ID),
@@ -384,7 +481,7 @@ func (s *Service) recordWorkflowSourceBinding(
 		AgentProfileID: step.AgentProfileID,
 		SessionID:      session.ID,
 		OperationID:    operationID,
-		UpdatedAt:      now,
+		UpdatedAt:      updatedAt,
 	})
 	if err != nil {
 		s.logger.Error("failed to persist workflow source session binding",
@@ -396,9 +493,17 @@ func (s *Service) recordWorkflowSourceBinding(
 		return fmt.Errorf("persist workflow source session binding: %w", err)
 	}
 	if !accepted {
-		return fmt.Errorf("workflow source session binding was superseded for step %q", step.ID)
+		s.logger.Debug("ignored superseded workflow source session binding",
+			zap.String("task_id", taskID),
+			zap.String("step_id", step.ID),
+			zap.String("session_id", session.ID),
+			zap.String("operation_id", operationID))
 	}
 	return nil
+}
+
+func workflowSourceBindingOperationID(entryIdentity string) string {
+	return fmt.Sprintf("workflow-step-entry-v2:%s", entryIdentity)
 }
 
 func (s *Service) preflightWorkflowSessionTarget(ctx context.Context, taskID string, target *models.TaskSession) error {

@@ -359,16 +359,46 @@ async function updateChangedSteps(remapped: WorkflowStep[], savedSteps: Workflow
     return !saved || !areStepDraftsEqual(step, saved);
   });
 
+  const targetChanged = (step: WorkflowStep, saved: WorkflowStep) =>
+    JSON.stringify(step.session_target ?? null) !== JSON.stringify(saved.session_target ?? null);
+  const targetNeedsSourceProfileFirst = (step: WorkflowStep) => {
+    const target = step.session_target;
+    if (target?.kind !== "step") return false;
+    const sourceDraft = remapped.find((candidate) => candidate.id === target.step_id);
+    const sourceSaved = sourceDraft ? savedById.get(sourceDraft.id) : undefined;
+    return sourceSaved?.agent_profile_id === "" && sourceDraft?.agent_profile_id !== "";
+  };
+
+  // Existing targets must be detached before their source profile is removed.
+  // A replacement target also clears the mutually-exclusive direct profile in
+  // the same request, so the controller never observes an invalid half-state.
   for (const step of changed) {
     const saved = savedById.get(step.id);
-    if (
-      saved &&
-      JSON.stringify(step.session_target ?? null) !== JSON.stringify(saved.session_target ?? null)
-    ) {
-      await updateWorkflowStepAction(step.id, { session_target: step.session_target ?? null });
+    if (!saved || !targetChanged(step, saved) || saved.session_target == null) continue;
+    const attachAfterSourceProfile = targetNeedsSourceProfileFirst(step);
+    await updateWorkflowStepAction(step.id, {
+      session_target: attachAfterSourceProfile ? null : (step.session_target ?? null),
+      ...(!attachAfterSourceProfile && step.session_target != null ? { agent_profile_id: "" } : {}),
+    });
+  }
+
+  // A newly attached target can refer to a source whose direct profile is also
+  // being enabled in this save. Persist all other changes first, then attach
+  // those targets once the source profile is valid on the server.
+  const targetAdditions = changed.filter((step) => {
+    const saved = savedById.get(step.id);
+    return (
+      (saved?.session_target == null && step.session_target != null) ||
+      targetNeedsSourceProfileFirst(step)
+    );
+  });
+  const targetAdditionIDs = new Set(targetAdditions.map((step) => step.id));
+  for (const step of changed) {
+    if (!targetAdditionIDs.has(step.id)) {
+      await updateWorkflowStepAction(step.id, stepUpdatePayload(step));
     }
   }
-  for (const step of changed) {
+  for (const step of targetAdditions) {
     await updateWorkflowStepAction(step.id, stepUpdatePayload(step));
   }
 }

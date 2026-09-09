@@ -66,10 +66,10 @@ func (r *Repository) GetWorkflowSessionBinding(
 	return &binding, nil
 }
 
-// UpsertWorkflowSessionBinding commits a source-step session choice. A
-// delayed operation cannot replace a newer binding because the timestamp is
-// compared inside the same upsert statement. The bool reports whether this
-// operation won the conditional write.
+// UpsertWorkflowSessionBinding commits a source-step session choice. Versioned
+// step-entry operations compare their immutable entry identity inside the same
+// upsert statement, while legacy operations retain timestamp ordering. The
+// bool reports whether this operation won the conditional write.
 func (r *Repository) UpsertWorkflowSessionBinding(
 	ctx context.Context,
 	binding *models.WorkflowSessionBinding,
@@ -92,7 +92,18 @@ func (r *Repository) UpsertWorkflowSessionBinding(
 			session_id = EXCLUDED.session_id,
 			operation_id = EXCLUDED.operation_id,
 			updated_at = EXCLUDED.updated_at
-		WHERE task_workflow_session_bindings.updated_at < EXCLUDED.updated_at
+		WHERE (
+			(task_workflow_session_bindings.operation_id LIKE 'workflow-step-entry-v2:%'
+				AND (
+					task_workflow_session_bindings.operation_id < EXCLUDED.operation_id
+					OR (
+						task_workflow_session_bindings.operation_id = EXCLUDED.operation_id
+						AND task_workflow_session_bindings.updated_at < EXCLUDED.updated_at
+					)
+				))
+			OR (task_workflow_session_bindings.operation_id NOT LIKE 'workflow-step-entry-v2:%'
+				AND task_workflow_session_bindings.updated_at < EXCLUDED.updated_at)
+		)
 	`
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
 		binding.TaskID,
