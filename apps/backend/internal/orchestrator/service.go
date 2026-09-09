@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -278,6 +279,23 @@ type DirectPromptStarter interface {
 		attachments []v1.MessageAttachment,
 		references []v1.EntityReference,
 		promptReferenceContext string,
+	) (*executor.TaskExecution, error)
+}
+
+// DirectPromptStarterWithCanvasGuidance starts a prepared direct-message
+// session with the server-resolved canvas projection that was used before the
+// message was persisted. The projection is deliberately separate from the
+// prompt text so a second canonicalization cannot independently re-resolve a
+// different capability state.
+type DirectPromptStarterWithCanvasGuidance interface {
+	StartCreatedSessionWithPromptContextAndCanvasGuidance(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+		canvasGuidanceResolved, includeCanvasGuidance bool,
 	) (*executor.TaskExecution, error)
 }
 
@@ -1706,6 +1724,40 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// TaskSessionCanvasGuidanceEnabled reports whether the resolved MCP profile for
+// a session includes canvas authoring. It is the narrow read-only seam used by
+// message handlers before they persist the first prompt.
+func (s *Service) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
+		return false, err
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
+}
+
+// ErrTaskSessionPairMismatch reports that a task/session API request named
+// two rows that do not belong together.
+var ErrTaskSessionPairMismatch = errors.New("task session pair mismatch")
+
+func (s *Service) taskSessionCanvasGuidanceEnabled(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowTitleTool bool,
+) (bool, error) {
+	if s.executor == nil || session == nil {
+		return false, nil
+	}
+	profile, err := s.executor.ResolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
+	if err != nil {
+		return false, err
+	}
+	return profile.HasCapability(mcpprofile.CapabilityCanvas), nil
+}
+
 // SetLaunchAttachmentClaimer wires staged-descriptor admission into the
 // unified session launch boundary.
 func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {
@@ -1906,7 +1958,7 @@ func (s *Service) authorizeTaskSessionPair(ctx context.Context, taskID, sessionI
 		return nil //nolint:nilerr // both IDs authorized; consistency is best-effort
 	}
 	if session.TaskID != taskID {
-		return fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+		return fmt.Errorf("%w: session %s does not belong to task %s", ErrTaskSessionPairMismatch, sessionID, taskID)
 	}
 	return nil
 }

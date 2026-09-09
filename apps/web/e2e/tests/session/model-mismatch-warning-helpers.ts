@@ -56,3 +56,16 @@ export async function readModelSelectionWarnings(
   const { messages } = await apiClient.listSessionMessages(sessionId);
   return messages.filter((message) => message.metadata?.kind === "model_selection_warning");
 }
+
+export async function createExecutorOnlyModelProfile(apiClient: ApiClient): Promise<AgentProfile> {
+  const { agents } = await apiClient.listAgents();
+  const agent = agents.find((item) => item.name === "mock-agent");
+  if (!agent) throw new Error("The E2E fixture must provide a mock agent");
+  return apiClient.createAgentProfile(agent.id, "Opus High", {
+    model: AMBIGUOUS_MODEL_VARIATIONS[0],
+    config_options: { effort: "high" },
+    fallback_model: "mock-smart",
+    auto_fallback: false,
+    env_vars: [{ key: MODEL_CATALOG_ENV, value: "ambiguous" }],
+  });
+}

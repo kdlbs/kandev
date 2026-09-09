@@ -169,11 +169,20 @@ func prepareSkillPackageMetadata(skill *models.Skill) {
 }
 
 // ValidateSkillUpdate validates a skill update for slug uniqueness. Slug
-// handling mirrors ValidateAndPrepareSkill: reject a not-well-formed slug
-// outright (AC-001.11), otherwise normalize to canonical before the
-// uniqueness check (AC-001.12).
-func (s *SkillService) ValidateSkillUpdate(ctx context.Context, skill *models.Skill) error {
-	if skill.Slug == "" {
+// handling mirrors ValidateAndPrepareSkill: an empty slug is not
+// well-formed and is rejected like any other not-well-formed slug when the
+// caller supplies one; the caller omits the field entirely (slugRequested
+// false) to leave the slug unchanged. A well-formed slug is normalized to
+// canonical form before the uniqueness check runs.
+//
+// A request that never mentions slug must never fail on slug grounds. The
+// config-import path can create a row with an empty stored slug outside
+// this service's own validation, so an unrelated update to such a row
+// heals it to a free name-derived slug rather than rejecting the caller's
+// edit; if every candidate collides, the stored empty value is left as-is.
+func (s *SkillService) ValidateSkillUpdate(ctx context.Context, skill *models.Skill, slugRequested bool) error {
+	if !slugRequested && skill.Slug == "" {
+		s.healEmptySlug(ctx, skill)
 		return nil
 	}
 	if !skillslug.WellFormed(skill.Slug) {
@@ -181,6 +190,15 @@ func (s *SkillService) ValidateSkillUpdate(ctx context.Context, skill *models.Sk
 	}
 	skill.Slug = skillslug.Normalize(skill.Slug)
 	return s.validateSlugUnique(ctx, skill.WorkspaceID, skill.Slug, skill.ID)
+}
+
+// healEmptySlug assigns skill a name-derived slug when one is free in its
+// workspace, and leaves its stored empty slug untouched otherwise.
+func (s *SkillService) healEmptySlug(ctx context.Context, skill *models.Skill) {
+	candidate := skillslug.Normalize(GenerateSlug(skill.Name))
+	if s.validateSlugUnique(ctx, skill.WorkspaceID, candidate, skill.ID) == nil {
+		skill.Slug = candidate
+	}
 }
 
 func (s *SkillService) validateSlugUnique(ctx context.Context, workspaceID, slug, excludeID string) error {

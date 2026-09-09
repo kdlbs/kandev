@@ -34,7 +34,8 @@ Antigravity has no automated install: Google distributes `agy_acp_server.par` (`
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use `npx -y pi-acp`.
+- Structured ACP sessions and one-shot inference use
+  `npx --yes --prefer-offline pi-acp@<effective-version>`.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -52,8 +53,8 @@ The status shown on this page is authoritative for the current host. A CLI that 
 
 ### Update a managed agent runtime
 
-The update icon is available on managed Claude, Codex, OpenCode, Copilot, and
-Gemini agent cards. It updates the runtime on the Kandev host.
+The update icon is available on managed Claude, Codex, OpenCode, Copilot,
+Gemini, and Pi agent cards. It updates the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -219,7 +220,10 @@ stale browser action does not replace a newer route decision.
 
 The model list shown while editing a profile comes from a host probe. It is an
 editing hint, not a launch gate. A profile remains selectable when its saved
-model is missing from that host list.
+model is missing from that host list. Profile selectors do not show a model
+warning for this difference. Inspect the model list in profile settings for
+discovery details. Authentication, installation, and probe-failure indicators
+remain visible on profile selectors.
 
 At task launch, the selected executor's ACP catalog is authoritative. Kandev
 sends the requested model only when the executor advertises it. An exact
@@ -318,7 +322,13 @@ Profile environment rules are:
 - `TASK_DESCRIPTION` and every `KANDEV_*` key are reserved;
 - an entry must use either a literal value or a secret reference, never both.
 
-Secret references are resolved at process launch. A deleted, missing, or unreadable secret causes that environment entry to be omitted; Kandev does not fall back to an old value. Empty resolved values are also omitted. Profile values fill missing environment keys but do not overwrite environment supplied by the executor or Kandev runtime.
+Kandev resolves secret references at process launch and cold resume. A deleted, missing, or unreadable secret blocks launch before the agent starts. The error identifies the environment key and its source.
+
+Secret deletion is blocked while an agent profile, executor profile, or repository environment references the secret. When you select Delete, Kandev checks first. If the secret is in use, a dialog lists the affected resources and does not offer a delete action. Remove or replace those references before deleting the secret.
+
+If a reference is already broken, open the named profile and select the replacement secret for the affected key, save, and retry. For a visible repository reference, open that repository's environment settings and replace the binding. A redacted `repository` reference means the repository is in a workspace that you cannot access; a workspace user with edit permission must locate and replace the binding in that workspace's repository settings. If no such user exists, ask a workspace owner or administrator to grant access or repair the binding. Creating a secret with the same name does not repair the reference because each secret has a separate ID.
+
+API clients can explicitly force deletion. This leaves broken references and blocks future launches until those references are repaired. See the [secret deletion API contract](websocket-api.md#settings-secrets-and-automations).
 
 Repositories can bind an environment key to a Global secret or to a Workspace secret from the same workspace under **Settings > Workspaces > _workspace_ > Repositories**. A task inherits bindings from every attached repository. Repository bindings are secret references, never values, and a repository binding to a deleted or unreadable secret blocks that task's launch. If two sources provide the same key, Kandev deduplicates an identical secret reference and rejects every other collision; repository order never chooses a winner.
 

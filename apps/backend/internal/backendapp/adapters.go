@@ -424,6 +424,7 @@ func buildLifecycleLaunchRequest(
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
+		AdditionalSkillSlugs:          append([]string(nil), req.AdditionalSkillSlugs...),
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
@@ -1047,6 +1048,25 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
 	)
 }
 
+// StartCreatedSessionWithPromptContextAndCanvasGuidance forwards direct
+// startup together with the server-resolved capability projection used when
+// the message was persisted.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
 type githubTaskIssueStoreAdapter struct {
 	svc *taskservice.Service
 }
@@ -1136,6 +1156,12 @@ func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessi
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
+}
+
+// TaskSessionCanvasGuidanceEnabled forwards the resolved capability used when
+// the message handler persists a first-turn prompt.
+func (w *orchestratorWrapper) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	return w.svc.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
 }
 
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).

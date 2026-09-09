@@ -19,6 +19,10 @@ import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/ses
 import { mergeTaskSession } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
+import {
+  readMcpAttachmentHistory,
+  shouldReplaceMcpAttachmentHistory,
+} from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
 import {
   getWalkthroughLastSeen,
@@ -120,6 +124,17 @@ function mergeTaskSessionSnapshot(
     active_subagent_count: existing.active_subagent_count,
     supports_steering: existing.supports_steering,
   };
+}
+
+function reconcileMcpAttachmentHistory(
+  draft: SessionSliceState & SessionRuntimeSliceState,
+  session: TaskSession,
+): void {
+  const incoming = readMcpAttachmentHistory(session.metadata?.mcp_attachment_state);
+  if (!incoming) return;
+  const existing = draft.sessionMcpStatus.bySessionId[session.id];
+  if (!shouldReplaceMcpAttachmentHistory(existing, incoming)) return;
+  draft.sessionMcpStatus.bySessionId[session.id] = incoming;
 }
 
 // Settled states are defined once in turn-actions (SETTLED_SESSION_STATES /
@@ -608,6 +623,10 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           draft.taskSessions.items[session.id] = session;
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
           syncPrepareProgress(draft, session);
+          reconcileMcpAttachmentHistory(
+            draft as unknown as SessionSliceState & SessionRuntimeSliceState,
+            session,
+          );
           reconcileActiveTurnForIdleSession(draft, session);
         }
       }),
