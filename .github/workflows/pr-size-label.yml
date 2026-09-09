@@ -273,6 +273,6 @@ jobs:
                 { data: 'Counted application files', header: true },
                 { data: 'Size label', header: true },
               ],
-              [summaryTableRow(countedFileCount, targetLabel)],
+              summaryTableRow(countedFileCount, targetLabel),
             ]);
             await core.summary.write();

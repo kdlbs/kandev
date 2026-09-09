@@ -54,6 +54,48 @@ def extract_function(source: str, name: str) -> str:
     raise AssertionError(f"{name} has an incomplete body")
 
 
+def extract_call_argument(source: str, call: str) -> str:
+    """Return one balanced array/object expression passed to a call."""
+
+    call_start = source.find(call)
+    if call_start < 0:
+        raise AssertionError(f"{call} is missing")
+
+    expression_start = call_start + len(call)
+    while expression_start < len(source) and source[expression_start].isspace():
+        expression_start += 1
+
+    opening = source[expression_start]
+    closing = {"[": "]", "{": "}"}.get(opening)
+    if closing is None:
+        raise AssertionError(f"{call} has no array/object argument")
+
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for index in range(expression_start, len(source)):
+        character = source[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            continue
+
+        if character in {"'", '"', "`"}:
+            quote = character
+        elif character == opening:
+            depth += 1
+        elif character == closing:
+            depth -= 1
+            if depth == 0:
+                return source[expression_start : index + 1]
+
+    raise AssertionError(f"{call} has an incomplete argument")
+
+
 def run_javascript(function_source: str, function_name: str, values: list[object]) -> object:
     """Execute a pure workflow helper without loading the GitHub runtime."""
 
@@ -303,7 +345,25 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
             run_javascript(summary_row, "summaryTableRow", [4, "small"]),
             ["4", "small"],
         )
-        self.assertIn("summaryTableRow(countedFileCount, targetLabel)", self.workflow)
+        table_expression = extract_call_argument(self.workflow, "core.summary.addTable(")
+        script = (
+            f"{summary_row}\n"
+            "const countedFileCount = 4;\n"
+            "const targetLabel = 'small';\n"
+            f"const table = {table_expression};\n"
+            "process.stdout.write(JSON.stringify(table));"
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        table = json.loads(result.stdout)
+        self.assertEqual(table[1], ["4", "small"])
+        self.assertTrue(all(isinstance(cell, str) for cell in table[1]))
 
     # @covers AC-CI-PR-SIZE-001.7
     def test_incomplete_file_results_fail_before_label_mutations(self) -> None:
