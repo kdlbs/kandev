@@ -74,6 +74,12 @@ func (s *Service) signalOrphanReapCandidates(
 	}
 
 	pending := s.sendOrphanReapSigterms(ctx, taskID, candidates, snapshot, verifier, signaler)
+	if ctx.Err() != nil {
+		// Cancellation may have broken the loop before anything reached
+		// pending; report it either way rather than falling through to the
+		// empty-pending "nothing to do" return below.
+		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, pending)
+	}
 	if len(pending) == 0 {
 		return nil
 	}
@@ -84,6 +90,9 @@ func (s *Service) signalOrphanReapCandidates(
 	}
 
 	killPending := s.sendOrphanReapSigkills(ctx, taskID, pending, snapshot, verifier, signaler)
+	if ctx.Err() != nil {
+		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending)
+	}
 	if len(killPending) == 0 {
 		return nil
 	}
@@ -106,6 +115,14 @@ func (s *Service) sendOrphanReapSigterms(
 ) []orphanReapPendingCandidate {
 	pending := make([]orphanReapPendingCandidate, 0, len(candidates))
 	for _, cand := range candidates {
+		if ctx.Err() != nil {
+			// AC-TASKS-ORPHAN-REAP-006.3: cancellation stops further
+			// signalling immediately; the caller's ctx.Done() branch records
+			// everyone already in pending as skipped. A context-blind
+			// verifier (e.g. Linux's VerifyCwd) must never let this loop
+			// keep sending signals after cancellation.
+			break
+		}
 		if !orphanReapReverifyInsideRoot(ctx, verifier, cand.PID, cand.Root) {
 			s.recordOrphanReapSkip(snapshot, taskID, cand, "pid reused or moved before signal")
 			continue
@@ -129,6 +146,12 @@ func (s *Service) sendOrphanReapSigkills(
 ) []orphanReapPendingCandidate {
 	killPending := make([]orphanReapPendingCandidate, 0, len(pending))
 	for _, cand := range pending {
+		if ctx.Err() != nil {
+			// AC-TASKS-ORPHAN-REAP-006.3: same cancellation posture as
+			// sendOrphanReapSigterms — stop before sending SIGKILL to the
+			// remainder of this batch.
+			break
+		}
 		alive, known := signaler.Alive(cand.PID)
 		if !known || !alive {
 			s.recordOrphanReapCandidate(snapshot, taskID, orphanReapRecordFor(cand.orphanReapCandidate, orphanReapOutcomeTerminated, ""))

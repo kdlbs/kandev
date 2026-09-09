@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -44,6 +45,62 @@ func TestRunOrphanReapPhaseSkipsRootThatExistsAgain(t *testing.T) {
 	}
 	if len(snapshot.OrphanReapRoots) != 1 {
 		t.Fatalf("expected the root to remain recorded for a later attempt, got %+v", snapshot.OrphanReapRoots)
+	}
+}
+
+// A root whose existence cannot be confirmed either way (a stat error
+// other than os.ErrNotExist) must not be treated as active — it is recorded
+// as a detection-failure skip and never reaches the host snapshot.
+func TestRunOrphanReapPhaseFailsClosedOnAmbiguousRootStatError(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	base := t.TempDir()
+	notADir := filepath.Join(base, "not-a-dir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ambiguousRoot := filepath.Join(notADir, "child") // Lstat returns ENOTDIR
+	svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{
+		snap: []hostProcess{{PID: 999, PPID: 1, Cwd: ambiguousRoot, Command: "sh"}},
+	}
+	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{ambiguousRoot})
+	if len(errs) != 0 {
+		t.Fatalf("expected no job errors from a phase-wide skip, got %v", errs)
+	}
+	if len(snapshot.OrphanReapRecords) != 0 {
+		t.Fatalf("expected no candidate records for an ambiguous root, got %+v", snapshot.OrphanReapRecords)
+	}
+	if len(snapshot.OrphanReapSkips) != 1 {
+		t.Fatalf("expected one skip for the ambiguous root, got %+v", snapshot.OrphanReapSkips)
+	}
+}
+
+// poisonOrphanReapHostSnapshotter fails the test if Snapshot is ever called,
+// proving a phase-level early return truly never reads the host.
+type poisonOrphanReapHostSnapshotter struct{ t *testing.T }
+
+func (p poisonOrphanReapHostSnapshotter) Snapshot(context.Context) ([]hostProcess, error) {
+	p.t.Helper()
+	p.t.Fatal("host snapshot must not be read when there are no reap roots")
+	return nil, nil
+}
+
+// AC-TASKS-ORPHAN-REAP-007.1: zero roots skips the phase without ever
+// reading the host process snapshot.
+func TestRunOrphanReapPhaseSkipsSnapshotReadWhenNoRoots(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.orphanReapHostSnapshotter = poisonOrphanReapHostSnapshotter{t: t}
+	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, nil)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	if len(snapshot.OrphanReapRoots) != 0 {
+		t.Fatalf("expected no roots recorded, got %+v", snapshot.OrphanReapRoots)
 	}
 }
 
@@ -160,4 +217,62 @@ func TestRunOrphanReapPhaseCapsCandidatesAt256(t *testing.T) {
 			t.Fatalf("expected exactly %d candidate records, got %d", orphanReapMaxCandidates, len(snapshot.OrphanReapRecords))
 		}
 	})
+}
+
+// persistOrphanReapProgressBestEffort must actually persist reap
+// progress recorded during a failed cleanup attempt, not merely take the
+// empty-snapshot no-op path.
+func TestPersistOrphanReapProgressBestEffortPersistsSnapshot(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const taskID = "task-persist-progress"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-orphan-reap", Title: taskID}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	initial, err := json.Marshal(taskResourceCleanupSnapshot{})
+	if err != nil {
+		t.Fatalf("marshal initial snapshot: %v", err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-persist-progress", OperationID: "delete:" + taskID, TaskID: taskID,
+		Trigger: models.TaskResourceCleanupTriggerDelete,
+		State:   models.TaskResourceCleanupStatePending, ResourceSnapshot: string(initial),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	claimed, err := repo.MarkTaskResourceCleanupJobRunning(ctx, job.ID)
+	if err != nil || !claimed {
+		t.Fatalf("MarkTaskResourceCleanupJobRunning: claimed=%v err=%v", claimed, err)
+	}
+	running, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+
+	snapshot := &taskResourceCleanupSnapshot{
+		OrphanReapRoots:   []string{"/tasks/" + taskID},
+		OrphanReapRecords: []orphanReapCandidateRecord{{PID: 500, Outcome: orphanReapOutcomeTerminated}},
+		OrphanReapSkips:   []orphanReapSkipRecord{{Root: "/tasks/" + taskID, Reason: "reap root exists again at reap time"}},
+	}
+	svc.persistOrphanReapProgressBestEffort(ctx, running, snapshot)
+
+	persisted, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob after persist: %v", err)
+	}
+	var decoded taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(persisted.ResourceSnapshot), &decoded); err != nil {
+		t.Fatalf("unmarshal persisted snapshot: %v", err)
+	}
+	if len(decoded.OrphanReapRoots) != 1 || decoded.OrphanReapRoots[0] != "/tasks/"+taskID {
+		t.Fatalf("expected persisted roots to survive, got %+v", decoded.OrphanReapRoots)
+	}
+	if len(decoded.OrphanReapRecords) != 1 || decoded.OrphanReapRecords[0].PID != 500 {
+		t.Fatalf("expected persisted records to survive, got %+v", decoded.OrphanReapRecords)
+	}
+	if len(decoded.OrphanReapSkips) != 1 {
+		t.Fatalf("expected persisted skips to survive, got %+v", decoded.OrphanReapSkips)
+	}
 }

@@ -312,6 +312,98 @@ func TestSignalOrphanReapCandidatesCancelledMidPhaseAfterSigterm(t *testing.T) {
 	})
 }
 
+// Cancellation arriving mid-loop over multiple candidates must stop
+// sending further signals immediately, not just at the next checkpoint. The
+// fake verifier here is context-blind (VerifyCwd ignores its ctx parameter),
+// matching real Linux behavior — the loop itself, not the verifier, must be
+// what stops signalling the remaining candidates.
+func TestSignalOrphanReapCandidatesStopsLoopOnCancellationMidBurst(t *testing.T) {
+	verifier := newFakeOrphanReapVerifier()
+	verifier.set(500, "/tasks/task-a")
+	verifier.set(600, "/tasks/task-a")
+	verifier.set(700, "/tasks/task-a")
+	signaler := newFakeOrphanReapSignaler()
+	signaler.setAlive(500, true)
+	signaler.setAlive(600, true)
+	signaler.setAlive(700, true)
+
+	svc := newOrphanReapSignalTestService()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	signaler.onSignal = func(pid int, sig orphanReapSignal) {
+		if pid == 500 && sig == orphanReapSigterm {
+			cancel()
+		}
+	}
+	svc.orphanReapVerifier = verifier
+	svc.orphanReapSignaler = signaler
+
+	candidates := []orphanReapCandidate{
+		newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a"),
+		newOrphanReapOwnershipCandidate(600, 1, "/tasks/task-a", "/tasks/task-a"),
+		newOrphanReapOwnershipCandidate(700, 1, "/tasks/task-a", "/tasks/task-a"),
+	}
+	snapshot := &taskResourceCleanupSnapshot{}
+	errs := svc.signalOrphanReapCandidates(ctx, "task-a", candidates, snapshot)
+
+	if len(errs) != 1 || !errors.Is(errs[0], errOrphanReapCancelledMidPhase) {
+		t.Fatalf("expected errOrphanReapCancelledMidPhase, got %v", errs)
+	}
+	sent := signaler.sentSignals()
+	if len(sent) != 1 || sent[0].pid != 500 {
+		t.Fatalf("expected only pid 500 to have been signalled before cancellation stopped the loop, got %+v", sent)
+	}
+	if _, ok := findOrphanReapRecord(snapshot, 600); ok {
+		t.Fatalf("expected pid 600 (never reached) to have no record")
+	}
+	if _, ok := findOrphanReapRecord(snapshot, 700); ok {
+		t.Fatalf("expected pid 700 (never reached) to have no record")
+	}
+	rec, ok := findOrphanReapRecord(snapshot, 500)
+	if !ok || rec.Outcome != orphanReapOutcomeSkipped {
+		t.Fatalf("expected pid 500 (already signalled) recorded skipped, got %+v (found=%v)", rec, ok)
+	}
+}
+
+// The same mid-burst stop applies to the SIGKILL loop.
+func TestSignalOrphanReapCandidatesStopsSigkillLoopOnCancellationMidBurst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		verifier := newFakeOrphanReapVerifier()
+		verifier.set(500, "/tasks/task-a")
+		verifier.set(600, "/tasks/task-a")
+		signaler := newFakeOrphanReapSignaler()
+		signaler.setAlive(500, true)
+		signaler.setAlive(600, true) // both survive sigterm, escalate to sigkill
+
+		svc := newOrphanReapSignalTestService()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		signaler.onSignal = func(pid int, sig orphanReapSignal) {
+			if pid == 500 && sig == orphanReapSigkill {
+				cancel()
+			}
+		}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = signaler
+
+		candidates := []orphanReapCandidate{
+			newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a"),
+			newOrphanReapOwnershipCandidate(600, 1, "/tasks/task-a", "/tasks/task-a"),
+		}
+		snapshot := &taskResourceCleanupSnapshot{}
+		errs := svc.signalOrphanReapCandidates(ctx, "task-a", candidates, snapshot)
+
+		if len(errs) != 1 || !errors.Is(errs[0], errOrphanReapCancelledMidPhase) {
+			t.Fatalf("expected errOrphanReapCancelledMidPhase, got %v", errs)
+		}
+		for _, s := range signaler.sentSignals() {
+			if s.pid == 600 && s.sig == orphanReapSigkill {
+				t.Fatalf("expected no SIGKILL sent to pid 600 after cancellation stopped the loop, got %+v", signaler.sentSignals())
+			}
+		}
+	})
+}
+
 // AC-TASKS-ORPHAN-REAP-004.4: a signal failing because the process is already
 // gone is a successful reap (terminated), not an error.
 func TestRecordOrphanReapSignalErrorProcessGoneIsTerminated(t *testing.T) {

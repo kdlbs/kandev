@@ -1,0 +1,104 @@
+package service
+
+import "testing"
+
+// These parsers previously only compiled under //go:build darwin, so no
+// CI runner (there is no macos-latest job) ever ran them. They are pure
+// string parsing untagged in resource_cleanup_orphan_reap_host_parse.go, so
+// this file exercises them directly on every platform CI does run.
+
+func TestParseLsofCwdEntries(t *testing.T) {
+	input := "p111\ncbash\nn/home/a\np222\ncsh\nn/home/b\n"
+	got := parseLsofCwdEntries([]byte(input))
+	if len(got) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %+v", len(got), got)
+	}
+	if got[111].Cwd != "/home/a" || got[111].Command != "bash" {
+		t.Fatalf("unexpected entry for pid 111: %+v", got[111])
+	}
+	if got[222].Cwd != "/home/b" || got[222].Command != "sh" {
+		t.Fatalf("unexpected entry for pid 222: %+v", got[222])
+	}
+}
+
+func TestParseLsofCwdEntriesDropsMissingCwd(t *testing.T) {
+	// AC-TASKS-ORPHAN-REAP-002.1: a process whose entry cannot be parsed
+	// (here, no 'n' cwd line) is not a candidate.
+	input := "p333\ncsh\n"
+	got := parseLsofCwdEntries([]byte(input))
+	if len(got) != 0 {
+		t.Fatalf("expected no entries for a record missing cwd, got %+v", got)
+	}
+}
+
+func TestParseLsofCwdEntriesDropsMalformedPID(t *testing.T) {
+	input := "pnot-a-number\ncsh\nn/home/a\n"
+	got := parseLsofCwdEntries([]byte(input))
+	if len(got) != 0 {
+		t.Fatalf("expected no entries for a malformed pid, got %+v", got)
+	}
+}
+
+func TestParsePSAncestry(t *testing.T) {
+	input := "  1   0\n  222   1\n"
+	got := parsePSAncestry([]byte(input))
+	if len(got) != 2 || got[1] != 0 || got[222] != 1 {
+		t.Fatalf("unexpected ancestry map: %+v", got)
+	}
+}
+
+func TestParsePSAncestrySkipsMalformedLines(t *testing.T) {
+	input := "not-a-pid 1\n222 1\n222\n"
+	got := parsePSAncestry([]byte(input))
+	if len(got) != 1 || got[222] != 1 {
+		t.Fatalf("expected only the well-formed line to survive, got %+v", got)
+	}
+}
+
+// A pid whose cwd lsof could not resolve (so it is absent from byPID)
+// must still appear in the combined snapshot with its ancestry intact, so
+// the ownership walk (AC-TASKS-ORPHAN-REAP-003.3) does not lose a hop.
+func TestCombineLsofAndPSSnapshotKeepsAncestryOnlyEntries(t *testing.T) {
+	byPID := map[int]hostProcess{
+		500: {PID: 500, Cwd: "/task/root", Command: "node"},
+	}
+	ppidByPID := map[int]int{
+		500: 450, // 500's parent, cwd unreadable so absent from byPID
+		450: 400, // 450's parent, itself another task's recorded local_pid
+	}
+
+	got := combineLsofAndPSSnapshot(byPID, ppidByPID)
+
+	byPIDOut := make(map[int]hostProcess, len(got))
+	for _, p := range got {
+		byPIDOut[p.PID] = p
+	}
+	if len(byPIDOut) != 2 {
+		t.Fatalf("expected 2 entries (one cwd-bearing, one ancestry-only), got %+v", byPIDOut)
+	}
+	if byPIDOut[500].PPID != 450 || byPIDOut[500].Cwd != "/task/root" {
+		t.Fatalf("expected pid 500's cwd and ppid preserved, got %+v", byPIDOut[500])
+	}
+	ancestryOnly, ok := byPIDOut[450]
+	if !ok {
+		t.Fatalf("expected an ancestry-only entry for pid 450, got %+v", byPIDOut)
+	}
+	if ancestryOnly.PPID != 400 {
+		t.Fatalf("expected pid 450's ppid to be 400, got %+v", ancestryOnly)
+	}
+	if ancestryOnly.Cwd != "" {
+		t.Fatalf("expected an ancestry-only entry to have an empty cwd (never a candidate), got %+v", ancestryOnly)
+	}
+}
+
+func TestCombineLsofAndPSSnapshotKeepsCwdOnlyEntry(t *testing.T) {
+	// A pid lsof saw but ps somehow missed (race between the two commands)
+	// still contributes what lsof knows, with ppid defaulting to 0.
+	byPID := map[int]hostProcess{
+		600: {PID: 600, Cwd: "/task/root", Command: "sh"},
+	}
+	got := combineLsofAndPSSnapshot(byPID, map[int]int{})
+	if len(got) != 1 || got[0].PID != 600 || got[0].Cwd != "/task/root" || got[0].PPID != 0 {
+		t.Fatalf("unexpected combined snapshot: %+v", got)
+	}
+}
