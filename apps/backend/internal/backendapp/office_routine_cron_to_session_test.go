@@ -392,6 +392,11 @@ func (m *stubAgentManager) CancelPermissionBySessionID(
 ) (*streams.PermissionCancelResponse, error) {
 	return nil, nil
 }
+func (m *stubAgentManager) ProbeBackgroundWorkloads(
+	_ context.Context, _ string,
+) (client.ProbeResult, error) {
+	return client.ProbeResultUnknown, nil
+}
 func (m *stubAgentManager) IsAgentRunningForSession(_ context.Context, _ string) bool { return false }
 func (m *stubAgentManager) IsAgentReadyForPrompt(_ context.Context, _ string) bool    { return false }
 func (m *stubAgentManager) ResolveAgentProfile(_ context.Context, profileID string) (*executor.AgentProfileInfo, error) {
