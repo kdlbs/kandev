@@ -11,17 +11,17 @@ import (
 )
 
 // resolveWaveIdentity performs the terminality-confirming last read
-// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.15) shared by the two engine-routed
-// task_children_completed producers: P2 (event_subscribers.go,
-// queueChildrenCompletedRun) and P3 (scheduler_wake_reconciler.go,
+// shared by the two engine-routed task_children_completed producers:
+// the edge-triggered path (event_subscribers.go, queueChildrenCompletedRun)
+// and the backstop reconciler (scheduler_wake_reconciler.go,
 // ParentWakeReconciler.reconcileOne). A wave identity is derived from, and
 // only from, a wave-member read that itself observed every member
 // terminal — not from an earlier AreAllChildrenTerminal / GetChildSetKey
 // read, which counts every child rather than just wave members. A read
-// error, any non-terminal wave member, or an empty wave-member set
-// (AC-...-001.7 — a parent with no wave members has no wave) all report
-// ok=false: the caller must queue no run (AC-...-002.12), and the log
-// param (nilable) records why at debug.
+// error, any non-terminal wave member, or an empty wave-member set (a
+// parent with no wave members has no wave) all report ok=false: the
+// caller must queue no run, and the log param (nilable) records why at
+// debug.
 func resolveWaveIdentity(
 	ctx context.Context, repo *sqlite.Repository, parentID string, log *logger.Logger,
 ) (waveKey, waveString string, ok bool) {

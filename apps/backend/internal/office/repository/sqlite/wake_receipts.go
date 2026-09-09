@@ -90,9 +90,9 @@ type StuckParentCandidate struct {
 //   - a second EXISTS, over the wave-member predicate (not archived, not
 //     ephemeral, not automation-origin — the same predicate
 //     ListWaveMembers applies), removes a parent with no possible wave from
-//     candidacy (AC-OFFICE-WAKE-WAVE-IDENTITY-003.9): without it such a
-//     parent would be listed every tick, found to have no wave, queue
-//     nothing, and be listed again. Additive and narrowing only — it sits
+//     candidacy: without it such a parent would be listed every tick,
+//     found to have no wave, queue nothing, and be listed again. Additive
+//     and narrowing only — it sits
 //     beside the existing archived-only EXISTS, never replacing it.
 //   - requiring a non-empty assignee_agent_profile_id drops a candidate
 //     with no resolvable runner, and the INNER JOIN against agent_profiles

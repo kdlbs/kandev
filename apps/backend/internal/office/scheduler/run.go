@@ -197,9 +197,8 @@ type SchedulerService struct {
 
 // WorkflowStepGetter resolves a workflow step by ID. Implemented by
 // workflow/service.Service.GetStep; wired via SetWorkflowStepGetter so the
-// cascade producer (P1) can resolve the parent's current step without an
-// engine dependency, for payload parity with the engine-routed producers
-// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16).
+// cascade producer can resolve the parent's current step without an
+// engine dependency, for payload parity with the engine-routed producers.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
 }
@@ -288,11 +287,10 @@ func (ss *SchedulerService) QueueRun(
 // queueRun is QueueRun plus an optional completion-wave identity. A
 // non-empty waveKey (a) skips CoalesceRun — a wave-carrying request is
 // never coalesced in and a wave-carrying queued run is never coalesced
-// into (AC-OFFICE-WAKE-WAVE-IDENTITY-002.14) — and (b) classifies
-// CreateRun's idx_run_wake_wave violation as an already-delivered wake
-// rather than an error: this call site inserts directly (not through
-// runs/service), so runs/service's own classification (Task 02) doesn't
-// cover it.
+// into — and (b) classifies CreateRun's idx_run_wake_wave violation as an
+// already-delivered wake rather than an error: this call site inserts
+// directly (not through runs/service), so runs/service's own
+// classification doesn't cover it.
 func (ss *SchedulerService) queueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
@@ -383,8 +381,8 @@ func (ss *SchedulerService) QueueRunCtx(
 // encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output
 // is a plain struct marshal, byte-identical to before ExtraPayload existed.
 // Otherwise ExtraPayload's keys are overlaid onto the encoded object —
-// workflow-authored keys win, matching engine.queueRunPayload's precedence
-// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16).
+// workflow-authored keys win, matching engine.queueRunPayload's
+// precedence.
 func encodeRunContext(c RunContext) (string, error) {
 	b, err := json.Marshal(c)
 	if err != nil {

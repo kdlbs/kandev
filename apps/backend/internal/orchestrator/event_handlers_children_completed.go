@@ -309,9 +309,9 @@ func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID str
 // on_children_completed dispatch. rows arrive ordered by created_at (see
 // ListChildCompletionRows) with terminality already confirmed by the
 // caller's single read (readyChildCompletionRows) — that same read is
-// what the wave identity is derived from (AC-OFFICE-WAKE-WAVE-IDENTITY-
-// 002.15), so this function only re-sorts a copy of rows ascending by id
-// (AC-...-001.2) before deriving it; it performs no read of its own.
+// what the wave identity is derived from, so this function only re-sorts
+// a copy of rows ascending by id before deriving it; it performs no read
+// of its own.
 func childCompletionPayload(parentID string, rows []models.ChildCompletionRow) engine.OnChildrenCompletedPayload {
 	summaries := make([]engine.ChildSummary, 0, len(rows))
 	for _, row := range rows {

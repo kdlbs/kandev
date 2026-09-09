@@ -1624,7 +1624,7 @@ func startSchedulingRuntime(
 	)
 	if services.OfficeSvcs != nil {
 		services.OfficeSvcs.Dashboard.SetWorkflowEngineDispatcher(engineDispatcher)
-		// Payload parity (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16): the
+		// For payload parity with the engine-routed producers, the
 		// cascade producer resolves the parent's current step directly,
 		// since it never goes through the engine.
 		services.OfficeSvcs.Scheduler.SetWorkflowStepGetter(services.Workflow)

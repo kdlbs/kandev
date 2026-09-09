@@ -432,15 +432,14 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 	queue(parentAssignee, rc)
 }
 
-// resolveWaveIdentity performs the terminality-confirming last read
-// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.15): a wave identity is derived from,
-// and only from, a wave-member read that itself observed every member
-// terminal. It does not trust the earlier ListChildStates loop above,
-// which counts every child (not just wave members) and is a separate,
-// unsynchronized read. A read error, any non-terminal wave member, or an
-// empty wave-member set (AC-...-001.7 — a parent with no wave members has
-// no wave) all report ok=false: the caller queues nothing and the backstop
-// delivers the wake later (AC-...-002.12).
+// resolveWaveIdentity performs the terminality-confirming last read: a
+// wave identity is derived from, and only from, a wave-member read that
+// itself observed every member terminal. It does not trust the earlier
+// ListChildStates loop above, which counts every child (not just wave
+// members) and is a separate, unsynchronized read. A read error, any
+// non-terminal wave member, or an empty wave-member set (a parent with no
+// wave members has no wave) all report ok=false: the caller queues
+// nothing and the backstop delivers the wake later.
 func (ss *SchedulerService) resolveWaveIdentity(
 	ctx context.Context, parentID string,
 ) (waveKey, waveString string, ok bool) {
@@ -466,11 +465,10 @@ func (ss *SchedulerService) resolveWaveIdentity(
 // resolveWaveActionPayload resolves the workflow-authored queue_run
 // payload the engine would attach for the parent's current step's
 // on_children_completed trigger, so a cascade wake that never touches the
-// engine still carries it (AC-OFFICE-WAKE-WAVE-IDENTITY-002.16). Any
-// failure to resolve it — no getter wired, no step bound, lookup error, no
-// matching action, no payload — returns nil and logs the omission at
-// debug: the wake itself is unconditional (AC-...-004.2), an optional
-// payload is not worth skipping it for.
+// engine still carries it. Any failure to resolve it — no getter wired,
+// no step bound, lookup error, no matching action, no payload — returns
+// nil and logs the omission at debug: the wake itself is unconditional,
+// an optional payload is not worth skipping it for.
 func (ss *SchedulerService) resolveWaveActionPayload(ctx context.Context, parentID string) map[string]any {
 	if ss.workflowStepGetter == nil {
 		return nil

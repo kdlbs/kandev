@@ -55,8 +55,8 @@ const sqliteRunWakeWaveViolationMessage = "UNIQUE constraint failed: runs.wake_w
 // than widening IsIdempotencyKeyUniqueViolation to "any unique violation":
 // the two indexes have independent meanings ("same dispatch" vs "same
 // wave") and a caller that needs to distinguish which one fired (the runs
-// service and office/scheduler both do, per AC-OFFICE-WAKE-WAVE-IDENTITY-002.4)
-// would otherwise have to re-derive the distinction itself.
+// service and office/scheduler both do) would otherwise have to re-derive
+// the distinction itself.
 func IsWakeWaveUniqueViolation(err error) bool {
 	if err == nil {
 		return false

@@ -44,10 +44,10 @@ var errIdempotencyKeyConflict = errors.New("idempotency key conflict")
 // idx_run_wake_wave: two producers deriving the same completion-wave
 // identity for the same target agent can both pass upstream checks before
 // either commits (this constraint has no windowed pre-check the way
-// IdempotencyKey does — .002.6 requires it stay unbounded). QueueRun treats
-// this exactly like an idempotency-key conflict: QueueOutcomeDeduped, not
-// an error, so the losing producer's caller does not log a spurious
-// failure for what is really a no-op (AC-OFFICE-WAKE-WAVE-IDENTITY-002.4).
+// IdempotencyKey does — it must stay unbounded). QueueRun treats this
+// exactly like an idempotency-key conflict: QueueOutcomeDeduped, not an
+// error, so the losing producer's caller does not log a spurious failure
+// for what is really a no-op.
 var errWakeWaveKeyConflict = errors.New("wake wave key conflict")
 
 // RunQueueAdapter is the interface the workflow engine uses to enqueue
@@ -344,12 +344,11 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 }
 
 // shouldCoalesceRun decides whether a request may be merged into an
-// existing queued row. A wave-carrying request is never coalesced
-// (AC-OFFICE-WAKE-WAVE-IDENTITY-002.14): coalescing replaces the target
-// row's payload without moving its recorded identity, which would leave a
-// run whose wave columns no longer describe the wake it delivers.
-// idx_run_wake_wave, not this window, is what reconciles wave-carrying
-// requests.
+// existing queued row. A wave-carrying request is never coalesced:
+// coalescing replaces the target row's payload without moving its
+// recorded identity, which would leave a run whose wave columns no
+// longer describe the wake it delivers. idx_run_wake_wave, not this
+// window, is what reconciles wave-carrying requests.
 func shouldCoalesceRun(req QueueRunRequest) bool {
 	return req.WakeWaveKey == "" && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
