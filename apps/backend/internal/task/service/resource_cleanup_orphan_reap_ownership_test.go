@@ -233,6 +233,47 @@ func TestApplyOrphanReapOwnershipSkipsCandidateOwnedByOtherTaskLocalPID(t *testi
 	}
 }
 
+// The ancestry walk must not break on an intermediate process whose cwd
+// is unreadable (so the host snapshotter can only report its PID/PPID, with
+// an empty Cwd). A candidate reached only through such a hop is still owned.
+func TestApplyOrphanReapOwnershipWalksThroughAncestryOnlyHop(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+	mustCreateOrphanReapTask(t, repo, "task-other")
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "exec-other", SessionID: "sess-other", TaskID: "task-other", ExecutorID: "executor-1",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+		LocalPID: 400,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	root := t.TempDir()
+	owned := newOrphanReapOwnershipCandidate(500, 450, root, root) // child of an ancestry-only hop
+	byRoot := map[string][]orphanReapCandidate{root: {owned}}
+	snap := []hostProcess{
+		{PID: 400, PPID: 1, Cwd: "/other", Command: "sh"},
+		{PID: 450, PPID: 400, Cwd: "", Command: ""}, // cwd unreadable: ancestry-only entry
+		{PID: 500, PPID: 450, Cwd: root, Command: "sh"},
+	}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+	if len(got) != 0 {
+		t.Fatalf("expected pid 500 to be skipped via the ancestry-only hop, got %+v", got)
+	}
+	foundSkip := false
+	for _, rec := range snapshot.OrphanReapRecords {
+		if rec.PID == 500 && rec.Outcome == orphanReapOutcomeSkipped {
+			foundSkip = true
+		}
+	}
+	if !foundSkip {
+		t.Fatalf("expected pid 500 to be recorded as skipped, got %+v", snapshot.OrphanReapRecords)
+	}
+}
+
 // AC-TASKS-ORPHAN-REAP-003.5: the backend's own PID is always protected.
 func TestApplyOrphanReapOwnershipSkipsProtectedPID(t *testing.T) {
 	svc, _, repo := createTestService(t)
@@ -319,6 +360,45 @@ func TestApplyOrphanReapOwnershipFailsClosedOnUnresolvableSessionPath(t *testing
 	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
 	if len(got) != 0 {
 		t.Fatalf("expected no signalable candidates when a stored path is unresolvable, got %+v", got)
+	}
+	if len(snapshot.OrphanReapSkips) != 2 {
+		t.Fatalf("expected both roots to be skipped as inconclusive, got %+v", snapshot.OrphanReapSkips)
+	}
+}
+
+// An unresolvable live executor worktree path must fail every active
+// root closed, the same way an unresolvable session path already does —
+// falling back to the raw, unresolved path would let a symlinked or
+// reparented process pass the AC-TASKS-ORPHAN-REAP-003.4 containment check.
+func TestApplyOrphanReapOwnershipFailsClosedOnUnresolvableExecutorWorktreePath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+	mustCreateOrphanReapTask(t, repo, "task-other")
+
+	unresolvable := filepath.Join(t.TempDir(), "does-not-exist")
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "exec-other", SessionID: "sess-other", TaskID: "task-other", ExecutorID: "executor-1",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+		WorktreePath: unresolvable,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	rootA, rootB := t.TempDir(), t.TempDir()
+	byRoot := map[string][]orphanReapCandidate{
+		rootA: {newOrphanReapOwnershipCandidate(500, 1, rootA, rootA)},
+		rootB: {newOrphanReapOwnershipCandidate(600, 1, rootB, rootB)},
+	}
+	snap := []hostProcess{
+		{PID: 500, PPID: 1, Cwd: rootA, Command: "sh"},
+		{PID: 600, PPID: 1, Cwd: rootB, Command: "sh"},
+	}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+	if len(got) != 0 {
+		t.Fatalf("expected no signalable candidates when a live executor worktree path is unresolvable, got %+v", got)
 	}
 	if len(snapshot.OrphanReapSkips) != 2 {
 		t.Fatalf("expected both roots to be skipped as inconclusive, got %+v", snapshot.OrphanReapSkips)

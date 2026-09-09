@@ -41,7 +41,15 @@ func (s *Service) applyOrphanReapOwnership(
 		return nil
 	}
 
-	localPIDOwner, liveWorktreeRoots := orphanReapOtherExecutorOwnership(otherExecutors, taskID)
+	localPIDOwner, liveWorktreeRoots, worktreeResolutionFailed := orphanReapOtherExecutorOwnership(otherExecutors, taskID)
+	if worktreeResolutionFailed {
+		// AC-TASKS-ORPHAN-REAP-003.4 + 003.6: an unresolvable other-task live
+		// executor worktree path cannot be ruled out as "containing" any
+		// root, so every root this attempt found is inconclusive — the same
+		// posture otherTaskSessionPaths already applies below.
+		s.skipEveryOrphanReapRoot(snapshot, byRoot, "ownership check inconclusive: could not resolve another task's live executor worktree path")
+		return nil
+	}
 
 	otherSessionPaths, resolutionFailed := s.otherTaskSessionPaths(otherSessions, taskID)
 	if resolutionFailed {
@@ -74,10 +82,13 @@ func (s *Service) applyOrphanReapOwnership(
 // orphanReapOtherExecutorOwnership indexes every other task's recorded
 // executions into a local_pid ownership map (AC-TASKS-ORPHAN-REAP-003.3) and
 // the set of live worktree roots another task's recorded execution occupies
-// (AC-TASKS-ORPHAN-REAP-003.4).
+// (AC-TASKS-ORPHAN-REAP-003.4). resolutionFailed is true when any live
+// executor's worktree path could not be resolved — mirrors
+// otherTaskSessionPaths, since an unresolvable path can silently fail to
+// match a process's real (resolved) cwd.
 func orphanReapOtherExecutorOwnership(
 	otherExecutors []*models.ExecutorRunning, taskID string,
-) (localPIDOwner map[int]string, liveWorktreeRoots []orphanReapOwnedPath) {
+) (localPIDOwner map[int]string, liveWorktreeRoots []orphanReapOwnedPath, resolutionFailed bool) {
 	localPIDOwner = map[int]string{}
 	for _, ex := range otherExecutors {
 		if ex == nil || ex.TaskID == "" || ex.TaskID == taskID {
@@ -86,14 +97,17 @@ func orphanReapOtherExecutorOwnership(
 		if ex.LocalPID != 0 {
 			localPIDOwner[ex.LocalPID] = ex.TaskID
 		}
-		if ex.WorktreePath != "" && orphanReapExecutorIsLive(ex.Status) {
-			liveWorktreeRoots = append(liveWorktreeRoots, orphanReapOwnedPath{
-				taskID: ex.TaskID,
-				path:   resolveOrphanReapPathBestEffort(ex.WorktreePath),
-			})
+		if ex.WorktreePath == "" || !orphanReapExecutorIsLive(ex.Status) {
+			continue
 		}
+		resolved, err := filepath.EvalSymlinks(ex.WorktreePath)
+		if err != nil {
+			resolutionFailed = true
+			continue
+		}
+		liveWorktreeRoots = append(liveWorktreeRoots, orphanReapOwnedPath{taskID: ex.TaskID, path: resolved})
 	}
-	return localPIDOwner, liveWorktreeRoots
+	return localPIDOwner, liveWorktreeRoots, resolutionFailed
 }
 
 func (s *Service) applyOrphanReapPerCandidateOwnership(

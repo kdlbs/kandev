@@ -34,16 +34,18 @@ func (linuxOrphanReapHost) Snapshot(ctx context.Context) ([]hostProcess, error) 
 		if err != nil {
 			continue
 		}
-		cwd, cwdErr := readProcCwd(pid)
-		if cwdErr != nil {
-			// Gone since the directory listing, or unreadable: not a
-			// candidate (AC-TASKS-ORPHAN-REAP-002.1).
-			continue
-		}
 		ppid, command, statErr := readProcStat(pid)
 		if statErr != nil {
+			// Gone since the directory listing, or unreadable: no ancestry
+			// or cwd is obtainable at all, so this pid can be neither a
+			// candidate nor an ancestry hop (AC-TASKS-ORPHAN-REAP-002.1).
 			continue
 		}
+		// A cwd read failure still leaves ancestry (ppid) usable for the
+		// ownership walk (AC-TASKS-ORPHAN-REAP-003.3); leave Cwd empty so
+		// this pid never becomes a candidate (attributeOrphanReapCandidates
+		// skips empty-cwd entries).
+		cwd, _ := readProcCwd(pid)
 		procs = append(procs, hostProcess{PID: pid, PPID: ppid, Cwd: cwd, Command: command})
 	}
 	return procs, nil

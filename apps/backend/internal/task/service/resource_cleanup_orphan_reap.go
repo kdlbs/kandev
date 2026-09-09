@@ -150,7 +150,10 @@ func (s *Service) gatherOrphanReapRootCandidates(
 func confirmOrphanReapRootsRemoved(candidates []string) []string {
 	var removed []string
 	for _, path := range candidates {
-		if _, err := os.Lstat(path); err == nil {
+		_, err := os.Lstat(path)
+		if !errors.Is(err, os.ErrNotExist) {
+			// Either the path still exists (err == nil) or the stat itself
+			// failed inconclusively (e.g. ENOTDIR): neither confirms removal.
 			continue
 		}
 		removed = append(removed, path)
@@ -201,13 +204,19 @@ func (s *Service) runOrphanReapPhase(
 	resolvedRoots := resolveOrphanReapRoots(snapshot.OrphanReapRoots)
 	activeRoots := make([]string, 0, len(resolvedRoots))
 	for _, root := range resolvedRoots {
-		if _, err := os.Lstat(root); err == nil {
+		_, err := os.Lstat(root)
+		switch {
+		case err == nil:
 			// AC-TASKS-ORPHAN-REAP-001.4: the root exists again; skip it for
 			// this attempt, but keep it recorded for a later one.
 			s.recordOrphanReapRootSkip(snapshot, root, "reap root exists again at reap time")
-			continue
+		case errors.Is(err, os.ErrNotExist):
+			activeRoots = append(activeRoots, root)
+		default:
+			// The stat itself failed inconclusively: this alone cannot
+			// confirm absence, so fail this root closed rather than guess.
+			s.recordOrphanReapRootSkipDetectionFailure(snapshot, root, "cannot confirm reap root state: "+err.Error())
 		}
-		activeRoots = append(activeRoots, root)
 	}
 	if len(activeRoots) == 0 {
 		return nil

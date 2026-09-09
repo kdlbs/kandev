@@ -89,3 +89,40 @@ func TestMergeOrphanReapRootsPersistsAcrossAttempts(t *testing.T) {
 		}
 	}
 }
+
+// recordOrphanReapCandidate supersedes rather than duplicates an
+// earlier record for the same PID (AC-TASKS-ORPHAN-REAP-006.5).
+func TestRecordOrphanReapCandidateSupersedesSamePID(t *testing.T) {
+	svc := &Service{}
+	snapshot := &taskResourceCleanupSnapshot{}
+	svc.recordOrphanReapCandidate(snapshot, "task-a", orphanReapCandidateRecord{
+		PID: 500, Outcome: orphanReapOutcomeSkipped, Reason: "first pass",
+	})
+	svc.recordOrphanReapCandidate(snapshot, "task-a", orphanReapCandidateRecord{
+		PID: 500, Outcome: orphanReapOutcomeTerminated, Reason: "second pass",
+	})
+
+	if len(snapshot.OrphanReapRecords) != 1 {
+		t.Fatalf("expected exactly one record for pid 500, got %+v", snapshot.OrphanReapRecords)
+	}
+	if snapshot.OrphanReapRecords[0].Outcome != orphanReapOutcomeTerminated || snapshot.OrphanReapRecords[0].Reason != "second pass" {
+		t.Fatalf("expected the later record to replace the earlier one, got %+v", snapshot.OrphanReapRecords[0])
+	}
+}
+
+// A stat error that does NOT confirm absence (e.g. ENOTDIR from a path
+// segment that is now a file) must never be read as "removed" — only a
+// confirmed os.ErrNotExist may.
+func TestConfirmOrphanReapRootsRemovedFailsClosedOnAmbiguousStatError(t *testing.T) {
+	base := t.TempDir()
+	notADir := filepath.Join(base, "not-a-dir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ambiguous := filepath.Join(notADir, "child") // Lstat returns ENOTDIR, not ErrNotExist
+
+	got := confirmOrphanReapRootsRemoved([]string{ambiguous})
+	if len(got) != 0 {
+		t.Fatalf("expected an ambiguous stat error to not be treated as removed, got %v", got)
+	}
+}
