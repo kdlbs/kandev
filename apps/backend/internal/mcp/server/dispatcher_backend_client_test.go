@@ -121,6 +121,7 @@ func TestDispatcherBackendClient_NilResultIsAllowed(t *testing.T) {
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.1
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.2
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.9
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.10
 func TestDispatcherBackendClient_EmptyPayloadWithResultSinkErrors(t *testing.T) {
 	core, observed := observer.New(zap.WarnLevel)
 	log, err := logger.NewFromZap(zap.New(core))
@@ -180,6 +181,7 @@ func TestDispatcherBackendClient_ErrorTypeWithEmptyPayloadKeepsBackendErrorBehav
 }
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.5
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.8
 func TestDispatcherBackendClient_EmptyObjectPayloadDecodesToNonNilEmptyMap(t *testing.T) {
 	log := newTestLogger(t)
 
@@ -208,4 +210,19 @@ func TestDispatcherBackendClient_NullPayloadStillDecodesWithoutError(t *testing.
 	err = client.RequestPayload(context.Background(), "test.action", nil, &result)
 	require.NoError(t, err)
 	require.Nil(t, result)
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.7
+func TestDispatcherBackendClient_InvalidJSONPayloadKeepsUnmarshalError(t *testing.T) {
+	log := newTestLogger(t)
+
+	respMsg := &ws.Message{Type: ws.MessageTypeResponse, Payload: json.RawMessage("not json")}
+	d := &fakeDispatcher{resp: respMsg}
+	client := NewDispatcherBackendClient(d, log)
+
+	var result map[string]interface{}
+	err := client.RequestPayload(context.Background(), "test.action", nil, &result)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to unmarshal")
+	require.NotErrorIs(t, err, ErrEmptyBackendPayload)
 }

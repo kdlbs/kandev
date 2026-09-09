@@ -203,6 +203,7 @@ func TestChannelBackendClientErrorTypeWithEmptyPayloadKeepsBackendErrorBehavior(
 }
 
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.5
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.8
 func TestChannelBackendClientEmptyObjectPayloadDecodesToNonNilEmptyMap(t *testing.T) {
 	client := NewChannelBackendClient(nil)
 	t.Cleanup(client.Close)
@@ -241,6 +242,29 @@ func TestChannelBackendClientNullPayloadStillDecodesWithoutError(t *testing.T) {
 
 	require.NoError(t, <-errCh)
 	require.Nil(t, result)
+}
+
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.7
+func TestChannelBackendClientInvalidJSONPayloadKeepsUnmarshalError(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	var result map[string]interface{}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, &result)
+	}()
+	request := <-client.GetRequestChannel()
+
+	response, err := ws.NewResponse(request.ID, request.Action, nil)
+	require.NoError(t, err)
+	response.Payload = []byte("not json")
+	client.HandleResponse(response)
+
+	respErr := <-errCh
+	require.Error(t, respErr)
+	require.Contains(t, respErr.Error(), "failed to unmarshal")
+	require.NotErrorIs(t, respErr, ErrEmptyBackendPayload)
 }
 
 func TestChannelBackendClientRedactsPluginInvocationPayload(t *testing.T) {
