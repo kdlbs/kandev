@@ -277,11 +277,10 @@ func (s *Service) takeOrphanReapHostSnapshot(ctx context.Context) ([]hostProcess
 // working ownership check concluded this root is not this task's to reap
 // (e.g. AC-001.4's "exists again", or a genuine other-task ownership hit).
 // Use recordOrphanReapRootSkipDetectionFailure instead when the check itself
-// could not run (system design decision carried from Spec Review round 4's
-// implementation seam: a fail-closed detection failure gets an
-// operator-facing severity distinct from a benign ownership skip, because the
-// host conditions causing the former are exactly what this feature exists to
-// prevent).
+// could not run: a fail-closed detection failure gets an operator-facing
+// severity distinct from a benign ownership skip, because the host
+// conditions causing the former are exactly what this feature exists to
+// prevent.
 func (s *Service) recordOrphanReapRootSkip(snapshot *taskResourceCleanupSnapshot, root, reason string) {
 	snapshot.OrphanReapSkips = append(snapshot.OrphanReapSkips, orphanReapSkipRecord{Root: root, Reason: reason})
 	orphanReapCounters.Add(orphanReapCounterSkippedRoot, 1)
