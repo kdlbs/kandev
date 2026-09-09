@@ -3,6 +3,7 @@ package routines_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,6 +163,64 @@ func TestTickScheduledTriggers_EmptyStatusFires(t *testing.T) {
 	}
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run row, got %d", len(runs))
+	}
+}
+
+// TestTickScheduledTriggers_ResumeAfterSuppression_ReportsZeroMissedTicks
+// covers AC-OFFICE-ROUTINE-STATUS-002.2/-002.3/-002.4: a routine paused
+// through an entire suppression window (here, one evaluation collapsing a
+// ~10-slot backlog in a single tick, simulating an outage inside the pause)
+// resumes at the cursor the suppression left — strictly in the future — and
+// its first fire reports zero missed ticks, never the backlog the
+// suppression window spanned. The payload only carries "missed_ticks" when
+// it is greater than zero (marshalRoutinePayload), so its absence here is
+// the assertion.
+func TestTickScheduledTriggers_ResumeAfterSuppression_ReportsZeroMissedTicks(t *testing.T) {
+	svc, _ := newObservedRoutineService(t)
+	routine, oldNext := createStatusGatedRoutine(t, svc, "paused")
+	ctx := context.Background()
+	enq := &fakeWakeupEnqueuer{}
+	svc.SetWakeupEnqueuer(enq)
+
+	// One suppressing evaluation, ten slots (minutes) after the original
+	// due time: the outage-inside-a-pause case in AC-002.4.
+	suppressAt := oldNext.Add(10 * time.Minute)
+	if err := svc.TickScheduledTriggers(ctx, suppressAt); err != nil {
+		t.Fatalf("suppressing tick: %v", err)
+	}
+	triggers, err := svc.ListRoutineTriggers(ctx, routine.ID)
+	if err != nil || len(triggers) != 1 {
+		t.Fatalf("list triggers: triggers=%v err=%v", triggers, err)
+	}
+	resumeCursor := *triggers[0].NextRunAt
+	if !resumeCursor.After(suppressAt) {
+		t.Fatalf("cursor = %v, want strictly after the suppressing evaluation %v", resumeCursor, suppressAt)
+	}
+
+	routine.Status = "active"
+	if err := svc.UpdateRoutine(ctx, routine); err != nil {
+		t.Fatalf("resume routine: %v", err)
+	}
+
+	// Tick exactly at the cursor the suppression left: the trigger is due
+	// and every intervening slot is in the future relative to the pause, so
+	// per -002.3 the fixed-set-of-cursors-in-the-future condition holds.
+	if err := svc.TickScheduledTriggers(ctx, resumeCursor); err != nil {
+		t.Fatalf("resuming tick: %v", err)
+	}
+	if len(enq.created) != 1 {
+		t.Fatalf("expected exactly 1 wakeup request on resume, got %d", len(enq.created))
+	}
+	if strings.Contains(enq.created[0].Payload, "missed_ticks") {
+		t.Errorf("payload = %q, must not carry missed_ticks (want 0 missed, absent from payload)",
+			enq.created[0].Payload)
+	}
+	runs, err := svc.ListRoutineRuns(ctx, routine.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected exactly 1 run row on resume, got %d", len(runs))
 	}
 }
 
