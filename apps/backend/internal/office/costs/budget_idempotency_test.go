@@ -8,6 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/models"
@@ -167,6 +171,49 @@ func TestCheckBudget_ExceededClaimsCompanionAlert(t *testing.T) {
 	}
 }
 
+// TestCheckBudget_ExceededClaimHeld_AlertBandEvaluationSuppressed covers
+// AC-OFFICE-COSTS-003.12 directly: while an exceeded-level claim is held
+// for a policy, period and revision, an evaluation whose spend reaches only
+// the alert level must not emit budget.alert for that period and revision.
+// The exceeded claim's companion already holds the alert-level slot, so
+// this follows from the ordinary primary-key conflict on a second
+// alert-level insert, with no separate read of the exceeded claim.
+func TestCheckBudget_ExceededClaimHeld_AlertBandEvaluationSuppressed(t *testing.T) {
+	repo, _, execSQL := newBudgetTestRepo(t)
+	ctx := context.Background()
+	createBudgetTestAgent(t, repo, "ws-1", "agent-exceeded-then-alert")
+	agents := &repoAgents{repo: repo}
+	spy := &budgetActivitySpy{}
+	svc := costs.NewCostService(repo, logger.Default(), spy, agents, agents)
+
+	policy := newIdempotencyTestPolicy("agent-exceeded-then-alert", 1000)
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+
+	periodKey := monthlyPeriodKey()
+	if claimed, err := repo.ClaimExceeded(ctx, policy.ID, periodKey, policy.Revision); err != nil || !claimed {
+		t.Fatalf("seed exceeded+companion claim: claimed=%v err=%v", claimed, err)
+	}
+
+	// Spend in the alert band only: >= 80% of the 1000 limit, below it.
+	insertBudgetTestCostEvent(t, execSQL, "agent-exceeded-then-alert", "task-1", 900)
+
+	results, err := svc.CheckBudget(ctx, "ws-1", "agent-exceeded-then-alert", "proj-1")
+	if err != nil {
+		t.Fatalf("CheckBudget: %v", err)
+	}
+	if !results[0].AlertFired {
+		t.Fatal("expected spend to reach the alert level")
+	}
+	if results[0].AlertSubmitted {
+		t.Fatal("budget.alert must not be submitted while an exceeded-level claim is held for this policy, period and revision")
+	}
+	if got := spy.count("budget.alert"); got != 0 {
+		t.Fatalf("budget.alert emissions = %d, want 0", got)
+	}
+}
+
 // TestCheckBudget_CompanionAlertClaimFault_StillSubmitsExceeded covers the
 // AC-OFFICE-COSTS-003.10 fault-injection case: when the companion
 // alert-level insert errors, the whole atomic pair rolls back — no exceeded
@@ -293,6 +340,69 @@ func TestCheckBudget_ClaimStoreFault_ExceededPath_EmitsAndCountsOncePerEval(t *t
 	}
 	if delta := claimFailureCount(t) - before; delta != 2 {
 		t.Fatalf("budget_claim_failures_total delta = %d, want 2 (1 per exceeded eval, the pair is one claim attempt)", delta)
+	}
+}
+
+// TestCheckBudget_ClaimStoreFault_LogsLevelFieldMatchingEmission covers
+// AC-OFFICE-COSTS-003.14: the claim-store failure log's level field names
+// the level whose emission the failed claim governs — "alert" for a
+// standalone alert-band claim, "exceeded" for the atomic pair — never a
+// sentinel shared by both.
+func TestCheckBudget_ClaimStoreFault_LogsLevelFieldMatchingEmission(t *testing.T) {
+	core, logs := observer.New(zapcore.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	injected := errors.New("injected claim store failure")
+
+	repo, _, execSQL := newBudgetTestRepo(t)
+	ctx := context.Background()
+	agents := &repoAgents{repo: repo}
+	spy := &budgetActivitySpy{}
+
+	createBudgetTestAgent(t, repo, "ws-1", "agent-log-alert")
+	alertFaulty := &claimFaultRepo{Repository: repo, failLevels: map[string]error{"alert": injected}}
+	alertSvc := costs.NewCostService(alertFaulty, log, spy, agents, agents)
+	alertPolicy := newIdempotencyTestPolicy("agent-log-alert", 1000)
+	if err := alertSvc.CreateBudgetPolicy(ctx, alertPolicy); err != nil {
+		t.Fatalf("create alert policy: %v", err)
+	}
+	insertBudgetTestCostEvent(t, execSQL, "agent-log-alert", "task-1", 850)
+	if _, err := alertSvc.CheckBudget(ctx, "ws-1", "agent-log-alert", "proj-1"); err != nil {
+		t.Fatalf("CheckBudget (alert): %v", err)
+	}
+
+	createBudgetTestAgent(t, repo, "ws-1", "agent-log-exceeded")
+	exceededFaulty := &claimFaultRepo{Repository: repo, failLevels: map[string]error{"exceeded": injected}}
+	exceededSvc := costs.NewCostService(exceededFaulty, log, spy, agents, agents)
+	exceededPolicy := newIdempotencyTestPolicy("agent-log-exceeded", 500)
+	if err := exceededSvc.CreateBudgetPolicy(ctx, exceededPolicy); err != nil {
+		t.Fatalf("create exceeded policy: %v", err)
+	}
+	insertBudgetTestCostEvent(t, execSQL, "agent-log-exceeded", "task-1", 600)
+	if _, err := exceededSvc.CheckBudget(ctx, "ws-1", "agent-log-exceeded", "proj-1"); err != nil {
+		t.Fatalf("CheckBudget (exceeded): %v", err)
+	}
+
+	entries := logs.FilterMessage("budget claim store failure").All()
+	if len(entries) != 2 {
+		t.Fatalf("claim-store-failure log entries = %d, want 2", len(entries))
+	}
+	var sawAlert, sawExceeded bool
+	for _, e := range entries {
+		switch e.ContextMap()["level"] {
+		case "alert":
+			sawAlert = true
+		case "exceeded":
+			sawExceeded = true
+		}
+	}
+	if !sawAlert {
+		t.Fatal(`expected a log entry with level="alert" for the standalone alert-band claim failure`)
+	}
+	if !sawExceeded {
+		t.Fatal(`expected a log entry with level="exceeded" for the atomic pair's claim failure`)
 	}
 }
 

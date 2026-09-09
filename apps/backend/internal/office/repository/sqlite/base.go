@@ -77,6 +77,12 @@ type Repository struct {
 	// than swallowing it.
 	failBudgetClaimsRecreateErr error
 
+	// failBudgetClaimsRecreateAfterDropErr is a test-only failpoint: when
+	// set, recreateBudgetClaimsForRevision returns it after DROP TABLE has
+	// run but before CREATE TABLE, inside the same transaction, so a test
+	// can prove the two are atomic rather than two independent statements.
+	failBudgetClaimsRecreateAfterDropErr error
+
 	// failBudgetExceededCompanionErr is a test-only failpoint: when set,
 	// ClaimExceeded returns it after the exceeded-level insert has run but
 	// before the companion alert-level insert, so a test can prove the

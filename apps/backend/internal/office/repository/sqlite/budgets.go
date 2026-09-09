@@ -292,12 +292,16 @@ func (r *Repository) claimExceededTx(
 // every boot after the first successful recreate on an upgraded one. On a
 // database still carrying the pre-revision three-column table, it drops and
 // recreates office_budget_claims with the four-column primary key the
-// current schema requires. It is not expressed as an r.migrate.Apply
-// statement: that runner re-executes its SQL on every boot and is
-// idempotent only because an already-exists error is swallowed, which
-// would destroy claim state on every boot here. It returns its error to
-// its caller rather than swallowing it, so a failed recreate is visible
-// rather than silently leaving the old three-column key in place.
+// current schema requires, as one transaction: DROP and CREATE either both
+// commit or neither does, so a boot interrupted between them leaves the
+// table exactly as it was rather than absent, and a retried boot always
+// finds the table in a state the probe can classify. It is not expressed as
+// an r.migrate.Apply statement: that runner re-executes its SQL on every
+// boot and is idempotent only because an already-exists error is
+// swallowed, which would destroy claim state on every boot here. It
+// returns its error to its caller rather than swallowing it, so a failed
+// recreate is visible rather than silently leaving the old three-column
+// key in place.
 func (r *Repository) recreateBudgetClaimsForRevision() error {
 	exists, err := columnExists(r.db, "office_budget_claims", "revision")
 	if err != nil {
@@ -309,11 +313,21 @@ func (r *Repository) recreateBudgetClaimsForRevision() error {
 	if r.failBudgetClaimsRecreateErr != nil {
 		return r.failBudgetClaimsRecreateErr
 	}
-	if _, err := r.db.Exec(`DROP TABLE office_budget_claims`); err != nil {
+	tx, err := r.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin office_budget_claims recreate: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE IF EXISTS office_budget_claims`); err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("drop office_budget_claims: %w", err)
 	}
-	if _, err := r.db.Exec(budgetClaimsDDL); err != nil {
+	if r.failBudgetClaimsRecreateAfterDropErr != nil {
+		_ = tx.Rollback()
+		return r.failBudgetClaimsRecreateAfterDropErr
+	}
+	if _, err := tx.Exec(budgetClaimsDDL); err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("recreate office_budget_claims: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }

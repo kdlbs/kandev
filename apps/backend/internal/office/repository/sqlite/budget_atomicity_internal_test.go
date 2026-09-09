@@ -16,7 +16,8 @@ import (
 // discard and the policy row update are one transaction
 // (AC-OFFICE-COSTS-002.8): when the row update fails after the discard has
 // already run, the whole transaction rolls back, so the claim survives
-// alongside the un-updated policy. failBudgetPolicyUpdateErr is a
+// alongside the un-updated policy, and the policy's revision does not
+// advance either (AC-OFFICE-COSTS-003.6). failBudgetPolicyUpdateErr is a
 // test-only failpoint (see base.go) standing in for a fault-injecting
 // driver.
 func TestUpdateBudgetPolicy_FailedUpdateRollsBackDiscard(t *testing.T) {
@@ -79,5 +80,8 @@ func TestUpdateBudgetPolicy_FailedUpdateRollsBackDiscard(t *testing.T) {
 	}
 	if stored.LimitSubcents != 1000 {
 		t.Fatalf("limit_subcents after rolled-back update = %d, want unchanged 1000", stored.LimitSubcents)
+	}
+	if stored.Revision != 1 {
+		t.Fatalf("revision after rolled-back update = %d, want unchanged 1 (a rolled-back update must not consume a revision number)", stored.Revision)
 	}
 }
