@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-MCP-SESSION-OBSERVABILITY-001
 created: 2026-07-30
-updated: 2026-08-30
+updated: 2026-09-09
 owners:
   - Kandev
 ---
@@ -123,6 +123,41 @@ stable reason code plus a bounded sanitized summary.
 
 Raw ACP JSONL logging remains a development-only diagnostic and is not enabled
 by this feature.
+
+## Frontend session-list reconciliation
+
+Task-detail boot state restores attachment history during initial navigation.
+Later task switches use `ListTaskSessionSummariesResponse`, which includes
+public session metadata. Both paths supply the same persisted history.
+
+`setTaskSessionsForTask` reads `metadata.mcp_attachment_state` in its existing
+Immer transaction. A runtime guard accepts only the known frontend projection:
+
+- The value is an object with schema version `1`.
+- The current attempt has a nonempty `attachment_attempt_id`.
+- Each attempt has a valid RFC3339 `started_at` value.
+- Optional `updated_at` and `tools_listed_at` values are valid RFC3339 values.
+- Each server has a nonempty name and a known attachment status.
+- Optional previous attempts satisfy the same attempt and server rules.
+
+The guard permits unknown optional fields from the backend report. This rule
+keeps the frontend compatible with additive safe metadata.
+
+The current attempt supplies the freshness value. The client uses `updated_at`
+when that field exists. Otherwise, the client uses `started_at`.
+
+A valid incoming history initializes an empty store entry. It also replaces
+stored history with an invalid freshness value. For two valid values, only a
+strictly newer incoming value replaces the stored history. Equal values retain
+the stored history because it can contain live evidence from a WebSocket event.
+
+The reconciliation loop changes only `sessionMcpStatus.bySessionId` for the
+session that owns the accepted history. Invalid or absent metadata does not
+clear live evidence. It does not change a sibling session.
+
+Desktop and mobile surfaces already read the shared session-runtime slice.
+This repair does not change layout, navigation, touch behavior, or viewport
+behavior.
 
 ## Kandev tool catalog
 

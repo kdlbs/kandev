@@ -18,7 +18,14 @@ import {
 import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { mergeTaskSession } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
-import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
+import type {
+  MCPAttachmentHistory,
+  MCPAttachmentServer,
+  MCPAttachmentStatus,
+  MCPToolSummary,
+  SessionRuntimeSliceState,
+} from "@/lib/state/slices/session-runtime/types";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
 import {
   getWalkthroughLastSeen,
@@ -120,6 +127,142 @@ function mergeTaskSessionSnapshot(
     active_subagent_count: existing.active_subagent_count,
     supports_steering: existing.supports_steering,
   };
+}
+
+const MCP_ATTACHMENT_STATUS_VALUES: readonly MCPAttachmentStatus[] = [
+  "unknown",
+  "delivered",
+  "connected",
+  "active",
+  "failed",
+  "filtered",
+  "unavailable",
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean";
+}
+
+function isOptionalNonNegativeInteger(value: unknown): boolean {
+  return (
+    value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 0)
+  );
+}
+
+function isOptionalTimestamp(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (typeof value === "string" && parseStrictRfc3339Timestamp(value) !== null)
+  );
+}
+
+function isMcpAttachmentStatus(value: unknown): value is MCPAttachmentStatus {
+  return (
+    typeof value === "string" && MCP_ATTACHMENT_STATUS_VALUES.includes(value as MCPAttachmentStatus)
+  );
+}
+
+function isValidMcpToolSummary(value: unknown): value is MCPToolSummary {
+  if (!isRecord(value) || !isNonEmptyString(value.name)) return false;
+  return (
+    isOptionalString(value.description) &&
+    isOptionalBoolean(value.input_schema_truncated) &&
+    isOptionalNonNegativeInteger(value.estimated_tokens)
+  );
+}
+
+function isValidMcpAttachmentServerFields(value: Record<string, unknown>): boolean {
+  if (
+    !isOptionalString(value.transport) ||
+    !isOptionalString(value.target) ||
+    !isOptionalString(value.reason_code) ||
+    !isOptionalString(value.summary) ||
+    !isOptionalString(value.connection_id) ||
+    !isOptionalString(value.tool_token_estimator) ||
+    !isOptionalTimestamp(value.tools_listed_at) ||
+    !isOptionalNonNegativeInteger(value.tool_count) ||
+    !isOptionalBoolean(value.tool_catalog_truncated)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isValidMcpAttachmentServer(value: unknown): value is MCPAttachmentServer {
+  if (!isRecord(value) || !isNonEmptyString(value.name) || !isMcpAttachmentStatus(value.status)) {
+    return false;
+  }
+  if (value.source !== undefined && value.source !== "kandev" && value.source !== "profile") {
+    return false;
+  }
+  if (!isValidMcpAttachmentServerFields(value)) return false;
+  return (
+    value.tools === undefined ||
+    (Array.isArray(value.tools) && value.tools.every(isValidMcpToolSummary))
+  );
+}
+
+function isValidMcpAttachmentAttempt(value: unknown): value is MCPAttachmentHistory["current"] {
+  if (!isRecord(value)) return false;
+  if (!isNonEmptyString(value.attachment_attempt_id)) return false;
+  if (
+    typeof value.started_at !== "string" ||
+    parseStrictRfc3339Timestamp(value.started_at) === null
+  ) {
+    return false;
+  }
+  if (!isOptionalTimestamp(value.updated_at)) return false;
+  return (
+    value.servers === undefined ||
+    (Array.isArray(value.servers) && value.servers.every(isValidMcpAttachmentServer))
+  );
+}
+
+function isValidMcpAttachmentHistory(value: unknown): value is MCPAttachmentHistory {
+  if (!isRecord(value) || value.version !== 1 || !isValidMcpAttachmentAttempt(value.current)) {
+    return false;
+  }
+  return (
+    value.previous === undefined ||
+    (Array.isArray(value.previous) && value.previous.every(isValidMcpAttachmentAttempt))
+  );
+}
+
+function mcpHistoryFreshness(history: MCPAttachmentHistory): bigint | null {
+  return parseStrictRfc3339Timestamp(history.current.updated_at ?? history.current.started_at);
+}
+
+function reconcileMcpAttachmentHistory(
+  draft: SessionSliceState & SessionRuntimeSliceState,
+  session: TaskSession,
+): void {
+  const incoming = session.metadata?.mcp_attachment_state;
+  if (!isValidMcpAttachmentHistory(incoming)) return;
+
+  const existing = draft.sessionMcpStatus.bySessionId[session.id];
+  if (existing) {
+    const incomingFreshness = mcpHistoryFreshness(incoming);
+    const existingFreshness = mcpHistoryFreshness(existing);
+    if (
+      incomingFreshness === null ||
+      (existingFreshness !== null && incomingFreshness <= existingFreshness)
+    ) {
+      return;
+    }
+  }
+  draft.sessionMcpStatus.bySessionId[session.id] = incoming;
 }
 
 // Settled states are defined once in turn-actions (SETTLED_SESSION_STATES /
@@ -608,6 +751,10 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           draft.taskSessions.items[session.id] = session;
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
           syncPrepareProgress(draft, session);
+          reconcileMcpAttachmentHistory(
+            draft as unknown as SessionSliceState & SessionRuntimeSliceState,
+            session,
+          );
           reconcileActiveTurnForIdleSession(draft, session);
         }
       }),
