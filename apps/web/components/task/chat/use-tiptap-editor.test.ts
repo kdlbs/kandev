@@ -263,6 +263,22 @@ function makeEditor(hasFocusInitially: boolean) {
   };
 }
 
+/** Variant of `makeEditor` where `setEditable(false)` does NOT blur --
+ *  modeling the real Chromium behavior the retry loop's comment cites, where
+ *  the blur caused by `contenteditable` flipping is applied on a queued task
+ *  rather than synchronously. `landQueuedBlur()` fires that queued blur
+ *  on demand, independent of `setEditable`, so a test can land it after the
+ *  loop has already run one or more attempts. */
+function makeQueuedBlurEditor(hasFocusInitially: boolean) {
+  let focused = hasFocusInitially;
+  return {
+    view: { hasFocus: () => focused },
+    setEditable: vi.fn(),
+    commands: { focus: vi.fn(() => void (focused = true)) },
+    landQueuedBlur: () => void (focused = false),
+  };
+}
+
 describe("useSyncDisabledState", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -362,6 +378,31 @@ describe("useSyncDisabledState", () => {
 
     expect(editor.commands.focus).toHaveBeenCalledTimes(5);
     expect(frameQueue).toHaveLength(0);
+  });
+
+  it("stays armed on frame 1 when the queued browser blur has not landed yet, and restores focus once it does", () => {
+    stubAnimationFrame();
+    const editor = makeQueuedBlurEditor(true);
+    const { rerender } = renderHook(({ disabled }) => useSyncDisabledState(editor, disabled), {
+      initialProps: { disabled: false },
+    });
+
+    rerender({ disabled: true });
+    rerender({ disabled: false });
+
+    // Frame 1: the queued blur has not landed yet, so the editor still
+    // reports focus. That is not evidence the restore succeeded -- it is
+    // just that the browser hasn't gotten around to the blur it queued.
+    flushFrame();
+    expect(editor.commands.focus).not.toHaveBeenCalled();
+
+    // The queued blur lands only now.
+    editor.landQueuedBlur();
+
+    // The loop must still be armed to catch it.
+    flushFrame();
+    expect(editor.commands.focus).toHaveBeenCalledOnce();
+    expect(editor.view.hasFocus()).toBe(true);
   });
 });
 

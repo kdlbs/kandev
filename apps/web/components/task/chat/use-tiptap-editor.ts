@@ -383,9 +383,10 @@ export function useSyncDisabledState(editor: DisabledStateEditor | null, disable
     let attempts = 0;
     const tick = () => {
       attempts += 1;
-      if (editor.view.hasFocus()) return;
-      if (!shouldRestoreFocusOnEnable(true)) return;
-      editor.commands.focus();
+      if (!editor.view.hasFocus()) {
+        if (!shouldRestoreFocusOnEnable(true)) return;
+        editor.commands.focus();
+      }
       if (attempts < FOCUS_RESTORE_MAX_ATTEMPTS) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
