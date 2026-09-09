@@ -2,6 +2,50 @@ import { fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type { ProcessInfo } from "@/lib/types/http";
 
+export type HtmlPreviewPublishResponse = {
+  port: number;
+  path: string;
+  version: number;
+};
+
+export type HtmlPreviewPublishRequest = {
+  repo?: string;
+  path: string;
+  content: string;
+};
+
+export async function publishHtmlPreview(
+  sessionId: string,
+  payload: HtmlPreviewPublishRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<HtmlPreviewPublishResponse>(
+    `/api/v1/task-sessions/${encodeURIComponent(sessionId)}/html-previews`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
+export function buildHtmlPreviewProxyUrl(
+  sessionId: string,
+  response: HtmlPreviewPublishResponse,
+  options?: ApiRequestOptions,
+): string {
+  const baseUrl = (options?.baseUrl ?? getBackendConfig().apiBaseUrl).replace(/\/+$/, "");
+  const rawPath = response.path.startsWith("/") ? response.path : `/${response.path}`;
+  const path = rawPath
+    .split("/")
+    .map((segment) => (segment ? encodeURIComponent(segment) : segment))
+    .join("/");
+  const url = new URL(
+    `${baseUrl}/port-proxy/${encodeURIComponent(sessionId)}/${response.port}${path}`,
+  );
+  url.searchParams.set("v", String(response.version));
+  return url.toString();
+}
+
 // Process operations
 export async function startProcess(
   sessionId: string,

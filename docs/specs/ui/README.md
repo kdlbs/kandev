@@ -6,11 +6,17 @@ migration: in_progress
 owners:
   - kandev
 ---
+
 # UI
+
 ## Scope
+
 UI owns responsive behavior; other systems own behavior/state.
+
 ## Map
+
 ### Requirements
+
 - [ACP model summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
@@ -47,30 +53,34 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Empty-Turn Notice and Slash-Command Hint](requirements/empty-turn-notice.md)
 - [Entity Reference Composer](requirements/entity-reference-composer.md)
 - [Executor settings card spacing](requirements/executor-settings-card-spacing.md)
-- [External VCS File Links](requirements/external-vcs-file-links.md)
+- [VCS File Links](requirements/external-vcs-file-links.md)
 - [File Tree Chat Context](requirements/file-tree-chat-context.md)
 - [File Tree Keyboard Scope](requirements/file-tree-keyboard-scope.md)
 - [Reload Kandev after frozen-tab restore](requirements/fix-duplicated-tab-stale-data.md)
 - [GitHub PR Review Actions](requirements/github-pr-review-actions.md)
 - [GitHub Saved-Query Default Views](requirements/github-saved-query-defaults.md)
 - [Kandev MCP Tool Results](requirements/kandev-mcp-tool-results.md)
+- [Native HTML File Preview](requirements/native-html-preview.md)
 - [Auto-hide empty workflow steps](requirements/kanban-auto-hide-empty-columns.md)
 - [Repair last-prompt transcript pinning](requirements/last-prompt-pinning-regressions.md)
 - [Repair merge commit details](requirements/merge-commit-details.md)
 - [Mermaid Rendering](requirements/mermaid-rendering.md)
 - [Message favorite star mobile sizing](requirements/message-favorite-star-mobile-size.md)
 - [Metadata dialog](requirements/message-metadata-overflow.md)
-- [Queue auto-merge](requirements/message-queue-auto-merge.md)
+- [Queue auto-merge (deprecated)](requirements/message-queue-auto-merge.md)
+- [Queue auto-merge session overrides (active)](requirements/message-queue-auto-merge-session-overrides.md)
+- [Message queue automation controls (active)](requirements/message-queue-automation-controls.md)
 - [Message queue management](requirements/message-queue-management.md)
 - [Merge queued](requirements/message-queue-merge.md)
 - [Pin the Message Queue Panel](requirements/message-queue-pin.md)
 - [Reorder Queued Messages](requirements/message-queue-reorder.md)
-- [Pending auto-run](requirements/message-queue-run.md)
+- [Pending auto-run (deprecated)](requirements/message-queue-run.md)
 - [Send Queued Messages Now](requirements/message-queue-send-now.md)
 - [Mobile topbar actions](requirements/mobile-quick-chat-topbar.md)
 - [Mobile Task Chrome](requirements/mobile-task-chrome.md)
 - [Mobile Task Navigation](requirements/mobile-task-navigation.md)
 - [Plan comments](requirements/plan-comment-drafts.md)
+- [Plan Editor Task-Switch Stability](requirements/plan-editor-task-switch-stability.md)
 - [Port-forwarding discovery](requirements/port-forwarding-discovery.md)
 - [Open proxy URLs in the browser panel](requirements/port-proxy-browser-panel.md)
 - [Responsive PR Detail Header](requirements/pr-detail-header-width.md)
@@ -93,6 +103,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Review File Status Cues](requirements/review-file-status.md)
 - [Review Markdown Preview](requirements/review-markdown-preview.md)
 - [Search/filter dropdown scroll reset](requirements/search-filter-scroll-reset.md)
+- [Saved Task View Deletion Confirmation](requirements/saved-task-view-deletion-confirmation.md)
 - [Selected option prominence](requirements/selected-option-picker-prominence.md)
 - [Session](requirements/session-start-composer-readiness.md)
 - [Session tab delete feedback](requirements/session-tab-delete-feedback.md)
@@ -101,6 +112,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Settings Manual Save](requirements/settings-manual-save.md)
 - [Settings Prompt Editor](requirements/settings-prompt-editor.md)
 - [Consistent settings typography](requirements/settings-typography.md)
+- [Sidebar Automatic Task Colors](requirements/sidebar-automatic-task-colors.md)
 - [Sidebar Archived Task Views](requirements/sidebar-archived-filter.md)
 - [Sidebar Diff Stat Priority](requirements/sidebar-diff-stat-priority.md)
 - [Sidebar empty task alignment](requirements/sidebar-empty-task-alignment.md)
@@ -121,8 +133,8 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Task listing](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
-- [Task surface refresh and mobile create](requirements/task-surface-refresh.md)
-- [Task Workspace Content Search](requirements/task-workspace-content-search.md)
+- [Task Surface Refresh](requirements/task-surface-refresh.md)
+- [Workspace Search](requirements/task-workspace-content-search.md)
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
 - [Terminal Touch Scrolling](requirements/terminal-touch-scrolling.md)
@@ -135,6 +147,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [WebKit Task Dialog Rendering](requirements/webkit-task-dialog-rendering.md)
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
+
 ### Design
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
@@ -160,9 +173,13 @@ UI owns responsive behavior; other systems own behavior/state.
 - [File Tree Keyboard Scope](system-design/file-tree-keyboard-scope.md)
 - [File Tree Chat](system-design/file-tree-chat-context.md)
 - [MCP results](system-design/kandev-mcp-tool-results.md)
+- [Message queue row controls](system-design/message-queue-row-controls.md)
+- [Message Queue Automation Controls (current)](system-design/message-queue-automation-controls.md)
+- [Native HTML File Preview](system-design/native-html-preview.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
+- [Sidebar Automatic Task Colors](system-design/sidebar-automatic-task-colors.md)
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
 - [Sidebar task row](system-design/sidebar-task-row-presentation.md)
 - [PR walkthrough](system-design/pr-walkthrough.md)
@@ -172,9 +189,11 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Plan comments](system-design/plan-comment-drafts.md)
+- [Plan Editor Task-Switch Stability](system-design/plan-editor-task-switch-stability.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
 - [Confirmations](system-design/confirmation-warning-hierarchy.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
+- [Saved Task View Deletion Confirmation](system-design/saved-task-view-deletion-confirmation.md)
 - [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task surface](system-design/task-surface-render-isolation.md)
@@ -188,5 +207,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Settings Menu Default](system-design/settings-menu-default.md)
 - [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
+
 ## Related
+
 - [Platform](../platform/README.md)

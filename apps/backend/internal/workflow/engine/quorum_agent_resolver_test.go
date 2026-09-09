@@ -284,6 +284,75 @@ func TestResolveParticipantRole_ReviewerAtStepDefersApproverResolverError(t *tes
 	}
 }
 
+// TestResolveParticipantRoleReadOnly_UnresolvedAgentSeatEmitsNoCounter is
+// the round-2 regression test: an observation-only caller (mirroring
+// office/service.HoldsDecisionSeat, invoked once per run launch rather than
+// once per guard evaluation) must not trip AC-OFFICE-REVIEW-SEATS-004.10's
+// "per guard evaluation" counter/log just because some other seat's agent
+// profile has been deleted. The queried agent-a holds no seat here — the
+// dropped seat belongs to an unrelated deleted profile — so the only
+// observable effect of resolving it must be ErrParticipantNotFound, with the
+// counter and log left untouched.
+func TestResolveParticipantRoleReadOnly_UnresolvedAgentSeatEmitsNoCounter(t *testing.T) {
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-gone", TaskID: "task-1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-gone", DecisionRequired: true},
+	}}
+	resolver := &fakeAgentProfileResolver{unresolved: map[string]bool{"rev-gone": true}}
+	core, logs := observer.New(zap.WarnLevel)
+	zapLogger := zap.New(core)
+	log, err := logger.NewFromZap(zapLogger)
+	if err != nil {
+		t.Fatalf("build logger: %v", err)
+	}
+	eng := New(quorumStore(nil), MapRegistry{},
+		WithDecisionStore(newFakeDecisionStore()), WithParticipantStore(participants),
+		WithAgentProfileResolver(resolver), WithLogger(log))
+
+	before := readParticipantAgentUnresolvedCounter("reviewer")
+	_, _, err = eng.ResolveParticipantRoleReadOnly(context.Background(), "task-1", "review", "agent-a")
+	if !errors.Is(err, ErrParticipantNotFound) {
+		t.Fatalf("err = %v, want ErrParticipantNotFound", err)
+	}
+	if after := readParticipantAgentUnresolvedCounter("reviewer"); after != before {
+		t.Errorf("counter changed by %d, want 0 (read-only resolution must not emit AC-004.8's counter)", after-before)
+	}
+	if got := logs.Len(); got != 0 {
+		t.Errorf("expected no warning logs from a read-only resolution, got %d: %+v", got, logs.All())
+	}
+}
+
+// TestResolveParticipantRole_UnresolvedAgentSeatEmitsCounter pins the
+// recording variant's unchanged behavior alongside the read-only test above:
+// the same slate, resolved through the recording entry point RecordAgentDecision
+// authorizes with, still emits AC-004.8's counter and log exactly once.
+func TestResolveParticipantRole_UnresolvedAgentSeatEmitsCounter(t *testing.T) {
+	participants := scopedParticipants{perTask: []ParticipantInfo{
+		{ID: "seat-gone", TaskID: "task-1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-gone", DecisionRequired: true},
+	}}
+	resolver := &fakeAgentProfileResolver{unresolved: map[string]bool{"rev-gone": true}}
+	core, logs := observer.New(zap.WarnLevel)
+	zapLogger := zap.New(core)
+	log, err := logger.NewFromZap(zapLogger)
+	if err != nil {
+		t.Fatalf("build logger: %v", err)
+	}
+	eng := New(quorumStore(nil), MapRegistry{},
+		WithDecisionStore(newFakeDecisionStore()), WithParticipantStore(participants),
+		WithAgentProfileResolver(resolver), WithLogger(log))
+
+	before := readParticipantAgentUnresolvedCounter("reviewer")
+	_, _, err = eng.ResolveParticipantRole(context.Background(), "task-1", "review", "agent-a")
+	if !errors.Is(err, ErrParticipantNotFound) {
+		t.Fatalf("err = %v, want ErrParticipantNotFound", err)
+	}
+	if after := readParticipantAgentUnresolvedCounter("reviewer"); after-before != 1 {
+		t.Errorf("counter delta = %d, want 1", after-before)
+	}
+	if got := logs.Len(); got != 1 {
+		t.Errorf("expected exactly one warning log, got %d: %+v", got, logs.All())
+	}
+}
+
 func TestComputeGuardOutcome_ContinuesEvaluatingAfterDroppingUnresolvedSeat(t *testing.T) {
 	parts := scopedParticipants{template: []ParticipantInfo{
 		{ID: "p1", StepID: "review", Role: "reviewer", AgentProfileID: "rev-A", DecisionRequired: true},

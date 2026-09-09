@@ -242,3 +242,7 @@ func (a *routineE2EWakeupAdapter) CreateWakeupRequest(
 func (a *routineE2EWakeupAdapter) Dispatch(ctx context.Context, requestID string) error {
 	return a.dispatcher.Dispatch(ctx, requestID)
 }
+
+func (a *routineE2EWakeupAdapter) FailWakeupRequest(ctx context.Context, requestID, reason string) error {
+	return a.repo.MarkWakeupRequestFailed(ctx, requestID, reason)
+}

@@ -160,6 +160,7 @@ function TaskRowItem({
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
       interrupted={task.interrupted}
+      parkedOnBackgroundWork={task.parkedOnBackgroundWork}
       isArchived={task.isArchived}
       isSelected={isSelected}
       diffStats={task.diffStats}
@@ -170,6 +171,7 @@ function TaskRowItem({
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}
       workflowStepId={task.workflowStepId}
+      automaticColor={task.automaticColor}
       primarySessionId={task.primarySessionId ?? null}
       hasPendingClarification={task.hasPendingClarification}
       hasPendingPermission={task.hasPendingPermission}

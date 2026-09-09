@@ -281,13 +281,14 @@ func (m *Manager) publishStreamingContentNow(
 	}
 
 	payload := &AgentStreamEventPayload{
-		Type:        "agent/event",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:     execution.ID,
-		ExecutionID: execution.ID,
-		TaskID:      execution.TaskID,
-		SessionID:   execution.SessionID,
-		Data:        &event,
+		Type:           "agent/event",
+		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:        execution.ID,
+		ExecutionID:    execution.ID,
+		AgentProfileID: execution.officeProfileID(),
+		TaskID:         execution.TaskID,
+		SessionID:      execution.SessionID,
+		Data:           &event,
 	}
 	m.eventPublisher.PublishAgentStreamEventPayload(payload)
 }

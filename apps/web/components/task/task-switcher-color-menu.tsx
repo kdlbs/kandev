@@ -17,8 +17,17 @@ import {
 } from "@/lib/task-colors";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import type { AutomaticTaskColorSource } from "@/lib/sidebar/task-color-rules";
 
-export function TaskColorMenu({ taskId, disabled }: { taskId: string; disabled?: boolean }) {
+export function TaskColorMenu({
+  taskId,
+  disabled,
+  automaticColorSource,
+}: {
+  taskId: string;
+  disabled?: boolean;
+  automaticColorSource?: AutomaticTaskColorSource;
+}) {
   const { t } = useTranslation();
   const currentColor = useTaskColor(taskId);
   const setColor = useSetTaskColor();
@@ -37,6 +46,14 @@ export function TaskColorMenu({ taskId, disabled }: { taskId: string; disabled?:
         )}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-40">
+        {automaticColorSource && (
+          <>
+            <ContextMenuItem disabled data-testid="automatic-task-color-source">
+              {t("task:automaticColorSource", { rule: automaticColorSource.label })}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {TASK_COLORS.map((color) => (
           <TaskColorMenuItem
             key={color}

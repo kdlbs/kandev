@@ -704,7 +704,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, "", "")
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, "", "", nil)
 	return admitted, err
 }
 
@@ -728,7 +728,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID,
+		ctx, task, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil,
 	)
 	return admitted, err
 }
@@ -749,8 +749,139 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 	targetStepID string,
 	limit int,
 ) (applied bool, err error) {
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, expectedStepID, "")
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, expectedStepID, "", nil)
 	return applied, err
+}
+
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, targetStepID string,
+	limit int,
+	record messagequeue.PendingMoveRecord,
+) (admitted, applied bool, err error) {
+	return r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, targetStepID, limit, nil, false, expectedStepID, "", &record,
+	)
+}
+
+func (r *Repository) MarkDeferredMoveAppliedForSession(
+	ctx context.Context,
+	taskID, moveID string,
+	record messagequeue.PendingMoveRecord,
+) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.validateDeferredMoveGuardTx(ctx, tx, record); err != nil {
+		return false, err
+	}
+	if _, _, found, err := r.readTaskStepInTx(ctx, tx, taskID); err != nil {
+		return false, err
+	} else if !found {
+		return false, sql.ErrNoRows
+	}
+	task, err := r.scanSingleTask(tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), taskID))
+	if err != nil {
+		return false, err
+	}
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	applied, _ := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{})
+	if _, exists := applied[moveID]; exists {
+		return false, nil
+	}
+	if applied == nil {
+		applied = map[string]interface{}{}
+	}
+	applied[moveID] = true
+	task.Metadata[models.MetaKeyAppliedDeferredMoves] = applied
+	task.UpdatedAt = time.Now().UTC()
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		return false, err
+	}
+	if _, err := r.updateTaskTx(ctx, tx, task, metadata, ""); err != nil {
+		return false, err
+	}
+	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) validateDeferredMoveGuardTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	record messagequeue.PendingMoveRecord,
+) error {
+	move := record.Move
+	if record.SessionID == "" || move.SessionIncarnationID == "" || move.TaskID == "" {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_locks (session_id) VALUES (?)
+		ON CONFLICT(session_id) DO UPDATE SET session_id = excluded.session_id
+	`), record.SessionID); err != nil {
+		return fmt.Errorf("lock deferred move session: %w", err)
+	}
+	var matched int
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*)
+		  FROM task_sessions s
+		  JOIN pending_moves p ON p.session_id = s.id
+		 WHERE s.id = ? AND s.task_id = ? AND s.queue_incarnation_id = ?
+		   AND p.move_id = ? AND p.session_incarnation_id = ?
+		   AND p.task_id = ? AND p.workflow_id = ? AND p.workflow_step_id = ?
+		   AND p.step_position = ? AND p.queued_at = ?
+		   AND p.actor = ? AND p.sender_session_id = ?
+	`), record.SessionID, move.TaskID, move.SessionIncarnationID,
+		move.MoveID, move.SessionIncarnationID, move.TaskID, move.WorkflowID,
+		move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor, move.SenderSessionID,
+	).Scan(&matched)
+	if err != nil {
+		return fmt.Errorf("validate deferred move identity: %w", err)
+	}
+	if matched != 1 {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	return nil
+}
+
+func (r *Repository) deleteDeferredMoveGuardTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	record messagequeue.PendingMoveRecord,
+) error {
+	move := record.Move
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM pending_moves
+		 WHERE session_id = ? AND move_id = ? AND session_incarnation_id = ?
+		   AND task_id = ? AND workflow_id = ? AND workflow_step_id = ?
+		   AND step_position = ? AND queued_at = ?
+		   AND actor = ? AND sender_session_id = ?
+	`), record.SessionID, move.MoveID, move.SessionIncarnationID, move.TaskID,
+		move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt,
+		move.Actor, move.SenderSessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("consume deferred move: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	return nil
 }
 
 // rebaseTaskForStepAdmissionCAS applies the AC-46/48 compare-and-swap
@@ -848,6 +979,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	queueExitPending bool,
 	expectedStepID string,
 	expectedWorkflowID string,
+	deferredMove *messagequeue.PendingMoveRecord,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -878,6 +1010,11 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	}
 	if err := r.lockWorkspaceRowStdTx(ctx, tx, workspaceID); err != nil {
 		return false, false, err
+	}
+	if deferredMove != nil {
+		if err := r.validateDeferredMoveGuardTx(ctx, tx, *deferredMove); err != nil {
+			return false, false, err
+		}
 	}
 
 	// AC-46/48 compare-and-swap precondition, only for CAS callers (see
@@ -933,6 +1070,26 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	if err != nil {
 		return false, false, err
 	}
+	if deferredMove != nil {
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_sessions SET review_status = ''
+			 WHERE id = ? AND task_id = ? AND queue_incarnation_id = ?
+		`), deferredMove.SessionID, deferredMove.Move.TaskID, deferredMove.Move.SessionIncarnationID)
+		if err != nil {
+			return false, false, err
+		}
+		if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
+			if rowsErr != nil {
+				return false, false, rowsErr
+			}
+			return false, false, messagequeue.ErrSessionIdentityMismatch
+		}
+	}
+	if deferredMove != nil {
+		if err := r.deleteDeferredMoveGuardTx(ctx, tx, *deferredMove); err != nil {
+			return false, false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, false, err
 	}
@@ -944,6 +1101,68 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 // task fields. It returns whether the key was present and removed.
 func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error) {
 	return r.removeTaskMetadataKeyWithExecutor(ctx, r.db, taskID, key)
+}
+
+// ClearManualMoveLifecycleMarkersIfCompleted atomically removes the pending
+// and completed markers for a manual move only while the completed marker and
+// task update generation still match the recovery snapshot. A new move clears
+// the old completed marker in the same task write that creates its pending
+// marker, and a later completion reuses the boolean marker value, so the
+// generation predicate prevents either newer move from being erased.
+func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Context, taskID string, completedAt time.Time) (bool, error) {
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = (
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
+				#- ARRAY[?]::text[] #- ARRAY[?]::text[]
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				?
+			  ) IS NOT NULL
+			  AND updated_at = ?
+		`
+		args = []interface{}{
+			models.MetaKeyManualMoveLifecyclePending,
+			models.MetaKeyManualMoveLifecycleCompleted,
+			r.nowUTC(),
+			taskID,
+			models.MetaKeyManualMoveLifecycleCompleted,
+			completedAt,
+		}
+	} else {
+		query = `
+			UPDATE tasks
+			SET metadata = json_remove(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?, ?
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?
+			  ) IS NOT NULL
+			  AND updated_at = ?
+		`
+		args = []interface{}{
+			jsonPath(models.MetaKeyManualMoveLifecyclePending),
+			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
+			r.nowUTC(),
+			taskID,
+			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
+			completedAt,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 // RemoveTaskMetadataKeyIfStamp removes one metadata object only when its
@@ -981,6 +1200,70 @@ func (r *Repository) RemoveTaskMetadataKeyIfStamp(
 	}
 	rows, err := result.RowsAffected()
 	return rows > 0, err
+}
+
+// TakeTaskMetadataKeyIfDestinationStep removes one metadata object only when
+// its nested step_id and stamp both equal the caller's expectations, and
+// returns the object's raw JSON on a successful claim. The advisory read
+// happens before the conditional removal; since stamp is a fresh unique value
+// minted on every write (never content-derived), a removal that matches both
+// step_id and stamp can only have removed the exact object just read.
+func (r *Repository) TakeTaskMetadataKeyIfDestinationStep(
+	ctx context.Context,
+	taskID, key, expectedStepID, expectedStamp string,
+) (json.RawMessage, bool, error) {
+	if strings.TrimSpace(expectedStepID) == "" || strings.TrimSpace(expectedStamp) == "" {
+		return nil, false, nil
+	}
+	task, err := r.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	value, present := task.Metadata[key]
+	if !present {
+		return nil, false, nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text, updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?, 'step_id') = ?
+			  AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?, 'stamp') = ?
+		`
+		args = []interface{}{key, time.Now().UTC(), taskID, key, expectedStepID, key, expectedStamp}
+	} else {
+		path := jsonPath(key)
+		stepIDPath := path + ".step_id"
+		stampPath := path + ".stamp"
+		query = `
+			UPDATE tasks
+			SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?), updated_at = ?
+			WHERE id = ?
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+		`
+		args = []interface{}{path, time.Now().UTC(), taskID, stepIDPath, expectedStepID, stampPath, expectedStamp}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	if rows == 0 {
+		return nil, false, nil
+	}
+	return raw, true, nil
 }
 
 func (r *Repository) removeTaskMetadataKeyWithExecutor(
@@ -1784,7 +2067,10 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 	if rows == 0 {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions, true); err != nil {
+		return "", err
+	}
+	if err := r.purgeQueueSessionPoliciesInTx(ctx, tx, sessions); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2514,7 +2800,7 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions, false); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2575,7 +2861,7 @@ func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
 	if err != nil {
 		return "", false, err
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions, false); err != nil {
 		return "", false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2614,12 +2900,119 @@ func (r *Repository) taskQueueSessionsInTx(ctx context.Context, tx *sqlx.Tx, tas
 	return sessions, nil
 }
 
-func (r *Repository) purgeTaskQueueInTx(ctx context.Context, tx *sqlx.Tx, taskID string, sessions []string) error {
-	_, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID, sessions)
-	if internaldb.IsMissingTableError(err) {
+func (r *Repository) purgeTaskQueueInTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	sessions []string,
+	deleteTask bool,
+) error {
+	r.notifyTaskQueuePurging(ctx, taskID)
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return r.purgeTaskQueuePostgres(ctx, tx, taskID, sessions, deleteTask)
+	}
+	queuedIDs, err := r.archiveQueuedIDsOrNil(ctx, tx, taskID, deleteTask)
+	if err != nil {
+		if internaldb.IsMissingTableError(err) {
+			return nil
+		}
+		return err
+	}
+	if _, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID, sessions); err != nil {
+		if internaldb.IsMissingTableError(err) {
+			return nil
+		}
+		return err
+	}
+	if deleteTask {
 		return nil
 	}
-	return err
+	return r.releaseUnreferencedTaskAttachmentClaimsTx(ctx, tx, taskID, queuedIDs)
+}
+
+// purgeTaskQueuePostgres purges under a savepoint so a missing queue schema
+// does not abort the enclosing archive/delete transaction. The attachment
+// release runs after the savepoint is released, with no cursor open across
+// statements on the single-connection transaction.
+func (r *Repository) purgeTaskQueuePostgres(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	sessions []string,
+	deleteTask bool,
+) error {
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT purge_task_queue"); err != nil {
+		return err
+	}
+	queuedIDs, err := r.archiveQueuedIDsOrNil(ctx, tx, taskID, deleteTask)
+	if err != nil {
+		return r.abortPurgeSavepoint(ctx, tx, err)
+	}
+	if _, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID, sessions); err != nil {
+		return r.abortPurgeSavepoint(ctx, tx, err)
+	}
+	if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT purge_task_queue"); err != nil {
+		return err
+	}
+	if deleteTask {
+		return nil
+	}
+	return r.releaseUnreferencedTaskAttachmentClaimsTx(ctx, tx, taskID, queuedIDs)
+}
+
+// archiveQueuedIDsOrNil collects the pre-purge queued attachment set for the
+// archive release. The delete path needs no ownership set. A missing queue
+// schema means bare task storage with no queue-owned claims.
+func (r *Repository) archiveQueuedIDsOrNil(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	deleteTask bool,
+) (map[string]struct{}, error) {
+	if deleteTask {
+		return nil, nil
+	}
+	queuedIDs, err := r.queuedAttachmentIDsForTaskTx(ctx, tx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return queuedIDs, nil
+}
+
+// abortPurgeSavepoint rolls back the purge savepoint. A missing queue schema
+// is not an archive failure: bare task repositories never had queue rows, so
+// there is nothing queue-owned to release.
+func (r *Repository) abortPurgeSavepoint(ctx context.Context, tx *sqlx.Tx, cause error) error {
+	if _, rbErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT purge_task_queue"); rbErr != nil {
+		return cause
+	}
+	if _, relErr := tx.ExecContext(ctx, "RELEASE SAVEPOINT purge_task_queue"); relErr != nil {
+		return cause
+	}
+	if internaldb.IsMissingTableError(cause) {
+		return nil
+	}
+	return cause
+}
+
+func (r *Repository) purgeQueueSessionPoliciesInTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionIDs []string,
+) error {
+	for _, sessionID := range sessionIDs {
+		if _, err := tx.ExecContext(
+			ctx,
+			r.db.Rebind(`DELETE FROM queue_session_state WHERE session_id = ?`),
+			sessionID,
+		); err != nil {
+			if internaldb.IsMissingTableError(err) {
+				return nil
+			}
+			return fmt.Errorf("purge queue session policy for %s: %w", sessionID, err)
+		}
+	}
+	return nil
 }
 
 // UnarchiveTaskByCascade clears archived_at + archived_by_cascade_id only

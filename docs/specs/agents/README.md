@@ -50,7 +50,8 @@ surface shared by task and Office consumers.
 - [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
 - [Mock-agent slow command duration syntax](requirements/mock-agent-slow-duration.md)
 - [Native Code Review](requirements/native-code-review.md)
-- [No Silent Model Fallback](requirements/no-silent-model-fallback.md)
+- [No Silent Model Fallback](requirements/no-silent-model-fallback.md), including
+  profile-selector warning placement and executor-authoritative task warnings.
 - [Copy agent configuration to isolated executors](requirements/portable-agent-configuration.md)
 - [Disable an Agent Profile](requirements/profile-disable.md)
 - [Agent Profile Recent Use](requirements/profile-recent-use.md)
@@ -79,6 +80,7 @@ surface shared by task and Office consumers.
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 2](system-design/runtime-updates-02.md)
+- [Managed Runtime Default Activation](system-design/runtime-default-activation.md)
 - [Managed npm runtime recovery](system-design/managed-npm-runtime-recovery.md)
 - [MCP Bridge Reliability](system-design/mcp-bridge-reliability.md)
 - [Agent MCP Timeout Budgets](system-design/mcp-timeout-budgets.md)

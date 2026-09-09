@@ -24,8 +24,8 @@ app is broken.
 
 #### Acceptance criteria
 
-- **AC-UI-EMPTY-TURN-NOTICE-001.1:** When an agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing.
-- **AC-UI-EMPTY-TURN-NOTICE-001.2:** "Output" means at least one agent message that is a tool call (`tool_call`/`tool_edit`/`tool_read`/`tool_execute`), a native plan/todo (`agent_plan`/`todo`), a permission or clarification prompt (`permission_request`/`clarification_request`), or a non-empty text response (`message`/`content`). Incidental per-turn messages — lifecycle `status`/`script_execution` notices, `log`, `progress`, and `thinking` — do **not** count as output.
+- **AC-UI-EMPTY-TURN-NOTICE-001.1:** When an agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing. If later output arrives for the same turn, the rendered transcript hides that notice.
+- **AC-UI-EMPTY-TURN-NOTICE-001.2:** "Output" means at least one agent message that is a tool call (`tool_call`/`tool_edit`/`tool_read`/`tool_search`/`tool_execute`), a native plan/todo (`agent_plan`/`todo`), a permission or clarification prompt (`permission_request`/`clarification_request`), or a non-empty text response (`message`/`content`). Incidental per-turn messages — lifecycle `status`/`script_execution` notices, `log`, `progress`, and `thinking` — do **not** count as output.
 - **AC-UI-EMPTY-TURN-NOTICE-001.3:** The backend is authoritative: the `session.turn.completed` event carries a transient `had_output` boolean computed from the turn's persisted messages at completion time (no DB column; the notice is live-only).
 - **AC-UI-EMPTY-TURN-NOTICE-001.4:** The notice text adapts to the triggering user message:
 - **AC-UI-EMPTY-TURN-NOTICE-001.5:** **No leading `/`** → "The agent finished without producing any output."
@@ -60,6 +60,7 @@ When a user sends a message to the agent chat and the turn completes with **no c
 - **GIVEN** a user sends `/commit` (an advertised command) and the turn produces no output, **WHEN** the turn completes, **THEN** the notice says the command ran but produced no output and to resend without the leading slash.
 - **GIVEN** a user sends a normal prompt with no leading slash and the turn is empty, **WHEN** the turn completes, **THEN** the notice says the agent finished without producing any output.
 - **GIVEN** a turn that produces a text response or a tool call, **WHEN** the turn completes, **THEN** no notice appears.
+- **GIVEN** a turn first reports no output and later receives agent text or a tool message, **WHEN** the transcript updates, **THEN** the notice is hidden for that turn.
 - **GIVEN** the same empty turn's `turn.completed` is processed more than once, **WHEN** the handler runs again, **THEN** only one notice exists for that turn.
 - **GIVEN** an orphan turn swept by resume cleanup, **WHEN** its `turn.completed` is published, **THEN** no notice appears.
 - **GIVEN** an empty turn on a quick-chat or config-chat surface, **WHEN** it completes, **THEN** no notice appears.
@@ -74,5 +75,5 @@ When a user sends a message to the agent chat and the turn completes with **no c
 ## Notes
 
 - Backend: `had_output` is computed in `Service.CompleteTurn` via `turnHadAgentOutput` over the turn's persisted messages (`apps/backend/internal/task/service/service_turns.go`). Messages are fetched via `ListMessagesByTurnID` (indexed by `turn_id`), so the read is O(turn_messages) rather than O(session_messages). The result is added to the `turn.completed` payload in `publishTurnEvent`.
-- Frontend: pure decision logic in `apps/web/lib/ws/handlers/empty-turn-notice.ts` (`computeEmptyTurnNotice`), wired from the `session.turn.completed` handler in `turns.ts`.
+- Frontend: `computeEmptyTurnNotice` in `apps/web/lib/ws/handlers/empty-turn-notice.ts` creates the notice. `filterVisibleMessages` in `apps/web/hooks/processed-message-filtering.ts` hides it after later output on the same turn. Both functions are wired to the existing session event and message state flow.
 - E2E: the mock agent's `empty-turn` scenario (`apps/backend/cmd/mock-agent/scenarios.go`) emits a multi-second empty `end_turn`; specs in `apps/web/e2e/tests/chat/empty-turn.spec.ts` (desktop) and `mobile-empty-turn.spec.ts` seed it as the auto-started turn so the live completion is observed.

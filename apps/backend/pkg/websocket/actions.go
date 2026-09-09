@@ -146,6 +146,7 @@ const (
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
+	ActionMessageQueueAutoMergeSet  = "message.queue.auto_merge.set" // Persist a per-session automatic-merge override
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -389,6 +390,7 @@ const (
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
 	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
@@ -430,6 +432,7 @@ const (
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
+	ActionMCPReportPRAutoFixOutcome     = "mcp.report_pr_auto_fix_outcome"
 	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
 	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
 	ActionMCPAddTaskDependency          = "mcp.add_task_dependency"

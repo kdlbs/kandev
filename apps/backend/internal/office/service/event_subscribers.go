@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -122,6 +123,7 @@ type CommentPostedData struct {
 	AuthorType             string `json:"author_type"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
 	EngineDispatched       string `json:"engine_dispatched"`
+	Source                 string `json:"source"`
 }
 
 // ApprovalResolvedData represents an approval resolved event payload.
@@ -275,11 +277,12 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 
 // AgentTurnMessageData is the payload of an agent.turn.message_saved event.
 type AgentTurnMessageData struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	TurnID    string `json:"turn_id"`
-	AgentText string `json:"agent_text"`
-	AgentID   string `json:"agent_id"`
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	TurnID         string `json:"turn_id"`
+	AgentText      string `json:"agent_text"`
+	AgentID        string `json:"agent_id"`
+	AgentProfileID string `json:"agent_profile_id"`
 }
 
 // handleAgentTurnMessageSaved auto-bridges an agent session response to a
@@ -331,10 +334,32 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return nil
 	}
 
+	// Attribute to the agent that actually ran the turn, not the task's
+	// assignee — the two diverge for a reviewer/approver turn. The event
+	// carries the acting agent's own office identity directly
+	// (execution.officeProfileID(), captured at launch before step/routing
+	// overrides mutate the profile). The session-row lookup only reflects
+	// the acting agent when features.officeSessionIdentity is on — off by
+	// default in every shipped profile, it stores the assignee for every
+	// participant's session — so it is kept only as a fallback for events
+	// published before this field existed. Final fallback is the assignee,
+	// mirroring handlePromptUsage's log-and-continue fallback below.
+	authorID := fields.AssigneeAgentProfileID
+	if data.AgentProfileID != "" {
+		authorID = data.AgentProfileID
+	} else if id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID); lookupErr != nil {
+		s.logger.Warn("session agent profile lookup failed",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(lookupErr))
+	} else if id != "" {
+		authorID = id
+	}
+
 	comment := &models.TaskComment{
 		TaskID:     data.TaskID,
 		AuthorType: "agent",
-		AuthorID:   fields.AssigneeAgentProfileID,
+		AuthorID:   authorID,
 		Body:       agentText,
 		Source:     "session",
 	}
@@ -344,10 +369,10 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return cErr
 	}
 	s.publishCommentCreated(ctx, comment)
-	// Successful turn → reset the agent's consecutive-failure counter
-	// regardless of which task succeeded. A bridged comment is the
-	// only place we know a turn produced real output.
-	s.RecordAgentSuccess(ctx, fields.AssigneeAgentProfileID)
+	// Successful turn → reset the acting agent's consecutive-failure
+	// counter. A bridged comment is the only place we know a turn
+	// produced real output.
+	s.RecordAgentSuccess(ctx, authorID)
 	// Lifecycle: each successful turn under an in-flight run lands a
 	// "step" event so the run detail page's Events log gets a row per
 	// turn. Resolve the run from the currently-claimed run for this
@@ -501,6 +526,16 @@ func (s *Service) handleTasklessAgentCompleted(
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Same reasoning as handleAgentCompleted's and handleAgentFailed's
+			// ErrNoRows exits: no claimed run resolves, so nothing reaches
+			// this function's own clear below, but the agent may still be
+			// "working" from the launch. Scoped to data.RunID for the same
+			// reason.
+			agentProfileID := data.AgentProfileID
+			if agentProfileID == "" {
+				agentProfileID = data.AgentID
+			}
+			s.clearAgentWorking(ctx, agentProfileID, data.RunID)
 			return nil
 		}
 		return err
@@ -662,8 +697,10 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		"session_id":    data.SessionID,
 		"error_message": data.ErrorMessage,
 	})
+	// Clear before routing can make the run claimable again. This prevents
+	// cleanup from this attempt from matching a relaunch that reuses its run ID.
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
-		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return nil
 	}
 	// Office failure path (v1): every agent error is terminal. The
@@ -990,10 +1027,22 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	return nil
 }
 
-// finalizeDone resolves blockers and notifies parents when a task enters
-// a terminal step. Both side-effects route through the engine via
-// dispatchEngineTrigger (on_blocker_resolved / on_children_completed).
+// finalizeDone resolves blockers, notifies parents, and closes out a
+// linked routine run when a task enters a terminal step. The blocker
+// and parent side-effects route through the engine via
+// dispatchEngineTrigger (on_blocker_resolved / on_children_completed);
+// the routine sync is a direct call since it's a simple status write,
+// not an engine trigger.
 func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
+	if s.routineRunSyncer != nil {
+		terminal := "done"
+		if strings.EqualFold(data.ToStepName, "cancelled") {
+			terminal = "cancelled"
+		}
+		if err := s.routineRunSyncer.SyncRunStatus(ctx, data.TaskID, terminal); err != nil {
+			s.logger.Warn("sync routine run status", zap.Error(err))
+		}
+	}
 	if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
 		s.logger.Error("blocker resolution runs failed", zap.Error(err))
 	}
@@ -1087,8 +1136,7 @@ func (s *Service) lookupChildPRLinks(
 }
 
 // queueChildrenCompletedRun checks if all children of a parent are terminal
-// and, if so, dispatches an on_children_completed trigger to the engine
-// with child summaries in the payload.
+// and, if so, dispatches an on_children_completed trigger to the engine.
 func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string) error {
 	allDone, err := s.repo.AreAllChildrenTerminal(ctx, parentID)
 	if err != nil || !allDone {
@@ -1105,25 +1153,13 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 		return fmt.Errorf("get child set key: %w", err)
 	}
 
-	children, _, err := s.repo.GetChildSummaries(ctx, parentID)
-	if err != nil {
-		s.logger.Error("get child summaries failed", zap.Error(err))
-		children = nil
-	}
-
+	// No child summaries are assembled here. The prompt path derives the
+	// child list at assembly time from the parent's current children, so a
+	// summary read at this point would pay for data that is discarded and
+	// would make the wake's content depend on which producer won the race.
 	key := wakeOperationID(parentID, childSetKey)
-	summaries := make([]engine.ChildSummary, 0, len(children))
-	prsByTask := s.lookupChildPRLinks(ctx, children)
-	for _, c := range children {
-		summaries = append(summaries, engine.ChildSummary{
-			TaskID:  c.TaskID,
-			Status:  c.State,
-			Summary: c.LastComment,
-			PRLinks: prsByTask[c.TaskID],
-		})
-	}
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
-		engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, key)
+		engine.OnChildrenCompletedPayload{}, key)
 }
 
 // handleCommentCreated loads the comment and relays it to external channels.
@@ -1156,6 +1192,11 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		return nil
 	}
 	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
+		return nil
+	}
+	// A session-bridged comment mirrors a turn that already ran; it must
+	// never itself queue a new run, whichever agent it's attributed to.
+	if data.Source == "session" {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is

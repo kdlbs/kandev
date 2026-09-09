@@ -2,6 +2,7 @@ package routingerr
 
 import (
 	"regexp"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -40,20 +41,67 @@ var redactions = []redaction{
 	{regexp.MustCompile(`/home/[^/\s]+/`), "/home/<redacted>/"},
 }
 
-// Redact applies the same credential and home-path rules as Sanitize but
-// performs no truncation, so a caller that needs to bound the result by a
-// different rule (e.g. keeping the newest bytes of a longer budget cut) sees
-// every credential intact and redacted rather than racing a head-truncation
-// that runs before it can see the whole input. Redact is idempotent:
-// applying it twice equals applying it once.
+var (
+	localUnixPathPattern    = regexp.MustCompile(`/(?:[^/\s"']+/)+[^\r\n\s"'<>]+`)
+	localWindowsPathPattern = regexp.MustCompile(`(?i)[A-Z]:[\\/][^\r\n"']+`)
+)
+
+func redactLocalPaths(s string) string {
+	s = localWindowsPathPattern.ReplaceAllStringFunc(s, func(path string) string {
+		if len(path) >= 4 && path[2:4] == "//" {
+			return path
+		}
+		return "[path-redacted]"
+	})
+	matches := localUnixPathPattern.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return s
+	}
+
+	var redacted strings.Builder
+	redacted.Grow(len(s))
+	last := 0
+	for _, match := range matches {
+		start, end := match[0], match[1]
+		redacted.WriteString(s[last:start])
+		path := s[start:end]
+		if start >= 2 && s[start-2:start] == ":/" {
+			redacted.WriteString(path)
+			last = end
+			continue
+		}
+		redacted.WriteString(redactUnixPath(path))
+		last = end
+	}
+	redacted.WriteString(s[last:])
+	return redacted.String()
+}
+
+func redactUnixPath(path string) string {
+	if strings.Contains(path, "[path-redacted]") {
+		return path
+	}
+	switch {
+	case strings.HasPrefix(path, "/Users/"):
+		return "/Users/<redacted>/[path-redacted]"
+	case strings.HasPrefix(path, "/home/"):
+		return "/home/<redacted>/[path-redacted]"
+	default:
+		return "[path-redacted]"
+	}
+}
+
+// Redact applies the credential and local-path rules without truncation.
+// The function is idempotent: applying it twice equals applying it once.
 func Redact(s string) string {
 	for _, r := range redactions {
 		s = r.pattern.ReplaceAllString(s, r.replace)
 	}
+	s = redactLocalPaths(s)
 	return s
 }
 
-// Sanitize redacts likely credentials, normalizes home paths, and truncates
+// Sanitize redacts likely credentials and local paths, then truncates
 // to MaxRawExcerptBytes on a rune boundary so a multi-byte character (e.g.
 // Vietnamese, CJK) is never split into invalid UTF-8. The function is
 // idempotent: applying it twice equals applying it once.
