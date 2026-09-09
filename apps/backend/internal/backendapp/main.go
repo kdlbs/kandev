@@ -2337,6 +2337,10 @@ func buildHTTPServer(
 	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
 	secretsSvc := secrets.NewService(userSecretStore, log)
+	secretsSvc.SetReferenceChecker(secretReferenceChecker{
+		agents: repos.AgentSettings, tasks: repos.Task,
+		authorizeWorkspace: services.Task.AuthorizeWorkspaceAccess,
+	}.list)
 	// Workspace classification happens here, at the wiring boundary, where both
 	// packages are importable: the task service's not-found sentinel becomes
 	// the secrets sentinel (404), while raw lookup/storage errors pass through
