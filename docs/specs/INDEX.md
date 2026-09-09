@@ -12,7 +12,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | Costs | [README](costs/README.md) | complete | 2 requirements, 0 designs |
 | Desktop | [README](desktop/README.md) | complete | 1 requirements, 1 designs |
 | Executors | [README](executors/README.md) | complete | 3 requirements, 6 designs |
-| Integrations | [README](integrations/README.md) | complete | 18 requirements, 21 designs |
+| Integrations | [README](integrations/README.md) | complete | 19 requirements, 21 designs |
 | Office | [README](office/README.md) | complete | 19 requirements, 38 designs |
 | Platform | [README](platform/README.md) | complete | 30 requirements, 10 designs |
 | Plugins | [README](plugins/README.md) | complete | 7 requirements, 9 designs |

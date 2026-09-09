@@ -17,6 +17,7 @@
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "handleE2ECreateAutomation", "rule": "raw-placeholder", "reason": "The E2E seed endpoint operates on the SQLite task repository"},
     {"file": "internal/db/schema.go", "symbol": "tableExistsQuery", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "TableColumns", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
+    {"file": "internal/db/schema.go", "symbol": "SQLiteTableSQL", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware SQLite schema inspection helper"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "sqlite-catalog", "reason": "The SQLite branch is the explicit dialect boundary for the schema probe"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "raw-placeholder", "reason": "The placeholder is in the explicit SQLite branch of the schema probe"},
     {"file": "internal/github/store.go", "symbol": "createTablesSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},

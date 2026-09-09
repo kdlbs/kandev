@@ -64,7 +64,7 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 			manifest.Public, manifest.RequestOAuthOnInstall, manifest.SetupOnUpdate)
 	}
 	wantPermissions := map[string]string{
-		"actions":        "read",
+		"actions":        "write",
 		"administration": "read",
 		"checks":         "read",
 		"contents":       "write",

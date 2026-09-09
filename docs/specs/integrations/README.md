@@ -58,6 +58,7 @@ outcomes that expose those contracts.
 - [Pull request outcome attribution](requirements/pr-outcome-attribution.md)
 - [Pull request link copy actions](requirements/pr-link-copy-actions.md)
 - [Provider-Aware Review Automation Runtime](requirements/provider-aware-review-automation.md)
+- [Scoped coordinator CI runs](scoped-coordinator-ci-runs.md)
 - [Slack Integration](requirements/slack.md)
 
 ### System design
