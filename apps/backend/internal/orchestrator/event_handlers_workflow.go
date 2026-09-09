@@ -1277,6 +1277,9 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 		}
 		task, err = s.repo.GetTask(ctx, taskID)
 		if err != nil || task == nil {
+			// A transient failure here only ends this attempt; it leaves any
+			// surviving lifecycle marker untouched, so the next startup sweep
+			// re-lists and retries the task.
 			return false
 		}
 	}
@@ -1291,6 +1294,9 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 		// still pending and schedule a second, redundant launch attempt.
 		task, err = s.repo.GetTask(ctx, taskID)
 		if err != nil || task == nil {
+			// A transient failure here only ends this attempt; it leaves any
+			// surviving lifecycle marker untouched, so the next startup sweep
+			// re-lists and retries the task.
 			return false
 		}
 	}
@@ -1610,7 +1616,8 @@ type autoStartLaunchTokens struct {
 // in-flight launch it did not itself schedule (see autoStartOnCreateActionable).
 // It does not gate the launch: on_enter's auto_start_agent action already
 // decided to launch, and consuming this key is a side effect of that, not a
-// precondition for it.
+// precondition for it. recoverAutoStartOnCreate's session-existence check is
+// the safety net against a duplicate launch when this claim write itself fails.
 func (s *Service) claimAutoStartOnCreateForLaunch(ctx context.Context, task *models.Task, alreadyClaimed bool) bool {
 	if alreadyClaimed {
 		return true
