@@ -64,6 +64,52 @@ func TestBuildSendNowEnvelopeAggregatesInFIFOOrder(t *testing.T) {
 	}
 }
 
+func TestBuildSendNowEnvelopeCarriesHandoffFromNonHeadEntry(t *testing.T) {
+	queuedAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	entries := []QueuedMessage{
+		{
+			ID: "first", SessionID: "session-1", TaskID: "task-1", Position: 10,
+			Content: "user message", QueuedAt: queuedAt, QueuedBy: QueuedByUser,
+			Metadata: map[string]interface{}{"origin": "user-input"},
+		},
+		{
+			ID: "second", SessionID: "session-1", TaskID: "task-1", Position: 20,
+			Content: "workflow auto-start", QueuedAt: queuedAt.Add(time.Minute), QueuedBy: QueuedByWorkflow,
+			Metadata: map[string]interface{}{MetadataStepHandoff: "claimed handoff text"},
+		},
+	}
+
+	envelope, err := BuildSendNowEnvelope(entries)
+	if err != nil {
+		t.Fatalf("BuildSendNowEnvelope() error = %v", err)
+	}
+	if got, ok := envelope.Metadata[MetadataStepHandoff].(string); !ok || got != "claimed handoff text" {
+		t.Fatalf("envelope handoff = %#v, want the second entry's claimed handoff text", envelope.Metadata[MetadataStepHandoff])
+	}
+}
+
+func TestBuildSendNowEnvelopeOmitsHandoffWhenNoEntryCarriesOne(t *testing.T) {
+	queuedAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	entries := []QueuedMessage{
+		{
+			ID: "first", SessionID: "session-1", TaskID: "task-1", Position: 10,
+			Content: "user message", QueuedAt: queuedAt, QueuedBy: QueuedByUser,
+		},
+		{
+			ID: "second", SessionID: "session-1", TaskID: "task-1", Position: 20,
+			Content: "another message", QueuedAt: queuedAt.Add(time.Minute), QueuedBy: QueuedByUser,
+		},
+	}
+
+	envelope, err := BuildSendNowEnvelope(entries)
+	if err != nil {
+		t.Fatalf("BuildSendNowEnvelope() error = %v", err)
+	}
+	if _, ok := envelope.Metadata[MetadataStepHandoff]; ok {
+		t.Fatalf("envelope handoff = %#v, want absent", envelope.Metadata[MetadataStepHandoff])
+	}
+}
+
 func TestBuildSendNowEnvelopeAllowsAttachmentOnlyEntries(t *testing.T) {
 	entries := []QueuedMessage{
 		{ID: "first", SessionID: "session-1", Position: 1, Attachments: []MessageAttachment{{Data: "aA==", SizeBytes: 1}}},

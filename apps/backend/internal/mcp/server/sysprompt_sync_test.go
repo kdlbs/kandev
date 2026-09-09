@@ -193,6 +193,24 @@ func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
 			}
 			require.NotEmpty(t, richOutputLine)
 			assert.LessOrEqual(t, utf8.RuneCountInString(richOutputLine), 750)
+			if name == "task" {
+				for _, phrase := range []string{
+					"For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now",
+					"Do not implement it as ASCII, SVG, HTML, or another app",
+					"Get the schema and examples from tool discovery",
+					"workspace-relative",
+					"Label series with units",
+					"Otherwise use prose or a small Markdown table",
+					"Kandev owns layout, axes, legends, and tooltips",
+				} {
+					assert.Contains(t, richOutputLine, phrase)
+				}
+				for _, recipe := range []string{inlineRecipe, csvRecipe, metricsRecipe} {
+					assert.NotContains(t, richOutputLine, recipe,
+						"task context should obtain rich-output schemas and examples through discovery")
+				}
+				return
+			}
 			for _, phrase := range []string{
 				"When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now",
 				"Do not implement the display as ASCII/SVG/HTML or with another app",
@@ -257,6 +275,23 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
+	assert.Len(t, registered, 11, "Office MCP must expose the replacement 11-tool catalog")
+}
+
+func TestDecisionMCPTransportIsAbsentFromOfficeAndKanban(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	office := New(backend, "office-session", "office-task", 10005, log, "", false, ModeOffice)
+	kanban := New(backend, "task-session", "task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, office)
+	require.NotNil(t, kanban)
+
+	assert.NotContains(t, office.mcpServer.ListTools(), "record_step_decision_kandev")
+	assert.NotContains(t, sysprompt.OfficeContext(), "record_step_decision_kandev")
+	assert.NotContains(t, kanban.mcpServer.ListTools(), "record_step_decision_kandev")
+	assert.NotContains(t, sysprompt.KandevContext(), "record_step_decision")
 }
 
 // TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a

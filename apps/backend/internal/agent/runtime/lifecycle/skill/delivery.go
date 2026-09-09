@@ -23,7 +23,9 @@ func (d *Deployer) deliver(_ context.Context, manifest *Manifest, executorType, 
 		return d.deliverSprites(manifest)
 	case "k8s":
 		return d.deliverKubernetes(manifest)
-	case "", "local", "local_pc", "worktree", "local_docker", "remote_docker", "ssh", "mock_remote":
+	case "ssh":
+		return d.deliverSSH(manifest)
+	case "", "local", "local_pc", "worktree", "local_docker", "remote_docker", "mock_remote":
 		// local_pc and local_docker share the same delivery: the
 		// worktree IS the agent's CWD inside the executor (Docker
 		// bind-mounts it; local_pc runs the agent in it directly), so
@@ -66,6 +68,16 @@ func (d *Deployer) deliverSprites(manifest *Manifest) DeployResult {
 func (d *Deployer) deliverKubernetes(manifest *Manifest) DeployResult {
 	dir := kubernetesInstructionsDir(manifest.WorkspaceSlug, manifest.AgentID)
 	return d.deliverRemote(manifest, dir, "k8s")
+}
+
+// deliverSSH keeps the manifest in launch metadata. The SSH executor uploads
+// its files after the remote task workspace and agentctl instance exist; the
+// host-side worktree is not the SSH agent's workspace.
+func (d *Deployer) deliverSSH(manifest *Manifest) DeployResult {
+	result := d.deliverRemote(manifest, "", "ssh")
+	result.InstructionsDir = instructionsDirHost(d.basePath, manifest.WorkspaceSlug, manifest.AgentID)
+	d.writeInstructionFiles(manifest, result.InstructionsDir)
+	return result
 }
 
 func (d *Deployer) deliverRemote(manifest *Manifest, dir, executorType string) DeployResult {

@@ -1068,6 +1068,8 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 		lifecycle.MetadataKeySSHRemoteAgentctlPID,
 		lifecycle.MetadataKeySSHLocalForwardPort,
 		lifecycle.MetadataKeySSHRemoteAgentctlURL,
+		lifecycle.MetadataKeySSHRuntimeAPILocalURL,
+		lifecycle.MetadataKeySSHRuntimeAPIRemotePort,
 		lifecycle.MetadataKeyOfficeAgentProfileID,
 	}
 	for _, k := range sessionScoped {
