@@ -90,11 +90,35 @@ export class IndexedDBLogStore {
     return entries;
   }
 
+  async readHighWatermark(): Promise<number | null> {
+    const database = await this.open();
+    const transaction = database.transaction(STORE_NAME, "readonly");
+    const store = transaction.objectStore(STORE_NAME);
+    let highWatermark: number | null = null;
+
+    return new Promise<number | null>((resolve, reject) => {
+      const request = store.openCursor(null, "prev");
+      request.onerror = () => reject(request.error ?? new Error(INDEXEDDB_CURSOR_ERROR));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        highWatermark = cursor ? Number(cursor.primaryKey) : null;
+      };
+      transaction.oncomplete = () => resolve(highWatermark);
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+    });
+  }
+
   async readPage(
     identityScope: string,
     maxBytes: number,
     after: LogPageCursor | null = null,
+    maxPrimaryKey?: number | null,
   ): Promise<LogPage> {
+    if (maxPrimaryKey === null) return { entries: [], nextCursor: null, done: true };
+
     const database = await this.open();
     const transaction = database.transaction(STORE_NAME, "readonly");
     const index = transaction.objectStore(STORE_NAME).index("timestamp_ms");
@@ -115,6 +139,10 @@ export class IndexedDBLogStore {
         }
         const record = cursor.value as PersistedEntry;
         const primaryKey = Number(cursor.primaryKey);
+        if (maxPrimaryKey !== undefined && primaryKey > maxPrimaryKey) {
+          cursor.continue();
+          return;
+        }
         if (!isAfterCursor(record, primaryKey, after)) {
           cursor.continue();
           return;

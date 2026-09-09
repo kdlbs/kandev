@@ -243,6 +243,11 @@ memory snapshot. The persistence drain continues and its storage mode does not
 change. The upload uses `storage_mode: memory`. Its final metadata includes
 `flush_timeout: true`.
 
+After the fixed drain completes, IndexedDB capture records the highest persisted
+object-store primary key. This key is the capture's upper boundary. Every page
+excludes rows with a larger primary key, including rows written between page
+transactions. A capture with no persisted rows sends an empty IndexedDB page.
+
 IndexedDB capture reads use the existing `timestamp_ms` index. Each page resumes
 with the prior timestamp and primary key. The cursor filters the requested
 identity while it scans the globally bounded store. The browser does not use

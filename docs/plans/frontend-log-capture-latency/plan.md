@@ -138,6 +138,10 @@ Return one page and close its readonly transaction before the uploader asks for
 the next page. Use stored prepared-byte counts for page limits. Do not use
 `getAll` or sort the complete identity partition.
 
+Before the first page, record the highest persisted primary key. Pass this fixed
+upper boundary to every page read so entries written after receipt cannot enter
+the capture between page transactions.
+
 ### Upload budget and page sizes
 
 In `apps/backend/internal/system/logbundle/service.go`, add
@@ -183,7 +187,7 @@ not be reproduced because this workspace had no attached browser session.
 ## Verification results
 
 - `pnpm install --frozen-lockfile` completed from `apps`.
-- The focused frontend logger suite passed: 4 files and 37 tests.
+- The focused frontend logger suite passed: 4 files and 40 tests.
 - `pnpm run typecheck` passed from `apps/web`.
 - The log-bundle package tests passed: 23 tests.
 - The log-bundle package race tests passed: 23 tests.

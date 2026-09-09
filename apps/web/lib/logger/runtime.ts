@@ -65,11 +65,18 @@ export async function beginBrowserLogCapture(scope: string): Promise<BrowserLogC
   if (!flushed || storageMode === "memory") {
     return { storageMode: "memory", flushTimeout: !flushed, memoryEntries, readPage: null };
   }
+  let maxPrimaryKey: number | null;
+  try {
+    maxPrimaryKey = await store.readHighWatermark();
+  } catch {
+    degradePersistence();
+    return { storageMode: "memory", flushTimeout: false, memoryEntries, readPage: null };
+  }
   return {
     storageMode: "indexeddb",
     flushTimeout: false,
     memoryEntries,
-    readPage: (maxBytes, after) => store.readPage(scope, maxBytes, after),
+    readPage: (maxBytes, after) => store.readPage(scope, maxBytes, after, maxPrimaryKey),
   };
 }
 

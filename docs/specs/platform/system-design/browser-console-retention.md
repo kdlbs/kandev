@@ -91,6 +91,13 @@ After the fixed-prefix drain completes, the runtime selects one snapshot source
 for the capture. IndexedDB mode reads through the existing `timestamp_ms`
 index. Memory mode reads the prepared entries from the receipt snapshot.
 
+Before the first IndexedDB page, the runtime records the highest persisted
+object-store primary key. This persisted high-water key is an upper boundary for
+the capture. Every page excludes rows with a larger primary key, so entries
+written after receipt cannot enter a later page even when their timestamps sort
+before earlier rows. A capture with no persisted rows uses an empty IndexedDB
+source.
+
 Each IndexedDB page uses one readonly transaction. A continuation token contains
 the timestamp index key and the object-store primary key. This pair gives a
 stable order when entries have equal timestamps.

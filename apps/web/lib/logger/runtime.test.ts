@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { encodedBytes, _resetForTesting, MAX_ENTRY_BYTES, type LogEntry } from "./buffer";
 import {
+  beginBrowserLogCapture,
   _resetRuntimeForTesting,
   browserLogMetadata,
   snapshotBrowserLogs,
@@ -9,6 +10,8 @@ import {
 
 const storeMocks = vi.hoisted(() => ({
   append: vi.fn(),
+  readHighWatermark: vi.fn(),
+  readPage: vi.fn(),
   snapshot: vi.fn(),
 }));
 const TEST_SOURCE = "test";
@@ -17,6 +20,8 @@ const TEST_SCOPE = "default-user";
 vi.mock("./indexeddb-store", () => ({
   IndexedDBLogStore: class {
     append = storeMocks.append;
+    readHighWatermark = storeMocks.readHighWatermark;
+    readPage = storeMocks.readPage;
     snapshot = storeMocks.snapshot;
   },
 }));
@@ -25,6 +30,12 @@ beforeEach(() => {
   _resetForTesting();
   _resetRuntimeForTesting();
   storeMocks.append.mockReset();
+  storeMocks.readHighWatermark.mockReset().mockResolvedValue(0);
+  storeMocks.readPage.mockReset().mockResolvedValue({
+    entries: [],
+    nextCursor: null,
+    done: true,
+  });
   storeMocks.snapshot.mockReset().mockResolvedValue([]);
 });
 
@@ -307,6 +318,16 @@ describe("browser logger runtime", () => {
 });
 
 describe("browser logger capture", () => {
+  it("keeps the persisted capture boundary fixed for every page", async () => {
+    storeMocks.readHighWatermark.mockResolvedValue(17);
+
+    const capture = await beginBrowserLogCapture(TEST_SCOPE);
+    await capture.readPage?.(256, null);
+
+    expect(storeMocks.readHighWatermark).toHaveBeenCalledTimes(1);
+    expect(storeMocks.readPage).toHaveBeenCalledWith(TEST_SCOPE, 256, null, 17);
+  });
+
   it("keeps a capture flush at the receipt watermark", async () => {
     vi.useFakeTimers();
     let releaseFirstAppend: (() => void) | undefined;

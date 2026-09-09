@@ -65,6 +65,8 @@ Run these tests and record their expected failures before implementation.
 - Report memory storage and `flush_timeout: true` for the fallback capture.
 - Page the existing `timestamp_ms` index with timestamp and primary-key
   continuation.
+- Record a persisted primary-key upper boundary after the capture flush and
+  apply it to every page.
 - Filter the requested identity without a complete-partition sort.
 - Reuse prepared byte counts for page bounds.
 - Add `capture_timeout_ms` to the backend WS notification.
@@ -147,13 +149,14 @@ make -C apps/backend lint
 - GREEN: capture now freezes the staging watermark, waits one second, and uses
   a receipt-time memory snapshot when the wait expires. Persistence continues.
 - GREEN: the store reads the timestamp index with timestamp and primary-key
-  continuation. It preserves identity filtering, equal-timestamp order, and
-  global retention bounds.
+  continuation and a persisted upper primary-key boundary. It preserves identity
+  filtering, equal-timestamp order, and global retention bounds while excluding
+  writes that arrive between page transactions.
 - GREEN: capture uploads a 128 KiB first page, waits for each upload before the
   next read, uses 800 KiB later pages, and aborts at the monotonic deadline.
 - GREEN: the backend notification includes the absolute deadline and a capped
   relative duration.
-- Verification passed: 4 frontend files and 37 focused tests, focused ESLint,
+- Verification passed: 4 frontend files and 40 focused tests, focused ESLint,
   web typecheck, 23 log-bundle tests, 23 log-bundle race tests, `gofmt -l`, and
   `git diff --check`.
 - The repository-wide backend test target was run twice. Both runs failed in

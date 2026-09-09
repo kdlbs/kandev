@@ -241,6 +241,44 @@ describe("frontend log capture read fallback", () => {
       entries: [entry.entry],
     });
   });
+
+  it("does not switch sources after the first page has uploaded", async () => {
+    const entry = prepareLogEntry({
+      timestamp: new Date(1).toISOString(),
+      level: "info",
+      source: "console",
+      message: "first page",
+    });
+    const readPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        entries: [entry],
+        nextCursor: { timestamp_ms: 1, primary_key: 1 },
+        done: false,
+      })
+      .mockRejectedValueOnce(new Error("IndexedDB read failed"));
+    captureMocks.begin.mockResolvedValue({
+      storageMode: "indexeddb",
+      flushTimeout: false,
+      memoryEntries: [entry],
+      readPage,
+    });
+
+    await expect(
+      handleBrowserLogCapture(
+        {
+          bundle_id: "bundle",
+          capture_deadline: new Date(Date.now() + 60_000).toISOString(),
+          capture_timeout_ms: 15_000,
+          max_chunk_bytes: 1024 * 1024,
+          max_browser_profiles: 4,
+        },
+        "identity",
+      ),
+    ).rejects.toThrow("IndexedDB read failed");
+
+    expect(captureMocks.upload).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("frontend log capture metadata", () => {

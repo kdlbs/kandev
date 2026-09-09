@@ -173,7 +173,9 @@ describe("IndexedDB log retention writes", () => {
     await expect(store.snapshot(IDENTITY_A)).resolves.toHaveLength(1);
     await expect(store.snapshot(IDENTITY_B)).resolves.toHaveLength(1);
   });
+});
 
+describe("IndexedDB log paging", () => {
   it("reads identity snapshots through the chronological timestamp index", async () => {
     const now = Date.now();
     const store = new IndexedDBLogStore();
@@ -219,6 +221,35 @@ describe("IndexedDB log retention writes", () => {
 
     expect(messages).toEqual(["first", "second", "third"]);
     expect(pageCount).toBe(3);
+  });
+
+  it("excludes records persisted after the capture upper bound", async () => {
+    const timestamp = Date.now();
+    const store = new IndexedDBLogStore();
+    const first = logEntry(IDENTITY_A, timestamp, "first");
+    const second = logEntry(IDENTITY_A, timestamp, "second");
+    await store.append(prepareEntries([first, second]));
+
+    const maxPrimaryKey = await store.readHighWatermark();
+    const firstPage = await store.readPage(
+      IDENTITY_A,
+      prepareLogEntry(first).bytes,
+      null,
+      maxPrimaryKey,
+    );
+    expect(firstPage.entries.map(({ entry }) => entry.message)).toEqual(["first"]);
+    expect(firstPage.done).toBe(false);
+
+    await store.append(prepareEntries([logEntry(IDENTITY_A, timestamp, "after-receipt")]));
+
+    const secondPage = await store.readPage(
+      IDENTITY_A,
+      MAX_BYTES,
+      firstPage.nextCursor,
+      maxPrimaryKey,
+    );
+    expect(secondPage.entries.map(({ entry }) => entry.message)).toEqual(["second"]);
+    expect(secondPage.done).toBe(true);
   });
 });
 
