@@ -288,6 +288,7 @@
   "kubernetesStatusUnknown": "未知",
   "kubernetesStatusWaiting": "等待中",
   "kubernetesPodStateValue": "Pod 状态：{{value}}",
+  "kubernetesContainerStateValue": "主容器状态：{{value}}",
   "kubernetesStepConfiguration": "配置",
   "kubernetesStepDiscovery": "API 发现",
   "kubernetesStepExistingClaim": "现有存储声明",

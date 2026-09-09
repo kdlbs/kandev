@@ -184,6 +184,23 @@ type BackendProcess = ChildProcess & {
   waitForLogFile?: () => Promise<void>;
 };
 
+type LogFileStream = Pick<NodeJS.EventEmitter, "once" | "on">;
+
+export function observeLogFile(logFile: LogFileStream): () => Promise<void> {
+  let logFileError: Error | undefined;
+  const logFileClosed = new Promise<void>((resolve) => {
+    logFile.once("close", resolve);
+  });
+  logFile.on("error", (error: Error) => {
+    logFileError ??= error;
+  });
+
+  return async () => {
+    await logFileClosed;
+    if (logFileError) throw logFileError;
+  };
+}
+
 function removeOwnedTempRoot(tmpDir: string): void {
   fs.rmSync(tmpDir, {
     recursive: true,
@@ -262,13 +279,7 @@ function spawnBackendProcess(
   });
 
   const logFile = fs.createWriteStream(logPath, { flags: "a" });
-  const logFileClosed = new Promise<void>((resolve, reject) => {
-    logFile.once("close", resolve);
-    logFile.once("error", reject);
-  });
-  // A child can emit an error after its exit event. Keep the stream error
-  // handled so late writes cannot terminate the Playwright worker.
-  logFile.on("error", () => undefined);
+  const waitForLogFile = observeLogFile(logFile);
   const closeLogFile = () => {
     if (!logFile.writableEnded) logFile.end();
   };
@@ -288,7 +299,7 @@ function spawnBackendProcess(
   });
 
   return Object.assign(proc, {
-    waitForLogFile: () => logFileClosed,
+    waitForLogFile,
   });
 }
 

@@ -4,7 +4,10 @@ import {
   kubernetesProfileConfig,
   test,
 } from "../../fixtures/kubernetes-test-base";
-import type { KubernetesWorkerTarget } from "../../fixtures/kubernetes-worker-images";
+import {
+  kubernetesWorkerPreset,
+  type KubernetesWorkerTarget,
+} from "../../fixtures/kubernetes-worker-images";
 import {
   execInKubernetesPod,
   waitForKubernetesPod,
@@ -34,10 +37,7 @@ test("runs every prepared worker image through the Kubernetes lifecycle", async 
   for (const { target, imageKey } of WORKER_TARGETS) {
     await test.step(target, async () => {
       const profileConfig = kubernetesProfileConfig(cluster, {
-        pod_template_yaml: cluster.podTemplate({
-          image: workerImages[imageKey],
-          imagePullPolicy: "Never",
-        }),
+        pod_template_yaml: kubernetesWorkerPreset(target, workerImages[imageKey]),
         "workspace.mode": "managed_pvc",
         "workspace.size": "1Gi",
         "workspace.access_modes": JSON.stringify(["ReadWriteOnce"]),
@@ -94,6 +94,24 @@ test("runs every prepared worker image through the Kubernetes lifecycle", async 
           expect(execInKubernetesPod(cluster, pod.metadata.name, ["node", "--version"])).toMatch(
             /^v\d+\./,
           );
+          const nodePnpmSmoke = [
+            "set -eu",
+            "package=/workspace/kandev-npm-global-smoke",
+            'mkdir -p "$package" /workspace/.npm-global /workspace/.pnpm /workspace/.pnpm-store',
+            'printf \'%s\\n\' \'{"name":"kandev-npm-global-smoke","version":"1.0.0","bin":{"kandev-npm-global-smoke":"cli.js"}}\' > "$package/package.json"',
+            "printf '%s\\n' '#!/bin/sh' 'printf npm-global-ok' > \"$package/cli.js\"",
+            'chmod +x "$package/cli.js"',
+            'npm install --global --offline --ignore-scripts "$package" >/dev/null',
+            "test -x /workspace/.npm-global/bin/kandev-npm-global-smoke",
+            'test "$(/workspace/.npm-global/bin/kandev-npm-global-smoke)" = npm-global-ok',
+            "test -w /workspace/.pnpm",
+            "test -w /workspace/.pnpm-store",
+            "touch /workspace/.pnpm/.write-test /workspace/.pnpm-store/.write-test",
+            'rm -rf "$package" /workspace/.npm-global/lib/node_modules/kandev-npm-global-smoke /workspace/.npm-global/bin/kandev-npm-global-smoke /workspace/.pnpm/.write-test /workspace/.pnpm-store/.write-test',
+          ].join(" && ");
+          expect(
+            execInKubernetesPod(cluster, pod.metadata.name, ["/bin/sh", "-ceu", nodePnpmSmoke]),
+          ).toBe("");
         } else if (target === "python") {
           const pythonSmoke = [
             "python3 -m venv /workspace/kandev-python-venv",

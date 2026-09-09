@@ -10,6 +10,11 @@ const DOCKERFILE = path.join(IMAGE_DIR, "Dockerfile");
 const PIN_FILE = path.join(IMAGE_DIR, "pins.env");
 const MOCK_AGENT = path.join(REPOSITORY_ROOT, "apps/backend/bin/mock-agent-linux-amd64");
 const TARGETS = ["minimal", "node-pnpm", "python"] as const;
+const PRESET_FILES: Record<KubernetesWorkerTarget, string> = {
+  minimal: "minimal.yaml",
+  "node-pnpm": "node-pnpm.yaml",
+  python: "python.yaml",
+};
 
 export type KubernetesWorkerTarget = (typeof TARGETS)[number];
 
@@ -19,6 +24,31 @@ export type KubernetesWorkerImages = {
   python: string;
   dispose: () => Promise<void>;
 };
+
+export function kubernetesWorkerPreset(
+  target: KubernetesWorkerTarget,
+  image: string,
+  imagePullPolicy: "Always" | "IfNotPresent" | "Never" = "Never",
+): string {
+  const presetPath = path.join(REPOSITORY_ROOT, "k8s", "presets", PRESET_FILES[target]);
+  let template = fs.readFileSync(presetPath, "utf8");
+  template = replacePresetField(template, "image", image, presetPath);
+  return replacePresetField(template, "imagePullPolicy", imagePullPolicy, presetPath);
+}
+
+function replacePresetField(
+  template: string,
+  field: string,
+  value: string,
+  presetPath: string,
+): string {
+  const pattern = new RegExp(`^(\\s+${field}:\\s+).+$`, "gm");
+  const matches = template.match(pattern) ?? [];
+  if (matches.length !== 1) {
+    throw new Error(`worker preset must contain exactly one ${field} field: ${presetPath}`);
+  }
+  return template.replace(pattern, (_match: string, prefix: string) => `${prefix}${value}`);
+}
 
 type BuiltImage = {
   tag: string;

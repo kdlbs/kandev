@@ -70,6 +70,14 @@ export function podStatusValue(session: KubernetesSession): string {
   return session.container_state || session.pod_phase || "unknown";
 }
 
+export function podPhaseValue(session: KubernetesSession): string {
+  return session.pod_phase?.trim() || "unknown";
+}
+
+export function mainContainerStateValue(session: KubernetesSession): string {
+  return session.container_state?.trim() || "unknown";
+}
+
 export function translateTaskLink(session: KubernetesSession, t: TFunction): string {
   return t("executors:kubernetesOpenTask", {
     task: session.task_id,

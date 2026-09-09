@@ -288,6 +288,7 @@
   "kubernetesStatusUnknown": "Desconhecido",
   "kubernetesStatusWaiting": "Em espera",
   "kubernetesPodStateValue": "Estado do Pod: {{value}}",
+  "kubernetesContainerStateValue": "Estado do contentor principal: {{value}}",
   "kubernetesStepConfiguration": "Configuração",
   "kubernetesStepDiscovery": "Descoberta da API",
   "kubernetesStepExistingClaim": "Claim existente",

@@ -304,6 +304,7 @@
   "kubernetesStatusUnknown": "Unknown",
   "kubernetesStatusWaiting": "Waiting",
   "kubernetesPodStateValue": "Pod state: {{value}}",
+  "kubernetesContainerStateValue": "Main-container state: {{value}}",
   "kubernetesStepConfiguration": "Configuration",
   "kubernetesStepDiscovery": "API discovery",
   "kubernetesStepExistingClaim": "Existing claim",

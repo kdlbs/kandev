@@ -5,6 +5,8 @@ import { Badge } from "@kandev/ui/badge";
 import type { KubernetesSession } from "@/lib/types/http-kubernetes";
 import {
   normalizedState,
+  mainContainerStateValue,
+  podPhaseValue,
   podStatusLabel,
   podStatusValue,
   retentionLabel,
@@ -41,6 +43,8 @@ function SessionIdentityValue({ label, value }: { label: string; value: string }
 export function SessionStatus({ session }: { session: KubernetesSession }) {
   const { t } = useTranslation();
   const podStatus = podStatusValue(session);
+  const podPhase = podPhaseValue(session);
+  const mainContainerState = mainContainerStateValue(session);
   const retentionState = normalizedState(session.retention_state);
   return (
     <div className="space-y-2">
@@ -59,7 +63,12 @@ export function SessionStatus({ session }: { session: KubernetesSession }) {
             value: sessionStateLabel(session.session_state, t),
           })}
         </p>
-        <p>{t("executors:kubernetesPodStateValue", { value: podStatusLabel(podStatus, t) })}</p>
+        <p>{t("executors:kubernetesPodStateValue", { value: podStatusLabel(podPhase, t) })}</p>
+        <p>
+          {t("executors:kubernetesContainerStateValue", {
+            value: podStatusLabel(mainContainerState, t),
+          })}
+        </p>
         <p>
           {t("executors:kubernetesRetentionStateValue", {
             value: retentionLabel(retentionState, t),

@@ -304,6 +304,7 @@
   "kubernetesStatusUnknown": "Ũńķńōŵń",
   "kubernetesStatusWaiting": "Ŵàĩţĩńĝ",
   "kubernetesPodStateValue": "Ƥōď śţàţē: {{value}}",
+  "kubernetesContainerStateValue": "Ḿàĩń-ćōńţàĩńēŕ śţàţē: {{value}}",
   "kubernetesStepConfiguration": "Ćōńƒĩĝũŕàţĩōń",
   "kubernetesStepDiscovery": "ÀƤĨ ďĩśćōvēŕŷ",
   "kubernetesStepExistingClaim": "Ēxĩśţĩńĝ ćĺàĩḿ",

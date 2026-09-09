@@ -127,7 +127,8 @@ the current Kind fixture. UI response fixtures do not replace this evidence.
 Passed:
 
 - `rtk pnpm exec vitest run components/settings/kubernetes-sessions-card.test.tsx lib/api/domains/kubernetes-api.test.ts hooks/domains/settings/use-kubernetes-settings.test.tsx`
-  (23 tests)
+  (24 tests, including distinct Pod phase and main-container state coverage on
+  desktop and mobile)
 - `rtk pnpm run typecheck`
 - `rtk pnpm run i18n:check`
 - `rtk pnpm run i18n:ratchet`

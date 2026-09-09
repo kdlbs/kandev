@@ -44,6 +44,27 @@ describe("KubernetesSessionsCard", () => {
     );
     expect(mobileLink.className).toContain("cursor-pointer");
   });
+
+  it("shows Pod phase and main-container state separately on both layouts", () => {
+    responsive.isMobile = false;
+    const state = sessionsState();
+    state.sessions[0] = {
+      ...state.sessions[0],
+      pod_phase: "Pending",
+      container_state: "waiting",
+    };
+
+    const rendered = render(<KubernetesSessionsCard state={state} />);
+    const desktopStatus = screen.getByTestId("kubernetes-session-status");
+    expect(within(desktopStatus).getByText("Pod state: Pending")).toBeTruthy();
+    expect(within(desktopStatus).getByText("Main-container state: Waiting")).toBeTruthy();
+
+    responsive.isMobile = true;
+    rendered.rerender(<KubernetesSessionsCard state={state} />);
+    const mobile = screen.getByTestId("kubernetes-mobile-session-list");
+    expect(within(mobile).getByText("Pod state: Pending")).toBeTruthy();
+    expect(within(mobile).getByText("Main-container state: Waiting")).toBeTruthy();
+  });
 });
 
 type KubernetesSessionsState = ComponentProps<typeof KubernetesSessionsCard>["state"];

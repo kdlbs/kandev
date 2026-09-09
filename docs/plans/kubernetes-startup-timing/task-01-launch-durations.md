@@ -119,6 +119,9 @@ Passed:
   (115 tests)
 - `rtk env KANDEV_LOG_LEVEL=info KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --no-build --project containers tests/kubernetes/kubernetes-executor.spec.ts -- --grep 'launches through kubeconfig'`
   (1 test passed in 50.9 seconds; default text log format)
+- `rtk pnpm e2e:run --host --no-build --project chromium tests/system/backend-fixture-lifecycle.spec.ts`
+  (8 tests passed, including early log-stream error capture without an
+  unhandled rejection and close-before-owned-root removal ordering)
 - `rtk node --test scripts/validate-public-docs.test.mjs`
 - `rtk node scripts/validate-public-docs.mjs`
 - `rtk git diff --check`

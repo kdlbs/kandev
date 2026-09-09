@@ -109,9 +109,11 @@ registry access, and sufficient disk for the three targets are required.
 Passed:
 
 - `rtk env KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --no-build --project containers tests/kubernetes/kubernetes-worker-presets.spec.ts`
-  (1 test passed in 3.7 minutes; all three actual recipe targets launched,
-  completed terminal work, preserved Stop/Resume state, and cleaned exact
-  owned Pod/PVC resources)
+  (1 test passed in 4.9 minutes; all three shipped PodTemplate files were
+  loaded with only the image and fixture pull policy replaced. Each actual
+  recipe target launched, completed terminal work, preserved Stop/Resume state,
+  and cleaned exact owned Pod/PVC resources. The node-pnpm target also passed
+  a network-free local npm global install and writable pnpm home/store checks.)
 - `rtk pnpm e2e:run --host --no-build --project chromium tests/settings/kubernetes-executor.spec.ts`
   (4 tests passed)
 - `rtk pnpm e2e:run --host --no-build --project mobile-chrome tests/settings/mobile-kubernetes-executor.spec.ts`
