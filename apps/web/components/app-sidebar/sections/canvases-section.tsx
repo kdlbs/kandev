@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { IconLayoutGrid, IconListDetails } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
@@ -22,6 +23,7 @@ import {
   SIDEBAR_ITEM_INACTIVE,
 } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
+import { CanvasTaskCreateLauncher } from "@/components/canvas/canvas-task-create-launcher";
 
 const EMPTY_CANVASES: Canvas[] = [];
 
@@ -103,16 +105,24 @@ function CanvasRow({ canvas, active }: { canvas: Canvas; active: boolean }) {
   );
 }
 
-function EmptyCanvasRow({ workspaceId }: { workspaceId: string }) {
+function EmptyCanvasRow({
+  onOpen,
+  triggerRef,
+}: {
+  onOpen: () => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
   const { t } = useTranslation();
   return (
-    <Link
-      href={workspaceCanvasSettingsHref(workspaceId)}
+    <button
+      ref={triggerRef}
+      type="button"
       data-testid="sidebar-canvases-empty"
-      className="rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground cursor-pointer"
+      onClick={onOpen}
+      className="min-h-8 w-full cursor-pointer rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground [@media(pointer:coarse)]:min-h-11"
     >
       {t("canvases:setUpCanvas")}
-    </Link>
+    </button>
   );
 }
 
@@ -128,23 +138,31 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
   if (!enabled || !activeWorkspaceId) return null;
 
   return (
-    <AppSidebarSection
-      id={APP_SIDEBAR_SECTION_IDS.canvases}
-      label={t("canvases:canvases")}
-      collapsed={collapsed}
-      icon={IconLayoutGrid}
-      headerAction={<OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} />}
-      headerActionVisibility="always"
-      collapsedSummary={activeCanvases.length > 0 ? activeCanvases.length : undefined}
-      defaultExpanded={false}
-    >
-      {activeCanvases.length === 0 ? (
-        <EmptyCanvasRow workspaceId={activeWorkspaceId} />
-      ) : (
-        activeCanvases.map((canvas) => (
-          <CanvasRow key={canvas.id} canvas={canvas} active={pathname === canvasHref(canvas.id)} />
-        ))
+    <CanvasTaskCreateLauncher workspaceId={activeWorkspaceId} presentation="sidebar">
+      {({ onOpen, triggerRef }) => (
+        <AppSidebarSection
+          id={APP_SIDEBAR_SECTION_IDS.canvases}
+          label={t("canvases:canvases")}
+          collapsed={collapsed}
+          icon={IconLayoutGrid}
+          headerAction={<OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} />}
+          headerActionVisibility="always"
+          collapsedSummary={activeCanvases.length > 0 ? activeCanvases.length : undefined}
+          defaultExpanded={false}
+        >
+          {activeCanvases.length === 0 ? (
+            <EmptyCanvasRow onOpen={onOpen} triggerRef={triggerRef} />
+          ) : (
+            activeCanvases.map((canvas) => (
+              <CanvasRow
+                key={canvas.id}
+                canvas={canvas}
+                active={pathname === canvasHref(canvas.id)}
+              />
+            ))
+          )}
+        </AppSidebarSection>
       )}
-    </AppSidebarSection>
+    </CanvasTaskCreateLauncher>
   );
 }

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 type DialogProps = {
   open: boolean;
+  onOpenChange: (open: boolean) => void;
   initialValues?: {
     title?: string;
     description?: string;
@@ -20,8 +21,11 @@ type DialogProps = {
 };
 
 const CREATE_CANVAS_LABEL = "Create canvas";
+const SET_UP_CANVAS_LABEL = "Set up a canvas";
 const CREATE_CANVAS_TITLE = "Create a canvas";
-const CREATE_CANVAS_PROMPT = "Build a canvas application";
+const CREATE_CANVAS_GOAL =
+  "Create a new Kandev canvas with a coordinator view that lists the existing tasks.";
+const CREATE_CANVAS_PROMPT = `${CREATE_CANVAS_GOAL}\n\n@create-canvas`;
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => mocks.featureEnabled,
@@ -48,8 +52,9 @@ vi.mock("react-i18next", () => ({
     t: (key: string) =>
       ({
         "canvases:createCanvas": CREATE_CANVAS_LABEL,
+        "canvases:setUpCanvas": SET_UP_CANVAS_LABEL,
         "canvases:createCanvasTaskTitle": CREATE_CANVAS_TITLE,
-        "canvases:createCanvasTaskPrompt": CREATE_CANVAS_PROMPT,
+        "canvases:createCanvasTaskPrompt": CREATE_CANVAS_GOAL,
       })[key] ?? key,
   }),
 }));
@@ -80,6 +85,38 @@ describe("CanvasTaskCreateLauncher", () => {
 
     fireEvent.click(screen.getByTestId("canvas-dialog-submit"));
     expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
+  });
+
+  it("uses a semantic sidebar setup button and the same task preset", () => {
+    render(<CanvasTaskCreateLauncher workspaceId="workspace-1" presentation="sidebar" />);
+
+    const setup = screen.getByTestId("sidebar-canvases-empty");
+    expect(setup.tagName).toBe("BUTTON");
+    expect(setup.textContent).toContain(SET_UP_CANVAS_LABEL);
+    expect(setup.getAttribute("href")).toBeNull();
+
+    fireEvent.click(setup);
+
+    expect(mocks.dialogProps?.initialValues).toEqual({
+      title: CREATE_CANVAS_TITLE,
+      description: CREATE_CANVAS_PROMPT,
+      noRepository: true,
+      preferLocalExecutor: true,
+    });
+  });
+
+  it("closes the draft when its workspace or feature availability changes", () => {
+    const { rerender } = render(<CanvasTaskCreateLauncher workspaceId="workspace-1" />);
+    fireEvent.click(screen.getByRole("button", { name: CREATE_CANVAS_LABEL }));
+    expect(mocks.dialogProps?.open).toBe(true);
+
+    rerender(<CanvasTaskCreateLauncher workspaceId="workspace-2" />);
+    expect(mocks.dialogProps?.open).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: CREATE_CANVAS_LABEL }));
+    mocks.featureEnabled = false;
+    rerender(<CanvasTaskCreateLauncher workspaceId="workspace-2" />);
+    expect(screen.queryByRole("button", { name: CREATE_CANVAS_LABEL })).toBeNull();
   });
 
   it("does not expose a canvas action while the feature is disabled", () => {

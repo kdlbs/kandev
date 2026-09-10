@@ -207,29 +207,10 @@ each file.
 
 ## Guided canvas task launch
 
-The desktop sidebar and workspace Canvases settings page use one shared canvas
-task preset. The preset opens the standard `TaskCreateDialog`. It does not
-create canvas metadata or add a canvas-only form.
-
-The preset supplies:
-
-- a localized task title and canvas-authoring prompt
-- repository-free source mode with an empty scratch path
-- a preference for an eligible local executor profile
-- the selected workspace
-
-The normal dialog continues to own workflow, workflow step, agent profile, and
-executor compatibility. The workflow and agent profile remain editable. The
-executor preference uses capability-based selection and never stores a profile
-identifier in the preset.
-
-Successful task creation follows the normal task route. The user continues the
-conversation there, and the task agent uses the authoring lifecycle. The same
-full-screen task dialog serves the workspace settings action on a phone. The
-desktop sidebar does not exist at that viewport.
-
-All launch surfaces remain behind `features.canvases`. A disabled client does
-not request canvas counts, add a settings tab, or register the task preset.
+The [guided canvas task launch design](guided-canvas-task-launch.md) owns
+creation entry points, the editable preset, saved-prompt preparation, and
+authoring prompt guidance. It maps the launch requirement and its desktop and
+phone outcomes. The runtime authoring bundle remains below.
 
 ## Agent authoring guidance
 
@@ -548,11 +529,12 @@ The section contains:
 - a workspace canvas count
 - one row for each active workspace canvas
 - a settings shortcut
-- an empty setup row that opens canvas guidance
+- an empty setup row that opens the guided task dialog
 
-The sidebar does not create canvases directly. The empty setup row opens the
-workspace Canvases settings page, where the guided task launch is available.
-There is no package import or blank canvas action in the sidebar.
+The empty setup row opens the guided task dialog on the current route.
+The separate settings shortcut opens workspace canvas management. The task
+agent creates the canvas after submission; opening the dialog does not create
+canvas metadata. There is no package import or blank canvas builder action.
 
 Routes are:
 

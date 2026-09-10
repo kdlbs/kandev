@@ -138,13 +138,9 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await testPage.getByRole("button", { name: "E2E Workflow", exact: true }).last().tap();
 
       const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
-      for (const tool of [
-        "create_canvas_kandev",
-        "read_canvas_authoring_skill_kandev",
-        "publish_canvas_kandev",
-      ]) {
-        expect(defaultPrompt, `mobile preset is missing ${tool}`).toContain(tool);
-      }
+      expect(defaultPrompt).toBe(
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
       expect(defaultPrompt).not.toContain("e2e:mcp:");
       await expect
         .poll(() =>
@@ -160,12 +156,37 @@ test.describe("Plugin-backed canvases on mobile", () => {
           summary: "Canvas created through the guided settings task flow.",
         })})`,
         'e2e:message("Canvas created from settings.")',
+        "Create a canvas that shows the current task list.",
+        "",
+        "@create-canvas",
       ].join("\n");
       await dialog.getByTestId("task-title-input").fill(taskTitle);
       await dialog.getByTestId("task-description-input").fill(description);
 
+      let failNextTaskCreate = true;
+      await testPage.route("**/api/v1/tasks", async (route) => {
+        if (failNextTaskCreate && route.request().method() === "POST") {
+          failNextTaskCreate = false;
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "controlled canvas task creation failure" }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
       const startAgent = dialog.getByTestId("submit-start-agent");
       await expect(startAgent).toBeEnabled();
+      await startAgent.tap();
+      await expect(
+        testPage
+          .locator('[data-testid="toast-message"]')
+          .filter({ hasText: "Failed to create task" }),
+      ).toBeVisible();
+      await expect(dialog.getByTestId("task-description-input")).toHaveValue(description);
+
       const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
       await startAgent.tap();
       const response = await responsePromise;
@@ -214,6 +235,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
         sessions.find((candidate) => candidate.id === taskSessionId)?.executor_profile_id,
       ).toBe(localProfile!.id);
     } finally {
+      await testPage.unroute("**/api/v1/tasks").catch(() => undefined);
       await Promise.all(canvasIds.map((canvasId) => removeCanvas(apiClient, canvasId)));
       if (alternateWorkflowId)
         await apiClient.deleteWorkflow(alternateWorkflowId).catch(() => undefined);

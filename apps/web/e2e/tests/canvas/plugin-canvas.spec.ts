@@ -10,6 +10,51 @@ import {
 } from "./canvas-fixture";
 
 test.describe("Plugin-backed canvases in the desktop task workbench", () => {
+  test("canvas setup opens the task dialog directly from the empty sidebar", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    try {
+      await testPage.goto(`/?workspaceId=${encodeURIComponent(seedData.workspaceId)}`);
+      await expect(testPage.getByTestId("kanban-board")).toBeVisible();
+      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible();
+
+      const sectionHeader = testPage.getByRole("button", { name: /canvases/i }).first();
+      await sectionHeader.click();
+      const setup = testPage.getByTestId("sidebar-canvases-empty");
+      await expect(setup).toBeVisible();
+
+      const routeBeforeOpen = testPage.url();
+      await setup.click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(testPage).toHaveURL(routeBeforeOpen);
+      await expect(dialog.getByTestId("source-mode-scratch")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await expect(dialog.getByTestId("task-description-input")).toHaveValue(
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
+
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(setup).toBeFocused();
+
+      await setup.click();
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).toBeHidden();
+    } finally {
+      await releaseFeature();
+    }
+  });
+
   test("shows the canvas creation prompt and retains the edited description on desktop", async ({
     testPage,
     apiClient,
@@ -48,16 +93,12 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
       );
 
       const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
-      for (const tool of [
-        "create_canvas_kandev",
-        "read_canvas_authoring_skill_kandev",
-        "publish_canvas_kandev",
-      ]) {
-        expect(defaultPrompt, `desktop preset is missing ${tool}`).toContain(tool);
-      }
+      expect(defaultPrompt).toBe(
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
       expect(defaultPrompt).not.toContain("e2e:mcp:");
 
-      const editedDescription = "desktop canvas prompt override";
+      const editedDescription = "desktop canvas prompt override\n\n@create-canvas";
       await dialog.getByTestId("task-title-input").fill("E2E Desktop Canvas Task");
       await dialog.getByTestId("task-description-input").fill(editedDescription);
 

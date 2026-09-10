@@ -386,6 +386,7 @@ func isLegacyCIAutoFixPrompt(content string) bool {
 func (r *sqliteRepository) getBuiltinPrompts() []*models.Prompt {
 	now := time.Now().UTC()
 	return []*models.Prompt{
+		{ID: "builtin-create-canvas", Name: "create-canvas", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("create-canvas")},
 		{ID: "builtin-code-review", Name: "code-review", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("code-review")},
 		{ID: "builtin-open-pr", Name: "open-pr", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("open-pr")},
 		{ID: "builtin-merge-base", Name: "merge-base", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("merge-base")},

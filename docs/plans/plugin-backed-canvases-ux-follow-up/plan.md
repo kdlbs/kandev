@@ -17,6 +17,13 @@ legacy_specs:
 
 # Implementation Plan: Plugin-backed canvases UX follow-up
 
+## Subsequent design
+
+The [direct canvas creation package](../canvas-direct-creation/plan.md) replaces
+Task 02's sidebar settings redirect with direct task-dialog launch. Completed
+results below remain historical. The new package owns replacement navigation
+and prompt tests; Task 07's outstanding external ACP evaluation is unchanged.
+
 ## Overview
 
 Correct the canvas discovery, creation, host, appearance, and authoring issues

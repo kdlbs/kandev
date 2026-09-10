@@ -25,6 +25,7 @@ remains authoritative for task data and permissions.
 
 ## System design
 
+- [Guided canvas task launch](system-design/guided-canvas-task-launch.md)
 - [Agent-authored web-app canvases](system-design/agent-authored-web-apps.md)
 - [Owner-authorized creation](system-design/local-creation-authority.md)
 - [Superseded collaborative canvases](system-design/collaborative-canvases.md)
@@ -32,7 +33,7 @@ remains authoritative for task data and permissions.
 ## Related context
 
 - [Runtime and permission fix plan](../../plans/canvas-runtime-permission-fixes/plan.md)
-
+- [Direct creation and saved prompt plan](../../plans/canvas-direct-creation/plan.md)
 - [Agent MCP discovery guidance](../agents/system-design/mcp-tool-discovery-guidance.md)
 - [MCP discovery and canvas prompt plan](../../plans/mcp-discovery-canvas-prompts/plan.md)
 - [GitHub Copilot App Canvas reference](../../copilot-canvas-reference.md)

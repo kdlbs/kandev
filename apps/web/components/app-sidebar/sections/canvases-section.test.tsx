@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 
@@ -32,6 +33,16 @@ vi.mock("@/lib/api/domains/canvas-api", () => ({
   workspaceCanvasSettingsHref: (id: string) =>
     `/settings/workspaces/${encodeURIComponent(id)}/canvases`,
   listWorkspaceCanvases: mocks.listWorkspaceCanvases,
+}));
+vi.mock("@/components/canvas/canvas-task-create-launcher", () => ({
+  CanvasTaskCreateLauncher: ({
+    children,
+  }: {
+    children: (props: {
+      onOpen: () => void;
+      triggerRef: { current: HTMLButtonElement | null };
+    }) => ReactNode;
+  }) => children({ onOpen: vi.fn(), triggerRef: { current: null } }),
 }));
 import { CanvasesSection, isActiveWorkspaceCanvas } from "./canvases-section";
 
@@ -103,7 +114,7 @@ describe("CanvasesSection", () => {
     expect(screen.getByTestId("sidebar-canvases-settings").getAttribute("href")).toBe(
       "/settings/workspaces/workspace-1/canvases",
     );
-    expect(screen.queryByTestId("sidebar-create-canvas")).toBeNull();
+    expect(screen.queryByTestId("sidebar-canvases-empty")).toBeNull();
   });
 
   it("shows setup guidance only after expanding an empty canvas section", async () => {
@@ -128,8 +139,8 @@ describe("CanvasesSection", () => {
 
     const setup = await screen.findByTestId("sidebar-canvases-empty");
     expect(setup.textContent).toContain("Set up a canvas");
-    expect(setup.getAttribute("href")).toBe("/settings/workspaces/workspace-1/canvases");
-    expect(screen.queryByTestId("sidebar-create-canvas")).toBeNull();
+    expect(setup.tagName).toBe("BUTTON");
+    expect(setup.getAttribute("href")).toBeNull();
   });
 
   it("starts folded while preserving the active workspace count", async () => {

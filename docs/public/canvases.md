@@ -17,6 +17,25 @@ An administrator can enable `features.canvases` in **Settings > System > Feature
 
 With the flag off, Kandev does not expose canvas tools, routes, events, background work, or navigation. Database migrations can still exist, but Kandev does not read or change canvas data.
 
+## Start a canvas task
+
+When canvases are enabled, open the workspace sidebar and expand **Canvases**.
+If the workspace has no active canvases, select **Set up a canvas**. Kandev
+opens the normal task form on the current page. It starts with an editable
+coordinator-view goal followed by the `@create-canvas` saved-prompt reference.
+
+Choose the agent, executor, workflow, and other task options, then select
+**Start task**. The task uses no repository by default and prefers a local
+executor. You can edit or remove the goal and reference before you submit.
+
+On a phone, open **Settings > Workspace > Canvases** and select **Create
+canvas**. The same full-screen task form and task options are available.
+
+The `@create-canvas` reference keeps the detailed authoring instructions out
+of the visible task description. Customize those instructions in **Settings >
+Prompts**. The task description keeps the text you submitted, while the
+reference is expanded when Kandev launches the task.
+
 ## Create a task canvas
 
 1. Open the task that owns the canvas.
