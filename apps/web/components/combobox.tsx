@@ -6,6 +6,7 @@ import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   Command,
   CommandEmpty,
@@ -198,9 +199,10 @@ function ComboboxTrigger({
         aria-label={ariaLabel}
         aria-expanded={open}
         className={cn(
+          controlSizingClassName("standard"),
           "w-full justify-between",
           !disabled && "cursor-pointer",
-          touchTarget && "min-h-12",
+          touchTarget && "max-md:min-h-12 [@media(pointer:coarse)]:min-h-12",
           triggerClassName,
         )}
         disabled={disabled}
@@ -300,7 +302,12 @@ export const Combobox = memo(function Combobox({
               {headerAction}
             </div>
           ) : null}
-          {showSearch && <CommandInput placeholder={searchPlaceholder} className="h-9" />}
+          {showSearch && (
+            <CommandInput
+              placeholder={searchPlaceholder}
+              className={controlSizingClassName("standard")}
+            />
+          )}
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <OptionsList

@@ -41,6 +41,7 @@ import {
 } from "@/components/settings/agent-profile-duplicate-action";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export {
   ProfileEnvVarsEditor,
@@ -112,7 +113,7 @@ function ProfileEditorHeader({
           variant="outline"
           onClick={onDuplicate}
           data-testid="duplicate-profile-header"
-          className="min-h-11 w-full md:w-auto"
+          className={settingsActionClassName("w-full md:w-auto")}
           disabled={duplicating}
           aria-busy={duplicating}
           title={t("agents:duplicateProfileNamed", { name: savedProfileName })}

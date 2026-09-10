@@ -13,6 +13,7 @@ import {
 } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function GitHubAccessHelp({
   label,
@@ -40,7 +41,7 @@ export function GitHubAccessHelp({
       type="button"
       variant="ghost"
       size="icon"
-      className="h-11 w-11 shrink-0 cursor-pointer text-muted-foreground sm:h-6 sm:w-6"
+      className={controlSizingClassName("icon", "shrink-0 cursor-pointer text-muted-foreground")}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
       aria-expanded={usesTouchDrawer ? open : undefined}
       aria-label={label}

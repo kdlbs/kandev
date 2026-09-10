@@ -54,7 +54,7 @@ export function JiraActionBar({
           type="button"
           variant="destructive"
           onClick={() => setConfirmingDelete(true)}
-          className="ml-auto min-h-11 cursor-pointer"
+          className="ml-auto cursor-pointer"
           data-testid="jira-delete-button"
         >
           {t("jira:removeConfiguration")}
