@@ -420,6 +420,7 @@ function FileBrowserTreeContent({
   multiSelect,
   dnd,
   activeFilePath,
+  workspaceBlocked,
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
@@ -431,6 +432,7 @@ function FileBrowserTreeContent({
   handlers: ReturnType<typeof useFileBrowserHandlers>;
   multiSelect: ReturnType<typeof useSelectionInteractions>["multiSelect"];
   dnd: ReturnType<typeof useSelectionInteractions>["dnd"];
+  workspaceBlocked: boolean;
   showTouchActions: boolean;
 }) {
   const { search, isSessionFailed, sessionError, treeState, fileStatuses, workspaceRestoration } =
@@ -466,13 +468,13 @@ function FileBrowserTreeContent({
         visibleLoadingPaths={treeState.visibleLoadingPaths}
         onOpenFile={handlers.openFileByPath}
         onToggleExpand={handlers.toggleExpand}
-        onDeleteFile={onDeleteFile}
-        onRenameFile={onRenameFile}
+        onDeleteFile={workspaceBlocked ? undefined : onDeleteFile}
+        onRenameFile={workspaceBlocked ? undefined : onRenameFile}
         onDownloadFile={onDownloadFile}
-        onUploadFilesHere={onUploadFilesHere}
+        onUploadFilesHere={workspaceBlocked ? undefined : onUploadFilesHere}
         onAddToChatContext={handlers.handleAddToChatContext}
         showTouchActions={showTouchActions}
-        onCreateFileSubmit={handlers.handleCreateFileSubmit}
+        onCreateFileSubmit={workspaceBlocked ? () => undefined : handlers.handleCreateFileSubmit}
         onCancelCreate={handlers.handleCancelCreate}
         onRetry={() => void treeState.loadTree({ resetRetry: true })}
         workspaceRestoration={workspaceRestoration.attempt}
@@ -483,11 +485,11 @@ function FileBrowserTreeContent({
         onSelect={multiSelect.handleClick}
         isDragging={dnd.isDragging}
         dragOverPath={dnd.dragOverPath}
-        onDragStart={dnd.handleDragStart}
-        onDragEnd={dnd.handleDragEnd}
-        onDragOver={dnd.handleDragOver}
-        onDragLeave={dnd.handleDragLeave}
-        onDrop={dnd.handleDrop}
+        onDragStart={workspaceBlocked ? undefined : dnd.handleDragStart}
+        onDragEnd={workspaceBlocked ? undefined : dnd.handleDragEnd}
+        onDragOver={workspaceBlocked ? undefined : dnd.handleDragOver}
+        onDragLeave={workspaceBlocked ? undefined : dnd.handleDragLeave}
+        onDrop={workspaceBlocked ? undefined : dnd.handleDrop}
         selectedCount={multiSelect.selectedPaths.size}
         selectedPaths={multiSelect.selectedPaths}
       />
@@ -523,6 +525,8 @@ export function FileBrowser({
     containerRef,
   });
   const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
+  const workspaceBlocked =
+    data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
   const { openPicker, uploads, elements } = useFileUploadEntryPoints(sessionId);
   const handleToolbarUpload = useCallback(
     (mode: "files" | "folder") => openPicker(mode, handlers.activeFolderPath ?? ""),
@@ -545,12 +549,12 @@ export function FileBrowser({
           copied={copied}
           expandedPathsSize={treeState.expandedPaths.size}
           onCopyPath={copyPath}
-          onStartCreate={onCreateFile ? handlers.handleStartCreate : undefined}
+          onStartCreate={!workspaceBlocked && onCreateFile ? handlers.handleStartCreate : undefined}
           onOpenFolder={openFolder}
           onCollapseAll={treeState.collapseAll}
-          showCreateButton={Boolean(onCreateFile)}
-          onUploadFiles={sessionId ? handleToolbarUpload : undefined}
-          onAddSources={onAddSources}
+          showCreateButton={!workspaceBlocked && Boolean(onCreateFile)}
+          onUploadFiles={!workspaceBlocked && sessionId ? handleToolbarUpload : undefined}
+          onAddSources={workspaceBlocked ? undefined : onAddSources}
           addSourcesButtonRef={addSourcesButtonRef}
           addSourcesDisabledReason={addSourcesDisabledReason}
         />
@@ -561,6 +565,7 @@ export function FileBrowser({
           multiSelect={multiSelect}
           dnd={dnd}
           activeFilePath={activeFilePath}
+          workspaceBlocked={workspaceBlocked}
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
           onDownloadFile={onDownloadFile}

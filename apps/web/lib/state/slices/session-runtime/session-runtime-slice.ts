@@ -350,7 +350,16 @@ export function migrateEnvKeyedData(
   migrate(draft.userShells.dismissedByEnvironmentId);
   migrate(draft.userShells.loading);
   migrate(draft.userShells.loaded);
-  migrate(draft.workspaceRestoration.byEnvironmentId);
+  const workspaceAttempt = draft.workspaceRestoration.byEnvironmentId[sessionId];
+  if (workspaceAttempt) {
+    if (!(environmentId in draft.workspaceRestoration.byEnvironmentId)) {
+      draft.workspaceRestoration.byEnvironmentId[environmentId] = {
+        ...workspaceAttempt,
+        environmentId,
+      };
+    }
+    delete draft.workspaceRestoration.byEnvironmentId[sessionId];
+  }
 }
 
 function buildContextWindowActions(set: ImmerSet) {

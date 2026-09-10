@@ -11,9 +11,10 @@ import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
   const { t } = useTranslation();
-  const workspaceBlocked =
-    props.workspaceRestoration && props.workspaceRestoration.status !== "ready";
-  if (workspaceBlocked && props.tree) {
+  const workspaceBlocked = Boolean(
+    props.workspaceRestoration && props.workspaceRestoration.status !== "ready",
+  );
+  if (workspaceBlocked) {
     const notice = (
       <WorkspaceUnavailable
         restoration={props.workspaceRestoration}
@@ -36,12 +37,15 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
         </div>
       );
     }
-    return (
-      <div className="flex min-h-0 flex-col">
-        {notice}
-        <FileTreeView {...props} />
-      </div>
-    );
+    if (props.tree) {
+      return (
+        <div className="flex min-h-0 flex-col">
+          {notice}
+          <FileTreeView {...props} />
+        </div>
+      );
+    }
+    return notice;
   }
   if (props.isSearchActive && props.searchResults !== null) {
     return (

@@ -3,6 +3,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { SessionPage } from "../../pages/session-page";
 import {
   restartAndAssertColdWorkspace,
+  RETAINED_WORKSPACE_CONTENT,
   RETAINED_WORKSPACE_FILE,
   seedCompletedConversation,
 } from "./completed-workspace-restoration-helpers";
@@ -35,7 +36,14 @@ test.describe("Completed conversation resume", () => {
     await expect(session.completedSessionNewAgentButton()).toBeVisible();
 
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
+    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    await fileNode.click();
+    const viewer = testPage.locator(".monaco-editor:visible").first();
+    await expect(viewer).toBeVisible({ timeout: 15_000 });
+    await expect(
+      viewer.locator(".view-lines").filter({ hasText: RETAINED_WORKSPACE_CONTENT }),
+    ).toBeVisible();
     await session.clickSessionChatTab();
 
     // Opening historical work is passive. Reloading must not launch a new

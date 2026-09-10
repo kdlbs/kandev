@@ -63,12 +63,13 @@ or provider protocol changes.
 
 ## TDD entry
 
-Add `TestWorkspaceRestoreTerminalSessions` using real retained inventory and the
-existing manager/runtime fakes. Assert workspace success first; the baseline
-returns `ErrSessionTerminal`. Retain agent-launch, promotion, and passthrough
-rejection tests. The focused lifecycle block preserves the existing coalescing,
-cleanup, and workspace-validation coverage, while the managed E2E crosses the
-real lifecycle manager and verifies the later explicit Resume.
+Use `TestEnsureExecutionAllowsTerminalWorkspaceWithoutStartingAgent` with real
+retained inventory and the existing manager/runtime fakes. Assert workspace
+success first; the baseline returns `ErrSessionTerminal`. Retain agent-launch,
+promotion, and passthrough rejection tests. The focused lifecycle block
+preserves the existing coalescing, cleanup, and workspace-validation coverage,
+while the managed E2E crosses the real lifecycle manager and verifies the later
+explicit Resume.
 
 ## Verification
 

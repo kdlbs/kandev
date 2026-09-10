@@ -1080,7 +1080,7 @@ func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.
 	mgr.SetExecutorProfileReader(reader)
 
 	execution, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
-		SessionID: "session-1", WorkspaceID: "workspace-1", AgentProfileID: "agent-profile", ExecutionProfileID: "agent-profile",
+		TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", AgentProfileID: "agent-profile", ExecutionProfileID: "agent-profile",
 		ExecutorProfileID: "executor-profile",
 		AgentID:           "auggie", WorkspacePath: "/workspace/task-1",
 	})

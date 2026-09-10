@@ -69,7 +69,7 @@ export function WorkspaceUnavailable({
               type="button"
               variant="outline"
               size="sm"
-              className="mt-3 h-11 cursor-pointer gap-1.5 sm:h-8"
+              className="mt-3 h-11 cursor-pointer gap-1.5 md:h-8"
               disabled={retryDisabled}
               onClick={onRetry}
               data-testid="workspace-retry"
@@ -80,7 +80,7 @@ export function WorkspaceUnavailable({
           )}
           {detail && (
             <details className="mt-2 min-w-0 text-xs text-muted-foreground">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 sm:min-h-8">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 md:min-h-8">
                 <IconChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
                 {t("task:technicalDetails")}
               </summary>

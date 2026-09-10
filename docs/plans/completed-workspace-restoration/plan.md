@@ -45,9 +45,9 @@ with a warm runtime can miss the defect. `describeEnsureError` then assigns a
 session-start title to a restore failure, and `task-page-inner.tsx` renders it
 above the entire layout.
 
-The existing `TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance`
-pins the conflicting policy. The correction must replace its workspace
-expectations while preserving the actual agent-launch and cleanup guards.
+The existing terminal-session lifecycle tests pin the conflicting policy. The
+correction must replace only the workspace expectations while preserving the
+actual agent-launch and cleanup guards.
 PR #3564's explicit `AllowCompletedSessionResume` is not a workspace permission.
 
 Classification: the passive state invariant already exists in
@@ -109,7 +109,7 @@ this table use `AC-TASKS-COMPLETION-`.
 
 | Criteria | Regression evidence |
 | --- | --- |
-| `003.1`, `003.2`, `003.4` | lifecycle `manager_workspace_restore_test.go`: `TestWorkspaceRestoreTerminalSessions` covers COMPLETED/FAILED/CANCELLED and all three ensure entry points; `TestAgentStartsStillRejectTerminalSessions`, `TestWorkspacePromotionStillRejectsTerminalSessions`, and `TestPassthroughReconnectStillRejectsTerminalSessions` preserve agent-only rejection |
+| `003.1`, `003.2`, `003.4` | lifecycle `manager_execution_test.go`: `TestEnsureExecutionAllowsTerminalWorkspaceWithoutStartingAgent` covers COMPLETED/FAILED/CANCELLED and all three ensure entry points; `manager_workspace_restore_test.go` keeps `TestAgentStartsStillRejectTerminalSessions`, `TestWorkspacePromotionStillRejectsTerminalSessions`, and `TestPassthroughReconnectStillRejectsTerminalSessions` for agent-only rejection |
 | `003.3`, `002.2`, `002.3`, `002.4`, `002.8`, `002.13` | desktop `completed-workspace-restoration.spec.ts` and `completed-session-resume.spec.ts` restore the workspace, restart the backend, and then resume the same conversation without changing task/session identity |
 | `003.5`, `003.6` | lifecycle `manager_workspace_restore_test.go`: `TestWorkspaceRestoreRejectsActiveCleanupWithoutMutation`, `TestWorkspaceRestoreRejectsAdmissionChangesWithoutMutation`, and `TestCachedWorkspaceRestoreRechecksProviderAdmission`; existing coalescing and deduplication tests remain in the focused lifecycle block |
 | `003.7` | existing lifecycle workspace-validation and materialization tests plus `TestWorkspaceRestoreRejectsAdmissionChangesWithoutMutation`; the cold E2E uses an existing retained worktree and does not create a replacement |
@@ -167,6 +167,10 @@ Implementation and regression tests completed on 2026-09-10:
 - `rtk git diff --check` passed. Targeted E2E-sleep lint passed for all four
   changed session specs. The repository-wide E2E-sleep lint still reports its
   pre-existing unrelated baseline and is not used as a task gate.
+- Review-fixup validation passed: the impacted frontend suite ran 120 tests,
+  backend normal suites ran 5,395 tests across three packages, and the
+  lifecycle race block ran 81 tests. Web typecheck, full lint, E2E build, and
+  both desktop/mobile cold-runtime flows passed again.
 
 Design validation before implementation on 2026-09-10:
 

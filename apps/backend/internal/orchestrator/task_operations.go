@@ -3493,6 +3493,11 @@ func (s *Service) populateEnvironmentWorkspaceInfo(ctx context.Context, session 
 	if session.TaskEnvironmentID != "" && env.ID != session.TaskEnvironmentID {
 		return
 	}
+	// WorkspacePath is the canonical task-root identity. A repository-less
+	// environment is still restorable, so do not require a repo row here.
+	if resp.WorktreePath == nil && env.WorkspacePath != "" {
+		resp.WorktreePath = &env.WorkspacePath
+	}
 	if len(env.Repos) == 0 {
 		return
 	}

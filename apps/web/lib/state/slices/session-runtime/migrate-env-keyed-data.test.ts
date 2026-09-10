@@ -154,6 +154,7 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     expect(state.workspaceRestoration.byEnvironmentId["env-3"]).toMatchObject({
       taskId: "task-3",
       sessionId: "sess-3",
+      environmentId: "env-3",
       status: "pending",
     });
     expect(state.workspaceRestoration.byEnvironmentId["sess-3"]).toBeUndefined();

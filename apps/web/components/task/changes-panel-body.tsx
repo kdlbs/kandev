@@ -48,7 +48,9 @@ function ComparisonTargetNotice({
 function ChangesPanelDialogsSection({
   dialogs,
   isLoading,
-}: Pick<ChangesPanelBodyProps, "dialogs" | "isLoading">) {
+  workspaceBlocked,
+}: Pick<ChangesPanelBodyProps, "dialogs" | "isLoading"> & { workspaceBlocked: boolean }) {
+  if (workspaceBlocked) return null;
   return (
     <>
       <DiscardDialog
@@ -386,7 +388,11 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
         totalFileCount={props.totalFileCount}
         onOpenReview={props.onOpenReview}
       />
-      <ChangesPanelDialogsSection dialogs={props.dialogs} isLoading={props.isLoading} />
+      <ChangesPanelDialogsSection
+        dialogs={props.dialogs}
+        isLoading={props.isLoading}
+        workspaceBlocked={Boolean(workspaceBlocked)}
+      />
     </PanelBody>
   );
 }

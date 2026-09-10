@@ -335,7 +335,7 @@ describe("resumeWithSilentFallback", () => {
     });
   });
 
-  it("seeds agentctl ready when restore_workspace fallback succeeds", async () => {
+  it("does not optimistically seed agentctl ready after restore_workspace succeeds", async () => {
     mockRequest
       .mockResolvedValueOnce({ success: false, task_id: TASK_ID, state: FAILED_STATE })
       .mockResolvedValueOnce({
@@ -350,8 +350,7 @@ describe("resumeWithSilentFallback", () => {
 
     await resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters);
 
-    expect(setAgentctlReady).toHaveBeenCalledTimes(1);
-    expect(setAgentctlReady).toHaveBeenCalledWith(SESSION_ID);
+    expect(setAgentctlReady).not.toHaveBeenCalled();
   });
 
   it("keeps workspace-only restore failures out of global recovery feedback", async () => {
@@ -392,6 +391,44 @@ describe("resumeWithSilentFallback", () => {
     expect(complete).not.toHaveBeenCalled();
     expect(calls.errors.at(-1)).toBeNull();
     expect(calls.recoveryFailures.at(-1)).toBeNull();
+  });
+
+  it("clears a stale workspace attempt when restore rejects after navigation", async () => {
+    let rejectRestore: ((error: Error) => void) | undefined;
+    mockRequest.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectRestore = reject;
+      }),
+    );
+    const { setters } = createSetters();
+    const attempt = {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      environmentId: "environment-1",
+      revision: 1,
+      status: "pending" as const,
+    };
+    const clear = vi.fn(() => true);
+    setters.workspaceRestoration = {
+      begin: () => attempt,
+      complete: vi.fn(() => true),
+      fail: vi.fn(() => true),
+      clear,
+    };
+    let current = true;
+    const restorePromise = resumeViaLaunch(buildRestoreWorkspaceRequest, {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      session: null,
+      setters,
+      canContinue: () => current,
+    });
+
+    current = false;
+    rejectRestore?.(new Error("late restore failure"));
+
+    expect(await restorePromise).toBe(false);
+    expect(clear).toHaveBeenCalledWith(attempt);
   });
 
   it("does not seed agentctl ready when resume succeeds (new execution will emit its own events)", async () => {

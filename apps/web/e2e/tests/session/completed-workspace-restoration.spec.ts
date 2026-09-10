@@ -78,6 +78,13 @@ test.describe("Completed workspace restoration", () => {
     await session.typeInTerminal("printf 'RESTORED_WORKSPACE_SHELL\\n'");
     await session.expectTerminalHasText("RESTORED_WORKSPACE_SHELL");
 
+    const workspaceStatus = await apiClient.wsRequest<{
+      state: string;
+      is_agent_running: boolean;
+    }>("task.session.status", { task_id: task.id, session_id: task.session_id });
+    expect(workspaceStatus.state).toBe("COMPLETED");
+    expect(workspaceStatus.is_agent_running).toBe(false);
+
     const afterWorkspace = await apiClient.listTaskSessions(task.id);
     const afterWorkspaceMessages = await apiClient.listSessionMessages(task.session_id);
     expect(afterWorkspace.sessions).toHaveLength(beforeSessions.sessions.length);

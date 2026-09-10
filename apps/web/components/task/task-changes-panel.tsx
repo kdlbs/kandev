@@ -193,12 +193,16 @@ function persistAutoMarkSetting(checked: boolean) {
   updateUserSettings(payload, { cache: "no-store" }).catch(() => {});
 }
 
-function useWalkthroughRequest(activeSessionId: string | null | undefined, allFiles: ReviewFile[]) {
+function useWalkthroughRequest(
+  activeSessionId: string | null | undefined,
+  allFiles: ReviewFile[],
+  workspaceBlocked = false,
+) {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   return useRequestChangesWalkthrough({
     taskId: activeTaskId,
     sessionId: activeSessionId,
-    ready: allFiles.length > 0,
+    ready: allFiles.length > 0 && !workspaceBlocked,
   });
 }
 
@@ -227,20 +231,56 @@ function useChangesPRPresentation(opts: {
   return { selectedFileKey, blockChangesForPR };
 }
 
+function useFixCommentsRequest(
+  activeSessionId: string | null | undefined,
+  workspaceBlocked: boolean,
+) {
+  const { t } = useTranslation();
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const getPendingComments = useCommentsStore((s) => s.getPendingComments);
+  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
+  const { toast } = useToast();
+
+  return useCallback(() => {
+    if (workspaceBlocked || !activeSessionId || !activeTaskId) return;
+    const comments = getPendingComments().filter(isDiffComment);
+    if (comments.length === 0) return;
+    const markdown = formatReviewCommentsAsMarkdown(comments);
+    if (!markdown) return;
+    const client = getWebSocketClient();
+    if (client)
+      client
+        .request("message.add", {
+          task_id: activeTaskId,
+          session_id: activeSessionId,
+          client_message_id: generateUUID(),
+          content: markdown,
+        })
+        .catch(() => toast({ title: t("task:failedToSendComments"), variant: "error" }));
+    markCommentsSent(comments.map((c) => c.id));
+  }, [
+    activeSessionId,
+    activeTaskId,
+    getPendingComments,
+    markCommentsSent,
+    t,
+    toast,
+    workspaceBlocked,
+  ]);
+}
+
 function useChangesActions(
   activeSessionId: string | null | undefined,
   allFiles: ReviewFile[],
   defaultWordWrap = DEFAULT_DIFF_WORD_WRAP,
+  workspaceBlocked = false,
 ) {
   const { t } = useTranslation();
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const userSettings = useAppStore((state) => state.userSettings);
   const { discard } = useGitOperations(activeSessionId ?? null);
   const { markReviewed, markUnreviewed } = useSessionFileReviews(activeSessionId ?? null);
-  const getPendingComments = useCommentsStore((s) => s.getPendingComments);
-  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const { toast } = useToast();
 
   const [splitView, setSplitView] = useState(
@@ -268,6 +308,7 @@ function useChangesActions(
 
   const handleDiscard = useCallback(
     async (key: string) => {
+      if (workspaceBlocked) return;
       const { repositoryName, path } = discardTargetFromReviewFileKey(key);
       try {
         const result = await discard([path], repositoryName || undefined);
@@ -288,7 +329,7 @@ function useChangesActions(
         });
       }
     },
-    [discard, toast],
+    [discard, toast, workspaceBlocked],
   );
 
   const handleToggleAutoMark = useCallback(
@@ -300,25 +341,7 @@ function useChangesActions(
     [setUserSettings, userSettings],
   );
 
-  const handleFixComments = useCallback(() => {
-    if (!activeSessionId || !activeTaskId) return;
-    const allPending = getPendingComments();
-    const comments = allPending.filter(isDiffComment);
-    if (comments.length === 0) return;
-    const markdown = formatReviewCommentsAsMarkdown(comments);
-    if (!markdown) return;
-    const client = getWebSocketClient();
-    if (client)
-      client
-        .request("message.add", {
-          task_id: activeTaskId,
-          session_id: activeSessionId,
-          client_message_id: generateUUID(),
-          content: markdown,
-        })
-        .catch(() => toast({ title: t("task:failedToSendComments"), variant: "error" }));
-    markCommentsSent(comments.map((c) => c.id));
-  }, [activeSessionId, activeTaskId, getPendingComments, markCommentsSent, toast]);
+  const handleFixComments = useFixCommentsRequest(activeSessionId, workspaceBlocked);
 
   return {
     splitView,
@@ -338,6 +361,27 @@ function useTaskChangesWorkspaceRestoration(
 ): WorkspaceRestorationResult {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   return useWorkspaceRestoration(activeTaskId, activeSessionId);
+}
+
+function useTaskChangesPanelActions(
+  view: ReturnType<typeof useChangesView>,
+  wordWrap: boolean,
+  workspaceRestoration: WorkspaceRestorationResult,
+) {
+  const workspaceBlocked =
+    workspaceRestoration.status !== null && workspaceRestoration.status !== "ready";
+  const actions = useChangesActions(
+    view.activeSessionId,
+    view.allFiles,
+    wordWrap,
+    workspaceBlocked,
+  );
+  const handleRequestWalkthrough = useWalkthroughRequest(
+    view.activeSessionId,
+    view.allFiles,
+    workspaceBlocked,
+  );
+  return { actions, handleRequestWalkthrough };
 }
 
 function ChangesPanelHeader({
@@ -395,10 +439,13 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
 
   const view = useChangesView(selectedDiff, onClearSelected, sourceFilter, prKey);
   const workspaceRestoration = useTaskChangesWorkspaceRestoration(view.activeSessionId);
+  const { actions, handleRequestWalkthrough } = useTaskChangesPanelActions(
+    view,
+    wordWrapProp,
+    workspaceRestoration,
+  );
   const usesPRDiff = sourceFilter === "all" || sourceFilter === "pr";
   const relevantPRLoading = usesPRDiff && view.prDiffLoading;
-  const actions = useChangesActions(view.activeSessionId, view.allFiles, wordWrapProp);
-  const handleRequestWalkthrough = useWalkthroughRequest(view.activeSessionId, view.allFiles);
   const fileTarget = { filePath, fileRepositoryName, prKey, changeLayer };
   const visible = useVisibleDiffState({
     allFiles: view.allFiles,

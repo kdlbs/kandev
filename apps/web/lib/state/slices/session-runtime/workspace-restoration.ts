@@ -31,13 +31,15 @@ export type WorkspaceRestorationInput = {
 };
 
 export function resolveWorkspaceRestorationKey(
-  sessionId: string | null | undefined,
+  _sessionId: string | null | undefined,
   environmentId?: string | null,
 ): string | null {
   const explicitEnvironmentId = environmentId?.trim();
   if (explicitEnvironmentId) return explicitEnvironmentId;
-  const fallbackSessionId = sessionId?.trim();
-  return fallbackSessionId || null;
+  // Workspace state is environment-scoped. Waiting for the canonical mapping
+  // prevents a late mapping from moving an in-flight attempt away from the
+  // key selected by a restore callback.
+  return null;
 }
 
 export function beginWorkspaceRestoration(
@@ -118,5 +120,6 @@ export function sanitizeWorkspaceRestorationDetails(error: unknown): string {
   return message
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .slice(0, 512)
+    .replace(/[\uD800-\uDBFF]$/u, "")
     .trim();
 }

@@ -440,6 +440,25 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const workspaceReady = mode === "shell" && workspaceRestoration.status === "ready";
   const connectionID = mode === "agent" ? sessionId : environmentId;
   const environmentEnded = useEnvironmentEnded(environmentId);
+  useEffect(() => {
+    if (
+      mode !== "shell" ||
+      !environmentEnded ||
+      !taskId ||
+      !sessionId ||
+      workspaceRestoration.status !== null
+    ) {
+      return;
+    }
+    void workspaceRestoration.restore();
+  }, [
+    environmentEnded,
+    mode,
+    sessionId,
+    taskId,
+    workspaceRestoration.restore,
+    workspaceRestoration.status,
+  ]);
   const canConnect =
     computeCanConnect(mode, connectionID, sessionId, environmentEnded, workspaceReady) &&
     (mode !== "shell" || !workspaceRestoration.status || workspaceRestoration.status === "ready");
@@ -513,11 +532,13 @@ function TerminalPaneOverlay({
   const { t } = useTranslation();
   if (mode === "shell" && workspaceRestoration?.status && workspaceRestoration.status !== "ready") {
     return (
-      <WorkspaceUnavailable
-        restoration={workspaceRestoration.attempt}
-        onRetry={() => void workspaceRestoration.restore()}
-        retryDisabled={workspaceRestoration.status === "pending"}
-      />
+      <div className="absolute inset-0 z-10 bg-background">
+        <WorkspaceUnavailable
+          restoration={workspaceRestoration.attempt}
+          onRetry={() => void workspaceRestoration.restore()}
+          retryDisabled={workspaceRestoration.status === "pending"}
+        />
+      </div>
     );
   }
   if (paneState === "connected") return null;

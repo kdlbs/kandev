@@ -89,4 +89,11 @@ describe("workspace restoration attempt state", () => {
     expect(details).toHaveLength(512);
     expect(details).not.toContain("\u0000");
   });
+
+  it("does not leave a trailing high surrogate in bounded diagnostics", () => {
+    const details = sanitizeWorkspaceRestorationDetails("x".repeat(511) + "😀");
+
+    expect(details).toHaveLength(511);
+    expect(details).toBe("x".repeat(511));
+  });
 });

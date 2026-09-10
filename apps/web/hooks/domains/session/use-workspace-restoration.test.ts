@@ -18,10 +18,10 @@ const mockRestoreSessionWorkspace = vi.mocked(restoreSessionWorkspace);
 const taskId = "task-1";
 const sessionId = "session-1";
 const environmentId = "environment-1";
+const agentExecutionId = "execution-1";
 
 let workspaceRestoration: WorkspaceRestorationState;
 let state: Record<string, unknown>;
-const setAgentctlStatus = vi.fn();
 const bumpWorkspaceFilesRefresh = vi.fn();
 
 function resetStore() {
@@ -29,6 +29,7 @@ function resetStore() {
   state = {
     environmentIdBySessionId: { [sessionId]: environmentId },
     taskSessions: { items: { [sessionId]: { task_environment_id: environmentId } } },
+    sessionAgentctl: { itemsBySessionId: {} },
     get workspaceRestoration() {
       return workspaceRestoration;
     },
@@ -48,13 +49,13 @@ function resetStore() {
       failAttempt(workspaceRestoration, attempt, details),
     clearWorkspaceRestoration: (attempt: Parameters<typeof clearAttempt>[1]) =>
       clearAttempt(workspaceRestoration, attempt),
-    setSessionAgentctlStatus: setAgentctlStatus,
     bumpWorkspaceFilesRefresh,
   };
 }
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (value: Record<string, unknown>) => unknown) => selector(state),
+  useAppStoreApi: () => ({ getState: () => state }),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -82,14 +83,13 @@ describe("useWorkspaceRestoration attempt lifecycle", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.attempt?.details).toBe("backendfailure");
-    expect(setAgentctlStatus).not.toHaveBeenCalled();
     expect(bumpWorkspaceFilesRefresh).not.toHaveBeenCalled();
   });
 
   it("retries a failed restore, clears the error, and refreshes workspace consumers", async () => {
     mockRestoreSessionWorkspace
       .mockRejectedValueOnce(new Error("first failure"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ success: true, agent_execution_id: agentExecutionId } as never);
     const { result, rerender } = renderHook(() =>
       useWorkspaceRestoration(taskId, sessionId, environmentId),
     );
@@ -100,6 +100,10 @@ describe("useWorkspaceRestoration attempt lifecycle", () => {
     rerender();
     expect(result.current.status).toBe("error");
 
+    state.sessionAgentctl = {
+      itemsBySessionId: { [sessionId]: { status: "ready", agentExecutionId } },
+    };
+
     await act(async () => {
       expect(await result.current.restore()).toBe(true);
     });
@@ -108,7 +112,6 @@ describe("useWorkspaceRestoration attempt lifecycle", () => {
     expect(result.current.status).toBe("ready");
     expect(result.current.attempt?.details).toBeUndefined();
     expect(mockRestoreSessionWorkspace).toHaveBeenCalledTimes(2);
-    expect(setAgentctlStatus).toHaveBeenCalledWith(sessionId, { status: "ready" });
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith(sessionId);
   });
 });
@@ -117,8 +120,8 @@ describe("useWorkspaceRestoration concurrency guards", () => {
   it("rejects a duplicate retry while the first restore is pending", async () => {
     let resolveRestore: (() => void) | undefined;
     mockRestoreSessionWorkspace.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        resolveRestore = resolve;
+      new Promise((resolve) => {
+        resolveRestore = () => resolve({ success: true } as never);
       }),
     );
     const { result, rerender } = renderHook(() =>
@@ -141,12 +144,19 @@ describe("useWorkspaceRestoration concurrency guards", () => {
       resolveRestore?.();
       expect(await firstRestore).toBe(true);
     });
+    rerender();
+    expect(result.current.status).toBe("pending");
   });
 
   it("does not let a restore from the previous task settle the current attempt", async () => {
     const restores: Array<() => void> = [];
     mockRestoreSessionWorkspace.mockImplementation(
-      () => new Promise<void>((resolve) => restores.push(resolve)),
+      () =>
+        new Promise((resolve) =>
+          restores.push(() =>
+            resolve({ success: true, agent_execution_id: agentExecutionId } as never),
+          ),
+        ),
     );
     const { result, rerender } = renderHook(
       ({ currentTaskId }) => useWorkspaceRestoration(currentTaskId, sessionId, environmentId),
@@ -173,6 +183,9 @@ describe("useWorkspaceRestoration concurrency guards", () => {
     expect(result.current.attempt?.taskId).toBe("task-2");
     expect(result.current.status).toBe("pending");
 
+    state.sessionAgentctl = {
+      itemsBySessionId: { [sessionId]: { status: "ready", agentExecutionId } },
+    };
     await act(async () => {
       restores[1]?.();
       expect(await secondRestore).toBe(true);

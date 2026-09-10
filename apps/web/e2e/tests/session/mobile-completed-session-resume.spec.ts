@@ -3,6 +3,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { SessionPage } from "../../pages/session-page";
 import {
   restartAndAssertColdWorkspace,
+  RETAINED_WORKSPACE_CONTENT,
   RETAINED_WORKSPACE_FILE,
   seedCompletedConversation,
 } from "./completed-workspace-restoration-helpers";
@@ -30,7 +31,18 @@ test.describe("Completed conversation resume on mobile", () => {
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 
     await testPage.getByRole("button", { name: "Files" }).tap();
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
+    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    await fileNode.tap();
+    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+    await expect(viewer).toBeVisible({ timeout: 15_000 });
+    await expect(
+      viewer
+        .getByTestId("mobile-file-viewer-content")
+        .locator(".cm-line")
+        .filter({ hasText: RETAINED_WORKSPACE_CONTENT }),
+    ).toBeVisible();
+    await viewer.getByRole("button", { name: "Close" }).tap();
     await testPage.getByRole("button", { name: "Chat" }).tap();
 
     const resume = session.completedSessionResumeButton();

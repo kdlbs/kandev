@@ -265,14 +265,6 @@ function settleWorkspaceRestoreFailure(
   context.setters.setRecoveryFailure?.(null);
 }
 
-function settleWorkspaceRestoreSuccess(
-  attempt: WorkspaceRestorationAttempt | null,
-  context: ResumeLaunchContext,
-): boolean {
-  if (!attempt) return true;
-  return context.setters.workspaceRestoration?.complete(attempt) ?? false;
-}
-
 function isWorkspaceRestoreRequest(request: LaunchSessionRequest): boolean {
   return request.intent === "restore_workspace";
 }
@@ -290,7 +282,6 @@ function toLaunchError(error: unknown): Error {
 function applyLaunchSuccess(
   response: ResumeResponse,
   request: LaunchSessionRequest,
-  workspaceAttempt: WorkspaceRestorationAttempt | null,
   context: ResumeLaunchContext,
 ): LaunchAttempt {
   applyResumeResponse(
@@ -301,10 +292,9 @@ function applyLaunchSuccess(
     context.setters,
   );
   if (!isWorkspaceRestoreRequest(request)) return { ok: true };
-  if (!settleWorkspaceRestoreSuccess(workspaceAttempt, context)) {
-    return { ok: false, error: new Error() };
-  }
-  context.setters.setAgentctlReady?.(context.sessionId);
+  // restore_workspace only admits the retained workspace. Agentctl readiness
+  // is settled by the matching session.agentctl_ready event so a later health
+  // failure cannot be hidden by an optimistic response.
   return { ok: true };
 }
 
@@ -439,15 +429,24 @@ async function tryLaunch(
   }
   try {
     const resp = await launchSession(request);
-    if (!canContinue()) return { ok: false, error: new Error() };
+    if (!canContinue()) {
+      if (workspaceAttempt) setters.workspaceRestoration?.clear(workspaceAttempt);
+      return { ok: false, error: new Error() };
+    }
     if (!resp.success) return applyLaunchFailure(resp, request, workspaceAttempt, context);
-    return applyLaunchSuccess(resp, request, workspaceAttempt, context);
+    return applyLaunchSuccess(resp, request, context);
   } catch (err) {
     console.error("[tryLaunch] session launch failed", {
       intent: request.intent,
       sessionId: context.sessionId,
       err,
     });
+    if (!canContinue()) {
+      // A rejected stale request must not strand its pending workspace row.
+      // The attempt carries its own task/session/environment/revision fence.
+      if (workspaceAttempt) setters.workspaceRestoration?.clear(workspaceAttempt);
+      return { ok: false, error: toLaunchError(err) };
+    }
     return handleLaunchException(err, request, workspaceAttempt, context);
   }
 }

@@ -62,8 +62,9 @@ export function buildGuardedSetters(
             guard() ? (setters.workspaceRestoration?.complete(attempt) ?? false) : false,
           fail: (attempt, error) =>
             guard() ? (setters.workspaceRestoration?.fail(attempt, error) ?? false) : false,
-          clear: (attempt) =>
-            guard() ? (setters.workspaceRestoration?.clear(attempt) ?? false) : false,
+          // clearWorkspaceRestoration validates the attempt identity itself.
+          // Allow stale request cleanup to remove only its own matching row.
+          clear: (attempt) => setters.workspaceRestoration?.clear(attempt) ?? false,
         }
       : undefined,
     onTaskArchiveConflict: () => {

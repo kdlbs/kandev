@@ -391,6 +391,9 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   const taskId = session?.task_id ?? null;
   const workspaceRestoration = useWorkspaceRestoration(taskId, isReadOnlyMode ? null : sessionId);
   const isSessionFailed = !isReadOnlyMode && isFailed;
+  const sessionEnded = Boolean(
+    session && ["COMPLETED", "FAILED", "CANCELLED"].includes(session.state),
+  );
   const shellOutput = useAppStore((state) => {
     if (!sessionId || isReadOnlyMode) return "";
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
@@ -406,6 +409,8 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   return {
     sessionId,
     taskId,
+    isActive,
+    sessionEnded,
     isSessionFailed,
     errorMessage,
     shellOutput,
@@ -438,12 +443,36 @@ export function ShellTerminal({
     sessionId,
     taskId,
     isSessionFailed,
+    sessionEnded,
     errorMessage,
     shellOutput,
     canSubscribe,
     agentctlStatusKey,
     workspaceRestoration,
   } = useShellSessionState(propSessionId, isReadOnlyMode);
+  const workspaceBlocked =
+    !isReadOnlyMode &&
+    workspaceRestoration.status !== null &&
+    workspaceRestoration.status !== "ready";
+  useEffect(() => {
+    if (
+      isReadOnlyMode ||
+      !sessionEnded ||
+      !taskId ||
+      !sessionId ||
+      workspaceRestoration.status !== null
+    ) {
+      return;
+    }
+    void workspaceRestoration.restore();
+  }, [
+    isReadOnlyMode,
+    sessionEnded,
+    sessionId,
+    taskId,
+    workspaceRestoration.restore,
+    workspaceRestoration.status,
+  ]);
   useReadOnlyOutputSync({
     xtermRef,
     isReadOnlyMode,
@@ -492,10 +521,16 @@ export function ShellTerminal({
     onClose: search.close,
   });
 
-  useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId });
+  useShellInputHandler({
+    xtermRef,
+    onDataDisposableRef,
+    isReadOnlyMode: isReadOnlyMode || workspaceBlocked,
+    taskId,
+    sessionId,
+  });
   useShellTerminalKeyHandler({
     xtermRef,
-    isReadOnlyMode,
+    isReadOnlyMode: isReadOnlyMode || workspaceBlocked,
     sessionId,
     send,
     onFindInPanel: search.open,
@@ -512,18 +547,6 @@ export function ShellTerminal({
     send,
     storeApi,
   });
-
-  if (!isReadOnlyMode && workspaceRestoration.status && workspaceRestoration.status !== "ready") {
-    return (
-      <div className="h-full w-full min-w-0">
-        <WorkspaceUnavailable
-          restoration={workspaceRestoration.attempt}
-          onRetry={() => void workspaceRestoration.restore()}
-          retryDisabled={workspaceRestoration.status === "pending"}
-        />
-      </div>
-    );
-  }
 
   const searchBar = <TerminalSearchBar search={search} />;
   if (isReadOnlyMode) {
@@ -546,7 +569,7 @@ export function ShellTerminal({
       </div>
     );
   }
-  if (isSessionFailed) {
+  if (isSessionFailed && workspaceRestoration.status === null) {
     return <WorkspaceUnavailable error={errorMessage} />;
   }
   return (
@@ -558,6 +581,15 @@ export function ShellTerminal({
     >
       <div ref={terminalRef} className="h-full w-full" />
       {searchBar}
+      {workspaceBlocked && (
+        <div className="absolute inset-0 z-10 bg-background">
+          <WorkspaceUnavailable
+            restoration={workspaceRestoration.attempt}
+            onRetry={() => void workspaceRestoration.restore()}
+            retryDisabled={workspaceRestoration.status === "pending"}
+          />
+        </div>
+      )}
     </div>
   );
 }

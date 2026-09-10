@@ -792,36 +792,66 @@ func (m *Manager) createExecutionWithMode(
 		return nil, err
 	}
 
-	if addErr := m.executionStore.Add(execution); addErr != nil {
+	return m.registerAndPublishCreatedExecution(
+		operationCtx,
+		taskID,
+		info,
+		agentLaunch,
+		inputs,
+		runtimeInstance,
+		execution,
+	)
+}
+
+func (m *Manager) registerAndPublishCreatedExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	agentLaunch bool,
+	inputs *executionCreationInputs,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+) (*AgentExecution, error) {
+	// Cleanup can stop and remove an execution as soon as it is registered.
+	// Keep the final admission, registration, persistence, and publication as
+	// one lifecycle transition so cleanup cannot observe a half-created
+	// workspace execution and tear it down underneath its first subscriber.
+	execution.remoteInstanceLifecycleMu.Lock()
+	if err := m.executionStore.Add(execution); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
 		// Lost a race: another path created an execution for this session
 		// between our check and our Add. Roll back the runtime instance we
 		// just spawned (otherwise its subprocess is orphaned) and return the
 		// winner so the caller observes a single execution per session.
-		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
-			m.rollbackRacedExecution(operationCtx, inputs.runtime, runtimeInstance, execution)
+		if errors.Is(err, ErrExecutionAlreadyExistsForSession) {
+			m.rollbackRacedExecution(ctx, inputs.runtime, runtimeInstance, execution)
 			if existing, ok := m.executionStore.GetBySessionID(info.SessionID); ok {
 				return existing, nil
 			}
 		}
-		return nil, fmt.Errorf("failed to register execution: %w", addErr)
+		return nil, fmt.Errorf("failed to register execution: %w", err)
 	}
 	isKubernetes := execution.RuntimeName == agentruntime.RuntimeKubernetes
 	var createdRuntimeSecrets map[string]bool
+	var err error
 	if isKubernetes {
-		createdRuntimeSecrets, err = m.persistRequiredKubernetesRuntimeSecrets(operationCtx, runtimeInstance, execution)
+		createdRuntimeSecrets, err = m.persistRequiredKubernetesRuntimeSecrets(ctx, runtimeInstance, execution)
 		if err != nil {
+			execution.remoteInstanceLifecycleMu.Unlock()
 			m.rollbackRegisteredLaunch(inputs.runtime, runtimeInstance, execution, "Kubernetes runtime secret persistence failed")
 			return nil, err
 		}
 	}
 	// Persist before the final session read so concurrent deletion cleanup can
 	// inventory this execution even if it started between Add and validation.
-	if err := m.persistExecutorRunningResult(operationCtx, execution); err != nil {
-		secretCleanupErr := m.deleteCreatedRuntimeSecrets(operationCtx, execution, createdRuntimeSecrets)
+	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+		secretCleanupErr := m.deleteCreatedRuntimeSecrets(ctx, execution, createdRuntimeSecrets)
+		execution.remoteInstanceLifecycleMu.Unlock()
 		m.rollbackRegisteredLaunchAfterPersistFailure(inputs.runtime, runtimeInstance, execution)
 		return nil, errors.Join(fmt.Errorf("persist execution registration: %w", err), secretCleanupErr)
 	}
-	if err := m.ensureExecutionAdmission(operationCtx, taskID, info, agentLaunch); err != nil {
+	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
 		if errors.Is(err, errTaskCleanupActive) {
 			m.rollbackRegisteredLaunchForTaskCleanup(inputs.runtime, runtimeInstance, execution)
 		} else {
@@ -829,10 +859,12 @@ func (m *Manager) createExecutionWithMode(
 		}
 		return nil, err
 	}
-	if err := m.publishCreatedExecution(operationCtx, runtimeInstance, execution, inputs.executionID, taskID); err != nil {
+	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, inputs.executionID, taskID); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
 		m.rollbackRegisteredLaunch(inputs.runtime, runtimeInstance, execution, "runtime secret persistence failed")
 		return nil, err
 	}
+	execution.remoteInstanceLifecycleMu.Unlock()
 
 	return execution, nil
 }

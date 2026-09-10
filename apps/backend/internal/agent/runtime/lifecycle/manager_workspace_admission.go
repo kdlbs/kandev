@@ -85,13 +85,13 @@ func validateWorkspaceAdmission(taskID string, info *WorkspaceInfo, snapshot *wo
 }
 
 func validateWorkspaceSessionIdentity(taskID string, info *WorkspaceInfo, session *models.TaskSession) error {
-	if session.ID != "" && session.ID != info.SessionID {
+	if session.ID == "" || session.ID != info.SessionID {
 		return fmt.Errorf("%w: verify workspace admission: session identity changed", ErrSessionWorkspaceNotReady)
 	}
-	if taskID != "" && session.TaskID != "" && session.TaskID != taskID {
+	if taskID == "" || session.TaskID == "" || session.TaskID != taskID {
 		return fmt.Errorf("%w: verify workspace admission: session belongs to another task", ErrSessionWorkspaceNotReady)
 	}
-	if info.TaskID != "" && session.TaskID != "" && session.TaskID != info.TaskID {
+	if info.TaskID == "" || session.TaskID != info.TaskID {
 		return fmt.Errorf("%w: verify workspace admission: session task binding changed", ErrSessionWorkspaceNotReady)
 	}
 	return nil
