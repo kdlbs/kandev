@@ -45,11 +45,12 @@ var errKubernetesLifecycleRequestIncomplete = errors.New("kubernetes lifecycle r
 // KubernetesExecutor owns Kubernetes Pod/PVC lifecycle and process-local
 // forwards. Cluster clients are initialized lazily from the selected executor.
 type KubernetesExecutor struct {
-	agentctlResolver *AgentctlResolver
-	logger           *logger.Logger
-	clientFactory    kubernetesRuntimeClientFactory
-	resolveBinary    kubernetesAgentctlBinaryResolver
-	healthRetryDelay time.Duration
+	agentctlResolver  *AgentctlResolver
+	logger            *logger.Logger
+	clientFactory     kubernetesRuntimeClientFactory
+	resolveBinary     kubernetesAgentctlBinaryResolver
+	healthRetryDelay  time.Duration
+	launchTimingClock func() time.Time
 
 	mu       sync.Mutex
 	sessions map[string]*kubernetesSession
@@ -79,12 +80,13 @@ const (
 
 func NewKubernetesExecutor(agentctlResolver *AgentctlResolver, log *logger.Logger) *KubernetesExecutor {
 	runtime := &KubernetesExecutor{
-		agentctlResolver: agentctlResolver,
-		logger:           log,
-		clientFactory:    newKubernetesRuntimeClient,
-		healthRetryDelay: agentctlHealthRetryDelay,
-		sessions:         make(map[string]*kubernetesSession),
-		locks:            make(map[string]*kubernetesInstanceLock),
+		agentctlResolver:  agentctlResolver,
+		logger:            log,
+		clientFactory:     newKubernetesRuntimeClient,
+		healthRetryDelay:  agentctlHealthRetryDelay,
+		launchTimingClock: time.Now,
+		sessions:          make(map[string]*kubernetesSession),
+		locks:             make(map[string]*kubernetesInstanceLock),
 	}
 	if agentctlResolver != nil {
 		runtime.resolveBinary = func(platform kubeexecutor.Platform) ([]byte, error) {
@@ -156,36 +158,64 @@ func (r *KubernetesExecutor) createFresh(
 	executorConfig kubeexecutor.ExecutorConfig,
 	profile kubeexecutor.ProfileConfig,
 ) (_ *ExecutorInstance, returnedErr error) {
+	timing := newKubernetesLaunchTimingWithClock(r.logger, req, r.launchTimingClock)
+	defer func() { timing.complete(returnedErr) }()
+
 	launch, err := newKubernetesFreshLaunch(r, runtime, req, executorConfig, profile)
 	if err != nil {
+		timing.failureSite = "initialize"
 		return nil, err
 	}
 	defer func() {
 		returnedErr = launch.rollbackAfterFailure(ctx, returnedErr)
 	}()
-	if err := launch.provisionWorkspace(ctx); err != nil {
+	if err := timing.runStage("storage", func() error {
+		return launch.provisionWorkspace(ctx)
+	}); err != nil {
 		return nil, err
 	}
-	runningPod, err := launch.createRunningPod(ctx)
+	var runningPod *corev1.Pod
+	if err := timing.runStage("pod_ready", func() error {
+		var stageErr error
+		runningPod, stageErr = launch.createRunningPod(ctx)
+		return stageErr
+	}); err != nil {
+		return nil, err
+	}
+	var nonce string
+	var binary []byte
+	if err := timing.runStage("bootstrap", func() error {
+		var stageErr error
+		nonce, stageErr = generateBootstrapNonce()
+		if stageErr != nil {
+			return stageErr
+		}
+		binary, stageErr = r.resolveBinary(profile.Platform)
+		if stageErr != nil {
+			return fmt.Errorf("kubernetes lifecycle: resolve agentctl for %s: %w", profile.Platform, stageErr)
+		}
+		return r.bootstrapPod(ctx, runtime, req, runningPod, profile, nonce, binary)
+	}); err != nil {
+		return nil, err
+	}
+	var client *agentctl.Client
+	var finalForward kubeexecutor.PortForwardSession
+	var token string
+	var remotePort int
+	if err := timing.runStage("agentctl_connect", func() error {
+		var stageErr error
+		client, finalForward, token, remotePort, stageErr = r.connectNewAgentctl(
+			ctx, runtime, req, runningPod, nonce,
+		)
+		return stageErr
+	}); err != nil {
+		return nil, err
+	}
+	instance, err := launch.complete(ctx, runningPod, client, finalForward, token, nonce, remotePort)
 	if err != nil {
-		return nil, err
+		timing.failureSite = "finalize"
 	}
-	nonce, err := generateBootstrapNonce()
-	if err != nil {
-		return nil, err
-	}
-	binary, err := r.resolveBinary(profile.Platform)
-	if err != nil {
-		return nil, fmt.Errorf("kubernetes lifecycle: resolve agentctl for %s: %w", profile.Platform, err)
-	}
-	if err = r.bootstrapPod(ctx, runtime, req, runningPod, profile, nonce, binary); err != nil {
-		return nil, err
-	}
-	client, finalForward, token, remotePort, err := r.connectNewAgentctl(ctx, runtime, req, runningPod, nonce)
-	if err != nil {
-		return nil, err
-	}
-	return launch.complete(ctx, runningPod, client, finalForward, token, nonce, remotePort)
+	return instance, err
 }
 
 type kubernetesFreshLaunch struct {

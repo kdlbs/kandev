@@ -15,6 +15,7 @@ const NONE: PendingInput = { clarification: false, permission: false };
 export type PendingInputFallback = {
   taskId?: string | null;
   taskPendingAction?: TaskPendingAction | null;
+  statusSummary?: { pending_action?: TaskPendingAction | null } | null;
   primarySessionState?: string | null;
   primarySessionPendingAction?: TaskPendingAction | null;
 };
@@ -37,6 +38,14 @@ function fallbackFlag(
 
 function actionFlags(action: TaskPendingAction | null | undefined): PendingInput {
   return { clarification: action === "clarification", permission: action === "permission" };
+}
+
+function fallbackTaskPendingAction(
+  fallback: PendingInputFallback | undefined,
+): TaskPendingAction | null | undefined {
+  return fallback?.statusSummary != null
+    ? fallback.statusSummary.pending_action
+    : fallback?.taskPendingAction;
 }
 
 function loadedSessionFlags(
@@ -122,7 +131,7 @@ function selectFlagsFromLoadedTaskSessions(
         session.pending_action,
       );
     },
-    fallback?.taskPendingAction,
+    fallbackTaskPendingAction(fallback),
   );
   if (!result.hasUnloadedMessages) {
     return { clarification: result.clarification, permission: result.permission };
@@ -139,7 +148,7 @@ function selectFlagsFromPrimarySession(
   primarySession: PrimarySessionProjection,
   fallback: PendingInputFallback | undefined,
 ): PendingInput {
-  const taskSnapshot = actionFlags(fallback?.taskPendingAction);
+  const taskSnapshot = actionFlags(fallbackTaskPendingAction(fallback));
   if (taskSnapshot.clarification || taskSnapshot.permission) return taskSnapshot;
   if (!primarySession.id) return NONE;
   if (messagesBySession[primarySession.id] !== undefined) {
