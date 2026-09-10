@@ -181,6 +181,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Message Queue Automation Controls (current)](system-design/message-queue-automation-controls.md)
 - [Native HTML File Preview](system-design/native-html-preview.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
+- [Mobile Menu Backdrops System Design](system-design/mobile-menu-backdrops.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Automatic Task Colors](system-design/sidebar-automatic-task-colors.md)

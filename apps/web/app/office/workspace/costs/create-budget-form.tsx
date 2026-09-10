@@ -85,8 +85,14 @@ function FormFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="daily" className="cursor-pointer">
+              {t("office:daily")}
+            </SelectItem>
             <SelectItem value="monthly" className="cursor-pointer">
               {t("office:monthly")}
+            </SelectItem>
+            <SelectItem value="yearly" className="cursor-pointer">
+              {t("office:yearly")}
             </SelectItem>
             <SelectItem value="total" className="cursor-pointer">
               {t("office:total")}
@@ -147,7 +153,7 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
         // Budgets are stored as hundredths of a cent (subcents) to
         // match cost_subcents semantics — see apps/web/lib/utils.ts:formatDollars.
         limitSubcents: Math.round(parseFloat(state.limitDollars || "0") * 10000),
-        period: state.period as "monthly" | "total",
+        period: state.period as "daily" | "monthly" | "yearly" | "total",
         alertThresholdPct: parseInt(state.alertPct, 10) || 80,
         actionOnExceed: state.action as "notify_only" | "pause_agent" | "block_new_tasks",
       });

@@ -27,6 +27,16 @@ Mobile users need the same task controls as desktop without relying on long pres
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.6:** Opening the board navigation control exposes available workflows and the focused workflow's steps in one bottom drawer. Choosing a workflow makes it the active workflow for the board, task creation, and multi-select actions through the existing saved workflow selection; previous/next step buttons and horizontal swipe remain equivalent transient step shortcuts.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.7:** The task list is the primary vertical scroller. The document and workflow container do not require horizontal scrolling.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.8:** Search and live workflow/task updates choose a deterministic visible fallback if the focused workflow disappears.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.9:** When a dropdown or context action menu opens as a bottom sheet below 640px, its background shall be dimmed and lightly blurred using the same treatment as the existing mobile navigation drawers. The menu text and controls shall remain sharp. Browsers without background-blur support shall retain the dimming.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.10:** When a user enters or leaves a submenu, the menu hierarchy shall retain one backdrop without adding another darkening or blur layer for each submenu. An enclosing drawer shall retain its own existing backdrop and remain usable after the menu closes.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.11:** When the root menu closes, its backdrop shall fade with the sheet's exit motion and leave no visible layer afterward. Unmounting or leaving the bottom-sheet viewport range shall remove the backdrop immediately. Outside-tap dismissal, Escape, focus return, action selection, and any existing non-modal interaction shall retain their current behavior.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.12:** The backdrop treatment shall apply consistently to task and non-task dropdown/context bottom sheets, including workspace selection, session options, file actions, and topbar overflow. At widths of 640px and above, those menus shall retain their existing anchored presentation without a new menu backdrop.
+
+## Menu backdrop design
+
+The shared backdrop contract in criteria 001.9 through 001.12 extends the
+existing bottom-sheet presentation in criterion 001.3. Its technical source is
+[Mobile Menu Backdrops](../system-design/mobile-menu-backdrops.md).
 
 ## Migrated source detail
 
@@ -90,9 +100,12 @@ Mobile users need the same task controls as desktop without relying on long pres
 - Changing backend task-move contracts, workflow ordering, or task permissions.
 - Unlocking or changing a started task's prompt.
 - Changing repository selection during task creation, workspace-source attachment, file browsing, or desktop and tablet task interaction.
+- Changing the backdrop of ordinary dialogs, full-height mobile Quick Chat,
+  non-menu popovers, or existing Drawer and Sheet surfaces.
 
 ## Implementation plans
 
 - [Mobile task navigation refinement](../../../plans/mobile-task-navigation-refinement/plan.md)
 - [SPA blank-screen resilience](../../../plans/spa-blank-screen-resilience/plan.md)
 - [Mobile repository switcher removal](../../../plans/mobile-repository-switcher-removal/plan.md)
+- [Mobile menu backdrops](../../../plans/mobile-menu-backdrops/plan.md)
