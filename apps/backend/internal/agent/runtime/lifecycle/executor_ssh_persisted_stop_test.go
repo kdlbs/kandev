@@ -59,6 +59,8 @@ func TestSSHExecutorStopInstanceFromPersistedMetadataOnly(t *testing.T) {
 func TestSSHExecutorStopInstanceDeadPidEmptyStderrReapsCleanly(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshFail("")},
+		sshScriptRule{match: "test -d '/remote/session'", result: sshFail("")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
@@ -81,6 +83,31 @@ func TestSSHExecutorStopInstanceDeadPidEmptyStderrReapsCleanly(t *testing.T) {
 	}
 	if _, ok := server.lastCommandContaining("rm -rf '/remote/session'"); !ok {
 		t.Fatalf("expected the session dir to still be reclaimed, commands: %v", server.commands())
+	}
+}
+
+func TestSSHExecutorStopInstanceDeadPidWithNewerSessionPreservesDirectory(t *testing.T) {
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("9999")},
+	).handle)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+
+	metadata := sshConnectionMetadata(t, server)
+	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "orphaned-instance",
+		StopReason: "startup terminal session cleanup",
+		Metadata:   metadata,
+	}, true)
+	if err == nil {
+		t.Fatal("expected StopInstance to preserve a session directory whose pidfile names a newer pid")
+	}
+	if _, ok := server.lastCommandContaining("rm -rf '/remote/session'"); ok {
+		t.Fatalf("expected no removal of a session directory owned by another launch, commands: %v", server.commands())
 	}
 }
 
@@ -163,6 +190,7 @@ func TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile(t *testing.T) {
 func TestSSHExecutorStopInstanceIdentityMismatchSkipsKill(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/usr/bin/some-other-process --unrelated")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
@@ -170,6 +198,7 @@ func TestSSHExecutorStopInstanceIdentityMismatchSkipsKill(t *testing.T) {
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 
 	err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "orphaned-instance",
@@ -195,6 +224,7 @@ func TestSSHExecutorStopInstanceIdentityMismatchSkipsKill(t *testing.T) {
 func TestSSHExecutorStopInstanceIdentityMismatchDirRemovalFailurePropagatesError(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/usr/bin/some-other-process --unrelated")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshFail("permission denied")},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
@@ -202,6 +232,7 @@ func TestSSHExecutorStopInstanceIdentityMismatchDirRemovalFailurePropagatesError
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 
 	err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "orphaned-instance",
@@ -221,6 +252,7 @@ func TestSSHExecutorStopInstanceIdentityMismatchDirRemovalFailurePropagatesError
 func TestSSHExecutorStopInstanceIdentityTaskDirMismatchSkipsKill(t *testing.T) {
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task-other")},
+		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
@@ -261,6 +293,7 @@ func TestSSHExecutorStopInstanceIdentityProbeFailurePreservesRow(t *testing.T) {
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 
 	err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "orphaned-instance",
@@ -323,7 +356,7 @@ func TestSSHExecutorStopInstancePersistedMetadataPreservesOnBackendShutdown(t *t
 	}
 }
 
-func TestSSHExecutorStopInstanceNoPersistedMetadataIsNoOp(t *testing.T) {
+func TestSSHExecutorStopInstanceIncompletePersistedMetadataErrors(t *testing.T) {
 	tests := []struct {
 		name     string
 		metadata map[string]interface{}
@@ -351,6 +384,15 @@ func TestSSHExecutorStopInstanceNoPersistedMetadataIsNoOp(t *testing.T) {
 			MetadataKeySSHRemoteAgentctlPID: "4242",
 			MetadataKeySSHRemoteSessionDir:  "   ",
 		}},
+		{name: "missing task dir", metadata: map[string]interface{}{
+			MetadataKeySSHRemoteAgentctlPID: "4242",
+			MetadataKeySSHRemoteSessionDir:  "/remote/session",
+		}},
+		{name: "blank task dir", metadata: map[string]interface{}{
+			MetadataKeySSHRemoteAgentctlPID: "4242",
+			MetadataKeySSHRemoteSessionDir:  "/remote/session",
+			MetadataKeySSHRemoteTaskDir:     "   ",
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -360,8 +402,8 @@ func TestSSHExecutorStopInstanceNoPersistedMetadataIsNoOp(t *testing.T) {
 				StopReason: "startup terminal session cleanup",
 				Metadata:   tc.metadata,
 			}, true)
-			if err != nil {
-				t.Fatalf("StopInstance: %v", err)
+			if err == nil {
+				t.Fatal("StopInstance succeeded with incomplete persisted metadata")
 			}
 		})
 	}
@@ -395,6 +437,7 @@ func TestSSHExecutorStopInstanceUnreadablePidfilePreservesLiveAgentctl(t *testin
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
 		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshFail("ssh: unable to open channel")},
+		sshScriptRule{match: "test -d '/remote/session'", result: sshFail("ssh: unable to open channel")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())

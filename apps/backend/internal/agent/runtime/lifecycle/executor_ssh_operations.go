@@ -1031,19 +1031,33 @@ func stopRemoteAgentctl(ctx context.Context, client *ssh.Client, sessionDir stri
 	return err
 }
 
+//nolint:dupword // shell branches contain repeated `fi` tokens.
 func remoteAgentctlStopCommand(sessionDir string, pid int) string {
 	removeSessionDir := removeRemoteDirCommand(sessionDir)
 	if pid <= 0 {
 		return removeSessionDir
 	}
-	return fmt.Sprintf(`kill %[1]d 2>/dev/null || true
-attempt=0
-while kill -0 %[1]d 2>/dev/null && [ "$attempt" -lt %[2]d ]; do
-  sleep 0.1
-  attempt=$((attempt + 1))
-done
+	return fmt.Sprintf(`if kill %[1]d 2>/dev/null; then
+  attempt=0
+  while kill -0 %[1]d 2>/dev/null && [ "$attempt" -lt %[2]d ]; do
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  if kill -0 %[1]d 2>/dev/null; then
+    if ! kill -9 %[1]d 2>/dev/null && kill -0 %[1]d 2>/dev/null; then
+      echo "failed to terminate remote agentctl pid %[1]d" >&2
+      exit 1
+    fi
+  fi
+else
+  if kill -0 %[1]d 2>/dev/null; then
+    echo "failed to signal remote agentctl pid %[1]d" >&2
+    exit 1
+  fi
+fi
 if kill -0 %[1]d 2>/dev/null; then
-  kill -9 %[1]d 2>/dev/null || true
+  echo "remote agentctl pid %[1]d is still running" >&2
+  exit 1
 fi
 %[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
 }
@@ -1096,15 +1110,29 @@ func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid i
 		if !remotePsProbeConfirmsAbsence(stdout, stderr) {
 			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
 		}
-		return false, nil
+		return verifyAbandonedRemoteAgentctlDirectory(ctx, client, pid, sessionDir)
 	}
 	if !remoteAgentctlCommandLineMatches(stdout, taskDir) {
-		return false, nil
+		return verifyAbandonedRemoteAgentctlDirectory(ctx, client, pid, sessionDir)
 	}
 	if err := remoteAgentctlPidFileConfirms(ctx, client, sessionDir, pid); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func verifyAbandonedRemoteAgentctlDirectory(ctx context.Context, client *ssh.Client, pid int, sessionDir string) (bool, error) {
+	filePID, present, err := readRemoteAgentctlPidFile(ctx, client, sessionDir)
+	if err != nil {
+		return false, err
+	}
+	if !present {
+		return false, nil
+	}
+	if filePID != pid {
+		return false, fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)
+	}
+	return false, nil
 }
 
 func remoteProcessCommandLineCommand(pid int) string {
@@ -1149,26 +1177,62 @@ func commandLineHasFlagValue(line, flag, value string) bool {
 // because the caller reclaims the session directory on a mismatch and that
 // directory may belong to a live process.
 func remoteAgentctlPidFileConfirms(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
+	filePID, present, err := readRemoteAgentctlPidFile(ctx, client, sessionDir)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("remote agentctl session directory %s disappeared before pidfile verification", sessionDir)
+	}
+	if filePID != pid {
+		return fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)
+	}
+	return nil
+}
+
+func readRemoteAgentctlPidFile(ctx context.Context, client *ssh.Client, sessionDir string) (int, bool, error) {
 	if strings.TrimSpace(sessionDir) == "" {
-		return fmt.Errorf("remote agentctl pidfile check for pid %d: no session directory", pid)
+		return 0, false, errors.New("remote agentctl pidfile check: no session directory")
 	}
 	path := sessionDir + "/agentctl.pid"
 	stdout, stderr, err := runSSHCommand(ctx, client, "cat -- "+shellQuote(path))
 	if err != nil {
-		if detail := strings.TrimSpace(stderr); detail != "" {
-			return fmt.Errorf("remote cat %s failed: %w (stderr: %s)", path, err, detail)
+		exists, existsErr := remoteSessionDirExists(ctx, client, sessionDir)
+		if existsErr != nil {
+			return 0, false, existsErr
 		}
-		return fmt.Errorf("remote cat %s failed: %w", path, err)
+		if !exists {
+			return 0, false, nil
+		}
+		if detail := strings.TrimSpace(stderr); detail != "" {
+			return 0, false, fmt.Errorf("remote cat %s failed: %w (stderr: %s)", path, err, detail)
+		}
+		return 0, false, fmt.Errorf("remote cat %s failed: %w", path, err)
 	}
 	content := strings.TrimSpace(stdout)
 	filePID, err := strconv.Atoi(content)
 	if err != nil {
-		return fmt.Errorf("remote pidfile %s does not name a pid: %q", path, content)
+		return 0, false, fmt.Errorf("remote pidfile %s does not name a pid: %q", path, content)
 	}
-	if filePID != pid {
-		return fmt.Errorf("remote pidfile %s names pid %d, not %d", path, filePID, pid)
+	if filePID <= 0 {
+		return 0, false, fmt.Errorf("remote pidfile %s contains non-positive pid %d", path, filePID)
 	}
-	return nil
+	return filePID, true, nil
+}
+
+func remoteSessionDirExists(ctx context.Context, client *ssh.Client, sessionDir string) (bool, error) {
+	_, stderr, err := runSSHCommand(ctx, client, "test -d "+shellQuote(sessionDir))
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) && strings.TrimSpace(stderr) == "" {
+		return false, nil
+	}
+	if detail := strings.TrimSpace(stderr); detail != "" {
+		return false, fmt.Errorf("remote test -d %s failed: %w (stderr: %s)", sessionDir, err, detail)
+	}
+	return false, fmt.Errorf("remote test -d %s failed: %w", sessionDir, err)
 }
 
 // probeRemoteAgentctlLiveness distinguishes a completed remote process probe

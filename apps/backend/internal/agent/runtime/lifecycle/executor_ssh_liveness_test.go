@@ -85,6 +85,7 @@ func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
 	t.Run("non-matching command line reports no identity", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 			sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/other-task")},
+			sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		).handle)
 
 		ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
@@ -127,10 +128,17 @@ func TestVerifyRemoteAgentctlIdentity(t *testing.T) {
 			{name: "non-numeric content", result: sshOut("not-a-pid")},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-					sshScriptRule{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
-					sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: tc.result},
-				).handle)
+				rules := []sshScriptRule{
+					{match: "ps -p 4242 -o command=", result: sshOut("/opt/kandev/bin/agentctl --workdir /remote/task")},
+					{match: "cat -- '/remote/session/agentctl.pid'", result: tc.result},
+				}
+				switch tc.name {
+				case "missing file":
+					rules = append(rules, sshScriptRule{match: "test -d '/remote/session'", result: sshOK})
+				case "channel fault under load":
+					rules = append(rules, sshScriptRule{match: "test -d '/remote/session'", result: sshFail("ssh: unable to open channel")})
+				}
+				server := newFakeSSHServer(t, newSSHScriptedHandler(t, rules...).handle)
 
 				ours, err := verifyRemoteAgentctlIdentity(context.Background(), server.dial(t), 4242, "/remote/session", "/remote/task")
 				if err == nil || ours {

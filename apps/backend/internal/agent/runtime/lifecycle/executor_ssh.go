@@ -671,14 +671,19 @@ func sshRemoteCleanupContext(ctx context.Context) (context.Context, context.Canc
 // lifetime — every other stop reuses the SSH client opened at CreateInstance
 // or ResumeRemoteInstance.
 func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance *ExecutorInstance, force bool) error {
-	pid, sessionDir, ok := persistedSSHAgentctlTarget(instance.Metadata)
-	if !ok {
-		r.logger.Debug("stop: no tracked SSH session state for instance",
-			zap.String("instance_id", instance.InstanceID))
-		return nil
-	}
 	if !sshShouldStopRemoteAgentctl(instance, force) {
 		return nil
+	}
+	if instance == nil || len(instance.Metadata) == 0 {
+		return fmt.Errorf("ssh: persisted agentctl metadata is missing for instance %q", instanceID(instance))
+	}
+	pid, sessionDir, ok := persistedSSHAgentctlTarget(instance.Metadata)
+	if !ok {
+		return fmt.Errorf("ssh: persisted agentctl metadata is incomplete for instance %q", instance.InstanceID)
+	}
+	taskDir := strings.TrimSpace(getMetadataString(instance.Metadata, MetadataKeySSHRemoteTaskDir))
+	if taskDir == "" {
+		return fmt.Errorf("ssh: no persisted remote task dir for instance %q: agentctl identity is unprovable", instance.InstanceID)
 	}
 	target, err := r.targetFromMetadata(instance.Metadata)
 	if err != nil {
@@ -696,7 +701,6 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 	if verifyIdentity == nil {
 		verifyIdentity = verifyRemoteAgentctlIdentity
 	}
-	taskDir := getMetadataString(instance.Metadata, MetadataKeySSHRemoteTaskDir)
 	isOurs, err := verifyIdentity(cleanupCtx, client, pid, sessionDir, taskDir)
 	if err != nil {
 		return fmt.Errorf("ssh: verify persisted agentctl identity for instance %q: %w", instance.InstanceID, err)
@@ -728,7 +732,7 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 // non-positive means there is nothing durable to act on — never build a
 // kill/rm-rf command from an empty or zero value.
 func persistedSSHAgentctlTarget(metadata map[string]interface{}) (pid int, sessionDir string, ok bool) {
-	pidStr := getMetadataString(metadata, MetadataKeySSHRemoteAgentctlPID)
+	pidStr := strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHRemoteAgentctlPID))
 	sessionDir = strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHRemoteSessionDir))
 	if pidStr == "" || sessionDir == "" {
 		return 0, "", false
@@ -738,6 +742,13 @@ func persistedSSHAgentctlTarget(metadata map[string]interface{}) (pid int, sessi
 		return 0, "", false
 	}
 	return parsedPID, sessionDir, true
+}
+
+func instanceID(instance *ExecutorInstance) string {
+	if instance == nil {
+		return "<nil>"
+	}
+	return instance.InstanceID
 }
 
 // RecoverInstances re-opens SSH connections for sessions that were live before
