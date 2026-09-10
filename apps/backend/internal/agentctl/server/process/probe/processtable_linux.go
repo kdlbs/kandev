@@ -3,12 +3,10 @@
 package probe
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -91,20 +89,10 @@ func linuxBootTime() (time.Time, error) {
 	return time.Now().Add(-time.Duration(uptimeSeconds * float64(time.Second))), nil
 }
 
-// processGone reports whether err means the process disappeared before its
-// stat file could be read. The directory entry can still be listed by
-// ReadDir while the kernel is mid-teardown of the task struct: open() then
-// succeeds but read() reports ESRCH ("no such process") rather than the
-// ENOENT os.IsNotExist checks for. Both mean the same thing — exited between
-// ReadDir and stat — and neither is a fatal read error.
-func processGone(err error) bool {
-	return os.IsNotExist(err) || errors.Is(err, syscall.ESRCH)
-}
-
 func readLinuxProcessStat(pid int, bootTime time.Time) (processInfo, bool, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		if processGone(err) {
+		if os.IsNotExist(err) {
 			return processInfo{}, false, nil
 		}
 		return processInfo{}, false, err

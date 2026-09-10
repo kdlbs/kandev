@@ -191,15 +191,12 @@ type TaskDetacher interface {
 	DetachTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
 }
 
-// TaskLifecyclePublisher loads the canonical task row and publishes the
-// task.updated event for a task row Office has just mutated. Office's own
-// status-change events (office.task.status_changed) only reach the Office
-// board; this is the seam that reaches everything else WS-driven off
-// task.updated (All-Workflows kanban, task views, the task/statussummary
-// projector).
+// TaskLifecyclePublisher reloads and publishes the canonical task.updated
+// event for a task row Office has just mutated. The implementation owns task
+// publication ordering so concurrent status writes cannot publish stale
+// snapshots. Office's own status-change events only reach the Office board.
 type TaskLifecyclePublisher interface {
-	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
-	PublishTaskUpdated(ctx context.Context, task *taskmodels.Task, oldWorkflowIDs ...string)
+	PublishTaskUpdatedByID(ctx context.Context, id string)
 }
 
 // SessionTerminator flips the (task, agent) office session row to a terminal

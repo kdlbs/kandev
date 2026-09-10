@@ -997,24 +997,16 @@ const canonicalTaskUpdatedPublishTimeout = 10 * time.Second
 // kanban view, task views, the task/statussummary projector) keys off.
 // Nil-safe: skipped when no publisher is wired. Runs on a context detached
 // from ctx's cancellation: the mutation has already committed, so a caller
-// that disconnects (HTTP) or a ctx that expires between the write and this
-// reload must not suppress the event other WS-driven views depend on.
+// that disconnects (HTTP) or a ctx that expires after the write must not
+// suppress the event other WS-driven views depend on. The task service owns
+// the reload and per-task publication queue.
 func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, taskID string) {
 	if s.taskLifecycle == nil {
 		return
 	}
 	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), canonicalTaskUpdatedPublishTimeout)
 	defer cancel()
-	task, err := s.taskLifecycle.GetTask(pubCtx, taskID)
-	if err != nil {
-		s.logger.Error("publish canonical task updated: load task failed",
-			zap.String("task_id", taskID), zap.Error(err))
-		return
-	}
-	if task == nil {
-		return
-	}
-	s.taskLifecycle.PublishTaskUpdated(pubCtx, task)
+	s.taskLifecycle.PublishTaskUpdatedByID(pubCtx, taskID)
 }
 
 // runReactivityForComment fires the pipeline for a standalone comment

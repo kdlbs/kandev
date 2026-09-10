@@ -7,22 +7,17 @@ import (
 
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
-	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // recordingTaskLifecyclePublisher is a fake dashboard.TaskLifecyclePublisher
-// that records every PublishTaskUpdated call so tests can assert exactly
+// that records every PublishTaskUpdatedByID call so tests can assert exactly
 // one canonical task.updated reaches the bus per UpdateTaskStatus call.
 type recordingTaskLifecyclePublisher struct {
 	published []string
 }
 
-func (r *recordingTaskLifecyclePublisher) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
-	return &taskmodels.Task{ID: id}, nil
-}
-
-func (r *recordingTaskLifecyclePublisher) PublishTaskUpdated(_ context.Context, task *taskmodels.Task, _ ...string) {
-	r.published = append(r.published, task.ID)
+func (r *recordingTaskLifecyclePublisher) PublishTaskUpdatedByID(_ context.Context, id string) {
+	r.published = append(r.published, id)
 }
 
 // TestUpdateTaskStatus_PublishesCanonicalTaskUpdated pins AGENTS.md:228:
