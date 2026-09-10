@@ -120,6 +120,12 @@ Done on 2026-09-10.
 - The delete page-object waits for the coordinator's localized success toast
   before starting a second removal; the held-response scenario opts out so it
   can inspect the pending interval.
+- Inspected the phone rendering in
+  `apps/web/.pr-assets/mobile-pr-removal-capture--mobile-task-removal-status.png`;
+  the captured surface
+  shows the neutral removal status in the existing mobile content region.
+  Mobile E2E asserted the final task/overview destination, URL identity, and
+  absence of a document reload after the held response was released.
 - Specification tests: 36 passed; full specification lint passed.
 - Targeted E2E-sleep lint for changed files and `rtk git diff --check` passed.
 - The repository-wide E2E-sleep config still reports unrelated baseline errors;

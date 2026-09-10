@@ -281,17 +281,12 @@ function useCloseMissingSelectedTask(params: {
 function usePreviewRemovalState(
   selectedTaskId: string | null | undefined,
   isOpen: boolean,
-  close: () => void,
 ): { previewIsOpen: boolean; previewTaskId: string | null | undefined } {
   const isRemovingSelectedTask = useAppStore((state) =>
     selectedTaskId ? taskRemovalCoversTask(state.taskRemoval, selectedTaskId) : false,
   );
   const previewIsOpen = isOpen && !isRemovingSelectedTask;
   const previewTaskId = isRemovingSelectedTask ? null : selectedTaskId;
-
-  useEffect(() => {
-    if (isRemovingSelectedTask) close();
-  }, [close, isRemovingSelectedTask]);
 
   return { previewIsOpen, previewTaskId };
 }
@@ -355,7 +350,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       },
     });
 
-  const { previewIsOpen, previewTaskId } = usePreviewRemovalState(selectedTaskId, isOpen, close);
+  const { previewIsOpen, previewTaskId } = usePreviewRemovalState(selectedTaskId, isOpen);
 
   useMirrorPreviewedTaskId(previewIsOpen, previewTaskId, setKanbanPreviewedTaskId);
 

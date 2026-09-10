@@ -285,7 +285,12 @@ it("leaves local removal navigation to the coordinator", () => {
           taskIds: [TASK_ID],
           requestIds: [TASK_ID],
           outcomesByTaskId: { [TASK_ID]: "pending" },
-          departure: { taskId: TASK_ID, sessionId: SESSION_ID, navigationRevision: 0 },
+          departure: {
+            taskId: TASK_ID,
+            sessionId: SESSION_ID,
+            navigationRevision: 0,
+            origin: "detail",
+          },
         },
       },
       pendingTokenByTaskId: { [TASK_ID]: "removal-1" },

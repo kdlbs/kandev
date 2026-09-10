@@ -30,6 +30,7 @@ describe("task removal state", () => {
         taskId: CHILD_TASK,
         sessionId: "session-child",
         navigationRevision: 0,
+        origin: "detail",
       },
     });
 
@@ -55,7 +56,7 @@ describe("task removal state", () => {
       workspaceId: WORKSPACE_ONE,
       taskIds: [TASK_ONE],
       requestIds: [TASK_ONE],
-      departure: { taskId: TASK_ONE, sessionId: null, navigationRevision: 0 },
+      departure: { taskId: TASK_ONE, sessionId: null, navigationRevision: 0, origin: "detail" },
     })!;
 
     expect(ownsTaskRemovalDeparture(state, REMOVAL_ONE, 0)).toBe(true);
@@ -97,7 +98,12 @@ describe("task removal state", () => {
       workspaceId: "workspace-1",
       taskIds: [PARENT_TASK, CHILD_TASK],
       requestIds: [PARENT_TASK],
-      departure: { taskId: PARENT_TASK, sessionId: null, navigationRevision: 0 },
+      departure: {
+        taskId: PARENT_TASK,
+        sessionId: null,
+        navigationRevision: 0,
+        origin: "detail",
+      },
     })!;
 
     expect(taskRemovalOwnsDepartureForTask(state, PARENT_TASK)).toBe(true);

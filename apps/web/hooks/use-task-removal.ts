@@ -296,7 +296,7 @@ function orderedTaskCandidates(
     (task) =>
       task.id !== removedTaskId &&
       !excludedTaskIds?.has(task.id) &&
-      (!workspaceId || !task.workspaceId || task.workspaceId === workspaceId),
+      (!workspaceId || task.workspaceId === workspaceId),
   );
   const remainingById = new Map(candidates.map((task) => [task.id, task]));
   const ordered: KanbanState["tasks"] = [];

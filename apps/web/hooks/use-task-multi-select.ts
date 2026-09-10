@@ -184,6 +184,7 @@ function useBulkOperations({
           idList.map((id) => ({ taskId: id, mutate: () => per(id, opts) })),
           { cascade: opts?.cascade },
         );
+        if (result.skipped) return;
         const succeeded = new Set(result.succeededTaskIds);
         removeTasksFromStore(succeeded);
         const failed = new Set(result.failedTaskIds);

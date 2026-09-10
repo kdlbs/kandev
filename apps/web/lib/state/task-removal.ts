@@ -2,10 +2,13 @@ export type TaskRemovalAction = "archive" | "delete";
 
 export type TaskRemovalOutcome = "pending" | "succeeded" | "failed" | "unknown";
 
+export type TaskRemovalDepartureOrigin = "detail" | "preview";
+
 export type TaskRemovalDeparture = {
   taskId: string;
   sessionId: string | null;
   navigationRevision: number;
+  origin: TaskRemovalDepartureOrigin;
 };
 
 export type TaskRemovalOperation = {

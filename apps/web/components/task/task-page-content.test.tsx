@@ -33,17 +33,24 @@ describe("TaskLoadErrorState", () => {
   });
 });
 
-function StartRemoval() {
+function StartRemoval({
+  removalTaskId = "task-1",
+  activeTaskId,
+}: {
+  removalTaskId?: string;
+  activeTaskId?: string;
+}) {
   const store = useAppStoreApi();
   useEffect(() => {
+    if (activeTaskId) store.getState().setActiveTask(activeTaskId);
     store.getState().beginTaskRemoval({
       action: "delete",
       workspaceId: "ws-1",
-      taskIds: ["task-1"],
-      requestIds: ["task-1"],
+      taskIds: [removalTaskId],
+      requestIds: [removalTaskId],
       departure: null,
     });
-  }, [store]);
+  }, [activeTaskId, removalTaskId, store]);
   return null;
 }
 
@@ -60,5 +67,19 @@ describe("TaskRemovalBoundary", () => {
 
     await waitFor(() => expect(screen.getByTestId("task-removal-status")).toBeTruthy());
     expect(screen.queryByTestId("outgoing-task-content")).toBeNull();
+  });
+
+  it("does not let a stale active task hide an explicit route task", async () => {
+    render(
+      <StateProvider>
+        <StartRemoval removalTaskId="task-a" activeTaskId="task-a" />
+        <TaskRemovalBoundary taskId="task-b">
+          <div data-testid="explicit-task-content">Explicit task</div>
+        </TaskRemovalBoundary>
+      </StateProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("explicit-task-content")).toBeTruthy());
+    expect(screen.queryByTestId("task-removal-status")).toBeNull();
   });
 });

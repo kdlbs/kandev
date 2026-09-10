@@ -29,7 +29,12 @@ vi.mock("@/lib/routing/client-router", () => ({
 import { useTaskRemoval, selectNextTaskAfterRemoval } from "./use-task-removal";
 import { setRecentTasks } from "@/lib/recent-tasks";
 
-type TaskRow = { id: string; primarySessionId: string | null; parentTaskId?: string | null };
+type TaskRow = {
+  id: string;
+  primarySessionId: string | null;
+  parentTaskId?: string | null;
+  workspaceId?: string | null;
+};
 
 const CASCADE_PARENT: TaskRow = { id: "task-parent", primarySessionId: "sess-parent" };
 const CASCADE_CHILD: TaskRow = {
@@ -313,6 +318,31 @@ describe("useTaskRemoval — next task selection", () => {
     const removal = await result.current.removeTaskFromBoard("task-A", {
       wasActiveTaskId: "task-A",
       wasActiveSessionId: "sess-A",
+    });
+
+    expect(removal.switchedTaskId).toBeNull();
+    expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
+    expect(softNavigateMock).toHaveBeenCalledWith(OVERVIEW_URL, "replace");
+  });
+
+  it("does not use a candidate without workspace ownership for a scoped removal", async () => {
+    const candidateWithoutWorkspace = { id: "task-unscoped", primarySessionId: "sess-unscoped" };
+    const store = makeStore({
+      activeTaskId: "task-A",
+      activeSessionId: "sess-A",
+      remainingTasks: [
+        { id: "task-A", primarySessionId: "sess-A", workspaceId: "workspace-1" },
+        candidateWithoutWorkspace,
+      ],
+    });
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+
+    const removal = await result.current.removeTaskFromBoard("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+      workspaceId: "workspace-1",
     });
 
     expect(removal.switchedTaskId).toBeNull();

@@ -154,6 +154,7 @@ test.describe("Delete task redirect", () => {
 
       gate.release();
       await expect(testPage).not.toHaveURL(/\/t\//, { timeout: 15_000 });
+      expect(gate.requestCount()).toBe(1);
       expect(documentRequests).toHaveLength(0);
     } finally {
       gate.release();

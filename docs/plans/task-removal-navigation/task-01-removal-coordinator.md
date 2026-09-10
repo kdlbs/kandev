@@ -103,6 +103,17 @@ Preserve existing archive-confirmation and delete-discard choices.
 
 Done on 2026-09-10.
 
+- RED: `cd apps/web && pnpm exec vitest run hooks/use-task-removal-coordinator.test.ts`
+  failed on the stale `replaceTaskUrl` rollback expectation after navigation
+  ownership moved into the coordinator.
+- GREEN: `cd apps/web && pnpm exec vitest run lib/state/task-removal.test.ts
+  hooks/use-task-removal.test.ts hooks/use-task-removal-coordinator.test.ts
+  hooks/use-task-actions.test.ts lib/ws/handlers/tasks-archive.test.ts
+  lib/ws/handlers/tasks.test.ts lib/ws/handlers/tasks.deleted.test.ts
+  lib/ws/handlers/tasks-unarchive.test.ts lib/routing/client-router.test.ts`
+  passed with 9 files and 86 tests.
+- Fixup rerun of the same command passed with 9 files and 96 tests after the
+  review regressions were added.
 - Added browser-local operation state, per-target settlement, duplicate-target
   suppression, navigation ownership, cascade exclusion, workspace-scoped
   candidate validation, and guarded SPA destination navigation.

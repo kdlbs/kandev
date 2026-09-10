@@ -42,7 +42,7 @@ function TaskRemovalStatus() {
 
 export function TaskRemovalBoundary({ taskId, children }: TaskRemovalBoundaryProps) {
   const isPending = useAppStore((state) => {
-    if (taskId && taskRemovalCoversTask(state.taskRemoval, taskId)) return true;
+    if (taskId) return taskRemovalCoversTask(state.taskRemoval, taskId);
     const activeTaskId = state.tasks.activeTaskId;
     return activeTaskId ? taskRemovalCoversTask(state.taskRemoval, activeTaskId) : false;
   });

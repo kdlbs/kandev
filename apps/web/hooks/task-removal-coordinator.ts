@@ -3,7 +3,11 @@ import type { AppState } from "@/lib/state/store";
 import { fetchTask } from "@/lib/api";
 import { linkToTask, linkToTaskOverview } from "@/lib/links";
 import { softNavigate } from "@/lib/routing/client-router";
-import { ownsTaskRemovalDeparture, type TaskRemovalAction } from "@/lib/state/task-removal";
+import {
+  ownsTaskRemovalDeparture,
+  type TaskRemovalAction,
+  type TaskRemovalDeparture,
+} from "@/lib/state/task-removal";
 import type {
   RemoveFromBoardOptions,
   RemoveFromBoardResult,
@@ -16,6 +20,11 @@ import type {
 type TaskRemovalStore = StoreApi<AppState>;
 
 type RemovalIdsByRequest = Map<string, ReadonlySet<string>>;
+
+type RequestMutationPlan = {
+  mutationRequests: TaskRemovalRequest[];
+  rootRequestIdByRequestId: Map<string, string>;
+};
 
 type TaskRemovalCoordinatorDeps = {
   store: TaskRemovalStore;
@@ -67,6 +76,61 @@ function collectRemovalIds(
   return { requestIds, removalIdsByRequest, removalTaskIds };
 }
 
+function createRequestMutationPlan(
+  requests: TaskRemovalRequest[],
+  removalIdsByRequest: RemovalIdsByRequest,
+): RequestMutationPlan {
+  const coveringRequestIdByRequestId = new Map<string, string>();
+  const firstRequestIndexById = new Map<string, number>();
+
+  for (const [index, request] of requests.entries()) {
+    if (!firstRequestIndexById.has(request.taskId)) {
+      firstRequestIndexById.set(request.taskId, index);
+    } else {
+      coveringRequestIdByRequestId.set(
+        request.taskId,
+        requests[firstRequestIndexById.get(request.taskId)!].taskId,
+      );
+    }
+
+    const coveringRequest = requests.find(
+      (candidate) =>
+        candidate.taskId !== request.taskId &&
+        removalIdsByRequest.get(candidate.taskId)?.has(request.taskId),
+    );
+    if (coveringRequest) {
+      coveringRequestIdByRequestId.set(request.taskId, coveringRequest.taskId);
+    }
+  }
+
+  const rootRequestIdByRequestId = new Map<string, string>();
+  const rootRequestIdFor = (requestId: string): string => {
+    const visited = new Set<string>();
+    let rootRequestId = requestId;
+    while (coveringRequestIdByRequestId.has(rootRequestId)) {
+      if (visited.has(rootRequestId)) break;
+      visited.add(rootRequestId);
+      rootRequestId = coveringRequestIdByRequestId.get(rootRequestId)!;
+    }
+    return rootRequestId;
+  };
+
+  const rootRequestIds = new Set<string>();
+  for (const request of requests) {
+    const rootRequestId = rootRequestIdFor(request.taskId);
+    rootRequestIdByRequestId.set(request.taskId, rootRequestId);
+    rootRequestIds.add(rootRequestId);
+  }
+
+  return {
+    mutationRequests: requests.filter(
+      (request, index) =>
+        rootRequestIds.has(request.taskId) && firstRequestIndexById.get(request.taskId) === index,
+    ),
+    rootRequestIdByRequestId,
+  };
+}
+
 function beginRemovalOperation(
   deps: TaskRemovalCoordinatorDeps,
   action: TaskRemovalAction,
@@ -79,7 +143,7 @@ function beginRemovalOperation(
   activeSessionId: string | null;
   workspaceId: string | null;
   navigationRevision: number;
-  departure: { taskId: string; sessionId: string | null; navigationRevision: number };
+  departure: TaskRemovalDeparture;
 } | null {
   const { store } = deps;
   const state = store.getState();
@@ -89,7 +153,12 @@ function beginRemovalOperation(
   const activeSessionId = state.tasks.activeSessionId;
   const workspaceId = resolveWorkspaceId(store, activeTaskId, opts?.workspaceId);
   const navigationRevision = state.taskRemoval.navigationRevision;
-  const departure = { taskId: activeTaskId, sessionId: activeSessionId, navigationRevision };
+  const departure: TaskRemovalDeparture = {
+    taskId: activeTaskId,
+    sessionId: activeSessionId,
+    navigationRevision,
+    origin: state.kanbanPreviewedTaskId === activeTaskId ? "preview" : "detail",
+  };
   const token = state.beginTaskRemoval({
     action,
     workspaceId,
@@ -162,14 +231,31 @@ function settleRequests(
   store: TaskRemovalStore,
   token: string,
   requests: TaskRemovalRequest[],
+  mutationPlan: RequestMutationPlan,
   results: PromiseSettledResult<void>[],
 ): SettledRequests {
-  const succeededRequests = requests.filter((_, index) => results[index]?.status === "fulfilled");
-  const failedRequests = requests.filter((_, index) => results[index]?.status === "rejected");
-  const errorsByTaskId: Record<string, unknown> = {};
-  for (const [index, request] of requests.entries()) {
+  const resultByRequestId = new Map<string, PromiseSettledResult<void>>();
+  for (const [index, request] of mutationPlan.mutationRequests.entries()) {
     const result = results[index];
-    if (result?.status === "rejected") errorsByTaskId[request.taskId] = result.reason;
+    if (result) resultByRequestId.set(request.taskId, result);
+  }
+
+  const succeededRequests: TaskRemovalRequest[] = [];
+  const failedRequests: TaskRemovalRequest[] = [];
+  const errorsByTaskId: Record<string, unknown> = {};
+  for (const request of requests) {
+    const rootRequestId =
+      mutationPlan.rootRequestIdByRequestId.get(request.taskId) ?? request.taskId;
+    const result = resultByRequestId.get(rootRequestId);
+    if (result?.status === "fulfilled") {
+      succeededRequests.push(request);
+    } else {
+      failedRequests.push(request);
+      errorsByTaskId[request.taskId] =
+        result?.status === "rejected"
+          ? result.reason
+          : new Error("Task removal mutation did not settle");
+    }
   }
   store.getState().recordTaskRemovalResult(
     token,
@@ -214,12 +300,6 @@ function ownsDeparture(
   return ownsTaskRemovalDeparture(store.getState().taskRemoval, token, navigationRevision);
 }
 
-function isDefinitiveRemovalFailure(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const status = (error as { status?: unknown }).status;
-  return typeof status === "number" && status >= 400 && status < 500 && status !== 408;
-}
-
 function sessionBelongsToTask(store: TaskRemovalStore, taskId: string, sessionId: string): boolean {
   const state = store.getState();
   const session = state.taskSessions.items[sessionId];
@@ -251,9 +331,7 @@ function setActiveSessionAutomatically(
 async function canRestoreDeparture(
   action: TaskRemovalAction,
   departureTaskId: string,
-  error: unknown,
 ): Promise<boolean> {
-  if (isDefinitiveRemovalFailure(error)) return true;
   try {
     const currentTask = await fetchTask(departureTaskId, { cache: "no-store" });
     return action === "delete" || !currentTask.archived_at;
@@ -265,13 +343,12 @@ async function canRestoreDeparture(
 async function recoverFailedDeparture(params: {
   action: TaskRemovalAction;
   store: TaskRemovalStore;
-  departure: { taskId: string; sessionId: string | null; navigationRevision: number } | null;
+  departure: TaskRemovalDeparture | null;
   departureRequest: TaskRemovalRequest | undefined;
-  errorsByTaskId: Record<string, unknown>;
   token: string;
   workspaceId: string | null;
 }): Promise<void> {
-  const { action, store, departure, departureRequest, errorsByTaskId, token, workspaceId } = params;
+  const { action, store, departure, departureRequest, token, workspaceId } = params;
   if (
     !departure ||
     !departureRequest ||
@@ -279,11 +356,7 @@ async function recoverFailedDeparture(params: {
   ) {
     return;
   }
-  const canRestore = await canRestoreDeparture(
-    action,
-    departure.taskId,
-    errorsByTaskId[departureRequest.taskId],
-  );
+  const canRestore = await canRestoreDeparture(action, departure.taskId);
   if (!ownsDeparture(store, token, departure.navigationRevision)) return;
   if (!canRestore) {
     softNavigate(linkToTaskOverview({ workspaceId: workspaceId ?? undefined }), "replace");
@@ -294,12 +367,14 @@ async function recoverFailedDeparture(params: {
   } else {
     setActiveTaskAutomatically(store, departure.taskId);
   }
-  softNavigate(linkToTask(departure.taskId), "replace");
+  if (departure.origin === "detail") {
+    softNavigate(linkToTask(departure.taskId), "replace");
+  }
 }
 
 async function reconcileSuccessfulRemoval(params: {
   deps: TaskRemovalCoordinatorDeps;
-  departure: { taskId: string; sessionId: string | null; navigationRevision: number } | null;
+  departure: TaskRemovalDeparture | null;
   activeSucceeded: boolean;
   succeededRemovalIds: Set<string>;
   token: string;
@@ -328,6 +403,10 @@ async function reconcileSuccessfulRemoval(params: {
     errorsByTaskId,
   } = params;
   if (succeededRemovalIds.size === 0) return switchedTaskId;
+  if (departure?.origin === "preview") {
+    removeTasksFromSnapshots(deps.store, succeededRemovalIds);
+    return null;
+  }
   if (!departure || !activeSucceeded) {
     removeTasksFromSnapshots(deps.store, succeededRemovalIds);
     return switchedTaskId;
@@ -373,6 +452,92 @@ function notifySuccessfulRemoval(
   deps.notifySuccess?.(action, settled.succeededRequests.length);
 }
 
+type DestinationOutcome =
+  | { ok: true; value: RemoveFromBoardResult }
+  | { ok: false; error: unknown };
+
+async function settleAndReconcileRemoval(params: {
+  deps: TaskRemovalCoordinatorDeps;
+  action: TaskRemovalAction;
+  operation: NonNullable<ReturnType<typeof beginOperation>>;
+  requests: TaskRemovalRequest[];
+  removalIdsByRequest: RemovalIdsByRequest;
+  removalTaskIds: ReadonlySet<string>;
+  mutationPlan: RequestMutationPlan;
+  mutationResults: PromiseSettledResult<void>[];
+  destinationOutcome: DestinationOutcome;
+  opts?: TaskRemovalRunOptions;
+}): Promise<TaskRemovalBatchResult> {
+  const {
+    deps,
+    action,
+    operation,
+    requests,
+    removalIdsByRequest,
+    removalTaskIds,
+    mutationPlan,
+    mutationResults,
+    destinationOutcome,
+    opts,
+  } = params;
+  const settled = settleRequests(
+    deps.store,
+    operation.token,
+    requests,
+    mutationPlan,
+    mutationResults,
+  );
+  const succeededRemovalIds = collectSucceededRemovalIds(
+    settled.succeededRequests,
+    removalIdsByRequest,
+  );
+  const activeSucceeded = operation.departure
+    ? succeededRemovalIds.has(operation.departure.taskId)
+    : false;
+  let switchedTaskId = destinationOutcome.ok
+    ? (destinationOutcome.value.switchedTaskId ?? null)
+    : null;
+  switchedTaskId = await reconcileSuccessfulRemoval({
+    deps,
+    departure: operation.departure,
+    activeSucceeded,
+    succeededRemovalIds,
+    token: operation.token,
+    navigationRevision: operation.navigationRevision,
+    removalTaskIds,
+    activeTaskId: operation.activeTaskId,
+    activeSessionId: operation.activeSessionId,
+    workspaceId: operation.workspaceId,
+    validateTaskAncestry: opts?.cascade === true,
+    switchedTaskId,
+    errorsByTaskId: settled.errorsByTaskId,
+  });
+  const departureRequest = departureRequestFor(
+    operation.departure?.taskId ?? null,
+    requests,
+    removalIdsByRequest,
+  );
+  if (operation.departure && !activeSucceeded && departureRequest) {
+    await recoverFailedDeparture({
+      action,
+      store: deps.store,
+      departure: operation.departure,
+      departureRequest,
+      token: operation.token,
+      workspaceId: operation.workspaceId,
+    });
+  }
+  notifySuccessfulRemoval(deps, action, settled);
+  return {
+    skipped: false,
+    operationToken: operation.token,
+    switchedTaskId,
+    succeededTaskIds: settled.succeededRequests.map((request) => request.taskId),
+    failedTaskIds: settled.failedRequests.map((request) => request.taskId),
+    errorsByTaskId: settled.errorsByTaskId,
+  };
+}
+
 export async function coordinateTaskRemovalBatch(
   deps: TaskRemovalCoordinatorDeps,
   action: TaskRemovalAction,
@@ -390,19 +555,23 @@ export async function coordinateTaskRemovalBatch(
   const operation = beginOperation(deps, action, requestIds, removalTaskIds, opts);
   if (!operation) return skippedResult();
 
-  const destinationPromise = operation.departure
-    ? deps.removeTaskFromBoard(operation.departure.taskId, {
-        wasActiveTaskId: operation.activeTaskId,
-        wasActiveSessionId: operation.activeSessionId,
-        switchOnly: true,
-        excludedTaskIds: removalTaskIds,
-        removalToken: operation.token,
-        removalNavigationRevision: operation.navigationRevision,
-        workspaceId: operation.workspaceId,
-        validateTaskAncestry: opts?.cascade === true,
-      })
-    : Promise.resolve({ switchedTaskId: null, excludedTaskIds: undefined });
-  const mutationPromise = Promise.allSettled(requests.map((request) => request.mutate()));
+  const destinationPromise =
+    operation.departure && operation.departure.origin === "detail"
+      ? deps.removeTaskFromBoard(operation.departure.taskId, {
+          wasActiveTaskId: operation.activeTaskId,
+          wasActiveSessionId: operation.activeSessionId,
+          switchOnly: true,
+          excludedTaskIds: removalTaskIds,
+          removalToken: operation.token,
+          removalNavigationRevision: operation.navigationRevision,
+          workspaceId: operation.workspaceId,
+          validateTaskAncestry: opts?.cascade === true,
+        })
+      : Promise.resolve({ switchedTaskId: null, excludedTaskIds: undefined });
+  const mutationPlan = createRequestMutationPlan(requests, removalIdsByRequest);
+  const mutationPromise = Promise.allSettled(
+    mutationPlan.mutationRequests.map((request) => request.mutate()),
+  );
 
   try {
     const [destinationOutcome, mutationResults] = await Promise.all([
@@ -412,57 +581,18 @@ export async function coordinateTaskRemovalBatch(
       ),
       mutationPromise,
     ]);
-    const settled = settleRequests(deps.store, operation.token, requests, mutationResults);
-    const succeededRemovalIds = collectSucceededRemovalIds(
-      settled.succeededRequests,
-      removalIdsByRequest,
-    );
-    const activeSucceeded = operation.departure
-      ? succeededRemovalIds.has(operation.departure.taskId)
-      : false;
-    let switchedTaskId = destinationOutcome.ok
-      ? (destinationOutcome.value.switchedTaskId ?? null)
-      : null;
-    switchedTaskId = await reconcileSuccessfulRemoval({
+    return await settleAndReconcileRemoval({
       deps,
-      departure: operation.departure,
-      activeSucceeded,
-      succeededRemovalIds,
-      token: operation.token,
-      navigationRevision: operation.navigationRevision,
-      removalTaskIds,
-      activeTaskId: operation.activeTaskId,
-      activeSessionId: operation.activeSessionId,
-      workspaceId: operation.workspaceId,
-      validateTaskAncestry: opts?.cascade === true,
-      switchedTaskId,
-      errorsByTaskId: settled.errorsByTaskId,
-    });
-    const departureRequest = departureRequestFor(
-      operation.departure?.taskId ?? null,
+      action,
+      operation,
       requests,
       removalIdsByRequest,
-    );
-    if (operation.departure && !activeSucceeded && departureRequest) {
-      await recoverFailedDeparture({
-        action,
-        store: deps.store,
-        departure: operation.departure,
-        departureRequest,
-        errorsByTaskId: settled.errorsByTaskId,
-        token: operation.token,
-        workspaceId: operation.workspaceId,
-      });
-    }
-    notifySuccessfulRemoval(deps, action, settled);
-    return {
-      skipped: false,
-      operationToken: operation.token,
-      switchedTaskId,
-      succeededTaskIds: settled.succeededRequests.map((request) => request.taskId),
-      failedTaskIds: settled.failedRequests.map((request) => request.taskId),
-      errorsByTaskId: settled.errorsByTaskId,
-    };
+      removalTaskIds,
+      mutationPlan,
+      mutationResults,
+      destinationOutcome,
+      opts,
+    });
   } finally {
     deps.store.getState().releaseTaskRemoval(operation.token);
   }
