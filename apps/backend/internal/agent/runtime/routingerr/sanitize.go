@@ -45,7 +45,7 @@ var credentialRedactions = []redaction{
 	// userinfo class includes '@' so the match backtracks to the LAST '@'
 	// before the next '/' or whitespace, matching how a real credential
 	// embedding a raw '@' actually terminates.
-	literalRedaction(`(?i)([a-z][a-z0-9+.-]*://)[^\s/]+@`, "$1"+redactionMask+"@"),
+	literalRedaction(`(?i)([a-z][a-z0-9+.-]*://)[^\s/?#]+@`, "$1"+redactionMask+"@"),
 }
 
 var redactions = append(append([]redaction{
@@ -102,14 +102,24 @@ func isBareDecimalInteger(s string) bool {
 	return true
 }
 
+// isCountKey reports whether a credential-like assignment key is a known
+// token-count field. Only these fields can preserve a bare decimal value.
+func isCountKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "tokens", "max_tokens", "input_tokens", "output_tokens",
+		"total_tokens", "prompt_tokens", "completion_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
 // redactAssignments replaces each password/secret/token/api-key assignment
 // with its key name and a mask, consuming the value with scanValue so an
 // embedded quote or leading structural delimiter cannot truncate the match
-// early and leave part of the credential in cleartext. A bare decimal
-// integer value is left untouched: it is never a credential, and the key
-// pattern also matches non-credential fields that merely contain one of the
-// keywords as a substring (`max_tokens`, `input_tokens`), where redacting a
-// count destroys legitimate diagnostic content for no security benefit.
+// early and leave part of the credential in cleartext. A bare decimal integer
+// is preserved only for the explicit token-count keys, because the key pattern
+// also matches non-credential fields that contain a keyword as a substring.
 func redactAssignments(s string) string {
 	matches := credentialAssignmentKey.FindAllStringSubmatchIndex(s, -1)
 	if matches == nil {
@@ -124,11 +134,11 @@ func redactAssignments(s string) string {
 			continue
 		}
 		valueLen := scanValue(s[end:])
+		keyStart, keyEnd := assignmentKeySpan(loc)
 		b.WriteString(s[last:start])
-		if isBareDecimalInteger(s[end : end+valueLen]) {
+		if isCountKey(s[keyStart:keyEnd]) && isBareDecimalInteger(s[end:end+valueLen]) {
 			b.WriteString(s[start : end+valueLen])
 		} else {
-			keyStart, keyEnd := assignmentKeySpan(loc)
 			b.WriteString(s[keyStart:keyEnd])
 			b.WriteString(": ")
 			b.WriteString(redactionMask)
@@ -139,14 +149,9 @@ func redactAssignments(s string) string {
 	return b.String()
 }
 
-// delimiterBytes stop a bare (unquoted) value: a closing brace, bracket,
-// paren, or angle bracket. A value directly followed by one of these, as in
-// `{"password": "***"}` after an earlier redaction pass, must not consume it
-// so repeated redaction stays idempotent. Comma and semicolon are
-// deliberately excluded: unlike a container terminator, either can appear
-// inside a single legitimate credential value (e.g. a connection string), so
-// treating them as delimiters would truncate the value and leave its
-// remainder in cleartext.
+// delimiterBytes identify closing structural characters that can follow a
+// bare value. Commas and semicolons are handled only as part of a trailing
+// structural suffix, because either can appear inside a credential value.
 const delimiterBytes = "}])>"
 
 func isSpaceByte(c byte) bool {
@@ -179,9 +184,10 @@ func scanValue(s string) int {
 	return scanBare(s)
 }
 
-// scanBare consumes a bare (unquoted) value: at least one character
-// regardless of its class, then any run of characters that are neither
-// whitespace nor a structural delimiter.
+// scanBare consumes a bare value until whitespace. A closing delimiter at the
+// end of the token is kept outside the value so JSON-like structure survives;
+// a delimiter inside the token remains part of the value and cannot expose a
+// suffix after redaction.
 func scanBare(s string) int {
 	n := len(s)
 	i := 0
@@ -190,10 +196,27 @@ func scanBare(s string) int {
 		if isSpaceByte(c) {
 			break
 		}
-		if i > 0 && isDelimiterByte(c) {
-			break
-		}
 		i++
+	}
+	if i == 0 {
+		return 0
+	}
+	suffixStart := i
+	hasClosingDelimiter := false
+	for suffixStart > 0 {
+		c := s[suffixStart-1]
+		switch {
+		case isDelimiterByte(c):
+			hasClosingDelimiter = true
+			suffixStart--
+		case c == ',' || c == ';':
+			suffixStart--
+		default:
+			if hasClosingDelimiter && suffixStart > 0 {
+				return suffixStart
+			}
+			return i
+		}
 	}
 	return i
 }
@@ -203,11 +226,9 @@ func scanBare(s string) int {
 // ok=false if no closing quote is found before a newline or the end of s, so
 // the caller falls back to bare scanning.
 //
-// A closing quote only ends the value if what follows is a delimiter or the
-// end of the string. Otherwise the quote did not actually terminate the
-// credential (for example a value with an embedded, unescaped quote
-// character followed directly by more content), and scanning continues via
-// scanContinuation to find the real boundary.
+// A closing quote ends the value when it is followed by whitespace, the end
+// of the string, or a trailing structural suffix. Otherwise the quote did not
+// terminate the credential, and scanning continues to consume the value.
 func scanQuoted(s string) (int, bool) {
 	n := len(s)
 	quote := s[0]
@@ -232,10 +253,35 @@ func scanQuoted(s string) (int, bool) {
 // scanQuoted for when the scan needs to continue past that quote.
 func extendPastQuote(s string, j int) int {
 	n := len(s)
-	if j >= n || isSpaceByte(s[j]) || isDelimiterByte(s[j]) {
+	if j >= n || isSpaceByte(s[j]) {
 		return j
 	}
+	if isDelimiterByte(s[j]) {
+		if isTrailingStructuralSuffix(s[j:]) {
+			return j
+		}
+		return j + scanBare(s[j:])
+	}
 	return j + scanContinuation(s[j:])
+}
+
+// isTrailingStructuralSuffix reports whether s starts with a closing
+// delimiter and then contains only structural punctuation until whitespace or
+// the end. Such a suffix belongs to the surrounding object, not the value.
+func isTrailingStructuralSuffix(s string) bool {
+	if len(s) == 0 || !isDelimiterByte(s[0]) {
+		return false
+	}
+	hasClosingDelimiter := false
+	for i := 0; i < len(s) && !isSpaceByte(s[i]); i++ {
+		switch {
+		case isDelimiterByte(s[i]):
+			hasClosingDelimiter = true
+		case s[i] != ',' && s[i] != ';':
+			return false
+		}
+	}
+	return hasClosingDelimiter
 }
 
 // scanContinuation scans the trailing content directly after a quote that
