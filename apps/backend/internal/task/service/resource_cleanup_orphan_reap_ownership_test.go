@@ -274,6 +274,39 @@ func TestApplyOrphanReapOwnershipWalksThroughAncestryOnlyHop(t *testing.T) {
 	}
 }
 
+// A hop ps did not report an ancestry entry for (the host snapshot marks it
+// with the unresolved-ppid sentinel, not a defaulted 0) must fail the whole
+// candidate closed rather than let the walk read the sentinel as "no more
+// ancestors, not owned".
+func TestApplyOrphanReapOwnershipFailsClosedOnUnresolvedAncestryHop(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+
+	root := t.TempDir()
+	cand := newOrphanReapOwnershipCandidate(500, 450, root, root)
+	byRoot := map[string][]orphanReapCandidate{root: {cand}}
+	snap := []hostProcess{
+		{PID: 450, PPID: orphanReapUnresolvedPPID, Cwd: "", Command: ""},
+		{PID: 500, PPID: 450, Cwd: root, Command: "sh"},
+	}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+	if len(got) != 0 {
+		t.Fatalf("expected pid 500 to be skipped as ownership-inconclusive, not signaled, got %+v", got)
+	}
+	found := false
+	for _, rec := range snapshot.OrphanReapRecords {
+		if rec.PID == 500 && rec.Outcome == orphanReapOutcomeSkipped {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected pid 500 to be recorded as skipped, got %+v", snapshot.OrphanReapRecords)
+	}
+}
+
 // AC-TASKS-ORPHAN-REAP-003.5: the backend's own PID is always protected.
 func TestApplyOrphanReapOwnershipSkipsProtectedPID(t *testing.T) {
 	svc, _, repo := createTestService(t)
@@ -510,5 +543,32 @@ func TestOrphanReapProtectedPIDsStopsOnCycle(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("expected exactly the two cycle pids protected (no runaway walk), got %+v", got)
+	}
+}
+
+// Hitting the unresolved-ppid sentinel partway up the chain must report
+// inconclusive, not fall through to "walk ended, not owned".
+func TestOrphanReapAncestorOwnerReturnsInconclusiveOnUnresolvedHop(t *testing.T) {
+	ppidByPID := map[int]int{
+		500: 450,
+		450: orphanReapUnresolvedPPID,
+	}
+	owner, blocked, inconclusive := orphanReapAncestorOwner(500, ppidByPID, map[int]string{})
+	if !inconclusive || blocked || owner != "" {
+		t.Fatalf("expected an inconclusive result, got owner=%q blocked=%v inconclusive=%v", owner, blocked, inconclusive)
+	}
+}
+
+// An owner found before the walk reaches an unresolved hop still reports as
+// blocked, not inconclusive: the sentinel only matters when the walk needs
+// to cross it.
+func TestOrphanReapAncestorOwnerFindsOwnerBeforeUnresolvedHop(t *testing.T) {
+	ppidByPID := map[int]int{
+		500: 400,
+		400: orphanReapUnresolvedPPID,
+	}
+	owner, blocked, inconclusive := orphanReapAncestorOwner(500, ppidByPID, map[int]string{400: "task-other"})
+	if inconclusive || !blocked || owner != "task-other" {
+		t.Fatalf("expected pid 400 to be found owned before the walk needed to cross the unresolved hop, got owner=%q blocked=%v inconclusive=%v", owner, blocked, inconclusive)
 	}
 }
