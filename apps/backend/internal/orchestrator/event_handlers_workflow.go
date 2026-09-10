@@ -367,12 +367,25 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 			State:     session.State,
 		}
 	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return ProcessOnTurnStartResult{}, fmt.Errorf("load task for on_turn_start: %w", err)
+	}
+	if task != nil && task.State == v1.TaskStateCompleted && !models.IsCompletionFollowUpSession(session.Metadata) {
+		if err := s.repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyCompletionFollowUp, true); err != nil {
+			return ProcessOnTurnStartResult{}, fmt.Errorf("mark completed task follow-up: %w", err)
+		}
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyCompletionFollowUp] = true
+	}
 	// ADR 0015 — a fresh user message before the pending signal's
 	// transition has fired cancels the signal (re-open semantics). The
 	// user is continuing the conversation; this step is no longer "done".
 	s.clearPendingStepSignal(ctx, session)
 	s.processOnTurnStartViaEngine(ctx, taskID, session)
-	task, err := s.repo.GetTask(ctx, taskID)
+	task, err = s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		// Do not let a read race turn an unknown admission state into an
 		// immediate prompt. The caller can retry after reconciliation.

@@ -33,11 +33,15 @@ test.describe("Workflow task completion on mobile", () => {
     const helpBox = await help.boundingBox();
     expect(helpBox).not.toBeNull();
     expect(helpBox!.height).toBeGreaterThanOrEqual(44);
+    await help.evaluate((element) => (element as HTMLElement).blur());
+    await expect(testPage.getByRole("tooltip")).toHaveCount(0);
     await help.tap();
-    await expect(testPage.getByRole("tooltip")).toContainText(
+    await expect(testPage.getByRole("dialog")).toContainText(
       "Marks the task complete when it enters this final step",
     );
     await expect(checkbox).toBeChecked();
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByRole("dialog")).toHaveCount(0);
 
     await checkbox.tap();
     await expect(checkbox).not.toBeChecked();

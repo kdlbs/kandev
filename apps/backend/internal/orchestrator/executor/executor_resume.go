@@ -1615,11 +1615,12 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
-	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput || isArchiveCancelledResumeSession(session)) {
+	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
+		isArchiveCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
-		// description. Also covers an archive-cancelled session whose running
-		// record survived cleanup but carries no token — same auto-resume shape
-		// as the running==nil branch above.
+		// description. Also covers completed and archive-cancelled sessions whose
+		// running record survived cleanup but carries no token — the same
+		// auto-resume shape as the running==nil branch above.
 		req.TaskDescription = ""
 		e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
 			zap.String("task_id", task.ID),
