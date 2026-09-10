@@ -391,9 +391,6 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   const taskId = session?.task_id ?? null;
   const workspaceRestoration = useWorkspaceRestoration(taskId, isReadOnlyMode ? null : sessionId);
   const isSessionFailed = !isReadOnlyMode && isFailed;
-  const sessionEnded = Boolean(
-    session && ["COMPLETED", "FAILED", "CANCELLED"].includes(session.state),
-  );
   const shellOutput = useAppStore((state) => {
     if (!sessionId || isReadOnlyMode) return "";
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
@@ -410,7 +407,6 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
     sessionId,
     taskId,
     isActive,
-    sessionEnded,
     isSessionFailed,
     errorMessage,
     shellOutput,
@@ -443,7 +439,6 @@ export function ShellTerminal({
     sessionId,
     taskId,
     isSessionFailed,
-    sessionEnded,
     errorMessage,
     shellOutput,
     canSubscribe,
@@ -454,25 +449,6 @@ export function ShellTerminal({
     !isReadOnlyMode &&
     workspaceRestoration.status !== null &&
     workspaceRestoration.status !== "ready";
-  useEffect(() => {
-    if (
-      isReadOnlyMode ||
-      !sessionEnded ||
-      !taskId ||
-      !sessionId ||
-      workspaceRestoration.status !== null
-    ) {
-      return;
-    }
-    void workspaceRestoration.restore();
-  }, [
-    isReadOnlyMode,
-    sessionEnded,
-    sessionId,
-    taskId,
-    workspaceRestoration.restore,
-    workspaceRestoration.status,
-  ]);
   useReadOnlyOutputSync({
     xtermRef,
     isReadOnlyMode,

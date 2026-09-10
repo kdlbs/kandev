@@ -177,6 +177,11 @@ Implementation and regression tests completed on 2026-09-10:
 - The subsequent frontend failure was isolated to an incomplete existing test
   mock after the store API became a workspace-restoration dependency. The
   responsive File Browser mock now supplies that API, and its three tests pass.
+- PR fixup removed duplicate terminal-side workspace launches. The page-level
+  resumption owner still admits retained workspaces, while archived unarchive
+  recovery keeps its single Resume request and ended sessions retain their
+  terminal explanation. The affected desktop E2E checks passed 4/4 and the
+  passthrough unit suite passed 31/31 locally.
 
 Design validation before implementation on 2026-09-10:
 

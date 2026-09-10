@@ -440,25 +440,6 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const workspaceReady = mode === "shell" && workspaceRestoration.status === "ready";
   const connectionID = mode === "agent" ? sessionId : environmentId;
   const environmentEnded = useEnvironmentEnded(environmentId);
-  useEffect(() => {
-    if (
-      mode !== "shell" ||
-      !environmentEnded ||
-      !taskId ||
-      !sessionId ||
-      workspaceRestoration.status !== null
-    ) {
-      return;
-    }
-    void workspaceRestoration.restore();
-  }, [
-    environmentEnded,
-    mode,
-    sessionId,
-    taskId,
-    workspaceRestoration.restore,
-    workspaceRestoration.status,
-  ]);
   const canConnect =
     computeCanConnect(mode, connectionID, sessionId, environmentEnded, workspaceReady) &&
     (mode !== "shell" || !workspaceRestoration.status || workspaceRestoration.status === "ready");
