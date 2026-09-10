@@ -111,6 +111,23 @@ test.describe("Agents", () => {
     });
   });
 
+  test("paused agent remains reachable from the agents list", async ({
+    testPage,
+    officeApi,
+    officeSeed,
+  }) => {
+    await officeApi.updateAgentStatus(officeSeed.agentId, "paused");
+
+    await testPage.goto("/office/agents");
+    const agentCardLink = testPage.locator(`a[href="/office/agents/${officeSeed.agentId}"]`);
+    await expect(agentCardLink).toBeVisible({ timeout: 10_000 });
+    await agentCardLink.click();
+    await testPage.waitForURL(new RegExp(`/office/agents/${officeSeed.agentId}/dashboard$`));
+    await expect(testPage.getByTestId("agent-recovery-control")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test("newly created agent appears on agents page", async ({
     testPage,
     officeApi,

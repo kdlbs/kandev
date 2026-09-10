@@ -19,7 +19,8 @@ type Props = { agentId: string };
  * Recovery control for an out-of-service Office agent. One control, one
  * accessible name, shown for `paused` and `stopped` alike — the target
  * status requested is always the constant `idle`, never derived from the
- * rendered status, so a stale render or a repeat click is harmless.
+ * rendered status. The rendered status is sent as an expected recoverable
+ * status so a stale browser cannot clear a live working owner.
  *
  * Reads the agent from the store by id, rather than taking a resolved agent
  * prop, so a store patch after recovery re-renders this control immediately.
@@ -37,7 +38,9 @@ export function AgentRecoveryControl({ agentId }: Props) {
     const requestedFromStatus = agent.status;
     setRecovering(true);
     try {
-      const updated = await updateAgentStatus(agent.id, "idle");
+      const updated = await updateAgentStatus(agent.id, "idle", {
+        expectedStatus: requestedFromStatus,
+      });
       // Something other than this request (a WS-triggered refetch, another
       // client's write) may have moved the store row while the request was
       // in flight. Applying this response then would clobber a newer status

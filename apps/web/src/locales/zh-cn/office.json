@@ -350,7 +350,7 @@
   "failedToRefreshUtilization": "刷新利用率失败",
   "failedToReject": "拒绝失败",
   "failedToRemoveRepository": "移除仓库失败",
-  "failedToReturnAgentToService": "恢复代理服务失败",
+  "failedToReturnAgentToService": "恢复智能体服务失败",
   "failedToRunRoutine": "运行例行程序失败",
   "failedToSave": "保存失败",
   "failedToSaveExecutorConfiguration": "保存执行器配置失败",

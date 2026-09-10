@@ -16,21 +16,19 @@ supported product operation — `PATCH /api/v1/office/agents/:id/status` accepts
 the transition and the agent state machine lists `paused -> idle` ("user clicks
 Resume") and `stopped -> idle` ("user reactivates") as user-driven transitions.
 
-No user interface calls that endpoint. The nearest thing is the inbox "Mark
-fixed" action, and it does not close this gap for two separate reasons. It
-reaches exactly one population — an agent auto-paused after consecutive
-failures, whose inbox entry still exists and has not been dismissed — so every
-other way an agent reaches `paused` or `stopped` (a budget guard, a direct API
-call, an operator who already dismissed the inbox entry) it never sees. And for
-the population it does reach, it writes the agent's existing status back
-unchanged: it clears the pause reason, resets the failure counter and dismisses
-the entries, but leaves the agent `paused`. It also attempts to re-queue the
-affected runs, and every one of those attempts fails, because a run cannot be
-queued for an agent that is `paused`.
+Before this capability, no user interface called that endpoint. The nearest
+existing action is the inbox "Mark fixed" action, but it applies only to an
+auto-paused agent whose inbox entry still exists and has not been dismissed. It
+is a full failure-recovery action:
+it clears the pause reason, resets the failure counter, dismisses the related
+inbox entries, returns the agent to `idle`, and re-queues eligible runs. It does
+not cover a manually paused or stopped agent, a budget pause, or an agent whose
+inbox entry was already dismissed. It also bundles failure bookkeeping and
+run re-queueing with the status change, which is not suitable for every
+operator recovery decision.
 
-So today there is no path at all, for any agent, from `paused` or `stopped` back
-to `idle` that does not involve hand-writing an HTTP request against the
-backend.
+So today the product has no status-only path from every `paused` or `stopped`
+agent back to `idle` without a hand-written HTTP request against the backend.
 
 This capability adds that affordance: an operator-facing control on the Office
 agent detail surface that returns a `paused` or `stopped` agent to `idle`.
@@ -75,15 +73,14 @@ live `agent_paused_after_failures` entry. Neither covers an agent that reached
 `paused` or `stopped` by any other route, which is the gap this capability
 closes.
 
-**What we are doing differently.** The one adjacent flow bundles three effects
-together — counter reset, inbox dismissal, an attempted run re-queue — and does
-not change status at all. This capability is its exact complement: it changes
-status and does nothing else. Bundling the two would mean an operator
-reactivating a manually stopped agent silently re-queues failed work they never
-asked to retry. Separating "put this agent back in service" from "treat these
-failures as resolved" is the substantive departure, and the "Consequences of
-the named exclusions" section below states what the operator gives up by using
-the narrower action, and in what order the two are best used.
+**What we are doing differently.** The one adjacent flow bundles four effects
+together: counter reset, inbox dismissal, status recovery, and eligible run
+re-queue. This capability is its status-only complement. Bundling the two would
+mean an operator reactivating a manually stopped agent silently re-queues failed
+work they never asked to retry. Separating "put this agent back in service"
+from "treat these failures as resolved" is the substantive departure, and the
+"Consequences of the named exclusions" section below states what the operator
+gives up by using the narrower action.
 
 ## Terminology
 
@@ -98,10 +95,9 @@ the narrower action, and in what order the two are best used.
   control.
 - **Auto-pause recovery:** the existing inbox "Mark fixed" action on an
   `agent_paused_after_failures` entry. It clears the pause reason, resets the
-  consecutive-failure counter, dismisses inbox entries, and attempts to re-queue
-  runs. It does not change the agent's status, and because it does not, those
-  re-queue attempts are refused. Its name notwithstanding, it is a
-  failure-bookkeeping action, not a recovery of the agent's ability to work.
+  consecutive-failure counter, dismisses inbox entries, returns the agent to
+  `idle`, and re-queues eligible runs. It is the full failure-recovery action;
+  the detail control in this capability is the status-only action.
 
 ## Requirements
 
@@ -126,8 +122,9 @@ scheduled work without my leaving the product.
   `working`, `pending_approval`, an empty status, and a value the client does
   not recognise — the system shall not present the recovery control.
 - **AC-OFFICE-AGENT-RECOVERY-001.3:** When an operator activates the recovery
-  control, the system shall request the target status `idle` for that agent and
-  shall request no other field change.
+  control, the system shall request the target status `idle` for that agent.
+  The request may include the rendered recoverable status as a concurrency
+  precondition, but it shall request no other agent field change.
 - **AC-OFFICE-AGENT-RECOVERY-001.4:** When the recovery request succeeds, the
   system shall render the status the server returned for that agent, and shall
   not render a status the acting client predicted before the response arrived.
@@ -182,9 +179,13 @@ agent came back, and must never report a recovery that did not happen.
   success to both.
 - **AC-OFFICE-AGENT-RECOVERY-002.5:** When an agent's status changes between the
   moment the acting client rendered it and the moment the operator activates the
-  recovery control, the system shall apply the operator's request against the
-  agent's current server-side status and shall render the resulting status,
-  rather than the status the client had rendered.
+  recovery control, the system shall apply the request only while the current
+  server-side status is still recoverable (`paused` or `stopped`). If the current
+  status is `idle`, the request shall report success without another write. If
+  the current status is `working`, `pending_approval`, or another non-recoverable
+  value, the request shall fail and shall not change the agent or its working
+  owner. The acting client shall render the server result, not a status it
+  predicted before the response arrived.
 - **AC-OFFICE-AGENT-RECOVERY-002.6:** When the requested transition is refused,
   or the target agent cannot be resolved, the system shall treat the request as
   failed under AC-OFFICE-AGENT-RECOVERY-002.2 and shall not report success.
@@ -212,23 +213,22 @@ server's response and never precedes it
 (AC-OFFICE-AGENT-RECOVERY-001.4).
 
 The requested target is the constant `idle` rather than a value derived from the
-status the client last rendered. A repeat request is therefore a no-op rather
-than a conflict (AC-OFFICE-AGENT-RECOVERY-002.3), two concurrent operators
-converge on the same result (AC-OFFICE-AGENT-RECOVERY-002.4), and a request
-built against a stale render still expresses the operator's intent
-(AC-OFFICE-AGENT-RECOVERY-002.5).
+status the client last rendered. The client also sends that rendered status as
+an expected recoverable status. The backend uses a compare-and-set write and
+allows a retry when the current status moved between `paused` and `stopped`.
+A repeat request that finds `idle` is a no-op and reports success
+(AC-OFFICE-AGENT-RECOVERY-002.3), so concurrent operators converge on `idle`
+(AC-OFFICE-AGENT-RECOVERY-002.4). If a stale request finds `working`,
+`pending_approval`, or another non-recoverable status, it fails without clearing
+the status or the `working_run_id` owner (AC-OFFICE-AGENT-RECOVERY-002.5).
 
-One other writer of this field is not a recovery and does not converge with one.
-Auto-pause recovery reads the agent's status and writes that same value back, so
-a "Mark fixed" that began before a recovery landed can complete after it and
-restore the earlier `paused`. The agent is then `paused` with an empty pause
-reason, a state this capability's own request never produces. No compare-and-set
-exists on the status endpoint and this capability adds none, and the acting
-client is not told of the later write, so it keeps showing `idle` and keeps the
-control hidden per `AC-OFFICE-AGENT-RECOVERY-001.5`. The control returns
-whenever that agent is next read from the server, and activating it again is the
-operator's remedy. Removing the stale write belongs to the flow that performs it
-(see "Out of scope").
+The inbox "Mark fixed" flow is a second writer with a different contract. It
+uses its own compare-and-set unpause and full failure-recovery sequence. If it
+races with this status-only control, one operation can observe the other, but
+neither operation restores a stale `paused` value. The operator can choose the
+status-only action when the failure history and queued work must remain, or
+"Mark fixed" when the failure history should be reset and eligible runs should
+be re-queued.
 
 ## Consequences of the named exclusions
 
@@ -277,23 +277,19 @@ each consequence below is downstream of those two.
   re-queue, the run is now accepted rather than refused, because the agent is
   `idle`.
 
-**Recovery first. The other order destroys the work it appears to retry.**
-For an agent auto-paused after consecutive failures, where the operator wants
-both the failures treated as resolved and the agent working again, this control
-should be used **first**. Used first, it returns the agent to `idle` and
-un-suppresses whichever per-run `agent_run_failed` entries survive, each of
-which still carries its own "Mark fixed"; where that action re-queues at all
-(above), the run is now accepted, because the agent is `idle`. What
-recovery-first gives up is the **one-click counter reset**, and the counter is
-not stuck by that: it also clears on the agent's next successful turn.
+**Choose the action that matches the recovery intent.** For an auto-paused
+agent with an active inbox entry, "Mark fixed" is the full recovery path. It
+returns the agent to `idle`, resets the failure counter, dismisses the related
+entries, and re-queues eligible runs. The detail control is the status-only
+path. It returns the agent to `idle`, keeps the failure counter, and leaves
+run-queue and inbox ownership to the existing flow.
 
-In the other order, the consolidated "Mark fixed" dismisses every per-run entry
-permanently — a dismissal is never undone — while leaving the agent `paused`,
-so each re-queue it then attempts is refused and nothing is queued. That leaves
-the operator with a reset counter, an empty inbox, no queued work, and no
-per-run entry left to retry from. This is a defect in that flow, which this
-capability neither causes nor repairs; it is recorded here because it is the
-reason the ordering guidance reads the way it does.
+If the detail control runs first, it clears `pause_reason`, so the consolidated
+auto-pause entry no longer applies. Surviving per-run entries remain available
+for their own "Mark fixed" actions. If "Mark fixed" runs first, it performs its
+full recovery and the detail control becomes a successful no-op when the page
+refreshes. Neither order loses a live working owner or restores a stale paused
+status.
 
 For every other route into `paused` or `stopped` — a budget guard, a direct API
 call, an operator who already dismissed the inbox entry — "Mark fixed" never
@@ -313,12 +309,9 @@ applied in the first place and this control is the only action needed.
   re-queueing runs.** Owned by the auto-pause recovery flow described in
   [inbox](inbox.md) and [runtime](runtime.md). See "Consequences of the named
   exclusions" above for what this means in practice.
-- **Repairing the auto-pause recovery flow.** Two defects in it are described
-  above: it writes back a status it read earlier, which can revert a concurrent
-  recovery, and it dismisses per-run entries permanently while its own unchanged
-  `paused` status causes every re-queue it attempts to be refused. Both live in
-  that flow, not in this control, and either fix changes behavior this
-  capability does not own.
+- **Changing the auto-pause recovery flow.** The inbox "Mark fixed" action owns
+  failure-counter reset, inbox dismissal, and run re-queueing. This capability
+  does not change that full recovery path.
 - **Live propagation of the recovered status to other clients.** The status
   endpoint publishes no event, so another operator's already-open view keeps the
   stale status until it refetches for some other reason. This capability

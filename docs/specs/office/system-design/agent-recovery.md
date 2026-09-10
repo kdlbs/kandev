@@ -22,9 +22,9 @@ Adjacent contracts this design uses but does not own:
 - The Office agent status transition table and the status endpoint's validation
   (`internal/office/agents`). Consumed as-is; this design adds no transition.
 - The auto-pause recovery flow (`MarkAgentPausedFixed`), which owns the
-  failure-counter reset, inbox dismissal, and an attempted run re-queue, and
-  which writes the agent's status back unchanged — so while that status is
-  `paused`, the re-queue it attempts is refused. Not invoked here.
+  failure-counter reset, inbox dismissal, the transition back to `idle`, and
+  run re-queueing. It is the full failure-recovery action. This design adds a
+  separate status-only action and does not invoke the inbox flow.
 - The Office inbox's failure sources. They are not called by this design, but
   they READ the field it writes: both the consolidated auto-paused entry and the
   suppression of the individual failed-run entries are selected by matching
@@ -54,20 +54,20 @@ control and the pause-reason text belong beside the state they describe, and
 placing them in the layout rather than in one tab satisfies
 AC-OFFICE-AGENT-RECOVERY-001.1 without repeating the control per tab.
 
-**Office agent API client (web).** Owns the single status mutation. The web
-codebase has no caller of the agent status endpoint today; the only existing
-caller in the repository is the end-to-end test helper. This design adds the
-production client function rather than reaching for the general agent update
-endpoint — see [Data and contracts](#data-and-contracts) for why that
-distinction is load-bearing.
+**Office agent API client (web).** Owns the status mutation for the detail
+control. It uses the status endpoint's guarded recovery mode rather than the
+general agent update endpoint — see [Data and contracts](#data-and-contracts)
+for why that distinction is load-bearing.
 
 **Office agent store slice (web).** Holds the workspace's agent rows and is the
 single read source for the identity strip, the agent list, and the dashboard.
 Patching the recovered agent here is what makes AC-OFFICE-AGENT-RECOVERY-001.5
 hold across those surfaces without a reload.
 
-**Office agent status endpoint (backend, existing, unchanged).** Validates the
-transition, persists status and pause reason, and returns the updated agent.
+**Office agent status endpoint (backend).** Validates the transition, persists
+status and pause reason, and returns the updated agent. Guarded recovery
+requests include the rendered recoverable status and use a compare-and-set
+write, so a stale browser cannot clear a live working owner.
 
 **Office agent list (web, existing, unchanged).** Applies no status filter, so a
 `paused` or `stopped` agent is already listed and already links to its detail
@@ -80,7 +80,7 @@ Request:
 
 ```text
 PATCH /api/v1/office/agents/:id/status
-{ "status": "idle" }
+{ "status": "idle", "expected_status": "paused" }
 ```
 
 Response `200`:
@@ -103,31 +103,31 @@ also assert on the normalized value rather than on key presence.
 
 Three further properties of this contract shape the design:
 
-1. **The endpoint is the only validating writer.** The general agent update
+1. **The status endpoint is the validating writer.** The general agent update
    endpoint (`PATCH /api/v1/office/agents/:id`) also accepts a `status` field,
    but it assigns it directly and never consults the transition table. The
-   recovery control must use the `/status` endpoint so that an illegal
-   transition is refused rather than silently written.
+   recovery control uses the `/status` endpoint with `expected_status`, so an
+   illegal transition or a stale non-recoverable status is refused rather than
+   silently written.
 
 2. **Omitting `pause_reason` clears it.** The request field is a plain string,
    and the persistence layer preserves the stored `pause_reason` only when the
-   *incoming* status is `working`. A recovery request therefore writes an empty
-   pause reason as a side effect of writing `idle`, which is what
-   AC-OFFICE-AGENT-RECOVERY-001.7 requires. The same statement clears
-   `working_run_id`.
+   *incoming* status is `working`. A guarded recovery request therefore writes
+   an empty pause reason as a side effect of writing `idle`, which is what
+   AC-OFFICE-AGENT-RECOVERY-001.7 requires. The compare-and-set predicate
+   restricts that write to a recoverable source status, so it cannot clear a
+   live `working_run_id`.
 
 3. **The response body is the authority.** The handler returns the agent it just
    wrote, so the acting client never has to guess and never has to re-fetch to
    satisfy AC-OFFICE-AGENT-RECOVERY-001.4.
 
-Statuses whose transition set contains `idle`: `paused`, `stopped`,
-`working`, `pending_approval`, and `idle` itself (a same-status write is
-accepted as a no-op). Restricting the control to `paused` and `stopped` per
-AC-OFFICE-AGENT-RECOVERY-001.2 is therefore a **presentation** decision, not a
-constraint the endpoint enforces — the control is not shown for `working` or
-`pending_approval` even though the endpoint would accept those requests. An
-implementation must gate on the rendered status rather than assume the backend
-will refuse.
+The general endpoint accepts `idle` from `paused`, `stopped`, `working`,
+`pending_approval`, and `idle` itself. Guarded recovery is narrower: it accepts
+only a request rendered from `paused` or `stopped`, applies it only while the
+server still has one of those recoverable statuses, and treats `idle` as an
+idempotent success. The control is not shown for `working` or
+`pending_approval`, and a stale request that reaches either status is refused.
 
 ## Control flow
 
@@ -136,10 +136,12 @@ will refuse.
    is non-empty, it renders that text.
 2. Activation marks the request in flight, which disables further activation
    (AC-OFFICE-AGENT-RECOVERY-002.1).
-3. The API client issues the `PATCH` with the constant target `idle`. The target
-   is not derived from the rendered status, which is what makes a stale render
-   harmless (AC-OFFICE-AGENT-RECOVERY-002.5) and a repeat request a no-op
-   (AC-OFFICE-AGENT-RECOVERY-002.3).
+3. The API client issues the `PATCH` with the constant target `idle` and the
+   rendered status as `expected_status`. The backend compare-and-set applies
+   the write only to a current `paused` or `stopped` row, retries once when
+   those two statuses exchange places, and treats current `idle` as a no-op.
+   A stale `working` or `pending_approval` row fails without a write
+   (AC-OFFICE-AGENT-RECOVERY-002.5).
 4. On `200`, the client patches the store from the normalized response agent's
    `status` and `pause_reason`, where an absent `pause_reason` normalizes to the
    empty string (see [Data and contracts](#data-and-contracts)). No optimistic
@@ -153,26 +155,22 @@ omission is deliberate.
 
 ## Failure and recovery
 
-The endpoint answers every service-layer failure with `400` and an `error`
-string, including a target agent that cannot be resolved. An implementation must
-not distinguish "no such agent" from "illegal transition" by status code; both
-are the failed-request path of AC-OFFICE-AGENT-RECOVERY-002.2 and
-AC-OFFICE-AGENT-RECOVERY-002.6.
+The endpoint answers ordinary service-layer failures with `400` and an `error`
+string, including a target agent that cannot be resolved. A guarded recovery
+that finds a stale non-recoverable status answers `409`, because the requested
+state changed before the write. Both cases are failed-request paths under
+AC-OFFICE-AGENT-RECOVERY-002.2 and AC-OFFICE-AGENT-RECOVERY-002.6.
 
 Transport failures and non-`2xx` responses are handled identically: displayed
 state unchanged, error surfaced, control re-enabled. Because the request is
 idempotent, an operator who retries after an ambiguous timeout cannot make
 things worse.
 
-**A concurrent "Mark fixed" can undo a completed recovery.** Auto-pause recovery
-reads the agent row and writes the status it read back, so one that began before
-a recovery landed can complete after it and restore `paused`. The recovery
-response was still truthful when it was sent, and this design keeps
-AC-OFFICE-AGENT-RECOVERY-001.4 by rendering it; the acting client is simply not
-told about the later write, for the same reason it is not told about any other:
-the endpoint publishes no event. The control reappears on the next refetch and
-the operator can activate it again. Guarding the write is the other flow's to
-fix, not this one's.
+**A concurrent "Mark fixed" uses a separate recovery contract.** Its unpause
+write is also compare-and-set, so it cannot restore a stale `paused` value after
+the detail control has returned the agent to `idle`. Either flow can observe an
+`idle` result from the other and complete its own work. The endpoint still
+publishes no event, so another open browser may remain stale until a refetch.
 
 **No event is published.** The status endpoint emits nothing on the event bus
 and writes no activity entry. The constant `office.agent.status_changed` is
@@ -188,10 +186,10 @@ change to the endpoint and is out of scope here.
 
 ## Persistence
 
-None added. The status endpoint's existing single-statement update owns the
-write. The agent runtime row is DB-resident and not part of exported YAML
-configuration, so config reconciliation does not revert an operator's recovery
-across a restart.
+None added. The status endpoint's single-statement compare-and-set update owns
+the guarded write. The canonical `agent_profiles` row is DB-resident and not
+part of exported YAML configuration, so config reconciliation does not revert
+an operator's recovery across a restart.
 
 ## Security
 
@@ -207,7 +205,7 @@ not already read.
 
 ## Observability
 
-The backend path is unchanged and logs nothing for this transition today. The
+The backend path logs nothing for this transition today. The
 operator-visible signals are the rendered status, the presence or absence of the
 recovery control, and the pause-reason text — which is what the acceptance
 criteria assert against. If a run-time record of who recovered an agent is

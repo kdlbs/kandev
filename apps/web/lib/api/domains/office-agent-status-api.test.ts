@@ -54,6 +54,13 @@ describe("updateAgentStatus", () => {
     expect(init?.body).toBe(JSON.stringify({ status: "stopped" }));
   });
 
+  it("includes the rendered status when the caller requests a guarded recovery", async () => {
+    await updateAgentStatus(AGENT_ID, "idle", { expectedStatus: "paused" });
+
+    const [, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(init?.body).toBe(JSON.stringify({ status: "idle", expected_status: "paused" }));
+  });
+
   it("resolves to the response body's agent, normalized", async () => {
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify(agentResponse({ status: "idle", pause_reason: undefined })), {

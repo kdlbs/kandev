@@ -44,7 +44,8 @@ handles the in-flight and failure paths without an optimistic write.
 
 ## Out of scope
 
-- Any backend change or new endpoint call beyond the status mutation.
+- Any endpoint beyond the status mutation; the control uses its guarded
+  `expected_status` mode.
 - Failure-counter resets, inbox dismissal, and run re-queueing.
 - Browser coverage: delivered alongside this task as
   `apps/web/e2e/tests/office/agents.spec.ts` and
@@ -116,4 +117,8 @@ Task 02 provides the status mutation client this control calls.
 
 ## Results
 
-Pending.
+Implemented in the detail layout, recovery control, locale catalogs, and
+browser specs. The control uses the guarded status client, keeps the store
+response-driven, and the mobile path checks viewport containment and a
+touch-sized button. The list-to-detail browser case confirms paused agents
+remain reachable.

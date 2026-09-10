@@ -174,7 +174,9 @@ describe("AgentRecoveryControl activation", () => {
     fireEvent.click(getControlButton());
 
     await waitFor(() => {
-      expect(updateAgentStatus).toHaveBeenCalledWith(AGENT_ID, "idle");
+      expect(updateAgentStatus).toHaveBeenCalledWith(AGENT_ID, "idle", {
+        expectedStatus: "paused",
+      });
     });
     expect(updateAgentStatus).toHaveBeenCalledTimes(1);
   });

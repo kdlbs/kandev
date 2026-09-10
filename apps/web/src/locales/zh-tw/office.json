@@ -350,7 +350,7 @@
   "failedToRefreshUtilization": "重新整理利用率失敗",
   "failedToReject": "拒絕失敗",
   "failedToRemoveRepository": "移除儲存庫失敗",
-  "failedToReturnAgentToService": "恢復代理服務失敗",
+  "failedToReturnAgentToService": "恢復代理程式服務失敗",
   "failedToRunRoutine": "執行例行程式失敗",
   "failedToSave": "儲存失敗",
   "failedToSaveExecutorConfiguration": "儲存執行器設定檔失敗",

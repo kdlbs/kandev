@@ -13,6 +13,10 @@ test.describe("Agent recovery control on mobile", () => {
     const recoveryControl = testPage.getByTestId("agent-recovery-control");
     await expect(recoveryControl).toBeVisible({ timeout: 10_000 });
 
+    const documentWidth = await testPage.evaluate(() => document.documentElement.scrollWidth);
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    expect(documentWidth).toBeLessThanOrEqual(viewportWidth);
+
     const box = await recoveryControl.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);

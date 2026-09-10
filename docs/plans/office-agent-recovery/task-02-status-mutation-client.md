@@ -28,7 +28,8 @@ never emits `status`.
 ## In scope
 
 - `updateAgentStatus(id, status, options?)` in the Office API domain client,
-  posting `{ status }` and returning the normalized agent from the response.
+  posting `{ status }` and, for guarded recovery, an `expected_status`
+  precondition; it returns the normalized agent from the response.
 - Unit coverage over the request the function issues and the agent it returns.
 
 ## Out of scope
@@ -42,7 +43,8 @@ never emits `status`.
 
 - The function issues exactly one request, `PATCH` to
   `/api/v1/office/agents/<id>/status`, with the body `{"status":"idle"}` and no
-  other field, when called with the target `idle`.
+  other state field, when called with the target `idle`. A guarded recovery
+  may add its expected source status as a concurrency precondition.
 - The target status is the caller's argument, never read from a prior response
   or from module state.
 - The resolved value is the response body's agent passed through the module's
@@ -95,4 +97,7 @@ generated contract, lockfile, or package configuration.
 
 ## Results
 
-Pending.
+Implemented in `office-api.ts` and `office-agent-status-api.test.ts`. The
+client sends the constant target and can include the rendered status as the
+`expected_status` recovery precondition. The response still passes through
+the existing agent normalizer.

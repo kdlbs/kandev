@@ -83,4 +83,7 @@ generated contract, lockfile, or package configuration.
 
 ## Results
 
-Pending.
+Implemented in `service_status_transition_test.go`. The table test pins the
+paused/stopped recovery transitions, same-status idle idempotence, and refused
+unknown transitions. The later fixup adds guarded service and handler coverage
+for stale working status without changing this task's transition table.
