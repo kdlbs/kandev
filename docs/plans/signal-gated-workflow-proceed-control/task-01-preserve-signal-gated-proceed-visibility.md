@@ -49,12 +49,14 @@ action hidden in both composer surfaces while a clarification barrier is active.
    dropped by each mapper.
 3. **RED:** Add the focused Playwright scenario and confirm the next-step
    locator remains hidden after the mock agent returns idle.
-4. **RED:** Add shared composer eligibility coverage and a passthrough rendering
-   case for `WAITING_FOR_INPUT` with a pending clarification.
+4. **RED:** Add shared composer eligibility coverage and deferred-hydration
+   rendering cases for standard and passthrough surfaces when
+   `WAITING_FOR_INPUT` has a durable pending clarification.
 5. **GREEN:** Add the optional step field, preserve it through each mapper and
    the Go boot-state mapper, and narrow the automatic-transition suppression
    condition in `useNextWorkflowStep`. Apply one shared composer eligibility
-   policy to standard chat and passthrough surfaces.
+   policy from chat types to standard chat and passthrough surfaces, using both
+   the durable session projection and message-derived fallback.
 6. **REFACTOR:** Keep workflow projection in the shared hook and keep the
    busy-state and clarification gates in one shared UI policy. Do not duplicate
    them in mobile components.
@@ -69,7 +71,8 @@ action hidden in both composer surfaces while a clarification barrier is active.
   because the existing composer action submits the adjacent next step.
 - A busy agent still hides the action until it becomes idle.
 - A pending clarification hides the action while the session is
-  `WAITING_FOR_INPUT`; clearing the barrier makes it eligible again when idle.
+  `WAITING_FOR_INPUT`, including while messages are hydrating; clearing the
+  durable and message-derived barrier makes it eligible again when idle.
 - Initial load, cached snapshot refresh, mobile workspace switching, and live
   workflow-step updates preserve identical behavior.
 - Selecting the action uses the existing manual task-move endpoint and advances
@@ -93,8 +96,10 @@ action hidden in both composer surfaces while a clarification barrier is active.
 - `apps/web/hooks/domains/kanban/use-plan-actions.ts`
 - `apps/web/hooks/domains/kanban/use-plan-actions.test.ts`
 - `apps/web/components/task/chat/chat-status-bar.tsx`
+- `apps/web/components/task/chat/types.ts`
 - `apps/web/components/task/chat/chat-input-area.tsx`
 - `apps/web/components/task/chat/chat-input-area.test.ts`
+- `apps/web/components/task/chat/chat-input-area.test.tsx`
 - `apps/web/components/task/passthrough-toolbar.tsx`
 - `apps/web/components/task/passthrough-toolbar.test.tsx`
 - `apps/web/e2e/helpers/api-client.ts`
@@ -108,7 +113,7 @@ action hidden in both composer surfaces while a clarification barrier is active.
 cd apps/backend
 go test ./internal/backendapp
 cd ../web
-pnpm exec vitest run components/task/chat/chat-input-area.test.ts components/task/passthrough-toolbar.test.tsx
+pnpm exec vitest run components/task/chat/chat-input-area.test.ts components/task/chat/chat-input-area.test.tsx components/task/passthrough-toolbar.test.tsx
 pnpm exec vitest run hooks/domains/kanban/use-plan-actions.test.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.test.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts
 pnpm run typecheck
 pnpm exec eslint hooks/domains/kanban/use-plan-actions.ts hooks/domains/kanban/use-plan-actions.test.ts lib/state/slices/kanban/types.ts lib/ssr/mapper.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts e2e/helpers/api-client.ts e2e/tests/workflow/workflow-step-proceed.spec.ts
@@ -132,7 +137,7 @@ None.
   guard; they should remain consumers of the shared derived value.
 - Reading only `isAgentBusy` would treat `WAITING_FOR_INPUT` as eligible even
   while a durable clarification is pending; both composer surfaces must use the
-  shared pending-clarification gate.
+  shared pending-clarification gate and retain the message-derived fallback.
 
 ## Parallelism
 
@@ -167,9 +172,11 @@ plan work-order checkbox to `completed` only after all acceptance criteria pass.
   task API to report the target step before asserting the UI.
 - Replacement PR remediation: both composer surfaces hide the signal-gated
   proceed action during an active clarification barrier and restore eligibility
-  after it clears. Focused coverage includes the `WAITING_FOR_INPUT` state with
-  a pending clarification and passthrough rendering.
-- Replacement PR verification: 10 frontend test files, 142 tests passed;
+  after it clears. The shared predicates now live in `chat/types.ts`, and the
+  durable session projection covers the message hydration window. Focused
+  coverage includes standard and passthrough rendering in `WAITING_FOR_INPUT`
+  with a pending clarification.
+- Replacement PR verification: 10 frontend test files, 145 tests passed;
   typecheck passed; specification tests (36) and full specification lint passed;
   diff check passed. Disposable desktop and mobile clarification captures each
   passed one browser test and were removed before commit.

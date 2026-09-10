@@ -29,6 +29,7 @@ import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
+import { shouldShowProceed } from "./types";
 
 type TodoDisplayItem = {
   text: string;
@@ -51,14 +52,6 @@ export function resolveStatusRowTaskId(
   statusTaskId: string | null,
 ): string | null {
   return sessionTaskId ?? statusTaskId;
-}
-
-export function shouldShowProceed(
-  nextStepName: string | null,
-  isAgentBusy: boolean,
-  hasPendingClarification: boolean,
-): boolean {
-  return !!nextStepName && !isAgentBusy && !hasPendingClarification;
 }
 
 export function shouldRenderChatStatusBar({

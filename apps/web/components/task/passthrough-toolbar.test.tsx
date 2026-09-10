@@ -32,6 +32,7 @@ const TID_SEND_COMMENTS = "passthrough-send-comments";
 // --- Mutable state for per-test overrides ---
 let mockSessionState: string | null = null;
 let mockPendingClarification: object | null = null;
+let mockPendingAction: "clarification" | "permission" | null = null;
 let mockKeyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }> =
   {};
 const responsiveMock = vi.hoisted(() => ({
@@ -69,7 +70,13 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       taskSessions: {
         items: mockSessionState
-          ? { [SESSION_ID]: { id: SESSION_ID, state: mockSessionState } }
+          ? {
+              [SESSION_ID]: {
+                id: SESSION_ID,
+                state: mockSessionState,
+                pending_action: mockPendingAction,
+              },
+            }
           : {},
       },
       quickChat: { sessions: [] },
@@ -190,6 +197,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     taskId: TASK_ID,
     task: { id: TASK_ID, title: "Task title" },
     taskDescription: "Task description",
+    session: { state: mockSessionState, pending_action: mockPendingAction },
     isCompleted: mockSessionState === "COMPLETED",
     planModeEnabled: mockPlanModeEnabled,
     planModeAvailable: true,
@@ -302,6 +310,7 @@ async function openComposer() {
 function resetMocks() {
   mockSessionState = null;
   mockPendingClarification = null;
+  mockPendingAction = null;
   mockKeyboardShortcuts = {};
   responsiveMock.breakpoint = "desktop";
   mockPendingByFile = {};
@@ -365,12 +374,17 @@ describe("PassthroughToolbar – default state", () => {
 
   it("hides proceed while a clarification barrier is pending", () => {
     mockSessionState = "WAITING_FOR_INPUT";
-    mockPendingClarification = { id: "clarification-1" };
+    mockPendingAction = "clarification";
     mockNextStep = { proceedStepName: "Review", proceed: vi.fn(), isMoving: false };
 
-    renderToolbar();
+    const view = renderToolbar();
 
     expect(screen.queryByTestId(TID_PROCEED)).toBeNull();
+
+    mockPendingAction = null;
+    view.rerender(<PassthroughToolbar sessionId={SESSION_ID} taskId={TASK_ID} />);
+
+    expect(screen.getByTestId(TID_PROCEED)).toBeTruthy();
   });
 });
 

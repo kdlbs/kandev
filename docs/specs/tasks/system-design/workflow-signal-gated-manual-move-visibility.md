@@ -41,7 +41,8 @@ the future ADR 0015 `manual_fallback` signal path.
   configured arbitrary destination.
 - `ChatStatusBar` and `PassthroughToolbar` consume the shared next-step
   projection and shared eligibility policy. Both retain the busy-state gate
-  and suppress the action while `pendingClarification` is present.
+  and suppress the action while message-derived `pendingClarification` is
+  present or the durable session `pending_action` is `clarification`.
 - The phone task drawer remains the alternate manual step-move surface. This
   correction adds no phone-only layout or interaction.
 
@@ -54,6 +55,11 @@ boolean so older or partial payloads continue to behave as ungated steps.
 Every projection from `WorkflowSnapshot.steps` or workflow-step WebSocket
 payloads into `KanbanState.steps` copies the field without defaulting it. The
 visibility rule treats only the literal value `true` as signal-gated.
+
+The session `pending_action` projection is authoritative while transcript
+messages hydrate. Composer surfaces retain the message-derived clarification
+fallback after hydration and combine both signals through the shared chat
+eligibility predicates.
 
 ## Control flow
 
@@ -70,7 +76,8 @@ visibility rule treats only the literal value `true` as signal-gated.
    adjacent-next-step control would submit the wrong destination.
 5. The standard and passthrough composer surfaces show the existing action only
    when the shared projection returns a next-step name, the agent is idle, and
-   the current session has no pending clarification.
+   neither the durable session projection nor the message-derived fallback
+   reports a pending clarification.
 6. Selecting the action uses the existing manual task-move request and its
    existing error handling.
 
@@ -81,8 +88,9 @@ visibility rule treats only the literal value `true` as signal-gated.
 - A busy agent keeps the action hidden. Returning to idle recomputes the surface
   without a reload.
 - A pending clarification keeps the action hidden while the session waits for
-  the user's answer. Clearing the clarification recomputes the surface and
-  restores eligibility when the agent is idle.
+  the user's answer. The durable session projection covers the message
+  hydration window; clearing both signals recomputes the surface and restores
+  eligibility when the agent is idle.
 - A rejected manual move keeps the task on the current step and uses the current
   localized error toast.
 - No completion signal is synthesized, so this path cannot increment the future
@@ -102,10 +110,11 @@ task-move API and backend policy checks.
 
 No new production metric is required for visibility. Unit tests cover all
 client projection paths, the gated versus ungated decision, the unsupported
-gated move destinations, and the clarification barrier. The boot mapper has a
-regression test for direct task-page hydration. A browser test proves the
-user-visible action after an idle signal-gated turn and waits for the causal
-backend move before asserting the stepper.
+gated move destinations, the durable clarification hydration window, and the
+message-derived fallback. The boot mapper has a regression test for direct
+task-page hydration. A browser test proves the user-visible action after an
+idle signal-gated turn and waits for the causal backend move before asserting
+the stepper.
 
 ## Responsive behavior
 

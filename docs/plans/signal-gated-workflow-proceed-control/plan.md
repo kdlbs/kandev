@@ -68,8 +68,10 @@ clarification barrier is pending.
 - Preserve the Go boot-state mapper field so direct task-page hydration has the
   same signal-gated policy input as subsequent client refreshes.
 - Use one shared proceed-eligibility policy in `ChatStatusBar` and
-  `PassthroughToolbar` so the busy-state and pending-clarification gates cannot
-  drift between surfaces.
+  `PassthroughToolbar` from the chat domain types module so the busy-state and
+  pending-clarification gates cannot drift between surfaces. Combine the
+  durable session `pending_action` projection with the message-derived
+  fallback during transcript hydration.
 - Leave `proceed()` unchanged so the action continues to use the normal task
   move API and existing error handling.
 
@@ -83,8 +85,9 @@ clarification barrier is pending.
   live Kanban updates. A Go boot-state mapper test covers direct task-page
   hydration.
 - Shared composer eligibility tests prove a pending clarification suppresses
-  the action while `WAITING_FOR_INPUT`, and passthrough rendering remains hidden
-  until that barrier is absent.
+  the action while `WAITING_FOR_INPUT`, and standard/passthrough rendering
+  remains hidden while the durable projection is present before messages
+  hydrate.
 
 ## E2E test
 
@@ -100,9 +103,10 @@ The existing mobile task-drawer move test remains the parity check for the
 phone-specific path. No new responsive markup is introduced.
 
 The pending-clarification correction is covered at the shared eligibility and
-passthrough rendering boundaries because the clarification overlay lifecycle is
-already owned by the session panel state. The desktop browser scenario remains
-the end-to-end proof for the eligible signal-gated move path.
+both composer rendering boundaries. The durable session projection covers the
+message hydration window, while the clarification overlay lifecycle remains
+owned by the session panel state. The desktop browser scenario remains the
+end-to-end proof for the eligible signal-gated move path.
 
 ## Work orders
 
@@ -119,7 +123,7 @@ go test ./internal/backendapp
 Run focused tests from `apps/web`:
 
 ```bash
-pnpm exec vitest run components/task/chat/chat-input-area.test.ts components/task/passthrough-toolbar.test.tsx
+pnpm exec vitest run components/task/chat/chat-input-area.test.ts components/task/chat/chat-input-area.test.tsx components/task/passthrough-toolbar.test.tsx
 pnpm exec vitest run hooks/domains/kanban/use-plan-actions.test.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.test.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts
 pnpm run typecheck
 pnpm exec eslint hooks/domains/kanban/use-plan-actions.ts hooks/domains/kanban/use-plan-actions.test.ts lib/state/slices/kanban/types.ts lib/ssr/mapper.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts e2e/helpers/api-client.ts e2e/tests/workflow/workflow-step-proceed.spec.ts

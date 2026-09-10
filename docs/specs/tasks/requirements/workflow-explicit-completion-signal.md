@@ -141,6 +141,11 @@ The pending completion signal continues to use `TaskSession.Metadata` as specifi
   and a pending clarification, **WHEN** its session is waiting for input,
   **THEN** the standard and passthrough next-step actions remain hidden until
   the clarification is answered or otherwise cleared.
+- **GIVEN** the same session's durable pending-action projection is
+  `clarification` while its messages are still hydrating, **WHEN** its session
+  is waiting for input, **THEN** both composer surfaces keep the next-step
+  action hidden until the message-derived or durable clarification barrier
+  clears.
 - **GIVEN** the same signal-gated workflow step after its clarification barrier
   clears, **WHEN** its session is idle, **THEN** the standard and passthrough
   next-step actions become eligible again.
