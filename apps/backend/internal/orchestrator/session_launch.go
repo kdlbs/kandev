@@ -70,8 +70,10 @@ type LaunchSessionRequest struct {
 	// server-side coordination flag set by the deferred-start handlers, so it is
 	// kept off the wire protocol (`json:"-"`) — a client must not be able to
 	// suppress the upgrade and strand a passthrough session without a PTY.
-	DeferredStart bool                   `json:"-"`
-	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	DeferredStart bool `json:"-"`
+	// InitialPromptPreview is supplied only by task creation after attachment claim.
+	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
+	Attachments          []v1.MessageAttachment       `json:"attachments,omitempty"`
 	// SpawnOrigin identifies the agent session that requested this launch via
 	// spawn_session_kandev, so the new session's first turn can carry spawner
 	// attribution and reply instructions. Like DeferredStart it is kept off the
@@ -235,8 +237,9 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
 		return s.launchStart(ctx, req)
 	}
+	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	sessionID, err := s.PrepareTaskSession(
-		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
+		prepareCtx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.WorkflowStepID, req.LaunchWorkspace,
 	)
 	if err != nil {

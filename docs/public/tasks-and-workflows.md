@@ -300,6 +300,8 @@ Folders are live host paths and are available only to **Local/Local PC** and **W
 
 The task prompt supports image, audio, and resource attachments. Kandev accepts at most 10 files per submission, with a 100 MiB raw limit per file and a 100 MiB raw aggregate limit. Files are uploaded over authenticated HTTP before the task or message is submitted, so the task-create JSON and WebSocket frames carry attachment descriptors rather than base64 file contents. An upload that is still in progress or has failed must finish or be retried before the prompt can be sent. Removing a staged attachment discards its private upload; unclaimed uploads expire automatically after 24 hours. This prompt-attachment limit does not change the separate 10 MB task-document upload contract.
 
+During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
+
 Creating a fresh local branch is available only with the local executor. If the checkout is dirty, Kandev lists the affected paths and requires explicit consent before discarding those local changes. If another path becomes dirty after the warning, creation fails with a conflict and asks for consent again. Save or commit work before approving this operation.
 
 </details>
