@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
@@ -254,6 +255,7 @@ test.describe("Mobile Threads view", () => {
     await expect(menu.getByTestId("mobile-home-status-button")).toBeVisible();
     const quickChat = menu.getByTestId("mobile-quick-chat-button");
     const terminal = menu.getByTestId("mobile-quick-terminal-button");
+    await waitForFiniteAnimations(menu);
     for (const action of [quickChat, terminal]) {
       await expect(action).toBeVisible();
       expect((await action.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
