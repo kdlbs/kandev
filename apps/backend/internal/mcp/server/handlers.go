@@ -26,6 +26,7 @@ const (
 	promptArg            = "prompt"
 	questionsArg         = "questions"
 	optionsArg           = "options"
+	instructionsArg      = "instructions"
 	idArg                = "id"
 	titleArg             = "title"
 	labelArg             = "label"
@@ -54,7 +55,7 @@ func moveTaskEntryOptionsToolOption() mcp.ToolOption {
 				typeKey:        "boolean",
 				descriptionArg: "Reset the target session's agent context before the step's on_enter actions run.",
 			},
-			"instructions": map[string]any{
+			instructionsArg: map[string]any{
 				typeKey:        stringType,
 				descriptionArg: "One-time instructions appended to the target step's prompt (never replacing it) for this entry only.",
 			},

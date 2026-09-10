@@ -971,6 +971,13 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	return true, nil
 }
 
+// Inner descriptor keys for the one-shot MetaKeyWorkflowMovePending marker.
+const (
+	pendingMoveFromStepIDKey = "from_step_id"
+	pendingMoveIDKey         = "move_id"
+	pendingMoveOptionsKey    = "options"
+)
+
 func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	ctx context.Context,
 	task *models.Task,
@@ -1073,9 +1080,9 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 			return false, false, fmt.Errorf("encode deferred workflow move options: %w", err)
 		}
 		task.Metadata[models.MetaKeyWorkflowMovePending] = map[string]interface{}{
-			"from_step_id": expectedStepID,
-			"move_id":      deferredMove.Move.MoveID,
-			"options":      string(encoded),
+			pendingMoveFromStepIDKey: expectedStepID,
+			pendingMoveIDKey:         deferredMove.Move.MoveID,
+			pendingMoveOptionsKey:    string(encoded),
 		}
 	}
 	metadata, err := json.Marshal(task.Metadata)
