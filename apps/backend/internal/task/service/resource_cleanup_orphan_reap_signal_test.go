@@ -48,6 +48,7 @@ type fakeOrphanReapSignaler struct {
 	signalErr map[int]error
 	sent      []fakeOrphanReapSentSignal
 	onSignal  func(pid int, sig orphanReapSignal)
+	onAlive   func(pid int)
 }
 
 type fakeOrphanReapSentSignal struct {
@@ -90,8 +91,12 @@ func (f *fakeOrphanReapSignaler) Signal(pid int, sig orphanReapSignal) error {
 
 func (f *fakeOrphanReapSignaler) Alive(pid int) (alive, known bool) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	alive, ok := f.alive[pid]
+	hook := f.onAlive
+	f.mu.Unlock()
+	if hook != nil {
+		hook(pid)
+	}
 	return alive, ok
 }
 
@@ -642,5 +647,48 @@ func TestResolveOrphanReapSurvivorsRecordsCancelledWhenContextAlreadyDone(t *tes
 	if !ok || rec.Outcome != orphanReapOutcomeSkipped || rec.Reason != "sigkill already sent" {
 		t.Fatalf("expected pid 500 recorded skipped/\"sigkill already sent\" despite cancellation, "+
 			"not resolved to a normal outcome, got %+v (found=%v)", rec, ok)
+	}
+}
+
+// AC-TASKS-ORPHAN-REAP-006.3: cancellation landing between candidates in this
+// loop -- after the first is already classified, before the second is --
+// must still persist the not-yet-classified remainder as skipped naming the
+// signal already sent, without disturbing the first candidate's accurate
+// outcome.
+func TestResolveOrphanReapSurvivorsStopsOnCancellationMidLoop(t *testing.T) {
+	svc := newOrphanReapSignalTestService()
+	verifier := newFakeOrphanReapVerifier()
+	verifier.set(600, "/tasks/task-a")
+	signaler := newFakeOrphanReapSignaler()
+	signaler.setAlive(500, false) // confirmed dead
+	signaler.setAlive(600, true)  // would otherwise resolve cleanly to "survived"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	signaler.onAlive = func(pid int) {
+		if pid == 500 {
+			cancel()
+		}
+	}
+
+	killPending := []orphanReapPendingCandidate{
+		{orphanReapCandidate: newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a"), lastSignal: "sigkill already sent"},
+		{orphanReapCandidate: newOrphanReapOwnershipCandidate(600, 1, "/tasks/task-a", "/tasks/task-a"), lastSignal: "sigkill already sent"},
+	}
+	snapshot := &taskResourceCleanupSnapshot{}
+	errs := svc.resolveOrphanReapSurvivors(ctx, "task-a", killPending, snapshot, verifier, signaler)
+
+	if len(errs) != 1 || !errors.Is(errs[0], errOrphanReapCancelledMidPhase) {
+		t.Fatalf("expected errOrphanReapCancelledMidPhase, got %v", errs)
+	}
+	rec500, ok := findOrphanReapRecord(snapshot, 500)
+	if !ok || rec500.Outcome != orphanReapOutcomeKilled {
+		t.Fatalf("expected pid 500 (classified before cancellation) to keep its accurate killed outcome, "+
+			"got %+v (found=%v)", rec500, ok)
+	}
+	rec600, ok := findOrphanReapRecord(snapshot, 600)
+	if !ok || rec600.Outcome != orphanReapOutcomeSkipped || rec600.Reason != "sigkill already sent" {
+		t.Fatalf("expected pid 600 (not yet classified when cancellation landed) recorded "+
+			"skipped/\"sigkill already sent\", not resolved to survived, got %+v (found=%v)", rec600, ok)
 	}
 }

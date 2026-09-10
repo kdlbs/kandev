@@ -192,15 +192,18 @@ func (s *Service) resolveOrphanReapSurvivors(
 	verifier orphanReapVerifier,
 	signaler orphanReapSignaler,
 ) []error {
-	if ctx.Err() != nil {
-		// The settle-delay select's two channels can both already be ready,
-		// so cancellation is not guaranteed to have won that select even
-		// when it raced the timer; recheck here rather than resolve
-		// already-signalled candidates to a normal outcome.
-		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending)
-	}
 	survived := false
-	for _, cand := range killPending {
+	for i, cand := range killPending {
+		if ctx.Err() != nil {
+			// The settle-delay select's two channels can both already be
+			// ready, so cancellation is not guaranteed to have won that
+			// select even when it raced the timer, and cancellation can
+			// also land between candidates in this loop rather than only
+			// before it starts. Recheck every iteration rather than resolve
+			// the not-yet-classified remainder to a normal outcome; a
+			// candidate already classified above keeps its accurate one.
+			return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending[i:])
+		}
 		alive, known := signaler.Alive(cand.PID)
 		if known && !alive {
 			s.recordOrphanReapCandidate(snapshot, taskID, orphanReapRecordFor(cand.orphanReapCandidate, orphanReapOutcomeKilled, ""))
