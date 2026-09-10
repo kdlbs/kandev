@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { SentrySettingsPage } from "../../pages/sentry-settings-page";
 
 function guardAgainstNativeDialogs(testPage: Page) {
@@ -116,7 +117,9 @@ test.describe("integration configuration removal confirmations", () => {
     await settings.goto(seedData.workspaceId);
 
     const card = settings.cardByName("Production Sentry");
+    await expectControlHeight(card.getByTestId("sentry-instance-edit-button"), 28);
     const removeButton = card.getByTestId("sentry-instance-delete-button");
+    await expectControlHeight(removeButton, 28);
     await removeButton.click();
     const popover = testPage.getByTestId("sentry-remove-confirm-popover");
     await expect(popover).toContainText("Production Sentry");

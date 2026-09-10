@@ -47,9 +47,8 @@ export function IntegrationStartTaskMenu<T extends IntegrationTaskPreset>({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          size="sm"
           variant="outline"
-          className="h-11 cursor-pointer gap-1 sm:h-7"
+          className="cursor-pointer gap-1"
           aria-label={triggerAriaLabel ?? t("github:task")}
           data-testid={triggerTestId}
         >

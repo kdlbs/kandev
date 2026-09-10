@@ -29,6 +29,28 @@ function preserveLiveAutoStartFailed(
   });
 }
 
+function preserveLiveWorkspaceOrphaned(
+  snapshotTasks: KanbanTask[],
+  fetchStartTasks: KanbanTask[],
+  currentTasks: KanbanTask[],
+) {
+  const fetchStartByID = new Map(fetchStartTasks.map((task) => [task.id, task]));
+  const currentByID = new Map(currentTasks.map((task) => [task.id, task]));
+  return snapshotTasks.map((task) => {
+    const current = currentByID.get(task.id);
+    if (!current) return task;
+    const fetchStart = fetchStartByID.get(task.id);
+    if (
+      task.workspaceOrphaned === undefined ||
+      fetchStart === undefined ||
+      current.workspaceOrphaned !== fetchStart.workspaceOrphaned
+    ) {
+      return { ...task, workspaceOrphaned: current.workspaceOrphaned };
+    }
+    return task;
+  });
+}
+
 /**
  * A REST workflow-snapshot fetch can resolve after a live parked-projection
  * transition (task.updated) has already moved the store ahead, and the two
@@ -100,7 +122,15 @@ export function useWorkflowSnapshot(workflowId: string | null) {
           const currentTasks = store.getState().kanban.tasks;
           const fetchedAtStartTasks = existing.tasks;
           nextState.kanban.tasks = preserveLiveParkedFields(
-            preserveLiveAutoStartFailed(nextState.kanban.tasks, fetchedAtStartTasks, currentTasks),
+            preserveLiveWorkspaceOrphaned(
+              preserveLiveAutoStartFailed(
+                nextState.kanban.tasks,
+                fetchedAtStartTasks,
+                currentTasks,
+              ),
+              fetchedAtStartTasks,
+              currentTasks,
+            ),
             currentTasks,
           );
         }

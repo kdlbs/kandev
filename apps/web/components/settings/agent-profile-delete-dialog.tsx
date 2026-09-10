@@ -23,6 +23,7 @@ import type {
   WatcherReference,
   UtilityAgentReference,
 } from "@/lib/types/agent-profile-errors";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 // The watcher `kind` values are the wire enum and are never translated; only
 // their labels are copy, so they travel as catalog keys and resolve at render.
@@ -217,13 +218,15 @@ export function AgentProfileDeleteConflictDialog({
           </div>
         </AlertDialogDescription>
         <AlertDialogFooter data-testid="agent-profile-delete-conflict-footer">
-          <AlertDialogCancel className="min-h-11 w-full cursor-pointer sm:min-h-9 sm:w-auto">
+          <AlertDialogCancel className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}>
             {t(CANCEL_LABEL_KEY)}
           </AlertDialogCancel>
           {hasHardBlockers ? null : (
             <AlertDialogAction
               onClick={onConfirm}
-              className="min-h-11 w-full cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:min-h-9 sm:w-auto"
+              className={settingsActionClassName(
+                "w-full cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto",
+              )}
             >
               {t("agents:deleteAnyway")}
             </AlertDialogAction>

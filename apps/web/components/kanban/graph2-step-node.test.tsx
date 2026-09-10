@@ -42,6 +42,24 @@ function renderCurrentNode(foregroundActivity?: ForegroundActivity | null) {
   );
 }
 
+function renderNodeWithTask(task: Task) {
+  return render(
+    <StateProvider>
+      <TooltipProvider>
+        <Graph2StepNode
+          step={STEP}
+          phase="current"
+          task={task}
+          hasPrev={false}
+          hasNext={false}
+          onMoveTask={() => undefined}
+          onOpenTask={() => undefined}
+        />
+      </TooltipProvider>
+    </StateProvider>,
+  );
+}
+
 describe("Graph2StepNode — task-level background-running affordance", () => {
   it("shows the background spinner (IconLoader) for a background-running task, not the done check", () => {
     const { container } = renderCurrentNode("background");
@@ -68,24 +86,6 @@ describe("Graph2StepNode — task-level background-running affordance", () => {
 });
 
 describe("Graph2StepNode — auto-start-failed marker", () => {
-  function renderNodeWithTask(task: Task) {
-    return render(
-      <StateProvider>
-        <TooltipProvider>
-          <Graph2StepNode
-            step={STEP}
-            phase="current"
-            task={task}
-            hasPrev={false}
-            hasNext={false}
-            onMoveTask={() => undefined}
-            onOpenTask={() => undefined}
-          />
-        </TooltipProvider>
-      </StateProvider>,
-    );
-  }
-
   it("shows the auto-start-failed triangle for a non-terminal task marked auto_start_failed", () => {
     const task = {
       id: "task-1",
@@ -108,6 +108,32 @@ describe("Graph2StepNode — auto-start-failed marker", () => {
     } as Task;
     const { container } = renderNodeWithTask(task);
     expect(container.querySelector('[data-testid="task-state-auto-start-failed"]')).toBeNull();
+  });
+});
+
+describe("Graph2StepNode — workspace-orphaned marker", () => {
+  it("shows the workspace-orphaned marker for a non-terminal task marked workspace_orphaned", () => {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "TODO",
+      workspaceOrphaned: true,
+    } as Task;
+    const { container } = renderNodeWithTask(task);
+    expect(container.querySelector('[data-testid="task-state-workspace-orphaned"]')).not.toBeNull();
+  });
+
+  it("does not show the workspace-orphaned marker when the flag is absent", () => {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "TODO",
+      workspaceOrphaned: false,
+    } as Task;
+    const { container } = renderNodeWithTask(task);
+    expect(container.querySelector('[data-testid="task-state-workspace-orphaned"]')).toBeNull();
   });
 });
 
