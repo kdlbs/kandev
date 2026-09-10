@@ -422,9 +422,12 @@ func TestPersistOrphanReapProgressBestEffortPersistsSnapshot(t *testing.T) {
 	}
 
 	snapshot := &taskResourceCleanupSnapshot{
-		OrphanReapRoots:   []string{"/tasks/" + taskID},
-		OrphanReapRecords: []orphanReapCandidateRecord{{PID: 500, Outcome: orphanReapOutcomeTerminated}},
-		OrphanReapSkips:   []orphanReapSkipRecord{{Root: "/tasks/" + taskID, Reason: "reap root exists again at reap time"}},
+		OrphanReapRoots: []string{"/tasks/" + taskID},
+		OrphanReapRecords: []orphanReapCandidateRecord{{
+			PID: 500, Cwd: "/tasks/" + taskID + "/child", Root: "/tasks/" + taskID,
+			Command: "sh", Outcome: orphanReapOutcomeTerminated,
+		}},
+		OrphanReapSkips: []orphanReapSkipRecord{{Root: "/tasks/" + taskID, Reason: "reap root exists again at reap time"}},
 	}
 	svc.persistOrphanReapProgressBestEffort(ctx, running, snapshot)
 
@@ -439,8 +442,13 @@ func TestPersistOrphanReapProgressBestEffortPersistsSnapshot(t *testing.T) {
 	if len(decoded.OrphanReapRoots) != 1 || decoded.OrphanReapRoots[0] != "/tasks/"+taskID {
 		t.Fatalf("expected persisted roots to survive, got %+v", decoded.OrphanReapRoots)
 	}
-	if len(decoded.OrphanReapRecords) != 1 || decoded.OrphanReapRecords[0].PID != 500 {
+	if len(decoded.OrphanReapRecords) != 1 {
 		t.Fatalf("expected persisted records to survive, got %+v", decoded.OrphanReapRecords)
+	}
+	gotRecord := decoded.OrphanReapRecords[0]
+	wantRecord := snapshot.OrphanReapRecords[0]
+	if gotRecord != wantRecord {
+		t.Fatalf("persisted record = %+v, want every field to survive the DB round trip: %+v", gotRecord, wantRecord)
 	}
 	if len(decoded.OrphanReapSkips) != 1 {
 		t.Fatalf("expected persisted skips to survive, got %+v", decoded.OrphanReapSkips)
@@ -506,6 +514,61 @@ func TestRunOrphanReapPhaseEmitsAggregateWarnLogWhenCandidatesAreReaped(t *testi
 		wantProcesses := fmt.Sprintf("%d:%s", reapedPID, cwd)
 		if fields["processes"] != wantProcesses {
 			t.Fatalf("expected processes=%q, got %+v", wantProcesses, fields["processes"])
+		}
+	})
+}
+
+// AC-TASKS-ORPHAN-REAP-005.1: the persisted record must carry the process
+// identifier, resolved working directory, matched reap root, command name,
+// and outcome. Drives a real candidate through runOrphanReapPhase end to
+// end rather than hand-building a record, so a producer that stopped
+// setting one of these fields would fail this test.
+func TestRunOrphanReapPhaseRecordsAllFieldsOnATerminatedCandidate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, _, _ := createTestService(t)
+		root := t.TempDir()
+		if err := os.RemoveAll(root); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
+		const reapedPID = 800
+		cwd := filepath.Join(root, "child")
+
+		verifier := newFakeOrphanReapVerifier()
+		verifier.set(reapedPID, cwd)
+		fake := newFakeOrphanReapSignaler()
+		fake.setAlive(reapedPID, true)
+		fake.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm {
+				fake.setAlive(pid, false)
+			}
+		}
+		svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{snap: []hostProcess{
+			{PID: reapedPID, PPID: 1, Cwd: cwd, Command: "sh"},
+		}}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = fake
+
+		job := &models.TaskResourceCleanupJob{TaskID: "task-all-fields"}
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		if errs := svc.runOrphanReapPhase(context.Background(), job, snapshot); len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+
+		rec, ok := findOrphanReapRecord(snapshot, reapedPID)
+		if !ok {
+			t.Fatalf("expected a record for pid %d, snapshot=%+v", reapedPID, snapshot.OrphanReapRecords)
+		}
+		if rec.Cwd != cwd {
+			t.Fatalf("record.Cwd = %q, want %q", rec.Cwd, cwd)
+		}
+		if rec.Root != root {
+			t.Fatalf("record.Root = %q, want %q", rec.Root, root)
+		}
+		if rec.Command != "sh" {
+			t.Fatalf("record.Command = %q, want %q", rec.Command, "sh")
+		}
+		if rec.Outcome != orphanReapOutcomeTerminated {
+			t.Fatalf("record.Outcome = %q, want %q", rec.Outcome, orphanReapOutcomeTerminated)
 		}
 	})
 }
