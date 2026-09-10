@@ -805,14 +805,23 @@ func (s *Service) loadQueuePromotedTaskAndTargetStep(ctx context.Context, taskID
 // already claimed carries through promotion instead of being silently
 // dropped; every other caller goes through handleTaskQueuePromoted and passes
 // false.
+//
+//nolint:cyclop // queue promotion has independent task, dependency, session, and token recovery states
 func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx context.Context, data watcher.TaskEventData, autoStartOnCreateClaimed bool) {
+	restoreCreateIntent := func() {
+		if autoStartOnCreateClaimed {
+			s.restoreAutoStartOnCreate(ctx, data.TaskID, "task.queue_promoted")
+		}
+	}
 	task, targetStep, ok := s.loadQueuePromotedTaskAndTargetStep(ctx, data.TaskID)
 	if !ok {
+		restoreCreateIntent()
 		return
 	}
 	if err := s.syncTaskStateForQueuePromotion(ctx, task, targetStep); err != nil {
 		s.logger.Warn("task.queue_promoted: failed to synchronize task state",
 			zap.String("task_id", task.ID), zap.Error(err))
+		restoreCreateIntent()
 		return
 	}
 	session, sessionErr := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
@@ -825,6 +834,7 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 	if sessionErr != nil {
 		s.logger.Warn("task.queue_promoted: failed to load active session",
 			zap.String("task_id", task.ID), zap.Error(sessionErr))
+		restoreCreateIntent()
 		return
 	}
 	if session == nil {
@@ -832,6 +842,9 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 			// Promotion controls WIP admission, not dependency readiness. Keep both
 			// the promotion lifecycle token and deferred launch intent intact so the
 			// dependency-resolution path can start the task once its blockers clear.
+			if autoStartOnCreateClaimed {
+				s.discardAutoStartOnCreate(ctx, task.ID, "task.queue_promoted")
+			}
 			return
 		}
 	}
@@ -843,10 +856,12 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 	if sourceErr != nil {
 		s.logger.Warn("task.queue_promoted: failed to load source step",
 			zap.String("task_id", task.ID), zap.Error(sourceErr))
+		restoreCreateIntent()
 		return
 	}
 	queuePromotionToken := queuePromotionLifecycleToken(task)
 	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
+		restoreCreateIntent()
 		return
 	}
 	if remover, ok := s.repo.(taskMetadataKeyRemover); ok {
@@ -857,7 +872,13 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 		go func() {
 			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep); err != nil {
 				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.queue_promoted")
+				if autoStartOnCreateClaimed {
+					s.restoreAutoStartOnCreate(context.WithoutCancel(ctx), task.ID, "task.queue_promoted")
+				}
 				return
+			}
+			if autoStartOnCreateClaimed {
+				s.completeAutoStartOnCreate(context.WithoutCancel(ctx), task.ID, "task.queue_promoted")
 			}
 			if s.onTaskQueuePromotionEntryComplete != nil {
 				s.onTaskQueuePromotionEntryComplete()
@@ -903,11 +924,11 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 // anything with it. Either way the key can never change this handler's
 // outcome, so checking it here would be dead code.
 //
-// The opt-in itself is claimed via claimTaskEventMetadata before launching,
-// the same one-shot-token pattern used for MetaKeyQueuePromotionPending: a
-// duplicate task.created delivery for the same task would otherwise see the
-// key still present and launch a second time. Only the delivery that wins
-// the atomic RemoveTaskMetadataKey proceeds.
+// The opt-in itself is claimed before launching, the same one-shot-token
+// pattern used for MetaKeyQueuePromotionPending. The claim also writes a
+// durable in-flight marker before removing the intent, so a process exit
+// cannot erase the last recovery signal. Only the delivery that wins the
+// local and database ownership hand-off proceeds.
 func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventData) {
 	task, err := s.repo.GetTask(ctx, data.TaskID)
 	if err != nil || task == nil {
@@ -919,13 +940,21 @@ func (s *Service) handleTaskCreated(ctx context.Context, data watcher.TaskEventD
 	if !autoStartOnCreateActionable(task) {
 		return
 	}
-	if !s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
+	sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		s.logger.Warn("task.created: failed to check existing sessions", zap.String("task_id", task.ID), zap.Error(err))
 		return
 	}
-	// The claim above already removed the key; carry that ownership into the
-	// launch attempt (autoStartOnCreateClaimed=true) so a StartTask failure
-	// before a durable session exists can restore it instead of stranding the
-	// task with no marker (see handleAutoStartFailure).
+	if len(sessions) > 0 {
+		s.completeAutoStartOnCreate(ctx, task.ID, events.TaskCreated)
+		return
+	}
+	if result := s.claimAutoStartOnCreateForLaunch(ctx, task, false); result != autoStartOnCreateClaimOwned {
+		return
+	}
+	// Carry ownership into the launch attempt so a StartTask failure before a
+	// durable session exists can restore the intent (see
+	// handleAutoStartFailure).
 	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskCreated, data.StepTransitionID, true)
 }
 
@@ -1072,8 +1101,13 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.logger.Warn("failed to list auto-start-on-create tokens for recovery", zap.Error(err))
 		return
 	}
-	// autoStarts is the raw, pre-filter list; only entries that pass
-	// autoStartOnCreateActionable below are added to jobs, so it is left out
+	autoStartsInFlight, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyAutoStartOnCreateInFlight)
+	if err != nil {
+		s.logger.Warn("failed to list in-flight auto-start-on-create tokens for recovery", zap.Error(err))
+		return
+	}
+	// The auto-start lists are raw, pre-filter lists; only entries that pass
+	// autoStartOnCreateActionable below are added to jobs, so they are left out
 	// of this capacity hint rather than causing routine over-allocation.
 	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted))
 	for _, task := range pending {
@@ -1096,7 +1130,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 			jobs[task.ID] = struct{}{}
 		}
 	}
-	for _, task := range autoStarts {
+	for _, task := range append(autoStarts, autoStartsInFlight...) {
 		// ListTasksWithMetadataKey matches key EXISTENCE, which is broader
 		// than what handleTaskCreated will act on. Rows it refuses keep their
 		// key forever, so admitting them would schedule work that can never
@@ -1432,7 +1466,8 @@ func autoStartOnCreateActionable(task *models.Task) bool {
 	if task == nil || task.IsFromOffice {
 		return false
 	}
-	return models.HasAutoStartOnCreateIntent(task.Metadata)
+	return models.HasAutoStartOnCreateIntent(task.Metadata) ||
+		models.HasAutoStartOnCreateInFlight(task.Metadata)
 }
 
 // recoverAutoStartOnCreate replays a lost task.created delivery for a task that
@@ -1442,13 +1477,11 @@ func autoStartOnCreateActionable(task *models.Task) bool {
 // without ever touching this key, so an operator starting the task by hand
 // after a lost delivery leaves the token behind. Every automated auto-start
 // path (task.moved, dependency resolution, handleTaskQueuePromoted) now claims
-// this key itself via claimAutoStartOnCreateForLaunch before it launches, but
-// claiming the key and producing a durable session are not the same instant:
-// a launch attempt already in flight may have claimed the key without yet
-// having created a session. Replaying here without checking would launch a
+// this key itself via claimAutoStartOnCreateForLaunch before it launches. The
+// durable in-flight marker remains until a session or run is created, while
+// the local ownership map prevents this process from reclaiming it during the
+// detached launch. Replaying here without the session check would launch a
 // second agent onto a task that is already running or already finished.
-// Neither autoStartTaskForStep nor startTask has an existing-session guard, so
-// that launch would go all the way through.
 func (s *Service) recoverAutoStartOnCreate(ctx context.Context, task *models.Task) {
 	sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
 	if err != nil {
@@ -1459,13 +1492,13 @@ func (s *Service) recoverAutoStartOnCreate(ctx context.Context, task *models.Tas
 		return
 	}
 	if len(sessions) > 0 {
-		// The task was started by one of those other paths, so this one-shot
-		// token is spent. Claim it rather than merely skipping, so the row
-		// converges instead of being re-scanned on every future startup.
-		if s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate) {
-			s.logger.Info("discarded spent auto-start-on-create token: task already has a session",
-				zap.String("task_id", task.ID), zap.Int("session_count", len(sessions)))
-		}
+		// The task was started by one of those other paths, so both the
+		// intent and any in-flight hand-off are spent. Clear them rather than
+		// merely skipping, so the row converges instead of being re-scanned on
+		// every future startup.
+		s.completeAutoStartOnCreate(ctx, task.ID, "auto-start-on-create recovery")
+		s.logger.Info("discarded spent auto-start-on-create token: task already has a session",
+			zap.String("task_id", task.ID), zap.Int("session_count", len(sessions)))
 		return
 	}
 	// Re-enter handleTaskCreated exactly like a live delivery would, so the
@@ -1529,22 +1562,33 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 
 // autoStartTaskForStep evaluates a target step's on_enter auto-start action
 // for a task with no session yet. autoStartOnCreateClaimed is true only when
-// the caller (handleTaskCreated) already removed MetaKeyAutoStartOnCreate
-// before dispatching here; every other caller passes false and lets
+// the caller (handleTaskCreated) already reserved the create-time launch
+// marker before dispatching here. Every other caller passes false and lets
 // autoStartTaskForLoadedStep claim the key itself if the task still carries
 // it, so a concurrent launch attempt cannot observe the token as if nobody
 // had scheduled a launch for it (see claimAutoStartOnCreateForLaunch).
+//
+//nolint:cyclop // the single auto-start chokepoint evaluates each lifecycle gate before dispatch
 func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string, stepTransitionID int64, autoStartOnCreateClaimed bool) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn(eventName+": failed to load task for auto-start",
 			zap.String("task_id", taskID), zap.Error(err))
 		if autoStartOnCreateClaimed {
-			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyAutoStartOnCreate, true, eventName)
+			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 		}
 		return
 	}
-	if task == nil || task.QueuedForStepID != "" {
+	if task == nil {
+		if autoStartOnCreateClaimed {
+			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
+		}
+		return
+	}
+	if task.QueuedForStepID != "" {
+		if autoStartOnCreateClaimed {
+			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
+		}
 		return
 	}
 	// Dependency gate. Sits here — the single automated-launch chokepoint — so
@@ -1557,7 +1601,9 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	// so it restores the token instead of stranding it.
 	if blocked, gateErrored := s.dependencyBlocksAutoStart(ctx, taskID, eventName); blocked {
 		if gateErrored && autoStartOnCreateClaimed {
-			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyAutoStartOnCreate, true, eventName)
+			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
+		} else if autoStartOnCreateClaimed {
+			s.discardAutoStartOnCreate(ctx, taskID, eventName)
 		}
 		return
 	}
@@ -1575,9 +1621,12 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		return
 	}
 	if task != nil && s.shouldSkipTerminalPRAutoStart(ctx, task) {
+		if autoStartOnCreateClaimed {
+			s.discardAutoStartOnCreate(ctx, taskID, eventName)
+		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, false) {
+	if s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
 		return
 	}
 
@@ -1589,7 +1638,7 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.String("to_step_id", stepID),
 			zap.Error(err))
 		if autoStartOnCreateClaimed {
-			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyAutoStartOnCreate, true, eventName)
+			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 		}
 		return
 	}
@@ -1607,45 +1656,208 @@ type autoStartLaunchTokens struct {
 	restoreAutoStartOnCreate bool
 }
 
-// claimAutoStartOnCreateForLaunch decides whether this launch attempt owns
-// restoring MetaKeyAutoStartOnCreate on failure. When alreadyClaimed is true
-// (handleTaskCreated already removed the key before dispatching here), that
-// ownership is simply carried forward. Otherwise the key is claimed now,
-// synchronously and before any launch goroutine starts — so a concurrent
-// lifecycle-recovery read of this task never observes the token next to an
-// in-flight launch it did not itself schedule (see autoStartOnCreateActionable).
-// It does not gate the launch: on_enter's auto_start_agent action already
-// decided to launch, and consuming this key is a side effect of that, not a
-// precondition for it. recoverAutoStartOnCreate's session-existence check is
-// the safety net against a duplicate launch when this claim write itself fails.
-func (s *Service) claimAutoStartOnCreateForLaunch(ctx context.Context, task *models.Task, alreadyClaimed bool) bool {
+type autoStartOnCreateClaimResult uint8
+
+const (
+	autoStartOnCreateNoIntent autoStartOnCreateClaimResult = iota
+	autoStartOnCreateClaimOwned
+	autoStartOnCreateClaimLost
+	autoStartOnCreateClaimError
+)
+
+// claimAutoStartOnCreateForLaunch reserves the create-time launch intent
+// before a detached launch starts. The original intent is removed only after
+// the durable in-flight marker is written. A second caller therefore sees a
+// lost claim, while a process restart can recover the in-flight marker.
+//
+//nolint:cyclop // durable claim/recovery ordering has separate stale, write, and ownership outcomes
+func (s *Service) claimAutoStartOnCreateForLaunch(ctx context.Context, task *models.Task, alreadyClaimed bool) autoStartOnCreateClaimResult {
+	if task == nil {
+		return autoStartOnCreateClaimError
+	}
 	if alreadyClaimed {
-		return true
+		s.autoStartOnCreateMu.Lock()
+		if s.autoStartOnCreateInFlight == nil {
+			s.autoStartOnCreateInFlight = make(map[string]struct{})
+		}
+		s.autoStartOnCreateInFlight[task.ID] = struct{}{}
+		s.autoStartOnCreateMu.Unlock()
+		return autoStartOnCreateClaimOwned
 	}
-	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
-		return false
+
+	s.autoStartOnCreateMu.Lock()
+	defer s.autoStartOnCreateMu.Unlock()
+	if s.autoStartOnCreateInFlight == nil {
+		s.autoStartOnCreateInFlight = make(map[string]struct{})
 	}
-	return s.claimTaskEventMetadata(ctx, task, models.MetaKeyAutoStartOnCreate)
+	if _, inFlight := s.autoStartOnCreateInFlight[task.ID]; inFlight {
+		return autoStartOnCreateClaimLost
+	}
+
+	intent := models.HasAutoStartOnCreateIntent(task.Metadata)
+	staleInFlight := models.HasAutoStartOnCreateInFlight(task.Metadata)
+	if !intent && !staleInFlight {
+		return autoStartOnCreateNoIntent
+	}
+	setter, setterOK := s.repo.(taskMetadataKeySetter)
+	remover, removerOK := s.repo.(taskMetadataKeyRemover)
+	if !setterOK || !removerOK {
+		s.logger.Warn("auto-start-on-create claim unavailable: repository lacks metadata primitives",
+			zap.String("task_id", task.ID))
+		return autoStartOnCreateClaimError
+	}
+	if staleInFlight {
+		// An in-flight marker without a local owner belongs to a previous
+		// process, or to a claim that crashed between its two writes. Rebuild
+		// the original intent before taking a fresh reservation.
+		if !intent {
+			if err := setter.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyAutoStartOnCreate, true); err != nil {
+				s.logger.Warn("failed to restore stale auto-start-on-create intent",
+					zap.String("task_id", task.ID), zap.Error(err))
+				return autoStartOnCreateClaimError
+			}
+		}
+		if _, err := remover.RemoveTaskMetadataKey(ctx, task.ID, models.MetaKeyAutoStartOnCreateInFlight); err != nil {
+			s.logger.Warn("failed to clear stale auto-start-on-create marker",
+				zap.String("task_id", task.ID), zap.Error(err))
+			return autoStartOnCreateClaimError
+		}
+	}
+	if err := setter.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyAutoStartOnCreateInFlight, true); err != nil {
+		s.logger.Warn("failed to persist auto-start-on-create in-flight marker",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return autoStartOnCreateClaimError
+	}
+	claimed, err := remover.RemoveTaskMetadataKey(ctx, task.ID, models.MetaKeyAutoStartOnCreate)
+	if err != nil {
+		s.logger.Warn("failed to claim auto-start-on-create intent",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return autoStartOnCreateClaimError
+	}
+	if !claimed {
+		_, _ = remover.RemoveTaskMetadataKey(ctx, task.ID, models.MetaKeyAutoStartOnCreateInFlight)
+		return autoStartOnCreateClaimLost
+	}
+	s.autoStartOnCreateInFlight[task.ID] = struct{}{}
+	return autoStartOnCreateClaimOwned
 }
 
+func (s *Service) clearAutoStartOnCreateInFlight(taskID string) {
+	s.autoStartOnCreateMu.Lock()
+	delete(s.autoStartOnCreateInFlight, taskID)
+	s.autoStartOnCreateMu.Unlock()
+}
+
+func (s *Service) ownsAutoStartOnCreateInFlight(taskID string) bool {
+	s.autoStartOnCreateMu.Lock()
+	defer s.autoStartOnCreateMu.Unlock()
+	_, owned := s.autoStartOnCreateInFlight[taskID]
+	return owned
+}
+
+// restoreAutoStartOnCreate restores a failed reservation and leaves a
+// durable intent for the next lifecycle sweep. The original intent is
+// written before the in-flight marker is removed, so either write ordering
+// still leaves recovery work after a process exit.
+func (s *Service) restoreAutoStartOnCreate(ctx context.Context, taskID, eventName string) {
+	setter, setterOK := s.repo.(taskMetadataKeySetter)
+	remover, removerOK := s.repo.(taskMetadataKeyRemover)
+	if !setterOK || !removerOK {
+		s.logger.Warn(eventName+": repository cannot restore auto-start-on-create reservation",
+			zap.String("task_id", taskID))
+		s.clearAutoStartOnCreateInFlight(taskID)
+		return
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartOnCreate, true); err != nil {
+		s.logger.Warn(eventName+": failed to restore auto-start-on-create intent",
+			zap.String("task_id", taskID), zap.Error(err))
+		s.clearAutoStartOnCreateInFlight(taskID)
+		return
+	}
+	if _, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartOnCreateInFlight); err != nil {
+		s.logger.Warn(eventName+": failed to clear auto-start-on-create in-flight marker",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+	s.clearAutoStartOnCreateInFlight(taskID)
+}
+
+// discardAutoStartOnCreate consumes a reservation when the task no longer
+// needs a create-time launch (for example, a terminal PR or a step without
+// auto-start). It is intentionally separate from restoreAutoStartOnCreate.
+func (s *Service) discardAutoStartOnCreate(ctx context.Context, taskID, eventName string) {
+	if remover, ok := s.repo.(taskMetadataKeyRemover); ok {
+		if _, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartOnCreateInFlight); err != nil {
+			s.logger.Warn(eventName+": failed to clear auto-start-on-create in-flight marker",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}
+	s.clearAutoStartOnCreateInFlight(taskID)
+}
+
+// completeAutoStartOnCreate clears both lifecycle markers after a session or
+// run is durable. A session-existence check in startup recovery also calls
+// this helper, which makes cleanup idempotent after a process restart.
+func (s *Service) completeAutoStartOnCreate(ctx context.Context, taskID, eventName string) {
+	if remover, ok := s.repo.(taskMetadataKeyRemover); ok {
+		for _, key := range []string{models.MetaKeyAutoStartOnCreate, models.MetaKeyAutoStartOnCreateInFlight} {
+			if _, err := remover.RemoveTaskMetadataKey(ctx, taskID, key); err != nil {
+				s.logger.Warn(eventName+": failed to clear auto-start-on-create marker",
+					zap.String("task_id", taskID), zap.String("metadata_key", key), zap.Error(err))
+			}
+		}
+	}
+	s.clearAutoStartOnCreateInFlight(taskID)
+}
+
+//nolint:cyclop,gocognit,funlen // launch dispatch combines existing workflow gates with durable token ownership
 func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64, autoStartOnCreateClaimed bool) {
 	if task == nil || task.QueuedForStepID != "" || step == nil {
+		if autoStartOnCreateClaimed && task != nil {
+			s.restoreAutoStartOnCreate(ctx, task.ID, eventName)
+		}
 		return
+	}
+	if models.HasAutoStartOnCreateIntent(task.Metadata) || models.HasAutoStartOnCreateInFlight(task.Metadata) || autoStartOnCreateClaimed {
+		sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
+		if err != nil {
+			s.logger.Warn(eventName+": failed to check existing sessions before auto-start-on-create claim",
+				zap.String("task_id", task.ID), zap.Error(err))
+			if autoStartOnCreateClaimed {
+				s.restoreAutoStartOnCreate(ctx, task.ID, eventName)
+			}
+			return
+		}
+		if len(sessions) > 0 {
+			s.completeAutoStartOnCreate(ctx, task.ID, eventName)
+			return
+		}
 	}
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
+		if autoStartOnCreateClaimed {
+			s.discardAutoStartOnCreate(ctx, task.ID, eventName)
+		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion) {
+	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
 		return
 	}
 	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
 		s.logger.Debug(eventName+": target step has no auto-start",
 			zap.String("task_id", task.ID),
 			zap.String("to_step_id", step.ID))
+		if autoStartOnCreateClaimed {
+			s.discardAutoStartOnCreate(ctx, task.ID, eventName)
+		}
 		return
 	}
 
-	restoreAutoStartOnCreate := s.claimAutoStartOnCreateForLaunch(ctx, task, autoStartOnCreateClaimed)
+	claimResult := s.claimAutoStartOnCreateForLaunch(ctx, task, autoStartOnCreateClaimed)
+	if claimResult == autoStartOnCreateClaimLost || claimResult == autoStartOnCreateClaimError {
+		s.logger.Debug(eventName+": auto-start-on-create claim did not win",
+			zap.String("task_id", task.ID), zap.Uint8("claim_result", uint8(claimResult)))
+		return
+	}
+	restoreAutoStartOnCreate := claimResult == autoStartOnCreateClaimOwned
 
 	if s.isOfficeTask(ctx, task.ID) {
 		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion, stepTransitionID, restoreAutoStartOnCreate)
@@ -1703,6 +1915,10 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 				queuePromotionToken:      queuePromotionToken,
 				restoreAutoStartOnCreate: restoreAutoStartOnCreate,
 			})
+			return
+		}
+		if restoreAutoStartOnCreate {
+			s.completeAutoStartOnCreate(asyncCtx, task.ID, eventName)
 		}
 	}()
 }
@@ -1755,12 +1971,18 @@ func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *mo
 			s.logger.Info(eventName+": queued office run (no session, auto-start step)",
 				zap.String("task_id", task.ID),
 				zap.String("to_step_id", step.ID))
+			if restoreAutoStartOnCreate {
+				s.completeAutoStartOnCreate(asyncCtx, task.ID, eventName)
+			}
 			return
 		}
 		s.logger.Debug(eventName+": office auto-start run not queued",
 			zap.String("task_id", task.ID),
 			zap.String("to_step_id", step.ID),
 			zap.String("outcome", string(outcome)))
+		if restoreAutoStartOnCreate {
+			s.completeAutoStartOnCreate(asyncCtx, task.ID, eventName)
+		}
 	}()
 }
 
@@ -1833,12 +2055,13 @@ func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName 
 		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, tokens.queuePromotionToken, eventName)
 	}
 	if tokens.restoreAutoStartOnCreate {
-		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyAutoStartOnCreate, true, eventName)
+		s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 	}
 	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName)
 }
 
-func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string, restoreQueuePromotion bool) bool {
+//nolint:cyclop,gocognit,funlen // deferred launches coordinate two durable tokens and async success/failure cleanup
+func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string, restoreQueuePromotion bool, autoStartOnCreateClaimed ...bool) bool {
 	if task.Metadata == nil {
 		return false
 	}
@@ -1848,6 +2071,9 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
+		if len(autoStartOnCreateClaimed) > 0 && autoStartOnCreateClaimed[0] {
+			s.restoreAutoStartOnCreate(ctx, task.ID, eventName)
+		}
 		return false
 	}
 	var intent struct {
@@ -1863,7 +2089,25 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 	}
 	if err := json.Unmarshal(encoded, &intent); err != nil || intent.AgentProfileID == "" {
 		s.logger.Warn(eventName+": invalid deferred launch intent", zap.String("task_id", task.ID), zap.Error(err))
+		if len(autoStartOnCreateClaimed) > 0 && autoStartOnCreateClaimed[0] {
+			s.restoreAutoStartOnCreate(ctx, task.ID, eventName)
+		}
 		return true
+	}
+	createClaimed := false
+	requestedCreateClaim := len(autoStartOnCreateClaimed) > 0 && autoStartOnCreateClaimed[0]
+	if requestedCreateClaim || models.HasAutoStartOnCreateIntent(task.Metadata) || models.HasAutoStartOnCreateInFlight(task.Metadata) {
+		claimResult := s.claimAutoStartOnCreateForLaunch(ctx, task, requestedCreateClaim)
+		switch claimResult {
+		case autoStartOnCreateClaimOwned:
+			createClaimed = true
+		case autoStartOnCreateNoIntent:
+			if requestedCreateClaim {
+				return true
+			}
+		default:
+			return true
+		}
 	}
 	launchIntent := IntentStart
 	if intent.Intent == "prepare" {
@@ -1873,6 +2117,9 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		launchCtx := context.WithoutCancel(ctx)
 		metadataClaimed, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
 		if !claimOK {
+			if createClaimed {
+				s.restoreAutoStartOnCreate(launchCtx, task.ID, eventName)
+			}
 			return
 		}
 		launchResp, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
@@ -1890,7 +2137,13 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 			if restoreQueuePromotion {
 				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, queuePromotionLifecycleToken(task), eventName)
 			}
+			if createClaimed {
+				s.restoreAutoStartOnCreate(launchCtx, task.ID, eventName)
+			}
 			return
+		}
+		if createClaimed {
+			s.completeAutoStartOnCreate(launchCtx, task.ID, eventName)
 		}
 		if intent.RecordRecentUse {
 			s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)

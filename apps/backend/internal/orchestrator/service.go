@@ -591,6 +591,13 @@ type Service struct {
 	passthroughDispatchMu sync.Mutex
 	passthroughDispatches map[string]map[*passthroughDispatchToken]struct{}
 
+	// autoStartOnCreateMu serializes the local ownership hand-off for the
+	// durable auto-start-on-create marker. The database marker survives a
+	// process restart; this map prevents recovery and event delivery from
+	// reclaiming the same marker while its detached launch is still running.
+	autoStartOnCreateMu       sync.Mutex
+	autoStartOnCreateInFlight map[string]struct{}
+
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
@@ -1500,6 +1507,7 @@ func NewService(
 		executor:                     exec,
 		scheduler:                    sched,
 		messageQueue:                 msgQueue,
+		autoStartOnCreateInFlight:    make(map[string]struct{}),
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),

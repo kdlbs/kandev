@@ -215,6 +215,12 @@ const (
 	// whose Routine workflow start step has no other transition to carry it
 	// into an auto_start_agent evaluation.
 	MetaKeyAutoStartOnCreate = "auto_start_on_create"
+	// MetaKeyAutoStartOnCreateInFlight is a durable hand-off marker for an
+	// auto-start-on-create launch. The original intent is consumed before the
+	// detached launch starts, but this marker remains until a session or run
+	// is durable. That lets startup recovery retry a process that exits in the
+	// gap instead of losing the last recovery signal.
+	MetaKeyAutoStartOnCreateInFlight = "auto_start_on_create_in_flight"
 	// MetaKeyStepHandoffCarry is a single-slot, task-scoped token carrying one
 	// consuming transition's completion handoff exactly one hop, to the next
 	// step's first dispatched prompt. Its value is a StepHandoffCarryToken.
@@ -261,6 +267,15 @@ func IsAgentTitleOwner(metadata map[string]interface{}, sessionID string) bool {
 func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
 	intent, ok := metadata[MetaKeyAutoStartOnCreate].(bool)
 	return ok && intent
+}
+
+// HasAutoStartOnCreateInFlight reports whether a launch attempt still owns
+// the durable hand-off marker for a create-time auto-start. Only an explicit
+// true value counts; JSON rehydration and in-process callers use the same
+// representation as the other lifecycle markers.
+func HasAutoStartOnCreateInFlight(metadata map[string]interface{}) bool {
+	inFlight, ok := metadata[MetaKeyAutoStartOnCreateInFlight].(bool)
+	return ok && inFlight
 }
 
 // TaskSession.Metadata key that records how the session came into existence.
