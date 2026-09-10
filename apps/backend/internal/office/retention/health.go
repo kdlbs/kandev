@@ -22,11 +22,11 @@ const (
 // there is no separate stored issue map to keep in sync with them.
 //
 // office_retention_count_failed:<table> is a ninth issue id beyond the
-// design's closed eight-id catalogue: F33 (a Build-accepted spec gap) found
-// no id for a failed census evaluation. It fires only on CensusStale (a
-// table that had a successful evaluation and then failed); CensusNotComputed
-// is the pre-first-success state AC-003.11 requires rendering as absent
-// rather than alarming, so it raises nothing on its own.
+// design's closed eight-id catalogue, covering a failed census evaluation.
+// It fires only on CensusStale (a table that had a successful evaluation and
+// then failed); CensusNotComputed is the pre-first-success state AC-003.11
+// requires rendering as absent rather than alarming, so it raises nothing on
+// its own.
 //
 // office_retention_threshold:<table> and office_retention_disabled:<table>
 // both answer AC-003.5/-003.7's "retained count over threshold" condition,
@@ -152,7 +152,7 @@ func failedTableIssues(last LastSweep) []health.Issue {
 }
 
 // censusIssues covers AC-001.10 (unknown status), AC-003.5/-003.7 (threshold,
-// split on enabled/disabled), and F33's office_retention_count_failed.
+// split on enabled/disabled), and office_retention_count_failed.
 func (c *Checker) censusIssues(settings Settings) []health.Issue {
 	counts := c.sweeper.CensusSnapshot()
 

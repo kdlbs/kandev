@@ -98,29 +98,6 @@ describe("RetentionSettingsCard", () => {
     expect(screen.getByTestId("retention-never-swept")).toBeTruthy();
   });
 
-  it("stages an admin edit until the shared save contributor runs, then reloads", async () => {
-    renderCard();
-    await screen.findByTestId(ENABLED_TOGGLE_TEST_ID);
-
-    const toggle = screen.getByTestId(ENABLED_TOGGLE_TEST_ID);
-    fireEvent.click(toggle);
-    expect(saveRetentionSettingsMock).not.toHaveBeenCalled();
-    expect(saveContributor?.isDirty).toBe(true);
-    if (!saveContributor) throw new Error("expected save contributor");
-
-    saveRetentionSettingsMock.mockResolvedValueOnce(defaultSettings({ enabled: false }));
-    fetchRetentionStatusMock.mockResolvedValueOnce(
-      statusOf({ settings: defaultSettings({ enabled: false }) }),
-    );
-
-    await act(async () => saveContributor?.save(saveContributor.revision));
-
-    expect(saveRetentionSettingsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: false }),
-    );
-    await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
-  });
-
   it("keeps members read-only while preserving the loaded values", async () => {
     currentRole = "member";
     renderCard();
@@ -192,6 +169,48 @@ describe("RetentionSettingsCard", () => {
     );
     expect(screen.getByText(/Stale: last measurement failed/)).toBeTruthy();
     expect(screen.getByTestId("retention-skip-count").textContent).toContain("2");
+  });
+});
+
+describe("RetentionSettingsCard save/reload consistency", () => {
+  it("stages an admin edit until the shared save contributor runs, then reloads", async () => {
+    renderCard();
+    await screen.findByTestId(ENABLED_TOGGLE_TEST_ID);
+
+    const toggle = screen.getByTestId(ENABLED_TOGGLE_TEST_ID);
+    fireEvent.click(toggle);
+    expect(saveRetentionSettingsMock).not.toHaveBeenCalled();
+    expect(saveContributor?.isDirty).toBe(true);
+    if (!saveContributor) throw new Error("expected save contributor");
+
+    saveRetentionSettingsMock.mockResolvedValueOnce(defaultSettings({ enabled: false }));
+    fetchRetentionStatusMock.mockResolvedValueOnce(
+      statusOf({ settings: defaultSettings({ enabled: false }) }),
+    );
+
+    await act(async () => saveContributor?.save(saveContributor.revision));
+
+    expect(saveRetentionSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
+    await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
+  });
+
+  it("clears the dirty draft from the save response even when the post-save reload fails", async () => {
+    renderCard();
+    await screen.findByTestId(ENABLED_TOGGLE_TEST_ID);
+    fireEvent.click(screen.getByTestId(ENABLED_TOGGLE_TEST_ID));
+    if (!saveContributor) throw new Error("expected save contributor");
+
+    saveRetentionSettingsMock.mockResolvedValueOnce(defaultSettings({ enabled: false }));
+    fetchRetentionStatusMock.mockRejectedValueOnce(new Error("offline"));
+
+    await act(async () => saveContributor?.save(saveContributor.revision));
+
+    expect(saveRetentionSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
+    await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
   });
 });
 

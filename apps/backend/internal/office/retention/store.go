@@ -326,6 +326,9 @@ func deleteRunsByIDs(ctx context.Context, tx *sqlx.Tx, ids []string, cutoff time
 	return total, nil
 }
 
+// deleteByRunIDs deletes run-id-keyed satellite rows for one table. table
+// must be a hardcoded identifier from a call site in this package, never a
+// caller-supplied string — it is interpolated directly into the query text.
 func deleteByRunIDs(ctx context.Context, tx *sqlx.Tx, table string, ids []string) (int64, error) {
 	var total int64
 	for _, chunk := range chunkIDs(ids, retentionMaxHostParams) {

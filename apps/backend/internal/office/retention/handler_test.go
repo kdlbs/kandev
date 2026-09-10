@@ -231,6 +231,26 @@ func TestPutRetention_UnknownFieldIsRejectedNamingTheField(t *testing.T) {
 	}
 }
 
+func TestPutRetention_TrailingDataAfterObjectIsRejected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler, sweeper := newTestHandler(t)
+	router := newTestRetentionRouter(handler)
+
+	body := []byte(`{"enabled": true} {"enabled": false}`)
+	response := doRequest(router, http.MethodPut, "/api/v1/system/retention", body)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", response.Code, response.Body.String())
+	}
+
+	stored, err := sweeper.settingsStore.GetSettings(t.Context())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if stored != DefaultSettings() {
+		t.Fatalf("stored = %+v, want unchanged defaults (nothing written on rejection)", stored)
+	}
+}
+
 func TestPutRetention_FractionalNumberIsRejected(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler, _ := newTestHandler(t)

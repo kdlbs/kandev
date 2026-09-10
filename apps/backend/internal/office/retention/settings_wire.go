@@ -48,6 +48,9 @@ func decodeRetentionSettings(body []byte) (Settings, error) {
 	if err := dec.Decode(&env); err != nil {
 		return Settings{}, err
 	}
+	if dec.More() {
+		return Settings{}, fmt.Errorf("request body: unexpected data after the JSON object")
+	}
 
 	enabled, err := decodeBoolField(env.Enabled, "enabled", defaults.Enabled)
 	if err != nil {

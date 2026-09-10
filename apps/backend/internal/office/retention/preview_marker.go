@@ -73,10 +73,12 @@ func (s *PreviewMarkerStore) MarkCompleted(ctx context.Context, table TableName,
 
 // GetWith is Get against an explicit connection instead of the shared
 // settings pool. Required mid-sweep on PostgreSQL: every statement in a
-// sweep must run on the session holding the advisory lock (F27 — see
-// sweep.go and lock.go), and going through the pool here would request a
-// second connection, which deadlocks under a maxOpenConns=1 pool (the
-// mandated Postgres-gated test harness).
+// sweep must run on the session holding the advisory lock (see sweep.go
+// and lock.go), and going through the pool here would request a second
+// connection, which deadlocks under a maxOpenConns=1 pool (the mandated
+// Postgres-gated test harness). This bypasses systemsettings.Store and
+// reads the key/value pair directly, so it depends on that package's
+// `settings` table keeping its `key`/`value` column names.
 func (s *PreviewMarkerStore) GetWith(ctx context.Context, q queryer) (PreviewMarker, bool) {
 	var raw string
 	err := q.GetContext(ctx, &raw, q.Rebind(`SELECT value FROM settings WHERE key = ?`), previewMarkerKey)
