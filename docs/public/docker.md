@@ -5,7 +5,11 @@ description: "Run the Kandev control plane in Docker and understand Docker-based
 
 # Docker
 
-The published image runs the Kandev control plane: native backend, web UI, API, WebSocket endpoint, external MCP endpoint, and the host-side `agentctl`. This is different from the **Local Docker executor**, which creates a separate container for an agent.
+The published image runs the Kandev control plane from a native Go binary. The
+binary contains the compiled web UI and serves the API, WebSocket endpoint, and
+external MCP endpoint. The image also includes the host-side `agentctl`. This
+is different from the **Local Docker executor**, which creates a separate
+container for an agent.
 
 For Kubernetes, see [Kubernetes](k8s.md). For executor profiles, see [Executors](executors.md#local-docker).
 
