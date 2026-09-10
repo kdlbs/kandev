@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-09-10T14:20:46.448Z",
+  "assets": [
+    {
+      "name": "pending-clarification",
+      "type": "screenshot",
+      "format": "png",
+      "file": "mobile-pr-clarification-proceed-capture--pending-clarification.png",
+      "test": "mobile-pr-clarification-proceed-capture.spec.ts",
+      "caption": "Mobile proceed action hidden while clarification is pending"
+    },
+    {
+      "name": "clarification-cleared",
+      "type": "screenshot",
+      "format": "png",
+      "file": "mobile-pr-clarification-proceed-capture--clarification-cleared.png",
+      "test": "mobile-pr-clarification-proceed-capture.spec.ts",
+      "caption": "Mobile proceed action eligible after the clarification barrier clears"
+    },
+    {
+      "name": "pending-clarification-desktop",
+      "type": "screenshot",
+      "format": "png",
+      "file": "pr-clarification-proceed-capture--pending-clarification.png",
+      "test": "pr-clarification-proceed-capture.spec.ts",
+      "caption": "Desktop proceed action hidden while clarification is pending"
+    },
+    {
+      "name": "clarification-cleared-desktop",
+      "type": "screenshot",
+      "format": "png",
+      "file": "pr-clarification-proceed-capture--clarification-cleared.png",
+      "test": "pr-clarification-proceed-capture.spec.ts",
+      "caption": "Desktop proceed action eligible after the clarification barrier clears"
+    }
+  ]
+}
