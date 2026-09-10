@@ -361,7 +361,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // User-selected tab overrides the default primary session pick.
   // Reset when the selected task changes.
   const [userSelectedSessionId, setUserSelectedSessionId] = useSessionSelectionReset(
-    previewTaskId,
+    selectedTaskId,
     initialSessionId ?? null,
   );
 
