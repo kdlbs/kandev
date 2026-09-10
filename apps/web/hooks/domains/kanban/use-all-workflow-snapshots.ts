@@ -196,6 +196,7 @@ async function fetchAndWriteSnapshot(
       position: step.position,
       events: step.events,
       allow_manual_move: step.allow_manual_move,
+      auto_advance_requires_signal: step.auto_advance_requires_signal,
       prompt: step.prompt,
       is_start_step: step.is_start_step,
       show_in_command_panel: step.show_in_command_panel,

@@ -39,6 +39,7 @@ type stepDefYAML struct {
 	ProfileSessionEndPolicy    taskmodels.WorkflowProfileSessionEndPolicy   `yaml:"profile_session_end_policy,omitempty"`
 	AutoAdvanceRequiresSignal  bool                                         `yaml:"auto_advance_requires_signal,omitempty"`
 	CancelTriggersTurnComplete bool                                         `yaml:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter        bool                                         `yaml:"complete_task_on_enter,omitempty"`
 	Events                     stepEventsYAML                               `yaml:"events,omitempty"`
 }
 
@@ -183,6 +184,7 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
 		AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        s.CompleteTaskOnEnter,
 		StageType:                  stage,
 	}, nil
 }

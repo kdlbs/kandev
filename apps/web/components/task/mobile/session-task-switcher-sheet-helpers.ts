@@ -14,6 +14,7 @@ export function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: s
       events: step.events,
       // Preserve optional step capabilities until the next full reload.
       allow_manual_move: step.allow_manual_move,
+      auto_advance_requires_signal: step.auto_advance_requires_signal,
       prompt: step.prompt,
       is_start_step: step.is_start_step,
       show_in_command_panel: step.show_in_command_panel,

@@ -822,6 +822,7 @@ export class ApiClient {
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       auto_advance_requires_signal?: boolean;
+      complete_task_on_enter?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -843,6 +844,9 @@ export class ApiClient {
         : {}),
       ...(opts?.auto_advance_requires_signal != null
         ? { auto_advance_requires_signal: opts.auto_advance_requires_signal }
+        : {}),
+      ...(opts?.complete_task_on_enter != null
+        ? { complete_task_on_enter: opts.complete_task_on_enter }
         : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
@@ -1281,10 +1285,11 @@ export class ApiClient {
         on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
+      auto_advance_requires_signal?: boolean;
       wip_limit?: number;
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
-      auto_advance_requires_signal?: boolean;
+      complete_task_on_enter?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;

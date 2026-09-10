@@ -244,7 +244,7 @@ func TestService_MoveTaskToTerminalStepCompletesTask(t *testing.T) {
 	seedMoveSteps(svc)
 	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
-		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
 	}
 	createMoveTask(t, ctx, repo, "task-terminal", "wf-source", "step-source", nil)
 	eventBus.ClearEvents()
@@ -284,7 +284,7 @@ func TestService_MoveTaskToTerminalStepPreservesTerminalFailureStates(t *testing
 			seedMoveSteps(svc)
 			getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 			getter.steps["step-done"] = &wfmodels.WorkflowStep{
-				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
 			}
 			createMoveTask(t, ctx, repo, "task-terminal-"+tc.name, "wf-source", "step-source", nil)
 			task, err := repo.GetTask(ctx, "task-terminal-"+tc.name)
@@ -320,7 +320,7 @@ func TestService_MoveTaskRecoveryCompletesFailedTaskAtTerminalStep(t *testing.T)
 	seedMoveSteps(svc)
 	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
-		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
 	}
 	createMoveTask(t, ctx, repo, "task-recovery", "wf-source", "step-source", nil)
 	task, err := repo.GetTask(ctx, "task-recovery")
@@ -356,7 +356,7 @@ func TestService_MoveTaskRecoveryIsIdempotentAtTerminalStep(t *testing.T) {
 	seedMoveSteps(svc)
 	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
-		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
 	}
 	createMoveTask(t, ctx, repo, "task-recovery-idempotent", "wf-source", "step-done", nil)
 
@@ -401,7 +401,7 @@ func TestService_MoveTaskOutOfTerminalStepReopensTask(t *testing.T) {
 	seedMoveSteps(svc)
 	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
-		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
 	}
 	createMoveTask(t, ctx, repo, "task-reopened", "wf-source", "step-done", nil)
 	task, err := repo.GetTask(ctx, "task-reopened")
@@ -437,7 +437,7 @@ func TestService_ApproveSessionToTerminalStepCompletesTask(t *testing.T) {
 	seedMoveSteps(svc)
 	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
-		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2,
+		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2, CompleteTaskOnEnter: true,
 	}
 	createMoveTask(t, ctx, repo, "task-approved", "wf-source", "step-review-target", nil)
 	createMoveSession(t, ctx, repo, "session-approved", "task-approved", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
@@ -847,7 +847,7 @@ func TestService_BulkMoveTasksToTerminalStepCompletesTasks(t *testing.T) {
 	seedMoveSteps(svc)
 	getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
-		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+		ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
 	}
 	createMoveTask(t, ctx, repo, "task-bulk-terminal", "wf-source", "step-source", nil)
 	eventBus.ClearEvents()
@@ -884,7 +884,7 @@ func TestService_BulkMoveTasksToTerminalStepPreservesTerminalFailureStates(t *te
 			seedMoveSteps(svc)
 			getter := svc.workflowStepGetter.(*fakeWorkflowStepGetter)
 			getter.steps["step-done"] = &wfmodels.WorkflowStep{
-				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2,
+				ID: "step-done", WorkflowID: "wf-source", Name: "Done", Position: 2, CompleteTaskOnEnter: true,
 			}
 			createMoveTask(t, ctx, repo, "task-bulk-terminal-"+tc.name, "wf-source", "step-source", nil)
 			task, err := repo.GetTask(ctx, "task-bulk-terminal-"+tc.name)

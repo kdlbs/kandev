@@ -774,7 +774,11 @@ at runtime instead of assuming that a domain's full schema is present in the
 tool definition. Existing lifecycle tools and compatibility MCP tools remain
 available where documented.
 
-`export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
+`export_workflow_kandev` takes `workflow_id` and returns one version 2
+`kandev_workflow` JSON document with explicit step completion booleans. It omits
+instance IDs and timestamps. Pass its JSON text unchanged as `document` to
+`import_workflow_kandev` when it is within the existing 1 MiB import limit.
+Version 1 documents remain accepted for compatibility.
 
 ### Read a saved prompt
 

@@ -1181,6 +1181,7 @@ type WorkflowStepDTO struct {
 	StageType                  string    `json:"stage_type,omitempty"`
 	AutoAdvanceRequiresSignal  bool      `json:"auto_advance_requires_signal"`
 	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
+	CompleteTaskOnEnter        bool      `json:"complete_task_on_enter"`
 	CreatedAt                  time.Time `json:"created_at"`
 	UpdatedAt                  time.Time `json:"updated_at"`
 }

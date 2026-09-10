@@ -49,6 +49,7 @@ function sourceSteps(): WorkflowStep[] {
       agent_profile_id: "step-agent",
       profile_session_start_policy: "reuse",
       profile_session_end_policy: "complete",
+      complete_task_on_enter: false,
       auto_advance_requires_signal: true,
       cancel_triggers_turn_complete: true,
       wip_limit: 2,
@@ -70,6 +71,7 @@ function sourceSteps(): WorkflowStep[] {
       show_in_command_panel: false,
       auto_archive_after_hours: 0,
       agent_profile_id: "",
+      complete_task_on_enter: true,
       auto_advance_requires_signal: false,
       cancel_triggers_turn_complete: false,
       wip_limit: 0,
@@ -157,6 +159,7 @@ describe("createWorkflowDuplication", () => {
       agent_profile_id: "step-agent",
       profile_session_start_policy: "reuse",
       profile_session_end_policy: "complete",
+      complete_task_on_enter: false,
       auto_advance_requires_signal: true,
       cancel_triggers_turn_complete: true,
       wip_limit: 2,
@@ -165,6 +168,7 @@ describe("createWorkflowDuplication", () => {
       updated_at: "",
       workflow_id: result.workflow.id,
     });
+    expect(copiedDone.complete_task_on_enter).toBe(true);
     expect(copiedDone.pull_from_step_id).toBe(copiedReview.id);
     expect(copiedReview.events?.on_turn_complete).toEqual([
       {

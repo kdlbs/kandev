@@ -11,10 +11,10 @@ WORKFLOW TOOLS:
 - update_workflow_kandev: Update a workflow. Required: workflow_id. Optional: name, description.
 - delete_workflow_kandev: Delete a workflow and all its steps (destructive). Required: workflow_id.
 - import_workflow_kandev: Import one or more workflows into a workspace from a portable document (the kandev_workflow YAML/JSON export envelope). Workflows whose name already exists are skipped. Required: workspace_id, document. Returns the created and skipped workflow names.
-- export_workflow_kandev: Export one workflow as a portable version 1 kandev_workflow JSON document. Required: workflow_id. Pass the returned JSON unchanged as document to import_workflow_kandev.
+- export_workflow_kandev: Export one workflow as a portable version 2 kandev_workflow JSON document. Required: workflow_id. Pass the returned JSON unchanged as document to import_workflow_kandev. Version 1 documents remain accepted for compatibility.
 - list_workflow_steps_kandev: List workflow steps (columns) in a workflow. Required: workflow_id.
-- create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_advance_requires_signal, cancel_triggers_turn_complete, events.
-- update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_archive_after_hours, auto_advance_requires_signal, cancel_triggers_turn_complete, events.
+- create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, complete_task_on_enter, auto_advance_requires_signal, cancel_triggers_turn_complete, events.
+- update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_archive_after_hours, complete_task_on_enter, auto_advance_requires_signal, cancel_triggers_turn_complete, events.
 - cancel_triggers_turn_complete: When true, an explicit user cancellation runs the step's normal on_turn_complete actions after the cancelled turn settles. It does not apply to internal or agent cancellations.
 - delete_workflow_step_kandev: Delete a workflow step (destructive). Required: step_id.
 - reorder_workflow_steps_kandev: Reorder workflow steps. Required: workflow_id, step_ids (ordered array of step IDs).

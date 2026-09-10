@@ -52,6 +52,27 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowIDs...)
 }
 
+// PublishTaskUpdatedByID reloads and publishes the canonical task.updated
+// event inside the task's FIFO publication queue. Callers use this after a
+// direct task-row mutation when the database row is the source of truth.
+func (s *Service) PublishTaskUpdatedByID(ctx context.Context, taskID string) {
+	if s.eventBus == nil || taskID == "" {
+		return
+	}
+	s.enqueueTaskPublication(ctx, taskID, events.TaskUpdated, func(publicationCtx context.Context) {
+		task, err := s.GetTask(publicationCtx, taskID)
+		if err != nil {
+			s.logger.Error("failed to load task for task.updated publication",
+				zap.String("task_id", taskID), zap.Error(err))
+			return
+		}
+		if task == nil {
+			return
+		}
+		s.publishTaskEventNow(publicationCtx, events.TaskUpdated, task, nil, nil, nil, nil)
+	})
+}
+
 // PublishTaskQueuePromoted notifies subscribers that a queued task has been
 // admitted to its destination step. The event is distinct from task.updated so
 // orchestration can launch deferred work exactly when capacity is granted.

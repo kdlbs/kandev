@@ -84,6 +84,7 @@ func payload(step *models.WorkflowStep) map[string]interface{} {
 		"stage_type":                    string(step.StageType),
 		"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
 		"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,
+		"complete_task_on_enter":        step.CompleteTaskOnEnter,
 		"created_at":                    step.CreatedAt,
 		"updated_at":                    step.UpdatedAt,
 	}

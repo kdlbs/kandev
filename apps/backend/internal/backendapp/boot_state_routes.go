@@ -743,6 +743,7 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"position":                     step.Position,
 		"events":                       step.Events,
 		"allow_manual_move":            step.AllowManualMove,
+		"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,
 		"prompt":                       step.Prompt,
 		"is_start_step":                step.IsStartStep,
 		"show_in_command_panel":        step.ShowInCommandPanel,

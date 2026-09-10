@@ -19,6 +19,7 @@ import {
 } from "./workflow-pipeline-editor-helpers";
 import {
   useStepActions,
+  CompleteTaskOnEnterToggle,
   TurnStartSelect,
   TurnCompleteSelect,
   ChildrenCompletedSelect,
@@ -220,10 +221,11 @@ type StepBehaviorSectionProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   toggleOnEnterAction: (type: string) => void;
+  isFinalStep: boolean;
   readOnly: boolean;
 };
 
-type StepToggleRowsProps = Omit<StepBehaviorSectionProps, "steps">;
+type StepToggleRowsProps = Omit<StepBehaviorSectionProps, "steps" | "isFinalStep">;
 
 // The six on-enter / board-behavior toggles. Split out of StepBehaviorSection
 // so that component stays under the 100-line function cap.
@@ -325,6 +327,7 @@ function StepBehaviorSection({
   steps,
   onUpdate,
   toggleOnEnterAction,
+  isFinalStep,
   readOnly,
 }: StepBehaviorSectionProps) {
   return (
@@ -338,6 +341,13 @@ function StepBehaviorSection({
           readOnly={readOnly}
         />
       </div>
+      <CompleteTaskOnEnterToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+        isFinalStep={isFinalStep}
+      />
       <StepWipControls
         step={step}
         savedStep={savedStep}
@@ -475,6 +485,7 @@ export function StepConfigPanel({
   }, 500);
 
   const actions = useStepActions({ step, onUpdate });
+  const isFinalStep = steps[steps.length - 1]?.id === step.id;
 
   return (
     <div
@@ -501,6 +512,7 @@ export function StepConfigPanel({
           steps={steps}
           onUpdate={onUpdate}
           toggleOnEnterAction={actions.toggleOnEnterAction}
+          isFinalStep={isFinalStep}
           readOnly={readOnly}
         />
         <SessionConfigEditor

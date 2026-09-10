@@ -1863,6 +1863,34 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// SetSessionMetadataKeyIfState atomically sets one metadata key only while the
+// session remains in expectedState. Runtime recovery uses this to keep a
+// follow-up marker from being attached to a session that was stopped between
+// its guarded state transition and metadata persistence.
+func (r *Repository) SetSessionMetadataKeyIfState(
+	ctx context.Context,
+	sessionID, key string,
+	value interface{},
+	expectedState models.TaskSessionState,
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	query := metadataKeyUpdateQuery("task_sessions", r.db.DriverName()) + " AND state = ?"
+	args := metadataKeyUpdateArgs(r.db.DriverName(), key, string(valueJSON), r.nowUTC(), sessionID)
+	args = append(args, string(expectedState))
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // UpdateSessionContextWindow stores a context-window sample and atomically
 // increments the session's inferred compaction count when the new used-token
 // value is lower than the previous persisted sample.

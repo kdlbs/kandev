@@ -211,6 +211,8 @@ type StepDefinition struct {
 	// CancelTriggersTurnComplete allows an explicit user cancellation to run
 	// this step's ordinary on_turn_complete actions.
 	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete,omitempty" yaml:"cancel_triggers_turn_complete,omitempty"`
+	// CompleteTaskOnEnter marks the final step as completing its task on entry.
+	CompleteTaskOnEnter bool `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
 }
 
 // WorkflowStep represents a step in a workflow
@@ -244,9 +246,11 @@ type WorkflowStep struct {
 	AutoAdvanceRequiresSignal bool `json:"auto_advance_requires_signal"`
 	// CancelTriggersTurnComplete allows an explicit user cancellation to run
 	// this step's ordinary on_turn_complete actions.
-	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
-	CreatedAt                  time.Time `json:"created_at"`
-	UpdatedAt                  time.Time `json:"updated_at"`
+	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete"`
+	// CompleteTaskOnEnter marks the final step as completing its task on entry.
+	CompleteTaskOnEnter bool      `json:"complete_task_on_enter"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // HasOnEnterAction checks if the step has a specific on_enter action type.

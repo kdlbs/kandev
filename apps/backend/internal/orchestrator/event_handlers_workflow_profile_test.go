@@ -528,6 +528,36 @@ func TestPrepareWorkflowStepSession_PreservesMatchingProfileSession(t *testing.T
 	}
 }
 
+func TestPrepareWorkflowStepSession_ClearsCompletionFollowUpWithoutProfile(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyCompletionFollowUp, true); err != nil {
+		t.Fatalf("mark completion follow-up: %v", err)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	step := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	if _, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", session, step, nil); err != nil {
+		t.Fatalf("prepareWorkflowStepSession returned error: %v", err)
+	} else if switched {
+		t.Fatal("step without a profile must not switch sessions")
+	}
+
+	updated, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if models.IsCompletionFollowUpSession(updated.Metadata) {
+		t.Fatal("explicit workflow step entry retained completion follow-up ownership")
+	}
+}
+
 func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -3198,6 +3198,15 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 		return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
+	case models.TaskSessionStateCompleted:
+		if !pinnedTarget {
+			return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
+		}
+		resumed, err := h.resumeCompletedTaskMessageSession(ctx, taskID, session.ID)
+		if err != nil {
+			return taskMessageDispatchResult{}, err
+		}
+		return h.dispatchPreparedTaskMessage(ctx, taskID, resumed, prompt, metadata)
 
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		if interruptIfBusy {
@@ -3247,6 +3256,33 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		}
 		return result, err
 	}
+}
+
+// resumeCompletedTaskMessageSession admits a pinned completed target through
+// the same guarded resume path as the user-facing recovery action. The session
+// is reloaded before the message is recorded so the prompt cannot be attached
+// to a different session or to the pre-resume terminal snapshot.
+func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	_, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		TaskID:                      taskID,
+		SessionID:                   sessionID,
+		Intent:                      orchestrator.IntentResume,
+		AllowCompletedSessionResume: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to resume completed session: %w", err)
+	}
+	resumed, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload completed session after resume: %w", err)
+	}
+	if resumed == nil || resumed.TaskID != taskID {
+		return nil, errors.New("completed session was not available after resume")
+	}
+	if resumed.State == models.TaskSessionStateCompleted {
+		return nil, errors.New("completed session did not become ready for a follow-up message")
+	}
+	return resumed, nil
 }
 
 func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {

@@ -2334,25 +2334,32 @@ func (s *Service) ResumeTaskSessionWithOptions(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	allowCompletedResume := options.AllowCompletedSessionResume &&
+		session.State == models.TaskSessionStateCompleted
+	// The completed-session permission is valid only for the exact completed
+	// row admitted by the caller. Do not let an option intended for that state
+	// alter the ordinary FAILED/CANCELLED recovery paths.
+	options.AllowCompletedSessionResume = allowCompletedResume
+	// Completed sessions remain closed to every implicit resume path. Check this
+	// before looking for an executor row because cleanup commonly removes that
+	// row, and the caller should receive the terminal-state rejection rather
+	// than an incidental "no executor record" error.
+	if session.State == models.TaskSessionStateCompleted && !allowCompletedResume {
+		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
+	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if (err != nil || running == nil) &&
 		session.State != models.TaskSessionStateCancelled &&
-		session.State != models.TaskSessionStateFailed {
+		session.State != models.TaskSessionStateFailed &&
+		!allowCompletedResume {
 		// Executor record is required for non-terminal sessions. For cancelled/failed sessions
 		// the record may already have been cleaned up before the user clicked Resume — allow it.
+		// Explicit completed follow-up has the same cleanup shape and is admitted
+		// only through the narrow permission above.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	s.noteMissingWorktreesBeforeResume(sessionID, session)
 	branchRecoveryBefore := s.captureBranchRecoveryBeforeResume(ctx, taskID, sessionID, options)
-
-	// Completed sessions cannot be restarted — they require a new session.
-	// Failed and cancelled sessions keep the resume token so the relaunched
-	// agent continues the previous conversation (via ACP session/load for
-	// native-resume agents, or --resume on CLI). Users who want a fresh start
-	// after a failure can invoke RecoverSession with action="fresh_start".
-	if session.State == models.TaskSessionStateCompleted {
-		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
-	}
 
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {

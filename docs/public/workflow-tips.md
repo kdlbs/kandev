@@ -141,6 +141,7 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
 | Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
 | Run completion actions when a turn is cancelled | Also runs the step's `on_turn_complete` actions after an explicit user cancellation settles. A pending clarification, silent interruption, parent/task stop, provider failure, crash, or runtime teardown does not qualify. If the destination has `on_enter: auto_start_agent`, another agent turn can begin immediately. Default is off for custom steps; the built-in Kanban workflow enables it on Backlog and In Progress for newly created workflows; existing workflows are not backfilled. |
+| Complete task on entry | On the final step only, marks the task complete when it enters that step. The setting is saved per step, so moving a step changes which saved value is active. A value on a non-final step is retained but inactive. Default is off. |
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
@@ -157,6 +158,10 @@ fresh conversation. The source step's **Complete the session** setting closes
 the conversation, while **Park the session** stops the agent and keeps the
 conversation available for reuse or manual follow-up. These settings default
 to reuse on start and complete on end.
+
+### Continue a completed conversation
+
+Opening or reloading a completed task does not start its agent. If the task has a completed conversation, select **Resume** to continue that same conversation. The previous messages and provider context remain available, and the task keeps its completed state and workflow step. Select **New Agent** when you want a separate conversation. A follow-up does not run the completed step's workflow actions again.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 

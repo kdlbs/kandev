@@ -134,6 +134,7 @@ export type StepDefinition = {
   route_state?: string;
   route_reason?: string;
   downstream_acp_session_id?: string;
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -156,6 +157,7 @@ export type WorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  complete_task_on_enter?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
@@ -527,6 +529,9 @@ export type WorkflowStepDTO = {
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
   pull_from_step_id?: string | null;
+  complete_task_on_enter: boolean;
+  auto_advance_requires_signal: boolean;
+  cancel_triggers_turn_complete: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -990,6 +995,7 @@ export type StepPortable = {
   agent_profile?: AgentProfilePortable;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;
   wip_limit?: number;
