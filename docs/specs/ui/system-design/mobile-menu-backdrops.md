@@ -41,9 +41,9 @@ that existing contract, including non-task consumers of the same primitives.
 ## Shared presentation
 
 Extend the existing `max-width: 639px` menu rule. Generate one decorative
-`::before` backdrop on the positioning wrapper whose direct child has both
-`mobile-menu-root` and `data-state="open"`. Use a fixed viewport inset, the
-Drawer backdrop utilities, `pointer-events: none`, and a negative stacking
+`::before` backdrop on the positioning wrapper whose direct child has
+`mobile-menu-root`. Make it opaque only for `data-state="open"`. Use a fixed
+viewport inset, the Drawer backdrop utilities, `pointer-events: none`, and a negative stacking
 level within the menu wrapper's existing stacking context. Keep the menu and
 its children above the backdrop.
 
@@ -73,11 +73,12 @@ targets.
 
 ## Lifecycle and interaction
 
-The `data-state="open"` selector follows Radix state directly. Closed content,
-including content retained for exit motion or force mounting, cannot retain
-a visible menu backdrop. Unmounting removes the positioning wrapper and its
-pseudo-element. Crossing the CSS breakpoint removes or restores the backdrop
-without changing menu state.
+The `data-state="open"` selector follows Radix state directly. The backdrop
+transitions opacity over 100ms, matching the existing menu exit duration, so
+closing content retains dimming while it animates out. Closed force-mounted
+content is transparent after that transition. Unmounting removes the positioning
+wrapper and its pseudo-element immediately. Crossing the CSS breakpoint removes
+or restores the backdrop without changing menu state.
 
 The pseudo-element is decorative and is absent from the accessibility tree.
 It must not receive pointer events or introduce another focus or scroll lock.
@@ -112,15 +113,18 @@ Verify both light and dark themes; the foreground must not inherit blur.
 Browser tests inspect the root positioner's computed `::before` style, not
 only a class name. They verify a viewport-covering fixed layer, positive blur
 when supported, dimming matching an existing Drawer, negative local stacking,
-and pointer transparency. A screenshot confirms that actual page content is
-blurred and menu text remains sharp.
+and pointer transparency. Verify the wrapper's positive stacking level as well
+as the backdrop's negative local level. A screenshot confirms that actual page
+content is blurred and menu text remains sharp.
 
 Exercise real Kanban task options, task-row context submenus, and the non-modal
 workspace picker. Assert menu actions still work, parent drawers survive menu
 dismissal, outside tap and Escape clean up, and document horizontal overflow
 remains zero. Count generated backdrops across root and submenu positioners
 to catch accidental duplication. Cover 639px, 640px, and an ordinary desktop
-width, including resizing while a menu is open.
+width, including resizing while a menu is open. Observe the actual close-state
+mutation to verify the backdrop stays generated and fades before Radix removes
+the sheet; do not use a fixed sleep to sample the exit frame.
 
 Use the focused commands and named regressions in the
 [work order](../../../plans/mobile-menu-backdrops/task-01-add-menu-backdrops.md).

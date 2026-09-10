@@ -10,6 +10,7 @@ export async function readMenuBackdrop(menu: Locator) {
     const backdrop = getComputedStyle(positioner, "::before");
     return {
       content: backdrop.content,
+      opacity: Number.parseFloat(backdrop.opacity),
       background: backdrop.backgroundColor,
       blur: backdrop.backdropFilter || backdrop.getPropertyValue("-webkit-backdrop-filter"),
       position: backdrop.position,
@@ -20,6 +21,7 @@ export async function readMenuBackdrop(menu: Locator) {
       pointerEvents: backdrop.pointerEvents,
       foregroundFilter: getComputedStyle(element).filter,
       wrapperTransform: getComputedStyle(positioner).transform,
+      wrapperZIndex: Number.parseInt(getComputedStyle(positioner).zIndex, 10),
       viewport: { width: window.innerWidth, height: window.innerHeight },
       supportsBlur:
         CSS.supports("backdrop-filter", "blur(1px)") ||
@@ -46,8 +48,11 @@ export async function expectMenuBackdropCount(page: Page, count: number) {
 export async function expectMobileMenuBackdrop(menu: Locator) {
   await expect(menu).toBeVisible();
   await waitForFiniteAnimations(menu);
-  await expect.poll(() => readMenuBackdrop(menu)).toMatchObject({ content: '""' });
+  await expect
+    .poll(async () => ["none", "normal"].includes((await readMenuBackdrop(menu)).content))
+    .toBe(false);
   const backdrop = await readMenuBackdrop(menu);
+  expect(backdrop.opacity).toBe(1);
   expect(backdrop.background).not.toBe("rgba(0, 0, 0, 0)");
   expect(backdrop.position).toBe("fixed");
   expect(backdrop.inset).toEqual(["0px", "0px", "0px", "0px"]);
@@ -57,6 +62,7 @@ export async function expectMobileMenuBackdrop(menu: Locator) {
   expect(backdrop.pointerEvents).toBe("none");
   expect(backdrop.foregroundFilter).toMatch(/^(none|blur\(0px\))$/);
   expect(backdrop.wrapperTransform).toBe("none");
+  expect(backdrop.wrapperZIndex).toBeGreaterThan(0);
   if (backdrop.supportsBlur) {
     expect(
       Number.parseFloat(backdrop.blur.match(/blur\(([\d.]+)px\)/)?.[1] ?? "0"),

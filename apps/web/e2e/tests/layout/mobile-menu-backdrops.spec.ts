@@ -9,6 +9,47 @@ import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile menu backdrops", () => {
+  // @covers AC-UI-MOBILE-TASK-NAVIGATION-001.11
+  test("the backdrop fades with the closing menu sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Closing backdrop task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.taskCard(task.id).getByRole("button", { name: "More options" }).tap();
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"]');
+    await expectMobileMenuBackdrop(menu);
+
+    const closeFrame = await menu.evaluateHandle((element) => {
+      const frame = { content: "", opacity: "", transition: "", duration: "" };
+      const observer = new MutationObserver(() => {
+        if (element.getAttribute("data-state") !== "closed") return;
+        const backdrop = getComputedStyle(element.parentElement!, "::before");
+        frame.content = backdrop.content;
+        frame.opacity = backdrop.opacity;
+        frame.transition = backdrop.transitionProperty;
+        frame.duration = backdrop.transitionDuration;
+        observer.disconnect();
+      });
+      observer.observe(element, { attributes: true, attributeFilter: ["data-state"] });
+      return frame;
+    });
+    await testPage.keyboard.press("Escape");
+    const closing = await closeFrame.jsonValue();
+    expect(["none", "normal"]).not.toContain(closing.content);
+    expect(Number.parseFloat(closing.opacity)).toBeGreaterThan(0);
+    expect(closing.transition).toBe("opacity");
+    expect(closing.duration).toBe("0.1s");
+    await closeFrame.dispose();
+    await expect(menu).toHaveCount(0);
+    await expectMenuBackdropCount(testPage, 0);
+  });
+
   // @covers AC-UI-MOBILE-TASK-NAVIGATION-001.3, AC-UI-MOBILE-TASK-NAVIGATION-001.9, AC-UI-MOBILE-TASK-NAVIGATION-001.11
   test("Kanban task options blur the background and dismiss cleanly", async ({
     testPage,

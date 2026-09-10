@@ -98,6 +98,7 @@ or a parallel state machine solely to test backdrop presence.
 
 | Test file and scenario | Criteria |
 | --- | --- |
+| `e2e/tests/layout/mobile-menu-backdrops.spec.ts`: **the backdrop fades with the closing menu sheet** | 001.11 |
 | New `e2e/tests/layout/mobile-menu-backdrops.spec.ts`: **Kanban task options blur the background and dismiss cleanly** | 001.3, 001.9, 001.11 |
 | Same file: **task submenus share one backdrop and preserve the task drawer** | 001.3, 001.10, 001.11 |
 | Same file: **workspace menu preserves non-modal drawer interaction** | 001.9, 001.11, 001.12 |
@@ -117,7 +118,7 @@ nearby interaction patterns and selected compatibility checks.
 Run the work order sequentially after the explicit implementation request.
 There is no delegation or publication step in this package.
 
-## Verification results
+## Initial implementation verification
 
 - Implementation completed after the user's explicit implementation request.
   The change is two shared root markers and phone-only CSS; no action handler,
@@ -140,6 +141,27 @@ There is no delegation or publication step in this package.
   No public documentation or localization changes were required.
 - Specification validation: all files passed; all 30 specification-linter tests
   passed. `git diff --check` passed.
+
+## PR review remediation
+
+- Reproduced the premature backdrop removal with an exit-state browser
+  regression, then added a 100ms opacity transition matching the menu sheet.
+  The requirement, design, and shared-component guidance now record that
+  lifecycle explicitly.
+- Strengthened browser assertions for visible opacity and the Radix wrapper's
+  positive stacking context. Generated-content checks no longer depend on
+  one browser's empty-string serialization. Aligned the index link with the
+  design document's title.
+- Actual WebKit verification passed the exit, nested-task, and non-modal
+  workspace scenarios. The Kanban scenario passed its backdrop assertions but
+  exposed an outside-tap limitation: tapping the HTML background emitted no
+  click, which Radix's touch dismissal awaits. The same failure reproduced
+  with the PR's backdrop marker removed and original positioning hint restored.
+  This is not a passing full WebKit suite or physical-iOS verification; it does
+  not change the existing Chromium-only CI browser contract.
+- See the work order for focused commands and validation evidence. Remote CI
+  and review evidence belongs to the current PR head, not these historical
+  local results.
 
 ## Risks
 

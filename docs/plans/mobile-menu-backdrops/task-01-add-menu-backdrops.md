@@ -219,3 +219,49 @@ Closed the named verification browser and stopped the owned isolated runtime.
 The managed browser fixtures handled their own backend and test-data cleanup.
 No live user instance or data was used. Commit and publication follow the
 user's separate PR request.
+
+### PR review remediation
+
+- Added `the backdrop fades with the closing menu sheet`. The regression
+  observed the actual Radix close-state mutation and failed with backdrop
+  `content: none` before the fix. After rebuilding, it passed with a generated,
+  still-visible backdrop transitioning opacity over 100ms and disappearing
+  when Radix unmounts the sheet.
+- Root backdrops now remain generated through exit presence, with closed
+  content transparent after the transition. Updated criterion 001.11, the
+  design, and shared menu guidance. Desktop media-query behavior is unchanged.
+- Browser helpers also assert visible opacity and a positive wrapper z-index;
+  the latter verifies Radix's existing stacking context without overriding it.
+  Generated-content checks accept browser-specific serialization. Corrected
+  the UI index link to match the design H1.
+- Actual WebKit 26.5 (Playwright build 2311), using the iPhone 13 profile,
+  passed exit motion, nested task submenus, and non-modal workspace selection.
+  Kanban dimming/blur assertions passed, but its outside-tap dismissal failed.
+  A disposable baseline test removed `mobile-menu-root` and restored the
+  original `will-change: transform` hint; the same dismissal failed. Captured
+  events were `pointerdown`, `touchstart`, `pointerup`, and `touchend` on HTML,
+  with no `click`. Radix waits for that click to dismiss a touch interaction.
+  No dismissal workaround, test skip, or expanded CI project was introduced.
+- WebKit's missing Ubuntu libraries were downloaded and extracted into a
+  task-owned temporary directory, not installed on the host. Its wrapper
+  overwrites `LD_LIBRARY_PATH`, so the temporary verification config launched
+  the pinned MiniBrowser directly with its bundled paths plus those libraries.
+  The config retained normal fixtures, one worker, and the iPhone 13 device.
+
+Commands from `apps/web` (production assets rebuilt first):
+
+```sh
+pnpm e2e:run --host --no-build --project mobile-chrome tests/layout/mobile-menu-backdrops.spec.ts -- --retries=0 --trace=on
+pnpm e2e:run --host --no-build --project chromium tests/layout/menu-backdrops.spec.ts -- --config=e2e/menu-backdrops-verification.config.ts --retries=0
+pnpm e2e:run --host --no-build --project mobile-webkit tests/layout/mobile-menu-backdrops.spec.ts -- --config=e2e/menu-backdrops-verification.config.ts --retries=0 --trace=on
+```
+
+The temporary config and baseline diagnostic are verification-only artifacts,
+not changes to the repository's standard browser matrix. WebKit remains a
+partial validation, with the touch-dismissal limitation above recorded explicitly.
+
+Final focused Chromium verification passed all four mobile backdrop cases,
+both desktop/breakpoint cases, and all four compatibility cases from the initial
+work order, with retries disabled. Typecheck, targeted ESLint/Prettier,
+specification checks, all 19 harness-linter tests, all 30 specification-linter
+tests, the all-file harness audit, and the targeted harness hook passed.
