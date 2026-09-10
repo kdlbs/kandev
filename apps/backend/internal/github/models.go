@@ -435,8 +435,10 @@ type WorkflowRun struct {
 	Conclusion    string                   `json:"conclusion"`
 	HeadSHA       string                   `json:"head_sha"`
 	HeadBranch    string                   `json:"head_branch"`
+	HeadRepoID    int64                    `json:"head_repo_id"`
 	HeadRepoOwner string                   `json:"head_repo_owner"`
 	HeadRepoName  string                   `json:"head_repo_name"`
+	HeadRepoURL   string                   `json:"head_repo_url"`
 	HTMLURL       string                   `json:"html_url"`
 	CreatedAt     time.Time                `json:"created_at"`
 	UpdatedAt     time.Time                `json:"updated_at"`
@@ -449,8 +451,10 @@ type WorkflowRunPullRequest struct {
 	Number        int    `json:"number"`
 	HeadSHA       string `json:"head_sha"`
 	HeadBranch    string `json:"head_branch"`
+	HeadRepoID    int64  `json:"head_repo_id"`
 	HeadRepoOwner string `json:"head_repo_owner"`
 	HeadRepoName  string `json:"head_repo_name"`
+	HeadRepoURL   string `json:"head_repo_url"`
 }
 
 // WorkflowJob is the current-attempt job subset used to distinguish a

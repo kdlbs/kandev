@@ -100,3 +100,7 @@ Validation passed:
 - `git diff --check`.
 
 PR-fixup validation also passed `go test -race ./internal/github -count=1` (1,741 tests) and `make -C apps/backend lint` with zero issues. The unwatched lifecycle and mock workflow mutation regressions are covered by the added tests.
+
+The exact-head review remediation also covers the actual REST `pull_requests[].head.repo` shape, including
+matching and mismatching repository identities and a newer associated success superseding an older unassociated
+approval. The final focused workflow-attention tests and backend lint passed after this change.

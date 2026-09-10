@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -49,8 +50,10 @@ type ghWorkflowRun struct {
 }
 
 type ghWorkflowRepository struct {
+	ID       int64               `json:"id"`
 	FullName string              `json:"full_name"`
 	Name     string              `json:"name"`
+	URL      string              `json:"url"`
 	Owner    ghWorkflowRepoOwner `json:"owner"`
 }
 
@@ -92,14 +95,11 @@ func convertRawWorkflowRun(raw ghWorkflowRun) WorkflowRun {
 		run.Conclusion = *raw.Conclusion
 	}
 	if raw.HeadRepository != nil {
-		run.HeadRepoOwner = raw.HeadRepository.Owner.Login
-		run.HeadRepoName = raw.HeadRepository.Name
-		if run.HeadRepoName == "" && run.HeadRepoOwner != "" {
-			parts := strings.SplitN(raw.HeadRepository.FullName, "/", 2)
-			if len(parts) == 2 && strings.EqualFold(parts[0], run.HeadRepoOwner) {
-				run.HeadRepoName = parts[1]
-			}
-		}
+		repository := workflowRepositoryIdentityFromRaw(raw.HeadRepository)
+		run.HeadRepoID = repository.ID
+		run.HeadRepoOwner = repository.Owner
+		run.HeadRepoName = repository.Name
+		run.HeadRepoURL = repository.URL
 	}
 	for _, association := range raw.PullRequests {
 		converted := WorkflowRunPullRequest{
@@ -108,8 +108,11 @@ func convertRawWorkflowRun(raw ghWorkflowRun) WorkflowRun {
 			HeadBranch: association.Head.Ref,
 		}
 		if association.Head.Repo != nil {
-			converted.HeadRepoOwner = association.Head.Repo.Owner.Login
-			converted.HeadRepoName = association.Head.Repo.Name
+			repository := workflowRepositoryIdentityFromRaw(association.Head.Repo)
+			converted.HeadRepoID = repository.ID
+			converted.HeadRepoOwner = repository.Owner
+			converted.HeadRepoName = repository.Name
+			converted.HeadRepoURL = repository.URL
 		}
 		run.PullRequests = append(run.PullRequests, converted)
 	}
@@ -335,17 +338,173 @@ func workflowAssociationMatchesPR(association WorkflowRunPullRequest, run Workfl
 	if association.HeadBranch != "" && association.HeadBranch != pr.HeadBranch {
 		return false
 	}
-	if workflowRepoIdentityMatches(association.HeadRepoOwner, association.HeadRepoName, pr.HeadRepoOwner, pr.HeadRepoName) {
-		return true
+	associationRepository := workflowRepositoryIdentityFromAssociation(association)
+	if associationRepository.empty() {
+		return run.HeadRepoID == 0 && run.HeadRepoOwner == "" && run.HeadRepoName == "" && run.HeadRepoURL == ""
 	}
-	return association.HeadRepoOwner == "" && association.HeadRepoName == "" &&
-		run.HeadRepoOwner == "" && run.HeadRepoName == ""
+	runRepository := workflowRepositoryIdentityFromRun(run)
+	merged, ok := mergeWorkflowRepositoryIdentities(associationRepository, runRepository)
+	return ok && workflowRepositoryIdentityMatchesPR(merged, pr)
 }
 
 func workflowRunMatchesUnassociatedPR(run WorkflowRun, pr *PR) bool {
 	return strings.EqualFold(run.Event, workflowEventPullRequest) &&
 		run.HeadBranch != "" && run.HeadBranch == pr.HeadBranch &&
-		workflowRepoIdentityMatches(run.HeadRepoOwner, run.HeadRepoName, pr.HeadRepoOwner, pr.HeadRepoName)
+		workflowRepositoryIdentityMatchesPR(workflowRepositoryIdentityFromRun(run), pr)
+}
+
+type workflowRepositoryIdentity struct {
+	ID    int64
+	Owner string
+	Name  string
+	URL   string
+}
+
+func workflowRepositoryIdentityFromRaw(repository *ghWorkflowRepository) workflowRepositoryIdentity {
+	if repository == nil {
+		return workflowRepositoryIdentity{}
+	}
+	identity := workflowRepositoryIdentity{
+		ID:    repository.ID,
+		Owner: repository.Owner.Login,
+		Name:  repository.Name,
+		URL:   repository.URL,
+	}
+	if owner, name := workflowRepositoryPath(repository.FullName); identity.Owner == "" || identity.Name == "" {
+		if identity.Owner == "" {
+			identity.Owner = owner
+		}
+		if identity.Name == "" {
+			identity.Name = name
+		}
+	}
+	if owner, name := workflowRepositoryPath(identity.URL); identity.Owner == "" || identity.Name == "" {
+		if identity.Owner == "" {
+			identity.Owner = owner
+		}
+		if identity.Name == "" {
+			identity.Name = name
+		}
+	}
+	return identity
+}
+
+func workflowRepositoryIdentityFromAssociation(association WorkflowRunPullRequest) workflowRepositoryIdentity {
+	identity := workflowRepositoryIdentity{
+		ID:    association.HeadRepoID,
+		Owner: association.HeadRepoOwner,
+		Name:  association.HeadRepoName,
+		URL:   association.HeadRepoURL,
+	}
+	if owner, name := workflowRepositoryPath(identity.URL); identity.Owner == "" || identity.Name == "" {
+		if identity.Owner == "" {
+			identity.Owner = owner
+		}
+		if identity.Name == "" {
+			identity.Name = name
+		}
+	}
+	return identity
+}
+
+func workflowRepositoryIdentityFromRun(run WorkflowRun) workflowRepositoryIdentity {
+	identity := workflowRepositoryIdentity{
+		ID:    run.HeadRepoID,
+		Owner: run.HeadRepoOwner,
+		Name:  run.HeadRepoName,
+		URL:   run.HeadRepoURL,
+	}
+	if owner, name := workflowRepositoryPath(identity.URL); identity.Owner == "" || identity.Name == "" {
+		if identity.Owner == "" {
+			identity.Owner = owner
+		}
+		if identity.Name == "" {
+			identity.Name = name
+		}
+	}
+	return identity
+}
+
+func (identity workflowRepositoryIdentity) empty() bool {
+	return identity.ID == 0 && identity.Owner == "" && identity.Name == "" && identity.URL == ""
+}
+
+func workflowRepositoryPath(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ""
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Path != "" {
+		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		for index, part := range parts {
+			if strings.EqualFold(part, "repos") && len(parts) > index+2 {
+				return parts[index+1], parts[index+2]
+			}
+		}
+		if parsed.Host != "" && len(parts) >= 2 {
+			return parts[len(parts)-2], parts[len(parts)-1]
+		}
+	}
+	parts := strings.SplitN(strings.Trim(value, "/"), "/", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
+}
+
+func mergeWorkflowRepositoryIdentities(
+	association workflowRepositoryIdentity,
+	run workflowRepositoryIdentity,
+) (workflowRepositoryIdentity, bool) {
+	if workflowRepositoryIdentitiesConflict(association, run) {
+		return workflowRepositoryIdentity{}, false
+	}
+	merged := association
+	if merged.ID == 0 {
+		merged.ID = run.ID
+	}
+	if merged.Owner == "" {
+		merged.Owner = run.Owner
+	}
+	if merged.Name == "" {
+		merged.Name = run.Name
+	}
+	if merged.URL == "" {
+		merged.URL = run.URL
+	}
+	return merged, true
+}
+
+func workflowRepositoryIdentitiesConflict(a, b workflowRepositoryIdentity) bool {
+	return (a.ID != 0 && b.ID != 0 && a.ID != b.ID) ||
+		(a.Owner != "" && b.Owner != "" && !strings.EqualFold(a.Owner, b.Owner)) ||
+		(a.Name != "" && b.Name != "" && !strings.EqualFold(a.Name, b.Name))
+}
+
+func workflowRepositoryIdentityMatchesPR(identity workflowRepositoryIdentity, pr *PR) bool {
+	if pr == nil {
+		return false
+	}
+	return !workflowRepositoryIdentityConflictsWithPR(identity, pr) &&
+		workflowRepositoryIdentityHasPositivePRMatch(identity, pr)
+}
+
+func workflowRepositoryIdentityConflictsWithPR(identity workflowRepositoryIdentity, pr *PR) bool {
+	if identity.ID != 0 && pr.HeadRepoID != 0 && identity.ID != pr.HeadRepoID {
+		return true
+	}
+	if identity.Owner != "" && pr.HeadRepoOwner != "" && !strings.EqualFold(identity.Owner, pr.HeadRepoOwner) {
+		return true
+	}
+	if identity.Name != "" && pr.HeadRepoName != "" && !strings.EqualFold(identity.Name, pr.HeadRepoName) {
+		return true
+	}
+	return false
+}
+
+func workflowRepositoryIdentityHasPositivePRMatch(identity workflowRepositoryIdentity, pr *PR) bool {
+	return (identity.ID != 0 && pr.HeadRepoID != 0) ||
+		(identity.Owner != "" && identity.Name != "" && pr.HeadRepoOwner != "" && pr.HeadRepoName != "")
 }
 
 func workflowRepoIdentityMatches(ownerA, repoA, ownerB, repoB string) bool {
@@ -365,9 +524,14 @@ func workflowRunGroupKey(run WorkflowRun) string {
 	if run.WorkflowID == 0 {
 		workflow = "name:" + strings.ToLower(run.Name)
 	}
-	return fmt.Sprintf("%s|event:%s|branch:%s|source:%s/%s",
+	repository := workflowRepositoryIdentityFromRun(run)
+	source := strings.ToLower(repository.Owner) + "/" + strings.ToLower(repository.Name)
+	if repository.Owner == "" && repository.Name == "" && repository.ID != 0 {
+		source = fmt.Sprintf("id:%d", repository.ID)
+	}
+	return fmt.Sprintf("%s|event:%s|branch:%s|source:%s",
 		workflow, strings.ToLower(run.Event), run.HeadBranch,
-		strings.ToLower(run.HeadRepoOwner), strings.ToLower(run.HeadRepoName))
+		source)
 }
 
 func workflowRunNewer(candidate, current WorkflowRun) bool {

@@ -6,11 +6,14 @@ import {
   getWorkflowAttentionForDisplay,
 } from "./pr-workflow-attention";
 
+const EARLIER_OBSERVED_AT = "2026-09-10T10:00:00Z";
+const LATER_OBSERVED_AT = "2026-09-10T11:00:00Z";
+
 function makeAttention(overrides: Partial<WorkflowAttention> = {}): WorkflowAttention {
   return {
     state: "approval_required",
     head_sha: "head-1",
-    observed_at: "2026-09-10T10:00:00Z",
+    observed_at: EARLIER_OBSERVED_AT,
     stale: false,
     runs: [
       {
@@ -116,6 +119,62 @@ describe("getActiveWorkflowAttention", () => {
         makePR({ workflow_attention: makeAttention({ state: "unknown", runs: null as never }) }),
       ),
     ).toEqual(makeAttention({ state: "unknown", runs: [] }));
+  });
+
+  it("lets a newer stored empty observation clear cached attention", () => {
+    const cached = makeAttention({ observed_at: EARLIER_OBSERVED_AT });
+    const storedNone = makeAttention({
+      state: "none",
+      runs: [],
+      observed_at: LATER_OBSERVED_AT,
+    });
+
+    expect(
+      getWorkflowAttentionForDisplay(makePR({ workflow_attention: storedNone }), cached),
+    ).toBeNull();
+  });
+
+  it("lets newer stored attention reappear when cached feedback is an older clear", () => {
+    const cached = makeAttention({
+      state: "none",
+      runs: [],
+      observed_at: EARLIER_OBSERVED_AT,
+    });
+    const stored = makeAttention({ observed_at: LATER_OBSERVED_AT });
+
+    expect(getWorkflowAttentionForDisplay(makePR({ workflow_attention: stored }), cached)).toBe(
+      stored,
+    );
+  });
+
+  it("ignores mismatched cached heads when stored evidence is current", () => {
+    const stored = makeAttention({ observed_at: LATER_OBSERVED_AT });
+    const cached = makeAttention({ head_sha: "old-head", observed_at: "2026-09-10T12:00:00Z" });
+
+    expect(getWorkflowAttentionForDisplay(makePR({ workflow_attention: stored }), cached)).toBe(
+      stored,
+    );
+  });
+
+  it("preserves current unknown-read semantics while applying observation recency", () => {
+    const stored = makeAttention({ observed_at: LATER_OBSERVED_AT });
+    const olderUnknown = makeAttention({
+      state: "unknown",
+      runs: [],
+      observed_at: EARLIER_OBSERVED_AT,
+    });
+    const newerUnknown = makeAttention({
+      state: "unknown",
+      runs: [],
+      observed_at: "2026-09-10T12:00:00Z",
+    });
+
+    expect(
+      getWorkflowAttentionForDisplay(makePR({ workflow_attention: stored }), olderUnknown),
+    ).toBe(stored);
+    expect(
+      getWorkflowAttentionForDisplay(makePR({ workflow_attention: stored }), newerUnknown),
+    ).toEqual({ ...stored, stale: true });
   });
 });
 

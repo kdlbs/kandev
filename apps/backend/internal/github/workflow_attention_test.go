@@ -112,6 +112,63 @@ func TestWorkflowAttention_LatestRunAndAssociationFiltering(t *testing.T) {
 	}
 }
 
+func TestWorkflowAttention_RESTAssociationUsesRepositoryURLIdentity(t *testing.T) {
+	runs, err := decodeGHWorkflowRuns(`{"id":7,"run_attempt":1,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"head-sha","head_branch":"feature/approval","head_repository":{"id":123,"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"pull_requests":[{"number":143,"head":{"ref":"feature/approval","sha":"head-sha","repo":{"id":123,"name":"widget-fork","url":"https://api.github.com/repos/contributor/widget-fork"}}}]}`)
+	if err != nil {
+		t.Fatalf("decodeGHWorkflowRuns() error = %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("decoded runs = %d, want 1", len(runs))
+	}
+	run := convertRawWorkflowRun(runs[0])
+
+	matchingPR := &PR{
+		Number:        143,
+		HeadSHA:       "head-sha",
+		HeadBranch:    "feature/approval",
+		HeadRepoID:    123,
+		HeadRepoOwner: "contributor",
+		HeadRepoName:  "widget-fork",
+	}
+	if !workflowRunMatchesPR(run, matchingPR) {
+		t.Fatalf("workflowRunMatchesPR() = false for the REST association shape: %#v", run)
+	}
+
+	mismatchingPR := *matchingPR
+	mismatchingPR.HeadRepoID = 456
+	if workflowRunMatchesPR(run, &mismatchingPR) {
+		t.Fatal("workflowRunMatchesPR() = true for a mismatching head repository")
+	}
+}
+
+func TestWorkflowAttention_NewAssociatedSuccessSupersedesOlderUnassociatedApproval(t *testing.T) {
+	runs, err := decodeGHWorkflowRuns(`{"id":100,"run_attempt":1,"workflow_id":9,"name":"CI","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"head-sha","head_branch":"feature/approval","head_repository":{"id":123,"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"created_at":"2026-09-10T12:00:00Z","updated_at":"2026-09-10T12:00:00Z","pull_requests":[]}
+{"id":101,"run_attempt":1,"workflow_id":9,"name":"CI","event":"pull_request","status":"completed","conclusion":"success","head_sha":"head-sha","head_branch":"feature/approval","head_repository":{"id":123,"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"created_at":"2026-09-10T13:00:00Z","updated_at":"2026-09-10T13:00:00Z","pull_requests":[{"number":143,"head":{"ref":"feature/approval","sha":"head-sha","repo":{"id":123,"name":"widget-fork","url":"https://api.github.com/repos/contributor/widget-fork"}}}]}`)
+	if err != nil {
+		t.Fatalf("decodeGHWorkflowRuns() error = %v", err)
+	}
+	converted := make([]WorkflowRun, 0, len(runs))
+	for _, raw := range runs {
+		converted = append(converted, convertRawWorkflowRun(raw))
+	}
+	pr := &PR{
+		Number:        143,
+		State:         "open",
+		HeadSHA:       "head-sha",
+		HeadBranch:    "feature/approval",
+		HeadRepoID:    123,
+		HeadRepoOwner: "contributor",
+		HeadRepoName:  "widget-fork",
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+	}
+
+	selected := selectCurrentWorkflowRuns(converted, pr)
+	if len(selected) != 1 || selected[0].ID != 101 {
+		t.Fatalf("selected workflow runs = %#v, want only newer associated success", selected)
+	}
+}
+
 func TestWorkflowAttention_NewExecutionWinsOverLateUpdate(t *testing.T) {
 	pr := &PR{
 		Number:        7,

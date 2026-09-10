@@ -34,7 +34,10 @@ Select the newest run and attempt for each workflow, event, and source branch/re
 Ignore earlier attempts and runs that a newer execution supersedes.
 Do not filter to `action_required` before selecting the latest runs.
 
-Match explicit pull-request associations when present. A mismatching non-empty association excludes the run.
+Match explicit pull-request associations when present. Use the association repository ID and canonical
+repository URL when the REST payload omits `owner.login`, and compare every identity field that both
+the association and pull-request transport provide. A mismatching non-empty association or top-level
+head repository excludes the run.
 GitHub can return an empty association list for fork workflows that require approval.
 For that case, require matching head SHA, head repository, head branch, and the `pull_request` event.
 Extend the PR transport shape with head repository identity where necessary.
@@ -70,6 +73,10 @@ runs: [{run_id, run_attempt, workflow_id, name, url, reason}]
 The run list contains only selected workflows that need attention.
 `none` requires complete provider evidence. Partial or unavailable evidence is `unknown` unless a prior same-head observation exists.
 An internal populated marker distinguishes old callers that did not attempt collection from an observed `unknown` result.
+When a surface has both stored TaskPR evidence and cached feedback, compare applicable same-head observations by
+`observed_at` and retain `none` as an authoritative observation during that comparison. A changed-head or malformed
+cached observation cannot hide valid current stored evidence; a newer unknown observation preserves a positive result
+as stale.
 Old payloads without this object remain compatible and cannot claim approval.
 
 ## Storage and recovery

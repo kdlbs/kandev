@@ -1,4 +1,5 @@
 import type { TaskPR, WorkflowAttention, WorkflowAttentionState } from "@/lib/types/github";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 type WorkflowAttentionCarrier = {
   state: string;
@@ -10,7 +11,7 @@ function isAttentionState(state: WorkflowAttentionState): boolean {
   return state === "approval_required" || state === "action_required";
 }
 
-function currentWorkflowAttention(
+function currentWorkflowObservation(
   carrier: WorkflowAttentionCarrier,
   attention: WorkflowAttention | null | undefined,
 ): WorkflowAttention | null {
@@ -34,7 +35,20 @@ function normalizeWorkflowAttention(attention: WorkflowAttention | null): Workfl
 export function getCurrentWorkflowAttention(
   carrier: WorkflowAttentionCarrier,
 ): WorkflowAttention | null {
-  return normalizeWorkflowAttention(currentWorkflowAttention(carrier, carrier.workflow_attention));
+  return normalizeWorkflowAttention(
+    currentWorkflowObservation(carrier, carrier.workflow_attention),
+  );
+}
+
+function suppliedObservationIsAtLeastAsFresh(
+  stored: WorkflowAttention,
+  supplied: WorkflowAttention,
+): boolean {
+  const storedTimestamp = parseStrictRfc3339Timestamp(stored.observed_at);
+  const suppliedTimestamp = parseStrictRfc3339Timestamp(supplied.observed_at);
+  if (suppliedTimestamp === null) return storedTimestamp === null;
+  if (storedTimestamp === null) return true;
+  return suppliedTimestamp >= storedTimestamp;
 }
 
 /**
@@ -47,28 +61,23 @@ export function getWorkflowAttentionForDisplay(
   carrier: WorkflowAttentionCarrier,
   suppliedAttention?: WorkflowAttention | null,
 ): WorkflowAttention | null {
-  const stored = getCurrentWorkflowAttention(carrier);
+  const stored = currentWorkflowObservation(carrier, carrier.workflow_attention);
   if (suppliedAttention == null) return normalizeWorkflowAttention(stored);
-  if (
-    carrier.head_sha &&
-    suppliedAttention.head_sha &&
-    suppliedAttention.head_sha !== carrier.head_sha
-  ) {
-    return null;
-  }
-  const incoming = currentWorkflowAttention(carrier, suppliedAttention);
-  if (!incoming) return null;
-  if (incoming.state === "unknown" && stored && isAttentionState(stored.state)) {
+  const incoming = currentWorkflowObservation(carrier, suppliedAttention);
+  if (!incoming) return normalizeWorkflowAttention(stored);
+  const useIncoming = stored === null || suppliedObservationIsAtLeastAsFresh(stored, incoming);
+  const selected = useIncoming ? incoming : stored;
+  if (useIncoming && incoming.state === "unknown" && stored && isAttentionState(stored.state)) {
     return normalizeWorkflowAttention({ ...stored, stale: true });
   }
-  return normalizeWorkflowAttention(incoming);
+  return normalizeWorkflowAttention(selected);
 }
 
 export function getActiveWorkflowAttention(
   carrier: WorkflowAttentionCarrier,
   attention: WorkflowAttention | null | undefined = carrier.workflow_attention,
 ): WorkflowAttention | null {
-  const current = normalizeWorkflowAttention(currentWorkflowAttention(carrier, attention));
+  const current = normalizeWorkflowAttention(currentWorkflowObservation(carrier, attention));
   return current && isAttentionState(current.state) ? current : null;
 }
 

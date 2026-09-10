@@ -149,6 +149,12 @@ Implementation and verification on 2026-09-10:
 
 PR fixup remediation on 2026-09-10 moved batched workflow enrichment inside the shared singleflight, kept unwatched lifecycle refreshes Actions-read-free, corrected workflow-run ordering and GraphQL schema usage, hardened legacy/null and mock-provider paths, and separated duplicate summary-row test IDs. The final local checks passed backend race testing, backend lint, frontend typecheck/lint/i18n gates, the focused 149-test frontend suite, and the targeted desktop/mobile browser scenarios.
 
+An exact-head review then identified two correctness gaps. Workflow association matching now consumes the REST
+association repository ID and URL when `owner.login` is absent, rejects conflicting identities, and selects a
+newer associated success over an older unassociated approval. Detail-surface feedback now compares strict
+same-head observation timestamps, including authoritative `none`, and falls back to valid stored evidence when
+cached feedback is stale or belongs to another head. Regression coverage was added for both fixes.
+
 ## Risks
 
 - The Actions API requires read permission that some existing credentials lack. The unavailable path is required.

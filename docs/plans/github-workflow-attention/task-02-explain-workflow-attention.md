@@ -135,3 +135,8 @@ Validation passed:
 - Dedicated desktop and mobile approval-attention screenshots were captured and visually reviewed from `.pr-assets`.
 
 PR-fixup validation also passed the focused frontend suite after review remediation, `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`. The managed desktop and mobile approval scenarios each passed after the final UI changes.
+
+The exact-head review remediation adds coverage for newer stored `none` observations clearing cached approval,
+newer stored approval reappearing over an older cached clear, changed-head cached feedback fallback, and the
+existing stale-positive behavior for newer unknown reads. This is a data-selection correction with no layout or
+touch interaction change, so the existing mobile browser scenario remains the relevant coverage.
