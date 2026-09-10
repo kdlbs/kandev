@@ -1,5 +1,9 @@
 {
   "columnLabel": "Conversa do agente para {{title}}",
+  "chooseThread": "Escolher conversa",
+  "chooseThreadLabel": "Escolher conversa. Atual: {{title}}",
+  "chooseThreadDescription": "Ir para uma conversa nesta vista.",
+  "threadPosition": "{{position}}/{{total}}",
   "emptyBody": "Os Tópicos colocam lado a lado todos os agentes em execução. Inicie um agente numa tarefa e a conversa aparece aqui como uma coluna.",
   "emptyTitle": "Nenhum agente está a trabalhar neste momento",
   "loading": "A carregar as conversas...",
