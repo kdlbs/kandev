@@ -16,6 +16,7 @@ package plugins
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"strings"
@@ -178,10 +179,10 @@ func mergeMaskedSecrets(incoming, existing map[string]any, schema map[string]any
 
 // validateConfigSchema checks config against the author-declared
 // config_schema for pluginID. Deliberately a small JSON-Schema subset —
-// required fields, primitive types (string/boolean/number/integer), and enum
-// membership on declared properties. Undeclared keys and richer schema
-// constructs are permitted: the schema is advisory authoring metadata, not a
-// hard sandbox.
+// required fields, primitive types (string/boolean/number/integer), numeric
+// minimum/maximum bounds, and enum membership on declared properties.
+// Undeclared keys and richer schema constructs are permitted: the schema is
+// advisory authoring metadata, not a hard sandbox.
 //
 // A secret field that was left unchanged carries its own vault reference (an
 // internal storage marker) rather than a user value — the cleartext was
@@ -251,11 +252,15 @@ func checkRequiredKeys(config map[string]any, schema map[string]any) error {
 }
 
 // checkPropertyValue validates one present value against its declared
-// property: primitive type match plus enum membership.
+// property: primitive type match, numeric bounds, and enum membership.
 func checkPropertyValue(name string, value any, prop map[string]any) error {
-	if typeName, ok := prop["type"].(string); ok {
+	typeName, hasType := prop["type"].(string)
+	if hasType {
 		if !valueMatchesType(value, typeName) {
 			return fmt.Errorf("%w: field %q must be a %s", ErrConfigInvalid, name, typeName)
+		}
+		if err := checkNumericBounds(name, value, prop, typeName); err != nil {
+			return err
 		}
 	}
 	if enum, ok := prop["enum"].([]any); ok && len(enum) > 0 {
@@ -267,6 +272,33 @@ func checkPropertyValue(name string, value any, prop map[string]any) error {
 		return fmt.Errorf("%w: field %q must be one of the declared enum values", ErrConfigInvalid, name)
 	}
 	return nil
+}
+
+// checkNumericBounds applies the subset of JSON-Schema numeric constraints
+// understood by the generic plugin settings form. Malformed bounds are
+// ignored because config_schema is authoring metadata; a valid manifest
+// cannot produce one, and ignoring it preserves the existing permissive
+// behavior for richer or malformed schemas.
+func checkNumericBounds(name string, value any, prop map[string]any, typeName string) error {
+	if typeName != "number" && typeName != "integer" {
+		return nil
+	}
+	valueNumber, ok := numericValue(value)
+	if !ok || math.IsNaN(valueNumber) || math.IsInf(valueNumber, 0) {
+		return fmt.Errorf("%w: field %q must be finite", ErrConfigInvalid, name)
+	}
+	if minimum, ok := numericSchemaBound(prop["minimum"]); ok && valueNumber < minimum {
+		return fmt.Errorf("%w: field %q must be at least %v", ErrConfigInvalid, name, minimum)
+	}
+	if maximum, ok := numericSchemaBound(prop["maximum"]); ok && valueNumber > maximum {
+		return fmt.Errorf("%w: field %q must be at most %v", ErrConfigInvalid, name, maximum)
+	}
+	return nil
+}
+
+func numericSchemaBound(value any) (float64, bool) {
+	bound, ok := numericValue(value)
+	return bound, ok && !math.IsNaN(bound) && !math.IsInf(bound, 0)
 }
 
 // enumValueMatches compares a submitted value against a declared enum
@@ -284,14 +316,31 @@ func enumValueMatches(value, allowed any) bool {
 }
 
 // numericValue converts the numeric types a config value can realistically
-// carry (JSON float64, YAML int/int64/uint64) to float64 for comparison.
+// carry (JSON float64, YAML integers, and programmatic integer/float values)
+// to float64 for comparison.
 func numericValue(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
 		return n, true
+	case float32:
+		return float64(n), true
 	case int:
 		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int32:
+		return float64(n), true
 	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
 		return float64(n), true
 	case uint64:
 		return float64(n), true
@@ -325,15 +374,21 @@ func valueMatchesType(value any, typeName string) bool {
 }
 
 func isNumeric(value any) bool {
-	if _, ok := value.(float64); ok {
-		return true
+	if _, ok := numericValue(value); !ok {
+		return false
+	}
+	_, isFloat := value.(float32)
+	if !isFloat {
+		if _, isFloat = value.(float64); isFloat {
+			return true
+		}
 	}
 	return isInt(value)
 }
 
 func isInt(value any) bool {
 	switch value.(type) {
-	case int, int64, uint64:
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return true
 	default:
 		return false

@@ -822,9 +822,12 @@ interface PluginRegistry {
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
   // presentation }`, where presentation is "desktop" or "mobile". On a phone,
   // contributions join the horizontally scrollable middle action strip between
-  // the fixed Kandev link and menu button. Documented host ui.Button icon
-  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
-  // desktop contribution sizing is unchanged. It is the app-wide,
+  // the fixed Kandev link and menu button. Ordinary host ui.Button icon
+  // contributions are normalized to a 32px box with a 16px SVG icon on phones.
+  // A rich status control with ordered text may set data-main-top-bar-rich on
+  // its root to opt out; it must own a compact layout with a minimum 44px touch
+  // height and must not add a nested scroller. Desktop contribution sizing is
+  // unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
   // ids.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
@@ -842,7 +845,8 @@ interface PluginRegistry {
   // as `slotProps`. It is owner-scoped: the host renders only the component
   // registered by the plugin currently being viewed, so your card appears on
   // your own settings page and never on another plugin's — no per-id gating
-  // needed in your component.
+  // needed in your component. Signed-in users can see this card; the separate
+  // schema-driven operator form and lifecycle controls remain administrator-only.
   registerComponent(
     slot: string,
     Component: React.ComponentType<{ slotProps?: unknown }>,

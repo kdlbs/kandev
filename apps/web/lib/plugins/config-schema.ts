@@ -33,6 +33,10 @@ export interface PluginConfigField {
    * round trip — the backend validates against these, not their string
    * forms). */
   enumRawValues?: unknown[];
+  /** Inclusive numeric lower bound from the manifest schema. */
+  minimum?: number;
+  /** Inclusive numeric upper bound from the manifest schema. */
+  maximum?: number;
   defaultValue?: unknown;
 }
 
@@ -55,6 +59,10 @@ function fieldType(prop: SchemaObject): PluginConfigFieldType {
 
 function isSecretProp(prop: SchemaObject): boolean {
   return prop.secret === true || prop.format === "password";
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function requiredNames(schema: SchemaObject): Set<string> {
@@ -83,15 +91,19 @@ export function parseConfigSchema(
   for (const [name, raw] of Object.entries(properties)) {
     const prop = asObject(raw);
     if (!prop) continue;
+    const type = fieldType(prop);
+    const numeric = type === "number" || type === "integer";
     fields.push({
       name,
-      type: fieldType(prop),
+      type,
       label: typeof prop.title === "string" && prop.title !== "" ? prop.title : name,
       description: typeof prop.description === "string" ? prop.description : undefined,
       required: required.has(name),
       secret: isSecretProp(prop),
       enumValues: Array.isArray(prop.enum) ? prop.enum.map((v) => String(v)) : undefined,
       enumRawValues: Array.isArray(prop.enum) ? prop.enum : undefined,
+      minimum: numeric ? finiteNumber(prop.minimum) : undefined,
+      maximum: numeric ? finiteNumber(prop.maximum) : undefined,
       defaultValue: prop.default,
     });
   }

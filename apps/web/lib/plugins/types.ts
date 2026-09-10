@@ -125,9 +125,12 @@ export interface IntegrationSettingsRegistration {
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
  * presentation }`). On phones, `presentation` is "mobile": contributions
  * join the horizontally scrollable middle action strip between the fixed
- * Kandev link and menu button. Use the host `ui.Button` icon-button contract
- * there: a 32px box with a 16px SVG icon. Desktop contributions retain their
- * existing sizing.
+ * Kandev link and menu button. Ordinary `ui.Button` icon actions are
+ * normalized there to a 32px box with a 16px SVG icon. A rich status control
+ * with ordered text may opt out by setting `data-main-top-bar-rich` on its
+ * root; it must own a compact layout with a minimum 44px touch height and
+ * must not add a nested scroller. Desktop contributions retain their existing
+ * sizing.
  * "app-status-bar-left" / "app-status-bar-right" (receives
  * `AppStatusBarSlotProps` as `slotProps`), and
  * "plugin-settings" (inline UI on a plugin's own settings

@@ -162,6 +162,8 @@ function ConfigFieldControl({
       // step="1" on integer fields nudges the browser to flag non-integral
       // input in-place; serializeConfigValues still rejects it as a backstop.
       step={!field.secret && field.type === "integer" ? "1" : undefined}
+      min={field.minimum}
+      max={field.maximum}
       value={typeof value === "string" ? value : ""}
       disabled={disabled}
       data-settings-dirty={isDirty}

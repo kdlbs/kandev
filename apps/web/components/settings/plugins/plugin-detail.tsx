@@ -65,14 +65,15 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
       <PluginDetailHeader plugin={plugin} />
       <Separator />
 
+      {/* Owner-scoped personal settings are available to every signed-in user;
+          the schema-driven operator form below remains administrator-only. */}
+      <PluginSlot
+        name="plugin-settings"
+        ownerPluginId={plugin.id}
+        slotProps={{ pluginId: plugin.id, status: plugin.status }}
+      />
       {canManage && (
         <>
-          {/* Owner-scoped inline slot for the plugin's own settings UI, at the top (see PLUGIN-API.md). */}
-          <PluginSlot
-            name="plugin-settings"
-            ownerPluginId={plugin.id}
-            slotProps={{ pluginId: plugin.id, status: plugin.status }}
-          />
           <PluginSettingsCard
             plugin={plugin}
             form={form}

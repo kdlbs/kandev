@@ -59,7 +59,7 @@ describe("MainTopBarPluginActions", () => {
 
     expect(screen.getByTestId("plugin-button").textContent).toBe("mobile");
     expect(screen.getByTestId("mobile-main-top-bar-plugin-actions").className).toContain(
-      "[&_[data-slot=button]]:!size-8",
+      "[&_[data-slot=button]:not([data-main-top-bar-rich])]:!size-8",
     );
   });
 });
