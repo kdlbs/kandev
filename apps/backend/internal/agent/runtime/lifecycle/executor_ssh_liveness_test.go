@@ -58,6 +58,19 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 	})
 }
 
+func TestRemoteProcessCommandLineCommandSupportsBusyboxFallback(t *testing.T) {
+	command := remoteProcessCommandLineCommand(4242)
+	for _, want := range []string{
+		"ps -p 4242 -o command=",
+		"/proc/4242/cmdline",
+		"tr",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("remote process command = %q, want it to contain %q", command, want)
+		}
+	}
+}
+
 // TestVerifyRemoteAgentctlIdentity covers R2-F1: verifyRemoteAgentctlIdentity
 // must mirror probeRemoteAgentctlLiveness's discipline for a nonzero `ps`
 // exit — only a confirmed-absent process is a safe "not ours", any other

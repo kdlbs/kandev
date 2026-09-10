@@ -1136,7 +1136,23 @@ func verifyAbandonedRemoteAgentctlDirectory(ctx context.Context, client *ssh.Cli
 }
 
 func remoteProcessCommandLineCommand(pid int) string {
-	return fmt.Sprintf("ps -p %d -o command=", pid)
+	// BusyBox ps (used by Alpine-based SSH targets) does not support the
+	// procps/macOS `-p` selector. Prefer the precise selector when available,
+	// then read Linux's per-process argv as a portable fallback. Keep an absent
+	// PID as an empty, non-zero result so remotePsProbeConfirmsAbsence can still
+	// distinguish it from a probe error. If neither mechanism is available,
+	// return stderr and fail closed rather than treating the process as absent.
+	return fmt.Sprintf(`ps -p %[1]d -o command= 2>/dev/null || {
+  if [ ! -d /proc ]; then
+    echo "process identity probe unavailable: ps does not support -p and /proc is absent" >&2
+    exit 2
+  fi
+  if [ -e /proc/%[1]d/cmdline ]; then
+    tr '\000' ' ' < /proc/%[1]d/cmdline
+  else
+    exit 1
+  fi
+}`, pid)
 }
 
 func remoteAgentctlCommandLineMatches(commandLine, taskDir string) bool {
