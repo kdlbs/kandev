@@ -77,6 +77,12 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 			State: string(inspection.class), Reason: inspection.reason,
 		}
 	}
+	if err := validateMissingLinkedWorktreeAdmin(req.RepositoryPath, inspection.adminPath); err != nil {
+		return nil, &WorktreeRecoveryError{
+			TaskID: wt.TaskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+			State: string(linkedWorktreeAmbiguous), Reason: err.Error(),
+		}
+	}
 	if _, err := os.Lstat(wt.Path); err != nil {
 		return nil, fmt.Errorf("%w: original checkout is unavailable: %v", ErrWorktreeCorrupted, err)
 	}
@@ -386,12 +392,23 @@ func writeRecoveryRecord(path string, record recoveryRecord) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create recovery state temporary file: %w", err)
+	}
+	tmp := tmpFile.Name()
+	defer func() {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
+	}()
+	if _, err := tmpFile.Write(data); err != nil {
 		return fmt.Errorf("write recovery state: %w", err)
 	}
-	if err := syncRecoveryFile(tmp); err != nil {
+	if err := syncRecoveryFile(tmpFile); err != nil {
 		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close recovery state: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("commit recovery state: %w", err)

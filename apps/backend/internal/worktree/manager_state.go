@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/gitref"
 	"go.uber.org/zap"
 )
 
@@ -293,9 +294,20 @@ func inspectLinkedWorktree(path string) linkedWorktreeInspection {
 		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, reason: "checkout git pointer has no gitdir target"}
 	}
 	adminPath = strings.TrimSpace(adminPath)
-	if adminPath == "" || !filepath.IsAbs(adminPath) {
+	if adminPath == "" {
 		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: "checkout git pointer has an invalid gitdir target"}
 	}
+	if !filepath.IsAbs(adminPath) {
+		adminPath, err = filepath.Abs(filepath.Join(path, adminPath))
+		if err != nil {
+			return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, reason: "cannot resolve checkout git pointer target"}
+		}
+	}
+	return inspectLinkedWorktreeMetadata(path, gitFile, filepath.Clean(adminPath))
+}
+
+//nolint:cyclop // Each metadata boundary must classify independently and fail closed.
+func inspectLinkedWorktreeMetadata(path, gitFile, adminPath string) linkedWorktreeInspection {
 	adminInfo, err := os.Lstat(adminPath)
 	if os.IsNotExist(err) {
 		return linkedWorktreeInspection{class: linkedWorktreeMissingAdmin, adminPath: adminPath, reason: fmt.Sprintf("linked-worktree admin target %q is missing", adminPath)}
@@ -312,6 +324,9 @@ func inspectLinkedWorktree(path string) linkedWorktreeInspection {
 	}
 	if info, statErr := os.Lstat(commonDir); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: fmt.Sprintf("linked-worktree common directory %q is unavailable", commonDir)}
+	}
+	if err := validateLinkedWorktreeAdminPlacement(commonDir, adminPath); err != nil {
+		return linkedWorktreeInspection{class: linkedWorktreeAmbiguous, adminPath: adminPath, reason: err.Error()}
 	}
 
 	backlinkPath := filepath.Join(adminPath, "gitdir")
@@ -342,6 +357,45 @@ func inspectLinkedWorktree(path string) linkedWorktreeInspection {
 	}
 
 	return linkedWorktreeInspection{class: linkedWorktreeHealthy, adminPath: adminPath, expectedBacklink: expectedBacklink, actualBacklink: actualBacklink}
+}
+
+func validateLinkedWorktreeAdminPlacement(commonDir, adminPath string) error {
+	canonicalCommonDir, err := filepath.EvalSymlinks(commonDir)
+	if err != nil {
+		return fmt.Errorf("cannot resolve linked-worktree common directory: %w", err)
+	}
+	canonicalAdminPath, err := filepath.EvalSymlinks(adminPath)
+	if err != nil {
+		return fmt.Errorf("cannot resolve linked-worktree admin target: %w", err)
+	}
+	worktreesDir := filepath.Join(canonicalCommonDir, "worktrees")
+	rel, err := filepath.Rel(worktreesDir, canonicalAdminPath)
+	if err != nil || rel == "." || rel == ".." || filepath.Dir(rel) != "." {
+		return fmt.Errorf("linked-worktree admin target %q is outside common directory %q", adminPath, canonicalCommonDir)
+	}
+	return nil
+}
+
+func validateMissingLinkedWorktreeAdmin(repositoryPath, adminPath string) error {
+	gitDir, err := gitref.ResolveGitDir(repositoryPath)
+	if err != nil {
+		return fmt.Errorf("cannot resolve repository Git directory: %w", err)
+	}
+	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return fmt.Errorf("cannot resolve repository Git directory: %w", err)
+	}
+	commonDir := gitref.ResolveCommonGitDir(canonicalGitDir)
+	canonicalCommonDir, err := filepath.EvalSymlinks(commonDir)
+	if err != nil {
+		return fmt.Errorf("cannot resolve repository common directory: %w", err)
+	}
+	worktreesDir := filepath.Join(canonicalCommonDir, "worktrees")
+	rel, err := filepath.Rel(worktreesDir, filepath.Clean(adminPath))
+	if err != nil || rel == "." || rel == ".." || filepath.Dir(rel) != "." {
+		return fmt.Errorf("missing linked-worktree admin target %q is outside repository common directory %q", adminPath, canonicalCommonDir)
+	}
+	return nil
 }
 
 func linkedWorktreeCommonDir(adminPath string) (string, error) {

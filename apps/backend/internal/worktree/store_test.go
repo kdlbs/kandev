@@ -122,6 +122,50 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_CompareAndSwapWorktree(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-cas", "task-cas")
+	expected := &Worktree{
+		ID:           "wt-cas-original",
+		SessionID:    "session-cas",
+		RepositoryID: "repo-cas",
+		BranchSlug:   "main",
+		Path:         "/tmp/cas-original",
+		Branch:       "feature/cas",
+		Status:       StatusActive,
+	}
+	if err := store.CreateWorktree(ctx, expected); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	replacement := *expected
+	replacement.ID = "wt-cas-replacement"
+	replacement.Path = "/tmp/cas-replacement"
+	replacement.Branch = "feature/cas-recovered"
+	replacement.UpdatedAt = time.Now().UTC().Add(time.Second)
+	swapped, err := store.CompareAndSwapWorktree(ctx, expected, &replacement)
+	if err != nil {
+		t.Fatalf("compare-and-swap: %v", err)
+	}
+	if !swapped {
+		t.Fatal("compare-and-swap rejected the unchanged durable row")
+	}
+
+	current, err := store.GetWorktreeByID(ctx, replacement.ID)
+	if err != nil {
+		t.Fatalf("load replacement: %v", err)
+	}
+	if current == nil || current.Path != replacement.Path || current.Branch != replacement.Branch {
+		t.Fatalf("replacement = %+v, want path %q and branch %q", current, replacement.Path, replacement.Branch)
+	}
+	if swapped, err := store.CompareAndSwapWorktree(ctx, expected, &replacement); err != nil {
+		t.Fatalf("stale compare-and-swap: %v", err)
+	} else if swapped {
+		t.Fatal("stale compare-and-swap unexpectedly succeeded")
+	}
+}
+
 func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

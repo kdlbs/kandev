@@ -7,8 +7,11 @@ import (
 	"os"
 )
 
-func syncRecoveryFile(path string) error {
-	return syncRecoveryPath(path, os.O_RDONLY)
+func syncRecoveryFile(file *os.File) error {
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync recovery state: %w", err)
+	}
+	return nil
 }
 
 func syncRecoveryDirectory(path string) error {

@@ -71,6 +71,30 @@ func TestManager_IsValid_RejectsMissingLinkedWorktreeAdminDirectory(t *testing.T
 	}
 }
 
+func TestManager_AdmitTaskRecoveryRejectsMissingAdminOutsideRepositoryCommonWorktrees(t *testing.T) {
+	cfg, _, original := newBrokenRecoveryFixture(t, "foreign-admin")
+	foreignAdminPath := filepath.Join(t.TempDir(), "worktrees", "missing")
+	if err := os.WriteFile(filepath.Join(original.Path, ".git"), []byte("gitdir: "+foreignAdminPath+"\n"), 0600); err != nil {
+		t.Fatalf("rewrite worktree pointer: %v", err)
+	}
+
+	store := newMockStore()
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	err = mgr.AdmitTaskRecovery(context.Background(), original.TaskID)
+	var recoveryErr *WorktreeRecoveryError
+	if !errors.As(err, &recoveryErr) || recoveryErr.State != string(linkedWorktreeAmbiguous) {
+		t.Fatalf("AdmitTaskRecovery() error = %+v, want ambiguous recovery refusal", err)
+	}
+	if _, err := os.Stat(original.Path + ".kandev-recovery.json"); !os.IsNotExist(err) {
+		t.Fatalf("recovery record exists after foreign admin refusal: %v", err)
+	}
+}
+
 func TestManager_IsValid_RejectsSymlinkedLinkedWorktreeAdminDirectory(t *testing.T) {
 	cfg := newTestConfig(t)
 	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())

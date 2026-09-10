@@ -127,6 +127,70 @@ func TestManager_IsValidAcceptsAbsoluteCommonDir(t *testing.T) {
 	}
 }
 
+func TestManager_IsValidAcceptsRelativeGitDirPointer(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+
+	pointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(pointer), "gitdir:"))
+	relativeAdminPath, err := filepath.Rel(worktreePath, adminPath)
+	if err != nil {
+		t.Fatalf("make relative admin path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, ".git"), []byte("gitdir: "+relativeAdminPath+"\n"), 0600); err != nil {
+		t.Fatalf("write relative worktree pointer: %v", err)
+	}
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if !mgr.IsValid(worktreePath) {
+		t.Fatal("healthy worktree with a relative gitdir pointer was rejected")
+	}
+}
+
+func TestManager_IsValidRejectsAdminDirectoryOutsideCommonWorktrees(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+
+	pointer, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read worktree pointer: %v", err)
+	}
+	adminPath := strings.TrimSpace(strings.TrimPrefix(string(pointer), "gitdir:"))
+	commonDir, err := linkedWorktreeCommonDir(adminPath)
+	if err != nil {
+		t.Fatalf("resolve common dir: %v", err)
+	}
+	foreignAdminPath := filepath.Join(t.TempDir(), "foreign-admin")
+	if err := os.Rename(adminPath, foreignAdminPath); err != nil {
+		t.Fatalf("move admin directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(foreignAdminPath, "commondir"), []byte(commonDir+"\n"), 0600); err != nil {
+		t.Fatalf("rewrite common dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(foreignAdminPath, "gitdir"), []byte(filepath.Join(worktreePath, ".git")+"\n"), 0600); err != nil {
+		t.Fatalf("rewrite backlink: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, ".git"), []byte("gitdir: "+foreignAdminPath+"\n"), 0600); err != nil {
+		t.Fatalf("rewrite worktree pointer: %v", err)
+	}
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if mgr.IsValid(worktreePath) {
+		t.Fatal("worktree with admin metadata outside common worktrees was accepted")
+	}
+}
+
 func TestManager_AdmitTaskRecoveryFailsClosedOnWorktreeStatError(t *testing.T) {
 	cfg := newTestConfig(t)
 	parent := filepath.Join(cfg.TasksBasePath, "not-a-directory")
@@ -158,6 +222,30 @@ func TestAdoptRecoveryRecordRejectsInvalidOperationID(t *testing.T) {
 	_, _, err := adoptRecoveryRecord(&Worktree{ID: "wt-1", TaskID: "task-1", Path: worktreePath}, record)
 	if err == nil {
 		t.Fatal("adoptRecoveryRecord accepted an invalid operation ID")
+	}
+}
+
+func TestWriteRecoveryRecordDoesNotFollowPredictableTempSymlink(t *testing.T) {
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "state.json")
+	sentinelPath := filepath.Join(dir, "sentinel")
+	const sentinel = "keep this file"
+	if err := os.WriteFile(sentinelPath, []byte(sentinel), 0600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	if err := os.Symlink(sentinelPath, recordPath+".tmp"); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+
+	record := recoveryRecord{OperationID: "11111111-1111-1111-1111-111111111111", TaskID: "task-1", WorktreeID: "wt-1"}
+	if err := writeRecoveryRecord(recordPath, record); err != nil {
+		t.Fatalf("write recovery record: %v", err)
+	}
+	if got, err := os.ReadFile(sentinelPath); err != nil || string(got) != sentinel {
+		t.Fatalf("sentinel changed through temporary symlink: %q, err=%v", got, err)
+	}
+	if _, err := os.Stat(recordPath); err != nil {
+		t.Fatalf("recovery record was not committed: %v", err)
 	}
 }
 

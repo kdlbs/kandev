@@ -259,6 +259,12 @@ func (m *Manager) admitPersistedWorktreeRecovery(ctx context.Context, taskID str
 			State: string(inspection.class), Reason: inspection.reason,
 		}
 	}
+	if err := validateMissingLinkedWorktreeAdmin(wt.RepositoryPath, inspection.adminPath); err != nil {
+		return &WorktreeRecoveryError{
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+			State: string(linkedWorktreeAmbiguous), Reason: err.Error(),
+		}
+	}
 	if err := handle.VerifyPath(filepath.Clean(wt.Path)); err != nil {
 		return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, State: string(linkedWorktreeAmbiguous), Reason: err.Error()}
 	}
