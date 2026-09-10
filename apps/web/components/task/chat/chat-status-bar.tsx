@@ -199,7 +199,7 @@ export function ChatStatusBar({
           />
         </div>
       )}
-      {showProceed && (
+      {showProceed && nextStepName && (
         <WorkflowMoveProceedButton
           nextStepName={nextStepName}
           onProceed={onProceed}
