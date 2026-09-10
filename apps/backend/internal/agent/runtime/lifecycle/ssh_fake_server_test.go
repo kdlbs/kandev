@@ -235,9 +235,16 @@ func (s *fakeSSHServer) serveConn(conn net.Conn) {
 	}
 }
 
+// serveGlobalRequests answers every global request (replying false to one
+// that wants a reply, mirroring ssh.DiscardRequests) unless the server is
+// silent, in which case it drains the request without replying — so a
+// wantReply sender's SendRequest blocks until the connection tears down.
 func (s *fakeSSHServer) serveGlobalRequests(conn *ssh.ServerConn, requests <-chan *ssh.Request) {
 	defer s.wg.Done()
 	for req := range requests {
+		if s.silent.Load() {
+			continue
+		}
 		switch req.Type {
 		case "tcpip-forward":
 			s.handleTCPIPForward(conn, req)
