@@ -50,6 +50,7 @@ type TaskDeleteConfirmDialogProps = {
   requireDiscardConsent?: boolean;
   onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
   confirmTestId?: string;
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 type DiscardWorktreeChangesOptionProps = {
@@ -254,6 +255,7 @@ export function TaskDeleteConfirmDialog({
   requireDiscardConsent = false,
   onConfirm,
   confirmTestId,
+  onCloseAutoFocus,
 }: TaskDeleteConfirmDialogProps) {
   const { t } = useTranslation();
   const safeCount = count ?? 0;
@@ -284,7 +286,12 @@ export function TaskDeleteConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+      <AlertDialogContent
+        size="lg"
+        className={TASK_CONFIRM_CLASS}
+        onClick={stopDialogPropagation}
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
         </AlertDialogHeader>

@@ -56,12 +56,16 @@ export function useTaskActions() {
  * Archives a task and switches to the next available task.
  * Shared between the PR merged banner and the sidebar archive action.
  */
-export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
+export function useArchiveAndSwitchTask(opts?: {
+  useLayoutSwitch?: boolean;
+  stayOnListing?: boolean;
+}) {
   const store = useAppStoreApi();
   const { archiveTaskById } = useTaskActions();
   const { removeTaskFromBoard } = useTaskRemoval({
     store,
     useLayoutSwitch: opts?.useLayoutSwitch,
+    stayOnListing: opts?.stayOnListing,
   });
 
   return useCallback(

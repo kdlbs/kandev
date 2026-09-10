@@ -14,6 +14,8 @@ type TaskRemovalOptions = {
   store: StoreApi<AppState>;
   /** Whether to call performLayoutSwitch when switching sessions (desktop sidebar uses this) */
   useLayoutSwitch?: boolean;
+  /** Listing surfaces own their viewport selection and must not navigate to task detail. */
+  stayOnListing?: boolean;
 };
 
 export type TaskSessionLoadOptions = {
@@ -209,7 +211,7 @@ function collectTaskTreeIds(
   return excludedTaskIds;
 }
 
-function collectTaskTreeIdsFromStore(
+export function collectTaskTreeIdsFromStore(
   store: StoreApi<AppState>,
   rootTaskId: string,
 ): ReadonlySet<string> {
@@ -361,7 +363,11 @@ function shouldSwitchAfterRemoval(
  *
  * Used by both TaskSessionSidebar and SessionTaskSwitcherSheet.
  */
-export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOptions) {
+export function useTaskRemoval({
+  store,
+  useLayoutSwitch = false,
+  stayOnListing = false,
+}: TaskRemovalOptions) {
   const loadTaskSessionsForTask = useCallback(
     (taskId: string, options?: TaskSessionLoadOptions) =>
       loadTaskSessionsForTaskFromStore(store, taskId, options),
@@ -393,7 +399,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       }
       const allRemainingTasks = collectRemainingTasks(store);
 
-      if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
+      if (stayOnListing || !shouldSwitchAfterRemoval(store, taskId, opts)) {
         return { switchedTaskId: null, excludedTaskIds };
       }
 
@@ -421,7 +427,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       window.location.href = linkToTaskOverview();
       return { switchedTaskId: null, excludedTaskIds };
     },
-    [store, useLayoutSwitch, loadTaskSessionsForTask],
+    [store, useLayoutSwitch, stayOnListing, loadTaskSessionsForTask],
   );
 
   return { removeTaskFromBoard, loadTaskSessionsForTask };

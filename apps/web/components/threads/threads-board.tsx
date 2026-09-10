@@ -8,6 +8,8 @@ import { ThreadColumn } from "./thread-column";
 import { useThreadColumnActivation } from "./use-thread-column-activation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MobileThreadPicker } from "./mobile-thread-picker";
+import { ThreadTaskActionsProvider } from "./thread-task-actions";
+import { useThreadSelectionRecovery } from "./use-thread-selection-recovery";
 
 type ThreadsBoardProps = {
   threads: ActiveThread[];
@@ -27,6 +29,7 @@ function ThreadsPlaceholder({ testId, children }: { testId: string; children: Re
   return (
     <div
       data-testid={testId}
+      tabIndex={-1}
       className="flex h-full min-h-0 w-full flex-col items-center justify-center gap-2 px-6 text-center"
     >
       {children}
@@ -99,6 +102,7 @@ export function ThreadsBoard({
   const orderedIds = useMemo(() => threads.map((thread) => thread.taskId), [threads]);
   const { boardRef, registerColumn, preloadTaskIds, detailTaskIds, mobileTaskId } =
     useThreadColumnActivation(orderedIds, focusedTaskId);
+  const rememberThread = useThreadSelectionRecovery(orderedIds, boardRef, isMobile);
 
   function taskColumn(taskId: string | null) {
     return Array.from(boardRef.current?.children ?? []).find(
@@ -120,57 +124,65 @@ export function ThreadsBoard({
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      {renderHeader?.(mobileTaskId)}
-      {threads.length === 0 ? (
-        <div className="min-h-0 flex-1">
-          {isLoading ? <ThreadsLoadingState /> : <ThreadsEmptyState />}
-        </div>
-      ) : (
-        <div
-          data-testid="threads-board"
-          ref={boardRef}
-          // Capture phase: a column's own handlers must not be able to swallow the
-          // interaction that retires the mark.
-          onPointerDownCapture={retire}
-          onFocusCapture={retire}
-          className="flex min-h-0 min-w-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain md:gap-3 md:p-3 md:snap-none"
-        >
-          {threads.map((thread) => (
-            <ThreadColumn
-              key={thread.taskId}
-              thread={thread}
-              mobileNavigation={
-                isMobile
-                  ? {
-                      onChoose: () => {
-                        returnFocusTaskId.current = thread.taskId;
-                        setPickerOpen(true);
-                      },
-                    }
-                  : undefined
-              }
-              isFocused={thread.taskId === markedTaskId}
-              requestedSessionId={thread.taskId === focusedTaskId ? focusedSessionId : null}
-              isPreloaded={preloadTaskIds.has(thread.taskId)}
-              isDetailActive={detailTaskIds.has(thread.taskId)}
-              onInvalidRequestedSession={onInvalidRequestedSession}
-              onColumnRef={registerColumn}
-              onOpenTask={onOpenTask}
-            />
-          ))}
-        </div>
-      )}
-      {isMobile && threads.length > 0 && (
-        <MobileThreadPicker
-          threads={threads}
-          selectedTaskId={mobileTaskId}
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          onSelect={selectThread}
-          onCloseAutoFocus={restorePickerFocus}
-        />
-      )}
-    </div>
+    <ThreadTaskActionsProvider boardRef={boardRef}>
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        {renderHeader?.(mobileTaskId)}
+        {threads.length === 0 ? (
+          <div className="min-h-0 flex-1">
+            {isLoading ? <ThreadsLoadingState /> : <ThreadsEmptyState />}
+          </div>
+        ) : (
+          <div
+            data-testid="threads-board"
+            ref={boardRef}
+            // Capture phase: a column's own handlers must not be able to swallow the
+            // interaction that retires the mark.
+            onPointerDownCapture={(event) => {
+              retire();
+              rememberThread(event);
+            }}
+            onFocusCapture={(event) => {
+              retire();
+              rememberThread(event);
+            }}
+            className="flex min-h-0 min-w-0 w-full flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain md:gap-3 md:p-3 md:snap-none"
+          >
+            {threads.map((thread) => (
+              <ThreadColumn
+                key={thread.taskId}
+                thread={thread}
+                mobileNavigation={
+                  isMobile
+                    ? {
+                        onChoose: () => {
+                          returnFocusTaskId.current = thread.taskId;
+                          setPickerOpen(true);
+                        },
+                      }
+                    : undefined
+                }
+                isFocused={thread.taskId === markedTaskId}
+                requestedSessionId={thread.taskId === focusedTaskId ? focusedSessionId : null}
+                isPreloaded={preloadTaskIds.has(thread.taskId)}
+                isDetailActive={detailTaskIds.has(thread.taskId)}
+                onInvalidRequestedSession={onInvalidRequestedSession}
+                onColumnRef={registerColumn}
+                onOpenTask={onOpenTask}
+              />
+            ))}
+          </div>
+        )}
+        {isMobile && threads.length > 0 && (
+          <MobileThreadPicker
+            threads={threads}
+            selectedTaskId={mobileTaskId}
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            onSelect={selectThread}
+            onCloseAutoFocus={restorePickerFocus}
+          />
+        )}
+      </div>
+    </ThreadTaskActionsProvider>
   );
 }

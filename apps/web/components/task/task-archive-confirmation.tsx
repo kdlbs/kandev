@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, type RefObject } from "react";
+import { useEffect, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
@@ -38,6 +38,8 @@ export type TaskArchiveConfirmationProps = {
   confirmTestId?: string;
   /** Render a simple confirmation inside an existing action surface. */
   inline?: boolean;
+  /** Wrap only simple inline choices; complex confirmations replace the surface. */
+  renderInline?: (content: ReactNode) => ReactNode;
   /** Use the contained dialog even when classification resolves without descendants. */
   forceDialog?: boolean;
 };
@@ -225,6 +227,7 @@ type ArchiveConfirmationContentProps = ArchiveDialogProps & {
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   inline: boolean;
+  renderInline?: (content: ReactNode) => ReactNode;
 };
 
 function ArchiveConfirmationContent({
@@ -236,6 +239,7 @@ function ArchiveConfirmationContent({
   focusReturnRef,
   focusBoundaryRef,
   inline,
+  renderInline = (content) => content,
   subtaskClassification,
   ...dialogProps
 }: ArchiveConfirmationContentProps) {
@@ -259,10 +263,10 @@ function ArchiveConfirmationContent({
 
   if (subtaskClassification.status !== "resolved") {
     if (inline) {
-      return (
+      return renderInline(
         <span data-testid="task-archive-classifying" className="text-xs text-muted-foreground">
           {t("common:loading")}
-        </span>
+        </span>,
       );
     }
     if (!isFinePointer) return null;
@@ -277,7 +281,7 @@ function ArchiveConfirmationContent({
 
   const confirm = () => dialogProps.onConfirm({ cascade: false });
   if (inline || !isFinePointer) {
-    return (
+    return renderInline(
       <ArchiveConfirmCopy
         taskTitle={dialogProps.taskTitle}
         executorType={dialogProps.executorType}
@@ -287,7 +291,7 @@ function ArchiveConfirmationContent({
         onClose={() => dialogProps.onOpenChange(false)}
         onConfirm={confirm}
         confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
-      />
+      />,
     );
   }
 
@@ -326,6 +330,7 @@ export function TaskArchiveConfirmation({
   onConfirm,
   confirmTestId = DEFAULT_CONFIRM_TEST_ID,
   inline = false,
+  renderInline,
   forceDialog = false,
 }: TaskArchiveConfirmationProps) {
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -346,6 +351,7 @@ export function TaskArchiveConfirmation({
       focusReturnRef={focusReturnRef}
       focusBoundaryRef={focusBoundaryRef}
       inline={inline}
+      renderInline={renderInline}
       onOpenChange={onOpenChange}
       taskTitle={taskTitle}
       isBulkOperation={isBulkOperation}
