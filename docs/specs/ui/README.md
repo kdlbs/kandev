@@ -132,7 +132,7 @@ runtime, and workspace lifecycle/state ownership.
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
 - [Threads Deck](requirements/threads-conversation-deck.md)
-- [Task listing and Home preferences](requirements/task-listing-display-preferences.md)
+- [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
 - [Task Surface Refresh](requirements/task-surface-refresh.md)
@@ -151,7 +151,7 @@ runtime, and workspace lifecycle/state ownership.
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 
 ### Design
-- [Task listing and Home preferences](system-design/task-listing-display-preferences.md)
+- [Task Listing Display Preferences](system-design/task-listing-display-preferences.md)
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Dialog containment](system-design/dialog-content-containment.md)

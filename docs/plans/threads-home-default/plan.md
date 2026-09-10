@@ -192,6 +192,11 @@ are normal `chromium` and `mobile-chrome` navigation tests, not the provider
 
 ## Verification results
 
+PR fixup scope also includes preserving disabled-Office phone Home routing,
+repairing the workspace-picker test fixture, direct fallback resolver coverage,
+and aligning specification index labels and backend verification build tags.
+Task 02 records the remediation sequence and completed local validation.
+
 - `python3 scripts/lint-spec-files.test.py`: passed, 30 tests.
 - `python3 scripts/lint-spec-files.py --all`: passed for all specification files.
 - `git diff --check -- docs/specs docs/plans`: passed.
@@ -200,7 +205,7 @@ are normal `chromium` and `mobile-chrome` navigation tests, not the provider
   87 tests passed.
 - Task 02: 148 routing/navigation tests passed, including delayed and cancelled
   bootstrap, Office, empty/error fallback, and explicit destinations.
-- Final consolidated frontend run: 272 tests passed across 21 files, including
+- Implementation-checkpoint frontend run: 272 tests passed across 21 files, including
   blocked/malformed local storage and settings draft/rebase/save regressions.
 - Task 03: 19 browser tests passed with strict WS checks and no retries:
   desktop startup/listing 8, phone startup/listing 5, desktop Office Home 3,
@@ -208,14 +213,25 @@ are normal `chromium` and `mobile-chrome` navigation tests, not the provider
   temporary artifact paths are recorded in Task 03.
 - Typecheck, focused ESLint, all locale checks, and the production build passed.
 - Public docs validation passed for 46 pages and its validator test passed.
+- PR review remediation: the E2E settings response now declares the optional
+  workspace and workflow IDs used by cleanup. A targeted compiler check
+  reproduced both unknown-to-string errors before the fix and passed afterward;
+  two API-helper tests and focused ESLint passed. The helper change is test-only.
+- PR routing remediation: 88 focused frontend tests and seven phone E2E tests
+  passed against a rebuilt web bundle, with retries disabled. The new
+  disabled-Office regression failed on the old href before the fix. Typecheck,
+  focused ESLint, specification and public-docs validation passed. Backend
+  startup, boot mapping, and SQLite conformance passed with `-tags fts5 -race`;
+  PostgreSQL was not rerun for this frontend/documentation-only remediation.
 - Requirements are active, system design is current, and all three work orders
   are done. The task-owned disposable PostgreSQL fixture was removed after
   successful persistence and upgrade checks.
 
 Each work order records its exact implementation commands and results;
 execution was authorized by the user's subsequent "go for impl" request.
-Public documentation changes were completed in Task 03. No commit, push, PR,
-agent delegation, or parent-worktree edit was performed.
+Public documentation changes were completed in Task 03. At the implementation
+checkpoint, no commit, push, PR, agent delegation, or parent-worktree edit had
+been performed. The user subsequently authorized PR publication and fixup.
 
 ## Risks
 

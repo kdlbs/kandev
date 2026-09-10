@@ -61,6 +61,7 @@ export function resolveStartupListingRedirect({
     searchParams.get("workflowId")
   )
     return null;
+  // Explicit overview skips the fixed default but still restores the remembered listing.
   if (startupPage === "threads" && !isExplicitHomeDestination(searchParams)) {
     return workspaceId ? linkToThreads(workspaceId) : null;
   }

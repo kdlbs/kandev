@@ -16,6 +16,7 @@ import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surfa
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { workspaceHomeHref } from "@/lib/navigation/workspace-home";
 import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
 import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-activity";
@@ -36,12 +37,14 @@ type KanbanHeaderMobileProps = {
 
 function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspaceId">) {
   const { t } = useTranslation();
+  const officeEnabled = useFeature("office");
   const startupPage = useAppStore((s) => s.userSettings.startupPage);
   const workspace = useAppStore((s) => s.workspaces.items.find((item) => item.id === workspaceId));
+  const homeWorkspace = officeEnabled ? workspace : undefined;
   return (
     <Link
       href={workspaceHomeHref(
-        workspace ?? (workspaceId ? { id: workspaceId } : undefined),
+        homeWorkspace ?? (workspaceId ? { id: workspaceId } : undefined),
         startupPage,
       )}
       aria-label={t("kanban:kandevHome")}

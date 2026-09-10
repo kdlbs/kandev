@@ -73,17 +73,17 @@ managed E2E commands rebuild production artifacts and isolate test data; use
 one project per invocation, sequentially. Do not point tests at parent demos.
 
 ```bash
-cd apps/web && pnpm run i18n:zh-hant
-cd apps/web && pnpm run i18n:pseudo
-cd apps/web && pnpm run i18n:check
-cd apps/web && pnpm run i18n:ratchet
-cd apps && pnpm --filter @kandev/web test components/settings/appearance-settings-state.test.ts components/settings/general-settings.test.tsx components/settings/settings-save-provider.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm exec eslint components/settings/startup-page-settings-card.tsx components/settings/general-settings.tsx components/settings/appearance-settings-state.ts e2e/tests/settings/startup-page.spec.ts e2e/tests/settings/mobile-startup-page.spec.ts
-cd apps/web && pnpm e2e:run --project chromium tests/settings/startup-page.spec.ts tests/task/task-listing-view-preferences.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-startup-page.spec.ts tests/task/mobile-task-listing-display.spec.ts
-cd apps/web && pnpm e2e:run --project chromium tests/office/sidebar-navigation.spec.ts -- --grep 'Home'
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/office/mobile-office-navigation.spec.ts
+(cd apps/web && pnpm run i18n:zh-hant)
+(cd apps/web && pnpm run i18n:pseudo)
+(cd apps/web && pnpm run i18n:check)
+(cd apps/web && pnpm run i18n:ratchet)
+(cd apps && pnpm --filter @kandev/web test components/settings/appearance-settings-state.test.ts components/settings/general-settings.test.tsx components/settings/settings-save-provider.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm exec eslint components/settings/startup-page-settings-card.tsx components/settings/general-settings.tsx components/settings/appearance-settings-state.ts e2e/tests/settings/startup-page.spec.ts e2e/tests/settings/mobile-startup-page.spec.ts)
+(cd apps/web && pnpm e2e:run --project chromium tests/settings/startup-page.spec.ts tests/task/task-listing-view-preferences.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-startup-page.spec.ts tests/task/mobile-task-listing-display.spec.ts)
+(cd apps/web && pnpm e2e:run --project chromium tests/office/sidebar-navigation.spec.ts -- --grep 'Home')
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/office/mobile-office-navigation.spec.ts)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 git diff --check
@@ -185,3 +185,34 @@ cleaned output directory to `/tmp/kandev-threads-home-evidence.CTXlH8/`:
 
 These are temporary local verification artifacts, not public media. Public
 documentation was updated at `docs/public/tasks-and-workflows.md`.
+
+### PR review remediation
+
+The E2E API helper's settings response now declares `workspace_id` and
+`workflow_filter_id` as optional strings, matching the existing response and
+save contracts. A targeted TypeScript compiler assertion over the startup
+spec reproduced TS2322 at both cleanup fields before the declaration fix and
+passed afterward. The normal web typecheck excludes E2E files.
+
+`pnpm exec vitest run e2e/helpers/api-client.test.ts` passed both helper tests,
+including contract coverage for reading and restoring the startup choice and
+workspace scope. Focused ESLint over both helper files passed. This helper
+change is test-only; Task 02 records the separate disabled-Office routing fix.
+
+After `make build-web`, the following command from `apps/web` passed all seven
+phone scenarios with strict WebSocket checks and retries disabled:
+
+```bash
+E2E_PORT_OFFSET=21 pnpm e2e:run --host --no-build --project mobile-chrome tests/office/mobile-office-navigation.spec.ts tests/settings/mobile-startup-page.spec.ts -- --retries=0
+```
+
+The new disabled-Office scenario proved brand tap, workspace retention, and
+Threads reload. Its `office-disabled-threads-phone.png` screenshot was inspected.
+The explicit-destination scenario completed in 11.0 seconds; reducing its causal
+session-wait budget would only fail a slow precondition earlier, so no speculative
+timeout change was made. Runtime environment is restored in `finally` and saved
+preferences remain restored by the suite's existing cleanup.
+
+Public how-to documentation now explicitly names Kanban/Pipeline selections and
+disabled-Office Home behavior. All verification blocks use scoped directory
+changes. Public-docs validation passed for 46 pages and its validator test passed.

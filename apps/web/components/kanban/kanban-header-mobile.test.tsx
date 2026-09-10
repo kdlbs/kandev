@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { defaultState } from "@/lib/state/default-state";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 
 vi.mock("@/components/page-topbar", () => ({
@@ -86,6 +87,48 @@ function renderHeader(
     </StateProvider>,
   );
 }
+
+describe("KanbanHeaderMobile Home routing", () => {
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.6
+  it.each([
+    [false, "task_overview", `/?home=overview&workspaceId=${ACTIVE_WORKSPACE_ID}`],
+    [false, "threads", `/threads?workspace=${ACTIVE_WORKSPACE_ID}`],
+    [true, "threads", `/office?workspaceId=${ACTIVE_WORKSPACE_ID}`],
+  ] as const)(
+    "resolves Home with Office enabled=%s and startup=%s",
+    (office, startupPage, href) => {
+      render(
+        <StateProvider
+          initialState={{
+            features: { ...defaultState.features, office },
+            workspaces: {
+              items: [
+                {
+                  id: ACTIVE_WORKSPACE_ID,
+                  name: "Office",
+                  office_workflow_id: "office-flow",
+                  owner_id: "user-1",
+                  created_at: "2026-09-10T00:00:00Z",
+                  updated_at: "2026-09-10T00:00:00Z",
+                },
+              ],
+              activeId: ACTIVE_WORKSPACE_ID,
+            },
+            userSettings: { ...defaultState.userSettings, startupPage },
+          }}
+        >
+          <KanbanHeaderMobile
+            workspaceId={ACTIVE_WORKSPACE_ID}
+            workspaceLabel="Office"
+            title="Home"
+          />
+        </StateProvider>,
+      );
+
+      expect(screen.getByRole("link", { name: "Kandev home" }).getAttribute("href")).toBe(href);
+    },
+  );
+});
 
 describe("KanbanHeaderMobile", () => {
   it("links the Kandev brand home and names the page through the title crumb", () => {

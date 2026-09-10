@@ -87,4 +87,33 @@ test.describe("Office mobile navigation", () => {
       { timeout: 10_000 },
     );
   });
+
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.6
+  test("keeps phone Home in the workspace's Threads when Office is disabled", async ({
+    testPage,
+    backend,
+    officeSeed,
+  }, testInfo) => {
+    try {
+      await backend.restart({ KANDEV_FEATURES_OFFICE: "false" });
+      await testPage.goto(`/?home=overview&workspaceId=${officeSeed.workspaceId}`);
+      const brand = testPage.getByTestId("mobile-topbar-brand");
+      await expect(brand).toHaveAttribute("href", `/threads?workspace=${officeSeed.workspaceId}`);
+      await brand.tap();
+      await expect(testPage).toHaveURL(
+        (url) =>
+          url.pathname === "/threads" &&
+          url.searchParams.get("workspace") === officeSeed.workspaceId,
+      );
+      const threads = testPage
+        .getByTestId("threads-board")
+        .or(testPage.getByTestId("threads-empty-state"));
+      await expect(threads).toBeVisible();
+      await testPage.reload();
+      await expect(threads).toBeVisible();
+      await testPage.screenshot({ path: testInfo.outputPath("office-disabled-threads-phone.png") });
+    } finally {
+      await backend.restart();
+    }
+  });
 });

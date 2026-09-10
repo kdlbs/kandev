@@ -55,18 +55,18 @@ revision ordering, and partial-update semantics remain authoritative.
 Install dependencies once in this worktree before the first pnpm command:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
+(cd apps && pnpm install --frozen-lockfile)
 ```
 
-Run from the repository root unless a command changes directory:
+Run from the repository root; each directory change is scoped to one command:
 
 ```bash
-cd apps/backend && go test -race ./internal/user/... -run StartupPage -count=1
-cd apps/backend && go test -race ./internal/backendapp -run TestMapUserSettingsStateIncludesNormalizedStartupPage -count=1
+(cd apps/backend && go test -tags fts5 -race ./internal/user/... -run StartupPage -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/backendapp -run TestMapUserSettingsStateIncludesNormalizedStartupPage -count=1)
 make -C apps/backend sqlguard
-cd apps/backend && go test -race ./internal/persistence/storeconformance -count=1
-cd apps && pnpm --filter @kandev/web test lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts
-cd apps/web && pnpm run typecheck
+(cd apps/backend && go test -tags fts5 -race ./internal/persistence/storeconformance -count=1)
+(cd apps && pnpm --filter @kandev/web test lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts)
+(cd apps/web && pnpm run typecheck)
 git diff --check
 ```
 
@@ -76,6 +76,13 @@ The conformance command includes fresh, replay, and previous-Stable upgrade
 coverage. No fixture/manifest edits are needed without a schema-history change.
 If PostgreSQL cannot run, record its exact missing evidence. New Go test names
 must contain `StartupPage` so the focused command discovers them.
+
+PR review aligned these commands with CI's `fts5` build tag and made the
+blocks safe to paste from the repository root. The tagged startup-page, boot
+mapping, and SQLite fresh/replay/upgrade conformance commands passed during
+fixup. PostgreSQL was not rerun: the original disposable fixture had been
+removed after the successful implementation checks, and remediation changed
+no backend implementation or persistence contract.
 
 ## Files likely touched
 

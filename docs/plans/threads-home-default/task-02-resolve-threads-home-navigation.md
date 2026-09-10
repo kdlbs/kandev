@@ -72,9 +72,9 @@ independent, including when settings bootstrap is delayed.
 Task 01 has already installed dependencies. Run each line from the repo root:
 
 ```bash
-cd apps && pnpm --filter @kandev/web test lib/startup-page.test.ts lib/task-listing/view-preference.test.ts lib/task-listing/view-navigation.test.ts hooks/use-task-listing-view.test.tsx app/page-client.test.tsx
-cd apps && pnpm --filter @kandev/web test lib/navigation/workspace-home.test.ts lib/navigation/resolve-destinations.test.ts hooks/use-app-destinations.test.tsx hooks/use-home-affordance.test.ts components/app-sidebar/app-sidebar-workspace-navigation.test.ts src/kanban-route.test.ts src/kanban-route-startup.test.tsx
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web test lib/startup-page.test.ts lib/task-listing/view-preference.test.ts lib/task-listing/view-navigation.test.ts hooks/use-task-listing-view.test.tsx app/page-client.test.tsx)
+(cd apps && pnpm --filter @kandev/web test lib/navigation/workspace-home.test.ts lib/navigation/resolve-destinations.test.ts hooks/use-app-destinations.test.tsx hooks/use-home-affordance.test.ts components/app-sidebar/app-sidebar-workspace-navigation.test.ts src/kanban-route.test.ts src/kanban-route-startup.test.tsx)
+(cd apps/web && pnpm run typecheck)
 git diff --check
 ```
 
@@ -145,3 +145,33 @@ workspace and sidebar/header neighbors passed (16 files, 148 tests). Typecheck,
 focused ESLint, and `git diff --check` passed. The SPA workspace test now waits
 for bootstrap before asserting the selected workspace. Browser proof follows
 in Task 03.
+
+### PR review remediation
+
+UI remains the owner of Home presentation; Office availability retains its
+existing feature-gate ownership. AC-003.6 and the Home-consumer design were
+clarified before repairing the phone brand's disabled-Office destination. Reuse the
+existing brand as direct navigation into the native task listing. Layout,
+touch targets, safe areas, scroll ownership, and the native menu/deck exemplars
+remain unchanged; no parent topbar or swipe work is included.
+
+RED: the two disabled-Office header cases and phone href assertion resolved
+to `/office` instead of the expected task listing. The stale workspace-picker
+mock also reproduced 23 crashes before repair. GREEN: gate the phone's Office
+record with the existing feature flag, preserving its workspace ID fallback;
+restore complete fixture inputs and cover Threads selection and Office priority.
+Direct no-workspace and explicit-overview cases document existing resolver
+behavior, with a short production invariant comment.
+
+Verification from `apps/web`:
+
+```bash
+pnpm exec vitest run components/kanban/kanban-header-mobile.test.tsx components/app-sidebar/app-sidebar-workspace-picker.test.tsx lib/startup-page.test.ts e2e/helpers/api-client.test.ts lib/navigation/workspace-home.test.ts hooks/use-home-affordance.test.ts src/kanban-route-startup.test.tsx app/page-client.test.tsx
+pnpm run typecheck
+pnpm exec eslint --max-warnings 0 components/kanban/kanban-header-mobile.tsx components/kanban/kanban-header-mobile.test.tsx components/app-sidebar/app-sidebar-workspace-picker.test.tsx lib/startup-page.ts lib/startup-page.test.ts e2e/helpers/api-client.ts e2e/helpers/api-client.test.ts e2e/tests/office/mobile-office-navigation.spec.ts
+```
+
+All 88 focused tests passed. After completing the typed header fixture and
+splitting its describe blocks to meet the lint limit, all 13 header tests
+passed again. Typecheck and focused ESLint passed. Task 03 records the rebuilt
+browser proof. Specification lint and its 30 validator tests passed.

@@ -156,6 +156,12 @@ the existing different query names (`workspaceId` for overview/Office,
 `workspace` for Threads). Unknown workspace mode retains the current disabled
 Home affordance. No-workspace onboarding remains available.
 
+Office priority uses effective mode, not workspace metadata alone. The phone
+listing brand gates its record-based Office destination with `useFeature("office")`,
+matching `useOfficeModeState` and the Kanban mismatch redirect. When disabled,
+it passes only the workspace ID to the shared resolver, preserving the saved
+task-listing default without linking to the unavailable Office surface.
+
 Audit and wire these callers; do not infer workspace type from the pathname:
 
 - Sidebar brand/header and primary Home row.

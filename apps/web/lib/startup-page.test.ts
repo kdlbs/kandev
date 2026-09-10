@@ -18,6 +18,28 @@ function recentTask(taskId: string, workspaceId: string): RecentTaskEntry {
 }
 
 describe("startup page resolution", () => {
+  // Test-only contract coverage for the existing startup fallbacks.
+  it("leaves onboarding reachable without a workspace for fixed Threads", () => {
+    expect(
+      resolveStartupListingRedirect({
+        startupPage: "threads",
+        preferredView: "kanban",
+        searchParams: new URLSearchParams(),
+      }),
+    ).toBeNull();
+  });
+
+  it("lets explicit overview restore the remembered List despite fixed Threads", () => {
+    expect(
+      resolveStartupListingRedirect({
+        startupPage: "threads",
+        preferredView: "list",
+        workspaceId: WORKSPACE_ID,
+        searchParams: new URLSearchParams("home=overview"),
+      }),
+    ).toBe(`/tasks?workspace=${WORKSPACE_ID}`);
+  });
+
   it("keeps fixed Threads independent of recent tasks and missing listing memory", () => {
     expect(
       resolveStartupTaskId({

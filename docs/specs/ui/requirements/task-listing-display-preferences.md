@@ -127,7 +127,10 @@ task-listing mode.
 - **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.6:** Home shall retain the active
   or explicitly requested workspace. Selecting another non-Office workspace
   shall apply Threads to that selected workspace. Office workspace Home shall
-  continue to open Office. No-workspace recovery shall remain available.
+  continue to open Office while Office is enabled. With Office disabled, Home
+  shall retain the workspace and honor the task-listing startup choice instead
+  of linking to unavailable Office surfaces. No-workspace recovery shall remain
+  available.
 - **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.7:** An empty Threads result
   shall stay in Threads and display its existing empty state. Unavailable or
   malformed browser listing storage shall not prevent a saved Threads Home

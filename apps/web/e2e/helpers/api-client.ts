@@ -1164,6 +1164,8 @@ export class ApiClient {
 
   async getUserSettings(): Promise<{
     settings: {
+      workspace_id?: string;
+      workflow_filter_id?: string;
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
