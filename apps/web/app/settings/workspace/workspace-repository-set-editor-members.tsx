@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { IconArrowDown, IconArrowUp, IconGitBranch, IconRefresh, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useTranslation } from "react-i18next";
 
 import { Pill } from "@/components/task-create-dialog-pill";
@@ -109,7 +110,7 @@ export function RepositorySetMembersField({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium">{t("workspaces:repositorySetsMembersLabel")}</p>
           <p className="text-xs text-muted-foreground">
@@ -124,7 +125,9 @@ export function RepositorySetMembersField({
           searchPlaceholder={t("workspaces:repositorySetsSearchRepositories")}
           emptyMessage={t("workspaces:repositorySetsNoMatchingRepositories")}
           disabled={availableRepositories.length === 0}
-          triggerClassName="min-h-11 border border-input bg-background px-3 sm:w-56 sm:shrink-0"
+          triggerClassName="border border-input bg-background px-2 md:w-48 md:shrink-0"
+          popoverPortal
+          popoverAlign="end"
           testId="repository-set-add-repository"
           dropdownTestId="repository-set-add-repository-dropdown"
           ariaLabel={t("workspaces:repositorySetsAddRepository")}
@@ -172,8 +175,7 @@ export function RepositorySetMembersField({
       <Button
         type="button"
         variant="outline"
-        size="sm"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         disabled={!hasSavedBases}
         onClick={resetBases}
         data-testid="repository-set-reset-bases"
@@ -232,7 +234,7 @@ function RepositorySetMemberRow({
   const { t } = useTranslation();
   return (
     <div
-      className="grid gap-2 rounded-md border p-2 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,auto)_auto] sm:items-center"
+      className="grid gap-2 rounded-md border p-2 md:grid-cols-[minmax(0,1fr)_minmax(0,12rem)_auto] md:items-center"
       data-testid={`repository-set-member-${member.repositoryId}`}
     >
       <div className="min-w-0">
@@ -256,9 +258,9 @@ function RepositorySetMemberRow({
       <div className="flex justify-end gap-0.5">
         <Button
           type="button"
-          size="sm"
+          size="icon"
           variant="ghost"
-          className="min-h-11 min-w-11 cursor-pointer"
+          className="cursor-pointer"
           disabled={!canMoveUp}
           aria-label={t("workspaces:repositorySetsMoveUp")}
           onClick={onMoveUp}
@@ -268,9 +270,9 @@ function RepositorySetMemberRow({
         </Button>
         <Button
           type="button"
-          size="sm"
+          size="icon"
           variant="ghost"
-          className="min-h-11 min-w-11 cursor-pointer"
+          className="cursor-pointer"
           disabled={!canMoveDown}
           aria-label={t("workspaces:repositorySetsMoveDown")}
           onClick={onMoveDown}
@@ -280,9 +282,9 @@ function RepositorySetMemberRow({
         </Button>
         <Button
           type="button"
-          size="sm"
+          size="icon"
           variant="ghost"
-          className="min-h-11 min-w-11 cursor-pointer"
+          className="cursor-pointer"
           aria-label={t("workspaces:repositorySetsRemove")}
           onClick={onRemove}
           data-testid={`repository-set-remove-${member.repositoryId}`}
@@ -339,7 +341,10 @@ function RepositorySetBaseBranchPicker({
       ariaLabel={t("workspaces:repositorySetsBaseBranchFor", { name: repository.name })}
       testId={`repository-set-base-${member.repositoryId}`}
       dropdownTestId={`repository-set-base-dropdown-${member.repositoryId}`}
-      triggerClassName="h-11 min-h-11 w-full justify-between border border-input bg-background px-3 hover:bg-background"
+      triggerClassName={controlSizingClassName(
+        "standard",
+        "min-w-0 w-full border border-input bg-background px-2 hover:bg-background",
+      )}
       onOpenChange={setBranchOpen}
       filter={scoreBranch}
     />

@@ -105,6 +105,15 @@ pnpm run i18n:check
 
 ## Results
 
+- UX follow-up: use the shared 28px desktop control sizing and responsive
+  touch targets for add, base, reset, and row actions. Keep the existing
+  full-height phone drawer and shared state. Portal the repository picker out
+  of the scrolling form and align it to the trigger's trailing edge.
+  Pad the desktop footer and override the shared bottom drawer's 80vh cap so
+  the phone editor retains its full-height contract.
+  Verification: 25 focused component tests and both settings Playwright specs
+  pass (2 desktop and 2 mobile tests). The browser checks cover 28px desktop
+  controls, repository-option hit targets, phone touch sizes, and drawer height.
 - Replaced the checkbox editor with ordered selected-member rows, searchable
   add and filter controls, move/remove actions, per-member base selectors, and
   Reset bases.

@@ -76,7 +76,7 @@ function RepositorySetEditorFooter({
     );
   }
   return (
-    <DialogFooter>
+    <DialogFooter className="shrink-0 px-4 pb-4 pt-2">
       <Button
         type="button"
         variant="outline"
@@ -143,7 +143,7 @@ export function RepositorySetEditorDialog({
     return (
       <Drawer open onOpenChange={(open) => !open && onClose()}>
         <DrawerContent
-          className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden"
+          className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-[100dvh]"
           data-testid="repository-set-editor-surface"
         >
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">

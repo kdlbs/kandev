@@ -23,6 +23,7 @@ test.describe("Mobile workspace repository sets", () => {
     const surface = testPage.getByTestId("repository-set-editor-surface");
     await expect(surface).toBeVisible();
     await expect(surface).toHaveClass(/h-\[100dvh\]/);
+    await expect.poll(async () => (await surface.boundingBox())?.height).toBe(844);
     await expect(testPage.getByTestId("repository-set-editor-form")).toHaveClass(
       /min-h-0.*overflow-y-auto/,
     );
@@ -38,6 +39,12 @@ test.describe("Mobile workspace repository sets", () => {
     expect(addRepositoryBox).not.toBeNull();
     expect(addRepositoryBox!.y).toBeGreaterThan(membersHintBox!.y + membersHintBox!.height);
     expect(addRepositoryBox!.width).toBeCloseTo(membersHintBox!.width, 0);
+    await testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`).tap();
+    await addRepository.tap();
+    await testPage.getByRole("option", { name: /E2E Repo/ }).tap();
+    await expect(
+      testPage.getByTestId(`repository-set-base-${seedData.repositoryId}`),
+    ).toBeVisible();
     await prCapture.screenshot("mobile-repository-set-editor", {
       caption:
         "The mobile repository set editor uses a full-height drawer with a fixed action bar.",
@@ -47,6 +54,8 @@ test.describe("Mobile workspace repository sets", () => {
       testPage.getByTestId("repository-set-editor-save"),
       testPage.getByTestId("repository-set-editor-cancel"),
       testPage.getByTestId(`repository-set-base-${seedData.repositoryId}`),
+      addRepository,
+      testPage.getByTestId("repository-set-reset-bases"),
     ]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();

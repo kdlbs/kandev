@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { expectControlHeight } from "../../helpers/control-sizing";
 
 const SET_ROW = "repository-set-row";
 const EDITOR_NAME = "repository-set-editor-name";
@@ -51,10 +52,32 @@ test.describe("Workspace repository sets settings", () => {
     expect(membersHintBox!.width).toBeGreaterThan(addRepositoryBox!.width);
     await testPage.getByTestId(EDITOR_NAME).fill(setName);
     await addRepository.click();
+    const repositoryOption = testPage.getByRole("option", { name: /E2E Repo/ });
+    await expect(repositoryOption).toBeVisible();
+    await expect
+      .poll(() =>
+        repositoryOption.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return [box.x + 8, box.right - 8].every((x) =>
+            element.contains(document.elementFromPoint(x, box.y + box.height / 2)),
+          );
+        }),
+      )
+      .toBe(true);
+    await prCapture.screenshot("desktop-repository-set-add-picker", {
+      caption: "The repository picker remains fully clickable outside the scrolling form.",
+    });
     await testPage.getByRole("option", { name: /E2E Repo/ }).click();
     await testPage.getByTestId("repository-set-add-repository").click();
     await testPage.getByRole("option", { name: SECOND_REPO_NAME }).click();
     const basePicker = testPage.getByTestId(`repository-set-base-${second.id}`);
+    for (const control of [
+      addRepository,
+      basePicker,
+      testPage.getByTestId("repository-set-reset-bases"),
+      testPage.getByTestId(`repository-set-remove-${second.id}`),
+    ])
+      await expectControlHeight(control, 28);
     await basePicker.click();
     const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${second.id}`);
     await expect(dropdown).toBeVisible();

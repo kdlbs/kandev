@@ -257,6 +257,19 @@ function selectComboboxOption({
   onOpenChange?.(false);
 }
 
+function ComboboxHeader({
+  dropdownLabel,
+  headerAction,
+}: Pick<ComboboxProps, "dropdownLabel" | "headerAction">) {
+  if (!dropdownLabel && !headerAction) return null;
+  return (
+    <div className="text-muted-foreground flex items-center justify-between gap-2 border-b px-2 py-1 text-xs">
+      <span>{dropdownLabel}</span>
+      {headerAction}
+    </div>
+  );
+}
+
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -328,12 +341,7 @@ export const Combobox = memo(function Combobox({
           filter={filter}
           data-testid={dropdownTestId}
         >
-          {dropdownLabel || headerAction ? (
-            <div className="text-muted-foreground flex items-center justify-between gap-2 px-2 py-1 text-xs border-b">
-              <span>{dropdownLabel}</span>
-              {headerAction}
-            </div>
-          ) : null}
+          <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
           {showSearch && (
             <CommandInput
               placeholder={searchPlaceholder}
