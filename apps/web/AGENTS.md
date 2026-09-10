@@ -14,7 +14,6 @@ For plugin UI work, begin with the [canonical plugin authoring guide](../../docs
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Dialog } from "@kandev/ui/dialog";
-// etc...
 ```
 
 **Do NOT** import from `@/components/ui/*` - always use `@kandev/ui` package.
@@ -31,6 +30,7 @@ import { Dialog } from "@kandev/ui/dialog";
 - Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable. Apply the 44px minimum to coarse-pointer hit areas, touch rows, and mobile controls only; keep fine-pointer desktop controls at the surrounding design-system density and do not reuse a touch-sized `h-11` class as the shared visual button size.
 - Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
 - Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
+- Phone listing chrome uses `KanbanHeaderMobile` and `MobileListingContext` across Kanban, List, and Threads. Threads supplies its saved-view control and inline pagination in the title slot. Phone search, tools, and plugin actions live in `MobileListingMenuActions`; keep activity/connection cues on the persistent menu button and restore the actual opener unless focus is moving into a launched surface. Tablet/desktop composition stays separate.
 
 ## Data Flow Pattern (Critical)
 

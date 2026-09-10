@@ -6,6 +6,7 @@ import { quickChatTabReferences, startQuickChatFromSetup } from "./quick-chat-he
 async function openMobileQuickChat(page: Page): Promise<Locator> {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
+  await page.getByTestId("mobile-topbar-menu").tap();
   await page.getByTestId("mobile-quick-chat-button").tap();
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
   await expect(dialog).toBeVisible({ timeout: 10_000 });

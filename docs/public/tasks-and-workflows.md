@@ -393,7 +393,19 @@ deletion is not success.
 
 ## Find and organize tasks
 
-On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
+On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
+**Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
+different layouts. Kandev remembers the last selected view in that browser on
+the current device. Phones offer **Kanban**, **Threads**, and **List** in the
+topbar menu; a saved desktop Pipeline preference is kept but shown as Kanban
+on the phone.
+
+Kanban and List share a compact phone header showing the workspace and current
+mode. Tap that context or the menu button to change views, workspaces, or display
+options, or return **Home**. In Threads, tap the view name to choose a saved
+Threads view. Phone **Search tasks** lives in the menu: selecting it reveals
+and focuses the search field below the header. Selecting it again hides the
+field and clears the query.
 
 Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
 

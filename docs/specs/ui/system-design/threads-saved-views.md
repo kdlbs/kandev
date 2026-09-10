@@ -302,8 +302,9 @@ The picker has title search, Select all, Clear all, and checkbox rows.
 Tablet uses the same top-bar position with 44-pixel triggers. Its trigger opens
 the mobile drawer because a touch pointer does not use the desktop popover.
 
-Phone shows a compact active-view button at the start of the top-bar action
-strip. The button opens one inset bottom drawer. The drawer has three internal
+Phone groups the Threads page label and active view in one unboxed, stacked
+button in the top bar, outside a scrolling action strip. The button opens one
+inset bottom drawer. The drawer has three internal
 pages: saved-view selection, view editor, and task picker. Back navigation
 changes the drawer page instead of opening another overlay.
 

@@ -1,5 +1,9 @@
 {
   "columnLabel": "Agent thread for {{title}}",
+  "chooseThread": "Choose thread",
+  "chooseThreadLabel": "Choose thread. Current: {{title}}",
+  "chooseThreadDescription": "Jump to a conversation in this view.",
+  "threadPosition": "{{position}}/{{total}}",
   "emptyBody": "Threads puts every running agent side by side. Start an agent on a task and its conversation shows up here as a column.",
   "emptyTitle": "No agent is working right now",
   "loading": "Loading threads...",
