@@ -534,6 +534,56 @@ func TestDeleteRunBatch_FloorHeldIndependentlyPerAgentProfile(t *testing.T) {
 	}
 }
 
+// TestDeleteRunBatch_LargeBatchChunksIDListAcrossStatements proves
+// deleteRunBatchOnce's satellite and runs deletes split their id list into
+// chunks of at most retentionMaxHostParams rather than binding the whole
+// batch as one IN clause, which is what let batch_limit's documented range
+// (AC-OFFICE-RUN-HISTORY-RETENTION-004.3, up to 100,000) overflow a single
+// statement's bind-parameter limit on either engine. retentionMaxHostParams+2
+// runs, each with one satellite row apiece, forces the delete loop to span
+// more than one chunk; every row and every satellite must still be deleted
+// and the reported count must reflect the true total, not just one chunk's.
+func TestDeleteRunBatch_LargeBatchChunksIDListAcrossStatements(t *testing.T) {
+	conn := testDB(t)
+	store := NewStore(db.NewPool(conn, conn))
+	ctx := context.Background()
+
+	const rowCount = retentionMaxHostParams + 2
+	finished := daysAgo(60)
+	ids := make([]string, 0, rowCount)
+	for i := 0; i < rowCount; i++ {
+		id := newID()
+		seedRun(t, conn, id, "agent-1", "finished", &finished, finished)
+		seedRunEvent(t, conn, id, 0)
+		ids = append(ids, id)
+	}
+
+	result, err := store.DeleteRunBatch(ctx, conn, daysAgo(30), 0, rowCount)
+	if err != nil {
+		t.Fatalf("DeleteRunBatch: %v", err)
+	}
+	if result.Abandoned {
+		t.Fatalf("result = %+v, want a clean delete, not abandoned", result)
+	}
+	if result.RunsDeleted != int64(rowCount) {
+		t.Fatalf("RunsDeleted = %d, want %d", result.RunsDeleted, rowCount)
+	}
+	if result.RunEventsDeleted != int64(rowCount) {
+		t.Fatalf("RunEventsDeleted = %d, want %d", result.RunEventsDeleted, rowCount)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs`); n != 0 {
+		t.Fatalf("runs remaining = %d, want 0 (every row across every chunk must be deleted)", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM run_events`); n != 0 {
+		t.Fatalf("run_events remaining = %d, want 0", n)
+	}
+	for _, id := range ids {
+		if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE id = ?`, id); n != 0 {
+			t.Fatalf("run %s remains after a chunked delete", id)
+		}
+	}
+}
+
 func TestCountRunEvents_PlainCount(t *testing.T) {
 	conn := testDB(t)
 	store := NewStore(db.NewPool(conn, conn))

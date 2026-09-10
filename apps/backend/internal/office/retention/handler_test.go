@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -308,5 +310,83 @@ func TestPutRetention_SuccessInvokesOnSettingsChanged(t *testing.T) {
 	}
 	if got.Enabled {
 		t.Fatal("OnSettingsChanged received Enabled=true, want false")
+	}
+}
+
+// TestPutRetention_ConcurrentPUTsApplyInSaveOrder is the regression test for
+// the concurrent-PUT scheduler desync found in review: without serializing
+// SaveSettings and OnSettingsChanged as one critical section, a second PUT
+// racing between the first's save and apply could complete its own save and
+// apply entirely in between, leaving the scheduler applying the first PUT's
+// now-stale settings after the second PUT's newer write already committed
+// (AC-004.5's last-writer-wins). testBetweenSaveAndApply fires while the
+// first PUT still holds the handler's mutex; it starts a second PUT
+// concurrently and proves that second PUT cannot complete until the first
+// releases the mutex, so the two applications can never interleave.
+func TestPutRetention_ConcurrentPUTsApplyInSaveOrder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sweeper, _ := newTestSweeper(t)
+
+	var mu sync.Mutex
+	var applied []bool
+	handler := NewHandler(HandlerConfig{
+		SettingsStore: sweeper.settingsStore,
+		Sweeper:       sweeper,
+		OnSettingsChanged: func(s Settings) {
+			mu.Lock()
+			applied = append(applied, s.Enabled)
+			mu.Unlock()
+		},
+	})
+	router := newTestRetentionRouter(handler)
+
+	secondDone := make(chan struct{})
+	secondStarted := false
+
+	t.Cleanup(func() { testBetweenSaveAndApply = nil })
+	testBetweenSaveAndApply = func() {
+		testBetweenSaveAndApply = nil // only race a second request once
+		secondStarted = true
+		go func() {
+			response := doRequest(router, http.MethodPut, "/api/v1/system/retention", []byte(`{"enabled": true}`))
+			if response.Code != http.StatusOK {
+				t.Errorf("second PUT status = %d, want 200: %s", response.Code, response.Body.String())
+			}
+			close(secondDone)
+		}()
+
+		select {
+		case <-secondDone:
+			t.Fatal("second PUT completed while the first still held the critical section")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	first := doRequest(router, http.MethodPut, "/api/v1/system/retention", []byte(`{"enabled": false}`))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first PUT status = %d, want 200: %s", first.Code, first.Body.String())
+	}
+	if !secondStarted {
+		t.Fatal("test hook never fired; the race was not exercised")
+	}
+
+	select {
+	case <-secondDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second PUT never completed after the first released the critical section")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(applied) != 2 || applied[0] != false || applied[1] != true {
+		t.Fatalf("OnSettingsChanged calls = %+v, want [false, true] in save order", applied)
+	}
+
+	stored, err := sweeper.settingsStore.GetSettings(t.Context())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if !stored.Enabled {
+		t.Fatal("stored Enabled = false, want true (the second, later PUT must win)")
 	}
 }

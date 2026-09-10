@@ -344,6 +344,70 @@ func TestRunSweep_AbandonedRunsBatchReportsFailureNotBacklogWithZeroSatellites(t
 	}
 }
 
+// TestRunSweep_SiblingTablePreviewFailureDoesNotAffectOtherTablesPreviewState
+// is AC-OFFICE-RUN-HISTORY-RETENTION-003.4's per-table independence test:
+// office_routine_runs' preview completes successfully, but runs' own preview
+// fails in the same sweep (its table is temporarily unreachable). The next
+// sweep must not preview office_routine_runs a second time — its preview
+// already completed and a sibling's failure must not reopen it — and must
+// preview runs again, since its own preview never recorded completion.
+func TestRunSweep_SiblingTablePreviewFailureDoesNotAffectOtherTablesPreviewState(t *testing.T) {
+	sweeper, conn := newTestSweeper(t)
+	ctx := context.Background()
+	saveZeroFloorSettings(t, sweeper)
+
+	seedRoutine(t, conn, "r-1")
+	old := daysAgo(60)
+	seedRoutineRun(t, conn, newID(), "r-1", "done", &old, old)
+	seedRun(t, conn, newID(), "agent-1", "finished", &old, old)
+
+	// Hide runs after office_routine_runs' own preview work has already
+	// completed for this sweep, so runs' preview fails on a genuine SQL
+	// error rather than a simulated one.
+	testBetweenTablesSweep = func(queryer) {
+		conn.MustExec(`ALTER TABLE runs RENAME TO runs_hidden`)
+	}
+	t.Cleanup(func() { testBetweenTablesSweep = nil })
+
+	sweeper.RunSweep(ctx)
+
+	first, ok := sweeper.LastSweepSnapshot()
+	if !ok {
+		t.Fatal("LastSweepSnapshot: ok = false, want true")
+	}
+	if !first.OfficeRoutineRuns.Previewed || first.OfficeRoutineRuns.Err != "" {
+		t.Fatalf("office_routine_runs = %+v, want a clean, completed preview", first.OfficeRoutineRuns)
+	}
+	if first.Runs.Err == "" {
+		t.Fatal("runs.Err is empty, want the preview failure recorded")
+	}
+	if first.Runs.Previewed {
+		t.Fatal("runs.Previewed = true, want false: the preview did not complete")
+	}
+
+	testBetweenTablesSweep = nil
+	conn.MustExec(`ALTER TABLE runs_hidden RENAME TO runs`)
+
+	sweeper.RunSweep(ctx)
+
+	second, ok := sweeper.LastSweepSnapshot()
+	if !ok {
+		t.Fatal("LastSweepSnapshot: ok = false, want true")
+	}
+	if second.OfficeRoutineRuns.Previewed {
+		t.Fatal("office_routine_runs.Previewed = true on the second sweep, want false: its preview already completed and must not run a second time because a sibling table failed")
+	}
+	if second.OfficeRoutineRuns.Deleted != 1 {
+		t.Fatalf("office_routine_runs.Deleted = %d, want 1 (it should now be deleting, having already completed its preview)", second.OfficeRoutineRuns.Deleted)
+	}
+	if !second.Runs.Previewed || second.Runs.Err != "" {
+		t.Fatalf("runs = %+v, want a fresh, successful preview: its earlier failed preview must not count as completed", second.Runs)
+	}
+	if second.Runs.WouldDelete != 1 {
+		t.Fatalf("runs.WouldDelete = %d, want 1", second.Runs.WouldDelete)
+	}
+}
+
 func TestLastSweepSnapshot_FalseBeforeFirstSweep(t *testing.T) {
 	sweeper, _ := newTestSweeper(t)
 	if _, ok := sweeper.LastSweepSnapshot(); ok {
