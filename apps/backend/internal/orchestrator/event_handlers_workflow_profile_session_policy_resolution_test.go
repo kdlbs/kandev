@@ -2,14 +2,85 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+// firstReusableLookupErrorRepo makes only the initial lookup fail. A second
+// lookup returns the parked profile session, reproducing the unsafe path where
+// preparation used to continue and promote a session it had not inspected.
+type firstReusableLookupErrorRepo struct {
+	sessionExecutorStore
+	calls int
+}
+
+func (r *firstReusableLookupErrorRepo) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	r.calls++
+	if r.calls == 1 {
+		return nil, errors.New("initial reusable-session lookup failed")
+	}
+	return r.sessionExecutorStore.ListTaskSessions(ctx, taskID)
+}
+
+func TestPrepareWorkflowStepSession_FailsClosedWhenInitialReusableLookupFails(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	parked := &models.TaskSession{
+		ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b", ExecutorID: "exec-local",
+		ExecutorProfileID: "ep1", TaskEnvironmentID: "env-1", State: models.TaskSessionStateWaitingForInput,
+		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, parked))
+	flaky := &firstReusableLookupErrorRepo{sessionExecutorStore: fixture.svc.repo}
+	fixture.svc.repo = flaky
+	target := &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", AgentProfileID: "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+	}
+	source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", AgentProfileID: "profile-a"}
+
+	_, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, target, source)
+
+	require.ErrorContains(t, err, "initial reusable-session lookup failed")
+	require.False(t, switched)
+	require.Equal(t, 1, flaky.calls, "a failed initial lookup must not permit a later reuse lookup")
+	persisted, err := fixture.repo.GetTaskSession(ctx, parked.ID)
+	require.NoError(t, err)
+	require.False(t, persisted.IsPrimary, "the uninspected parked session must not be promoted")
+}
+
+func TestPreflightWorkflowStepCredentials_ValidatesSameProfileReplacement(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.current.AgentProfileID = "profile-b"
+	fixture.stepGetter.workflowAgentProfileID = "profile-b"
+	fixture.svc.executor.SetGitHubCredentialBroker(
+		fakeSwitchSessionCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve",
+	)
+	repository := &models.Repository{
+		ID: "repo1", WorkspaceID: "ws1", Name: "widgets", SourceType: "local",
+		Provider: "acme-forge", RemoteURL: "https://forge.example/acme/widgets.git",
+	}
+	require.NoError(t, fixture.repo.CreateRepository(ctx, repository))
+	require.NoError(t, fixture.repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "taskrepo1", TaskID: "t1", RepositoryID: repository.ID,
+	}))
+
+	err := fixture.svc.preflightWorkflowStepCredentials(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", AgentProfileID: "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+	})
+
+	require.ErrorContains(t, err, "repo1")
+}
 
 func TestProcessStepExitAndEnter_UnknownSourceKeepsCurrentSessionRecoverable(t *testing.T) {
 	ctx := context.Background()

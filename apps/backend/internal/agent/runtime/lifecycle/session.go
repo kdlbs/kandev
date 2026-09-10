@@ -513,12 +513,10 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	}
 	effective.decision = decision
 	if decision.Outcome == ModelSelectionOutcomeApplied ||
-		decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
-		decision.Outcome == ModelSelectionOutcomeUniqueVariation {
+		decision.Outcome == ModelSelectionOutcomeExplicitFallback {
 		effective.appliedModel = decision.EffectiveModel
 	}
-	if decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
-		decision.Outcome == ModelSelectionOutcomeUniqueVariation {
+	if decision.Outcome == ModelSelectionOutcomeExplicitFallback {
 		effective.model = decision.EffectiveModel
 	}
 	return effective

@@ -4,7 +4,6 @@ system: agents
 requirements:
   - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001
   - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002
-  - REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-003
 created: 2026-08-23
 owners:
   - kandev
@@ -13,16 +12,16 @@ owners:
 
 ## Purpose and boundaries
 
-This design defines executor-authoritative model fallback, including safe
-resolution from a bare requested model to one advertised bracketed variation.
+This design defines executor-authoritative model fallback. An exact configured
+model is a runtime identity: an advertised bracketed variation is a different
+model and cannot be inferred, selected, or used to authorize inference.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001` | [Migrated source detail](#migrated-source-detail) |
-| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | [Unique model-variation resolution](#unique-model-variation-resolution) |
-| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-003` | [Profile selection and warning placement](#8-profile-selection-and-warning-placement) |
+| `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002` | Superseded by `REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-001`; no active design behavior |
 
 ## Migrated source detail
 
@@ -61,9 +60,14 @@ Kandev must keep the task operational and explain the effective model.**
 ## Goals
 
 - A configured model that the executor does not advertise is never applied.
-  The agent continues with its current or default model.
-- Every default or explicit fallback creates a persisted warning in task chat.
-  The warning survives reload and shows the effective model when known.
+  Exact profiles fail before inference when their start model is unavailable.
+  An explicit-fallback profile uses its start model when available. If the start
+  model is unavailable, Kandev applies the configured fallback only when it is
+  advertised and applied; otherwise, the profile fails before inference. Only
+  `auto_fallback=true` may continue with the executor's current or default model.
+- Every authorized default or explicit fallback creates a persisted warning in
+  task chat. The warning survives reload and shows the effective model when
+  known.
 - A Claude model that is valid for the user's account can start in a cold,
   isolated executor even when the initial Claude ACP model list omits it.
 - "Gone" models render **greyed out and unselectable** in every model
@@ -114,13 +118,14 @@ Kandev must keep the task operational and explain the effective model.**
 - **Gone model**: a model ID that is configured (profile start model, active
   session model, fallback model) but absent from the currently advertised
   list. Deterministic on the frontend: `configured ∉ advertised`.
-- **Default-on-mismatch mode**: profile has `auto_fallback = false` and no
-  `fallback_model`. If the executor omits the start model, Kandev skips model
-  selection and the agent uses its default. Kandev persists a warning.
+- **Exact mode**: profile has a non-empty model, `auto_fallback = false`, and
+  no `fallback_model`. If the executor cannot advertise and apply the start
+  model, Kandev fails the session before inference with sanitized mismatch
+  evidence.
 - **Fallback-model mode**: profile has `auto_fallback = false` and a
   non-empty `fallback_model`. The only permitted automatic switch is to
-  that single model when the executor advertises it. Otherwise, the agent uses
-  its default and Kandev persists a warning.
+  that single model when the executor advertises and applies it. Otherwise,
+  Kandev fails the session before inference with sanitized mismatch evidence.
 - **Auto-fallback mode**: profile has `auto_fallback = true`. Legacy
   behavior (session-start best-effort; office routing re-dispatch to next
   candidate). Every session-start deviation creates a warning.
@@ -134,137 +139,28 @@ Kandev must keep the task operational and explain the effective model.**
 Per agent profile, one of three modes (precedence: `auto_fallback` wins
 over `fallback_model`):
 
-| Scenario | Default-on-mismatch | Fallback-model | Auto-fallback |
+| Scenario | Exact mode | Fallback-model | Auto-fallback |
 |---|---|---|---|
-| Session start, start model not advertised | Do not call `SetModel`. Continue on the agent default and persist a warning. | If the fallback is advertised, apply it and persist a warning. Otherwise, use the agent default and persist a warning. | Do not call `SetModel`. Continue on the agent default and persist a warning. |
+| Session start, start model not advertised | Do not call `SetModel`. Fail before inference. | If the fallback is advertised, apply it and persist a warning. Otherwise fail before inference. | Do not call `SetModel`. Continue on the agent default and persist a warning. |
 | Session start, advertised start model fails to apply | Fail explicitly. | Fail explicitly. | Continue on the agent default and persist a warning. |
-| Session start, model selection unsupported | Continue on the agent default and persist a warning. | Same | Same |
-| Mid-session model/auth failure (office run, post-start) | Unchanged ADR behavior: office re-dispatches via the workspace routing chain (`routingerr.Decide(ContextOffice)`; availability codes → `DecisionFallback`). The profile's model policy does **not** gate office fallback — the workspace routing configuration is the office authorization owner. | Same as default-on-mismatch: `fallback_model` is a session-start policy, not an office routing input. | Legacy: re-dispatch to next candidate in the provider order (unchanged). |
+| Session start, model selection unsupported | Fail before inference. | Fail before inference. | Continue on the agent default and persist a warning. |
+| Mid-session model/auth failure (office run, post-start) | Unchanged ADR behavior: office re-dispatches via the workspace routing chain (`routingerr.Decide(ContextOffice)`; availability codes → `DecisionFallback`). The profile's model policy does **not** gate office fallback — the workspace routing configuration is the office authorization owner. | Same as exact mode: `fallback_model` is a session-start policy, not an office routing input. | Legacy: re-dispatch to next candidate in the provider order (unchanged). |
 | Boot reconciliation | Never overwrite a gone start model (keep it; UI shows it red). Same for a gone `fallback_model`. | Same | Same (reconciler is mode-independent). |
-| New-task / new-agent profile picker | Profile selectable without a host model advisory. | Same. | Same. |
+| New-task / new-agent profile picker | Profile selectable with a host-catalog warning. | Profile selectable with a host-catalog warning. | Profile selectable with a host-catalog warning. |
 | Model picker (profile editor, session toolbar) | Gone models greyed out, unselectable, visible. | Same. | Same. |
 
 `SetModel` failures that mean "this agent does not support model selection"
-(JSON-RPC `-32601`, `sessionmodel.MethodNone` / `IsMethodNotFound`) do not stop
-the launch. The agent uses its default and Kandev persists a warning.
+(JSON-RPC `-32601`, `sessionmodel.MethodNone` / `IsMethodNotFound`) fail exact
+and fallback-model launches before inference. Only `auto_fallback = true`
+continues on the agent default and persists a warning.
 
-The executor ACP catalog is authoritative for launch.
+The executor ACP catalog is authoritative for launch. Exact-profile model
+identity is enforced by [ADR-2026-09-06](../../../decisions/2026-09-06-exact-profile-model-identity.md).
 The host probe remains an editing hint and does not block profile selection.
-
-## Unique model-variation resolution
-
-### Matching contract
-
-ACP model IDs remain opaque and case-sensitive. Kandev recognizes only this
-structural relationship:
-
-```text
-<requested>[<variant>]
-```
-
-The requested ID must contain no `[` or `]` character. The advertised ID must
-start with the complete requested ID followed by `[`, end with `]`, and contain
-a non-empty variant with no bracket character. Kandev does not trim, parse, or
-rank the variant.
-
-Examples:
-
-| Requested | Advertised candidates | Result |
-| --- | --- | --- |
-| `opus` | `opus[1m]` | Apply `opus[1m]`. |
-| `opus` | `opus[270k]`, `opus[1m, fast]` | Do not infer. |
-| `opus[1m]` | `opus[270k]` | Do not infer. |
-| `opus` | `myopus[1m]`, `opus-extra[1m]` | Do not infer. |
-| `opus` | `opus[]`, `opus[1m][fast]` | Do not infer. |
-
-Duplicate catalog rows with the same model ID count as one distinct candidate.
-This rule keeps the outcome stable when an agent repeats a catalog entry.
-
-### Resolution order
-
-For profiles with `auto_fallback = false`, the lifecycle applies this order
-after ACP initialization:
-
-1. Apply the exact requested model when advertised.
-2. Apply the configured explicit fallback when advertised.
-3. Apply the requested model's unique advertised variation when one exists.
-4. Otherwise, make no model-selection call and keep the provider current or
-   default model.
-
-An unadvertised explicit fallback does not block step 3. More than one distinct
-variation blocks inference even when one candidate appears first or is the
-provider current model.
-
-When `auto_fallback = true`, the legacy path takes precedence when the
-requested model is absent: Kandev ignores the explicit fallback and does not
-infer a variation. It makes no model-selection call and continues on the
-provider current or default model with a warning. Apply errors for an
-advertised model remain best-effort in that mode.
-
-`applyStartModelPolicy` remains the single runtime owner. A pure helper returns
-the unique candidate or no candidate. Initial launch, context reset, and
-workspace rebind continue to call the same policy.
-
-### Decision and warning contract
-
-The typed decision adds the outcome `unique_variation` and the stable reason
-`unique_variation_applied`. `EffectiveModel` contains the advertised variation.
-`FallbackModel` remains reserved for a configured explicit fallback and is not
-overloaded with an inferred value.
-
-Kandev calls `SetModel` only with the candidate's exact advertised ID. A failed
-call follows the existing advertised-model rule: fail the operation unless
-legacy `auto_fallback` permits provider-default continuation. A
-method-not-supported response also follows the current provider-default path.
-
-The persisted `model_selection_warning` event uses the new reason and existing
-requested and effective model fields. The profile remains unchanged. The
-decision ID continues to include the requested model, reason, and effective
-model, so the warning stays idempotent for one session decision.
-
-### Host advisory and mobile behavior
-
-The frontend uses a small pure helper with the same case-sensitive matching
-table. This calculation is advisory because the host catalog can differ from
-the selected executor catalog.
-
-When the host advertises one variation, the task profile option remains
-selectable without a host model advisory. The profile editor keeps the saved
-bare ID visible and describes the unique
-host variation instead of reporting that the model is simply gone. Selecting
-the advertised variation remains an explicit way to update the profile.
-
-When the host advertises zero or multiple variations, the profile editor's
-missing-model presentation remains. The runtime can still reach a different decision from
-the selected executor catalog.
-
-The task-create selector has no host model tooltip or help drawer.
-The profile editor uses its existing responsive selector. The durable
-chat warning uses the existing status-message layout on desktop and mobile.
-This change adds no nested scroll area or hover-only information.
-
-### Tests and operational evidence
-
-Backend table tests cover exact precedence, explicit-fallback precedence,
-one variation, duplicate rows, multiple variations, bracketed requests,
-case differences, malformed IDs, method-not-supported, and apply errors.
-Existing launch, reset, rebind, warning persistence, and reload tests cover the
-new decision outcome.
-
-Frontend unit tests mirror the matching table and cover the task picker,
-profile editor, and localized status warning. Existing desktop and mobile model
-mismatch E2E flows add the unique and ambiguous catalog cases.
-
-Structured lifecycle logs record the requested model, effective model, outcome,
-and distinct candidate count. They do not record credentials or configuration
-file contents.
-
-No database migration is required.
 
 ## Related decisions
 
 - [Let the Executor Own Model Selection](../../../decisions/2026-08-15-executor-authoritative-model-selection.md)
-- [Resolve Only One Advertised Model Variation](../../../decisions/2026-09-07-unique-model-variation-resolution.md)
 
 ## Backend Changes
 
@@ -320,7 +216,8 @@ The policy applies this order:
 
 1. If the start model is advertised, call `SetModel(start_model)`.
 2. If the start model is absent and the explicit fallback is advertised, call `SetModel(fallback_model)`.
-3. Otherwise, do not call `SetModel` and continue with the agent default.
+3. Otherwise, exact and explicit-fallback profiles fail before inference. Only
+   `auto_fallback` profiles continue with the agent default.
 
 An empty advertised list follows step 3.
 It does not authorize a speculative `SetModel` request.
@@ -331,8 +228,9 @@ Transport and protocol errors remain explicit.
 If `auto_fallback` is enabled, an apply error remains best-effort.
 The launch continues with the agent default and persists a warning.
 
-If `sessionmodel.IsMethodNotFound(err)` is true, continue with the agent default.
-Persist a warning because the profile requested a model that Kandev could not apply.
+If `sessionmodel.IsMethodNotFound(err)` is true, exact and explicit-fallback
+profiles fail before inference. `auto_fallback` continues with the agent
+default and persists a warning.
 
 The start-model policy owns every model-selection attempt.
 Later profile or configuration layers must not repeat a handled attempt.
@@ -403,7 +301,9 @@ the execution profile cannot be resolved, rather than silently dropping its
 model and environment values.
 
 Kandev does not relax model validation after the ACP session starts.
-If Claude still omits the model, the executor-authoritative policy uses the default and warns.
+If an exact profile's selected model is unavailable or cannot be applied, the
+session fails before inference. Provider-default continuation with a durable
+warning is permitted only when `auto_fallback` explicitly authorizes it.
 
 Kandev does not copy the bridge private cache.
 The separate portable-configuration feature can copy `settings.json` after explicit user selection.
@@ -498,57 +398,27 @@ All new copy is externalized via `t()` into the `settings` i18n namespace
   (`apps/web/src/locales/{en,pseudo,pt-pt,zh-cn}/settings.json`) — the i18n ratchet
 judges added lines even in unmigrated files.
 
-### 8. Profile selection and warning placement
+### 8. Profile picker warnings (new-task / new-agent)
 
 `apps/web/lib/state/slices/settings/types.ts` — `AgentProfileOption` gains
 `model`, `fallbackModel`, `autoFallback` (populated in
 `toAgentProfileOption`).
 
 `apps/web/components/task-create-dialog-options.tsx`
-(`useAgentProfileOptions`) derives profile labels and eligibility without
-comparing the saved model with the host model catalog. Remove
-`advertisedModelIDs`, `ModelProbeWarning`, and `ModelProbeWarningIndicator` from
-this module, plus imports used only by those helpers. The hook no longer needs
-`useAvailableAgents` solely to produce model advisories.
+(`useAgentProfileOptions`) can compute a host-catalog difference.
+This difference is advisory only.
 
-Both `renderLabel` and `renderTriggerLabel` use the same profile presentation.
-Keep the option interface compatible with its consumers. Preserve profile
-eligibility, recent-use ordering, names, logos, and CLI passthrough indicators.
-Keep `getCapabilityWarning` and its authentication, installation, and probe
-failure states. Those states describe agent health rather than a model mismatch.
-
-Consumers include task creation, new subtasks, new sessions, quick chat,
-automation configuration, and Office setup. All receive this behavior from the
-shared hook. Do not add consumer-specific warning suppression flags.
-
-Retain profile model/configuration fields and the editor's
-`findUniqueModelVariation`. After checking references, remove these unused
-selector keys from every locale:
-`profileStartModelNotAdvertisedOnHost` and
-`profileStartModelUniqueVariationOnHost`.
+- Every profile remains selectable.
+- A missing host model shows one amber warning icon beside the profile name.
+- On fine pointers, hovering or focusing the warning icon reveals the full
+  localized advisory that the executor decides availability at launch. On
+  coarse pointers, tapping the icon opens the same advisory in a drawer. The
+  advisory is not shown as an always-visible secondary row in the option list.
+- The warning does not promise that an explicit fallback will be available.
+- The warning does not change the saved profile model.
 
 `apps/web/app/office/setup/agent-profile-setup-controls.tsx`
-(`useSelectableProfileOptions`) retains its Office eligibility filtering around
-the shared profile options.
-
-#### Desktop and mobile composition
-
-Keep the touch-usable combobox and shared selection logic. A row tap completes
-the temporary profile choice without another help drawer or an empty hit area.
-Preserve keyboard selection, focus return, picker-owned scrolling, and safe-area
-constraints. Assert no document horizontal overflow.
-
-Use `e2e/tests/settings/mobile-no-silent-model-fallback.spec.ts` as the shipped
-flow and `components/task/mobile/mobile-picker-sheet.tsx` as the curated
-temporary-choice precedent. No picker-shell replacement is needed.
-
-#### Rationale and compatibility
-
-A host observation cannot establish the executor outcome. A neutral icon or
-better ID comparison would still report valid catalog differences during
-selection. Keep the existing executor-authority ADR and runtime behavior.
-This change needs no resolver, cache, schema, or new ADR. Explain warning
-placement in `docs/public/agents-and-profiles.md` when implementation ships.
+(`useSelectableProfileOptions`) uses the same advisory behavior.
 
 The persisted `model_selection_warning` chat message renders through
 `apps/web/components/task/chat/messages/status-message.tsx`.
@@ -573,11 +443,12 @@ Backend (Go, `*_test.go` beside source):
 - Reconciler: gone start model is kept, not overwritten; empty model still
   seeded; gone fallback_model kept.
 - Runtime session start: an unadvertised start model causes no `SetModel` call.
-  The session continues with the reported current or default model.
+  Exact profiles fail before inference with sanitized mismatch evidence.
 - Runtime session start: an advertised explicit fallback is applied.
-  An unadvertised fallback causes no call and the agent default remains active.
-- Runtime session start: an empty catalog and method-not-supported both continue
-  with the agent default and create a model-selection warning.
+  An unadvertised fallback causes no call and the session fails before inference.
+- Runtime session start: an empty catalog and method-not-supported fail exact
+  and explicit-fallback profiles before inference. `auto_fallback=true` may
+  continue with the agent default and creates a model-selection warning.
 - Runtime session start: an advertised model apply error fails explicitly.
   Auto-fallback keeps best-effort behavior and creates a warning.
 - Runtime session start: each decision produces at most one model-selection
@@ -598,11 +469,8 @@ Frontend (Vitest, `*.test.ts(x)`):
 
 - `model-config-selector`: disabled option not selectable; greyed class.
 - `session-models` WS handler: stale active model is kept (not cleared).
-- `useAgentProfileOptions`: every otherwise eligible host-mismatch profile
-  remains selectable with no model advisory in either label. Cover canonical
-  IDs, legacy bracketed IDs, unique and multiple variations, and empty catalogs.
-- Capability health warnings, recent-use ordering, disabled-profile filtering,
-  and saved profile values remain unchanged by selector rendering.
+- `useAgentProfileOptions`: every host-mismatch profile remains selectable and
+  shows an advisory warning.
 - Profile editor: gone start model renders red + disabled; auto-fallback keeps
   the explicit fallback choice visible but disables its controls.
 - Profile editors: fallback settings start collapsed; expanding exposes both
@@ -616,14 +484,14 @@ E2E (Playwright, `apps/web/e2e`):
 
 - Mock backend (`KANDEV_E2E_MOCK=true`): create a profile whose start model
   is not in the host catalog. Make sure that the task-create picker keeps the
-  profile selectable without a host model warning in the option or selected
-  label. Select the profile with keyboard on desktop and a row tap on mobile.
-- Launch a profile whose executor advertises its exact model while the host
-  omits it. Verify the selected model, no model-selection warning, and unchanged
-  profile values after reload.
-- Launch with an executor catalog that omits the profile model. Make sure that
-  no model-selection call occurs, the task continues, and chat shows one warning.
-- Reload the task page. Make sure that the warning remains in chat.
+  profile selectable, shows one warning icon, and reveals the advisory warning
+  through the fine-pointer tooltip or coarse-pointer drawer.
+- Launch an exact profile with an executor catalog that omits its model. Make
+  sure that no model-selection call occurs and the session fails before a
+  prompt, tool call, or agent output with sanitized mismatch evidence.
+- Launch an auto-fallback profile with an executor catalog that omits its
+  model. Make sure that the task continues and chat shows one warning. Reload
+  the task page and make sure that warning remains in chat.
 - Desktop profile settings: the disclosure starts closed, expands to two
   horizontally aligned option columns, summarizes the current fallback mode,
   and exposes each info explanation on hover/focus.
@@ -636,8 +504,7 @@ E2E (Playwright, `apps/web/e2e`):
 - `agent_profiles.fallback_model TEXT NOT NULL DEFAULT ''`
 - `agent_profiles.auto_fallback INTEGER NOT NULL DEFAULT 0`
 
-Existing rows use `auto_fallback = 0` and no fallback model.
-This state means default-on-mismatch behavior.
-
-If the executor omits the saved model, the agent uses its default and Kandev
-persists a warning. The saved profile model does not change.
+Existing rows use `auto_fallback = 0` and no fallback model. This is exact
+mode: if the executor omits the saved model, Kandev fails before inference.
+The saved profile model does not change. Provider-default continuation and its
+persisted warning are permitted only when `auto_fallback = true`.

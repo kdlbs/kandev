@@ -397,6 +397,8 @@ type AgentProfileInfo struct {
 	AgentName                  string
 	Model                      string
 	Mode                       string
+	FallbackModel              string
+	AutoFallback               bool
 	ConfigOptions              map[string]string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool

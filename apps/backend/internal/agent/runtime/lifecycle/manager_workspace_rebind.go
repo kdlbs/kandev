@@ -195,17 +195,20 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 		execution.SetModelState(previousModel)
 		return fmt.Errorf("create ACP session in rebound workspace: %w", err)
 	}
+	if !cacheFreshSessionModelState(execution) && previousModelID != "" {
+		waitForFreshSessionModelState(ctx, m.logger, execution)
+	}
+	if err := m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousModelID, previousMode); err != nil {
+		execution.SetModelState(previousModel)
+		return err
+	}
+	// The replacement ACP ID becomes externally visible only after its saved
+	// session configuration, including a strict model, has been restored.
 	execution.ACPSessionID = newSessionID
 	execution.setSessionInitialized(true)
 	execution.resumeContextInjected = false
 	execution.needsResumeContext = m.historyManager != nil &&
 		m.historyManager.HasHistory(execution.SessionID)
-	if !cacheFreshSessionModelState(execution) && previousModelID != "" {
-		waitForFreshSessionModelState(ctx, m.logger, execution)
-	}
-	if err := m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousModelID, previousMode); err != nil {
-		return err
-	}
 	if m.eventPublisher != nil {
 		m.eventPublisher.PublishACPSessionCreated(execution, newSessionID)
 	}

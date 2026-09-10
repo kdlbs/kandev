@@ -60,23 +60,9 @@ Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
 inference, containers, and SSH commands. A successful version update stores
 your exact selection for this Kandev installation. The selection takes
-precedence for the current default generation. **Use Kandev default** clears
-it, and a later shipped package or reviewed default resets it during startup.
-Kandev does not store the default as a user selection.
-
-When a Kandev upgrade changes the managed package or its reviewed default,
-Kandev removes the older selection during startup before the service becomes
-ready. New probes and launches then use the reviewed default for that release.
-On the first startup with this generation tracking, Kandev treats an existing
-selection without a generation marker as legacy and resets it once.
-When the package and default stay the same, Kandev preserves your selection
-across restarts and unrelated upgrades. A process that is already running is
-not replaced, so the new default applies when Kandev starts a future process.
-
-After startup, open the update control to select any validated stable version,
-including an older version. This lets you roll back the new default when a
-provider or environment requires it. The selection remains active until you
-change it or a later Kandev release changes that agent's package or default.
+precedence over the default until you choose **Use Kandev default**. Kandev
+does not store the default as a user selection, so later Kandev releases can
+move unmodified installations to their reviewed defaults.
 
 When the cached npm check finds a newer stable release, the update control has
 a blue dot and its accessible label includes the effective and latest
@@ -179,31 +165,6 @@ change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
 
-### Model IDs and executor catalogs
-
-The host model probe is an editing hint. The selected executor owns the model
-catalog at launch. Kandev resolves a saved model in this order:
-
-1. Use the exact requested model when the executor advertises it.
-2. Use the advertised explicit fallback when the requested model is absent.
-3. Use one unique bracketed variation when the requested model is absent and
-   the executor advertises exactly one matching ID.
-4. Use the agent's current or default model when no earlier choice applies.
-
-Profiles with automatic fallback enabled keep the legacy behavior when the
-saved model is absent: Kandev ignores the explicit fallback and does not infer
-a variation. It uses the agent's current or default model instead.
-
-For example, a saved `opus` model can launch as `opus[1m]` when that is the
-only advertised `opus[...]` ID. If the executor advertises both
-`opus[270k]` and `opus[1m, fast]`, Kandev does not choose either variation.
-Variation text is opaque and model IDs remain case-sensitive.
-
-Kandev shows a warning when the launch result differs from the saved model.
-The saved profile remains `opus`; Kandev does not rewrite it after applying a
-unique variation or using the agent default. Recheck the executor catalog when
-the warning repeats after credentials, copied configuration, or agent updates.
-
 ### Use a dynamic profile
 
 > [!EXPERIMENTAL]
@@ -264,13 +225,16 @@ warning for this difference. Inspect the model list in profile settings for
 discovery details. Authentication, installation, and probe-failure indicators
 remain visible on profile selectors.
 
-At task launch, the selected executor's ACP catalog is authoritative. For
-profiles without automatic fallback, Kandev follows the four-step order above.
-For profiles with automatic fallback enabled, an absent saved model causes no
-model request, and Kandev ignores the explicit fallback and any variation.
-Kandev stores one warning in task chat with the requested model and the
-effective model when known. The warning also identifies the agent and executor
-and asks you to check credentials, copied configuration, and the agent version.
+At task launch, the selected executor's ACP catalog is authoritative. Kandev
+sends the requested model only when the executor advertises it. An exact
+profile, with no explicit fallback and automatic fallback off, fails before
+inference when its model cannot be selected. An advertised explicit fallback
+may be selected instead. With automatic fallback enabled, Kandev sends no
+unadvertised model request and continues with the agent's current or default
+model. Authorized fallback stores one warning in task chat with the requested
+model and effective model when known. The warning identifies the agent and
+executor and asks you to check credentials, copied configuration, and the
+agent version.
 
 The saved profile model is not changed. Optional portable configuration can
 copy selected allowlisted files into a remote executor, but it cannot guarantee

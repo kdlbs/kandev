@@ -770,6 +770,7 @@
   "keyValueValuePlaceholder": "值",
   "modelVariationAdvisory": "主機目錄中有一個可能的 {{model}} 變體：{{variation}}。已儲存的模型在啟動前保持不變。",
   "navUnits": "組織單元",
+  "profileStartModelNotAdvertisedOnHost": "主機探測未公佈 {{model}}。所選執行器將在啓動時決定使用的模型。",
   "unitsTitle": "組織單元",
   "unitsDescription": "單元包含團隊、工作區和成員。加入某個單元即可存取其下的所有工作區，包括之後建立的。",
   "unitsEmpty": "尚無單元。",

@@ -2956,6 +2956,18 @@ func (s *Service) prepareWorkflowStepSession(
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
 		if effectiveProfile != "" {
+			requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
+			if err != nil {
+				return nil, false, err
+			}
+			if requiresFreshSession {
+				endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
+				newSession, err := s.createNewSessionForStepWithEndPolicy(ctx, taskID, session, effectiveProfile, endPolicy)
+				if err != nil {
+					return nil, false, err
+				}
+				return newSession, true, nil
+			}
 			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
 		}
 		if !session.IsPrimary {
@@ -2975,12 +2987,86 @@ func (s *Service) prepareWorkflowStepSession(
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 	}
+	startPolicy, err := s.exactModelWorkflowStartPolicy(ctx, taskID, session.ID, step, sourceStep, effectiveProfile, startPolicy)
+	if err != nil {
+		return nil, false, err
+	}
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
 	newSession, err := s.switchSessionForStepWithPolicies(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy)
 	if err != nil {
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+func (s *Service) exactModelWorkflowStartPolicy(
+	ctx context.Context,
+	taskID, currentSessionID string,
+	step, sourceStep *wfmodels.WorkflowStep,
+	profileID string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+) (models.WorkflowProfileSessionStartPolicy, error) {
+	if startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
+		return startPolicy, nil
+	}
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, profileID, currentSessionID)
+	if err != nil {
+		s.logger.Warn("failed to inspect reusable session for exact model identity",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", profileID),
+			zap.Error(err))
+		return startPolicy, fmt.Errorf("find reusable session for exact model identity: %w", err)
+	}
+	requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
+	if err != nil {
+		return startPolicy, err
+	}
+	if requiresFreshSession {
+		return models.WorkflowProfileSessionStartPolicyNew, nil
+	}
+	return startPolicy, nil
+}
+
+// workflowEntryRequiresFreshExactModelSession prevents a workflow lane from
+// resuming a parked session whose persisted provider model disagrees with the
+// profile's configured model policy. Explicit session overrides remain valid
+// within a lane; this boundary applies only while entering a different workflow
+// step. Auto-fallback profiles intentionally allow provider-default reuse, but
+// explicit fallback profiles may reuse only the configured model or fallback.
+func (s *Service) workflowEntryRequiresFreshExactModelSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	step, sourceStep *wfmodels.WorkflowStep,
+	profileID string,
+) (bool, error) {
+	if session == nil || step == nil || sourceStep == nil || sourceStep.ID == step.ID || profileID == "" {
+		return false, nil
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
+	}
+	if profile == nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: profile is unavailable", profileID)
+	}
+	if profile.Model == "" || profile.AutoFallback {
+		return false, nil
+	}
+	effective, ok := models.LoadEffectiveSessionRuntimeConfig(session)
+	if !ok || effective.Model == "" || effective.Model == profile.Model {
+		return false, nil
+	}
+	if profile.FallbackModel != "" && effective.Model == profile.FallbackModel {
+		return false, nil
+	}
+	s.logger.Info("creating fresh workflow session for exact model identity",
+		zap.String("session_id", session.ID),
+		zap.String("profile_id", profileID),
+		zap.String("source_step_id", sourceStep.ID),
+		zap.String("target_step_id", step.ID),
+		zap.String("configured_model", profile.Model),
+		zap.String("persisted_model", effective.Model))
+	return true, nil
 }
 
 func (s *Service) preflightWorkflowStepCredentials(
@@ -2994,7 +3080,7 @@ func (s *Service) preflightWorkflowStepCredentials(
 	}
 	ctx = withWorkflowMetaCache(ctx)
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
-	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
+	if effectiveProfile == "" {
 		return nil
 	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)

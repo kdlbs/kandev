@@ -524,6 +524,15 @@ func (m *Manager) reapplySessionModelAfterReset(
 ) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
+	return m.reapplySessionModelAfterResetWithClient(ctx, execution, client, newSessionID, modelID)
+}
+
+func (m *Manager) reapplySessionModelAfterResetWithClient(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctlclient.Client,
+	newSessionID, modelID string,
+) error {
 	if client == nil || modelID == "" {
 		return nil
 	}
@@ -544,8 +553,7 @@ func (m *Manager) reapplySessionModelAfterReset(
 	}
 	if decision.EffectiveModel != "" &&
 		(decision.Outcome == ModelSelectionOutcomeApplied ||
-			decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
-			decision.Outcome == ModelSelectionOutcomeUniqueVariation) {
+			decision.Outcome == ModelSelectionOutcomeExplicitFallback) {
 		m.logger.Info("re-applied session model after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),

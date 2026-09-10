@@ -43,7 +43,7 @@ describe("StatusMessage model selection warnings", () => {
     expect(screen.getByText("The saved model was not advertised by the executor.")).toBeTruthy();
   });
 
-  it("explains when the executor applied the only advertised variation", () => {
+  it("renders a retired variation reason from a persisted legacy warning", () => {
     const comment = modelSelectionWarningMessage();
     comment.metadata = {
       ...comment.metadata,

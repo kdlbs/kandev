@@ -51,6 +51,11 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn('"postgres-18:${POSTGRES_18_RESULT}"', self.workflow)
         self.assertIn("TestPreviousStableUpgrade", self.workflow)
 
+    def test_windows_job_has_headroom_for_hosted_runner_variance(self) -> None:
+        _, marker, windows_job = self.workflow.partition("  test-windows:\n")
+        self.assertTrue(marker)
+        self.assertIn("timeout-minutes: 40", windows_job)
+
     def test_base_image_mirrors_postgres_18_at_the_same_digest(self) -> None:
         self.assertIn("POSTGRES_18_DIGEST: " + POSTGRES_18_DIGEST, self.base_image_workflow)
         self.assertIn("POSTGRES_18_SOURCE: docker.io/library/postgres:18@" + POSTGRES_18_DIGEST, self.base_image_workflow)

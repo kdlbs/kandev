@@ -67,6 +67,13 @@ type restartConfigOption struct {
 	Value string `json:"value"`
 }
 
+func restartDefaultModelState() *streams.SessionModelState {
+	return &streams.SessionModelState{
+		CurrentModelID: "claude-sonnet-4-20250514",
+		Models:         []streams.SessionModelInfo{{ModelID: "claude-sonnet-4-20250514"}},
+	}
+}
+
 func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
 	mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger().WithFields()}
 
@@ -436,6 +443,7 @@ func (m *restartMockAgentctlServer) getSetOptions() []restartConfigOption {
 func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -512,7 +520,7 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	}
 
 	wsActions := mock.getWSActions()
-	if !slices.Equal(wsActions, []string{"agent.initialize", "agent.session.new"}) {
+	if !slices.Equal(wsActions, []string{"agent.initialize", "agent.session.new", "agent.session.set_model"}) {
 		t.Fatalf("unexpected WS action order: %v", wsActions)
 	}
 
@@ -747,6 +755,7 @@ func TestPromptAgentWithDispatchCallbackTracksExecutionActivityUntilCompletion(t
 func TestManager_RestartAgentProcess_StopErrorIsNonFatal(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, true, false)
+	mock.newModelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -831,6 +840,7 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -871,6 +881,7 @@ func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
 func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.modelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -920,6 +931,7 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 func TestManager_ResetAgentContext_ClearsIdleDispatchGate(t *testing.T) {
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.modelState = restartDefaultModelState()
 
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -957,10 +969,10 @@ func TestManager_ResetAgentContext_ClearsIdleDispatchGate(t *testing.T) {
 	require.Contains(t, mock.getWSActions(), "agent.prompt")
 }
 
-// TestManager_ResetAgentContext_ReappliesSessionModel is the regression test
-// for an ACP fast-path reset replacing the task's selected model with the
-// provider default from the freshly-created session.
-func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
+// TestManager_ResetAgentContext_FailsWhenSessionModelCannotBeRestored ensures
+// a fresh ACP session never continues on its provider default after losing a
+// persisted model selection.
+func TestManager_ResetAgentContext_FailsWhenSessionModelCannotBeRestored(t *testing.T) {
 	mgr := newTestManager(t)
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
@@ -994,7 +1006,9 @@ func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
 	exec.SetModelState(&CachedModelState{CurrentModelID: "mock-fast"})
 	require.NoError(t, mgr.executionStore.Add(exec))
 
-	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+	err := mgr.ResetAgentContext(ctx, exec.ID)
+	require.ErrorContains(t, err, `requested model "mock-smart" is unavailable (reason: catalog_empty)`)
+	require.Equal(t, v1.AgentStatusFailed, exec.Status)
 
 	actions := mock.getWSActions()
 	resetIndex := slices.Index(actions, "agent.session.reset")
@@ -1003,7 +1017,7 @@ func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
 	require.Equal(t, -1, modelIndex,
 		"an empty fresh-session model catalog must not receive a model-selection request")
 	require.Empty(t, mock.getSetModelIDs(),
-		"reset must continue on the fresh-session provider default when no model is advertised")
+		"reset must not send a speculative model-selection request")
 }
 
 func TestManager_ResetAgentContext_UsesSynchronousSessionModelCatalog(t *testing.T) {
@@ -1062,6 +1076,7 @@ func TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache(t *testi
 		},
 	}
 	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
 

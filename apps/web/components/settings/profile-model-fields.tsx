@@ -23,7 +23,6 @@ import {
 import type { ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import type { CLIFlag } from "@/lib/types/http";
-import { findUniqueModelVariation } from "@/lib/model-variation";
 import {
   SettingsFieldDescription,
   SettingsFieldLabel,
@@ -84,12 +83,6 @@ export function ModelPicker({
   // in the list, greyed out and unselectable, so the user sees what was
   // configured instead of it silently vanishing.
   const modelIsGone = Boolean(profile.model && !modelOptions.some((m) => m.id === profile.model));
-  const uniqueVariation = modelIsGone
-    ? findUniqueModelVariation(
-        profile.model,
-        modelOptions.map((model) => model.id),
-      )
-    : null;
   if (modelIsGone) {
     modelOptions.unshift({
       id: profile.model!,
@@ -123,14 +116,6 @@ export function ModelPicker({
         keepOpenOnModelChange={keepOpenOnModelChange}
         triggerClassName={modelIsGone ? "text-destructive" : undefined}
       />
-      {uniqueVariation && (
-        <p className="text-xs text-muted-foreground" data-testid="profile-model-variation-advisory">
-          {t("settings:modelVariationAdvisory", {
-            model: profile.model,
-            variation: uniqueVariation,
-          })}
-        </p>
-      )}
     </div>
   );
 }
