@@ -26,10 +26,15 @@ import type {
   RetentionTableCensus,
   RetentionTableSweepResult,
   RetentionSweptTableResult,
+  RetentionUnknownStatusCount,
 } from "@/lib/types/system";
 
 function serialize(settings: RetentionSettings | null): string {
   return settings ? JSON.stringify(settings) : "loading";
+}
+
+function formatUnknownStatuses(unknown: RetentionUnknownStatusCount[]): string {
+  return unknown.map((u) => `${u.status} (${u.count})`).join(", ");
 }
 
 function NumberField({
@@ -452,7 +457,8 @@ function RetainedCountRow({ label, census }: { label: string; census: RetentionT
       )}
       {census.unknown_statuses && census.unknown_statuses.length > 0 && (
         <span className="text-amber-600">
-          {t("system:retentionUnknownStatusesLabel")}: {census.unknown_statuses.join(", ")}
+          {t("system:retentionUnknownStatusesLabel")}:{" "}
+          {formatUnknownStatuses(census.unknown_statuses)}
         </span>
       )}
       {census.top_routine_id && (

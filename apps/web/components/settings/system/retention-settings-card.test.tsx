@@ -194,3 +194,26 @@ describe("RetentionSettingsCard", () => {
     expect(screen.getByTestId("retention-skip-count").textContent).toContain("2");
   });
 });
+
+describe("RetentionSettingsCard unknown-status reporting", () => {
+  it("renders each unrecognized status with its row count", async () => {
+    fetchRetentionStatusMock.mockResolvedValue(
+      statusOf({
+        retained_counts: {
+          office_routine_runs: {
+            state: "fresh",
+            retained_count: 5,
+            as_of: "2026-09-01T00:00:00Z",
+            unknown_statuses: [{ status: "quarantined", count: 2 }],
+          },
+          runs: { state: "not_computed", retained_count: 0, as_of: "" },
+          run_events: { state: "not_computed", retained_count: 0, as_of: "" },
+        },
+      }),
+    );
+    renderCard();
+
+    const row = await screen.findByTestId("retention-retained-office_routine_runs");
+    expect(row.textContent).toContain("quarantined (2)");
+  });
+});

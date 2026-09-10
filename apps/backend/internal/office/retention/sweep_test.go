@@ -120,6 +120,70 @@ func TestRunSweep_SecondPassDeletesAfterPreview(t *testing.T) {
 	}
 }
 
+// TestRunSweep_RecentHistoryRowSurvivesWithinRetentionWindow seeds one row
+// inside the configured window and one past it, per table, with the floor
+// dropped to 0 so only age decides eligibility. A cutoff that ignores
+// WindowDays (using the sweep instant itself) would preview and then delete
+// both rows instead of only the old one.
+func TestRunSweep_RecentHistoryRowSurvivesWithinRetentionWindow(t *testing.T) {
+	sweeper, conn := newTestSweeper(t)
+	ctx := context.Background()
+	saveZeroFloorSettings(t, sweeper) // DefaultSettings() keeps the 30-day window
+
+	seedRoutine(t, conn, "r-1")
+	recent := daysAgo(1)
+	old := daysAgo(60)
+
+	recentRoutineRunID := newID()
+	oldRoutineRunID := newID()
+	seedRoutineRun(t, conn, recentRoutineRunID, "r-1", "done", &recent, recent)
+	seedRoutineRun(t, conn, oldRoutineRunID, "r-1", "done", &old, old)
+
+	recentRunID := newID()
+	oldRunID := newID()
+	seedRun(t, conn, recentRunID, "agent-1", "finished", &recent, recent)
+	seedRun(t, conn, oldRunID, "agent-1", "finished", &old, old)
+
+	sweeper.RunSweep(ctx) // preview pass
+
+	preview, ok := sweeper.LastSweepSnapshot()
+	if !ok {
+		t.Fatal("LastSweepSnapshot: ok = false, want true")
+	}
+	if preview.OfficeRoutineRuns.WouldDelete != 1 {
+		t.Fatalf("office_routine_runs.WouldDelete = %d, want 1 (only the row past the 30-day window)", preview.OfficeRoutineRuns.WouldDelete)
+	}
+	if preview.Runs.WouldDelete != 1 {
+		t.Fatalf("runs.WouldDelete = %d, want 1 (only the row past the 30-day window)", preview.Runs.WouldDelete)
+	}
+
+	sweeper.RunSweep(ctx) // deleting pass
+
+	last, ok := sweeper.LastSweepSnapshot()
+	if !ok {
+		t.Fatal("LastSweepSnapshot: ok = false, want true")
+	}
+	if last.OfficeRoutineRuns.Deleted != 1 {
+		t.Fatalf("office_routine_runs.Deleted = %d, want 1 (only the row past the 30-day window)", last.OfficeRoutineRuns.Deleted)
+	}
+	if last.Runs.Deleted != 1 {
+		t.Fatalf("runs.Deleted = %d, want 1 (only the row past the 30-day window)", last.Runs.Deleted)
+	}
+
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_routine_runs WHERE id = ?`, recentRoutineRunID); n != 1 {
+		t.Fatalf("recent routine-run rows = %d, want 1: a row inside the retention window must survive", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_routine_runs WHERE id = ?`, oldRoutineRunID); n != 0 {
+		t.Fatalf("old routine-run rows = %d, want 0", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE id = ?`, recentRunID); n != 1 {
+		t.Fatalf("recent run rows = %d, want 1: a row inside the retention window must survive", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE id = ?`, oldRunID); n != 0 {
+		t.Fatalf("old run rows = %d, want 0", n)
+	}
+}
+
 func TestRunSweep_BacklogFlaggedWhenEligibleExceedsBatchLimit(t *testing.T) {
 	sweeper, conn := newTestSweeper(t)
 	ctx := context.Background()

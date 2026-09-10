@@ -37,11 +37,12 @@ func (h *Handler) logError(message string, err error) {
 	}
 }
 
-// RegisterRoutes wires GET/PUT /api/v1/system/retention. Both routes are
-// admin-scoped, and GET is readable while retention is disabled
-// (AC-OFFICE-RUN-HISTORY-RETENTION-004.8).
-func RegisterRoutes(admin *gin.RouterGroup, handler *Handler) {
-	admin.GET("/retention", handler.getRetention)
+// RegisterRoutes wires GET/PUT /api/v1/system/retention: GET is
+// member-readable, matching every sibling System-pages surface (storage,
+// queue settings, sleep inhibition), and readable while retention is
+// disabled (AC-OFFICE-RUN-HISTORY-RETENTION-004.8); PUT is admin-scoped.
+func RegisterRoutes(read, admin *gin.RouterGroup, handler *Handler) {
+	read.GET("/retention", handler.getRetention)
 	admin.PUT("/retention", handler.putRetention)
 }
 

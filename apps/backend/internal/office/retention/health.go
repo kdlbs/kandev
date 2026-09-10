@@ -183,7 +183,7 @@ func (c *Checker) censusIssues(settings Settings) []health.Issue {
 			issues = append(issues, issue(
 				fmt.Sprintf("office_retention_unknown_status:%s", e.table),
 				"Unrecognized status in retained rows",
-				fmt.Sprintf("%s has rows with unrecognized status values, treated as live state and never pruned: %s.", e.table, strings.Join(e.census.UnknownStatuses, ", ")),
+				fmt.Sprintf("%s has rows with unrecognized status values, treated as live state and never pruned: %s.", e.table, formatUnknownStatuses(e.census.UnknownStatuses)),
 			))
 		}
 
@@ -206,6 +206,17 @@ func (c *Checker) censusIssues(settings Settings) []health.Issue {
 		))
 	}
 	return issues
+}
+
+// formatUnknownStatuses renders each unrecognized status with its row
+// count, in the ascending order summarizeStatusCensus already sorted them
+// (AC-OFFICE-RUN-HISTORY-RETENTION-001.10).
+func formatUnknownStatuses(unknown []UnknownStatusCount) string {
+	parts := make([]string, len(unknown))
+	for i, u := range unknown {
+		parts[i] = fmt.Sprintf("%s (%d)", u.Status, u.Count)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func thresholdMessage(table TableName, census TableCensus, warnRows int) string {

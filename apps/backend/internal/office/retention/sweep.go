@@ -253,17 +253,18 @@ func (s *Sweeper) isPreviewed(ctx context.Context, q queryer, table TableName) b
 }
 
 func (s *Sweeper) sweepRoutineRuns(ctx context.Context, q queryer, cfg TableSettings, now time.Time, batchLimit int) SweptTableResult {
+	cutoff := retentionCutoff(now, cfg.WindowDays)
 	if !s.isPreviewed(ctx, q, TableOfficeRoutineRuns) {
 		return s.previewTable(ctx, q, TableOfficeRoutineRuns, func() (int64, error) {
-			return s.store.CountEligibleRoutineRuns(ctx, q, now, cfg.FloorPerOwner)
+			return s.store.CountEligibleRoutineRuns(ctx, q, cutoff, cfg.FloorPerOwner)
 		}, now)
 	}
 
-	eligible, err := s.store.CountEligibleRoutineRuns(ctx, q, now, cfg.FloorPerOwner)
+	eligible, err := s.store.CountEligibleRoutineRuns(ctx, q, cutoff, cfg.FloorPerOwner)
 	if err != nil {
 		return SweptTableResult{TableSweepResult: TableSweepResult{Err: err.Error()}}
 	}
-	deleted, err := s.store.DeleteRoutineRunsBatch(ctx, q, now, cfg.FloorPerOwner, batchLimit)
+	deleted, err := s.store.DeleteRoutineRunsBatch(ctx, q, cutoff, cfg.FloorPerOwner, batchLimit)
 	if err != nil {
 		return SweptTableResult{TableSweepResult: TableSweepResult{Err: err.Error()}}
 	}
@@ -274,18 +275,19 @@ func (s *Sweeper) sweepRoutineRuns(ctx context.Context, q queryer, cfg TableSett
 }
 
 func (s *Sweeper) sweepRuns(ctx context.Context, q queryer, cfg TableSettings, now time.Time, batchLimit int) (SweptTableResult, satelliteResults) {
+	cutoff := retentionCutoff(now, cfg.WindowDays)
 	if !s.isPreviewed(ctx, q, TableRuns) {
 		result := s.previewTable(ctx, q, TableRuns, func() (int64, error) {
-			return s.store.CountEligibleRuns(ctx, q, now, cfg.FloorPerOwner)
+			return s.store.CountEligibleRuns(ctx, q, cutoff, cfg.FloorPerOwner)
 		}, now)
 		return result, satelliteResults{}
 	}
 
-	eligible, err := s.store.CountEligibleRuns(ctx, q, now, cfg.FloorPerOwner)
+	eligible, err := s.store.CountEligibleRuns(ctx, q, cutoff, cfg.FloorPerOwner)
 	if err != nil {
 		return SweptTableResult{TableSweepResult: TableSweepResult{Err: err.Error()}}, satelliteResults{}
 	}
-	result, err := s.store.DeleteRunBatch(ctx, q, now, cfg.FloorPerOwner, batchLimit)
+	result, err := s.store.DeleteRunBatch(ctx, q, cutoff, cfg.FloorPerOwner, batchLimit)
 	if err != nil {
 		return SweptTableResult{TableSweepResult: TableSweepResult{Err: err.Error()}}, satelliteResults{}
 	}
@@ -305,6 +307,14 @@ func (s *Sweeper) sweepRuns(ctx context.Context, q queryer, cfg TableSettings, n
 		RouteAttempts: TableSweepResult{Deleted: result.RouteAttemptsDeleted},
 		RunSkills:     TableSweepResult{Deleted: result.RunSkillsDeleted},
 	}
+}
+
+// retentionCutoff turns a table's configured window into the instant a
+// history row's completion time must be older than to be eligible,
+// derived from the one sweep-start instant both tables share
+// (AC-OFFICE-RUN-HISTORY-RETENTION-002.11).
+func retentionCutoff(now time.Time, windowDays int) time.Time {
+	return now.AddDate(0, 0, -windowDays)
 }
 
 // previewTable runs a table's first-ever preview pass: count eligible rows

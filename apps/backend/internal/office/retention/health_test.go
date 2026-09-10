@@ -3,6 +3,7 @@ package retention
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -34,6 +35,17 @@ func hasIssue(issues []health.Issue, id string) bool {
 		}
 	}
 	return false
+}
+
+func issueMessage(t *testing.T, issues []health.Issue, id string) string {
+	t.Helper()
+	for _, i := range issues {
+		if i.ID == id {
+			return i.Message
+		}
+	}
+	t.Fatalf("no issue with id %q in %v", id, issueIDs(issues))
+	return ""
 }
 
 func TestChecker_NameAndCategory(t *testing.T) {
@@ -227,12 +239,17 @@ func TestChecker_UnknownStatusRaisesWhileDisabledAndBeforeAnySweep(t *testing.T)
 
 	seedRoutine(t, conn, "r-1")
 	seedRoutineRun(t, conn, newID(), "r-1", "quarantined", nil, daysAgo(1))
+	seedRoutineRun(t, conn, newID(), "r-1", "quarantined", nil, daysAgo(2))
 
 	sweeper.RunCensus(ctx) // AC-003.11: census runs independent of the sweep/enabled state
 
 	issues := checker.Check(ctx)
-	if !hasIssue(issues, "office_retention_unknown_status:office_routine_runs") {
-		t.Fatalf("issues = %v, want office_retention_unknown_status:office_routine_runs (001.10, disabled, no sweep ever ran)", issueIDs(issues))
+	const id = "office_retention_unknown_status:office_routine_runs"
+	if !hasIssue(issues, id) {
+		t.Fatalf("issues = %v, want %s (001.10, disabled, no sweep ever ran)", issueIDs(issues), id)
+	}
+	if message := issueMessage(t, issues, id); !strings.Contains(message, "quarantined (2)") {
+		t.Fatalf("message = %q, want it to name the unrecognized status with its row count", message)
 	}
 }
 

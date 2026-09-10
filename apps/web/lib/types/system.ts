@@ -579,11 +579,16 @@ export interface RetentionLastSweep {
 
 export type RetentionCensusState = "not_computed" | "fresh" | "stale";
 
+export interface RetentionUnknownStatusCount {
+  status: string;
+  count: number;
+}
+
 export interface RetentionTableCensus {
   state: RetentionCensusState;
   retained_count: number;
   as_of: string;
-  unknown_statuses?: string[];
+  unknown_statuses?: RetentionUnknownStatusCount[];
   top_routine_id?: string;
   top_routine_share?: number;
 }

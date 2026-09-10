@@ -1721,17 +1721,20 @@ func registerSystemRoutes(p routeParams) {
 }
 
 // registerRetentionRoutes mounts GET/PUT /api/v1/system/retention. It is a
-// separate admin-scoped group from systemSvc's own /api/v1/system group
-// (rather than a field on system.Service) because internal/office/retention
-// cannot be imported by internal/system without inverting the existing
-// system -> office dependency direction; gin allows two RouterGroups to
-// share a path prefix as long as no route collides, and none does here.
+// separate group from systemSvc's own /api/v1/system group (rather than a
+// field on system.Service) because internal/office/retention cannot be
+// imported by internal/system without inverting the existing system ->
+// office dependency direction; gin allows two RouterGroups to share a path
+// prefix as long as no route collides, and none does here. Read/admin
+// split mirrors system.Service.RegisterRoutes: GET is member-readable,
+// PUT requires the admin-scoped settings-manage permission.
 func registerRetentionRoutes(p routeParams) {
 	if p.services == nil || p.services.Retention == nil {
 		return
 	}
-	admin := p.router.Group("/api/v1/system", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
-	retention.RegisterRoutes(admin, p.services.Retention.Handler)
+	read := p.router.Group("/api/v1/system")
+	admin := read.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
+	retention.RegisterRoutes(read, admin, p.services.Retention.Handler)
 }
 
 // registerHealthRoutes sets up the system health endpoint with all health checkers.

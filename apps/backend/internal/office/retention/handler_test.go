@@ -13,17 +13,22 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 )
 
-// newTestRetentionRouter mirrors production wiring: one admin group guarded
-// by authn.RequireAdmin, since both GET and PUT /api/v1/system/retention are
-// admin-scoped (unlike storage's split read/admin groups).
+// newTestRetentionRouter mirrors production wiring: GET is member-readable,
+// PUT requires admin, matching storage's and sleep-inhibition's split
+// read/admin groups.
 func newTestRetentionRouter(handler *Handler) *gin.Engine {
+	return newTestRetentionRouterAs(handler, authn.RoleAdmin)
+}
+
+func newTestRetentionRouterAs(handler *Handler, role authn.Role) *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		authn.SetOnGin(c, authn.Identity{UserID: "admin-1", Role: authn.RoleAdmin})
+		authn.SetOnGin(c, authn.Identity{UserID: "user-1", Role: role})
 		c.Next()
 	})
-	admin := router.Group("/api/v1/system", authn.RequireAdmin())
-	RegisterRoutes(admin, handler)
+	read := router.Group("/api/v1/system")
+	admin := read.Group("", authn.RequireAdmin())
+	RegisterRoutes(read, admin, handler)
 	return router
 }
 
@@ -70,6 +75,28 @@ func TestGetRetention_FreshInstallReturnsDefaultsAndNilLastSweep(t *testing.T) {
 	}
 	if status.SkipCount != 0 {
 		t.Fatalf("SkipCount = %d, want 0", status.SkipCount)
+	}
+}
+
+func TestGetRetention_NonAdminMemberCanRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler, _ := newTestHandler(t)
+	router := newTestRetentionRouterAs(handler, authn.RoleMember)
+
+	response := doRequest(router, http.MethodGet, "/api/v1/system/retention", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("member GET status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPutRetention_NonAdminMemberIsRejected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler, _ := newTestHandler(t)
+	router := newTestRetentionRouterAs(handler, authn.RoleMember)
+
+	response := doRequest(router, http.MethodPut, "/api/v1/system/retention", []byte(`{}`))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("member PUT status = %d, want 403: %s", response.Code, response.Body.String())
 	}
 }
 
