@@ -1,191 +1,175 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ComponentProps, ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 
 vi.mock("@/components/page-topbar", () => ({
   PageTopbar: ({
     title,
+    titleSlot,
     leading,
-    leftActions,
     actions,
     freeWidth,
   }: {
-    title?: string;
+    title: string;
+    titleSlot?: ReactNode;
     leading?: ReactNode;
-    leftActions?: ReactNode;
     actions?: ReactNode;
     freeWidth?: "lead" | "actions";
   }) => (
     <header data-free-width={freeWidth}>
       {leading}
-      <span data-testid="topbar-title">{title}</span>
-      <div data-testid="topbar-left-actions">{leftActions}</div>
-      <div>{actions}</div>
+      {titleSlot ?? title}
+      {actions}
     </header>
   ),
 }));
 
 vi.mock("./mobile-menu-sheet", () => ({
-  MobileMenuSheet: () => null,
+  MobileMenuSheet: ({ open, pageActions }: { open: boolean; pageActions?: ReactNode }) =>
+    open ? <div role="dialog">{pageActions}</div> : null,
 }));
 
-const quickChatMocks = vi.hoisted(() => ({
+const launchers = vi.hoisted(() => ({
   openQuickChat: vi.fn(),
   openQuickTerminal: vi.fn(),
 }));
-const statusDrawerState = vi.hoisted(() => ({
+const status = vi.hoisted(() => ({
   issueSeverity: "none" as "none" | "unstable" | "lost",
+}));
+const chat = vi.hoisted(() => ({
+  activity: null as "running" | "finished" | null,
+  label: "Quick Chat",
 }));
 
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
-  useQuickChatLauncher: () => quickChatMocks.openQuickChat,
+  useQuickChatLauncher: () => launchers.openQuickChat,
 }));
-
 vi.mock("@/hooks/use-quick-terminal-launcher", () => ({
-  useQuickTerminalLauncher: () => quickChatMocks.openQuickTerminal,
+  useQuickTerminalLauncher: () => launchers.openQuickTerminal,
 }));
-
 vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
-  useAppStatusDrawer: () => statusDrawerState,
+  useAppStatusDrawer: () => status,
+}));
+vi.mock("@/components/quick-chat/use-quick-chat-activity", () => ({
+  useQuickChatActivity: () => chat,
 }));
 
-const LEFT_ACTIONS_TEST_ID = "topbar-left-actions";
-const QUICK_CHAT_TEST_ID = "mobile-quick-chat-button";
-const QUICK_TERMINAL_TEST_ID = "mobile-quick-terminal-button";
-const ACTIVE_WORKSPACE_ID = "workspace-1";
+const MENU = "mobile-topbar-menu";
+const CHAT = "mobile-quick-chat-button";
+const TERMINAL = "mobile-quick-terminal-button";
+const CONTEXT = "mobile-topbar-page-context";
+const SEARCH = "mobile-search-toggle";
+const WORKSPACE = "workspace-1";
 
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+});
 afterEach(() => {
   cleanup();
-  quickChatMocks.openQuickChat.mockClear();
-  quickChatMocks.openQuickTerminal.mockClear();
-  statusDrawerState.issueSeverity = "none";
+  vi.useRealTimers();
+  vi.clearAllMocks();
+  status.issueSeverity = "none";
+  chat.activity = null;
+  chat.label = "Quick Chat";
 });
 
-/**
- * `currentPage` — not the title text — decides whether this is the Home header.
- * The component used to derive that from `title === "Home"`, which was true only
- * in English, so these tests pass the discriminant explicitly now.
- */
-function renderHeader(
-  title: string,
-  workspaceId?: string,
-  onSearchChange?: () => void,
-  currentPage: "kanban" | "tasks" = "kanban",
-) {
+function renderHeader(props: Partial<ComponentProps<typeof KanbanHeaderMobile>> = {}) {
   return render(
     <StateProvider>
       <KanbanHeaderMobile
-        title={title}
-        currentPage={currentPage}
-        workspaceId={workspaceId}
-        onSearchChange={onSearchChange}
-        workspaceLabel="/root/kandev"
+        title="Localized page title"
+        workspaceId={WORKSPACE}
+        workspaceLabel="Harbor"
+        {...props}
       />
     </StateProvider>,
   );
 }
 
-describe("KanbanHeaderMobile", () => {
-  it("links the Kandev brand home and names the page through the title crumb", () => {
-    renderHeader("Home", ACTIVE_WORKSPACE_ID);
+function openMenu() {
+  fireEvent.click(screen.getByTestId(MENU));
+}
+function frame() {
+  act(() => vi.advanceTimersToNextFrame());
+}
 
-    expect(screen.getByRole("link", { name: "Kandev home" }).getAttribute("href")).toBe(
-      `/?home=overview&workspaceId=${ACTIVE_WORKSPACE_ID}`,
-    );
-    expect(screen.getByTestId("topbar-title").textContent).toBe("Home");
-    // The old two-line title/workspace stack is gone.
-    expect(screen.getByTestId(LEFT_ACTIONS_TEST_ID).textContent).toBe("");
+describe("shared phone listing header", () => {
+  // @covers AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.5 AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.7
+  it.each([
+    ["kanban", "Kanban"],
+    ["tasks", "List"],
+  ] as const)("uses route-derived context and opens the menu on %s", (currentPage, label) => {
+    renderHeader({ currentPage });
+    const context = screen.getByTestId(CONTEXT);
+    expect(context.textContent).toContain("Harbor");
+    expect(context.textContent).toContain(label);
+    expect(screen.queryByTestId("mobile-topbar-brand")).toBeNull();
+    expect(screen.queryByTestId("mobile-topbar-action-strip")).toBeNull();
+    expect(context.closest("header")?.getAttribute("data-free-width")).toBe("lead");
+    fireEvent.click(context);
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
-  it("renders the title crumb without repeating the workspace label", () => {
-    renderHeader("Tasks", undefined, undefined, "tasks");
-
-    expect(screen.getByTestId("topbar-title").textContent).toBe("Tasks");
-    // The picker owns workspace identity; the bar never repeats it.
-    expect(screen.queryByText("/root/kandev")).toBeNull();
-    // The scrolling strip carries actions only; page context is the crumb's job.
-    const actionStrip = screen.getByTestId("mobile-topbar-action-strip");
-    expect(actionStrip.textContent).not.toContain("Tasks");
+  it("keeps the Threads-supplied view control in the title slot", () => {
+    renderHeader({ currentPage: "threads", taskListingControls: <button>Review view</button> });
+    const view = screen.getByRole("button", { name: "Review view" });
+    expect(view.closest("header")).not.toBeNull();
+    expect(screen.queryByTestId(CONTEXT)).toBeNull();
+    expect(screen.queryByTestId("mobile-topbar-action-strip")).toBeNull();
   });
 
-  it("opens quick chat from the header action when a workspace is active", () => {
-    renderHeader("Home", ACTIVE_WORKSPACE_ID);
-
-    fireEvent.click(screen.getByTestId(QUICK_CHAT_TEST_ID));
-    expect(quickChatMocks.openQuickChat).toHaveBeenCalledTimes(1);
+  // @covers AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.2 AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.3
+  it.each([
+    [CHAT, "openQuickChat"],
+    [TERMINAL, "openQuickTerminal"],
+  ] as const)("closes the menu before launching %s", (testId, launcher) => {
+    renderHeader();
+    expect(screen.queryByTestId(testId)).toBeNull();
+    openMenu();
+    fireEvent.click(screen.getByTestId(testId));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(launchers[launcher]).not.toHaveBeenCalled();
+    frame();
+    expect(launchers[launcher]).toHaveBeenCalledTimes(1);
   });
 
-  it("opens quick terminal immediately before quick chat", () => {
-    renderHeader("Home", ACTIVE_WORKSPACE_ID);
-
-    const terminalTarget = screen.getByTestId("mobile-quick-terminal-hit-target");
-    const quickChatTarget = screen.getByTestId("mobile-quick-chat-hit-target");
-    expect(terminalTarget.nextElementSibling).toBe(quickChatTarget);
-
-    fireEvent.click(screen.getByTestId(QUICK_TERMINAL_TEST_ID));
-    expect(quickChatMocks.openQuickTerminal).toHaveBeenCalledTimes(1);
+  it("omits workspace launchers without an active workspace", () => {
+    renderHeader({ workspaceId: undefined });
+    openMenu();
+    expect(screen.queryByTestId(CHAT)).toBeNull();
+    expect(screen.queryByTestId(TERMINAL)).toBeNull();
   });
 
-  it("hides the quick chat action without an active workspace", () => {
-    renderHeader("Home");
-
-    expect(screen.queryByTestId(QUICK_CHAT_TEST_ID)).toBeNull();
-    expect(screen.queryByTestId(QUICK_TERMINAL_TEST_ID)).toBeNull();
+  // @covers AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.10
+  it("reveals search from the menu and clears its query on collapse", () => {
+    const onSearchChange = vi.fn();
+    renderHeader({ currentPage: "tasks", searchQuery: "Alpha", onSearchChange });
+    openMenu();
+    expect(screen.getByTestId(SEARCH).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByTestId(SEARCH));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    frame();
+    expect(onSearchChange).not.toHaveBeenCalled();
+    openMenu();
+    expect(screen.getByTestId(SEARCH).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByTestId(SEARCH));
+    frame();
+    expect(onSearchChange).toHaveBeenCalledWith("");
   });
 
-  it("places quick chat immediately before search", () => {
-    renderHeader("Home", "workspace-1", vi.fn());
-
-    const quickChat = screen.getByTestId("mobile-quick-chat-hit-target");
-    const search = screen.getByTestId("mobile-search-toggle");
-    expect(quickChat.nextElementSibling).toBe(search);
-  });
-
-  it("hands the bar's leftover width to the scrolling action strip", () => {
-    renderHeader("Home", ACTIVE_WORKSPACE_ID, vi.fn());
-
-    // The strip is `flex-1`, so its base size is zero. If the lead zone keeps
-    // the slack the strip resolves to zero width, the actions become
-    // unreachable, and the bar renders brand, empty middle, menu.
-    const bar = screen.getByTestId("mobile-topbar-action-strip").closest("header");
-    expect(bar?.getAttribute("data-free-width")).toBe("actions");
-  });
-
-  it("keeps the brand and menu outside the middle action strip", () => {
-    renderHeader("Home", ACTIVE_WORKSPACE_ID, vi.fn());
-
-    const strip = screen.getByTestId("mobile-topbar-action-strip");
-    const menu = screen.getByTestId("mobile-topbar-menu");
-    expect(strip.parentElement).toBe(menu.parentElement);
-    expect(strip.previousElementSibling).not.toBe(menu);
-    expect(menu.previousElementSibling).toBe(strip);
-  });
-
-  it("uses the shared compact icon geometry for native mobile actions", () => {
-    renderHeader("Home", ACTIVE_WORKSPACE_ID, vi.fn());
-
-    for (const id of [
-      QUICK_TERMINAL_TEST_ID,
-      QUICK_CHAT_TEST_ID,
-      "mobile-search-toggle",
-      "mobile-topbar-menu",
-    ]) {
-      expect(screen.getByTestId(id).className).not.toContain("!size-11");
-    }
-    expect(screen.getByTestId("mobile-quick-terminal-hit-target").className).toContain("h-11");
-    expect(screen.getByTestId("mobile-quick-chat-hit-target").className).toContain("h-11");
-  });
-
-  it("describes a connectivity warning on the persistent Home menu trigger", () => {
-    statusDrawerState.issueSeverity = "lost";
-    renderHeader("Home");
-
+  it("keeps connectivity and Quick Chat feedback on the persistent menu", () => {
+    status.issueSeverity = "lost";
+    chat.activity = "running";
+    chat.label = "Quick Chat running";
+    renderHeader();
+    const menu = screen.getByTestId(MENU);
+    expect(menu.getAttribute("aria-label")).toContain("Connection lost");
+    expect(menu.getAttribute("aria-description")).toBe(chat.label);
+    expect(menu.getAttribute("data-connection-severity")).toBe("lost");
     expect(
-      screen.getByRole("button", {
-        name: "Connection lost for at least 10 seconds. Live updates may be stale. Open menu",
-      }),
-    ).toBeTruthy();
+      within(menu).getByTestId("quick-chat-activity-indicator").getAttribute("data-state"),
+    ).toBe("running");
   });
 });

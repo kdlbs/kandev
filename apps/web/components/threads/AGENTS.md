@@ -40,6 +40,20 @@ taking a fixed slice, so two threads fill the deck and a busy deck scrolls
 horizontally instead of shrinking into slivers. The phone keeps one full-width
 snapping column, which is a deliberately different layout.
 
+The phone title button opens one board-owned `MobileThreadPicker` using
+admitted task summaries. Selection scrolls an existing shell; viewport
+activation still owns transcript mounting. The picker restores focus without
+scrolling back to the previous column. Phone headers prioritize task title,
+status, and agent selection; workflow and step context remain in the picker.
+Titles wrap to two lines. Inline topbar pagination shows position/count for
+multiple threads and decorative dots only for decks of up to seven threads.
+`ThreadsBoard.renderHeader` receives `mobileTaskId`, derived from board scroll
+geometry by `useMobileThreadPosition`; the page derives its ordinal from stable
+order without copying selection state. Do not derive pagination from loaded
+chat or visibility-ID membership alone: both adjacent columns can stay
+intersecting across a swipe midpoint. Position changes also refresh the nearest
+visible detail calculation, retaining the one-phone-transcript limit.
+
 The page reads `?workspace=` into the route it hands `useKanbanRouteBootstrap`.
 Without it a cross-workspace link loads whichever workspace the cookie last
 named. Scope changes from the shared header go through `listingHistoryHref`,
