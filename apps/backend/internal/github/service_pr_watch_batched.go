@@ -74,14 +74,13 @@ func (s *Service) syncWatchesBatchedWithClient(
 		return nil, err
 	}
 	numbered, searching := splitPRWatches(watches)
-	statuses, err := s.fetchBatchedWatchStatuses(ctx, exec, cacheScope, numbered, searching)
+	statuses, err := s.fetchBatchedWatchStatuses(ctx, client, exec, cacheScope, numbered, searching)
 	if err != nil {
 		return nil, err
 	}
 	if statuses == nil {
 		statuses = &batchedWatchStatuses{}
 	}
-	s.enrichBatchedWorkflowAttention(ctx, client, cacheScope, statuses.byKey)
 
 	results := make([]PRWatchSyncResult, 0, len(watches))
 	now := time.Now().UTC()
@@ -116,7 +115,9 @@ func (s *Service) enrichBatchedWorkflowAttention(
 		return
 	}
 
-	fetchCtx, cancel := context.WithTimeout(ctx, workflowAttentionBatchBudget)
+	baseCtx, cancelBase := derivedFetchContext(ctx)
+	defer cancelBase()
+	fetchCtx, cancel := context.WithTimeout(baseCtx, workflowAttentionBatchBudget)
 	defer cancel()
 	sem := make(chan struct{}, workflowAttentionBatchConcurrency)
 	var wg sync.WaitGroup
@@ -277,7 +278,7 @@ type batchedWatchStatuses struct {
 // GetPRFeedback / GetPRStatus. The leader's deadline is preserved so
 // the fetch can't outlive the request budget.
 func (s *Service) fetchBatchedWatchStatuses(
-	ctx context.Context, exec GraphQLExecutor, cacheScope string, numbered, searching []*PRWatch,
+	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string, numbered, searching []*PRWatch,
 ) (*batchedWatchStatuses, error) {
 	key := scopedCacheKey(cacheScope, batchedFetchSingleflightKey(numbered, searching))
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
@@ -298,6 +299,7 @@ func (s *Service) fetchBatchedWatchStatuses(
 		if err := s.fetchBatchedBranchStatuses(fetchCtx, exec, cacheScope, searching, combined, repoErrGen); err != nil {
 			return nil, err
 		}
+		s.enrichBatchedWorkflowAttention(fetchCtx, client, cacheScope, combined.byKey)
 		return combined, nil
 	})
 	if err != nil {

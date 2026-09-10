@@ -50,6 +50,7 @@ The batched service path in `service_pr_watch_batched.go` enriches statuses befo
 Cover both numbered and branch-discovered watches. The existing poller owns refresh cadence.
 Coalesce enrichment by credential scope, repository, and head identity within each sync.
 Use bounded concurrency and the existing context budget. Do not add a frontend poller or one request per mounted surface.
+The unwatched-task lifecycle sweep only reconciles PR state, the observed head, and stored workflow attention; it does not issue new Actions reads. Retained watches and REST feedback/status paths provide fresh workflow evidence, while a head change invalidates the stored observation.
 
 The REST [workflow runs contract](https://docs.github.com/en/rest/actions/workflow-runs) defines collection and permission requirements.
 GitHub documents the maintainer action in [Approving workflow runs from forks](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks).

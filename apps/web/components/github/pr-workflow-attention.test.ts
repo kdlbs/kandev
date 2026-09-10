@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TaskPR, WorkflowAttention } from "@/lib/types/github";
 import {
   getActiveWorkflowAttention,
+  getCurrentWorkflowAttention,
   getWorkflowAttentionForDisplay,
 } from "./pr-workflow-attention";
 
@@ -115,5 +116,15 @@ describe("getActiveWorkflowAttention", () => {
         makePR({ workflow_attention: makeAttention({ state: "unknown", runs: null as never }) }),
       ),
     ).toEqual(makeAttention({ state: "unknown", runs: [] }));
+  });
+});
+
+describe("getCurrentWorkflowAttention", () => {
+  it("normalizes legacy null run arrays for summary consumers", () => {
+    const current = getCurrentWorkflowAttention(
+      makePR({ workflow_attention: makeAttention({ runs: null as never }) }),
+    );
+
+    expect(current?.runs).toEqual([]);
   });
 });

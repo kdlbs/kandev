@@ -27,13 +27,14 @@ function currentWorkflowAttention(
 
 function normalizeWorkflowAttention(attention: WorkflowAttention | null): WorkflowAttention | null {
   if (!attention || attention.state === "none") return null;
+  if (attention.runs != null) return attention;
   return { ...attention, runs: attention.runs ?? [] };
 }
 
 export function getCurrentWorkflowAttention(
   carrier: WorkflowAttentionCarrier,
 ): WorkflowAttention | null {
-  return currentWorkflowAttention(carrier, carrier.workflow_attention);
+  return normalizeWorkflowAttention(currentWorkflowAttention(carrier, carrier.workflow_attention));
 }
 
 /**
@@ -67,7 +68,7 @@ export function getActiveWorkflowAttention(
   carrier: WorkflowAttentionCarrier,
   attention: WorkflowAttention | null | undefined = carrier.workflow_attention,
 ): WorkflowAttention | null {
-  const current = currentWorkflowAttention(carrier, attention);
+  const current = normalizeWorkflowAttention(currentWorkflowAttention(carrier, attention));
   return current && isAttentionState(current.state) ? current : null;
 }
 

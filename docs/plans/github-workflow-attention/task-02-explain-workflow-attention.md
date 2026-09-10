@@ -126,10 +126,12 @@ Implemented and verified on 2026-09-10. Existing GitHub PR summary, icon, chip, 
 
 Validation passed:
 
-- The focused frontend suite passed 148 tests, including workflow interpretation and notice coverage.
+- The focused frontend suite passed 149 tests, including workflow interpretation, notice, and duplicate-row identity coverage.
 - `pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`.
 - Desktop PR E2E passed 10 tests; mobile PR E2E passed 8 tests.
 - Public documentation tests passed 62 tests; `node scripts/validate-public-docs.mjs` accepted 46 published pages.
 - `python3 scripts/lint-spec-files.py --all`.
 - `git diff --check`.
 - Dedicated desktop and mobile approval-attention screenshots were captured and visually reviewed from `.pr-assets`.
+
+PR-fixup validation also passed the focused frontend suite after review remediation, `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`. The managed desktop and mobile approval scenarios each passed after the final UI changes.

@@ -84,6 +84,8 @@ function workflowAttentionRow(pr: TaskPR): PRTaskSummaryRow | null {
 
 function deriveCIRows(pr: TaskPR): PRTaskSummaryRow[] {
   const attentionRow = workflowAttentionRow(pr);
+  const attentionExplainsUnstable =
+    attentionRow?.status === "awaiting_approval" || attentionRow?.status === "workflow_attention";
   const rows: PRTaskSummaryRow[] = [];
   if (pr.checks_state === "success") rows.push({ kind: "ci", status: "passed", tone: "success" });
   else if (pr.checks_state === "failure") {
@@ -92,9 +94,11 @@ function deriveCIRows(pr: TaskPR): PRTaskSummaryRow[] {
     rows.push({ kind: "ci", status: "in_progress", tone: "warning" });
   } else if (
     pr.checks_state === "unstable" ||
-    (pr.mergeable_state === "unstable" && !attentionRow)
+    (pr.mergeable_state === "unstable" && !attentionExplainsUnstable)
   ) {
-    if (!attentionRow) rows.push({ kind: "ci", status: "checks_not_successful", tone: "warning" });
+    if (!attentionExplainsUnstable) {
+      rows.push({ kind: "ci", status: "checks_not_successful", tone: "warning" });
+    }
   } else if (pr.checks_state) rows.push(rawRow("ci", pr.checks_state));
   if (attentionRow) rows.push(attentionRow);
   return rows;

@@ -195,15 +195,16 @@ function SummaryRow({
   presentation: ChangeRequestTaskStatusPresentation;
 }) {
   const { t } = useTranslation();
+  const rowTestId = `${presentation.rowTestIdPrefix}-${row.kind}${row.id ? `-${row.id}` : ""}`;
   return (
-    <div data-testid={`${presentation.rowTestIdPrefix}-${row.kind}`} className="contents">
+    <div data-testid={rowTestId} className="contents">
       <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">
         {t(presentation.rowLabelKeys[row.kind])}
       </span>
       <span className={cn("flex items-center", TONE_CLASSES[row.tone])}>
         <SummaryStatusIcon status={row.status} />
       </span>
-      <div data-testid={`${presentation.rowTestIdPrefix}-${row.kind}-value`} className="min-w-0">
+      <div data-testid={`${rowTestId}-value`} className="min-w-0">
         <span
           className={cn("flex min-w-0 items-center gap-1.5 font-medium", TONE_CLASSES[row.tone])}
         >
@@ -211,7 +212,7 @@ function SummaryRow({
         </span>
         {row.detail && (
           <span
-            data-testid={presentation.rowTestIdPrefix + "-" + row.kind + "-detail"}
+            data-testid={`${rowTestId}-detail`}
             className="mt-0.5 block text-[11px] leading-snug text-muted-foreground"
           >
             {getDetailText(row.detail, t)}

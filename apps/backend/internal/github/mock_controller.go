@@ -955,7 +955,15 @@ func (c *MockController) addWorkflowRuns(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, head_sha are required"})
 		return
 	}
+	for i := range req.Runs {
+		if req.Runs[i].HeadSHA == "" {
+			req.Runs[i].HeadSHA = req.HeadSHA
+		}
+	}
 	c.mock.ReplaceWorkflowRuns(req.Owner, req.Repo, req.HeadSHA, req.Runs)
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
 	ctx.JSON(http.StatusOK, gin.H{"runs": len(req.Runs)})
 }
 
@@ -971,7 +979,14 @@ func (c *MockController) addWorkflowRunJobs(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, run_id are required"})
 		return
 	}
-	c.mock.ReplaceWorkflowRunJobs(req.Owner, req.Repo, req.RunID, req.RunAttempt, req.Jobs)
+	attempt := req.RunAttempt
+	if attempt <= 0 {
+		attempt = 1
+	}
+	c.mock.ReplaceWorkflowRunJobs(req.Owner, req.Repo, req.RunID, attempt, req.Jobs)
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
 	ctx.JSON(http.StatusOK, gin.H{"jobs": len(req.Jobs)})
 }
 

@@ -138,14 +138,16 @@ Run the existing scenarios in both files with the additions.
 
 Implementation and verification on 2026-09-10:
 
-- `go test ./internal/github -count=1`: 1,738 tests passed.
+- `go test ./internal/github -count=1`: 1,741 tests passed.
 - `go test ./internal/orchestrator -run 'GitHub|Github|PRCI|PRCIAutomation' -count=1`: 51 tests passed.
-- The focused frontend suite passed 148 tests, including workflow interpretation, notice, summary, chip, popover, and detail coverage.
+- The focused frontend suite passed 149 tests, including workflow interpretation, notice, summary, chip, popover, and detail coverage.
 - `pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
 - Desktop PR E2E passed 10 tests; mobile PR E2E passed 8 tests.
 - Public documentation tests passed 62 tests; the validator accepted 46 published pages.
 - `python3 scripts/lint-spec-files.py --all` and `git diff --check` passed.
 - Dedicated desktop and mobile approval-attention screenshots were captured and visually reviewed from `.pr-assets`.
+
+PR fixup remediation on 2026-09-10 moved batched workflow enrichment inside the shared singleflight, kept unwatched lifecycle refreshes Actions-read-free, corrected workflow-run ordering and GraphQL schema usage, hardened legacy/null and mock-provider paths, and separated duplicate summary-row test IDs. The final local checks passed backend race testing, backend lint, frontend typecheck/lint/i18n gates, the focused 149-test frontend suite, and the targeted desktop/mobile browser scenarios.
 
 ## Risks
 

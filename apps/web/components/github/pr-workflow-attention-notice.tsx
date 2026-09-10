@@ -61,7 +61,7 @@ export function PRWorkflowAttentionNotice({
                   href={run.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex min-h-11 items-center self-start text-primary hover:underline sm:min-h-0"
+                  className="inline-flex min-h-11 cursor-pointer items-center self-start text-primary hover:underline [@media(pointer:fine)]:min-h-0"
                 >
                   {t("github:viewWorkflowOnGithub")}
                 </a>

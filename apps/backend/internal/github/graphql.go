@@ -436,7 +436,7 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 // the batched and single-PR paths returning the same data.
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
-		`headRefName baseRefName headRefOid headRepository { id name nameWithOwner cloneUrl httpsUrl } headRepositoryOwner { login } additions deletions changedFiles ` +
+		`headRefName baseRefName headRefOid headRepository { id name nameWithOwner cloneUrl } headRepositoryOwner { login } additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
 		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
 		`createdAt updatedAt mergedAt closedAt ` +

@@ -28,7 +28,7 @@ Persist the observation through every status writer without manufacturing check 
 ## In scope
 
 - Add the workflow-run and candidate-job readers, shared classifier, and matching client doubles.
-- Enrich REST status, feedback, numbered watches, and branch-discovered batches before cache publication.
+- Enrich REST status, feedback, numbered watches, and branch-discovered batches before cache publication. Keep the unwatched lifecycle sweep free of new Actions reads so active watches do not incur an additional workflow API sweep.
 - Add the JSON observation column and cover scan, update, restore, migration, and workspace events.
 - Preserve compact task-status projections and update their bounded attention category where necessary.
 - Prove approval-only observations cannot start CI repair or automatic merging.
@@ -90,11 +90,13 @@ Extra reads must stay inside existing credential scopes and context budgets.
 
 ## Results
 
-Implemented and verified on 2026-09-10. The GitHub clients now collect current-head workflow runs and jobs, classify jobless fork approvals separately from ordinary checks, and persist the bounded observation through REST, feedback, batched, watch, restore, and mock-provider paths. Approval-only evidence does not count as a failed check or satisfy CI automation readiness.
+Implemented and verified on 2026-09-10. The GitHub clients now collect current-head workflow runs and jobs, classify jobless fork approvals separately from ordinary checks, and persist the bounded observation through REST, feedback, batched, watch, restore, and mock-provider paths. The unwatched lifecycle sweep preserves same-head stored evidence and clears it on a new head without issuing new Actions reads. Approval-only evidence does not count as a failed check or satisfy CI automation readiness.
 
 Validation passed:
 
-- `go test ./internal/github -count=1`: 1,738 tests passed.
+- `go test ./internal/github -count=1`: 1,741 tests passed.
 - `go test ./internal/orchestrator -run 'GitHub|Github|PRCI|PRCIAutomation' -count=1`: 51 tests passed.
 - `python3 scripts/lint-spec-files.py --all`.
 - `git diff --check`.
+
+PR-fixup validation also passed `go test -race ./internal/github -count=1` (1,741 tests) and `make -C apps/backend lint` with zero issues. The unwatched lifecycle and mock workflow mutation regressions are covered by the added tests.

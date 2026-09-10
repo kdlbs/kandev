@@ -371,16 +371,23 @@ func workflowRunGroupKey(run WorkflowRun) string {
 }
 
 func workflowRunNewer(candidate, current WorkflowRun) bool {
+	// UpdatedAt can move forward when an older execution is cancelled or
+	// otherwise receives a late provider-side update. Compare distinct
+	// executions by creation time and identity first so that update activity
+	// cannot make an older execution hide a newer result.
+	if candidate.ID != current.ID {
+		if !candidate.CreatedAt.Equal(current.CreatedAt) {
+			return candidate.CreatedAt.After(current.CreatedAt)
+		}
+		return candidate.ID > current.ID
+	}
+	if candidate.RunAttempt != current.RunAttempt {
+		return candidate.RunAttempt > current.RunAttempt
+	}
 	if !candidate.UpdatedAt.Equal(current.UpdatedAt) {
 		return candidate.UpdatedAt.After(current.UpdatedAt)
 	}
-	if !candidate.CreatedAt.Equal(current.CreatedAt) {
-		return candidate.CreatedAt.After(current.CreatedAt)
-	}
-	if candidate.ID != current.ID {
-		return candidate.ID > current.ID
-	}
-	return candidate.RunAttempt > current.RunAttempt
+	return candidate.CreatedAt.After(current.CreatedAt)
 }
 
 func workflowRunLess(a, b WorkflowRun) bool {

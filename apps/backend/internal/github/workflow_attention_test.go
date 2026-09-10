@@ -112,6 +112,55 @@ func TestWorkflowAttention_LatestRunAndAssociationFiltering(t *testing.T) {
 	}
 }
 
+func TestWorkflowAttention_NewExecutionWinsOverLateUpdate(t *testing.T) {
+	pr := &PR{
+		Number:        7,
+		State:         "open",
+		HeadSHA:       "head-sha",
+		HeadBranch:    "feature/approval",
+		HeadRepoOwner: "contributor",
+		HeadRepoName:  "widget-fork",
+		RepoOwner:     "acme",
+		RepoName:      "widget",
+	}
+	created := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	selected := selectCurrentWorkflowRuns([]WorkflowRun{
+		{
+			ID:            100,
+			RunAttempt:    1,
+			WorkflowID:    9,
+			Name:          "CI",
+			Event:         "pull_request",
+			Status:        "completed",
+			Conclusion:    "action_required",
+			HeadSHA:       pr.HeadSHA,
+			HeadBranch:    pr.HeadBranch,
+			HeadRepoOwner: pr.HeadRepoOwner,
+			HeadRepoName:  pr.HeadRepoName,
+			CreatedAt:     created,
+			UpdatedAt:     created.Add(2 * time.Hour),
+		},
+		{
+			ID:            101,
+			RunAttempt:    1,
+			WorkflowID:    9,
+			Name:          "CI",
+			Event:         "pull_request",
+			Status:        "completed",
+			Conclusion:    "success",
+			HeadSHA:       pr.HeadSHA,
+			HeadBranch:    pr.HeadBranch,
+			HeadRepoOwner: pr.HeadRepoOwner,
+			HeadRepoName:  pr.HeadRepoName,
+			CreatedAt:     created.Add(time.Hour),
+			UpdatedAt:     created.Add(time.Hour),
+		},
+	}, pr)
+	if len(selected) != 1 || selected[0].ID != 101 {
+		t.Fatalf("selected workflow runs = %#v, want only newer execution 101", selected)
+	}
+}
+
 func TestWorkflowAttention_ActionRequiredWithJobsIsGeneric(t *testing.T) {
 	client := &workflowAttentionTestClient{MockClient: NewMockClient()}
 	pr := &PR{

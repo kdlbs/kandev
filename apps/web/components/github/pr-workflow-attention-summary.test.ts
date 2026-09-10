@@ -135,4 +135,20 @@ describe("workflow attention fallbacks", () => {
       { kind: "ci", id: WORKFLOW_ATTENTION_ID, status: "workflow_unavailable", tone: "muted" },
     ]);
   });
+
+  it("keeps an unstable check warning beside unavailable workflow evidence", () => {
+    const summary = derivePRTaskStatusSummary(
+      makeSummaryPR({
+        head_sha: HEAD_SHA,
+        checks_state: "unstable",
+        workflow_attention: makeAttention("unknown", [], { stale: true }),
+      }),
+      false,
+    );
+
+    expect(summary.rows).toEqual([
+      { kind: "ci", status: "checks_not_successful", tone: "warning" },
+      { kind: "ci", id: WORKFLOW_ATTENTION_ID, status: "workflow_unavailable", tone: "muted" },
+    ]);
+  });
 });
