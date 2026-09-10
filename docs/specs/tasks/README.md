@@ -36,6 +36,8 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Task completion and conversation follow-ups](requirements/task-completion.md)
+
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
@@ -83,6 +85,9 @@ signals, and task-scoped scheduling contracts.
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
+- [Task Actions Menu on Preview and Detail Surfaces](requirements/task-actions-menu.md)
+- [Task Actions Menu In-Flight and Concurrency](requirements/task-actions-menu-concurrency.md)
+- [Task Actions Menu Action Outcomes](requirements/task-actions-menu-outcomes.md)
 - [Subtasks as Workflow Checklist](requirements/subtask-checklist.md)
 - [Subtask Completion Trigger](requirements/subtask-completion-trigger.md)
 - [Subtask detachment](requirements/subtask-detachment.md)
@@ -108,7 +113,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow Duplication](requirements/workflow-duplication.md)
 - [Explicit Workflow-Step Completion Signal](requirements/workflow-explicit-completion-signal.md)
-- [Workflow Profile Session Lifecycle](requirements/workflow-profile-session-lifecycle.md)
+- [Workflow Profile Session Lifecycle and Recipients](requirements/workflow-profile-session-lifecycle.md)
 - [Agent decision recording](requirements/workflow-quorum-decision-recording-agent-surface.md)
 - [Quorum ordering and concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
 - [Quorum diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
@@ -128,6 +133,8 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [Task completion and conversation follow-ups](system-design/task-completion.md)
+
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
@@ -146,6 +153,7 @@ signals, and task-scoped scheduling contracts.
 - [Saved Prompt Delivery](system-design/saved-prompt-delivery.md)
 - [Passthrough Initial Prompt Turn Boundary](system-design/passthrough-initial-prompt-turn-boundary.md)
 - [Prompt attachments](system-design/prompt-attachments.md)
+- [Task Actions Menu on Preview and Detail Surfaces](system-design/task-actions-menu.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
 - [Task plan content size limit](system-design/plan-content-size-limit.md)
 - [Task plan write consistency](system-design/plan-write-consistency.md)
@@ -166,10 +174,11 @@ signals, and task-scoped scheduling contracts.
 - [Task priority visibility](system-design/task-priority-visibility.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow completion-signal payload delivery](system-design/workflow-completion-signal-payload-delivery.md)
+- [Signal-Gated Manual Move Visibility](system-design/workflow-signal-gated-manual-move-visibility.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
-- [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
+- [Workflow Profile Session Lifecycle and Recipients](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 - [Human Assignee](system-design/human-assignee.md)
 - [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)

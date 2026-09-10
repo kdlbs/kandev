@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import {
   builtInLayoutProfileName,
   BUILT_IN_LAYOUT_PROFILES,
@@ -61,9 +62,8 @@ function ProfileAction({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="sm"
           variant={variant}
-          className="min-h-11 cursor-pointer sm:min-h-8"
+          className={settingsActionClassName("cursor-pointer")}
           aria-label={label}
           onClick={onClick}
           data-testid={testId}

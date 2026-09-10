@@ -912,6 +912,7 @@ function assertExperimentalCalloutPlacement(file, markdown) {
  */
 async function assertLocalLinks(docsDir, file, markdown) {
   const source = stripMarkdownCode(markdown);
+  assertNoNestedLocalImages(file, source);
   const definitionPattern = /^\s{0,3}\[([^\]\n]+)\]:\s*(\S.*)$/gm;
   const referencePattern = /!?\[([^\]\n]+)\]\[([^\]\n]*)\]/g;
   const shortcutReferencePattern = /(?<![!\\\[\]])\[([^\]\n]+)\](?![\[(:])/g;
@@ -989,6 +990,25 @@ async function assertLocalLinks(docsDir, file, markdown) {
     if (rawFragment && /\.mdx?$/i.test(target)) {
       await assertHeadingFragment(file, href, target, rawFragment);
     }
+  }
+}
+
+/**
+ * Reject nested local image links unsupported by the public-doc publisher.
+ *
+ * @param {string} file Relative source path used in validation errors.
+ * @param {string} markdown Markdown with code regions removed.
+ * @returns {void}
+ */
+function assertNoNestedLocalImages(file, markdown) {
+  const nestedImagePattern =
+    /\[[^\]\r\n]*!\[[^\]\r\n]*\]\(([^)\r\n]+)\)\]\(([^)\r\n]+)\)/g;
+  for (const match of markdown.matchAll(nestedImagePattern)) {
+    const imageHref = parseMarkdownDestination(match[1]);
+    if (!imageHref || isExternalDestination(imageHref)) continue;
+    throw new Error(
+      `${file} uses a nested local image link: ${imageHref}; Landing copies only a direct plain Markdown image`,
+    );
   }
 }
 

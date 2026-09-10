@@ -32,91 +32,54 @@ Create a visible checklist:
 
 ## 1. Gather PR State
 
-Before the first GitHub helper call, request any runtime network approval that
-the environment requires. If access is denied, cancelled, or interrupted, stop
-the workflow permanently; retry only transient fetch failures after access is
-approved.
+Before the first GitHub call, obtain any network approval required by the
+runtime. If the runtime denies access, stop until the user authorizes access.
 
-Run `scripts/pr-state --summary <PR>` once. Record the current-head check,
-review, and PR-delivery fields described in
-`references/review-evidence.md`. For a cross-repository PR, use only the
-reported delivery fields as the push target; do not infer it from a local
-`fork` or `contributor` remote. Load that reference for exact-head review
-classification, authentication fallbacks, and hidden-thread handling. Inspect
-mergeability separately through `references/merge-conflicts.md`.
+Run `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`.
+Load [review-evidence.md](references/review-evidence.md) for snapshot fields,
+review classification, hidden threads, and access fallbacks.
+For cross-repository PRs, use the snapshot's delivery fields as the push target.
 
-If the fresh mergeability query reports `mergeable=CONFLICTING` or
-`mergeStateStatus=DIRTY`, stop CI and review triage. This is an actionable PR
-blocker, not a clean or report-only terminal state. Load
-`references/merge-conflicts.md`. If the user has explicitly authorized PR
-fixup or conflict resolution, resolve the conflict now (prefer a merge of the
-fresh base unless the user requests a rebase), verify the result, push it, and
-restart this section with a new PR-state snapshot. If authorization is absent,
-report the conflict and ask for it before mutating the branch. Do not triage
-comments or checks against a conflicted head.
+Then run `gh pr view <PR> --json state,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision`.
+Require matching head SHAs before triage. Verify the base SHA against the
+current base-ref tip. Refresh mismatched metadata before attributing failures.
+If the PR is merged or closed, stop. For a merge, report
+`mergedAt` and `mergeCommit.oid`.
 
-For pending CI, wait with `scripts/pr-await <PR>`. It blocks below the
-conversation and prints one report when every check is terminal, so a wait of
-any length costs a single round-trip. Do not re-run `scripts/pr-state
---summary` on a timer instead: each snapshot is a separate model turn that
-re-reads the whole context, and waiting is only about 6% of what such a turn
-actually does.
+Treat peer alerts as advisory until their SHA matches the current head.
+If captured output is empty, truncated, or invalid, rerun through `rtk proxy`.
+Capture stdout and stderr separately and preserve the exit code.
+An empty capture cannot prove that the PR is clean.
 
-Default `--mode all-terminal` is the cost-correct choice and returns only when
-no check is pending, so every failure arrives in one report and is fixed in one
-pass. It is also the correct choice for a reason unrelated to cost: a failed job
-can be visible while its parent workflow is still running, so an early return
-reports a partial failure set. Use `--mode first-failure` only when the user
-wants the first failure interactively; it costs an extra full CI cycle per
-failure. Pass `--deadline-min` for a user-stated limit; on exit 2 report the
-named pending checks as "CI in progress."
+If GitHub reports a conflict, load
+[merge-conflicts.md](references/merge-conflicts.md) before CI or review triage.
+An explicit fixup request authorizes conflict resolution within that request.
+Otherwise, report the conflict without changing the branch.
 
-Read its exit code rather than re-deriving state: 0 clean, 1 terminal with
-findings, 2 deadline with checks still pending, 3 blocked. Exit 3 covers every
-case where a clean answer cannot be trusted: the PR merged or closed, a workflow
-needs approval, access was lost, the merge-state query failed, the snapshot
-reported `errors` or a null unresolved-thread count, or the host toolchain
-cannot run `pr-state` correctly. Never downgrade an exit 3 to "probably clean."
+If the base advanced without conflicts, use that reference's advanced-base
+procedure. Base advancement alone does not require a branch update.
+Record the head, base, synthetic merge, and focused test results.
+If either input SHA changes, repeat the relevant validation.
+Keep the helper's exit code unchanged and report any separately verified base drift.
 
-Exit 1 counts blocking reviews, not only threads: a current-head
-`CHANGES_REQUESTED` review can exist with no unresolved thread attached.
+For related or stacked PRs, use the semantic-conflict procedure in the same
+reference. Reconcile changed contracts and stable IDs before delivery.
 
-Every report records the jq and bash versions it ran under. That is provenance,
-not a gate: `pr-state` used to fail silently on jq 1.6 and on the bash 3.2 that
-macOS ships as `/bin/bash`, both of which made a dirty PR look clean, and both
-are fixed at the source. What guards against a degraded `pr-state` now is the
-snapshot itself, which is stronger than any version check: a summary reporting
-`errors`, one whose unresolved-thread count is null, and one that does not parse
-are all treated as unknown rather than clean. A blocked report on an old
-toolchain adds a note naming it as a possible cause. A push during the wait
-restarts the gate against the new head and is reported.
+For pending checks, load [waiting.md](references/waiting.md).
+Use `scripts/pr-await` and its final exit code.
+For queue membership or enqueue/dequeue requests, load
+[merge-queue.md](references/merge-queue.md).
+For queue removals or failed synthetic checks, also load
+[ci-troubleshooting.md](references/ci-troubleshooting.md).
+Ordinary PR-head checks do not validate a merge-group commit.
 
-Do not use interactive `gh pr checks --watch` in the primary conversation: its
-TTY redraws make captured output unusable. Use the read-only `pr-poller` only
-when the user explicitly asked to wait or monitor and `pr-await` is unavailable.
-Treat a poller's unresolved/pending snapshot as provisional: it can predate a
-primary-session push or thread resolution. Re-run `scripts/pr-state --summary
-<PR>` at the current head before acting on it or declaring completion.
-If a job remains pending beyond the workflow's configured timeout, or its status
-conflicts with the GitHub UI/API, query the exact job with
-`gh api repos/<owner>/<repo>/actions/jobs/<job_id>` (or inspect the run with
-`gh run view <run_id>`) before calling CI hung or changing code. Treat the direct
-result as current-head evidence only after its `head_sha` matches
-`checks_head_sha`; otherwise report the result as stale or unknown.
+Directly supplied review findings need current-source validation even without
+a GitHub thread. Apply valid fixes within the user's authorization.
+Do not invent comment IDs or resolutions for findings without a thread.
+External replies and thread resolution still require user authorization.
 
-For a cross-repository PR whose current-head snapshot is unexpectedly sparse,
-inspect `approval_required_runs`. A current-head workflow with
-`conclusion=action_required` is blocked verification, not green or skipped CI.
-Only after the user authorizes PR fixup, approve the exact run with
-`gh api --method POST repos/<base-owner>/<base-repo>/actions/runs/<run-id>/approve`,
-then re-run the summary and require jobs to materialize before polling. `gh run
-approve` is not a valid command.
-
-Treat the state as clean only when the current head has no failed or pending
-checks, no merge conflict, no blocking review (an active `CHANGES_REQUESTED`
-or a review blocked at the exact current head), no unresolved review thread, no
-actionable issue comment, and qualifying exact-head semantic evidence where PR
-delivery requires it.
+If `reviewDecision=REVIEW_REQUIRED` and `mergeStateStatus=BLOCKED`, report the
+human approval gate. Green checks do not authorize self-approval or merging.
 
 ## 2. Fix CI Failures
 
@@ -142,9 +105,16 @@ when `origin` points to a fork. Inspect the parent workflow/run to determine
 whether a newer base commit caused the failure before changing product or docs
 code. If the fix is already upstream, update or rebase the branch only when
 authorized, rerun affected checks, and invalidate all prior exact-head evidence.
+If the installed `gh pr view --json` does not expose the base OID, use
+`BASE_SHA=$(gh api repos/<owner>/<repo>/pulls/<PR> --jq .base.sha)` alongside
+`gh pr view <PR> --json baseRefName,headRefOid` for the ref names. Run this
+fallback under `set -euo pipefail`, require a non-empty `BASE_SHA`, verify the
+fetched base tip separately, and only then run
+`git merge-tree --write-tree <base-remote>/<base-ref> HEAD`.
 
 For unfamiliar, infrastructure, or E2E failures, load
-`references/ci-troubleshooting.md` before changing code.
+`references/ci-troubleshooting.md` and, for transport or queue evidence,
+`references/transport-troubleshooting.md` before changing code.
 Also load it for unexpected zero-duration or no-op manual-review runs: event
 and workflow provenance can explain them without a product-code change.
 
@@ -168,25 +138,30 @@ assertion with the current implementation and concurrent or sibling PRs before
 editing. If it is a stale test expectation, the smallest valid remediation may
 be a test-only assertion update: keep it limited to the reported failure, run
 the focused test, and call out that scope. Do not change unrelated production
-behavior or duplicate a larger sibling change.
+behavior or duplicate a larger sibling change; for request-count/dedup assertions covering multiple hydration or effect continuations, use a deferred response, assert the count while it remains pending, then resolve and drain it before unmount/return so an immediately resolved mock cannot let cleanup timers create a false duplicate.
 When a remediation changes a documented behavior or contract, update the
-authoritative spec/guidance, plan, and task file when present; commit docs and
-code together, keep regression tests and verification commands aligned, and
-re-check the documentation before completion. Record why no update is needed
-when the behavior remains internal.
+authoritative spec/guidance, plan, and task file when present; refresh each
+Verification/Results section with exact post-fixup commands and outcomes; commit
+docs and code together, keep regression tests and verification commands aligned,
+and re-check the documentation before completion; record why no update is needed when the behavior remains internal.
 
 ## 3. Triage And Address Reviews
 
-Use `scripts/pr-resolve list <PR>` to obtain unresolved threads. Its previews
-can be truncated, so expand every listed review thread with
-`scripts/pr-resolve show <PR> <thread_id>` before deciding how to handle it.
-Use `scripts/pr-state --comment <comment_id>` only for a flat comment view when
-a thread context is not available. Validate against the current head, the spec,
-and existing architecture before editing or replying.
+Use `scripts/pr-resolve list <PR>` to obtain unresolved threads. Before handling multiple
+threads, make a thread-to-finding map and one body file per thread. Its previews can be
+truncated, so run `scripts/pr-resolve show <PR> <thread_id>` immediately before each
+write; verify comment/thread IDs and that the body names that thread's finding, file, and
+commit. Use `scripts/pr-state --comment <comment_id>` only for a flat comment view when no
+thread context is available. Validate against the current head, spec, and architecture before editing or replying.
 
 Every unresolved thread requires an explicit disposition, regardless of its
 author, bot identity, visibility, or apparent severity. Record exactly one of
 these dispositions:
+
+When an automated review identifies a security-boundary risk and the user
+explicitly chooses the behavior, record the accepted risk, trust/revocation
+responsibility, and targeted regression coverage in the final response, PR body,
+and authoritative spec. Do not silently encode the compromise.
 
 - `actionable`: make the valid code or test change, verify it, cite the
   resulting commit in the reply, and resolve the thread when writes are
@@ -246,11 +221,15 @@ summary's authoritative head repository and ref only when
 `pr.head_ref_oid` to equal local `HEAD`; an upstream remote comparison is not
 sufficient. Run broad `/verify` only if the user explicitly requests it or the
 PR/CI finding requires it.
-After every push, also run a fresh
-`gh pr view <PR> --json baseRefName,headRefOid,mergeable,mergeStateStatus` (or
-equivalent) at that pushed head. Require `headRefOid` to equal local `HEAD` and
-confirm `mergeable` is not `CONFLICTING` and `mergeStateStatus` is not `DIRTY`;
-`scripts/pr-state --summary` does not include mergeability.
+After every push, run fresh `gh pr view <PR> --json baseRefName,headRefOid,mergeable,mergeStateStatus`
+(or equivalent) at the pushed head; if GitHub briefly returns an older head, retry
+the query and exact-head `pr-state` with short bounded backoff before triaging or reporting.
+Require local `HEAD`, `headRefOid`, and `checks_head_sha` to match; confirm
+`mergeable` is not `CONFLICTING` and `mergeStateStatus` is not `DIRTY`; `scripts/pr-state --summary` does not include mergeability.
+
+If a remediation changes rendered UI, invalidate screenshots captured before
+fixup and recapture and re-publish every affected viewport after the final
+commit. Never leave pre-fixup screenshots in the PR.
 
 Immediately before a remediation commit or push—and again after long-running
 remediation—refresh PR state. Require the PR to remain open and its head ref to
@@ -260,10 +239,10 @@ local upstream tip; after the push, require the PR head OID to equal local
 stale push: preserve the local fix and ask before creating a clean follow-up.
 
 After any rebase or force-push, fetch the PR base and compare local `HEAD`, the upstream tip, and `pr.head_ref_oid`; rerun affected checks.
-A rebase onto a newer base invalidates prior evidence: rerun the exact failed
-command and any package-level gate required by whole-file rules (for example
-max-lines). Then rerun `scripts/pr-resolve list <PR>` and `scripts/pr-state --summary <PR>`; distinguish stale/current
-failures and report pending checks separately. Use `--force-with-lease`, never an unconditional force-push.
+A merge-commit head requires `--rebase-merges` or a verified merge-only delta;
+after long hooks/tests, compare the latest authoritative base with the rebase
+base and reconcile if changed; otherwise a rebase invalidates prior evidence:
+rerun affected checks, `scripts/pr-resolve list <PR>`, and `scripts/pr-state --summary <PR>`; use `--force-with-lease`, never an unconditional force-push.
 If the rebase or conflict resolution touched `AGENTS.md`, `CLAUDE.md`, or a
 skill/reference file, run the shared harness validation in
 `.agents/skills/harness-improvement/references/validation.md` before pushing.
@@ -276,10 +255,18 @@ After every push, re-fetch current-head state and run
 consolidation, verify the target head before commenting/closing the superseded
 PR; preserve its branch unless deletion is requested. Automated reviewers may
 resolve or replace threads; do not reply to or resolve a thread that fresh state
-reports as resolved. Before replying to a pre-push thread, run
-`scripts/pr-resolve show <PR> <thread_id>`; if it reports `resolved: true` (often
-with an `Addressed in commit ...` marker), record the thread as auto-resolved and
-do not post a duplicate reply. Continue replying/resolving only for `resolved: false` threads, including hidden unresolved threads.
+reports as resolved unless an authorized later code/policy change invalidates
+the rationale for that resolution. In that exception, re-fetch/show the thread,
+explicitly reopen it with `scripts/pr-resolve reopen <PR> <thread_id>`, then use
+the reply helper to reply/resolve/react and verify the final thread. Before an
+ordinary reply to a pre-push thread, run `scripts/pr-resolve show <PR>
+<thread_id>`; if it reports `resolved: true` (often with an `Addressed in commit
+...` marker), record the thread as auto-resolved and do not post a duplicate
+reply. Continue replying/resolving only for `resolved: false` threads, including
+hidden unresolved threads.
+If a finding cites an obsolete commit, inspect the cited lines at the current PR
+head before editing. Apply only the missing portion, and do not duplicate an
+assertion that is already present or reply to a resolved or stale thread.
 Treat each fresh summary as a new review-evidence snapshot: inspect every
 non-empty body in `review_evidence.exact_current_head_reviews[]`, even when
 `unresolved_review_thread_count=0` and `scripts/pr-resolve list` is empty.
@@ -303,11 +290,21 @@ changes. Declare the PR clean only when the
 exact-current-head review classification reports no unaddressed findings,
 `checks_snapshot_complete=true`, `failed_checks=[]`, `pending_checks=[]`,
 `approval_required_runs=[]`, `actionable_issue_comment_count=0`,
-`unresolved_review_thread_count=0`, `hidden_unresolved_threads=[]`, there is no
-merge conflict, and
-`scripts/pr-resolve list <PR>` is empty. Within
+`unresolved_review_thread_count=0`, `hidden_unresolved_threads=[]`,
+there is no merge conflict, and `scripts/pr-resolve list <PR>` is empty.
+Require either `base_advanced_since_head=false` or recorded merge-result
+validation for the current head and current base, as defined in
+`references/merge-conflicts.md`. An unknown base relationship is not sufficient.
+Within
 the user's monitoring limit, continue checking after resolutions until automated
 review jobs are terminal; otherwise report the exact pending check names.
+
+When remediation changes tests or validation, reconcile any validation commands
+or counts claimed in the live PR description with the final verification before
+declaring fixup complete. Reuse `/pr`'s live-body preservation and REST-fallback
+procedure, preserve intervening bot or maintainer text, and re-fetch exact-head
+state afterward; a body PATCH triggers workflows, so restart `pr-state`/`pr-await`
+before treating pre-PATCH CI as current.
 
 If the user explicitly requested a persistent Kandev plan update and the task
 has an external Kandev plan, call `get_task_plan_kandev` before fixup and
@@ -319,10 +316,10 @@ commit. Record the prior head's fixup evidence before a plan commit/push: that
 push restarts CI and invalidates the snapshot. For tracked `docs/plans/**`
 artifacts, keep prose head-agnostic and record remediation scope/local
 verification before that commit; then rerun `scripts/pr-state --summary` and
-`scripts/pr-resolve list` for the new head and report its pending checks
-separately. Mark prior current-head claims historical/superseded when a new
-head replaces them; report only the latest head's SHA, CI/review counts, and
-mergeability. Do not leave planned verification marked unstarted after it has run.
+`scripts/pr-resolve list` for the new head and report pending checks separately; keep
+exact-head verification/queue work externally pending, not complete, until pending
+checks are empty. Mark prior current-head claims historical/superseded when a new
+head replaces them; report only the latest head's SHA, CI/review counts, and mergeability; do not leave planned verification marked unstarted after it has run.
 
 Before declaring fixup complete, verify `git status --short` is clean,
 `git rev-parse HEAD` equals `git rev-parse @{upstream}`, the PR head equals
@@ -345,6 +342,20 @@ From a linked worktree, run `gh pr merge <PR> --squash` without
 and fail when another worktree owns it, even after the remote merge succeeds.
 Report the remote merge separately. Delete a remote or local branch only when
 requested and through a worktree-safe cleanup flow.
+
+When branch protection requires a merge queue, after the exact current head is
+clean and all checks pass, run `gh pr merge <PR> --auto
+--match-head-commit <SHA>` without a merge strategy. In this mode the command
+requests queue admission, not a direct merge. Verify the
+`added_to_merge_queue` timeline event and
+`pullRequest.mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } }` with GraphQL; treat "already queued" as verification, not a retry.
+Compare the expected SHA with `pullRequest.headRefOid`, not the queue commit; keep the PR open while queue checks run. Do not rely on a null `autoMergeRequest` or
+`mergeStateStatus=UNKNOWN` to determine queue status.
+
+For "monitor until merge", poll queue/PR state with bounded cadence; require
+`MERGED`, `mergedAt`, `mergeCommit.oid`, and `isInMergeQueue=false`.
+`QUEUED`/`AWAITING_CHECKS` and queued `CLEAN` remain pending; inspect
+`references/merge-queue.md` for synthetic checks before reporting a blocker.
 
 ## Guardrails
 

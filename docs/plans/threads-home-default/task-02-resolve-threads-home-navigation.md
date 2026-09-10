@@ -175,3 +175,39 @@ All 88 focused tests passed. After completing the typed header fixture and
 splitting its describe blocks to meet the lint limit, all 13 header tests
 passed again. Typecheck and focused ESLint passed. Task 03 records the rebuilt
 browser proof. Specification lint and its 30 validator tests passed.
+
+### CI navigation-fixture remediation
+
+The full frontend CI suite exposed three additional stale store fixtures in
+the primary sidebar, phone navigation sheet, and integrations menu tests.
+All 32 failures reproduced locally because the shared Home context now reads
+`userSettings.startupPage`. Restore the complete settings slice from the
+existing default state and reset mutable settings between cases. Extend the
+existing desktop and phone Home assertions to cover the Threads choice.
+
+This is test-only compatibility repair. Requirements, system design, public
+copy, production routing, and native surface geometry remain unchanged.
+
+Verification from the repo root:
+
+```bash
+(cd apps/web && pnpm exec vitest run components/app-sidebar/app-sidebar-primary-nav.test.tsx components/navigation/app-nav-sheet.test.tsx components/integrations/integrations-menu.test.ts)
+(cd apps/web && pnpm exec eslint --max-warnings 0 components/app-sidebar/app-sidebar-primary-nav.test.tsx components/navigation/app-nav-sheet.test.tsx components/integrations/integrations-menu.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps && NODE_ENV=production pnpm --filter @kandev/web test)
+```
+
+The pre-merge focused run passed all 34 tests, focused ESLint, and typecheck.
+Main integration then required the UI index to retain both this design and the
+new control-sizing design. The merged routing/settings suite passed 122 tests
+in 11 files, followed by full web lint, typecheck, i18n checks, tagged/race Go
+startup and boot-mapping tests, and the rebuilt browser checks in Task 03.
+Harness validation passed 19 tests and all 196 files; specification validation
+passed 36 tests and all specs. The PR-only diff is whitespace-clean; staged
+whitespace warnings were verified as unchanged incoming main content.
+
+The first merged full-suite attempt could not open a tsx IPC socket inside the
+agent sandbox (`EPERM`) and was stopped without a verdict. Full-suite execution
+requires local IPC permission in this environment. Final broad-suite and
+current-head CI/review results belong to the PR delivery evidence; the scoped
+remediation checks above are complete.

@@ -216,3 +216,22 @@ preferences remain restored by the suite's existing cleanup.
 Public how-to documentation now explicitly names Kanban/Pipeline selections and
 disabled-Office Home behavior. All verification blocks use scoped directory
 changes. Public-docs validation passed for 46 pages and its validator test passed.
+
+### Current-main integration verification
+
+The managed host runner rebuilt the backend, web bundle, and packaged plugin
+fixture after main integration. The following commands from `apps/web` passed
+seven phone scenarios followed by 14 desktop scenarios, with one worker, strict
+WebSocket checks, and retries disabled. The desktop run reused only the freshly
+built, unchanged artifacts from the preceding phone run.
+
+```bash
+E2E_PORT_OFFSET=21 pnpm e2e:run --host --project mobile-chrome tests/office/mobile-office-navigation.spec.ts tests/settings/mobile-startup-page.spec.ts -- --retries=0
+E2E_PORT_OFFSET=21 pnpm e2e:run --host --no-build --project chromium tests/office/sidebar-navigation.spec.ts tests/settings/startup-page.spec.ts -- --retries=0
+```
+
+Both runs used a task-owned writable Go cache and `GOMAXPROCS=4`. The 21 passing
+scenarios cover desktop and native phone Home entry points, explicit routes,
+workspace retention, preference persistence, and the disabled-Office fallback.
+All managed fixtures stopped after the runs; the main instance and parent demo
+data were not used.

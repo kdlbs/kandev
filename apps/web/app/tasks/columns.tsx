@@ -92,8 +92,8 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
             <Button
               ref={archiveAnchorRef}
               variant="ghost"
-              size="sm"
-              className="cursor-pointer h-7 w-7 p-0"
+              size="icon"
+              className="cursor-pointer p-0"
               onClick={(e) => {
                 e.stopPropagation();
                 setShowArchiveConfirm(true);
@@ -109,8 +109,8 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
-            size="sm"
-            className="cursor-pointer h-7 w-7 p-0"
+            size="icon"
+            className="cursor-pointer p-0"
             disabled={isDeleting}
             onClick={(e) => {
               e.stopPropagation();

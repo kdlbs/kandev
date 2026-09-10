@@ -21,6 +21,10 @@ type ExecutorProfilesCardProps = {
   profiles: ExecutorProfile[];
 };
 
+const executorProfileDeleteActionClassName = settingsActionClassName(
+  "p-0 text-destructive hover:text-destructive cursor-pointer",
+);
+
 function ExecutorProfilesHeader({
   title,
   description,
@@ -133,9 +137,11 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Button
                       variant="ghost"
-                      size="sm"
+                      size="icon"
                       onClick={(e) => handleDelete(e, profile.id)}
-                      className="h-11 w-11 p-0 text-destructive hover:text-destructive cursor-pointer md:h-7 md:w-7"
+                      aria-label={t("executors:deleteProfile")}
+                      data-testid="executor-profile-delete-button"
+                      className={executorProfileDeleteActionClassName}
                     >
                       <IconTrash className="h-3.5 w-3.5" />
                     </Button>

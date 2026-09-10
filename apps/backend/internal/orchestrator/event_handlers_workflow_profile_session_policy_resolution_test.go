@@ -11,6 +11,27 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+func TestResolveStepProfileSessionEndPolicyDefaultsToPark(t *testing.T) {
+	svc := &Service{}
+
+	for name, step := range map[string]*wfmodels.WorkflowStep{
+		"missing step":   nil,
+		"empty policy":   {},
+		"invalid policy": {ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicy("retain")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := svc.resolveStepProfileSessionEndPolicy(step); got != models.WorkflowProfileSessionEndPolicyPark {
+				t.Fatalf("resolveStepProfileSessionEndPolicy() = %q, want park", got)
+			}
+		})
+	}
+
+	explicitComplete := &wfmodels.WorkflowStep{ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete}
+	if got := svc.resolveStepProfileSessionEndPolicy(explicitComplete); got != models.WorkflowProfileSessionEndPolicyComplete {
+		t.Fatalf("explicit complete policy = %q, want complete", got)
+	}
+}
+
 func TestProcessStepExitAndEnter_UnknownSourceKeepsCurrentSessionRecoverable(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)

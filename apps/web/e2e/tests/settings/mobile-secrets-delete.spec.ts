@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { settledBoundingBox } from "../../helpers/settled-box";
 
 const SECRET_VALUE = "e2e-mobile-secret-delete-redaction-value";
 const REFERENCE_KINDS = ["agent_profile", "executor_profile", "repository"] as const;
@@ -138,7 +139,8 @@ test.describe("mobile-secrets-delete", () => {
       await expect(referenceCards.last()).toBeInViewport();
       const close = conflictDialog.getByRole("button", { name: "Close" });
       await expect(close).toBeVisible();
-      expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      const closeBox = await settledBoundingBox(close);
+      expect(closeBox.height).toBeGreaterThanOrEqual(44);
       await expect(row).toBeVisible();
       await expect(testPage.locator("body")).not.toContainText(SECRET_VALUE);
       await expect(testPage.locator("body")).not.toContainText("secret_in_use");

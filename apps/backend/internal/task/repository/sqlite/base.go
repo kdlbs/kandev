@@ -16,15 +16,16 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db                *sqlx.DB // writer
-	ro                *sqlx.DB // reader (read-only pool)
-	ownsDB            bool
-	log               *logger.Logger
-	migrate           *db.MigrateLogger
-	queuePurgeMu      sync.RWMutex
-	queuePurger       func(context.Context, string)
-	queuePurgePrepare func(context.Context, string)
-	queuePurgeNotify  func(context.Context, string)
+	db                      *sqlx.DB // writer
+	ro                      *sqlx.DB // reader (read-only pool)
+	ownsDB                  bool
+	log                     *logger.Logger
+	migrate                 *db.MigrateLogger
+	queuePurgeMu            sync.RWMutex
+	queuePurger             func(context.Context, string)
+	queuePurgePrepare       func(context.Context, string)
+	queuePurgeNotify        func(context.Context, string)
+	queueSessionPurgeNotify func(context.Context, string, string)
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
@@ -155,6 +156,23 @@ func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
 	}
 	if notifier != nil {
 		notifier(ctx, taskID)
+	}
+}
+
+// SetTaskSessionQueuePurgeNotifier registers a post-commit observer for queue
+// rows removed by DeleteTaskSession.
+func (r *Repository) SetTaskSessionQueuePurgeNotifier(notifier func(context.Context, string, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queueSessionPurgeNotify = notifier
+}
+
+func (r *Repository) notifyTaskSessionQueuePurged(ctx context.Context, taskID, sessionID string) {
+	r.queuePurgeMu.RLock()
+	notifier := r.queueSessionPurgeNotify
+	r.queuePurgeMu.RUnlock()
+	if notifier != nil {
+		notifier(ctx, taskID, sessionID)
 	}
 }
 

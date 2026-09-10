@@ -21,7 +21,7 @@ func TestStepFromPortableNormalizesProfileSessionPolicies(t *testing.T) {
 	}, map[int]string{0: "step-1"}, nil, "")
 
 	require.Equal(t, taskmodels.WorkflowProfileSessionStartPolicyReuse, step.ProfileSessionStartPolicy)
-	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyComplete, step.ProfileSessionEndPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyPark, step.ProfileSessionEndPolicy)
 }
 
 func TestImportWorkflowCarriesProfileSessionPoliciesOnStep(t *testing.T) {
@@ -87,5 +87,5 @@ func TestApplySyncedWorkflowsNormalizesStepProfileSessionPolicies(t *testing.T) 
 	steps, err = svc.repo.ListStepsByWorkflow(context.Background(), wf.ID)
 	require.NoError(t, err)
 	require.Equal(t, taskmodels.WorkflowProfileSessionStartPolicyReuse, steps[0].ProfileSessionStartPolicy)
-	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyComplete, steps[0].ProfileSessionEndPolicy)
+	require.Equal(t, taskmodels.WorkflowProfileSessionEndPolicyPark, steps[0].ProfileSessionEndPolicy)
 }

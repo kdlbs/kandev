@@ -124,5 +124,8 @@ func TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure(t *
 	require.Equal(t, 1, runningEventCalls, "the running event must still publish after the PTY write fails")
 	require.Empty(t, baseManager.markPassthroughCalls)
 	require.Len(t, baseManager.passthroughStdinCalls, 1)
-	require.Equal(t, 1, svc.messageQueue.GetStatus(ctx, "s1").Count)
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	require.Len(t, status.Entries, 1, "failed PTY delivery must restore the queued prompt")
+	require.Equal(t, "queued prompt", status.Entries[0].Content)
+	require.Equal(t, 1, status.Count)
 }

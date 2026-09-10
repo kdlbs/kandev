@@ -45,6 +45,7 @@ export type KanbanState = {
     position: number;
     events?: KanbanStepEvents;
     allow_manual_move?: boolean;
+    auto_advance_requires_signal?: boolean;
     prompt?: string;
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
@@ -128,6 +129,9 @@ export type KanbanState = {
     parkedRevision?: number;
     /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
     parkedEpoch?: number;
+    /** True when this task inherits an archived parent's workspace and can no
+     *  longer materialize or start. */
+    workspaceOrphaned?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;

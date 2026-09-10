@@ -455,6 +455,7 @@
   "workflow": "工作流程",
   "workflowsControlTheStepsAutomationAnd": "工作流程控制任務的步驟、自動化與代理程式行為。可在設定中新增更多工作流程。",
   "workspace": "工作區",
+  "workspaceOrphaned": "工作區已孤立",
   "workspaces": "工作區",
   "you": "您",
   "youCanUseTheNavigationOr": "你可以使用導航或重新載入以重試。",

@@ -691,6 +691,7 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 	}{
 		{name: "auto_advance_requires_signal", sql: `ALTER TABLE workflow_steps DROP COLUMN auto_advance_requires_signal`},
 		{name: "cancel_triggers_turn_complete", sql: `ALTER TABLE workflow_steps DROP COLUMN cancel_triggers_turn_complete`},
+		{name: "complete_task_on_enter", sql: `ALTER TABLE workflow_steps DROP COLUMN complete_task_on_enter`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := repo.db.Exec(column.sql); err != nil {
@@ -713,11 +714,45 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 			t.Fatalf("workflow_steps.%s column count = %d, want 1", column, count)
 		}
 	}
-	var autoAdvance, cancelComplete int
-	if err := repo.db.QueryRow(`SELECT auto_advance_requires_signal, cancel_triggers_turn_complete FROM workflow_steps WHERE id = 'legacy-projection-step'`).Scan(&autoAdvance, &cancelComplete); err != nil {
+	var autoAdvance, cancelComplete, completeTask int
+	if err := repo.db.QueryRow(`SELECT auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter FROM workflow_steps WHERE id = 'legacy-projection-step'`).Scan(&autoAdvance, &cancelComplete, &completeTask); err != nil {
 		t.Fatalf("read migrated workflow step: %v", err)
 	}
-	if autoAdvance != 0 || cancelComplete != 0 {
-		t.Fatalf("legacy workflow step defaults = (%d, %d), want (0, 0)", autoAdvance, cancelComplete)
+	if autoAdvance != 0 || cancelComplete != 0 || completeTask != 0 {
+		t.Fatalf("legacy workflow step defaults = (%d, %d, %d), want (0, 0, 0)", autoAdvance, cancelComplete, completeTask)
+	}
+}
+
+func TestRunnerProjectionWorkflowSessionEndPolicyDefaultsToPark(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+
+	var endPolicyDefault string
+	if err := repo.db.QueryRow(`SELECT dflt_value FROM pragma_table_info('workflow_steps') WHERE name = 'profile_session_end_policy'`).Scan(&endPolicyDefault); err != nil {
+		t.Fatalf("inspect session end policy default: %v", err)
+	}
+	if endPolicyDefault != "'park'" {
+		t.Fatalf("profile_session_end_policy schema default = %q, want 'park'", endPolicyDefault)
+	}
+}
+
+func TestRunnerProjectionParticipantCreatedAtReplayMigration(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+
+	if _, err := repo.db.Exec(`ALTER TABLE workflow_step_participants DROP COLUMN created_at`); err != nil {
+		t.Fatalf("drop legacy workflow_step_participants.created_at: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations on legacy workflow_step_participants schema: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay runMigrations: %v", err)
+	}
+
+	var count int
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('workflow_step_participants') WHERE name = 'created_at'`).Scan(&count); err != nil {
+		t.Fatalf("inspect workflow_step_participants.created_at: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("workflow_step_participants.created_at column count = %d, want 1", count)
 	}
 }

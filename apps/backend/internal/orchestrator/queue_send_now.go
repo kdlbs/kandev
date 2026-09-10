@@ -18,11 +18,13 @@ const (
 	QueueSendNowScopeEntry = "entry"
 	QueueSendNowScopeAll   = "all"
 
-	sendNowClaimRecoveryTimeout = 10 * time.Second
+	sendNowClaimRecoveryTimeout  = 10 * time.Second
+	sendNowWorkerShutdownTimeout = 500 * time.Millisecond
 )
 
 var (
 	ErrSendNowConflict           = errors.New("send-now operation is already in progress")
+	ErrSendNowEditConflict       = errors.New("send-now entry is being edited")
 	ErrSendNowQueueEmpty         = errors.New("send-now queue is empty")
 	ErrSendNowEntryNotFound      = errors.New("send-now entry is no longer pending")
 	ErrSendNowQueueChanged       = errors.New("send-now queue selection changed")
@@ -171,8 +173,22 @@ func (s *Service) sendNowRestoreClaimForReservation(
 	restore := &messagequeue.SendNowClaim{
 		Identity:          reservation.identity,
 		Sources:           []messagequeue.QueuedMessage{*reservation.source},
+		Dispatch:          messagequeue.QueuedMessage{SessionID: reservation.sessionID},
 		SourceGenerations: make(map[string]int64),
 	}
+	sessionGeneration, lifecycleGeneration, captured := reservation.source.ReservationGenerations()
+	if captured {
+		restore.SessionGeneration = sessionGeneration
+		if reservation.source.TaskID != "" {
+			restore.SourceGenerations[reservation.source.TaskID] = lifecycleGeneration
+		}
+		return restore, nil
+	}
+	sessionGeneration, err := s.messageQueue.SessionGeneration(ctx, reservation.sessionID)
+	if err != nil {
+		return nil, ErrSendNowQueueChanged
+	}
+	restore.SessionGeneration = sessionGeneration
 	if reservation.source.TaskID == "" {
 		return restore, nil
 	}
@@ -350,8 +366,8 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *message
 
 func mapSendNowClaimError(scope string, err error) error {
 	switch {
-	case errors.Is(err, messagequeue.ErrSendNowEmpty):
-		return ErrSendNowQueueChanged
+	case errors.Is(err, messagequeue.ErrEditConflict):
+		return ErrSendNowEditConflict
 	case errors.Is(err, messagequeue.ErrSendNowReservationConflict):
 		return ErrSendNowConflict
 	case errors.Is(err, messagequeue.ErrSendNowClaimChanged):
@@ -379,40 +395,66 @@ func (s *Service) launchSendNowClaim(
 	if s.sendNowCtx == nil {
 		s.sendNowCtx, s.sendNowCancel = context.WithCancel(context.Background())
 	}
+	if s.sendNowWorkers == nil {
+		s.sendNowWorkers = &sync.WaitGroup{}
+	}
 	workerCtx := s.sendNowCtx
-	s.sendNowWorkers.Add(1)
+	workers := s.sendNowWorkers
+	workers.Add(1)
 	s.sendNowMu.Unlock()
 	go func() {
-		defer s.sendNowWorkers.Done()
+		defer workers.Done()
 		s.executeSendNowClaimWithContext(workerCtx, claim, reservation)
 	}()
 	return true
 }
 
-func (s *Service) resetSendNowWorkers() {
+func (s *Service) resetSendNowWorkers() error {
 	s.sendNowMu.Lock()
 	defer s.sendNowMu.Unlock()
+	if s.sendNowDrain != nil {
+		select {
+		case <-s.sendNowDrain:
+		default:
+			return errors.New("previous Send Now workers are still recovering")
+		}
+	}
 	s.sendNowStopped = false
 	s.sendNowCtx, s.sendNowCancel = context.WithCancel(context.Background())
+	s.sendNowWorkers = &sync.WaitGroup{}
+	s.sendNowDrain = nil
+	return nil
 }
 
 func (s *Service) stopSendNowWorkers() {
 	s.sendNowMu.Lock()
 	s.sendNowStopped = true
 	cancel := s.sendNowCancel
+	workers := s.sendNowWorkers
+	done := s.sendNowDrain
+	startWait := workers != nil && done == nil
+	if startWait {
+		newDone := make(chan struct{})
+		done = newDone
+		s.sendNowDrain = newDone
+	}
 	s.sendNowMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	done := make(chan struct{})
-	go func() {
-		s.sendNowWorkers.Wait()
-		close(done)
-	}()
+	if workers == nil {
+		return
+	}
+	if startWait {
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
+	}
 	select {
 	case <-done:
-	case <-time.After(sendNowClaimRecoveryTimeout):
-		s.logger.Warn("timed out waiting for send-now workers during shutdown")
+	case <-time.After(sendNowWorkerShutdownTimeout):
+		s.logger.Warn("timed out waiting for Send Now workers; recovery remains owned by detached workers")
 	}
 }
 
@@ -469,6 +511,21 @@ func (s *Service) executeSendNowClaimWithContext(
 		}
 	}
 	if err := s.promptSendNowClaim(ctx, claim); err != nil {
+		var acceptedDispatch *acceptedPromptDispatchError
+		if errors.As(err, &acceptedDispatch) {
+			s.logger.Warn("send-now replacement prompt was accepted but acceptance persistence failed; settling without restore",
+				zap.String("session_id", sessionID), zap.Error(err))
+			if markErr := s.markSendNowClaimAcceptedWithRetry(ctx, claim); markErr != nil {
+				s.logger.Error("failed to persist accepted send-now queue claim",
+					zap.String("session_id", sessionID), zap.Error(markErr))
+			}
+			if ackErr := s.acknowledgeSendNowClaimWithRetry(ctx, claim); ackErr != nil {
+				s.logger.Error("failed to acknowledge accepted send-now queue claim",
+					zap.String("session_id", sessionID), zap.Error(ackErr))
+			}
+			s.publishQueueStatusEvent(context.Background(), sessionID)
+			return
+		}
 		s.logger.Warn("send-now replacement prompt failed; restoring queue claim",
 			zap.String("session_id", sessionID), zap.Error(err))
 		restore()
@@ -515,6 +572,9 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, promptTaskOptions{
 			claimEntryID: claim.Dispatch.ID,
+			afterDispatch: func() error {
+				return s.markSendNowClaimAcceptedWithRetry(ctx, claim)
+			},
 			afterClaim: func() error {
 				if !s.queuedDispatchIdentityIsCurrent(ctx, claim.Identity) {
 					return errLifecyclePromptReservationSuperseded
@@ -556,6 +616,17 @@ func (s *Service) acknowledgeSendNowClaimWithRetry(
 	})
 }
 
+func (s *Service) markSendNowClaimAcceptedWithRetry(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+) error {
+	if claim == nil || s.messageQueue == nil || !s.messageQueue.PendingSendNowClaimPersistenceAvailable() {
+		return nil
+	}
+	return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
+		return s.messageQueue.MarkPendingSendNowClaimAccepted(recoveryCtx, claim)
+	})
+}
 func (s *Service) retrySendNowClaimMutation(
 	ctx context.Context,
 	mutate func(context.Context) error,
@@ -579,4 +650,36 @@ func (s *Service) retrySendNowClaimMutation(
 		}
 	}
 	return err
+}
+
+func (s *Service) reconcilePendingSendNowClaimsOnStartup(ctx context.Context) error {
+	if s.messageQueue == nil || !s.messageQueue.PendingSendNowClaimPersistenceAvailable() {
+		return nil
+	}
+	claims, err := s.messageQueue.ListPendingSendNowClaims(ctx)
+	if err != nil {
+		return fmt.Errorf("list pending Send Now claims: %w", err)
+	}
+	for i := range claims {
+		pending := &claims[i]
+		claim := &pending.Claim
+		var recoveryErr error
+		if pending.Accepted {
+			recoveryErr = s.acknowledgeSendNowClaimWithRetry(ctx, claim)
+		} else {
+			recoveryErr = s.restoreSendNowClaimWithRetry(ctx, claim)
+		}
+		if recoveryErr != nil {
+			if !errors.Is(recoveryErr, messagequeue.ErrSendNowClaimChanged) {
+				return fmt.Errorf("recover pending Send Now claim for session %s: %w", claim.Dispatch.SessionID, recoveryErr)
+			}
+			if deleteErr := s.messageQueue.DeletePendingSendNowClaim(
+				context.WithoutCancel(ctx), claim,
+			); deleteErr != nil && !errors.Is(deleteErr, messagequeue.ErrSendNowClaimChanged) {
+				return fmt.Errorf("discard superseded Send Now claim for session %s: %w", claim.Dispatch.SessionID, deleteErr)
+			}
+		}
+		s.publishQueueStatusEvent(ctx, claim.Dispatch.SessionID)
+	}
+	return nil
 }

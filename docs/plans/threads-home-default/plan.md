@@ -196,6 +196,13 @@ PR fixup scope also includes preserving disabled-Office phone Home routing,
 repairing the workspace-picker test fixture, direct fallback resolver coverage,
 and aligning specification index labels and backend verification build tags.
 Task 02 records the remediation sequence and completed local validation.
+The later full frontend CI run exposed three more incomplete navigation test
+fixtures. Their test-only repair and expanded desktop/phone Home assertions
+are also recorded in Task 02; no additional product contract change is needed.
+The current-main merge retained both UI design index entries and passed the
+122-test navigation suite, full web lint/typecheck/i18n, tagged startup/boot
+tests, and 21 focused desktop/phone browser scenarios. Broad frontend and
+current-head remote CI/review results are tracked in the PR delivery evidence.
 
 - `python3 scripts/lint-spec-files.test.py`: passed, 30 tests.
 - `python3 scripts/lint-spec-files.py --all`: passed for all specification files.

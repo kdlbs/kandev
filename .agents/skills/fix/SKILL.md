@@ -57,6 +57,12 @@ Classify the bug:
 Do not create a standalone repair specification. The requirement is the durable
 behavioral source. The plan and work orders record this repair.
 
+For predicates over collections or inventory, state the quantifier explicitly:
+distinguish existential conditions such as “at least one live row” from
+universal conditions such as “all rows.” When behavior depends on that
+distinction, require a mixed-state regression containing both live and failed or
+deleted rows.
+
 Do not create parallel feature and UI requirements for one repair. A separate UI
 requirement is valid only when the repair changes an independent reusable UI
 contract.
@@ -77,6 +83,9 @@ The package must:
 - Name the regression test that fails before the correction.
 - Name exact files, dependencies, acceptance conditions, and commands.
 - Use dependency waves only when they clarify implementation order.
+- For rendered UI changes, include ASCII previews in the plan and relevant UI
+  work orders per `docs/specs/guide/plans-and-work-orders.md#ascii-ui-previews`.
+  Show before/after when it explains the defect and correction.
 
 Keep work orders sequential by default. A wave does not authorize delegation.
 
@@ -89,6 +98,8 @@ Before you change production or permanent test code, report:
 - Plan and work-order paths.
 - Dependency order and exact commands.
 - Risks and exclusions.
+- For UI changes, a compact inline ASCII preview of the correction, including
+  phone composition when different, and links to the full plan/work-order views.
 
 Then end the turn. Do not ask the user to approve the package or switch models.
 Wait for a later explicit implementation request.

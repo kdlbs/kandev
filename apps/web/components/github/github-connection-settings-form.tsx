@@ -284,7 +284,7 @@ export function GitHubConnectionSettingsForm(props: SettingsFormProps) {
           type="button"
           disabled={!canSave}
           onClick={save}
-          className="h-11 w-full cursor-pointer sm:w-auto"
+          className="w-full cursor-pointer sm:w-auto"
           data-dialog-default-action
         >
           {saving && <Spinner className="mr-2 h-4 w-4" />}

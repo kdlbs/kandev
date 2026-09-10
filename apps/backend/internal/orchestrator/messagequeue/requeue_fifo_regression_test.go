@@ -5,8 +5,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/stretchr/testify/require"
 )
+
+func newRequeueTestService(t *testing.T, repo Repository) *Service {
+	t.Helper()
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stderr",
+	})
+	require.NoError(t, err)
+	service := NewService(repo, 10, log)
+	service.SetAutoMergeEnabled(false)
+	return service
+}
 
 type requeueRepositoryFactory struct {
 	name string
@@ -77,6 +91,7 @@ func TestRepository_RequeuePreservingFIFO_ReplacesPendingCoalesceTarget(t *testi
 
 			insertRequeueTestEntry(t, repo, "session", "noise", QueuedByUser, nil)
 			pending := insertRequeueTestEntry(t, repo, "session", "pending", QueuedByWorkflow, metadata)
+
 			pendingPosition := pending.Position
 
 			require.NoError(t, repo.RequeuePreservingFIFO(ctx, taken))
@@ -87,6 +102,46 @@ func TestRepository_RequeuePreservingFIFO_ReplacesPendingCoalesceTarget(t *testi
 			require.Equal(t, "original", entries[1].Content)
 			require.Equal(t, pending.ID, entries[1].ID)
 			require.Equal(t, pendingPosition, entries[1].Position)
+		})
+	}
+}
+func TestService_RequeueAtHeadInvalidatesLeasedCoalesceTarget(t *testing.T) {
+	factories := []requeueRepositoryFactory{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+	}
+	for _, factory := range factories {
+		t.Run(factory.name, func(t *testing.T) {
+			svc := newRequeueTestService(t, factory.new(t))
+			ctx := context.Background()
+			metadata := map[string]interface{}{MetadataCoalesceKey: "retry-key"}
+			target, _, err := svc.QueueMessageWithCoalesceKey(
+				ctx, "session", "task", "original", "", QueuedByUser, false,
+				nil, metadata, "retry-key", true,
+			)
+			require.NoError(t, err)
+			lease, err := svc.BeginEdit(ctx, target.SessionID, target.ID, "connection")
+			require.NoError(t, err)
+
+			retry := &QueuedMessage{
+				SessionID: target.SessionID,
+				TaskID:    target.TaskID,
+				Content:   "retry",
+				QueuedBy:  QueuedByUser,
+				Metadata:  metadata,
+			}
+			require.NoError(t, svc.RequeueAtHead(ctx, retry))
+			status := svc.GetStatus(ctx, target.SessionID)
+			require.Len(t, status.Entries, 1)
+			require.Equal(t, target.ID, status.Entries[0].ID)
+			require.Equal(t, "retry", status.Entries[0].Content)
+
+			_, err = svc.UpdateMessageWithLease(
+				ctx, target.SessionID, target.ID, lease.LeaseID,
+				"stale-operation", "connection", lease.TargetRevision,
+				"stale edit", nil, nil,
+			)
+			require.ErrorIs(t, err, ErrEditLeaseNotFound)
 		})
 	}
 }
@@ -160,5 +215,52 @@ func TestService_RequeueAtHeadWaitsForSessionAdmission(t *testing.T) {
 	case <-repo.called:
 	case <-time.After(time.Second):
 		t.Fatal("requeue did not reach the repository after admission was released")
+	}
+}
+func TestRepository_RequeuePreservingFIFO_PersistsShiftedHighWater(t *testing.T) {
+	for _, factory := range autoRunRepositoryFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			repo := factory.new(t)
+			ctx := context.Background()
+			entries := make([]*QueuedMessage, 0, 10)
+			for range 10 {
+				entries = append(entries, insertRequeueTestEntry(t, repo, "requeue-high-water", "entry", QueuedByUser, nil))
+			}
+			taken, err := repo.TakeByID(ctx, "requeue-high-water", entries[1].ID)
+			require.NoError(t, err)
+			require.NotNil(t, taken)
+			require.NoError(t, repo.RequeuePreservingFIFO(ctx, taken))
+
+			for {
+				head, err := repo.TakeHead(ctx, "requeue-high-water")
+				require.NoError(t, err)
+				if head == nil {
+					break
+				}
+			}
+			later := insertRequeueTestEntry(t, repo, "requeue-high-water", "later", QueuedByUser, nil)
+			require.Greater(t, later.Position, int64(11))
+		})
+	}
+}
+func TestRepository_TransferDrainedSourceResetsPositionCounter(t *testing.T) {
+	for _, factory := range autoRunRepositoryFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			repo := factory.new(t)
+			ctx := context.Background()
+			err := repo.Insert(ctx, &QueuedMessage{
+				SessionID: "transfer-drained-source",
+				TaskID:    "task",
+				Content:   "entry",
+				QueuedBy:  QueuedByUser,
+			}, 0)
+			require.NoError(t, err)
+			_, err = repo.TakeHead(ctx, "transfer-drained-source")
+			require.NoError(t, err)
+			require.NoError(t, repo.TransferSession(ctx, "transfer-drained-source", "transfer-destination"))
+
+			reused := insertRequeueTestEntry(t, repo, "transfer-drained-source", "reused", QueuedByUser, nil)
+			require.Equal(t, int64(1), reused.Position)
+		})
 	}
 }

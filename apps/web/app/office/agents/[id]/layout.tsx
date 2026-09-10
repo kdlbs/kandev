@@ -14,6 +14,7 @@ import { AgentStatusDot } from "../components/agent-status-dot";
 import { AgentRoleBadge } from "../components/agent-role-badge";
 import { BudgetGauge } from "../components/budget-gauge";
 import { AgentRouteStrip } from "./components/agent-route-strip";
+import { AgentRecoveryControl } from "./components/agent-recovery-control";
 import { Trans, useTranslation } from "react-i18next";
 
 type AgentDetailLayoutProps = {
@@ -75,7 +76,7 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
   return (
     <div className="p-6 space-y-4">
       <div
-        className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5"
+        className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5"
         data-testid="agent-identity-strip"
       >
         <AgentRoleBadge role={agent.role} />
@@ -84,6 +85,7 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
           {agent.status}
         </span>
         <CoordinatorRoutineHint agentId={id} agentRole={agent.role} />
+        <AgentRecoveryControl agentId={id} />
         <div className="ml-auto">
           <BudgetGauge budgetCents={agent.budgetMonthlyCents} />
         </div>
