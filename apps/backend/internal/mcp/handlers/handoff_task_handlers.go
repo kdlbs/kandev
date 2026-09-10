@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/constants"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -805,6 +806,13 @@ func sortHandoffEntries(entries []handoffEntryRecord) {
 // millisecond precision.
 func formatHandoffTimestamp(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+// SetDashboardService wires the office dashboard service used to log
+// handoff_task_kandev's AC-19/AC-19a activity entries. Optional — when nil,
+// logHandoffActivity is a no-op (D6: activity logging never fails the call).
+func (h *Handlers) SetDashboardService(svc *dashboard.DashboardService) {
+	h.dashboardSvc = svc
 }
 
 // logHandoffActivity is AC-19/AC-19a: one entry in the source workspace

@@ -259,3 +259,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-05-script-capable-html-preview-isolation | [Capability-Free Runtime for Script-Capable HTML Preview](2026-09-05-script-capable-html-preview-isolation.md) | proposed | frontend, desktop, security | 2026-09-05 |
 | 2026-09-05-trusted-browser-html-preview | [Treat HTML Preview as Trusted Workspace Code](2026-09-05-trusted-browser-html-preview.md) | accepted | frontend, backend, agentctl, security | 2026-09-05 |
 | 2026-09-07-activate-managed-runtime-defaults | [Activate Shipped Managed Runtime Defaults](2026-09-07-activate-managed-runtime-defaults.md) | accepted | backend, frontend, protocol | 2026-09-07 |
+| 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |

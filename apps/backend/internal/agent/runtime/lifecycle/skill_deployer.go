@@ -27,11 +27,12 @@ type SkillDeployer interface {
 // the agent will run inside; ExecutorType is the executor backend
 // (local_pc / local_docker / sprites) so the deployer can pick a strategy.
 type SkillDeployRequest struct {
-	Profile       *settingsmodels.AgentProfile
-	WorkspacePath string
-	ExecutorType  string
-	WorkspaceID   string
-	SessionID     string
+	Profile              *settingsmodels.AgentProfile
+	WorkspacePath        string
+	ExecutorType         string
+	WorkspaceID          string
+	SessionID            string
+	AdditionalSkillSlugs []string
 	// OfficeRuntime reports whether backend selected Office mode and the
 	// finalized launch env contains a non-empty KANDEV_CLI. Office launch
 	// validation checks the remaining runtime variables before this hook runs.
