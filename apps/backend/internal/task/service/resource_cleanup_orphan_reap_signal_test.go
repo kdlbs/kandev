@@ -241,6 +241,34 @@ func TestSignalOrphanReapCandidatesReverifiesBeforeSigkill(t *testing.T) {
 	})
 }
 
+// AC-TASKS-ORPHAN-REAP-003.7: the pre-SIGTERM re-verification -- the check
+// standing between a reused PID and the first irreversible signal -- must
+// itself be able to fail and stop that signal, not just the pre-SIGKILL one.
+func TestSignalOrphanReapCandidatesReverifiesBeforeSigterm(t *testing.T) {
+	verifier := newFakeOrphanReapVerifier()
+	verifier.set(500, "/unrelated/dir") // already outside the root at enumeration-to-signal time
+	signaler := newFakeOrphanReapSignaler()
+	signaler.setAlive(500, true)
+
+	svc := newOrphanReapSignalTestService()
+	svc.orphanReapVerifier = verifier
+	svc.orphanReapSignaler = signaler
+
+	cand := newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a")
+	snapshot := &taskResourceCleanupSnapshot{}
+	errs := svc.signalOrphanReapCandidates(context.Background(), "task-a", []orphanReapCandidate{cand}, snapshot)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	if sent := signaler.sentSignals(); len(sent) != 0 {
+		t.Fatalf("expected no SIGTERM sent once re-verification found the pid outside its root, got %+v", sent)
+	}
+	rec, ok := findOrphanReapRecord(snapshot, 500)
+	if !ok || rec.Outcome != orphanReapOutcomeSkipped {
+		t.Fatalf("expected pid 500 recorded skipped before any signal, got %+v (found=%v)", rec, ok)
+	}
+}
+
 // AC-TASKS-ORPHAN-REAP-004.3: every SIGTERM is sent before the shared grace
 // period starts, regardless of how many candidates there are.
 func TestSignalOrphanReapCandidatesSendsAllSigtermsBeforeGraceDelay(t *testing.T) {
@@ -403,6 +431,102 @@ func TestSignalOrphanReapCandidatesStopsSigkillLoopOnCancellationMidBurst(t *tes
 		}
 	})
 }
+
+// cancelDuringVerify wraps a verifier and cancels the context as a side
+// effect of a successful VerifyCwd, simulating cancellation landing during a
+// context-blind verifier's read (Linux's VerifyCwd is a bare os.Readlink that
+// never observes ctx) -- after the per-iteration ctx.Err() check at the top
+// of the send loop already passed, but before the loop would otherwise reach
+// the signal send that follows a successful reverify.
+type cancelDuringVerify struct {
+	inner  orphanReapVerifier
+	cancel context.CancelFunc
+}
+
+func (v cancelDuringVerify) VerifyCwd(ctx context.Context, pid int) (string, error) {
+	cwd, err := v.inner.VerifyCwd(ctx, pid)
+	v.cancel()
+	return cwd, err
+}
+
+// AC-TASKS-ORPHAN-REAP-006.3: cancellation landing during the mandatory
+// re-verification itself -- after the loop-top ctx.Err() check already
+// passed -- must still stop the SIGTERM that would otherwise immediately
+// follow a successful reverify.
+func TestSignalOrphanReapCandidatesRechecksCancellationAfterReverifyBeforeSigterm(t *testing.T) {
+	verifier := newFakeOrphanReapVerifier()
+	verifier.set(500, "/tasks/task-a")
+	signaler := newFakeOrphanReapSignaler()
+	signaler.setAlive(500, true)
+
+	svc := newOrphanReapSignalTestService()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.orphanReapVerifier = cancelDuringVerify{inner: verifier, cancel: cancel}
+	svc.orphanReapSignaler = signaler
+
+	candidates := []orphanReapCandidate{
+		newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a"),
+	}
+	snapshot := &taskResourceCleanupSnapshot{}
+	errs := svc.signalOrphanReapCandidates(ctx, "task-a", candidates, snapshot)
+
+	if len(errs) != 1 || !errors.Is(errs[0], errOrphanReapCancelledMidPhase) {
+		t.Fatalf("expected errOrphanReapCancelledMidPhase, got %v", errs)
+	}
+	if sent := signaler.sentSignals(); len(sent) != 0 {
+		t.Fatalf("expected no SIGTERM sent once cancellation lands during reverify, got %+v", sent)
+	}
+}
+
+// The same recheck applies to the SIGKILL loop, between its reverify and the
+// SIGKILL send.
+func TestSignalOrphanReapCandidatesRechecksCancellationAfterReverifyBeforeSigkill(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		verifier := newFakeOrphanReapVerifier()
+		verifier.set(500, "/tasks/task-a")
+		signaler := newFakeOrphanReapSignaler()
+		signaler.setAlive(500, true) // survives sigterm, escalates to sigkill
+
+		svc := newOrphanReapSignalTestService()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cancelOnSigkillReverify := false
+		svc.orphanReapVerifier = verifierFunc(func(vctx context.Context, pid int) (string, error) {
+			cwd, err := verifier.VerifyCwd(vctx, pid)
+			if cancelOnSigkillReverify {
+				cancel()
+			}
+			return cwd, err
+		})
+		signaler.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm {
+				cancelOnSigkillReverify = true // arm cancellation for the SIGKILL-phase reverify only
+			}
+		}
+		svc.orphanReapSignaler = signaler
+
+		candidates := []orphanReapCandidate{
+			newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a"),
+		}
+		snapshot := &taskResourceCleanupSnapshot{}
+		errs := svc.signalOrphanReapCandidates(ctx, "task-a", candidates, snapshot)
+
+		if len(errs) != 1 || !errors.Is(errs[0], errOrphanReapCancelledMidPhase) {
+			t.Fatalf("expected errOrphanReapCancelledMidPhase, got %v", errs)
+		}
+		for _, s := range signaler.sentSignals() {
+			if s.sig == orphanReapSigkill {
+				t.Fatalf("expected no SIGKILL sent once cancellation lands during reverify, got %+v", signaler.sentSignals())
+			}
+		}
+	})
+}
+
+// verifierFunc adapts a plain function to orphanReapVerifier.
+type verifierFunc func(ctx context.Context, pid int) (string, error)
+
+func (f verifierFunc) VerifyCwd(ctx context.Context, pid int) (string, error) { return f(ctx, pid) }
 
 // AC-TASKS-ORPHAN-REAP-004.4: a signal failing because the process is already
 // gone is a successful reap (terminated), not an error.
