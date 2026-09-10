@@ -18,12 +18,12 @@ Kandev does not currently provide a user-login boundary for the web application,
 
 ## Choose an operating model
 
-| Mode | Start and stop | Durable state | Update path |
-| --- | --- | --- | --- |
-| Desktop | Launch or quit Kandev | `~/.kandev` by default | **Settings > System > Updates** uses the signed desktop updater when supported |
-| Interactive CLI | `kandev`, then `Ctrl-C` | `~/.kandev` by default | Upgrade the Homebrew or npm package, then restart |
-| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | A verified npm/npx user service can select and apply Stable or Nightly; other services use Stable and may require a package upgrade, reinstall, and restart |
-| Docker or Kubernetes | Container or workload manager | Mounted Kandev home plus any external database/provider state | Replace the image and recreate the container or pod |
+| Mode                 | Start and stop                               | Durable state                                                                                            | Update path                                                                                                                                                 |
+| -------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop              | Launch or quit Kandev                        | `~/.kandev` by default                                                                                   | **Settings > System > Updates** uses the signed desktop updater when supported                                                                              |
+| Interactive CLI      | `kandev`, then `Ctrl-C`                      | `~/.kandev` by default                                                                                   | Upgrade the Homebrew or npm package, then restart                                                                                                           |
+| Managed service      | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | A verified npm/npx user service can select and apply Stable or Nightly; other services use Stable and may require a package upgrade, reinstall, and restart |
+| Docker or Kubernetes | Container or workload manager                | Mounted Kandev home plus any external database/provider state                                            | Replace the image and recreate the container or pod                                                                                                         |
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
 
@@ -69,7 +69,12 @@ curl -fsS http://127.0.0.1:38429/health
 It returns HTTP 200 as soon as the listener accepts connections, with:
 
 ```json
-{"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
+{
+  "status": "ok",
+  "service": "kandev",
+  "mode": "websocket+http",
+  "version": "1.2.3"
+}
 ```
 
 `/health` never returns a non-2xx status while the process is alive, even mid-startup: it confirms the process is up, not that it can serve real traffic. Use the readiness endpoint instead when you need to know the backend can actually serve requests:
@@ -550,7 +555,7 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode**: experimental, medium risk, and off in the production profile by default.
-- **Office session identity**: experimental, high risk, and off in every profile by default. The live `(task_id, agent_profile_id)` pair is guarded in-transaction on the office session creation path, not by a table-level index; pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. It gives each Office participant a separate task conversation and requires a restart.
+- **Office session identity**: experimental, high risk, and on in every profile by default. The live `(task_id, agent_profile_id)` pair is guarded in-transaction on the Office session creation path, not by a table-level index; pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. It gives each Office participant a separate task conversation and requires a restart. Disabling the toggle restores the pre-graduation runner-seat binding and task-active-session decision re-evaluation.
 - **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
 - **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
 - **Unread divider**: a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
@@ -565,24 +570,24 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 
 ## Troubleshooting
 
-| Symptom | Check | Action |
-| --- | --- | --- |
-| `/health` cannot connect | Process-manager and launcher output | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once |
-| `/ready` stays at 503 while `/health` is 200 | Backend startup logs | Process is alive but still wiring routes, seeding the agent registry, or mounting test-harness routes; give it more time before restarting |
-| Status page says unhealthy while `/ready` is 200 | `/api/v1/system/health` issue IDs | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings |
-| Backups page reports a 15-second create timeout | Reload the backup list and inspect the `backup-create` job/log | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk |
-| Backup/maintenance fails on PostgreSQL | Active driver on Database page | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only |
-| Restored data looks stale | Whether the backend was restarted immediately | Quit/restart; do not keep using the old open database connections |
-| Diagnostic bundle is partial | `manifest.json` warnings, source status, and loss counters | Keep a Kandev browser open for frontend capture; use backend-only when browser evidence is unnecessary |
-| Update check returns HTTP 429 | Time since last **Check now** | Wait at least 30 seconds; background checks retry every six hours |
-| **Apply update** is absent | Install mode/method and `<home>/service/install.json` | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
-| **Nightly** is disabled | Install mode/method and `<home>/service/install.json` | Expected unless this is a verified managed npm/npx user service. Homebrew, Desktop, system-service, unmanaged, local-checkout, invalid-metadata, and unknown installs are Stable-only. |
-| Nightly check or save fails | npm access and cached checked time | Verify access to `https://registry.npmjs.org/kandev`, retry after connectivity returns, or keep/select Stable. A malformed or missing npm `nightly` tag fails closed. |
-| Metrics show unavailable | OS support, disk path, executor connectivity | Select supported metrics and verify permissions/network; the collector reports errors per sample |
-| Disk total exceeds filesystem expectation | Separate `data` and `backups` rows | Backups are counted twice in the UI total; use volume metrics for capacity decisions |
-| Legacy `/tmp/kandev-agent/*` uses disk | Process inventory and open-file references for the exact directory | This is data from older Kandev versions, not a current Storage resource. Stop Kandev, confirm no live process references the target, then remove only the confirmed-inactive legacy directory through host administration. |
-| Archived task's remote resource remains | Backend, Docker/Kubernetes/SSH/Sprites, and provider logs | Cleanup is asynchronous and bounded. SSH task directories and existing Kubernetes claims are retained by design; for other leftovers, verify work is preserved, then remove the exact resource manually |
-| Sprites reset removed the environment but not the sandbox | **Settings > Executors > Sprites.dev** | Current reset can omit the provider credential during destroy; find the old Kandev-named sandbox and destroy it explicitly |
+| Symptom                                                   | Check                                                              | Action                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/health` cannot connect                                  | Process-manager and launcher output                                | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once                                                                                                                                              |
+| `/ready` stays at 503 while `/health` is 200              | Backend startup logs                                               | Process is alive but still wiring routes, seeding the agent registry, or mounting test-harness routes; give it more time before restarting                                                                                                                    |
+| Status page says unhealthy while `/ready` is 200          | `/api/v1/system/health` issue IDs                                  | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings                                                                                                                                     |
+| Backups page reports a 15-second create timeout           | Reload the backup list and inspect the `backup-create` job/log     | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk                                                                                                                                                                         |
+| Backup/maintenance fails on PostgreSQL                    | Active driver on Database page                                     | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only                                                                                                                                                      |
+| Restored data looks stale                                 | Whether the backend was restarted immediately                      | Quit/restart; do not keep using the old open database connections                                                                                                                                                                                             |
+| Diagnostic bundle is partial                              | `manifest.json` warnings, source status, and loss counters         | Keep a Kandev browser open for frontend capture; use backend-only when browser evidence is unnecessary                                                                                                                                                        |
+| Update check returns HTTP 429                             | Time since last **Check now**                                      | Wait at least 30 seconds; background checks retry every six hours                                                                                                                                                                                             |
+| **Apply update** is absent                                | Install mode/method and `<home>/service/install.json`              | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
+| **Nightly** is disabled                                   | Install mode/method and `<home>/service/install.json`              | Expected unless this is a verified managed npm/npx user service. Homebrew, Desktop, system-service, unmanaged, local-checkout, invalid-metadata, and unknown installs are Stable-only.                                                                        |
+| Nightly check or save fails                               | npm access and cached checked time                                 | Verify access to `https://registry.npmjs.org/kandev`, retry after connectivity returns, or keep/select Stable. A malformed or missing npm `nightly` tag fails closed.                                                                                         |
+| Metrics show unavailable                                  | OS support, disk path, executor connectivity                       | Select supported metrics and verify permissions/network; the collector reports errors per sample                                                                                                                                                              |
+| Disk total exceeds filesystem expectation                 | Separate `data` and `backups` rows                                 | Backups are counted twice in the UI total; use volume metrics for capacity decisions                                                                                                                                                                          |
+| Legacy `/tmp/kandev-agent/*` uses disk                    | Process inventory and open-file references for the exact directory | This is data from older Kandev versions, not a current Storage resource. Stop Kandev, confirm no live process references the target, then remove only the confirmed-inactive legacy directory through host administration.                                    |
+| Archived task's remote resource remains                   | Backend, Docker/Kubernetes/SSH/Sprites, and provider logs          | Cleanup is asynchronous and bounded. SSH task directories and existing Kubernetes claims are retained by design; for other leftovers, verify work is preserved, then remove the exact resource manually                                                       |
+| Sprites reset removed the environment but not the sandbox | **Settings > Executors > Sprites.dev**                             | Current reset can omit the provider credential during destroy; find the old Kandev-named sandbox and destroy it explicitly                                                                                                                                    |
 
 ## Related pages
 

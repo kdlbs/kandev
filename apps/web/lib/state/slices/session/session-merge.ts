@@ -97,9 +97,12 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     existingRouteGeneration !== undefined &&
     (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
   const pendingAction = mergePendingActionProjection(existing, incoming);
+  const merged = { ...existing, ...incoming };
+  // A backend session update never carries the frontend-only projection owner.
+  // Its absence is the revocation signal for an optimistic resume rollback.
+  if (incoming.resume_projection_id === undefined) delete merged.resume_projection_id;
   return {
-    ...existing,
-    ...incoming,
+    ...merged,
     ...cancellation,
     ...parked,
     ...(routeIsStale

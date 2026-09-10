@@ -537,6 +537,17 @@ automation.webhook.reveal_secret
 
 These are trusted local-administration operations. In particular, `secrets.reveal` and `automation.webhook.reveal_secret` make the lack of WebSocket authentication security-critical.
 
+`secrets.delete` accepts `{ "id": "<secret-id>", "workspace_id": "<optional-workspace-id>", "force": false }`.
+A Workspace secret requires its `workspace_id`. A referenced secret returns `CONFLICT` with `details.code: "secret_in_use"` and `details.references`.
+References contain `kind` (`agent_profile`, `executor_profile`, or `repository`), `id`, `name`, and `key`.
+An inaccessible workspace-scoped profile or repository exposes only its `kind`. Secret values and secret IDs never appear in conflict details.
+The HTTP equivalent, `DELETE /api/v1/secrets/:id`, returns `409` with `code` and `references` at the top level.
+`GET /api/v1/secrets/:id/references` performs the same authorized reference lookup without changing the secret and returns `{ "references": [...] }`. Add `?workspace_id=<workspace-id>` for a Workspace secret. Settings uses this endpoint before it enables deletion; the later `DELETE` still repeats the check.
+
+With `force: true`, deletion preserves the broken bindings. Future launches fail until users repair those bindings.
+The HTTP override is `?force=true`, combined with `workspace_id` for Workspace secrets.
+Force does not bypass authorization. Reference lookup failures return `INTERNAL_ERROR` (HTTP `500`) and leave the secret intact.
+
 `automation.run.stop` requires `automation_id` and `run_id`. It cancels the
 selected open run's exact task/session/turn binding and returns `{run_id,
 status}`. A stale or terminal binding returns not found; it never stops another
@@ -696,6 +707,7 @@ workflow.step.updated
 workflow.step.deleted
 agent.profile.created
 agent.profile.updated
+agent.profile.mcp_config.updated
 agent.profile.deleted
 task.created
 task.updated

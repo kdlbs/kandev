@@ -27,8 +27,9 @@ const (
 	CapabilityDeleteSkills     = "delete_skills"
 )
 
-// AvailableActionRecordStepDecision identifies the MCP decision tool that a
-// run prompt may advertise when the agent holds the current workflow seat.
+// AvailableActionRecordStepDecision identifies the advisory runtime decision
+// action that a run prompt may advertise when the agent holds the current
+// workflow seat.
 const AvailableActionRecordStepDecision = "record_step_decision"
 
 // Allows reports whether the named runtime capability is granted.

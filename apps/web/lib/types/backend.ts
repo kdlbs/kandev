@@ -154,6 +154,11 @@ export type AgentSettingsUpdatedPayload = {
   agent: Agent;
 };
 
+export type AgentProfileMcpConfigUpdatedPayload = {
+  profile_id: string;
+  workspace_id?: string | null;
+};
+
 export type AgentAvailableUpdatedPayload = {
   agents: AvailableAgent[];
   tools?: ToolStatus[];
@@ -432,6 +437,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.plan.reverted": BackendMessage<"task.plan.reverted", TaskPlanRevisionEventPayload>;
     "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
     "agent.settings.updated": BackendMessage<"agent.settings.updated", AgentSettingsUpdatedPayload>;
+    "agent.profile.mcp_config.updated": BackendMessage<
+      "agent.profile.mcp_config.updated",
+      AgentProfileMcpConfigUpdatedPayload
+    >;
     "agent.available.updated": BackendMessage<
       "agent.available.updated",
       AgentAvailableUpdatedPayload

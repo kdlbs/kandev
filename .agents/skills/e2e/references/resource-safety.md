@@ -10,6 +10,11 @@ most three local shards, and lowers that limit when available memory is below
 runs inside a container. This prevents host memory reporting from authorizing
 more shards than the container can hold.
 
+Use `pnpm e2e:run`, guarded `pnpm e2e:raw`, or `make test-e2e` for ordinary
+verification. Reserve direct Playwright commands, all-worker overrides, and
+overlapping full suites for deliberate pressure or guard reproduction. Keep
+those experiments to one worker or shard by default and record the reason.
+
 Start with the default single shard; use two or three only when the host has
 capacity for separate Go backends, SPA processes, Chromium instances, and mock
 agents. If a command is rejected, reduce its shard or worker count. Do not

@@ -55,7 +55,7 @@ type EngineHandle interface {
 	RecordParticipantDecision(ctx context.Context, sessionID string, in engine.DecisionInfo) (engine.RecordDecisionResult, error)
 	EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (engine.QuorumSnapshot, error)
 	// ResolveParticipantRole is the AC-2/3/4/4a role-and-seat resolution
-	// entry point the agent decision tool needs. Reached the same way as
+	// entry point the runtime decision path needs. Reached the same way as
 	// the two methods above: via Dispatcher.ResolveParticipantRole plus a
 	// narrow caller-side type assertion.
 	ResolveParticipantRole(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)

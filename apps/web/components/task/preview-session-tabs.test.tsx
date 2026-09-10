@@ -375,6 +375,13 @@ describe("PreviewSessionTabs tab label", () => {
 
     expect(screen.getByTestId(SESSION_A_TAB_TESTID).textContent).toContain("My renamed agent");
   });
+
+  it("passes the owning task archive state to session recovery", () => {
+    mocks.sessions = [makeSession("session-a", { state: "COMPLETED" })];
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" isArchived />);
+
+    expect(mocks.useSessionResumption).toHaveBeenCalledWith(TASK_ID, "session-a", true);
+  });
 });
 
 describe("PreviewSessionTabs session context menu", () => {

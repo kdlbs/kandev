@@ -41,16 +41,16 @@ func (r *lifecycleQueueFailureRepository) InsertOrReplaceLifecycleByCoalesceKeyF
 
 // lifecycleAcknowledgingRepository exposes the durable lifecycle completion
 // boundary. ReserveHead intentionally retains lifecycle entries until the
-// executor accepts the prompt and AcknowledgeByID commits the removal.
+// executor accepts the prompt and AcknowledgeReserved commits the removal.
 type lifecycleAcknowledgingRepository struct {
 	messagequeue.Repository
 	acknowledged chan struct{}
 }
 
-func (r *lifecycleAcknowledgingRepository) AcknowledgeByID(
-	ctx context.Context, sessionID, entryID string,
+func (r *lifecycleAcknowledgingRepository) AcknowledgeReserved(
+	ctx context.Context, msg *messagequeue.QueuedMessage,
 ) error {
-	if err := r.Repository.AcknowledgeByID(ctx, sessionID, entryID); err != nil {
+	if err := r.Repository.AcknowledgeReserved(ctx, msg); err != nil {
 		return err
 	}
 	close(r.acknowledged)

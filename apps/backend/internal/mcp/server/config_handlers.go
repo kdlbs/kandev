@@ -176,8 +176,9 @@ func (s *Server) registerConfigAgentTools() {
 			mcp.WithDescription("Create a new agent profile for an agent."),
 			mcp.WithString("agent_id", mcp.Required(), mcp.Description("The agent ID to create a profile for")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
-			mcp.WithString("model", mcp.Required(), mcp.Description("Model name (e.g. 'claude-sonnet-4-5-20250514')")),
+			mcp.WithString("model", mcp.Description("Optional model name. Omit to use the agent default.")),
 			mcp.WithBoolean("auto_approve", mcp.Description("Auto-approve permissions (default: false)")),
+			mcp.WithObject("settings", mcp.Description("Optional complete profile settings object. Use describe_setting_kandev for the current schema.")),
 		),
 		s.wrapHandler("create_agent_profile_kandev", s.createAgentProfileHandler()),
 	)
@@ -563,17 +564,18 @@ func (s *Server) createAgentProfileHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("name is required"), nil
 		}
-		model, err := req.RequireString("model")
-		if err != nil {
-			return mcp.NewToolResultError("model is required"), nil
-		}
 		payload := map[string]interface{}{
 			"agent_id": agentID,
 			"name":     name,
-			"model":    model,
+		}
+		if model := req.GetString("model", ""); model != "" {
+			payload["model"] = model
 		}
 		if args := req.GetArguments(); args["auto_approve"] != nil {
 			payload["auto_approve"] = args["auto_approve"]
+		}
+		if args := req.GetArguments(); args["settings"] != nil {
+			payload["settings"] = args["settings"]
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPCreateAgentProfile, payload)
 	}

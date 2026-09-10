@@ -21,13 +21,13 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
-	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/plugins"
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/settingscatalog"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -273,21 +273,22 @@ type Handlers struct {
 	promptResolver       PromptReferenceResolver
 	promptReader         PromptReader
 	userSettingsProvider UserSettingsProvider
+	settingsRegistry     *settingscatalog.Registry
+	settingsOperations   SettingsOperations
 	logger               *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
-	workflowSvc       *workflowsvc.Service
-	agentSettingsCtrl *agentsettingscontroller.Controller
-	mcpConfigSvc      *mcpconfig.Service
+	workflowSvc         *workflowsvc.Service
+	agentSettingsCtrl   *agentsettingscontroller.Controller
+	mcpConfigSvc        *mcpconfig.Service
+	settingsBroadcaster interface {
+		Broadcast(*ws.Message)
+	}
 
 	// Cross-task handoff service (optional, set via SetHandoffService).
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
-
-	// Office dashboard service (optional, set via SetDashboardService).
-	// Wires the record_step_decision_kandev MCP tool.
-	dashboardSvc *dashboard.DashboardService
 
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
@@ -424,6 +425,12 @@ func (h *Handlers) SetConfigDeps(
 	h.mcpConfigSvc = mcpConfigSvc
 }
 
+// SetSettingsBroadcaster wires the notification path used by settings writes
+// that originate in legacy MCP configuration tools.
+func (h *Handlers) SetSettingsBroadcaster(broadcaster interface{ Broadcast(*ws.Message) }) {
+	h.settingsBroadcaster = broadcaster
+}
+
 // SetPluginService wires the plugin agent-tool catalog and invocation bridge.
 func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
@@ -520,6 +527,9 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	if h.settingsRegistry != nil {
+		h.registerSettingsHandlers(d)
+	}
 	if h.promptReader != nil {
 		h.registerPromptHandlers(d)
 	}
@@ -544,9 +554,6 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-	}
-	if h.dashboardSvc != nil {
-		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
 		h.registerTaskConfigMutationHandlers(d)
@@ -2981,6 +2988,7 @@ type taskMessageDispatchResult struct {
 }
 
 type taskMessageReviewRollback struct {
+	taskID         string
 	changed        bool
 	restoreTask    bool
 	taskState      v1.TaskState
@@ -3445,6 +3453,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 		return taskMessageReviewRollback{}, err
 	}
 	rollback := taskMessageReviewRollback{
+		taskID:         taskID,
 		changed:        true,
 		restoreTask:    true,
 		taskState:      task.State,
@@ -3554,14 +3563,28 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 		return nil
 	}
 	selected, err := repo.GetTaskSession(ctx, rollback.selectedID)
-	if err != nil {
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
 		return err
 	}
 	if selected != nil && selected.State == models.TaskSessionStateCancelled {
 		return errTaskMessageRollbackSuperseded
 	}
+	taskID := rollback.taskID
+	if selected != nil && selected.TaskID != "" {
+		taskID = selected.TaskID
+	}
+	if taskID == "" {
+		if snapshot, ok := rollback.queues[rollback.selectedID]; ok {
+			for _, entry := range snapshot.entries {
+				if entry.TaskID != "" {
+					taskID = entry.TaskID
+					break
+				}
+			}
+		}
+	}
 	if primaryID != "" && rollback.selectedID != primaryID {
-		if err := h.restoreTaskMessageQueueOwner(ctx, rollback.selectedID, primaryID); err != nil {
+		if err := h.restoreTaskMessageQueueOwner(ctx, taskID, rollback.selectedID, primaryID); err != nil {
 			return err
 		}
 	}
@@ -3603,10 +3626,12 @@ func (h *Handlers) restoreTaskMessageQueues(ctx context.Context, rollback taskMe
 	if queue == nil {
 		return nil
 	}
+	restoreCtx := context.WithoutCancel(ctx)
 	for sessionID, snapshot := range rollback.queues {
-		if err := h.restoreTaskMessageQueue(ctx, queue, sessionID, snapshot); err != nil {
+		if err := h.restoreTaskMessageQueue(restoreCtx, queue, sessionID, snapshot); err != nil {
 			return err
 		}
+		h.publishQueueStatusEvent(restoreCtx, snapshot.identity, queue)
 	}
 	return nil
 }
@@ -3619,7 +3644,8 @@ func (h *Handlers) restoreTaskMessageQueue(ctx context.Context, queue *messagequ
 	return queue.RestoreSessionForIdentity(ctx, snapshot.identity, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
 }
 
-func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID, primaryID string) error {
+//nolint:cyclop // Queue-owner restoration validates two identities and rolls back attachment transfer on failure.
+func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, taskID, selectedID, primaryID string) error {
 	queue := h.sessionLauncher.GetMessageQueue()
 	if queue == nil {
 		return nil
@@ -3654,7 +3680,38 @@ func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID,
 		primaryIdentity.SessionIncarnationID != primary.QueueIncarnationID {
 		return messagequeue.ErrSessionIdentityMismatch
 	}
-	return queue.TransferSessionIdentities(ctx, selectedIdentity, primaryIdentity)
+	transferCtx := context.WithoutCancel(ctx)
+	transferErr := queue.TransferSessionWithDurableAttachmentPreparation(
+		transferCtx,
+		taskID,
+		selectedID,
+		primaryID,
+		func(admittedCtx context.Context, attachmentIDs []string) error {
+			if h.taskSvc == nil {
+				return errors.New("session attachment transfer service is unavailable")
+			}
+			if err := h.taskSvc.TransferSessionMessageAttachments(
+				admittedCtx, taskID, selectedID, primaryID, attachmentIDs,
+			); err != nil {
+				return fmt.Errorf("transfer session attachments: %w", err)
+			}
+			return nil
+		},
+		func(rollbackCtx context.Context, attachmentIDs []string) error {
+			if h.taskSvc == nil {
+				return errors.New("session attachment transfer service is unavailable")
+			}
+			return h.taskSvc.TransferSessionMessageAttachments(
+				rollbackCtx, taskID, primaryID, selectedID, attachmentIDs,
+			)
+		},
+	)
+	if transferErr != nil {
+		return transferErr
+	}
+	h.publishQueueStatusEvent(transferCtx, selectedIdentity, queue)
+	h.publishQueueStatusEvent(transferCtx, primaryIdentity, queue)
+	return nil
 }
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
 	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
@@ -3916,10 +3973,10 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", taskID))
 
-	// Block until user responds or context is cancelled (agent MCP timeout).
-	// With MCP_TOOL_TIMEOUT set to 2h for Claude Code, this will wait long enough.
-	// If the agent times out, the entry is cleaned up and the event-based
-	// fallback in the orchestrator handles resuming with a new turn.
+	// WaitForResponse can outlast the agent client's idle watchdog because the
+	// MCP server emits progress while this call is blocked. If the agent
+	// cancels, cleanup and the event fallback resume the interaction on a new
+	// turn.
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
 	if err != nil {
 		if h.inputPauser != nil {

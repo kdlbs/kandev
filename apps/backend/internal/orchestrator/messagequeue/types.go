@@ -13,8 +13,8 @@ const DefaultMaxPerSession = 10
 
 // Sender identities written to QueuedMessage.QueuedBy. The handlers default
 // any empty user-supplied identity to QueuedByUser so the UpdateMessage
-// ownership guard always runs against a non-empty value. Agent, workflow, and
-// server identities are reserved for backend dispatch paths.
+// ownership guard always runs against a non-empty value. Agent, workflow,
+// server, and move-task identities are reserved for backend dispatch paths.
 const (
 	QueuedByUser     = "user"
 	QueuedByAgent    = "agent"
@@ -33,7 +33,7 @@ const (
 // additive prompts from one agent into a single delivery. See ADR 0051.
 func IsReservedQueuedBy(queuedBy string) bool {
 	switch queuedBy {
-	case QueuedByAgent, QueuedByWorkflow, QueuedByServer:
+	case QueuedByAgent, QueuedByWorkflow, QueuedByServer, QueuedByMoveTask:
 		return true
 	default:
 		return false
@@ -73,6 +73,8 @@ const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 // written by older builds. Reserved rows stay in storage for crash recovery
 // but are hidden from pending queue status until acknowledged or released.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
+
+const metadataLifecycleReservationID = "lifecycle_reservation_id"
 
 // MetadataLifecycleReservationIncarnation binds a retained row to the
 // immutable session incarnation that reserved it. A replacement incarnation
@@ -125,11 +127,50 @@ var (
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
+	// ErrQueueDispatchClaimChanged means the durable ordinary-dispatch claim
+	// was cleared or transferred before its worker attempted to settle it.
+	ErrQueueDispatchClaimChanged = errors.New("queue dispatch claim changed")
+	// ErrLifecycleReservationChanged means a newer lifecycle delivery attempt
+	// replaced the reservation being acknowledged.
+	ErrLifecycleReservationChanged = errors.New("lifecycle reservation changed")
+	// ErrSessionTransferInProgress prevents a queue mutation from entering a
+	// session while its rows and external attachment claims are being rebound.
+	ErrSessionTransferInProgress = errors.New("session transfer in progress")
+	// ErrSessionTransferOwnershipLost prevents an older transfer attempt from
+	// deleting or replacing a newer durable transfer fence.
+	ErrSessionTransferOwnershipLost = errors.New("session transfer ownership lost")
+	// ErrEditConflict means a queue entry is currently held by another editor.
+	ErrEditConflict = errors.New("queue entry edit conflict")
+	// ErrEditLeaseNotFound means a lease is missing, expired, or owned by
+	// another WebSocket connection.
+	ErrEditLeaseNotFound = errors.New("queue edit lease not found")
+	// ErrEditRevisionConflict means the target changed since edit.begin.
+	ErrEditRevisionConflict = errors.New("queue edit target revision conflict")
 	// ErrAutoMergePolicyChanged means admission's immutable policy snapshot no
 	// longer matches the durable session override. The caller must re-resolve
 	// policy before deciding whether to fold.
 	ErrAutoMergePolicyChanged = errors.New("queue Auto-merge policy changed")
 )
+
+const QueueEditLeaseTTL = 60 * time.Second
+
+// QueueEditLease is the server-issued, connection-bound hold for one entry.
+type QueueEditLease struct {
+	SessionID       string    `json:"session_id"`
+	EntryID         string    `json:"entry_id"`
+	LeaseID         string    `json:"lease_id"`
+	TargetRevision  int64     `json:"target_revision"`
+	LeaseGeneration int64     `json:"lease_generation,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at,omitempty"`
+	// connectionID and operation fields are server-side fencing state.
+	connectionID           string
+	taskID                 string
+	lastOperationID        string
+	lastOperationHash      string
+	lastOperationResult    int64
+	lastOperationPrevious  *QueuedMessage
+	lastOperationFinalized bool
+}
 
 // QueueSessionIdentity is the immutable authority for session-scoped queue work.
 type QueueSessionIdentity struct {
@@ -182,7 +223,21 @@ type QueuedMessage struct {
 	// reservedLifecycleDelivery is process-local evidence that ReserveHead
 	// retained this durable row for acknowledgement.
 	reservedLifecycleDelivery bool
-	reservationIdentity       QueueSessionIdentity
+
+	// dispatchAttemptID and lifecycleReservationID identify the exact durable
+	// delivery attempts this process may settle. They are intentionally absent
+	// from the public JSON wire shape.
+	dispatchAttemptID      string
+	lifecycleReservationID string
+
+	// reservationSessionGeneration and reservationLifecycleGeneration fence a
+	// FIFO dispatch source to the generations observed while it was reserved.
+	// They are process-local and only used if reservationGenerationsCaptured is
+	// true.
+	reservationSessionGeneration   int64
+	reservationLifecycleGeneration int64
+	reservationGenerationsCaptured bool
+	reservationIdentity            QueueSessionIdentity
 }
 
 // QueueRemovalResult is the atomic outcome of a user-driven queue deletion.
@@ -192,6 +247,20 @@ type QueueRemovalResult struct {
 	Removed  []QueuedMessage
 	Retained []QueuedMessage
 }
+
+// ReservationGenerations returns the session and lifecycle generations
+// captured when this entry was reserved for FIFO dispatch.
+func (m *QueuedMessage) ReservationGenerations() (int64, int64, bool) {
+	if m == nil {
+		return 0, 0, false
+	}
+	return m.reservationSessionGeneration, m.reservationLifecycleGeneration, m.reservationGenerationsCaptured
+}
+
+const (
+	lifecycleOriginGitHubPR = "github_pr_automation"
+	lifecycleOriginGitLabMR = "gitlab_mr_automation"
+)
 
 // IsDurableLifecycle reports whether this entry uses reserve/ack delivery.
 // The origin fallback keeps lifecycle rows queued by older builds safe across
@@ -204,7 +273,7 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 		return true
 	}
 	origin, _ := m.Metadata["origin"].(string)
-	return origin == "github_pr_automation" || origin == "ci_automation"
+	return origin == lifecycleOriginGitHubPR || origin == "ci_automation" || origin == lifecycleOriginGitLabMR
 }
 
 // IsReservedInFlight reports whether this row was retained for an in-flight
@@ -223,18 +292,19 @@ func (m *QueuedMessage) IsReservedLifecycleDelivery() bool {
 	return m != nil && m.reservedLifecycleDelivery
 }
 
-// markReservedMetadata returns a copy of metadata carrying the in-flight
-// reservation marker.
-func markReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
-	return markReservedMetadataForIncarnation(metadata, "")
+// markReservedMetadata returns a copy carrying the exact lifecycle delivery
+// attempt that may acknowledge the durable row.
+func markReservedMetadata(metadata map[string]interface{}, reservationIDs ...string) map[string]interface{} {
+	marked := copyMessageMetadata(metadata, 3)
+	marked[MetadataLifecycleReserved] = true
+	if len(reservationIDs) > 0 && reservationIDs[0] != "" {
+		marked[metadataLifecycleReservationID] = reservationIDs[0]
+	}
+	return marked
 }
 
 func markReservedMetadataForIncarnation(metadata map[string]interface{}, incarnationID string) map[string]interface{} {
-	marked := make(map[string]interface{}, len(metadata)+2)
-	for k, v := range metadata {
-		marked[k] = v
-	}
-	marked[MetadataLifecycleReserved] = true
+	marked := markReservedMetadata(metadata)
 	if incarnationID != "" {
 		marked[MetadataLifecycleReservationIncarnation] = incarnationID
 	}
@@ -249,11 +319,19 @@ func lifecycleReservationIncarnation(metadata map[string]interface{}) string {
 // clearReservedMetadata removes transient delivery ownership from copies
 // returned to dispatch or written back for retry.
 func clearReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
-	cleared := make(map[string]interface{}, len(metadata))
-	for k, v := range metadata {
-		if k != MetadataLifecycleReserved && k != MetadataLifecycleReservationIncarnation {
-			cleared[k] = v
+	cleared := copyMessageMetadata(metadata, 0)
+	if cleared == nil {
+		cleared = make(map[string]interface{})
+	}
+	for k := range cleared {
+		if k != MetadataLifecycleReserved && k != metadataLifecycleReservationID {
+			if k == MetadataLifecycleReservationIncarnation {
+				delete(cleared, k)
+				continue
+			}
+			continue
 		}
+		delete(cleared, k)
 	}
 	return cleared
 }
@@ -267,6 +345,42 @@ type MessageAttachment struct {
 	Name         string `json:"name,omitempty"`
 	SizeBytes    int64  `json:"size_bytes,omitempty"`
 	DeliveryMode string `json:"delivery_mode,omitempty"`
+}
+
+// AttachmentCleanup records a durable obligation to release attachment claims
+// after a queued message no longer references them.
+type AttachmentCleanup struct {
+	SessionID        string
+	CurrentSessionID string
+	EntryID          string
+	OperationID      string
+	TaskID           string
+	OwnerID          string
+	LeaseID          string
+	RemoveEntry      bool
+	Attachments      []MessageAttachment
+	EntryFingerprint string
+	ClaimPending     bool
+	CreatedAt        time.Time
+}
+
+type AttachmentCleanupLocator struct {
+	SessionID   string `json:"session_id"`
+	EntryID     string `json:"entry_id"`
+	OperationID string `json:"operation_id"`
+}
+
+// SessionTransferCompensation records an attachment binding that must be
+// reconciled with the durable queue location after an interrupted transfer.
+type SessionTransferCompensation struct {
+	OperationID     string
+	TaskID          string
+	FromSessionID   string
+	ToSessionID     string
+	EntryIDs        []string
+	AttachmentIDs   []string
+	CleanupLocators []AttachmentCleanupLocator
+	CreatedAt       time.Time
 }
 
 // QueueStatus is the per-session view returned to clients: full ordered list of

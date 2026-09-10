@@ -165,6 +165,12 @@ paired [system design](../system-design/browser-console-retention.md).
   synchronously in the intercepted console call. A full staging queue drops
   lower-priority `debug`/`info` entries first and records loss metadata; it
   never delays the original console call.
+- Frontend bundle capture freezes the entries that exist at notification
+  receipt. Entries that arrive later do not extend the capture flush. The
+  capture uses its receipt-time memory snapshot if the flush exceeds one second.
+- The frontend reads and uploads one chronological browser page at a time. The
+  first page is smaller than later pages. A monotonic receipt-relative budget
+  stops page reads and uploads without using the browser wall clock.
 - A browser debug producer that scans a growing collection coalesces its own
   derived payload before it calls `console.debug`. The
   `messages:process` producer keeps the latest inputs and emits one trailing

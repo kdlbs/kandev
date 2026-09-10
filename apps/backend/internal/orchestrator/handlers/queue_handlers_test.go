@@ -5,9 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"testing"
-	"time"
-
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -18,6 +15,8 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"testing"
+	"time"
 )
 
 // mockEventBus is a no-op event bus for handler tests.
@@ -125,6 +124,11 @@ func (m *mockQueueDrainer) DrainQueuedMessage(_ context.Context, sessionID strin
 	m.sessionID = sessionID
 	return m.drained, m.err
 }
+func (m *mockQueueDrainer) DrainQueuedMessageIfAutoRun(_ context.Context, sessionID string) (bool, error) {
+	m.autoRunCalls++
+	m.sessionID = sessionID
+	return m.autoRunResult, m.autoRunErr
+}
 
 func (m *mockQueueDrainer) SetQueueAutoRun(_ context.Context, sessionID string, enabled bool) (bool, bool, error) {
 	m.autoRunCalls++
@@ -139,6 +143,13 @@ func setupQueueHandlers(t *testing.T) (*QueueHandlers, *messagequeue.Service) {
 
 func setupQueueHandlersWithDrainer(t *testing.T, drainer QueueDrainer) (*QueueHandlers, *messagequeue.Service) {
 	t.Helper()
+	handlers, svc := setupQueueHandlersWithoutStart(t, drainer)
+	handlers.Start(context.Background())
+	return handlers, svc
+}
+
+func setupQueueHandlersWithoutStart(t *testing.T, drainer QueueDrainer) (*QueueHandlers, *messagequeue.Service) {
+	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",
 		Format:     "console",
@@ -147,7 +158,9 @@ func setupQueueHandlersWithDrainer(t *testing.T, drainer QueueDrainer) (*QueueHa
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
 	svc.SetAutoMergeEnabled(false)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer, allowQueueAccess{}, nil), svc
+	handlers := NewQueueHandlers(svc, &mockEventBus{}, log, drainer, allowQueueAccess{}, nil)
+	t.Cleanup(handlers.Stop)
+	return handlers, svc
 }
 
 func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.SubmissionValidator) (*QueueHandlers, *messagequeue.Service) {
@@ -160,7 +173,10 @@ func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.Submissi
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
 	svc.SetAutoMergeEnabled(false)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, allowQueueAccess{}, nil, validator), svc
+	handlers := NewQueueHandlers(svc, &mockEventBus{}, log, nil, allowQueueAccess{}, nil, validator)
+	handlers.Start(context.Background())
+	t.Cleanup(handlers.Stop)
+	return handlers, svc
 }
 
 func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Message {
@@ -742,6 +758,28 @@ func TestWsUpdateMessage(t *testing.T) {
 		assert.Equal(t, []string{"new-attachment"}, claimer.claims)
 		assert.Equal(t, []string{"old-attachment"}, claimer.releases)
 	})
+	t.Run("preserves an attachment still referenced by another queue entry", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		claimer := &recordingQueueAttachmentClaimer{}
+		handlers.SetAttachmentClaimer(claimer)
+		ctx := context.Background()
+		attachment := messagequeue.MessageAttachment{
+			Type: "resource", AttachmentID: "shared-attachment", Name: "shared.txt", MimeType: "text/plain",
+		}
+		first, err := svc.QueueMessage(ctx, "s", "task-1", "first", "", "u", false, []messagequeue.MessageAttachment{attachment})
+		require.NoError(t, err)
+		_, err = svc.QueueMessage(ctx, "s", "task-1", "second", "", "u", false, []messagequeue.MessageAttachment{attachment})
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s", "entry_id": first.ID, "content": "edited", "user_id": "u",
+				"attachments": []messagequeue.MessageAttachment{},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Empty(t, claimer.releases)
+	})
 
 	t.Run("releases only newly claimed attachments when replacement fails", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
@@ -760,6 +798,27 @@ func TestWsUpdateMessage(t *testing.T) {
 					{Type: "resource", AttachmentID: "old-attachment", Name: "old.txt", MimeType: "text/plain"},
 					{Type: "resource", AttachmentID: "new-attachment", Name: "new.txt", MimeType: "text/plain"},
 				},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, []string{"new-attachment"}, claimer.claims)
+		assert.Equal(t, []string{"new-attachment"}, claimer.releases)
+	})
+
+	t.Run("releases attachments when claim reports an error", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		claimer := &recordingQueueAttachmentClaimer{claimErr: errors.New("claim failed")}
+		handlers.SetAttachmentClaimer(claimer)
+		ctx := context.Background()
+		queued, err := svc.QueueMessage(ctx, "s", "task-1", "original", "", "u", false, nil)
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s", "entry_id": queued.ID, "content": "edited", "user_id": "u",
+				"attachments": []messagequeue.MessageAttachment{{
+					Type: "resource", AttachmentID: "new-attachment", Name: "new.txt", MimeType: "text/plain",
+				}},
 			}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
@@ -1016,6 +1075,30 @@ func TestWsUpdateMessage(t *testing.T) {
 		entries := svc.GetStatus(ctx, "s").Entries
 		require.Len(t, entries, 1)
 		assert.Equal(t, "lifecycle prompt", entries[0].Content)
+	})
+
+	t.Run("rejects user_id impersonating the move-task identity", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		queued, err := svc.QueueMessageWithMetadata(
+			ctx, "s", "t", "handoff", "", messagequeue.QueuedByMoveTask, false, nil,
+			map[string]interface{}{messagequeue.MetadataDeferredMoveID: "move-1"},
+		)
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+				"content":    "forged handoff",
+				"user_id":    messagequeue.QueuedByMoveTask,
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, "handoff", entries[0].Content)
 	})
 }
 

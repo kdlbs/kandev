@@ -103,6 +103,7 @@ function SendSubmitButton({
             planModeEnabled && "bg-violet-600 hover:bg-violet-500",
           )}
           disabled={isDisabled}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={onSubmit}
           data-testid="submit-message-button"
         >

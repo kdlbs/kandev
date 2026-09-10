@@ -34,11 +34,11 @@ The profile picker shows only profiles compatible with the task executor. If non
 
 ### Choose starting context
 
-| Option | What the new session receives | When to use it |
-|---|---|---|
-| **Blank** | Only the prompt you enter | Independent work that needs no earlier discussion |
+| Option                  | What the new session receives                                                                  | When to use it                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Blank**               | Only the prompt you enter                                                                      | Independent work that needs no earlier discussion                                                                     |
 | **Copy initial prompt** | Copies the first user message from the currently active session into the editable prompt field | A parallel approach; it is not guaranteed to be the task's original description, so inspect and edit it before launch |
-| **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field | Continue or branch from work already discussed |
+| **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field    | Continue or branch from work already discussed                                                                        |
 
 **Handoff** from an existing session opens the same dialog and selects a summary of that session. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
@@ -48,16 +48,16 @@ Prompts support pasted, dropped, or selected attachments. A prompt can contain a
 
 Right-click an agent tab on desktop to manage it. Available actions depend on its current state.
 
-| Action | Effect |
-|---|---|
-| **Rename** | Changes the session's display name |
-| **Set as Primary** | Makes a stoppable session the task's primary target |
-| **Stop** | Cancels the active agent turn for this session |
-| **Resume** | Attempts to continue a completed, failed, or cancelled session |
-| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
-| **Share** | Opens the publishing preview for an eligible session |
-| **Handoff** | Starts another session with a generated summary of this conversation |
-| **Close Others** | Closes other visible agent panels without deleting their sessions |
+| Action             | Effect                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rename**         | Changes the session's display name                                                                                                                                         |
+| **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
+| **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
+| **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
+| **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
+| **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
+| **Handoff**        | Starts another session with a generated summary of this conversation                                                                                                       |
+| **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
 
@@ -66,6 +66,12 @@ Stopping a turn does not itself run the next queued message. If pending rows rem
 The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
 Use **Auto-run** for normal queue motion. ON runs one eligible row per turn in FIFO order; OFF lets the current response finish and holds later rows. The setting belongs to the session and survives an empty queue, reload, and backend restart. A pending clarification or another lifecycle guard can leave the queue waiting while the switch remains ON. **Auto-merge** controls automatic folding of later compatible admissions. It initially follows the install-wide value and follows later global changes until you change the pill. That first change creates a session override that remains independent for the session's lifetime.
+
+### Send while a session resumes
+
+You can write and send the next prompt while an existing session is starting or resuming when its queue identity is ready. Kandev stores the prompt in the session queue, clears the composer after admission, and shows the normal queued-message indicator. The prompt runs when the session becomes ready and Auto-run is ON.
+
+If Auto-run is OFF, the prompt remains pending until you turn Auto-run ON in the queue controls. If resume fails, the accepted prompt stays in the queue with the session and is available after a later successful recovery. Environment preparation without a usable session queue does not enable Send.
 
 Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
 

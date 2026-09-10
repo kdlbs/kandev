@@ -383,7 +383,6 @@ func (h *Handlers) queueMoveTaskPromptWithMoveID(
 	if moveID != "" {
 		metadata = map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID}
 	}
-
 	var (
 		entry *messagequeue.QueuedMessage
 		err   error

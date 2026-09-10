@@ -53,6 +53,36 @@ Start with the cheapest faithful reproduction:
    with a fresh all-source bundle.
 5. Unknown: trace from the symptom backward through code and add temporary instrumentation only where it will split the search space.
 
+When logs show repeated calls to the same endpoint or action, classify each
+request by transport, method/action, query or body cursor, caller, and cadence
+before diagnosing a loop. A periodic newest-window refresh and cursor
+pagination can share a route while serving different purposes. Verify
+pagination by capturing the directional cursor request and its response. If no
+such request exists, investigate the UI trigger or lifecycle; repeated
+uncursored refreshes do not prove that the server failed to advance a cursor.
+
+Before any restart or mutating reproduction, capture the baseline diagnostic
+bundle and record the exact database and log pointers. Treat the live database
+as latest state, not historical evidence; preserve the baseline and reconstruct
+the lifecycle from timestamped logs, events, and transition tables before
+comparing later state.
+
+For a GitHub merge-queue ejection, a timeline removal event is not the cause.
+Inspect the ruleset's `check_response_timeout_minutes`, the current
+`mergeQueueEntry`, and `merge_group` runs. Record the synthetic run/job IDs,
+`head_sha`, start/end timestamps, configured workflow/job timeout, and logs
+before classifying the failure as CI capacity or changing product code. Use the
+PR-fixup merge-queue and CI-troubleshooting references for the query details.
+
+For workflow-routing failures, inspect the workflow's `on` activity types,
+job-level `if` gates, permissions, exact PR and head SHA, and the actor that
+added a label. Verify token-trigger behavior against GitHub's
+[GITHUB_TOKEN documentation](https://docs.github.com/en/actions/concepts/security/github_token):
+events created with `GITHUB_TOKEN` generally do not create another workflow run,
+and a label-only trigger does not cover a later `synchronize` update. Confirm
+the observed run and event rather than inferring that a missing run means the
+workflow logic was skipped.
+
 ### File-first log triage
 
 Start with the retained backend files before asking for a broad export. Each
