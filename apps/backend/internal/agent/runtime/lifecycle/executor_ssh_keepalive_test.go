@@ -128,6 +128,35 @@ func waitClosedWithin(t *testing.T, ch <-chan struct{}, timeout time.Duration, w
 	}
 }
 
+// waitForFreshProbeReply blocks until at least minElapsed has passed since
+// this call started and state's last recorded probe reply (read under the
+// same executor mutex classifySSHTransportLocked reads it under) is younger
+// than margin, so a caller can act on an observed-fresh reading instead of
+// sleeping a fixed duration and hoping scheduling jitter didn't eat the
+// unresponsive margin before its own read happens. minElapsed still forces
+// several real probe cycles to have had a chance to run, so a regression
+// that stops recording replies (leaving the reading frozen at session start)
+// times out and fails loudly instead of passing on the first, trivially
+// fresh check.
+func waitForFreshProbeReply(t *testing.T, exec *SSHExecutor, state *sshSessionState, minElapsed, margin, timeout time.Duration) {
+	t.Helper()
+	start := time.Now()
+	deadline := start.Add(timeout)
+	for {
+		now := time.Now()
+		exec.mu.Lock()
+		age := now.Sub(state.lastProbeReply)
+		exec.mu.Unlock()
+		if now.Sub(start) >= minElapsed && age < margin {
+			return
+		}
+		if now.After(deadline) {
+			t.Fatalf("no probe reply younger than %s observed after waiting %s (last reply age %s)", margin, timeout, age)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestSSHKeepaliveTuningValid(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -613,7 +642,12 @@ func TestSSHKeepaliveHealthyTransportKeepsAnsweringPastTwiceTheInterval(t *testi
 	client := server.dial(t)
 	state := newTrackedSSHSession(exec, "instance-1", client)
 
-	time.Sleep(30 * time.Millisecond) // several times the 10ms unresponsive threshold; the server stays healthy throughout
+	// Wait past several probe cycles for an observed-fresh reply, then act on
+	// it immediately, rather than sleeping a fixed duration and hoping the
+	// 10ms unresponsive margin survives scheduling jitter (the fixed sleep
+	// this replaced was intermittently flaky under load for exactly that
+	// reason).
+	waitForFreshProbeReply(t, exec, state, 30*time.Millisecond, 3*time.Millisecond, 2*time.Second)
 
 	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "instance-1",
