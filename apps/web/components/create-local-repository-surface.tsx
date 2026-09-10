@@ -33,6 +33,7 @@ import type { Repository } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { t } from "@/lib/i18n";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 // The returned strings are never rendered: the only caller uses this as a
 // boolean gate (`!nameError`), so they stay English rather than becoming dead
@@ -113,7 +114,7 @@ function RepositoryLocationFields({
           onChange={(event) => onNameChange(event.target.value)}
           placeholder="new-project"
           autoFocus
-          className="h-11 sm:h-8"
+          className={controlSizingClassName("standard")}
         />
       </label>
       <div className="space-y-1.5">
@@ -131,13 +132,12 @@ function RepositoryLocationFields({
               onLoadTypedDirectory();
             }}
             placeholder="/Users/you/Projects"
-            className="h-11 min-w-0 flex-1 font-mono sm:h-8"
+            className={controlSizingClassName("standard", "min-w-0 flex-1 font-mono")}
           />
           <Button
             type="button"
             variant="outline"
-            size="icon-lg"
-            className="size-11 sm:size-8"
+            size="icon"
             onClick={onLoadTypedDirectory}
             disabled={!parentPath}
             aria-label={t("common:browseParentDirectory")}
@@ -211,7 +211,7 @@ function CreateRepositoryFooter({
     <div className="flex shrink-0 justify-end border-t border-border px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <Button
         type="submit"
-        className="min-h-11 w-full cursor-pointer sm:w-auto sm:min-w-40"
+        className="w-full cursor-pointer sm:w-auto sm:min-w-40"
         disabled={!canSubmit}
       >
         <IconFolderPlus className="h-4 w-4" />

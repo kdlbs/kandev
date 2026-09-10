@@ -495,7 +495,7 @@ function UnarchiveRowAction({
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 cursor-pointer"
+            className="cursor-pointer"
             data-testid="tasks-list-unarchive"
             disabled={isPending}
             onClick={async () => {
@@ -562,7 +562,7 @@ function TaskRowActions({
               ref={archiveAnchorRef}
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               onClick={() => onArchiveOpenChange(true)}
             >
               <IconArchive className="h-4 w-4 text-muted-foreground" />
@@ -579,7 +579,7 @@ function TaskRowActions({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               disabled={isDeleting}
               onClick={() => onDeleteOpenChange(true)}
             >

@@ -1,12 +1,12 @@
 "use client";
 
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { TaskExternalLinkDialog } from "@/components/task/task-external-link-dialog";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
-import type { KanbanCardMenuState, Task } from "@/components/kanban-card";
+import { TaskExternalLinkDialog } from "@/components/task/task-external-link-dialog";
 import type { Repository } from "@/lib/types/http";
+import type { Task, KanbanCardProps, KanbanCardMenuState } from "@/components/kanban-card";
 
 export function KanbanCardDialogs({
   task,
@@ -21,7 +21,7 @@ export function KanbanCardDialogs({
   repositories: Repository[];
   menu: KanbanCardMenuState;
   isDeleting?: boolean;
-  onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
+  onDelete?: KanbanCardProps["onDelete"];
 }) {
   return (
     <>
@@ -32,7 +32,7 @@ export function KanbanCardDialogs({
         taskId={task.id}
         executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
+        onConfirm={(opts) => onDelete?.(task, opts)}
       />
       <TaskGitHubPRDialog
         workspaceId={workspaceId}

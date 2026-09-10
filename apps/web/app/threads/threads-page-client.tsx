@@ -1,23 +1,60 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { ThreadsBoard } from "@/components/threads/threads-board";
 import { ThreadsViewControls } from "@/components/threads/threads-view-controls";
+import { MobileThreadPagination } from "@/components/threads/mobile-thread-pagination";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import { linkToTask } from "@/lib/links";
-import { resolveFocusedThreadId } from "@/lib/threads/active-threads";
+import { resolveFocusedThreadId, type ActiveThread } from "@/lib/threads/active-threads";
 import { useStableThreadOrder } from "@/lib/threads/stable-order";
 import { DEFAULT_THREAD_VIEW } from "@/lib/state/slices/ui/thread-view-builtins";
-import { queryThreadView } from "@/lib/threads/thread-view-query";
+import { queryThreadView, type ThreadViewQueryResult } from "@/lib/threads/thread-view-query";
 import { useKanbanRouteBootstrap } from "@/src/kanban-route";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 type WorkspaceWorkflow = { id: string; workspaceId: string };
+
+function ThreadsPageHeader({
+  workspaceId,
+  query,
+  repositories,
+  threads,
+  activeMobileTaskId,
+}: {
+  workspaceId: string | null | undefined;
+  query: ThreadViewQueryResult;
+  repositories: ComponentProps<typeof ThreadsViewControls>["repositories"];
+  threads: readonly ActiveThread[];
+  activeMobileTaskId: string | null;
+}) {
+  return (
+    <KanbanHeader
+      workspaceId={workspaceId ?? undefined}
+      currentPage="threads"
+      taskListingControls={
+        <>
+          <ThreadsViewControls
+            candidates={query.candidates}
+            repositories={repositories}
+            admittedCount={query.admittedCandidates.length}
+            matchingCount={query.matchingCount + query.temporaryAdmissionCount}
+            hiddenCount={query.hiddenCount}
+          />
+          <MobileThreadPagination
+            position={threads.findIndex((thread) => thread.taskId === activeMobileTaskId) + 1}
+            total={threads.length}
+          />
+        </>
+      }
+    />
+  );
+}
 
 /**
  * Keep the derived deck scoped to the workspace that the route currently
@@ -137,30 +174,24 @@ export function ThreadsPageClient() {
   const focusedSessionId = focusedTaskId ? searchParams.get("sessionId") : null;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <KanbanHeader
-        workspaceId={activeWorkspaceId ?? undefined}
-        currentPage="threads"
-        taskListingControls={
-          <ThreadsViewControls
-            candidates={query.candidates}
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-col bg-background">
+      <ThreadsBoard
+        threads={threads}
+        isLoading={isLoading}
+        focusedTaskId={focusedTaskId}
+        focusedSessionId={focusedSessionId}
+        onInvalidRequestedSession={handleInvalidRequestedSession}
+        onOpenTask={handleOpenTask}
+        renderHeader={(activeMobileTaskId) => (
+          <ThreadsPageHeader
+            workspaceId={activeWorkspaceId}
+            query={query}
             repositories={repositories}
-            admittedCount={query.admittedCandidates.length}
-            matchingCount={query.matchingCount + query.temporaryAdmissionCount}
-            hiddenCount={query.hiddenCount}
+            threads={threads}
+            activeMobileTaskId={activeMobileTaskId}
           />
-        }
+        )}
       />
-      <div className="min-h-0 flex-1">
-        <ThreadsBoard
-          threads={threads}
-          isLoading={isLoading}
-          focusedTaskId={focusedTaskId}
-          focusedSessionId={focusedSessionId}
-          onInvalidRequestedSession={handleInvalidRequestedSession}
-          onOpenTask={handleOpenTask}
-        />
-      </div>
     </div>
   );
 }

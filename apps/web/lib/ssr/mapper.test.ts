@@ -174,6 +174,22 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.parkedEpoch).toBeUndefined();
   });
 
+  it.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ])(
+    "maps workspace_orphaned %s so a page reload does not hide or resurrect the badge",
+    (wireValue, expected) => {
+      const snapshot = snapshotWithPendingAction(undefined);
+      snapshot.tasks[0].workspace_orphaned = wireValue;
+
+      const state = snapshotToState(snapshot);
+
+      expect(state.kanban?.tasks[0]?.workspaceOrphaned).toBe(expected);
+    },
+  );
+
   it("hydrates the task status summary into the initial kanban state", () => {
     const snapshot = snapshotWithPendingAction(undefined);
     snapshot.tasks[0].status_summary = {

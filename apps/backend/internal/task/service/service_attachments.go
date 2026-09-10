@@ -44,16 +44,37 @@ func (s *Service) ClaimMessageAttachments(ctx context.Context, taskID, sessionID
 	return s.attachmentSvc.Claim(ctx, identity.UserID, task.WorkspaceID, taskID, sessionID, ids)
 }
 
-// PrepareQueueAttachmentClaim authenticates staged attachment ownership
-// without mutating it. The queue repository applies the returned claim in the
-// same transaction as queue admission.
-func (s *Service) PrepareQueueAttachmentClaim(ctx context.Context, taskID string, attachments []v1.MessageAttachment) (messagequeue.QueueAttachmentClaim, error) {
-	claim := messagequeue.QueueAttachmentClaim{}
+func (s *Service) attachmentIDs(attachments []v1.MessageAttachment) ([]string, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	if s.attachmentSvc == nil {
+		for _, attachment := range attachments {
+			if attachment.AttachmentID != "" {
+				return nil, errors.New("file-backed attachments are unavailable")
+			}
+		}
+		return nil, nil
+	}
+	ids := make([]string, 0, len(attachments))
 	for _, attachment := range attachments {
 		if attachment.AttachmentID != "" {
-			claim.IDs = append(claim.IDs, attachment.AttachmentID)
+			ids = append(ids, attachment.AttachmentID)
 		}
 	}
+	return ids, nil
+}
+
+// PrepareMessageAttachmentClaim authenticates staged attachment ownership
+// without mutating it. The accepting repository applies the returned claim in
+// the same transaction as the message or queue row that references it.
+func (s *Service) PrepareMessageAttachmentClaim(ctx context.Context, taskID string, attachments []v1.MessageAttachment) (messagequeue.QueueAttachmentClaim, error) {
+	claim := messagequeue.QueueAttachmentClaim{}
+	ids, err := s.attachmentIDs(attachments)
+	if err != nil {
+		return claim, err
+	}
+	claim.IDs = ids
 	if len(claim.IDs) == 0 {
 		return claim, nil
 	}
@@ -71,6 +92,13 @@ func (s *Service) PrepareQueueAttachmentClaim(ctx context.Context, taskID string
 	claim.OwnerID = identity.UserID
 	claim.WorkspaceID = task.WorkspaceID
 	return claim, nil
+}
+
+// PrepareQueueAttachmentClaim authenticates staged attachment ownership
+// without mutating it. The queue repository applies the returned claim in the
+// same transaction as queue admission.
+func (s *Service) PrepareQueueAttachmentClaim(ctx context.Context, taskID string, attachments []v1.MessageAttachment) (messagequeue.QueueAttachmentClaim, error) {
+	return s.PrepareMessageAttachmentClaim(ctx, taskID, attachments)
 }
 
 // ReleaseMessageAttachments asks the attachment repository to remove candidate

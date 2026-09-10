@@ -133,7 +133,7 @@ export function parseMCPTaskAgentProfileDefault(
 
 /** Parses the startup page preference, defaulting to "task_overview". */
 export function parseStartupPage(value: string | undefined): StartupPage {
-  return value === "last_task" ? "last_task" : "task_overview";
+  return value === "last_task" || value === "threads" ? value : "task_overview";
 }
 
 /** Parses the LSP status location, defaulting to "toolbar". */

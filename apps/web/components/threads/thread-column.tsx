@@ -12,6 +12,10 @@ import { selectThreadSessionId } from "@/lib/threads/thread-session-selection";
 import { resolveThreadColumnStatus, type ThreadStatus } from "@/lib/threads/thread-session-status";
 import { ThreadConversation } from "./thread-conversation";
 import { ThreadSessionStatusIcon, ThreadSessionSwitcher } from "./thread-session-switcher";
+import {
+  MobileThreadColumnHeader,
+  type MobileThreadNavigation,
+} from "./mobile-thread-column-header";
 
 export function resolveThreadStatus(thread: ActiveThread): ThreadStatus {
   return resolveThreadColumnStatus({
@@ -200,6 +204,7 @@ function ThreadSessionMembership({
 
 type ThreadColumnProps = {
   thread: ActiveThread;
+  mobileNavigation?: MobileThreadNavigation;
   isFocused?: boolean;
   isPreloaded?: boolean;
   isDetailActive?: boolean;
@@ -216,6 +221,7 @@ function ThreadColumnHeader({
   selectedSessionId,
   onSelectSession,
   onOpenTask,
+  mobileNavigation,
 }: {
   thread: ActiveThread;
   status: ThreadStatus;
@@ -223,8 +229,22 @@ function ThreadColumnHeader({
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onOpenTask: (taskId: string) => void;
+  mobileNavigation?: MobileThreadNavigation;
 }) {
   const { t } = useTranslation();
+  if (mobileNavigation) {
+    return (
+      <MobileThreadColumnHeader
+        thread={thread}
+        status={status}
+        sessions={sessions}
+        selectedSessionId={selectedSessionId}
+        onSelectSession={onSelectSession}
+        onOpenTask={onOpenTask}
+        navigation={mobileNavigation}
+      />
+    );
+  }
   return (
     <header className="flex flex-col gap-1 border-b px-3 py-2">
       <div className="flex items-start gap-2">
@@ -283,7 +303,7 @@ function ThreadColumnBody({
   onInvalidRequestedSession?: (taskId: string, sessionId: string) => void;
 }) {
   return (
-    <div className="min-h-0 flex-1">
+    <div className="min-h-0 min-w-0 flex-1">
       {isPreloaded && (
         <ThreadSessionMembership
           taskId={taskId}
@@ -308,6 +328,7 @@ function ThreadColumnBody({
 
 export function ThreadColumn({
   thread,
+  mobileNavigation,
   isFocused = false,
   isPreloaded = false,
   isDetailActive = false,
@@ -347,16 +368,10 @@ export function ThreadColumn({
   const handleSelectSession = useCallback((sessionId: string | null) => {
     setSelectedSessionId(sessionId);
   }, []);
-  const handleSessions = useCallback((nextSessions: TaskSession[]) => {
+  const handleSessionListState = useCallback((nextSessions: TaskSession[], isLoaded: boolean) => {
     setSessions(nextSessions);
+    setSessionListReady(isLoaded);
   }, []);
-  const handleSessionListState = useCallback(
-    (nextSessions: TaskSession[], isLoaded: boolean) => {
-      handleSessions(nextSessions);
-      setSessionListReady(isLoaded);
-    },
-    [handleSessions],
-  );
   const handleRequestedSessionResolved = useCallback(() => {
     setRequestedSessionResolved(true);
   }, []);
@@ -396,10 +411,11 @@ export function ThreadColumn({
       //             state, not focus, so in a deck of composers nothing else
       //             says where typing would land.
       //   outline — the column a deep link asked for.
-      className="flex h-full min-h-0 w-[85vw] shrink-0 snap-start flex-col overflow-hidden rounded-lg border bg-card focus-within:ring-2 focus-within:ring-ring data-[focused=true]:outline data-[focused=true]:outline-2 data-[focused=true]:outline-offset-2 data-[focused=true]:outline-primary md:w-auto md:min-w-[360px] md:flex-1 md:shrink"
+      className="flex h-full min-h-0 min-w-0 w-full shrink-0 snap-start flex-col overflow-hidden bg-card focus-within:ring-2 focus-within:ring-ring data-[focused=true]:outline data-[focused=true]:outline-2 data-[focused=true]:outline-offset-[-2px] data-[focused=true]:outline-primary md:w-auto md:min-w-[360px] md:flex-1 md:shrink md:rounded-lg md:border md:data-[focused=true]:outline-offset-2"
     >
       <ThreadColumnHeader
         thread={thread}
+        mobileNavigation={mobileNavigation}
         status={status}
         sessions={sessions}
         selectedSessionId={selectedSessionId}

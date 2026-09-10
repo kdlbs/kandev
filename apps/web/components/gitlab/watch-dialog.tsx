@@ -440,17 +440,13 @@ export function GitLabWatchDialog({
           <ScheduleFields kind={kind} form={form} setForm={setForm} />
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            className="min-h-11 cursor-pointer sm:min-h-9"
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
           <Button
             onClick={() => void save()}
             disabled={!payload || saving}
-            className="min-h-11 cursor-pointer sm:min-h-9"
+            className="cursor-pointer"
           >
             {saveLabel}
           </Button>

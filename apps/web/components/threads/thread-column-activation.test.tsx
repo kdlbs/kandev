@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCallback } from "react";
 import type { ResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -23,6 +23,7 @@ const TASK_C = "c";
 const TASK_D = "d";
 const DETAIL_IDS = "detail-ids";
 const PRELOAD_IDS = "preload-ids";
+const MOBILE_TASK_ID = "mobile-task";
 
 class MockIntersectionObserver implements IntersectionObserver {
   readonly root: Element | Document | null = null;
@@ -91,6 +92,7 @@ function ActivationFixture({ ids, focusedTaskId }: { ids: string[]; focusedTaskI
     <div ref={activation.boardRef} data-testid="activation-board">
       <output data-testid="preload-ids">{[...activation.preloadTaskIds].join(",")}</output>
       <output data-testid="detail-ids">{[...activation.detailTaskIds].join(",")}</output>
+      <output data-testid={MOBILE_TASK_ID}>{activation.mobileTaskId}</output>
       {ids.map((id) => (
         <ActivationColumn key={id} id={id} registerColumn={activation.registerColumn} />
       ))}
@@ -105,8 +107,117 @@ function ids(testId: string): string[] {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   observers.length = 0;
+});
+
+function mobileGeometry() {
+  const board = screen.getByTestId("activation-board");
+  const a = screen.getByTestId(`column-${TASK_A}`);
+  const b = screen.getByTestId(`column-${TASK_B}`);
+  vi.spyOn(board, "getBoundingClientRect").mockReturnValue({ left: 0, right: 300 } as DOMRect);
+  const rectA = vi.spyOn(a, "getBoundingClientRect");
+  const rectB = vi.spyOn(b, "getBoundingClientRect");
+  function move(offset: number) {
+    rectA.mockReturnValue({ left: -offset, right: 300 - offset } as DOMRect);
+    rectB.mockReturnValue({ left: 300 - offset, right: 600 - offset } as DOMRect);
+    fireEvent.scroll(board);
+  }
+  return { board, a, b, move };
+}
+
+describe("phone position feedback", () => {
+  let resize: ResizeObserverCallback;
+  const disconnectResize = vi.fn();
+
+  beforeEach(() => {
+    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(mobileBreakpoint());
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect = disconnectResize;
+      },
+    );
+    disconnectResize.mockClear();
+  });
+
+  function frame() {
+    act(() => vi.advanceTimersToNextFrame());
+  }
+
+  // @covers AC-UI-THREADS-DECK-003.13
+  it("updates mobile position across the midpoint without changing intersecting membership", () => {
+    render(<ActivationFixture ids={[TASK_A, TASK_B]} />);
+    const { a, b, move } = mobileGeometry();
+    move(30);
+    observers[0].instance.emit(
+      { target: a, isIntersecting: true, intersectionRatio: 0.9 },
+      { target: b, isIntersecting: true, intersectionRatio: 0.1 },
+    );
+    frame();
+    expect(ids(DETAIL_IDS)).toEqual([TASK_A]);
+
+    move(180);
+    observers[0].instance.emit(
+      { target: a, isIntersecting: true, intersectionRatio: 0.4 },
+      { target: b, isIntersecting: true, intersectionRatio: 0.6 },
+    );
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B]);
+
+    move(90);
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_A);
+  });
+
+  it("reconciles resize, removal, and an empty deck without waiting for visibility", () => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B]} />);
+    const { board, move } = mobileGeometry();
+    move(180);
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+
+    vi.mocked(board.getBoundingClientRect).mockReturnValue({ left: 0, right: 50 } as DOMRect);
+    act(() => resize([], {} as ResizeObserver));
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_A);
+
+    view.rerender(<ActivationFixture ids={[TASK_B]} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+    view.rerender(<ActivationFixture ids={[]} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe("");
+  });
+
+  it("uses deep-link fallback before geometry is available and clears on desktop", () => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B]} focusedTaskId={TASK_B} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
+    view.rerender(<ActivationFixture ids={[TASK_A, TASK_B]} focusedTaskId={TASK_B} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe("");
+    expect(disconnectResize).toHaveBeenCalled();
+  });
+
+  it("coalesces scroll work and cancels pending frames on unmount", () => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B]} />);
+    const { board, move } = mobileGeometry();
+    move(180);
+    move(190);
+    expect(vi.getTimerCount()).toBe(1);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(disconnectResize).toHaveBeenCalledTimes(1);
+    fireEvent.scroll(board);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 describe("useThreadColumnActivation", () => {

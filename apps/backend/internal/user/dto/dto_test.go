@@ -515,6 +515,7 @@ func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
 		want  string
 	}{
 		{name: "last task", value: models.StartupPageLastTask, want: models.StartupPageLastTask},
+		{name: "threads", value: "threads", want: "threads"},
 		{name: "unknown defaults to task overview", value: "future_value", want: models.StartupPageTaskOverview},
 	}
 

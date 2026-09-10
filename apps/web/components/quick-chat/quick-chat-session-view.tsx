@@ -24,7 +24,7 @@ function useIsQuickChatPassthrough(sessionId: string) {
 
 type QuickChatSessionViewProps = {
   session: QuickChatSession;
-  onInitialPromptSent?: () => void;
+  onInitialPromptAttempted?: () => void;
 };
 
 function resolveTaskArchiveState(
@@ -39,7 +39,10 @@ function resolveTaskArchiveState(
   return quickChatTaskId === taskId ? false : null;
 }
 
-export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChatSessionViewProps) {
+export function QuickChatSessionView({
+  session,
+  onInitialPromptAttempted,
+}: QuickChatSessionViewProps) {
   const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
   // Fetch the row on open so such a tab is usable, not just visible.
@@ -85,7 +88,7 @@ export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChat
           minimalToolbar={isConfig}
           placeholderOverride={isConfig ? t("chat:configChatPlaceholder") : undefined}
           initialPrompt={session.initialPrompt}
-          onInitialPromptSent={onInitialPromptSent}
+          onInitialPromptAttempted={onInitialPromptAttempted}
         />
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefObject } from "react";
 import { useTaskActions, type TaskActionOptions } from "@/hooks/use-task-actions";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
 import { sortIdsByDisplayOrder, type DisplayOrderTask } from "@/lib/kanban/task-order";
@@ -205,9 +206,11 @@ export function useTaskMultiSelectStore() {
 }
 
 type RunBulkActionOptions = {
+  action: "delete" | "archive";
   ids: string[];
   eligibleSelectedIds: (ids: string[]) => string[];
   per: (id: string, opts?: TaskActionOptions) => Promise<void>;
+  runTaskRemovalBatch: ReturnType<typeof useTaskRemoval>["runTaskRemovalBatch"];
   removeTasksFromStore: (ids: Set<string>) => void;
   setSelectedIds: (ids: Set<string>) => void;
   setIsMultiSelectEnabled: (v: boolean) => void;
@@ -221,9 +224,11 @@ type RunBulkActionOptions = {
  * doesn't count toward success or failure.
  */
 async function runBulkAction({
+  action,
   ids,
   eligibleSelectedIds,
   per,
+  runTaskRemovalBatch,
   removeTasksFromStore,
   setSelectedIds,
   setIsMultiSelectEnabled,
@@ -239,16 +244,65 @@ async function runBulkAction({
   }
   setBusy(true);
   try {
-    const results = await Promise.allSettled(idList.map((id) => per(id, opts)));
-    const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
+    const result = await runTaskRemovalBatch(
+      action,
+      idList.map((id) => ({ taskId: id, mutate: () => per(id, opts) })),
+      { cascade: opts?.cascade },
+    );
+    if (result.skipped) return;
+    const succeeded = new Set(result.succeededTaskIds);
     removeTasksFromStore(succeeded);
-    const failed = idList.filter((_, i) => results[i].status === "rejected");
-    const remaining = new Set([...failed, ...hidden]);
-    setSelectedIds(remaining);
-    if (remaining.size === 0) setIsMultiSelectEnabled(false);
+    const failed = new Set([...result.failedTaskIds, ...hidden]);
+    setSelectedIds(failed);
+    if (failed.size === 0) setIsMultiSelectEnabled(false);
   } finally {
     setBusy(false);
   }
+}
+
+type BulkMoveParams = {
+  workflowId: string | null;
+  selectedIdsRef: RefObject<Set<string>>;
+  moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
+  applyMoveInStore: (ids: Set<string>, stepId: string) => void;
+  getWorkflowIdForTask: (id: string) => string | null;
+  sortByDisplayOrder: (ids: string[]) => string[];
+  eligibleSelectedIds: (ids: string[]) => string[];
+};
+
+/**
+ * A task the priority filter hides is excluded before ordering, so it is
+ * neither moved nor consumes a position index. The remainder moves in board
+ * order so a backward range selection isn't reordered when sequential
+ * positions are assigned below.
+ */
+async function runBulkMove(
+  {
+    workflowId,
+    selectedIdsRef,
+    moveTaskById,
+    applyMoveInStore,
+    getWorkflowIdForTask,
+    sortByDisplayOrder,
+    eligibleSelectedIds,
+  }: BulkMoveParams,
+  targetStepId: string,
+): Promise<void> {
+  const idList = sortByDisplayOrder(eligibleSelectedIds([...(selectedIdsRef.current ?? [])]));
+  if (idList.length === 0) return;
+  const results = await Promise.allSettled(
+    idList.map((id, i) => {
+      const wfId = getWorkflowIdForTask(id) ?? workflowId;
+      if (!wfId) return Promise.reject(new Error("no workflow"));
+      return moveTaskById(id, {
+        workflow_id: wfId,
+        workflow_step_id: targetStepId,
+        position: i,
+      });
+    }),
+  );
+  const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
+  applyMoveInStore(succeeded, targetStepId);
 }
 
 function useBulkOperations({
@@ -261,6 +315,7 @@ function useBulkOperations({
   moveTaskById,
   deleteTaskById,
   archiveTaskById,
+  runTaskRemovalBatch,
   removeTasksFromStore,
   applyMoveInStore,
   getWorkflowIdForTask,
@@ -276,6 +331,7 @@ function useBulkOperations({
   moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
   deleteTaskById: ReturnType<typeof useTaskActions>["deleteTaskById"];
   archiveTaskById: ReturnType<typeof useTaskActions>["archiveTaskById"];
+  runTaskRemovalBatch: ReturnType<typeof useTaskRemoval>["runTaskRemovalBatch"];
   removeTasksFromStore: (ids: Set<string>) => void;
   applyMoveInStore: (ids: Set<string>, stepId: string) => void;
   getWorkflowIdForTask: (id: string) => string | null;
@@ -284,14 +340,17 @@ function useBulkOperations({
 }) {
   const runBulk = useCallback(
     (
+      action: "delete" | "archive",
       per: (id: string, opts?: TaskActionOptions) => Promise<void>,
       setBusy: (v: boolean) => void,
       opts?: TaskActionOptions,
     ) =>
       runBulkAction({
+        action,
         ids: [...(selectedIdsRef.current ?? [])],
         eligibleSelectedIds,
         per,
+        runTaskRemovalBatch,
         removeTasksFromStore,
         setSelectedIds,
         setIsMultiSelectEnabled,
@@ -301,6 +360,7 @@ function useBulkOperations({
     [
       eligibleSelectedIds,
       removeTasksFromStore,
+      runTaskRemovalBatch,
       selectedIdsRef,
       setIsMultiSelectEnabled,
       setSelectedIds,
@@ -308,37 +368,29 @@ function useBulkOperations({
   );
 
   const bulkDelete = useCallback(
-    (opts?: TaskActionOptions) => runBulk(deleteTaskById, setIsDeleting, opts),
+    (opts?: TaskActionOptions) => runBulk("delete", deleteTaskById, setIsDeleting, opts),
     [runBulk, deleteTaskById, setIsDeleting],
   );
 
   const bulkArchive = useCallback(
-    (opts?: TaskActionOptions) => runBulk(archiveTaskById, setIsArchiving, opts),
+    (opts?: TaskActionOptions) => runBulk("archive", archiveTaskById, setIsArchiving, opts),
     [runBulk, archiveTaskById, setIsArchiving],
   );
 
   const bulkMove = useCallback(
-    async (targetStepId: string) => {
-      // A task the priority filter hides is excluded before ordering, so it
-      // is neither moved nor consumes a position index. Move the remainder
-      // in board order so a backward range selection isn't reordered when
-      // sequential positions are assigned below.
-      const idList = sortByDisplayOrder(eligibleSelectedIds([...(selectedIdsRef.current ?? [])]));
-      if (idList.length === 0) return;
-      const results = await Promise.allSettled(
-        idList.map((id, i) => {
-          const wfId = getWorkflowIdForTask(id) ?? workflowId;
-          if (!wfId) return Promise.reject(new Error("no workflow"));
-          return moveTaskById(id, {
-            workflow_id: wfId,
-            workflow_step_id: targetStepId,
-            position: i,
-          });
-        }),
-      );
-      const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      applyMoveInStore(succeeded, targetStepId);
-    },
+    (targetStepId: string) =>
+      runBulkMove(
+        {
+          workflowId,
+          selectedIdsRef,
+          moveTaskById,
+          applyMoveInStore,
+          getWorkflowIdForTask,
+          sortByDisplayOrder,
+          eligibleSelectedIds,
+        },
+        targetStepId,
+      ),
     [
       workflowId,
       moveTaskById,
@@ -490,6 +542,9 @@ export function useTaskMultiSelect(workflowId: string | null) {
   }, [workflowId]);
 
   const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
+  const store = useAppStoreApi();
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemovalBatch } = useTaskRemoval({ store, notifySuccess });
   const {
     removeTasksFromStore,
     applyMoveInStore,
@@ -538,6 +593,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
     moveTaskById,
     deleteTaskById,
     archiveTaskById,
+    runTaskRemovalBatch,
     removeTasksFromStore,
     applyMoveInStore,
     getWorkflowIdForTask,

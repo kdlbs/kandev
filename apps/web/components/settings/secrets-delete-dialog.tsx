@@ -17,6 +17,7 @@ import {
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import type { SecretListItem, SecretReference } from "@/lib/types/http-secrets";
+import { settingsActionClassName } from "./settings-control";
 import { secretReferenceLabel } from "./secret-delete-error";
 
 type SecretDeleteConfirmationProps = {
@@ -115,7 +116,7 @@ export function SecretDeleteConflictDialog({
           </div>
         </AlertDialogDescription>
         <AlertDialogFooter className="border-t bg-muted/20 px-5 py-4 sm:px-6">
-          <AlertDialogCancel className="min-h-12 w-full cursor-pointer sm:min-h-9 sm:w-auto">
+          <AlertDialogCancel className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}>
             {t("common:close")}
           </AlertDialogCancel>
         </AlertDialogFooter>

@@ -55,6 +55,7 @@ import { MRDiscussionsSection } from "./mr-discussions-section";
 import { MRReviewerControl } from "./mr-reviewer-control";
 import { SubscriptionToggle } from "./subscription-toggle";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type MRKeyInput = Pick<TaskMR, "host" | "project_path" | "mr_iid">;
 const EMPTY_LABELS: string[] = [];
@@ -114,9 +115,8 @@ function LabelsControl({
           aria-label={t("gitlab:mergeRequestLabels")}
         />
         <Button
-          size="sm"
           variant="outline"
-          className="h-11 shrink-0 cursor-pointer sm:h-9"
+          className={controlSizingClassName("standard", "shrink-0 cursor-pointer")}
           disabled={busy}
           onClick={() =>
             onSave(
@@ -159,27 +159,27 @@ function PanelHeader({
           </p>
         </div>
         <Button
-          size="icon-sm"
+          size="icon"
           variant="ghost"
-          className="h-10 w-10 cursor-pointer sm:h-8 sm:w-8"
+          className={controlSizingClassName("icon", "cursor-pointer")}
           aria-label={t("gitlab:refreshMergeRequest")}
           onClick={onRefresh}
         >
           <IconRefresh className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
         <Button
-          size="icon-sm"
+          size="icon"
           variant="ghost"
-          className="h-10 w-10 cursor-pointer sm:h-8 sm:w-8"
+          className={controlSizingClassName("icon", "cursor-pointer")}
           aria-label={t("gitlab:openMergeRequestInGitlab")}
           onClick={() => void openExternalLink(mr.mr_url).catch(() => undefined)}
         >
           <IconExternalLink className="h-4 w-4" />
         </Button>
         <Button
-          size="icon-sm"
+          size="icon"
           variant="ghost"
-          className="h-10 w-10 cursor-pointer text-destructive sm:h-8 sm:w-8"
+          className={controlSizingClassName("icon", "cursor-pointer text-destructive")}
           aria-label={t("gitlab:unlinkMergeRequest")}
           onClick={onUnlink}
         >
@@ -210,26 +210,26 @@ function MRActionButtons({
   return (
     <div className="flex flex-wrap gap-2">
       <Button
-        size="sm"
-        className="h-11 cursor-pointer gap-1.5 bg-green-600 text-white hover:bg-green-700 sm:h-8"
+        className={controlSizingClassName(
+          "standard",
+          "cursor-pointer gap-1.5 bg-green-600 text-white hover:bg-green-700",
+        )}
         disabled={disabled}
         onClick={() => void run("approve", () => approveMR(identity))}
       >
         <IconCheck className="h-4 w-4" /> {t("gitlab:approve")}
       </Button>
       <Button
-        size="sm"
         variant="outline"
-        className="h-11 cursor-pointer sm:h-8"
+        className={controlSizingClassName("standard", "cursor-pointer")}
         disabled={disabled}
         onClick={() => void run("unapprove", () => unapproveMR(identity))}
       >
         {t("gitlab:unapprove")}
       </Button>
       <Button
-        size="sm"
         variant="outline"
-        className="h-11 cursor-pointer gap-1.5 sm:h-8"
+        className={controlSizingClassName("standard", "cursor-pointer gap-1.5")}
         disabled={disabled || hasConflicts}
         onClick={onMerge}
       >
@@ -330,7 +330,11 @@ function FeedbackPlaceholder({ error, onRetry }: { error: string | null; onRetry
     return (
       <div className="p-4 text-sm text-destructive">
         {error}
-        <Button variant="outline" size="sm" className="ml-2 cursor-pointer" onClick={onRetry}>
+        <Button
+          variant="outline"
+          className={controlSizingClassName("standard", "ml-2 cursor-pointer")}
+          onClick={onRetry}
+        >
           {t("gitlab:retry")}
         </Button>
       </div>

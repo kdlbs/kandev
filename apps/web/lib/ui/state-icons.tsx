@@ -8,6 +8,7 @@ import {
   IconCircleCheck,
   IconCircleDashed,
   IconCircleFilled,
+  IconFolderOff,
   IconLoader,
   IconLoader2,
   IconMessageQuestion,
@@ -30,6 +31,7 @@ const STYLE_LOADING = "text-blue-500";
 const STYLE_WARNING = "text-yellow-500";
 const STYLE_PERMISSION = "text-amber-500";
 const STYLE_ERROR = "text-red-500";
+const STYLE_DISABLED = "text-slate-500";
 const WAITING_FOR_INPUT = "WAITING_FOR_INPUT";
 
 const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
@@ -142,6 +144,16 @@ const TASK_AUTO_START_FAILED_ICON: IconConfig = {
 const TASK_PARKED_ICON: IconConfig = {
   Icon: IconCircleDashed,
   className: "text-violet-500 animate-spin",
+};
+
+// The task-level workspace-orphaned affordance: this task inherits an
+// archived parent's workspace, so it can no longer materialize or start. A
+// muted slashed-folder glyph, distinct in both hue and shape from the two
+// STYLE_ERROR red markers above — this reads as "cannot run" rather than
+// "run failed".
+const TASK_WORKSPACE_ORPHANED_ICON: IconConfig = {
+  Icon: IconFolderOff,
+  className: STYLE_DISABLED,
 };
 
 const DEFAULT_TASK_ICON: IconConfig = {
@@ -288,6 +300,34 @@ export function BackgroundWorkTaskIcon() {
 }
 
 /**
+ * Shared muted slashed-folder affordance for a task that inherits an
+ * archived parent's workspace and can no longer materialize or start.
+ * Carries the accessible "Workspace orphaned" label and tooltip, so every
+ * surface that renders this state presents it consistently.
+ */
+export function WorkspaceOrphanedTaskIcon({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={t("common:workspaceOrphaned")}
+          tabIndex={0}
+          className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-1"
+        >
+          <IconFolderOff
+            aria-hidden="true"
+            data-testid="task-state-workspace-orphaned"
+            className={cn(STYLE_DISABLED, className)}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{t("common:workspaceOrphaned")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
  * Returns true when the kanban card should show the spinning loader. The task
  * workflow state and the primary session's runtime state are decoupled — the
  * workflow can keep a task in `IN_PROGRESS` after the agent has finished, or
@@ -344,21 +384,28 @@ type TaskStateIconOptions = {
    * foregroundActivity.
    */
   parkedOnBackgroundWork?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start. */
+  workspaceOrphaned?: boolean;
 };
 
-// Interrupted (startup reconciliation marker) and auto-start-failed
-// (on_enter action that never launched a run) both replace the idle/done
-// affordances but never override terminal states, which keep their own
-// icons (done check, failure X, cancel pause). Interrupted takes precedence
-// when both happen to be set.
+// Interrupted (startup reconciliation marker), auto-start-failed (on_enter
+// action that never launched a run), and workspace-orphaned (inherited an
+// archived parent's workspace) all replace the idle/done affordances but
+// never override terminal states, which keep their own icons (done check,
+// failure X, cancel pause). Interrupted takes precedence over
+// auto-start-failed, which takes precedence over workspace-orphaned, when
+// more than one happens to be set.
 function getMarkerIconOverride(
   state: TaskState | undefined,
   interrupted: boolean,
   autoStartFailed: boolean,
+  workspaceOrphaned: boolean,
 ): IconConfig | null {
   if (TERMINAL_TASK_STATES.has(state)) return null;
   if (interrupted) return TASK_INTERRUPTED_ICON;
   if (autoStartFailed) return TASK_AUTO_START_FAILED_ICON;
+  if (workspaceOrphaned) return TASK_WORKSPACE_ORPHANED_ICON;
   return null;
 }
 
@@ -406,6 +453,7 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     interrupted = false,
     autoStartFailed = false,
     parkedOnBackgroundWork = false,
+    workspaceOrphaned = false,
   } = options;
   const pendingOrActive = getPendingOrActiveTaskIcon(state, {
     hasPendingClarification,
@@ -414,7 +462,12 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     parkedOnBackgroundWork,
   });
   if (pendingOrActive) return pendingOrActive;
-  const markerOverride = getMarkerIconOverride(state, interrupted, autoStartFailed);
+  const markerOverride = getMarkerIconOverride(
+    state,
+    interrupted,
+    autoStartFailed,
+    workspaceOrphaned,
+  );
   if (markerOverride) return markerOverride;
   if (!state) return DEFAULT_TASK_ICON;
   return TASK_STATE_ICONS[state] ?? DEFAULT_TASK_ICON;
@@ -438,9 +491,9 @@ export function getTaskStateIcon(
   options: TaskStateIconOptions = {},
 ) {
   const config = getTaskStateIconConfig(state, options);
-  // The interrupted, auto-start-failed, and parked affordances all carry
-  // their own tooltip and accessible label, so they must render through
-  // their shared component rather than a bare icon.
+  // The interrupted, auto-start-failed, parked, and workspace-orphaned
+  // affordances all carry their own tooltip and accessible label, so they
+  // must render through their shared component rather than a bare icon.
   if (config === TASK_INTERRUPTED_ICON) {
     return <InterruptedTaskIcon className={cn("h-4 w-4", className)} />;
   }
@@ -449,6 +502,9 @@ export function getTaskStateIcon(
   }
   if (config === TASK_PARKED_ICON) {
     return <BackgroundWorkTaskIcon />;
+  }
+  if (config === TASK_WORKSPACE_ORPHANED_ICON) {
+    return <WorkspaceOrphanedTaskIcon className={cn("h-4 w-4", className)} />;
   }
   return renderConfiguredIcon(config, className);
 }

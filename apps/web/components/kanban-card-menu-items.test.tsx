@@ -1,12 +1,16 @@
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, renderHook, screen, fireEvent } from "@testing-library/react";
 import { IconFlag } from "@tabler/icons-react";
+import type { StoreApi } from "zustand";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
 import {
   buildKanbanCardMenuEntries,
   KanbanCardDropdownMenuItems,
+  useKanbanCardMoveTargets,
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
 
@@ -411,5 +415,154 @@ describe("buildKanbanCardMenuEntries — priority action", () => {
     criticalEntry.onSelect?.();
 
     expect(onSelectPriority).toHaveBeenCalledWith("critical");
+  });
+});
+
+describe("useKanbanCardMoveTargets — explicit steps (AC-TASKS-TASK-ACTIONS-MENU-002.3b)", () => {
+  const WORKFLOW_ID = "wf-1";
+  const TASK_ID = "task-1";
+  const HIDDEN_STEP_ID = "step-hidden";
+
+  function wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <StateProvider
+        initialState={
+          {
+            kanbanMulti: {
+              snapshots: {
+                [WORKFLOW_ID]: {
+                  workflowId: WORKFLOW_ID,
+                  workflowName: "Workflow 1",
+                  steps: [
+                    { id: "step-a", title: "Todo", color: "blue", position: 0 },
+                    { id: HIDDEN_STEP_ID, title: "Hidden step", color: "gray", position: 1 },
+                    { id: "step-b", title: "Done", color: "green", position: 2 },
+                  ],
+                  tasks: [
+                    {
+                      id: TASK_ID,
+                      workflowId: WORKFLOW_ID,
+                      workflowStepId: "step-a",
+                      title: "Task 1",
+                      position: 0,
+                    },
+                  ],
+                },
+              },
+              isLoading: false,
+            },
+          } as never
+        }
+      >
+        {children}
+      </StateProvider>
+    );
+  }
+
+  it("uses the caller's explicit steps as-is for the current workflow's entry", () => {
+    const explicitSteps = [{ id: HIDDEN_STEP_ID, title: "Hidden step", color: "gray" }];
+    const { result } = renderHook(() => useKanbanCardMoveTargets(TASK_ID, explicitSteps), {
+      wrapper,
+    });
+
+    const stepIds = result.current.stepsByWorkflowId[WORKFLOW_ID].map((step) => step.id);
+    expect(stepIds).toEqual([HIDDEN_STEP_ID]);
+  });
+});
+
+describe("useKanbanCardMoveTargets — card hot path has no kanban.tasks/hiddenWorkflowStepIds subscription", () => {
+  const WORKFLOW_ID = "wf-1";
+  const TASK_ID = "task-1";
+  const CARD_STEPS = [{ id: "step-a", title: "Todo", color: "blue" }];
+
+  let capturedStore: StoreApi<AppState> | null = null;
+
+  function StoreCapture() {
+    capturedStore = useAppStoreApi();
+    return null;
+  }
+
+  function wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <StateProvider
+        initialState={
+          {
+            kanban: { tasks: [] },
+            kanbanMulti: {
+              snapshots: {
+                [WORKFLOW_ID]: {
+                  workflowId: WORKFLOW_ID,
+                  workflowName: "Workflow 1",
+                  steps: [{ id: "step-a", title: "Todo", color: "blue", position: 0 }],
+                  tasks: [
+                    {
+                      id: TASK_ID,
+                      workflowId: WORKFLOW_ID,
+                      workflowStepId: "step-a",
+                      title: "Task 1",
+                      position: 0,
+                    },
+                  ],
+                },
+              },
+              isLoading: false,
+            },
+            userSettings: { hiddenWorkflowStepIds: {} },
+          } as never
+        }
+      >
+        <StoreCapture />
+        {children}
+      </StateProvider>
+    );
+  }
+
+  // The card's own render path already knows its workflow's steps (it passes
+  // `steps` explicitly), so this hook must not force every card to re-render
+  // on unrelated `kanban.tasks`/`hiddenWorkflowStepIds` writes just to serve
+  // the preview/detail surfaces' fallback (system design: card hook keeps its
+  // original subscription set).
+  it("does not recompute when kanban.tasks or hiddenWorkflowStepIds change while the caller passes explicit steps", () => {
+    capturedStore = null;
+    let renderCount = 0;
+    const { result } = renderHook(
+      () => {
+        renderCount++;
+        return useKanbanCardMoveTargets(TASK_ID, CARD_STEPS);
+      },
+      { wrapper },
+    );
+
+    expect(result.current.currentWorkflowId).toBe(WORKFLOW_ID);
+    const countAfterMount = renderCount;
+
+    act(() => {
+      capturedStore!.setState((state) => ({
+        kanban: {
+          ...state.kanban,
+          tasks: [
+            ...state.kanban.tasks,
+            {
+              id: "other-task",
+              workflowId: WORKFLOW_ID,
+              workflowStepId: "step-a",
+              title: "Other",
+              position: 1,
+            },
+          ],
+        },
+      }));
+    });
+    expect(renderCount).toBe(countAfterMount);
+
+    act(() => {
+      capturedStore!.setState((state) => ({
+        userSettings: {
+          ...state.userSettings,
+          hiddenWorkflowStepIds: { [WORKFLOW_ID]: ["step-a"] },
+        },
+      }));
+    });
+    expect(renderCount).toBe(countAfterMount);
   });
 });
