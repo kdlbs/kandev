@@ -41,6 +41,14 @@ const mockSetState = vi.fn(
     mockStoreState = { ...mockStoreState, ...updater(mockStoreState) };
   },
 );
+const mockSubscribe = vi.fn(
+  (
+    _listener: (
+      current: ReturnType<typeof makeStoreState>,
+      previous: ReturnType<typeof makeStoreState>,
+    ) => void,
+  ) => vi.fn(),
+);
 
 vi.mock("@/lib/api/domains/queue-api", () => ({
   appendToQueue: vi.fn(),
@@ -60,7 +68,11 @@ vi.mock("@/hooks/use-message-handler", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({ getState: () => mockStoreState, setState: mockSetState }),
+  useAppStoreApi: () => ({
+    getState: () => mockStoreState,
+    setState: mockSetState,
+    subscribe: mockSubscribe,
+  }),
 }));
 
 vi.mock("@/lib/state/slices/comments", () => ({
