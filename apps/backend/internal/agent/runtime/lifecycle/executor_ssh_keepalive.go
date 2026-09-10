@@ -10,16 +10,20 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// docs/specs/executors/requirements/ssh-transport-liveness.md
+// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.10
+const (
+	defaultSSHKeepaliveInterval = 15 * time.Second
+	defaultSSHKeepaliveDeadline = 45 * time.Second
+)
+
 // Tuning values for SSH session transport liveness. Package-level variables,
 // not constants, so tests can shorten them (see goleak_test.go's TestMain,
 // which zeroes the keepalive pair for this package's test binary — a
 // non-positive value disables the watchdog per sshKeepaliveTuningValid).
-//
-// docs/specs/executors/requirements/ssh-transport-liveness.md
-// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.10
 var (
-	sshKeepaliveInterval = 15 * time.Second
-	sshKeepaliveDeadline = 45 * time.Second
+	sshKeepaliveInterval = defaultSSHKeepaliveInterval
+	sshKeepaliveDeadline = defaultSSHKeepaliveDeadline
 )
 
 // sshBrokerPreflightTimeout bounds the credential-broker reachability

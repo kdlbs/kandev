@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -148,6 +150,27 @@ func TestSSHKeepaliveTuningValid(t *testing.T) {
 	}
 }
 
+// TestSSHKeepaliveProductionDefaultsMatchSpec pins the package vars'
+// zero-test-override values against the named constants they initialize
+// from, so a change to either constant is a deliberate, visible edit here
+// rather than a silent drift from the spec's mandated 15s/45s pair — nothing
+// else in this suite asserts the untouched production defaults, since
+// TestMain zeroes sshKeepaliveInterval/sshKeepaliveDeadline for every other
+// test in this package's binary.
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.10
+func TestSSHKeepaliveProductionDefaultsMatchSpec(t *testing.T) {
+	if defaultSSHKeepaliveInterval != 15*time.Second {
+		t.Fatalf("defaultSSHKeepaliveInterval = %v, want 15s", defaultSSHKeepaliveInterval)
+	}
+	if defaultSSHKeepaliveDeadline != 45*time.Second {
+		t.Fatalf("defaultSSHKeepaliveDeadline = %v, want 45s", defaultSSHKeepaliveDeadline)
+	}
+	if !sshKeepaliveTuningValid(defaultSSHKeepaliveInterval, defaultSSHKeepaliveDeadline) {
+		t.Fatal("the production defaults must themselves satisfy sshKeepaliveTuningValid")
+	}
+}
+
 // TestSSHKeepaliveWatchdogDeclaresLossOnDeadline exercises the raw watchdog's
 // own decision timing in isolation from SSHExecutor — its onLost callback
 // here is a test channel, not the production transportTeardown, so it does
@@ -268,6 +291,63 @@ func TestSSHKeepaliveWatchdogStopSignalBeatsACoincidingProbeError(t *testing.T) 
 	}
 }
 
+// TestSSHKeepaliveWatchdogReplyBeatsACoincidingDeadlineExpiry drives runLoop's
+// reply-vs-deadline select directly. The reply is buffered before runLoop's
+// goroutine has run at all (a buffered send needs no receiver), and the
+// deadline is non-positive so its timer fires as soon as the runtime gets to
+// it — so by the time runLoop's blocking select first evaluates, both cases
+// are frequently ready together and Go's random pick exercises the timer.C
+// branch as often as the direct replies case. AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.3
+// requires a completed reply not yet accounted for to be accounted for first
+// even when a deadline expiry is also observable at the same moment: the
+// timer.C branch's own inner select must still find and consume the pending
+// reply rather than falling through to declare loss. onLost.recordReply
+// raises the deadline once the injected reply is accounted for (whichever
+// path got there), so a real, unrelated second expiry can't also fire during
+// the observation window. Repeated so the random pick lands on the timer.C
+// branch many times, not just once.
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.3
+func TestSSHKeepaliveWatchdogReplyBeatsACoincidingDeadlineExpiry(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+
+	const iterations = 300
+	for i := 0; i < iterations; i++ {
+		w := &sshKeepaliveWatchdog{
+			interval: time.Hour,
+			deadline: -1, // fires as soon as the runtime processes it
+			stopCh:   make(chan struct{}),
+			loopDone: make(chan struct{}),
+		}
+		var lostCalled atomic.Bool
+		w.onLost = func(string, time.Duration) { lostCalled.Store(true) }
+		w.recordReply = func(time.Time) {
+			// Accounted for: stop the deadline from legitimately re-expiring
+			// on its own so this test can observe "no loss declared" without
+			// racing a second, unrelated timer.
+			w.deadline = time.Hour
+		}
+
+		replies := make(chan time.Time, 1)
+		errs := make(chan error, 1)
+		replies <- time.Now() // buffered before runLoop's goroutine exists
+		go w.runLoop(replies, errs, time.Now())
+
+		select {
+		case <-w.loopDone:
+			t.Fatalf("iteration %d: runLoop exited instead of accounting for the pending reply", i)
+		case <-time.After(5 * time.Millisecond):
+			// Still running, having accounted for the reply rather than
+			// declaring loss on the coinciding deadline expiry — required.
+		}
+		close(w.stopCh)
+		waitClosedWithin(t, w.loopDone, 2*time.Second, "runLoop exiting after stop")
+		if lostCalled.Load() {
+			t.Fatalf("iteration %d: a reply that beat (or tied) a coinciding deadline expiry still declared transport loss", i)
+		}
+	}
+}
+
 // TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime is the
 // capability this card exists for: a session whose transport falls silent is
 // torn down automatically, within a bounded time, with no disposal call
@@ -333,6 +413,127 @@ func TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime(t *testing
 	}
 	if _, ok := fields["client_close_error"]; ok {
 		t.Fatalf("warning unexpectedly named a client_close_error: %v", fields)
+	}
+}
+
+// TestSSHKeepaliveTeardownNamesAForwarderCloseError covers the presence side
+// TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime
+// deliberately only asserts the absence of: when closing the forwarder
+// itself fails, transportTeardown's warning must name that error, and the
+// client close must still happen regardless
+// (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.5). The forwarder's once-guard is
+// pre-spent with a synthetic error here, exactly as a real forwarder.Close()
+// failure would leave it, rather than forcing an actual close failure.
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.5
+func TestSSHKeepaliveTeardownNamesAForwarderCloseError(t *testing.T) {
+	exec, logs := newObservedSSHExecutor(t)
+	server := newFakeSSHServer(t, nil)
+	client := server.dial(t)
+	t.Cleanup(func() { _ = client.Close() })
+
+	synthetic := errors.New("synthetic forwarder close error")
+	state := &sshSessionState{
+		target: &SSHTarget{Host: "build.example", User: "deploy", PinnedFingerprint: "SHA256:x"},
+		client: client,
+	}
+	state.forwarderCloseOnce.Do(func() { state.forwarderCloseErr = synthetic })
+
+	exec.transportTeardown("instance-1", state, sshTransportLostReasonDeadline, 90*time.Second)
+
+	if _, err := client.NewSession(); err == nil {
+		t.Fatal("client must still be closed despite the forwarder close error")
+	}
+
+	var warnings []observer.LoggedEntry
+	for _, entry := range logs.All() {
+		if entry.Message == "ssh session transport lost" {
+			warnings = append(warnings, entry)
+		}
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("transport-loss warnings = %d, want exactly 1 (entries: %v)", len(warnings), logs.All())
+	}
+	fields := warnings[0].ContextMap()
+	got, ok := fields["forwarder_close_error"]
+	if !ok {
+		t.Fatalf("warning missing forwarder_close_error field: %v", fields)
+	}
+	if fmt.Sprint(got) != synthetic.Error() {
+		t.Fatalf("warning forwarder_close_error = %v, want %v", got, synthetic)
+	}
+	if _, ok := fields["client_close_error"]; ok {
+		t.Fatalf("warning unexpectedly named a client_close_error: %v", fields)
+	}
+}
+
+// TestSSHKeepaliveStopInstanceAfterInternalTeardownIsANoOp covers what
+// TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime
+// deliberately does not: a disposal call (StopInstance) arriving after an
+// internally-triggered teardown has already run. Transport teardown must not
+// remove the session from the tracked sessions (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.6)
+// — removal stays the disposal path's job — so the later stop still finds and
+// removes it, skips its remote commands because the reading classifies the
+// transport as lost (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.8), and performs
+// no second teardown (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.5): teardown
+// runs at most once whether or not the session is subsequently stopped
+// (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.12).
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.5
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.6
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.8
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.12
+func TestSSHKeepaliveStopInstanceAfterInternalTeardownIsANoOp(t *testing.T) {
+	withSSHKeepaliveTuning(t, 5*time.Millisecond, 20*time.Millisecond)
+
+	exec, logs := newObservedSSHExecutor(t)
+	cleanupCalls, stopCalls := 0, 0
+	exec.cleanupScript = func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error {
+		cleanupCalls++
+		return nil
+	}
+	exec.stopRemote = func(context.Context, *ssh.Client, string, int) error {
+		stopCalls++
+		return nil
+	}
+	server := newFakeSSHServer(t, nil)
+	client := server.dial(t)
+	fwd, err := StartPortForward(client, 41234, newTestLogger())
+	if err != nil {
+		t.Fatalf("StartPortForward: %v", err)
+	}
+	t.Cleanup(func() { _ = fwd.Close() })
+	state := newTrackedSSHSessionWithForwarder(exec, "instance-1", client, fwd)
+
+	server.setSilent(true) // every probe goes unanswered from here on
+	waitClosedWithin(t, state.watchdog.loopDone, 2*time.Second, "the watchdog loop declaring transport loss")
+	waitClosedWithin(t, state.watchdog.proberDone, 2*time.Second, "the prober exiting after teardown closed the client")
+
+	exec.mu.Lock()
+	tracked := exec.sessions["instance-1"] == state
+	exec.mu.Unlock()
+	if !tracked {
+		t.Fatal("transport teardown must not remove the session from the tracked sessions — that stays the disposal path's job")
+	}
+
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "instance-1",
+		StopReason: StopReasonTaskDeleted, // would trigger the cleanup script on a healthy transport
+	}, false); err != nil {
+		t.Fatalf("StopInstance after an internal teardown: %v", err)
+	}
+	if cleanupCalls != 0 || stopCalls != 0 {
+		t.Fatalf("cleanup calls = %d, stop calls = %d, want both 0 — a lost transport must skip every remote command", cleanupCalls, stopCalls)
+	}
+
+	var warnings int
+	for _, entry := range logs.All() {
+		if entry.Message == "ssh session transport lost" {
+			warnings++
+		}
+	}
+	if warnings != 1 {
+		t.Fatalf("transport-loss warnings = %d, want exactly 1 — a disposal after teardown must not run a second teardown", warnings)
 	}
 }
 
@@ -487,6 +688,7 @@ func TestSSHExecutorBuildInstanceForLostRaceReturnsCompleteResumeMetadata(t *tes
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        "/custom/workdir",
 		MetadataKeyIsRemote:              true,
+		MetadataKeyReuseExistingProcess:  false,
 	}
 	for key, wantVal := range want {
 		if got := instance.Metadata[key]; got != wantVal {
@@ -495,6 +697,51 @@ func TestSSHExecutorBuildInstanceForLostRaceReturnsCompleteResumeMetadata(t *tes
 	}
 	if len(instance.Metadata) != len(want) {
 		t.Fatalf("Metadata = %+v, want exactly %d keys matching %+v", instance.Metadata, len(want), want)
+	}
+}
+
+// TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess covers
+// the race shape the test above does not: a CreateInstance caller losing
+// specifically to a ResumeRemoteInstance winner whose remote agent process is
+// already running (agentctlClient/reusingProcess are only ever set by
+// ResumeRemoteInstance). Without reusing the winner's client and reporting
+// reuse_existing_process, the loser's execution would skip reconnecting to
+// that process and manager_startup.go would spawn a second, conflicting one
+// against the same remote agentctl instance instead.
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.1
+func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *testing.T) {
+	server := newFakeSSHServer(t, nil)
+	fwd, err := StartPortForward(server.dial(t), 41234, newTestLogger())
+	if err != nil {
+		t.Fatalf("StartPortForward: %v", err)
+	}
+	t.Cleanup(func() { _ = fwd.Close() })
+	resumedClient := agentctl.NewClient(sshAgentctlLoopbackHost, fwd.LocalPort(), newTestLogger(),
+		agentctl.WithExecutionID("previous-instance"), agentctl.WithAuthToken("resumed-token"))
+
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	existing := &sshSessionState{
+		target:         &SSHTarget{Host: "build.example", Port: 22, User: "deploy", PinnedFingerprint: "SHA256:x"},
+		forwarder:      fwd,
+		agentctlClient: resumedClient,
+		pid:            4242,
+		remoteDir:      "/remote/session",
+		remoteTaskDir:  "/remote/task",
+		authToken:      "resumed-token",
+		reusingProcess: true,
+		port:           41234,
+		workdirRoot:    "/custom/workdir",
+	}
+	req := &ExecutorCreateRequest{InstanceID: "instance-1", TaskID: "task-1", SessionID: "session-1"}
+
+	instance := exec.buildInstanceForLostRace(req, existing)
+
+	if instance.Client != resumedClient {
+		t.Fatal("Client must be the resumed winner's own agentctl client, not a freshly constructed one")
+	}
+	if got := instance.Metadata[MetadataKeyReuseExistingProcess]; got != true {
+		t.Fatalf("Metadata[MetadataKeyReuseExistingProcess] = %v, want true — otherwise the loser's startup spawns a second agent subprocess against the winner's already-running remote process", got)
 	}
 }
 

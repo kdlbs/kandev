@@ -146,7 +146,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	// Check if we're reconnecting to an existing running agent process.
 	// When the existing process is still alive inside a remote executor (e.g., Sprites),
 	// we skip subprocess launch and go directly to ACP session initialization.
-	reuseExisting := execution.metadataBool("reuse_existing_process")
+	reuseExisting := execution.metadataBool(MetadataKeyReuseExistingProcess)
 
 	if !reuseExisting && execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)

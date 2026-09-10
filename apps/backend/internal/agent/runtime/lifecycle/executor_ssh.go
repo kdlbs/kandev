@@ -367,14 +367,18 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 // session state, never from this caller's request, since the request's
 // remote-agentctl metadata describes a session this caller never created.
 func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, existing *sshSessionState) *ExecutorInstance {
-	return &ExecutorInstance{
-		InstanceID:  req.InstanceID,
-		TaskID:      req.TaskID,
-		SessionID:   req.SessionID,
-		RuntimeName: r.Name(),
-		Client: agentctl.NewClient(sshAgentctlLoopbackHost, existing.forwarder.LocalPort(), r.logger,
+	client := existing.agentctlClient
+	if client == nil {
+		client = agentctl.NewClient(sshAgentctlLoopbackHost, existing.forwarder.LocalPort(), r.logger,
 			agentctl.WithExecutionID(req.InstanceID),
-			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(existing.authToken)),
+			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(existing.authToken))
+	}
+	return &ExecutorInstance{
+		InstanceID:    req.InstanceID,
+		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
+		RuntimeName:   r.Name(),
+		Client:        client,
 		WorkspacePath: existing.remoteTaskDir,
 		AuthToken:     existing.authToken,
 		Metadata: map[string]interface{}{
@@ -389,6 +393,7 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 			MetadataKeySSHLocalForwardPort:   strconv.Itoa(existing.forwarder.LocalPort()),
 			MetadataKeySSHWorkdirRoot:        existing.workdirRoot,
 			MetadataKeyIsRemote:              true,
+			MetadataKeyReuseExistingProcess:  existing.reusingProcess,
 		},
 	}
 }
@@ -688,7 +693,7 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
-		"reuse_existing_process":         state.reusingProcess,
+		MetadataKeyReuseExistingProcess:  state.reusingProcess,
 	}
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
