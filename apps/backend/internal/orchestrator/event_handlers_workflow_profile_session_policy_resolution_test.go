@@ -20,7 +20,7 @@ func TestProcessStepExitAndEnter_UnknownSourceKeepsCurrentSessionRecoverable(t *
 		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
 	}
 
-	if err := fixture.svc.processStepExitAndEnter(ctx, "t1", fixture.current, "missing-source", "step-b", "Test"); err == nil {
+	if err := fixture.svc.processStepExitAndEnter(ctx, "t1", fixture.current, "missing-source", "step-b", "Test", 0); err == nil {
 		t.Fatal("processStepExitAndEnter returned nil for unknown source step")
 	}
 
@@ -198,7 +198,7 @@ func TestProcessManualMoveLifecycle_UnknownSourceKeepsLifecyclePending(t *testin
 
 	fixture.svc.processManualMoveLifecycleWithFeederBarrier(
 		ctx, "t1", fixture.current, nil, target,
-		"missing-source", target.ID, "Test",
+		"missing-source", target.ID, "Test", 0,
 	)
 
 	stored, err := fixture.repo.GetTask(ctx, "t1")

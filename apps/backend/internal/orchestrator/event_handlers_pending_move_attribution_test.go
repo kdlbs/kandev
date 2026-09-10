@@ -33,10 +33,11 @@ func TestApplyPendingMove_UsesSenderSessionForLedgerAttribution(t *testing.T) {
 		t.Fatalf("create caller session: %v", err)
 	}
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID:          "task-1",
-		WorkflowID:      "wf1",
-		WorkflowStepID:  stepInProgressID,
-		SenderSessionID: senderSessionID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
+		SenderSessionID:        senderSessionID,
 	})
 
 	rows := stepTransitionRowsForTaskOrchestrator(t, sc.repo, "task-1")

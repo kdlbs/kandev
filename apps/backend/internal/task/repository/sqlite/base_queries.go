@@ -7,6 +7,10 @@ import "strings"
 // limit is requested. Shared across plan.go, document.go, and message.go.
 const sqlLimitClause = " LIMIT ?"
 
+// postgresForUpdateClause is appended to dynamic queries whose surrounding
+// transaction must serialize concurrent writers on PostgreSQL.
+const postgresForUpdateClause = " FOR UPDATE"
+
 // sqliteMaxHostParams is the safe upper bound on placeholders in a single
 // statement. SQLite's compile-time default (SQLITE_MAX_VARIABLE_NUMBER) is
 // 999 on older builds and 32766 on newer ones; we chunk well below the

@@ -310,12 +310,10 @@ both labels.
   task's step at that moment, so a redelivery arriving after the task returned
   to its origin shall be treated as a fresh move and may start an agent again.
 - **AC-PLUGINS-STEP-MOVE-005.10:** (pin) When two callers move the same task to
-  different steps concurrently, the system shall serialize the writes on the
-  workspace row lock, commit them in the order they reach the task write, and
-  record one transition row per committed change rather than collapsing them.
-  It shall not rebase a plugin move onto the state the earlier writer
-  committed: the destination is the caller's, while the recorded from-step is
-  read under the write transaction's own row lock.
+  different steps concurrently from the same observed source step, the system
+  shall commit exactly one destination and reject the stale snapshot. The
+  winner records one transition row; the rejected move changes no persisted
+  field and records no transition row.
 - **AC-PLUGINS-STEP-MOVE-005.11:** (new) When a plugin moves a task that is attached
   to no workflow and names no target workflow, the system shall reject the move
   with an invalid-argument error rather than infer a workflow from the step.

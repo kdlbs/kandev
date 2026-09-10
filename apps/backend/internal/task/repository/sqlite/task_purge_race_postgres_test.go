@@ -275,6 +275,60 @@ func TestPostgresRepository_QueueAdmissionRejectedAfterTaskDelete(t *testing.T) 
 	}
 }
 
+func TestPostgresRepository_TerminalRouteAbsorbsConcurrentPendingMoveAdmission(t *testing.T) {
+	repoA, repoB, terminalDB := newTaskPostgresRepoPair(t)
+	ctx := context.Background()
+	const (
+		taskID = "task-terminal-route-race"
+		sessID = "sess-terminal-route-race"
+	)
+	seedTaskWithSession(t, repoA, taskID, "ws-terminal-route-race", sessID)
+	queueRepo, err := messagequeue.NewSQLiteRepository(repoB.db, repoB.db)
+	if err != nil {
+		t.Fatalf("init queue repo: %v", err)
+	}
+
+	terminalTx, err := terminalDB.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin terminal route tx: %v", err)
+	}
+	defer func() { _ = terminalTx.Rollback() }()
+	if _, err := terminalTx.ExecContext(ctx, `
+		UPDATE tasks
+		SET workflow_step_id = 'step-done', state = 'COMPLETED', updated_at = NOW()
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("commit terminal task state: %v", err)
+	}
+	if _, err := terminalTx.ExecContext(ctx, `DELETE FROM pending_moves WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("settle terminal pending rows: %v", err)
+	}
+
+	admissionPID := pgBackendPID(t, repoB.db)
+	admissionDone := make(chan error, 1)
+	go func() {
+		admissionDone <- queueRepo.SetPendingMove(ctx, sessID, &messagequeue.PendingMove{
+			MoveID: "stale-after-terminal", TaskID: taskID,
+			WorkflowStepID: "step-later", ExpectedWorkflowStepID: "step-" + taskID,
+		})
+	}()
+	waitForWaitingLocks(t, repoA.db, admissionPID, 1, "pending move admission behind terminal task row")
+
+	if err := terminalTx.Commit(); err != nil {
+		t.Fatalf("commit terminal route tx: %v", err)
+	}
+	if err := <-admissionDone; !errors.Is(err, messagequeue.ErrPendingMoveGenerationConflict) {
+		t.Fatalf("stale admission err = %v, want ErrPendingMoveGenerationConflict", err)
+	}
+	var pending int
+	if err := repoA.db.GetContext(ctx, &pending, `SELECT count(*) FROM pending_moves WHERE task_id = $1`, taskID); err != nil {
+		t.Fatalf("count pending moves: %v", err)
+	}
+	if pending != 0 {
+		t.Fatalf("terminal route left %d pending row(s), want 0", pending)
+	}
+}
+
 // TestPostgresRepository_AutoMergeCandidateIntoAbove_RejectedAfterArchive
 // proves the full-queue fold re-guards the task row in its own transaction:
 // an archive committing between the failed insert and the fold must make the

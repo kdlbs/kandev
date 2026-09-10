@@ -13,9 +13,11 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // step_entry_dispatch_test.go covers the defect this Build round fixes: the
@@ -170,8 +172,13 @@ func (f *reviewLoopFixture) fireOnTurnComplete(t *testing.T, ctx context.Context
 	t.Helper()
 	setSessionState(t, ctx, f.repo, "s1", models.TaskSessionStateRunning)
 
-	onEnterDone := make(chan struct{})
-	f.svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
+	onEnterDone := make(chan struct{}, 1)
+	f.svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterDone <- struct{}{}:
+		default:
+		}
+	}
 
 	session, err := f.repo.GetTaskSession(ctx, "s1")
 	if err != nil {
@@ -214,6 +221,26 @@ func TestProcessOnEnter_QueueRunForEachParticipant_SingleReviewerEntry_QueuesExa
 	if clearCalls != 1 {
 		t.Errorf("clear_decisions calls = %d, want 1", clearCalls)
 	}
+}
+
+func TestProcessOnEnter_CompletesRouteEffectForCommittedTransition(t *testing.T) {
+	ctx := context.Background()
+	f := newReviewLoopFixture(t)
+
+	if !f.fireOnTurnComplete(t, ctx) {
+		t.Fatal("expected a transition from Work to Review")
+	}
+	var status string
+	err := f.repo.(*sqliterepo.Repository).DB().QueryRowContext(ctx, `
+		SELECT status
+		FROM workflow_route_effects
+		WHERE task_id = ? AND target_step_id = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, "t1", f.nameToID["Review"]).Scan(&status)
+	require.NoError(t, err)
+	require.Equal(t, "completed", status,
+		"on_enter must claim the durable transition effect instead of relying on a transient task field")
 }
 
 // TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_QueuesAnotherRun

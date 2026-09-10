@@ -657,7 +657,7 @@ func (r *Repository) transferTaskEnvironmentOwnership(
 	defer func() { _ = tx.Rollback() }()
 	query := taskEnvironmentOwnershipQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += postgresForUpdateClause
 	}
 	var currentTaskID string
 	var currentGeneration int64
@@ -731,7 +731,7 @@ func (r *Repository) ClaimTaskEnvironmentReset(
 	}
 	query := taskEnvironmentOwnershipQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += postgresForUpdateClause
 	}
 	var ownerTaskID string
 	var generation int64

@@ -38,6 +38,7 @@ import (
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflow/signalmetrics"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -2302,6 +2303,18 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
+		turnID, _, _, _ := h.workflowRouteCause(ctx, req.SessionID, routing.ProducerStepComplete)
+		operation := routing.Operation{
+			ID: workflowRouteOperationID("step-complete", msg.ID), TaskID: req.TaskID,
+			WorkspaceID: task.WorkspaceID, Producer: routing.ProducerStepComplete,
+			ExpectedStepID: launchStepID, ObservedStepID: task.WorkflowStepID,
+			SessionID: req.SessionID, TurnID: turnID,
+			ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+			Outcome: routing.OutcomeStaleSource,
+		}
+		if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, operation); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record stale signal", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
 	}
 
@@ -2324,6 +2337,25 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
+		observed, loadErr := h.taskSvc.GetTask(ctx, req.TaskID)
+		if loadErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to classify completion signal", nil)
+		}
+		if observed.WorkflowStepID != launchStepID {
+			turnID, _, _, _ := h.workflowRouteCause(ctx, req.SessionID, routing.ProducerStepComplete)
+			operation := routing.Operation{
+				ID: workflowRouteOperationID("step-complete", msg.ID), TaskID: req.TaskID,
+				WorkspaceID: observed.WorkspaceID, Producer: routing.ProducerStepComplete,
+				ExpectedStepID: launchStepID, ObservedStepID: observed.WorkflowStepID,
+				SessionID: req.SessionID, TurnID: turnID,
+				ActorKind: string(steptelemetry.ActorAgent), ActorID: req.SessionID,
+				Outcome: routing.OutcomeStaleSource,
+			}
+			if err := h.taskSvc.RecordWorkflowRouteOperation(ctx, operation); err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record stale signal", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
+		}
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
 	}
 

@@ -112,8 +112,9 @@ The ledger contract is observable through turn starts, committed transitions, ro
   they are ordered by `(occurred_at, id)`, **THEN** the order is total and
   matches the order the transitions committed.
 - **GIVEN** two callers concurrently moving the same task, one to `B` and one to
-  `C`, **WHEN** both transactions commit, **THEN** exactly two rows exist, their
-  chain is intact, and the later row's `to_workflow_step_id` equals the task's
+  `C`, from the same observed source generation, **WHEN** the transactions
+  contend, **THEN** exactly one move commits and one transition row exists; the
+  stale move is rejected and the row's `to_workflow_step_id` equals the task's
   final `workflow_step_id`.
 - **GIVEN** an engine trigger that is retried with the same `OperationID`,
   **WHEN** the retry is handled, **THEN** no second row is written.

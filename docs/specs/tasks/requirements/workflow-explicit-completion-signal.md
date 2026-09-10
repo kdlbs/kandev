@@ -37,6 +37,10 @@ Signal-gated Kanban and Office workflows need a reliable distinction between an 
 - Creating or loading an ACP session supplies the local Kandev MCP server. After a transient MCP reconnect, the client can list and call `step_complete_kandev` again without a user message or process restart.
 - Kandev does not pin the Claude ACP bridge version as part of this feature. Bridge selection retains the existing unversioned package behavior; diagnostics continue to report the version returned during ACP initialization.
 - Existing idempotency, clarification barriers, and re-open semantics remain unchanged. ADR 0015's planned manual "Mark complete & advance" fallback is not currently implemented and is outside this reliability fix.
+- Signal recording is generation-bound. If the immutable workflow step stamped
+  on the latest turn is no longer the task's current step, the call fails as
+  stale and must not mutate deferred routing state. See
+  [Atomic Terminal Routing](atomic-terminal-routing.md).
 - Explicit user-cancel completion is owned by the [Cancelled Turn Completion](workflow-cancelled-turn-completion.md) spec. When a step opts into that policy, the user's cancel action is a human completion decision and may run `on_turn_complete` without an agent-emitted signal; internal cancellation paths remain non-completing.
 
 ## API Surface
