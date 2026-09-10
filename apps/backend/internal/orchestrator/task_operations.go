@@ -4653,10 +4653,15 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 }
 
 type promptTaskOptions struct {
-	claimEntryID          string
-	lifecyclePrompt       bool
-	afterClaim            func() error
-	afterDispatch         func() error
+	claimEntryID    string
+	lifecyclePrompt bool
+	afterClaim      func() error
+	afterDispatch   func() error
+	// beforeDispatch is the durable at-most-once boundary for caller-owned
+	// queue receipts. It runs once, immediately before the first provider or
+	// model-switch I/O that can carry the prompt.
+	beforeDispatch        func() error
+	disableDispatchRetry  bool
 	preservePromptContext bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
@@ -4835,6 +4840,17 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
 	}
+	beforeDispatch := options.beforeDispatch
+	runBeforeDispatch := func() error {
+		if beforeDispatch == nil {
+			return nil
+		}
+		if err := beforeDispatch(); err != nil {
+			return err
+		}
+		beforeDispatch = nil
+		return nil
+	}
 
 	// Cache and reserve the replay identity before model switching. A restart
 	// based switch dispatches its prompt from StartAgentProcess, before the
@@ -4842,6 +4858,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	s.rememberTurnPromptWithAccepted(sessionID, prompt, model, planMode, attachments, options.onAccepted)
 	if modelSwitchRequired(session, model) {
 		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
+		if err := runBeforeDispatch(); err != nil {
+			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
+			s.clearPromptAttemptEvidence(sessionID, "", 0)
+			return nil, err
+		}
 	}
 
 	if result, handled, switchErr := s.trySwitchModelForPrompt(
@@ -4923,6 +4944,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			rollback, options, identityValidationErr, foregroundDispatch, false, nil,
 		)
 	}
+	if boundaryErr := runBeforeDispatch(); boundaryErr != nil {
+		failureCtx, cancel := options.failureContext(ctx)
+		defer cancel()
+		s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+		s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
+		return nil, boundaryErr
+	}
 	s.bindPromptTurnID(promptCtx, session, rollback.turnID)
 	s.beginInteractivePromptAttempt(
 		promptCtx,
@@ -4996,7 +5024,7 @@ func (s *Service) finishPromptDispatchFailure(
 		rollback.reservedTurnAccepted = true
 	}
 	failureResult, failureErr := s.handlePromptDispatchFailure(
-		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
+		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt && !options.disableDispatchRetry,
 		attachments, rollback, options.lifecyclePrompt, dispatchAccepted, promptErr,
 		options.promptAlreadyComposed, options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
 	)

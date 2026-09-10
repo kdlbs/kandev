@@ -15,12 +15,9 @@ import { useStore } from "zustand";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskPlan } from "@/lib/types/http-agents";
-import type { ChatSubmitPayload } from "./chat/chat-input-container";
-import type { EntityReference } from "@/lib/types/entity-reference";
 
 const mocks = vi.hoisted(() => ({
-  getWebSocketClient: vi.fn(),
-  onSend: null as null | ((payload: ChatSubmitPayload) => Promise<void>),
+  taskChatPanelProps: null as null | Record<string, unknown>,
   sessions: [] as TaskSession[],
   agentProfiles: [] as AgentProfileOption[],
   primarySessionId: null as string | null,
@@ -44,12 +41,9 @@ const mocks = vi.hoisted(() => ({
   getTaskPlan: vi.fn(),
 }));
 
-vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: mocks.getWebSocketClient,
-}));
 vi.mock("./task-chat-panel", () => ({
-  TaskChatPanel: ({ onSend }: { onSend: (payload: ChatSubmitPayload) => Promise<void> }) => {
-    mocks.onSend = onSend;
+  TaskChatPanel: (props: Record<string, unknown>) => {
+    mocks.taskChatPanelProps = props;
     return <div data-testid="preview-chat" />;
   },
 }));
@@ -283,8 +277,7 @@ const session: TaskSession = {
 
 afterEach(() => {
   cleanup();
-  mocks.getWebSocketClient.mockReset();
-  mocks.onSend = null;
+  mocks.taskChatPanelProps = null;
   mocks.sessions = [];
   mocks.agentProfiles = [];
   mocks.primarySessionId = null;
@@ -311,60 +304,16 @@ afterEach(() => {
   fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
 });
 
-describe("PreviewSessionBody send failures", () => {
-  it("rejects when the WebSocket client is unavailable", async () => {
-    mocks.getWebSocketClient.mockReturnValue(null);
+describe("PreviewSessionBody delivery", () => {
+  it("uses TaskChatPanel's queue-aware shared delivery path", () => {
     render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
 
-    await expect(mocks.onSend?.({ message: "hello" })).rejects.toMatchObject({
-      name: "MessageSendError",
-      code: "connection-unavailable",
-      message: "Connection unavailable. Reconnect and try again.",
+    expect(mocks.taskChatPanelProps).toMatchObject({
+      sessionId: "session-1",
+      taskId: TASK_ID,
+      hideSessionsDropdown: true,
     });
-  });
-
-  it("rethrows message.add failures to the chat input", async () => {
-    const error = new Error("message.add failed");
-    mocks.getWebSocketClient.mockReturnValue({ request: vi.fn().mockRejectedValue(error) });
-    render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
-
-    await expect(mocks.onSend?.({ message: "hello" })).rejects.toBe(error);
-  });
-
-  it("forwards attachments and entity references through preview direct send", async () => {
-    const request = vi.fn().mockResolvedValue(undefined);
-    mocks.getWebSocketClient.mockReturnValue({ request });
-    const reference: EntityReference = {
-      version: 1,
-      ref: "mention:v1:github:issue:acme%2Frepo:42",
-      provider: "github",
-      kind: "issue",
-      id: "42",
-      key: "acme/repo#42",
-      title: "Fix composer references",
-      url: "https://github.com/acme/repo/issues/42",
-      scope: "acme/repo",
-    };
-    render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
-
-    await mocks.onSend?.({
-      message: "reference",
-      attachments: [{ type: "image", data: "base64", mime_type: "image/png" }],
-      entityReferences: [reference],
-    });
-
-    expect(request).toHaveBeenCalledWith(
-      "message.add",
-      {
-        task_id: TASK_ID,
-        session_id: "session-1",
-        client_message_id: expect.any(String),
-        content: "reference",
-        attachments: [{ type: "image", data: "base64", mime_type: "image/png" }],
-        entity_references: [reference],
-      },
-      30000,
-    );
+    expect(mocks.taskChatPanelProps).not.toHaveProperty("onSend");
   });
 });
 

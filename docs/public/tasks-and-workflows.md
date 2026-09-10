@@ -637,8 +637,15 @@ Regular tasks have one shared Markdown plan, not a collection of named documents
 2. Write the plan or let an agent write it through task MCP.
 3. Edit it directly. The panel autosaves after 1.5 seconds.
 4. Use plan history to preview a revision, compare it with the previous or current revision, or restore it. Restore creates a new revision; it does not erase history or coalesce with the preceding revision.
-5. Select plan text to leave a comment. **Run** sends the selected feedback to the agent in plan mode.
+5. Select plan text to add pending feedback. Plan comments belong to the task plan, so the same comments appear above every session composer. A normal **Send** includes the visible comments in the message to the selected session. **Run** sends only that comment, in plan mode, to the task's current primary session. An accepted Send or Run removes the delivered comments from the plan and every composer.
 6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the current draft first and marks the plan as sent for implementation; the implement control is then disabled for that plan.
+
+Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
+text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
+and selected text. The complete message, including formatted comments, must
+also fit within 1 MiB. If a limit is exceeded, shorten the feedback, selection,
+or message and retry; rejected changes and deliveries do not remove pending
+comments.
 
 Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
 

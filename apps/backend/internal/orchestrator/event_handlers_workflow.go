@@ -5119,6 +5119,10 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 	} else {
 		reservation = s.markQueuedDispatchInFlightWithSourceLocked(identity.SessionID, queuedMsg.ID, queuedMsg)
 	}
+	if s.agentManager != nil && s.agentManager.IsPassthroughSession(ctx, identity.SessionID) {
+		go s.executeQueuedPassthroughMessageWithReservation(identity, queuedMsg, reservation)
+		return true
+	}
 	go s.executeQueuedMessageWithReservation(identity.SessionID, queuedMsg, reservation)
 	return true
 }
