@@ -521,10 +521,10 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	existing, repos []*models.TaskEnvironmentRepo,
 	replacePhysical bool,
 ) error {
-	byKey, legacyFlatByRepo := indexTaskEnvironmentReposTx(existing)
+	byKey, legacyFlatByRepo, soleByRepo := indexTaskEnvironmentReposTx(existing)
 	matched := make(map[string]struct{}, len(repos))
 	for position, incoming := range repos {
-		row := findTaskEnvironmentRepoTransition(byKey, legacyFlatByRepo, incoming)
+		row := findTaskEnvironmentRepoTransition(byKey, legacyFlatByRepo, soleByRepo, incoming)
 		if row == nil {
 			if incoming == nil || incoming.RepositoryID == "" {
 				continue
@@ -547,24 +547,43 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	return r.tombstoneOmittedTaskEnvironmentReposTx(ctx, tx, existing, matched)
 }
 
-func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (map[string]*models.TaskEnvironmentRepo, map[string]*models.TaskEnvironmentRepo) {
+func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (
+	map[string]*models.TaskEnvironmentRepo,
+	map[string]*models.TaskEnvironmentRepo,
+	map[string]*models.TaskEnvironmentRepo,
+) {
 	byKey := make(map[string]*models.TaskEnvironmentRepo, len(rows))
 	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
+	soleByRepo := make(map[string]*models.TaskEnvironmentRepo)
+	ambiguousRepo := make(map[string]struct{})
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
 		byKey[row.RepositoryID+"\x00"+row.BranchSlug] = row
-		if row.RepositoryID != "" && row.BranchSlug == "" {
+		if row.RepositoryID == "" {
+			continue
+		}
+		if row.BranchSlug == "" {
 			legacyFlatByRepo[row.RepositoryID] = row
 		}
+		if _, ambiguous := ambiguousRepo[row.RepositoryID]; ambiguous {
+			continue
+		}
+		if _, seen := soleByRepo[row.RepositoryID]; seen {
+			delete(soleByRepo, row.RepositoryID)
+			ambiguousRepo[row.RepositoryID] = struct{}{}
+			continue
+		}
+		soleByRepo[row.RepositoryID] = row
 	}
-	return byKey, legacyFlatByRepo
+	return byKey, legacyFlatByRepo, soleByRepo
 }
 
 func findTaskEnvironmentRepoTransition(
 	byKey map[string]*models.TaskEnvironmentRepo,
 	legacyFlatByRepo map[string]*models.TaskEnvironmentRepo,
+	soleByRepo map[string]*models.TaskEnvironmentRepo,
 	incoming *models.TaskEnvironmentRepo,
 ) *models.TaskEnvironmentRepo {
 	if incoming == nil || incoming.RepositoryID == "" {
@@ -579,6 +598,23 @@ func findTaskEnvironmentRepoTransition(
 			byKey[key] = row
 		}
 	}
+	if row == nil && incoming.BranchSlug == "" {
+		// A resume with no tracked branch identity (every local/local_pc
+		// resume, which never stamps req.BaseBranch) must update the
+		// repository's sole existing canonical row in place rather than
+		// insert a second, empty-branch row: a duplicate row makes the
+		// read-side untracked-branch match count two rows instead of one
+		// on the next resume and fail the exactly-one-match reuse guard.
+		// Only apply this when the repository has exactly one existing
+		// row; with two or more real branches already tracked, which one
+		// this write belongs to is ambiguous, so fall back to inserting.
+		row = soleByRepo[incoming.RepositoryID]
+		if row != nil {
+			delete(soleByRepo, incoming.RepositoryID)
+			delete(byKey, row.RepositoryID+"\x00"+row.BranchSlug)
+			byKey[key] = row
+		}
+	}
 	return row
 }
 
@@ -589,7 +625,12 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	position int,
 	replacePhysical bool,
 ) error {
-	row.BranchSlug = incoming.BranchSlug
+	// An incoming transition with untracked branch identity (a non-worktree
+	// local/local_pc resume never stamps req.BaseBranch) must not overwrite
+	// a row's already-known real branch with an empty one; preserve it.
+	if incoming.BranchSlug != "" {
+		row.BranchSlug = incoming.BranchSlug
+	}
 	if replacePhysical || incoming.WorktreeID != "" {
 		row.WorktreeID = incoming.WorktreeID
 		row.WorktreePath = incoming.WorktreePath
