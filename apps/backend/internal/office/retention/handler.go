@@ -3,6 +3,7 @@ package retention
 import (
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,12 @@ type HandlerConfig struct {
 // Handler serves GET/PUT /api/v1/system/retention.
 type Handler struct {
 	config HandlerConfig
+
+	// mu serializes a PUT's save and scheduler-apply as one critical
+	// section, so two concurrent PUTs cannot interleave into the scheduler
+	// applying the older of the two writes after the newer one is already
+	// stored (AC-OFFICE-RUN-HISTORY-RETENTION-004.5's last-writer-wins).
+	mu sync.Mutex
 }
 
 // NewHandler wires a Handler to its dependencies.
@@ -91,6 +98,9 @@ func (h *Handler) putRetention(c *gin.Context) {
 		return
 	}
 
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	saved, err := h.config.SettingsStore.SaveSettings(c.Request.Context(), settings)
 	if err != nil {
 		if errors.Is(err, ErrValidation) {
@@ -102,8 +112,19 @@ func (h *Handler) putRetention(c *gin.Context) {
 		return
 	}
 
+	if testBetweenSaveAndApply != nil {
+		testBetweenSaveAndApply()
+	}
+
 	if h.config.OnSettingsChanged != nil {
 		h.config.OnSettingsChanged(saved)
 	}
 	c.JSON(http.StatusOK, saved)
 }
+
+// testBetweenSaveAndApply, when set, runs after a PUT's SaveSettings
+// commits and before OnSettingsChanged is invoked, while mu is still held —
+// a deterministic seam for proving a second PUT cannot save and apply in
+// between (the concurrent-PUT desync this mutex exists to prevent). Never
+// set outside tests.
+var testBetweenSaveAndApply func()

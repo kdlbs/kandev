@@ -238,22 +238,7 @@ func (s *Store) deleteRunBatchOnce(ctx context.Context, q queryer, ids []string,
 		return RunBatchResult{}, false, err
 	}
 
-	query := `
-		DELETE FROM runs
-		WHERE id IN (?)
-		AND id IN (
-			SELECT id FROM (` + runEligibleSubquery() + `) ranked
-			WHERE rn > ? AND completion_time < ?
-		)`
-	bound, args, err := db.Bind(tx, query, ids, RunHistoryStatuses, floor, cutoff)
-	if err != nil {
-		return RunBatchResult{}, false, err
-	}
-	res, err := tx.ExecContext(ctx, bound, args...)
-	if err != nil {
-		return RunBatchResult{}, false, err
-	}
-	runsDeleted, err := res.RowsAffected()
+	runsDeleted, err := deleteRunsByIDs(ctx, tx, ids, cutoff, floor)
 	if err != nil {
 		return RunBatchResult{}, false, err
 	}
@@ -273,17 +258,93 @@ func (s *Store) deleteRunBatchOnce(ctx context.Context, q queryer, ids []string,
 	}, true, nil
 }
 
+// retentionMaxHostParams caps id-list placeholders per statement.
+// batch_limit's documented range (AC-OFFICE-RUN-HISTORY-RETENTION-004.3)
+// permits up to 100,000, which would otherwise bind that many ids in one IN
+// clause and can overflow SQLite's compiled variable-count limit or
+// PostgreSQL's wire-protocol parameter cap. Matches the bound this repo
+// already uses for the same reason (internal/task/repository/sqlite's
+// sqliteMaxHostParams).
+const retentionMaxHostParams = 500
+
+// chunkIDs splits ids into sub-slices of at most size entries so an
+// IN-clause query built from them stays under retentionMaxHostParams
+// regardless of batch_limit. An empty input returns nil rather than one
+// empty chunk, since an empty IN () clause is a SQL syntax error.
+func chunkIDs(ids []string, size int) [][]string {
+	if len(ids) == 0 {
+		return nil
+	}
+	if size <= 0 || len(ids) <= size {
+		return [][]string{ids}
+	}
+	chunks := make([][]string, 0, (len(ids)+size-1)/size)
+	for i := 0; i < len(ids); i += size {
+		end := i + size
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunks = append(chunks, ids[i:end])
+	}
+	return chunks
+}
+
+// deleteRunsByIDs deletes ids from runs, in chunks of at most
+// retentionMaxHostParams. Each chunk's outer WHERE re-asserts status and age
+// directly, in addition to the floor-checking subquery: PostgreSQL's
+// EvalPlanQual recheck of a concurrently updated row re-evaluates a direct
+// column predicate against the row's fresh values, but does not rebuild an
+// uncorrelated id-membership subquery, so the subquery alone is not enough
+// to exclude a row resurrected between selection and delete
+// (AC-OFFICE-RUN-HISTORY-RETENTION-002.4).
+func deleteRunsByIDs(ctx context.Context, tx *sqlx.Tx, ids []string, cutoff time.Time, floor int) (int64, error) {
+	var total int64
+	for _, chunk := range chunkIDs(ids, retentionMaxHostParams) {
+		query := `
+			DELETE FROM runs
+			WHERE id IN (?)
+			AND id IN (
+				SELECT id FROM (` + runEligibleSubquery() + `) ranked
+				WHERE rn > ? AND completion_time < ?
+			)
+			AND status IN (?)
+			AND COALESCE(finished_at, requested_at) < ?`
+		bound, args, err := db.Bind(tx, query, chunk, RunHistoryStatuses, floor, cutoff, RunHistoryStatuses, cutoff)
+		if err != nil {
+			return 0, err
+		}
+		res, err := tx.ExecContext(ctx, bound, args...)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		total += affected
+	}
+	return total, nil
+}
+
 func deleteByRunIDs(ctx context.Context, tx *sqlx.Tx, table string, ids []string) (int64, error) {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE run_id IN (?)`, table)
-	bound, args, err := db.Bind(tx, query, ids)
-	if err != nil {
-		return 0, err
+	var total int64
+	for _, chunk := range chunkIDs(ids, retentionMaxHostParams) {
+		query := fmt.Sprintf(`DELETE FROM %s WHERE run_id IN (?)`, table)
+		bound, args, err := db.Bind(tx, query, chunk)
+		if err != nil {
+			return 0, err
+		}
+		res, err := tx.ExecContext(ctx, bound, args...)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		total += affected
 	}
-	res, err := tx.ExecContext(ctx, bound, args...)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+	return total, nil
 }
 
 // CountRunEvents is run_events' plain retained count: it has no status
