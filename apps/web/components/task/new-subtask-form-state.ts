@@ -165,6 +165,10 @@ const EMPTY_STEPS: StepType[] | null = null;
 const INERT_TITLE_DRAFT = {
   blockedBy: [] as string[],
   setBlockedBy: () => undefined,
+  mcpServerIds: [] as string[],
+  setMcpServerIds: () => undefined,
+  mcpServerIdsDirty: false,
+  setMcpServerIdsDirty: () => undefined,
   taskName: "",
   setTaskName: NOOP,
   hasTitle: false,

@@ -312,6 +312,10 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+	// A session MCP selection may have arrived while this turn was active. The
+	// completion path transitions to Ready directly instead of going through
+	// MarkReady, so explicitly retry any deferred idle-session reconfiguration.
+	m.RequestSessionMCPReconfiguration(context.Background(), claim.execution.SessionID)
 }
 
 func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {

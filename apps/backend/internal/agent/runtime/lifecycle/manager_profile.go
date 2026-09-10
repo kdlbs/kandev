@@ -13,6 +13,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ResolveAgentProfile resolves an agent profile ID to profile information.
@@ -58,7 +60,61 @@ func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecuti
 	if execution == nil {
 		return nil, nil
 	}
+	if m.mcpResolver != nil && execution.WorkspaceID != "" {
+		return m.resolveEffectiveMcpServers(ctx, mcpconfig.ResolutionContext{
+			WorkspaceID: execution.WorkspaceID, RepositoryIDs: execution.RepositoryIDs,
+			ProfileID: execution.AgentProfileID, TaskID: execution.TaskID,
+			SessionID: execution.SessionID,
+		}, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig, execution.RuntimeName)
+	}
 	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
+}
+
+func (m *Manager) resolveMcpServersForLaunch(ctx context.Context, req *LaunchRequest, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
+	if req == nil {
+		return nil, nil
+	}
+	if m.mcpResolver != nil && req.WorkspaceID != "" {
+		profileID := executionProfileID(req)
+		return m.resolveEffectiveMcpServers(ctx, mcpconfig.ResolutionContext{
+			WorkspaceID: req.WorkspaceID, RepositoryIDs: repositoryIDsFromLaunch(req),
+			ProfileID: profileID, TaskID: req.TaskID, SessionID: req.SessionID,
+		}, profileID, req.Metadata, agentConfig, models.ExecutorType(req.ExecutorType).Runtime())
+	}
+	return m.resolveMcpServersWithParams(ctx, executionProfileID(req), req.Metadata, agentConfig)
+}
+
+func (m *Manager) resolveEffectiveMcpServers(
+	ctx context.Context,
+	resolutionContext mcpconfig.ResolutionContext,
+	profileID string,
+	metadata map[string]interface{},
+	agentConfig agents.Agent,
+	runtime agentruntime.Runtime,
+) ([]agentctltypes.McpServer, error) {
+	if agentConfig == nil {
+		return nil, nil
+	}
+	if runtime == "" {
+		runtime = agentruntime.RuntimeStandalone
+	}
+	policy := mcpconfig.DefaultPolicyForRuntime(runtime)
+	policy, executorID, err := m.applyExecutorMcpPolicy(profileID, "", metadata, policy)
+	if err != nil {
+		return nil, err
+	}
+	result, err := m.mcpResolver.Resolve(ctx, resolutionContext, policy)
+	if err != nil {
+		return nil, err
+	}
+	for _, decision := range result.Decisions {
+		m.logger.Warn("MCP server was not attached",
+			zap.String("profile_id", profileID), zap.String("executor_id", executorID),
+			zap.String("definition_id", decision.DefinitionID), zap.String("reason_code", decision.ReasonCode))
+	}
+	resolved := make([]mcpconfig.ResolvedServer, 0, len(result.Servers))
+	resolved = append(resolved, result.Servers...)
+	return mcpconfig.ToACPServers(resolved), nil
 }
 
 // applyExecutorMcpPolicy reads executor metadata and applies any executor-scoped MCP policy

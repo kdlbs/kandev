@@ -108,6 +108,7 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    mcp_server_ids?: string[];
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;

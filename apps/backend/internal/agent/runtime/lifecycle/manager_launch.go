@@ -19,6 +19,7 @@ import (
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
@@ -973,7 +974,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("build launch environment: %w", err)
 	}
 
-	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, executionProfileID(reqWithWorktree), reqWithWorktree.Metadata, agentConfig)
+	acpMcpServers, err := m.resolveMcpServersForLaunch(ctx, reqWithWorktree, agentConfig)
 	if err != nil {
 		m.logger.Warn("failed to resolve MCP servers for launch", zap.Error(err))
 	}
@@ -981,13 +982,16 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	var mcpServers []McpServerConfig
 	for _, srv := range acpMcpServers {
 		mcpServers = append(mcpServers, McpServerConfig{
-			Name:    srv.Name,
-			URL:     srv.URL,
-			Type:    srv.Type,
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Headers: srv.Headers,
+			Name:               srv.Name,
+			URL:                srv.URL,
+			Type:               srv.Type,
+			Command:            srv.Command,
+			Args:               srv.Args,
+			Env:                srv.Env,
+			Headers:            srv.Headers,
+			DefinitionID:       srv.DefinitionID,
+			DefinitionRevision: srv.DefinitionRevision,
+			Origins:            append([]agentctltypes.McpServerOrigin(nil), srv.Origins...),
 		})
 	}
 
@@ -1032,6 +1036,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
+		WorkspaceID:                    reqWithWorktree.WorkspaceID,
+		RepositoryIDs:                  repositoryIDsFromLaunch(reqWithWorktree),
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,

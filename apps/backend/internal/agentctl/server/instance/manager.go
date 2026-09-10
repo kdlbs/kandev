@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/netutil"
 	"github.com/kandev/kandev/pkg/agent"
@@ -368,13 +369,15 @@ func (m *Manager) buildMcpServerConfigs(mcpServers []McpServerConfig) []config.M
 			continue
 		}
 		result = append(result, config.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
+			Name:         mcp.Name,
+			URL:          mcp.URL,
+			Type:         mcp.Type,
+			Command:      mcp.Command,
+			Args:         mcp.Args,
+			Env:          mcp.Env,
+			Headers:      mcp.Headers,
+			DefinitionID: mcp.DefinitionID, DefinitionRevision: mcp.DefinitionRevision,
+			Origins: append([]agentctltypes.McpServerOrigin(nil), mcp.Origins...),
 		})
 	}
 	return result

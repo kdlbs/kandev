@@ -1,0 +1,32 @@
+{
+  "version": "2026-09-01",
+  "entries": [
+    {
+      "name": "com.kandev/task-context",
+      "title": "Kandev task context",
+      "description": "Read the current Kandev task context from a managed endpoint.",
+      "version": "1.0.0",
+      "remotes": [
+        {
+          "type": "streamable-http",
+          "url": "https://mcp.kandev.dev/task-context"
+        }
+      ]
+    },
+    {
+      "name": "com.kandev/example-tools",
+      "title": "Example tools",
+      "description": "A small example npm MCP server for testing workspace setup.",
+      "version": "1.0.0",
+      "packages": [
+        {
+          "registryType": "npm",
+          "registryBaseUrl": "https://registry.npmjs.org",
+          "identifier": "@kandev/example-tools",
+          "version": "1.0.0",
+          "transport": {"type": "stdio"}
+        }
+      ]
+    }
+  ]
+}

@@ -196,6 +196,7 @@ export function ProfileCardItem({
         />
         <ProfileMcpConfigCard
           profileId={profile.id}
+          workspaceId={draftAgent.workspace_id}
           supportsMcp={draftAgent.supports_mcp}
           cliPassthrough={profile.cliPassthrough ?? false}
           mcpInjection={passthroughConfig?.mcp_injection}

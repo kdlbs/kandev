@@ -832,6 +832,8 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
+			WorkspaceID:                    info.WorkspaceID,
+			RepositoryIDs:                  repositoryIDsFromWorkspace(info.WorkspaceRepositories),
 			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           officeAgentProfileID,

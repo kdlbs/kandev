@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"go.uber.org/zap"
 
@@ -167,6 +168,44 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 		})
 	}
 	return result
+}
+
+func repositoryIDsFromLaunch(req *LaunchRequest) []string {
+	if req == nil {
+		return nil
+	}
+	specs := req.RepoSpecs()
+	ids := make([]string, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		if spec.RepositoryID == "" {
+			continue
+		}
+		if _, exists := seen[spec.RepositoryID]; exists {
+			continue
+		}
+		seen[spec.RepositoryID] = struct{}{}
+		ids = append(ids, spec.RepositoryID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func repositoryIDsFromWorkspace(specs []WorkspaceRepositorySpec) []string {
+	ids := make([]string, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		if spec.RepositoryID == "" {
+			continue
+		}
+		if _, exists := seen[spec.RepositoryID]; exists {
+			continue
+		}
+		seen[spec.RepositoryID] = struct{}{}
+		ids = append(ids, spec.RepositoryID)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []WorkspaceRepositorySpec) []string {

@@ -120,6 +120,9 @@ export function buildDialogFormBodyProps(
     bottomSlot: props.bottomSlot,
     descriptionPlaceholder: props.descriptionPlaceholder,
     workflowLocked: props.lockedFields?.workflow,
+    mcpDefinitions: setup.mcpDefinitions,
+    mcpDefinitionsLoading: setup.mcpDefinitionsLoading,
+    mcpInheritedSelections: setup.mcpInheritedSelections,
   };
 }
 

@@ -23,6 +23,7 @@ import {
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
+import { MCPSessionSelector } from "@/components/task/mcp-session-selector";
 import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
 import type {
   DialogFormBodyProps,
@@ -174,6 +175,17 @@ function SessionModeBody(props: DialogFormBodyProps) {
         AgentSelectorComponent={AgentSelector}
         ExecutorProfileSelectorComponent={ExecutorProfileSelector}
       />
+      <MCPSessionSelector
+        definitions={props.mcpDefinitions}
+        definitionsLoading={props.mcpDefinitionsLoading}
+        selectedIds={props.fs.mcpServerIds}
+        onSelectedIdsChange={(ids) => {
+          props.fs.setMcpServerIds(ids);
+          props.fs.setMcpServerIdsDirty(true);
+        }}
+        inherited={props.mcpInheritedSelections}
+        disabled={props.isCreatingSession}
+      />
     </>
   );
 }
@@ -196,12 +208,21 @@ function DialogFormBody(props: DialogFormBodyProps) {
       />
       <TaskCreateAdvancedSettings
         isCreateMode={isCreateMode}
+        isEditMode={props.isEditMode}
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
+        dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
+        mcpDefinitions={props.mcpDefinitions}
+        mcpDefinitionsLoading={props.mcpDefinitionsLoading}
+        mcpSelectionIds={props.fs.mcpServerIds}
+        onMcpSelectionIdsChange={(ids) => {
+          props.fs.setMcpServerIds(ids);
+          props.fs.setMcpServerIdsDirty(true);
+        }}
+        mcpInheritedSelections={props.mcpInheritedSelections}
         priority={props.fs.priority}
         onPriorityChange={props.fs.setPriority}
-        dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
       />
       {props.isEditMode && (
         <TaskEditDialogDependencies

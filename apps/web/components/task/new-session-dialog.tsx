@@ -27,6 +27,8 @@ import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
 import { resolveNewSessionProfileSelection } from "./new-session-profile-selection";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { MCPSessionSelector } from "./mcp-session-selector";
+import { useNewSessionMCPSelection } from "./new-session-mcp";
 import { Trans, useTranslation } from "react-i18next";
 
 export type { HandoffPreset } from "./handoff-types";
@@ -386,6 +388,20 @@ function NewSessionForm({
     currentProfileId,
     handoff,
   });
+  const taskRepositories = useAppStore(
+    (state) => state.kanban.tasks.find((entry) => entry.id === taskId)?.repositories,
+  );
+  const taskRepositoryIds = useMemo(
+    () => [...new Set((taskRepositories ?? []).map((repository) => repository.repository_id))],
+    [taskRepositories],
+  );
+  const mcp = useNewSessionMCPSelection({
+    workspaceId,
+    taskId,
+    profileId: profileSelection.selectedProfileId,
+    repositoryIds: taskRepositoryIds,
+  });
+  const { selectedIds: mcpServerIds, setSelectedIds: setMcpServerIds } = mcp;
   const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
     useSessionPromptController(promptRef, taskId);
   const handleContextChange = useSessionContextChange({
@@ -408,6 +424,7 @@ function NewSessionForm({
     initialPrompt,
     agentProfiles,
     groupId,
+    mcpServerIds,
     onClose,
     toast,
     setActiveSession,
@@ -438,6 +455,14 @@ function NewSessionForm({
         hasInitialPrompt={!!initialPrompt}
         sessionOptions={sessionOptions}
         isSummarizing={isSummarizing}
+      />
+      <MCPSessionSelector
+        definitions={mcp.definitions}
+        definitionsLoading={mcp.definitionsLoading}
+        selectedIds={mcpServerIds}
+        onSelectedIdsChange={setMcpServerIds}
+        inherited={mcp.inherited}
+        disabled={isBusyState}
       />
       <TaskFormInputs
         isSessionMode

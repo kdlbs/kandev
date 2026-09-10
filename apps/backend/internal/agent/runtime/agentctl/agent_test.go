@@ -393,6 +393,28 @@ func TestInitialize_Success(t *testing.T) {
 	}
 }
 
+func TestInitializeStoresSessionCapabilities(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true,
+			"agent_info": map[string]any{
+				"name": "test-agent", "version": "1.0.0",
+				"supports_session_resume": true, "supports_session_load": true,
+			},
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	if _, err := c.Initialize(context.Background(), "kandev", "1.0.0"); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if !c.SupportsSessionResume() || !c.SupportsSessionLoad() {
+		t.Fatalf("capabilities = resume:%v load:%v", c.SupportsSessionResume(), c.SupportsSessionLoad())
+	}
+}
+
 func TestInitialize_ServerError(t *testing.T) {
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
@@ -459,6 +481,34 @@ func TestNewSession_Success(t *testing.T) {
 	}
 	if sessionID != "sess-123" {
 		t.Errorf("expected session ID 'sess-123', got %q", sessionID)
+	}
+}
+
+func TestResumeSession_SuccessStoresAttachmentAttempt(t *testing.T) {
+	var received map[string]any
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.session.resume" {
+			t.Fatalf("action = %q, want agent.session.resume", msg.Action)
+		}
+		if err := json.Unmarshal(msg.Payload, &received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true, "attachment_attempt_id": "attempt-7",
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	if err := c.ResumeSession(context.Background(), "acp-session", "/workspace", nil); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if received["session_id"] != "acp-session" || received["cwd"] != "/workspace" {
+		t.Fatalf("resume request = %#v", received)
+	}
+	if got := c.GetLastAttachmentAttemptID(); got != "attempt-7" {
+		t.Fatalf("attachment attempt = %q, want attempt-7", got)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -31,13 +32,16 @@ type ControlClient struct {
 
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
-	Name    string            `json:"name"`
-	URL     string            `json:"url,omitempty"`
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Name               string                          `json:"name"`
+	URL                string                          `json:"url,omitempty"`
+	Type               string                          `json:"type,omitempty"`
+	Command            string                          `json:"command,omitempty"`
+	Args               []string                        `json:"args,omitempty"`
+	Env                map[string]string               `json:"env,omitempty"`
+	Headers            map[string]string               `json:"headers,omitempty"`
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
