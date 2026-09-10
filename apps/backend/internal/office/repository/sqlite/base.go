@@ -45,7 +45,7 @@ func RunnerProjection(alias string) string {
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
 		 WHERE wsp.task_id = ` + alias + `.id
 		   AND wsp.role = 'runner'
-		 ORDER BY wsp.created_at DESC, wsp.agent_profile_id ASC, wsp.id ASC LIMIT 1), ''),
+		 ORDER BY wsp.created_at DESC, wsp.id ASC LIMIT 1), ''),
 		''
 	)`
 }
@@ -324,6 +324,15 @@ func (r *Repository) createCostTables() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+
+	-- Built-in default spend ceiling (REQ-OFFICE-BUDGET-003): a stable
+	-- per-workspace identifier distinct from any office_budget_policies row
+	-- (AC-OFFICE-BUDGET-003.7), never listed alongside operator policies.
+	CREATE TABLE IF NOT EXISTS office_budget_default_settings (
+		workspace_id TEXT PRIMARY KEY,
+		limit_subcents INTEGER NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
 	`)
 	return err
 }
@@ -462,6 +471,12 @@ func (r *Repository) createRoutineTables() error {
 		created_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (routine_id) REFERENCES office_routines(id) ON DELETE CASCADE
 	);
+	CREATE INDEX IF NOT EXISTS idx_office_routine_runs_active_fingerprint
+		ON office_routine_runs(routine_id, dispatch_fingerprint, created_at DESC)
+		WHERE status = 'task_created';
+	CREATE INDEX IF NOT EXISTS idx_office_routine_runs_linked_task
+		ON office_routine_runs(linked_task_id, created_at DESC)
+		WHERE linked_task_id != '';
 	`)
 	return err
 }
@@ -677,10 +692,10 @@ func (r *Repository) createContinuationSummaryTable() error {
 // dispatcher coalesces / claims / drops them per the agent's policy
 // before creating the corresponding runs row.
 //
-// idempotency_key carries source-level dedup (e.g. heartbeat:<agent>:
-// <unix_minute>) — duplicates within the window land on the partial
-// UNIQUE index and are rejected. The "" sentinel keeps the index free
-// for rows without a key.
+// idempotency_key carries source-level dedup (for example, a cron routine
+// trigger and minute bucket). Duplicates with the same source identity land
+// on the partial UNIQUE index and are rejected. The "" sentinel keeps the
+// index free for rows without a key.
 func (r *Repository) createAgentWakeupRequestTable() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS agent_wakeup_requests (

@@ -1277,7 +1277,7 @@ func TestResolveCurrentRunner_FallsBackToLatestTaskRunner(t *testing.T) {
 // TestResolveCurrentRunner_LatestTaskRunnerOrdersByCreatedAtNotInsertionOrder
 // pins the AC fix for the third tier's Postgres-incompatible `ORDER BY rowid
 // DESC` (rowid is SQLite-only and has no Postgres equivalent). The fix
-// reorders by `created_at DESC, agent_profile_id ASC` instead. This test
+// reorders by `created_at DESC, id ASC` instead. This test
 // decouples row-insertion order from created_at order — the row inserted
 // LAST has the EARLIEST created_at — so a lingering rowid/insertion-order
 // dependency would pick the wrong runner.
@@ -1316,6 +1316,42 @@ func TestResolveCurrentRunner_LatestTaskRunnerOrdersByCreatedAtNotInsertionOrder
 	}
 	if got != "runner-newer-created-at" {
 		t.Fatalf("expected the row with the newer created_at (runner-newer-created-at) regardless of insertion order, got %q", got)
+	}
+}
+
+// TestResolveCurrentRunner_LatestTaskRunnerUsesIDForEqualTimestamps keeps the
+// tie-break stable when two runner seats share a creation timestamp.
+func TestResolveCurrentRunner_LatestTaskRunnerUsesIDForEqualTimestamps(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	review := newPhase2TestStep(t, repo, "Review")
+	done := newPhase2TestStep(t, repo, "Done")
+	createdAt := time.Now().UTC().Truncate(time.Millisecond)
+
+	for _, row := range []struct {
+		id     string
+		agent  string
+		stepID string
+	}{
+		{id: "runner-z", agent: "agent-a", stepID: work.ID},
+		{id: "runner-a", agent: "agent-z", stepID: review.ID},
+	} {
+		if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+			INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+			VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+		`), row.id, row.stepID, "task-tied", row.agent, createdAt); err != nil {
+			t.Fatalf("insert runner %s: %v", row.id, err)
+		}
+	}
+
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-tied")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "agent-z" {
+		t.Fatalf("expected id ASC tie-break to select agent-z, got %q", got)
 	}
 }
 

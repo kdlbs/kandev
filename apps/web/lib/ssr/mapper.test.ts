@@ -31,6 +31,9 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
         position: 0,
         color: "bg-neutral-400",
         allow_manual_move: true,
+        complete_task_on_enter: false,
+        auto_advance_requires_signal: false,
+        cancel_triggers_turn_complete: false,
       },
     ],
     tasks: [
@@ -100,6 +103,19 @@ describe("snapshotToState", () => {
     const state = snapshotToState(snapshot);
 
     expect(state.kanban?.tasks[0]?.metadata).toEqual(snapshot.tasks[0].metadata);
+  });
+
+  it("hydrates the signal-gated flag into the initial kanban step state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    Object.assign(snapshot.steps[0], {
+      auto_advance_requires_signal: true,
+    });
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.steps[0]).toMatchObject({
+      auto_advance_requires_signal: true,
+    });
   });
 
   it.each([

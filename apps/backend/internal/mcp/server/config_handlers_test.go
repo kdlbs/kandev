@@ -493,8 +493,8 @@ func TestCreateAgentProfileHandler_MissingAgentID(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
-func TestCreateAgentProfileHandler_MissingModel(t *testing.T) {
-	backend := &testBackend{}
+func TestCreateAgentProfileHandler_AllowsAgentDefaultModel(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"id": "profile-1"}}
 	s := newTestServer(t, backend)
 
 	result := callTool(t, s, "create_agent_profile_kandev", map[string]interface{}{
@@ -502,7 +502,8 @@ func TestCreateAgentProfileHandler_MissingModel(t *testing.T) {
 		"name":     "My Profile",
 	})
 
-	assert.True(t, result.IsError)
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPCreateAgentProfile, backend.lastAction)
 }
 
 func TestUpdateAgentHandler_Success(t *testing.T) {

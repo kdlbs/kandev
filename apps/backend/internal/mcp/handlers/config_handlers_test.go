@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -398,6 +399,9 @@ func (r *recordingMessageQueuer) QueueMessageWithMetadata(_ context.Context, ses
 		QueuedBy:  userID,
 		Metadata:  metadata,
 	}
+	if msg.ID == "" {
+		msg.ID = fmt.Sprintf("queued-%d", len(r.calls)+1)
+	}
 	r.calls = append(r.calls, msg)
 	return &msg, nil
 }
@@ -408,21 +412,193 @@ type pendingMoveRecordingQueuer struct {
 	pendingMoves     []messagequeue.PendingMove
 }
 
-func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) {
+func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) error {
 	r.pendingSessionID = sessionID
 	if move != nil {
 		r.pendingMoves = append(r.pendingMoves, *move)
 	}
+	return nil
 }
 
-func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
+func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) error {
+	return nil
 }
 
-// TakeQueued is a no-op stub — the unit tests below don't exercise rollback,
-// they just exercise QueueMessage. Returning (nil, false) is consistent with
-// "nothing to take", which is what the rollback path checks before logging.
-func (r *recordingMessageQueuer) TakeQueued(_ context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
-	return nil, false
+func (r *recordingMessageQueuer) RemoveEntryForSession(
+	_ context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	entryID string,
+) (*messagequeue.QueueRemovalResult, error) {
+	for index := range r.calls {
+		entry := r.calls[index]
+		if entry.ID == entryID && entry.SessionID == identity.SessionID && entry.TaskID == identity.TaskID {
+			r.calls = append(r.calls[:index], r.calls[index+1:]...)
+			return &messagequeue.QueueRemovalResult{Removed: []messagequeue.QueuedMessage{entry}}, nil
+		}
+	}
+	return nil, messagequeue.ErrEntryNotFound
+}
+
+func TestApplyMoveTaskImmediate_RollsBackExactHandoffAfterMoveFailure(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-rollback", Name: "Rollback", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-rollback", WorkspaceID: "ws-rollback", Name: "Board", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-rollback", WorkspaceID: "ws-rollback", WorkflowID: "wf-rollback",
+		Title: "Rollback", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now,
+	}))
+	session := &models.TaskSession{
+		ID: "session-rollback", TaskID: "task-rollback", State: models.TaskSessionStateIdle,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, session))
+
+	queue := &recordingMessageQueuer{}
+	queue.calls = append(queue.calls, messagequeue.QueuedMessage{
+		ID: "preexisting", SessionID: session.ID, TaskID: session.TaskID, Content: "keep me",
+	})
+	h := &Handlers{taskSvc: svc, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{})
+	response, err := h.applyMoveTaskImmediate(ctx, msg, struct {
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
+	}{
+		TaskID: "task-rollback", WorkflowID: "missing-workflow",
+		WorkflowStepID: "missing-step", Prompt: "handoff",
+	}, session)
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+	require.Len(t, queue.calls, 1)
+	assert.Equal(t, "preexisting", queue.calls[0].ID)
+}
+
+type pendingMoveFailingQueuer struct {
+	recordingMessageQueuer
+	pendingErr error
+	removedIDs []string
+}
+
+func (r *pendingMoveFailingQueuer) SetPendingMove(
+	_ context.Context,
+	_ string,
+	_ *messagequeue.PendingMove,
+) error {
+	return r.pendingErr
+}
+
+func (r *pendingMoveFailingQueuer) RemoveEntryForSession(
+	_ context.Context,
+	_ messagequeue.QueueSessionIdentity,
+	entryID string,
+) (*messagequeue.QueueRemovalResult, error) {
+	r.removedIDs = append(r.removedIDs, entryID)
+	for index := range r.calls {
+		if r.calls[index].ID == entryID {
+			entry := r.calls[index]
+			r.calls = append(r.calls[:index], r.calls[index+1:]...)
+			return &messagequeue.QueueRemovalResult{Removed: []messagequeue.QueuedMessage{entry}}, nil
+		}
+	}
+	return nil, messagequeue.ErrEntryNotFound
+}
+
+func TestDeferMoveTask_RollsBackHandoffWhenPendingMovePersistenceFails(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedRunningTask(
+		t, repo,
+		"ws-pending-failure", "wf-pending-failure", "task-pending-failure",
+		"session-pending-failure", "step-current",
+	)
+	queue := &pendingMoveFailingQueuer{pendingErr: errors.New("persist pending move")}
+	queue.calls = append(queue.calls, messagequeue.QueuedMessage{
+		ID: "preexisting", SessionID: "session-pending-failure",
+		TaskID: "task-pending-failure", Content: "keep me",
+	})
+	h := &Handlers{taskSvc: svc, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id":          "task-pending-failure",
+		"workflow_id":      "wf-pending-failure",
+		"workflow_step_id": "step-target",
+		"prompt":           "handoff",
+	})
+
+	response, err := h.handleMoveTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+	require.Equal(t, []string{"queued-2"}, queue.removedIDs)
+	require.Len(t, queue.calls, 1)
+	assert.Equal(t, "preexisting", queue.calls[0].ID)
+}
+
+type rollbackContextMessageQueuer struct {
+	recordingMessageQueuer
+	queued       *messagequeue.QueuedMessage
+	rollbackCtx  context.Context
+	removedEntry string
+	takeCalled   bool
+}
+
+func (r *rollbackContextMessageQueuer) QueueMessageWithMetadata(
+	ctx context.Context,
+	sessionID, taskID, content, model, userID string,
+	planMode bool,
+	attachments []messagequeue.MessageAttachment,
+	metadata map[string]interface{},
+) (*messagequeue.QueuedMessage, error) {
+	msg, err := r.recordingMessageQueuer.QueueMessageWithMetadata(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
+	)
+	if err == nil {
+		msg.ID = "queued-handoff"
+		r.queued = msg
+	}
+	return msg, err
+}
+
+func (r *rollbackContextMessageQueuer) TakeQueued(ctx context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
+	r.rollbackCtx = ctx
+	r.takeCalled = true
+	if r.queued == nil {
+		return nil, false
+	}
+	msg := r.queued
+	r.queued = nil
+	return msg, true
+}
+
+func (r *rollbackContextMessageQueuer) RemoveEntry(ctx context.Context, _ string, entryID string) error {
+	r.rollbackCtx = ctx
+	r.removedEntry = entryID
+	if r.queued != nil && r.queued.ID == entryID {
+		r.queued = nil
+	}
+	return nil
+}
+
+func (r *rollbackContextMessageQueuer) RemoveEntryForSession(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	entryID string,
+) (*messagequeue.QueueRemovalResult, error) {
+	r.rollbackCtx = ctx
+	r.removedEntry = entryID
+	if r.queued == nil || r.queued.ID != entryID ||
+		r.queued.SessionID != identity.SessionID || r.queued.TaskID != identity.TaskID {
+		return nil, messagequeue.ErrEntryNotFound
+	}
+	removed := *r.queued
+	r.queued = nil
+	return &messagequeue.QueueRemovalResult{Removed: []messagequeue.QueuedMessage{removed}}, nil
 }
 
 // TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)
@@ -431,7 +607,9 @@ func (r *recordingMessageQueuer) TakeQueued(_ context.Context, _ string) (*messa
 func TestQueueMoveTaskPrompt_NilQueueReturnsError(t *testing.T) {
 	h := &Handlers{logger: testLogger(t).WithFields()}
 
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-1", "fix issues")
+	_, err := h.queueMoveTaskPrompt(context.Background(), messagequeue.QueueSessionIdentity{
+		TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "inc-1",
+	}, "fix issues")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "message queue")
 }
@@ -446,7 +624,9 @@ func TestQueueMoveTaskPrompt_EmptySessionIDReturnsError(t *testing.T) {
 		logger:       testLogger(t).WithFields(),
 	}
 
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "", "fix issues")
+	_, err := h.queueMoveTaskPrompt(context.Background(), messagequeue.QueueSessionIdentity{
+		TaskID: "task-1", SessionIncarnationID: "inc-1",
+	}, "fix issues")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "primary session")
 	assert.Empty(t, queue.calls, "queue must not be invoked without a session ID")
@@ -462,7 +642,9 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 		logger:       testLogger(t).WithFields(),
 	}
 
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-99", "Please fix the failing test in foo_test.go")
+	_, err := h.queueMoveTaskPrompt(context.Background(), messagequeue.QueueSessionIdentity{
+		TaskID: "task-1", SessionID: "session-99", SessionIncarnationID: "inc-99",
+	}, "Please fix the failing test in foo_test.go")
 	require.NoError(t, err)
 
 	require.Len(t, queue.calls, 1)
@@ -475,6 +657,41 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 	assert.Equal(t, "", got.Model)
 }
 
+func TestApplyMoveTaskImmediateRollsBackQueueWithDetachedContext(t *testing.T) {
+	taskSvc, _ := newTestTaskService(t)
+	queue := &rollbackContextMessageQueuer{}
+	h := &Handlers{
+		taskSvc:      taskSvc,
+		messageQueue: queue,
+		logger:       testLogger(t).WithFields(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, nil)
+	req := struct {
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
+	}{
+		TaskID:         "missing-task",
+		WorkflowID:     "missing-workflow",
+		WorkflowStepID: "missing-step",
+		Prompt:         "handoff",
+	}
+	session := &models.TaskSession{ID: "session-rollback", TaskID: req.TaskID}
+
+	resp, err := h.applyMoveTaskImmediate(ctx, msg, req, session)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	require.NotNil(t, queue.rollbackCtx)
+	assert.NoError(t, queue.rollbackCtx.Err())
+	assert.Equal(t, "queued-handoff", queue.removedEntry)
+	assert.False(t, queue.takeCalled)
+	assert.Nil(t, queue.queued)
+}
 func TestHandleDeleteTask_MissingTaskID(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPDeleteTask, map[string]string{})

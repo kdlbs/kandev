@@ -11,7 +11,7 @@ test.describe("Workflow queued messages", () => {
     apiClient,
     seedData,
   }) => {
-    const { session, sessionId } = await seedQueuedWorkflowMessageScenario(
+    const { session, queueIdentity } = await seedQueuedWorkflowMessageScenario(
       testPage,
       apiClient,
       seedData,
@@ -19,6 +19,6 @@ test.describe("Workflow queued messages", () => {
     );
 
     await expectWorkflowQueueBadge(session);
-    await expectDeliveredWorkflowMessage(apiClient, session, sessionId);
+    await expectDeliveredWorkflowMessage(apiClient, session, queueIdentity);
   });
 });

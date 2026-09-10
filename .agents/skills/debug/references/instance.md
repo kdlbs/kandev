@@ -52,10 +52,15 @@ needed when authentication is disabled.
 
 Use the smallest source set that can answer the question. `backend` covers the
 retained daily files; `frontend` asks connected tabs for their bounded local
-console history; `runtime` adds only allow-listed session status/executor
-metadata; `acp` is an explicit debug-only selection of one to ten authorized
-sessions and can include full protocol content. Standard evidence does not
-include stored chat/session/agent messages, while ACP evidence deliberately can.
+console history. The task-session bundle currently accepts only the source
+values exposed by its active schema (`backend`, `frontend`, or `all`); do not
+assume that `runtime` or `acp` is available. Standard evidence does not include
+stored chat/session/agent messages. For a delivery-versus-visibility question,
+identify the exact sender and receiver sessions first, then use authorized task
+conversation or ACP evidence when that source is available. Inspect
+`manifest.json` warnings before drawing conclusions; if the active diagnostic
+tool does not expose the requested chat/ACP source, report protocol evidence as
+unavailable instead of inferring delivery from ordinary logs.
 
 Extract into a newly created temporary directory, never a repository, home
 directory, workspace root, or reused path. Reject ZIP entries that are
@@ -86,6 +91,27 @@ rg --fixed-strings '<session-id>' '<HOME_DIR>/logs' -g 'backend-logs*.log'
 A zero-match task-ID search is inconclusive: install-wide backend events and
 browser pages outside recognized task routes may not carry `task_id`. Next
 search a precise route/error string or a bounded timestamp window.
+
+## Stalled launch triage
+
+When a session stays `RUNNING` but produces no agent output, do not treat a
+responsive browser or WebSocket as proof that the prompt reached the agent.
+Correlate three independent facts for the exact session and time window:
+
+1. Retained runtime state: current execution, turn, prompt generation, and
+   session status.
+2. Backend logs: launch admission, attachment claim/materialization, prompt
+   dispatch, and any asynchronous error or terminal event.
+3. Raw and normalized ACP frames for that authorized session, when protocol
+   evidence is necessary.
+
+No prompt frame means the failure happened before ACP admission. A prompt frame
+without a terminal frame points to transport or provider settlement. A terminal
+frame with durable state still `RUNNING` points to lifecycle reconciliation.
+For staged attachments, trace upload, claim, materialization, and prompt
+dispatch separately; an uploaded descriptor is not proof that launch claimed
+it. Finally, check whether an asynchronous error only reached a log line or
+also entered the correlated terminal execution path.
 
 Backend files also live under `<HOME_DIR>/logs/backend-logs.log` with the two
 previous UTC daily archives. Prefer a fresh bundle because its manifest records

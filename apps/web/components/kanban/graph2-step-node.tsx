@@ -164,6 +164,7 @@ export function Graph2StepNode({
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
+    statusSummary: task.statusSummary,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });

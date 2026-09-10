@@ -237,6 +237,11 @@ func (r *Repository) deleteWorkspaceCascade(
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err
 	}
+	if cleanup != nil {
+		if err := cleanup(ctx, tx); err != nil {
+			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
+		}
+	}
 
 	rows, err := r.deleteWorkspaceCascadeRow(ctx, tx, id, expectedName)
 	if err != nil {
@@ -271,11 +276,6 @@ func (r *Repository) deleteWorkspaceCascade(
 	`), id); err != nil {
 		return nil, nil, err
 	}
-	if cleanup != nil {
-		if err := cleanup(ctx, tx); err != nil {
-			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
@@ -293,8 +293,11 @@ func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.
 		if err != nil {
 			return fmt.Errorf("task queue sessions for cascade task %s: %w", task.ID, err)
 		}
-		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions); err != nil {
+		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions, true); err != nil {
 			return fmt.Errorf("purge task queue for workspace cascade task %s: %w", task.ID, err)
+		}
+		if err := r.purgeQueueSessionPoliciesInTx(ctx, tx, sessions); err != nil {
+			return fmt.Errorf("purge queue session policies for workspace cascade task %s: %w", task.ID, err)
 		}
 	}
 	return nil

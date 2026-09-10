@@ -24,6 +24,11 @@ type UpdateAgentProfileMcpConfigRequest struct {
 	Meta    map[string]any
 }
 
+type UpdateAgentProfileMcpConfigPatchRequest struct {
+	Enabled *bool
+	Servers *map[string]mcpconfig.ServerDef
+}
+
 func (c *Controller) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*dto.AgentProfileMcpConfigDTO, error) {
 	config, err := c.mcpService.GetConfigByProfileID(ctx, profileID)
 	if err != nil {
@@ -36,10 +41,11 @@ func (c *Controller) GetAgentProfileMcpConfig(ctx context.Context, profileID str
 		return nil, err
 	}
 	return &dto.AgentProfileMcpConfigDTO{
-		ProfileID: config.ProfileID,
-		Enabled:   config.Enabled,
-		Servers:   config.Servers,
-		Meta:      config.Meta,
+		ProfileID:   config.ProfileID,
+		WorkspaceID: config.WorkspaceID,
+		Enabled:     config.Enabled,
+		Servers:     config.Servers,
+		Meta:        config.Meta,
 	}, nil
 }
 
@@ -59,10 +65,34 @@ func (c *Controller) UpdateAgentProfileMcpConfig(ctx context.Context, profileID 
 		return nil, err
 	}
 	return &dto.AgentProfileMcpConfigDTO{
-		ProfileID: config.ProfileID,
-		Enabled:   config.Enabled,
-		Servers:   config.Servers,
-		Meta:      config.Meta,
+		ProfileID:   config.ProfileID,
+		WorkspaceID: config.WorkspaceID,
+		Enabled:     config.Enabled,
+		Servers:     config.Servers,
+		Meta:        config.Meta,
+	}, nil
+}
+
+func (c *Controller) UpdateAgentProfileMcpConfigPatch(ctx context.Context, profileID string, req UpdateAgentProfileMcpConfigPatchRequest) (*dto.AgentProfileMcpConfigDTO, error) {
+	config, err := c.mcpService.PatchConfigByProfileID(ctx, profileID, mcpconfig.ConfigPatch{
+		Enabled: req.Enabled,
+		Servers: req.Servers,
+	})
+	if err != nil {
+		if errors.Is(err, mcpconfig.ErrAgentProfileNotFound) {
+			return nil, ErrAgentProfileNotFound
+		}
+		if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) {
+			return nil, ErrAgentMcpUnsupported
+		}
+		return nil, err
+	}
+	return &dto.AgentProfileMcpConfigDTO{
+		ProfileID:   config.ProfileID,
+		WorkspaceID: config.WorkspaceID,
+		Enabled:     config.Enabled,
+		Servers:     config.Servers,
+		Meta:        config.Meta,
 	}, nil
 }
 

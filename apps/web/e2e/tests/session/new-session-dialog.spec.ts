@@ -75,7 +75,7 @@ test.describe("New session dialog", () => {
     }
   });
 
-  test("completed sessions replace the composer with a New Agent action", async ({
+  test("completed sessions show Resume and New Agent actions", async ({
     testPage,
     apiClient,
     seedData,
@@ -117,7 +117,8 @@ test.describe("New session dialog", () => {
     await expect(session.completedSessionNewAgentButton()).toHaveText("New Agent");
     await expect(session.activeChat().locator(".tiptap.ProseMirror")).not.toBeVisible();
     await expect(session.submitButton()).not.toBeVisible();
-    await expect(session.recoveryResumeButton()).not.toBeVisible();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.recoveryResumeButton()).toHaveText("Resume");
     await expect(session.recoveryFreshButton()).not.toBeVisible();
 
     await session.completedSessionNewAgentButton().click();

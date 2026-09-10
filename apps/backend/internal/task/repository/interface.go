@@ -280,6 +280,8 @@ type AttachmentRepository interface {
 	ClaimMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID string) error
 	DeleteClaimedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
 	DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
+	DeleteMessageAttachmentsBySession(ctx context.Context, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
+	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
 }
@@ -363,7 +365,7 @@ type SessionRepository interface {
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error)
 	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
-	DeleteTaskSession(ctx context.Context, id string) error
+	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)

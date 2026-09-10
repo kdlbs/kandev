@@ -109,13 +109,14 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	queueSettings := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg)).Effective
+	queueResolution := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg))
+	queueSettings := queueResolution.Effective
 	maxPerSession := queueSettings.MaxPerSession
 	mergeEnabled := queueSettings.MergeEnabled
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
-	msgQueue.SetAutoMergeEnabled(autoMergeEnabled)
+	msgQueue.SetAutoMergePolicy(autoMergeEnabled, queueResolution.Settings.AutoMergeRevision)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
 		zap.Bool("merge_enabled", mergeEnabled),
@@ -141,6 +142,10 @@ func provideOrchestrator(
 	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	orchestratorSvc.SetLaunchAttachmentClaimer(taskSvc)
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		orchestratorSvc.SetSessionAttachmentCleaner(taskSvc)
+	}
+	orchestratorSvc.SetSessionAttachmentTransferer(taskSvc)
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})

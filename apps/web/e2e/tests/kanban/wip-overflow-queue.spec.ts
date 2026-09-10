@@ -9,6 +9,7 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
   apiClient,
   seedData,
 }) => {
+  await testPage.setViewportSize({ width: 1440, height: 900 });
   const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Feeder Move Workflow");
   const sourceStep = await apiClient.createWorkflowStep(workflow.id, "C", 0, {
     is_start_step: true,
@@ -50,7 +51,6 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
     () =>
       new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
-
   // Dragging can temporarily move destinations before the anchored source
   // column, so scroll them back into the viewport before dropping.
   let feederBox = await feederColumn.boundingBox();

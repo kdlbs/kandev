@@ -14,6 +14,7 @@ resets it during startup.
 | OpenCode | `opencode-ai` | `1.18.29` | `acp --print-logs --log-level ERROR` |
 | Copilot | `@github/copilot` | `1.0.83` | `--acp` |
 | Gemini | `@google/gemini-cli` | `0.58.0` | `--acp` |
+| Pi | `pi-acp` | `0.0.33` | none |
 
 Normal capability probes, sessions, container commands, and one-shot inference
 use `npx --yes --prefer-offline package@effective-version` with the ACP
@@ -26,13 +27,16 @@ package is pinned, but npm transitive ranges, its cache, and the registry still
 affect reproducibility. Kandev records the version reported by the ACP
 initialize response instead of inferring it from source.
 
-If a managed startup reports the strict npm `ETARGET` error for the selected
-exact package and version, Kandev makes one recovery attempt. The colocated
-agentctl process resolves its own npm cache, removes only that package's
-deterministic `_npx` execution tree, and retries the same command with online
-metadata preference. This applies to standalone, local Docker, and remote SSH
-executors. Sibling trees, the global npm cache, the registry, and the selected
-version remain unchanged.
+If a managed startup or host capability probe reports the strict npm `ETARGET`
+error for the selected exact package and version, Kandev makes one recovery
+attempt. The colocated agentctl process resolves its own npm cache, removes only
+that package's deterministic `_npx` execution tree, and retries the same command
+with online metadata preference. Capability recovery publishes the successful
+catalogue without changing persisted profile selections. Host repair uses the
+failed probe's runtime environment and waits for concurrent host utility
+processes before replacing the tree. Runtime recovery applies to standalone,
+local Docker, and remote SSH executors. Sibling trees, the global npm cache,
+the registry, and the selected version remain unchanged.
 
 The **Update agent** action in Settings is the explicit freshness boundary for
 the Kandev host. Its candidate preparation resolves the requested trusted

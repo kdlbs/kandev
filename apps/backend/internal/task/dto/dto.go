@@ -329,8 +329,9 @@ type TaskWorkspaceFolderDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
+	ID                 string `json:"id"`
+	TaskID             string `json:"task_id"`
+	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name              string `json:"name"`
@@ -422,8 +423,9 @@ type TaskSessionDTO struct {
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
+	ID                 string `json:"id"`
+	TaskID             string `json:"task_id"`
+	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name              string `json:"name"`
@@ -995,30 +997,31 @@ func FromTaskWithSessionInfo(
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:                session.ID,
-		TaskID:            session.TaskID,
-		Name:              session.Name,
-		AgentExecutionID:  session.AgentExecutionID,
-		ContainerID:       session.ContainerID,
-		AgentProfileID:    session.AgentProfileID,
-		ExecutorID:        session.ExecutorID,
-		ExecutorProfileID: session.ExecutorProfileID,
-		EnvironmentID:     session.EnvironmentID,
-		RepositoryID:      session.RepositoryID,
-		BaseBranch:        session.BaseBranch,
-		BaseCommitSHA:     session.BaseCommitSHA,
-		WorkspacePath:     session.WorkspacePath,
-		State:             session.State,
-		ErrorMessage:      session.ErrorMessage,
-		Metadata:          session.Metadata,
-		StartedAt:         session.StartedAt,
-		CompletedAt:       session.CompletedAt,
-		UpdatedAt:         session.UpdatedAt,
-		IsPrimary:         session.IsPrimary,
-		IsPassthrough:     session.IsPassthrough,
-		ReviewStatus:      session.ReviewStatus,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		LastReadMessageID: session.LastReadMessageID,
+		ID:                 session.ID,
+		TaskID:             session.TaskID,
+		QueueIncarnationID: session.QueueIncarnationID,
+		Name:               session.Name,
+		AgentExecutionID:   session.AgentExecutionID,
+		ContainerID:        session.ContainerID,
+		AgentProfileID:     session.AgentProfileID,
+		ExecutorID:         session.ExecutorID,
+		ExecutorProfileID:  session.ExecutorProfileID,
+		EnvironmentID:      session.EnvironmentID,
+		RepositoryID:       session.RepositoryID,
+		BaseBranch:         session.BaseBranch,
+		BaseCommitSHA:      session.BaseCommitSHA,
+		WorkspacePath:      session.WorkspacePath,
+		State:              session.State,
+		ErrorMessage:       session.ErrorMessage,
+		Metadata:           session.Metadata,
+		StartedAt:          session.StartedAt,
+		CompletedAt:        session.CompletedAt,
+		UpdatedAt:          session.UpdatedAt,
+		IsPrimary:          session.IsPrimary,
+		IsPassthrough:      session.IsPassthrough,
+		ReviewStatus:       session.ReviewStatus,
+		TaskEnvironmentID:  session.TaskEnvironmentID,
+		LastReadMessageID:  session.LastReadMessageID,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1033,6 +1036,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
 		ID:                   session.ID,
 		TaskID:               session.TaskID,
+		QueueIncarnationID:   session.QueueIncarnationID,
 		Name:                 session.Name,
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
@@ -1176,6 +1180,7 @@ type WorkflowStepDTO struct {
 	StageType                  string    `json:"stage_type,omitempty"`
 	AutoAdvanceRequiresSignal  bool      `json:"auto_advance_requires_signal"`
 	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
+	CompleteTaskOnEnter        bool      `json:"complete_task_on_enter"`
 	CreatedAt                  time.Time `json:"created_at"`
 	UpdatedAt                  time.Time `json:"updated_at"`
 }

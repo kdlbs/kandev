@@ -361,6 +361,7 @@ type BackendTemplateStep = {
   agent_profile_id?: StepDefinition["agent_profile_id"];
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -418,6 +419,7 @@ type BackendWorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -446,6 +448,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
     step.profile_session_end_policy,
   ),
+  complete_task_on_enter: step.complete_task_on_enter,
   auto_advance_requires_signal: step.auto_advance_requires_signal,
   cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
   wip_limit: step.wip_limit ?? 0,
@@ -488,6 +491,7 @@ export async function createWorkflowStepAction(payload: {
   color: string;
   prompt?: string;
   events?: StepEvents;
+  complete_task_on_enter?: boolean;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: string;
@@ -514,6 +518,7 @@ export async function createWorkflowStepAction(payload: {
     wip_limit: payload.wip_limit ?? 0,
     pull_from_step_id: payload.pull_from_step_id ?? "",
     stage_type: payload.stage_type,
+    complete_task_on_enter: payload.complete_task_on_enter ?? false,
     cancel_triggers_turn_complete: payload.cancel_triggers_turn_complete ?? false,
     profile_session_start_policy: payload.profile_session_start_policy,
     profile_session_end_policy: payload.profile_session_end_policy,
@@ -548,6 +553,7 @@ export async function updateWorkflowStepAction(
       | "stage_type"
       | "profile_session_start_policy"
       | "profile_session_end_policy"
+      | "complete_task_on_enter"
     >
   >,
 ): Promise<WorkflowStep> {

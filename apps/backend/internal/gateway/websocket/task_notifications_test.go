@@ -246,6 +246,28 @@ func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_DropsTaskScopedQueueStatusWithoutSession(t *testing.T) {
+	hub := newTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{Enforced: func() bool { return true }})
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	payload := map[string]any{
+		"task_id":            "task-without-session",
+		"queue_status_scope": "task",
+	}
+
+	require.NoError(t, broadcaster.broadcastEvent(
+		context.Background(),
+		bus.NewEvent(events.MessageQueueStatusChanged, "test", payload),
+		ws.ActionMessageQueueStatusChanged,
+	))
+
+	select {
+	case leaked := <-hub.broadcast:
+		t.Fatalf("task-scoped queue status was globally broadcast: %s", leaked.Action)
+	default:
+	}
+}
+
 func TestTaskEventBroadcaster_DropsUnscopedGitHubCIOptionsWhenAuthIsEnforced(t *testing.T) {
 	hub := newTestHub(t)
 	hub.setAuthPolicy(AuthPolicy{Enforced: func() bool { return true }})
@@ -266,6 +288,29 @@ func TestTaskEventBroadcaster_DropsUnscopedGitHubCIOptionsWhenAuthIsEnforced(t *
 	select {
 	case leaked := <-hub.broadcast:
 		t.Fatalf("unscoped GitHub CI options update was globally broadcast: %s", leaked.Action)
+	default:
+	}
+}
+func TestTaskEventBroadcaster_DropsUnscopedQueueStatus(t *testing.T) {
+	hub := newTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{Enforced: func() bool { return true }})
+	msg, err := ws.NewNotification(ws.ActionMessageQueueStatusChanged, map[string]any{
+		"task_id": "task-without-session",
+	})
+	require.NoError(t, err)
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+
+	require.NoError(t, broadcaster.routeBroadcast(
+		ws.ActionMessageQueueStatusChanged,
+		msg.Payload,
+		"",
+		"",
+		msg,
+	))
+
+	select {
+	case leaked := <-hub.broadcast:
+		t.Fatalf("unscoped queue status was globally broadcast: %s", leaked.Action)
 	default:
 	}
 }
