@@ -436,10 +436,31 @@ func (s *Service) originalTaskSession(ctx context.Context, taskID string) (*mode
 	if err != nil {
 		return nil, err
 	}
+	if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr == nil && task != nil {
+		if snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata); ok {
+			for _, candidate := range sessions {
+				if candidate != nil && candidate.ID == snapshot.SessionID {
+					return candidate, nil
+				}
+			}
+			return nil, nil
+		}
+	}
 	if original, resolved := markedOriginalTaskSession(sessions); resolved {
 		return original, nil
 	}
-	return legacyOriginalTaskSession(sessions), nil
+	original := legacyOriginalTaskSession(sessions)
+	if original != nil {
+		if writer, ok := s.repo.(interface {
+			SetTaskMetadataKeyIfAbsent(context.Context, string, string, interface{}) (bool, error)
+		}); ok {
+			_, _ = writer.SetTaskMetadataKeyIfAbsent(ctx, taskID, models.MetaKeyWorkflowInitialSession, models.WorkflowInitialSessionSnapshot{
+				SessionID:      original.ID,
+				AgentProfileID: original.AgentProfileID,
+			})
+		}
+	}
+	return original, nil
 }
 
 func markedOriginalTaskSession(sessions []*models.TaskSession) (*models.TaskSession, bool) {

@@ -446,7 +446,7 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | Setting                   | Effect                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Start step**            | Where a task is created when no agent starts with it. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step. This setting places tasks; it never starts agents, which is **Auto-start agent** below. |
-| **Agent profile and session handling** | The combined selector overrides the workflow/task profile when entering this step. Its session lifecycle settings control how this step starts and ends when the effective profile changes. Consecutive steps with the same profile keep the current session. The fixed profile override and original-session options are mutually exclusive. |
+| **Agent profile and session handling** | The combined selector can choose a profile, the task's initial conversation, or a conversation from an earlier direct-profile step. Its lifecycle settings control how this step starts and ends. The fixed profile override and original-session options are mutually exclusive. |
 | **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
 | **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
 | **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
@@ -464,8 +464,33 @@ For a profile change, configure two independent settings in the combined selecto
 - **When this step ends: Complete the session** closes the source session. The workflow cannot reuse it later.
 - **When this step ends: Park the session** stops the source runtime but keeps the conversation available for reuse or manual follow-up.
 
-Existing steps use **Reuse an available session** and **Complete the session** by
-default. A parked session is not an active process. You can answer it later, or
+The combined selector can target a specific conversation when a step changes
+the agent profile:
+
+- **Initial agent session** returns to the conversation that the task used at
+  launch. If that conversation is unavailable, Kandev starts a new conversation
+  with the target step's profile.
+- **Earlier workflow step** returns to the latest successful session recorded
+  for that earlier direct-profile step. The source step must be earlier and
+  must select a profile directly. Inherited profiles and indirect targets are
+  not valid sources.
+- **Agent profile** keeps the default profile-based routing. Kandev can select
+  any eligible conversation for that profile.
+
+For an explicit target, Kandev does not select an unrelated tab only because it
+uses the same profile. **Start a new session** always creates a new conversation,
+even when the target profile already has another session. A completed or
+missing source conversation uses a new conversation with the target profile.
+
+If a source step is moved, removed, or changed to an indirect profile, the
+workflow editor keeps the invalid target visible. Save changes stays disabled
+until you choose another target, clear the target, or undo the source edit.
+Synced workflows require the same repair in the source file before the next
+sync.
+
+New or unset steps use **Reuse an available session** and **Park the session** by
+default. An explicitly saved **Complete the session** choice remains unchanged.
+A parked session is not an active process. You can answer it later, or
 Kandev can reuse it when a later destination step selects the matching profile
 and start behavior. If Kandev cannot prepare the destination session or record
 the parked switch, it keeps the current session recoverable and reports the

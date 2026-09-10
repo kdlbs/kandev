@@ -35,9 +35,11 @@ import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-
 type StepConfigHeaderProps = {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
+  steps: WorkflowStep[];
   localName: string;
   onLocalNameChange: (name: string) => void;
   onUpdate: (updates: Partial<WorkflowStep>) => void;
+  onRestoreSource?: () => void;
   onRemove: () => void;
   readOnly: boolean;
   debouncedUpdateName: (name: string) => void;
@@ -46,9 +48,11 @@ type StepConfigHeaderProps = {
 function StepConfigHeader({
   step,
   savedStep,
+  steps,
   localName,
   onLocalNameChange,
   onUpdate,
+  onRestoreSource,
   onRemove,
   readOnly,
   debouncedUpdateName,
@@ -98,7 +102,9 @@ function StepConfigHeader({
         <WorkflowStepAgentProfileSelector
           step={step}
           savedStep={savedStep}
+          steps={steps}
           onUpdate={onUpdate}
+          onRestoreSource={onRestoreSource}
           readOnly={readOnly}
         />
         <SessionConfigToggle
@@ -461,6 +467,7 @@ type StepConfigPanelProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   onRemove: () => void;
+  onRestoreSourceStep?: (sourceStepId: string) => void;
   readOnly?: boolean;
   onSessionConfigResolutionPendingChange?: (pending: boolean) => void;
 };
@@ -471,6 +478,7 @@ export function StepConfigPanel({
   steps,
   onUpdate,
   onRemove,
+  onRestoreSourceStep,
   readOnly = false,
   onSessionConfigResolutionPendingChange,
 }: StepConfigPanelProps) {
@@ -485,6 +493,7 @@ export function StepConfigPanel({
   }, 500);
 
   const actions = useStepActions({ step, onUpdate });
+  const sourceTarget = step.session_target?.kind === "step" ? step.session_target : undefined;
   const isFinalStep = steps[steps.length - 1]?.id === step.id;
 
   return (
@@ -498,6 +507,12 @@ export function StepConfigPanel({
       <StepConfigHeader
         step={step}
         savedStep={savedStep}
+        steps={steps}
+        onRestoreSource={
+          sourceTarget && onRestoreSourceStep
+            ? () => onRestoreSourceStep(sourceTarget.step_id)
+            : undefined
+        }
         localName={localName}
         onLocalNameChange={setLocalName}
         onUpdate={onUpdate}

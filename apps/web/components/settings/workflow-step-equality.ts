@@ -23,6 +23,7 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    session_target: step.session_target ?? null,
     complete_task_on_enter: step.complete_task_on_enter ?? false,
     auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,

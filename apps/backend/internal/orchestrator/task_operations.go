@@ -1063,6 +1063,9 @@ type startTaskOptions struct {
 	// composed workflow prompt below because the prompt is rebuilt from the
 	// durable step by ID and cannot see a transient step overlay.
 	EntryOptions *workflowmove.EntryOptions
+	// WorkflowEntryID pins source bindings and explicit route retries to the
+	// immutable step-entry ledger row that initiated an automatic launch.
+	WorkflowEntryID int64
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1089,6 +1092,83 @@ func (s *Service) StartTaskWithRoute(
 			Route:                &route,
 		})
 	return err
+}
+
+func (s *Service) prepareExplicitWorkflowStartRoute(
+	ctx context.Context,
+	taskID string,
+	workflowSessionConfigStepID string,
+	entryIDs ...int64,
+) (*models.TaskSession, string, *models.WorkflowSessionRoute, error) {
+	if workflowSessionConfigStepID == "" || s.workflowStepGetter == nil {
+		return nil, "", nil, nil
+	}
+
+	candidateStep, err := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("load workflow step for session target: %w", err)
+	}
+	if candidateStep == nil || candidateStep.SessionTarget == nil {
+		return nil, "", nil, nil
+	}
+
+	selectedSession, profileID, err := s.selectExplicitWorkflowStartSession(ctx, taskID, candidateStep)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, profileID); err != nil {
+			return nil, "", nil, err
+		}
+	}
+
+	startPolicy := s.resolveStepProfileSessionStartPolicy(candidateStep)
+	route := &models.WorkflowSessionRoute{
+		OperationID:       workflowSessionRouteID(taskID, candidateStep.ID, s.workflowEntryIdentity(ctx, taskID, entryIDs...), candidateStep.SessionTarget, startPolicy),
+		DestinationStepID: candidateStep.ID,
+		TargetKind:        string(candidateStep.SessionTarget.Kind),
+		TargetStepID:      candidateStep.SessionTarget.StepID,
+		AgentProfileID:    profileID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+	if recordedRoute, recordedSession, err := s.loadRecordedWorkflowSessionRoute(ctx, taskID, route.OperationID, candidateStep, profileID); err != nil {
+		return nil, "", nil, err
+	} else if recordedSession != nil {
+		selectedSession = recordedSession
+		route = recordedRoute
+	}
+	if selectedSession != nil || !s.supportsAtomicWorkflowSessionRouteCreation() {
+		if err := s.persistWorkflowSessionRoute(ctx, taskID, *route); err != nil {
+			return nil, "", nil, err
+		}
+	}
+	return selectedSession, profileID, route, nil
+}
+
+func (s *Service) promoteSelectedExplicitWorkflowSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	route *models.WorkflowSessionRoute,
+) (string, bool, error) {
+	if err := s.preflightWorkflowSessionTarget(ctx, taskID, session); err != nil {
+		return "", false, err
+	}
+	var promoted bool
+	var err error
+	if route != nil {
+		promoted, err = s.promoteWorkflowSessionRoute(ctx, taskID, session, route)
+	} else {
+		promoted, err = s.setNonterminalSessionPrimary(ctx, session.ID)
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("promote explicit workflow session: %w", err)
+	}
+	if !promoted {
+		return "", false, nil
+	}
+	s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+	return session.ID, true, nil
 }
 
 //nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
@@ -1234,6 +1314,23 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		task.Priority = priority
 	}
 
+	var explicitStartRoute *models.WorkflowSessionRoute
+	var selectedExplicitSession *models.TaskSession
+	var explicitProfileID string
+	selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
+		ctx,
+		task.ID,
+		workflowSessionConfigStepID,
+		opts.WorkflowEntryID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if explicitStartRoute != nil && explicitProfileID != "" {
+		agentProfileID = explicitProfileID
+		overrideApplied = agentProfileID != callerProfileID
+	}
+
 	// Use provided prompt, fall back to task description
 	effectivePrompt := prompt
 	if effectivePrompt == "" {
@@ -1243,9 +1340,37 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
-	if err != nil {
-		return nil, err
+	var sessionID string
+	var sessionCreated bool
+	if selectedExplicitSession != nil {
+		var promoted bool
+		var promoteErr error
+		sessionID, promoted, promoteErr = s.promoteSelectedExplicitWorkflowSession(ctx, task.ID, selectedExplicitSession, explicitStartRoute)
+		if promoteErr != nil {
+			return nil, promoteErr
+		}
+		if !promoted {
+			selectedExplicitSession = nil
+		}
+	}
+	if sessionID == "" {
+		if explicitStartRoute != nil {
+			sessionID, sessionCreated, err = s.prepareSessionForStartWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, explicitStartRoute)
+		} else {
+			sessionID, sessionCreated, err = s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if explicitStartRoute != nil && selectedExplicitSession == nil {
+		promoted, promoteErr := s.promoteWorkflowSessionRoute(ctx, task.ID, &models.TaskSession{ID: sessionID}, explicitStartRoute)
+		if promoteErr != nil {
+			return nil, fmt.Errorf("promote explicit workflow start session: %w", promoteErr)
+		}
+		if !promoted {
+			return nil, fmt.Errorf("explicit workflow start session became terminal before promotion")
+		}
 	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
@@ -1282,6 +1407,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload launch session: %w", err)
+	}
+	if explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
+		if sourceStep, stepErr := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID); stepErr != nil {
+			return nil, fmt.Errorf("load workflow source step for session binding: %w", stepErr)
+		} else if sourceStep != nil {
+			if bindErr := s.recordWorkflowSourceBinding(ctx, task.ID, sourceStep, launchSession, opts.WorkflowEntryID); bindErr != nil {
+				return nil, bindErr
+			}
+		}
 	}
 
 	if route == nil {
@@ -1614,7 +1748,15 @@ func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
-	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
+	return s.prepareSessionForStartWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, nil)
+}
+
+func (s *Service) prepareSessionForStartWithWorkflowRoute(
+	ctx context.Context, task *v1.Task,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
+	workflowRoute *models.WorkflowSessionRoute,
+) (string, bool, error) {
+	sessionID, created, err := s.createStartSessionWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
 	if err != nil {
 		return "", false, err
 	}
@@ -1825,16 +1967,42 @@ func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
+	return s.createStartSessionWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, nil)
+}
+
+func (s *Service) createStartSessionWithWorkflowRoute(
+	ctx context.Context, task *v1.Task,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
+	workflowRoute *models.WorkflowSessionRoute,
+) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err != nil || dbTask == nil || !dbTask.IsFromOffice {
-		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		var sessionID string
+		var prepareErr error
+		if workflowRoute != nil {
+			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRoute(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
+		} else {
+			sessionID, prepareErr = s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		}
 		return sessionID, prepareErr == nil, prepareErr
 	}
 
 	sessionOwnerID := s.officeSessionOwnerID(dbTask, agentProfileID, officeAgentProfileID)
 	if sessionOwnerID == "" {
-		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		var sessionID string
+		var prepareErr error
+		if workflowRoute != nil {
+			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRoute(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
+		} else {
+			sessionID, prepareErr = s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		}
 		return sessionID, prepareErr == nil, prepareErr
+	}
+	if workflowRoute != nil {
+		// Office sessions are identity-owned and may already exist. The route
+		// promotion path handles an exact selected row; a fresh Office session
+		// is not created through the generic PrepareSession transaction.
+		return "", false, fmt.Errorf("workflow session routes are not supported for new office sessions")
 	}
 	session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
 		ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID,
@@ -3991,22 +4159,28 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
+	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	return nil
+}
 
+func (s *Service) publishPrimarySessionUpdate(ctx context.Context, taskID, sessionID string) {
 	// Broadcast task.updated so frontend updates the primary star indicator.
 	// The task service's publisher loads primary-session info from the DB,
 	// which already reflects the SetSessionPrimary write above.
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to fetch session after setting primary", zap.Error(err))
-		return nil
+		return
 	}
-	task, err := s.repo.GetTask(ctx, session.TaskID)
+	if taskID == "" {
+		taskID = session.TaskID
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to fetch task after setting primary", zap.Error(err))
-		return nil
+		return
 	}
 	s.publishTaskUpdated(ctx, task)
-	return nil
 }
 
 // maxSessionNameLength caps user-supplied session names to keep tab labels sane.

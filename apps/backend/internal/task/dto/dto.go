@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -1174,6 +1175,7 @@ type WorkflowStepDTO struct {
 	AgentProfileID            string                                   `json:"agent_profile_id,omitempty"`
 	ProfileSessionStartPolicy models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
 	ProfileSessionEndPolicy   models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	SessionTarget             *wfmodels.WorkflowSessionTarget          `json:"session_target,omitempty"`
 	WIPLimit                  int                                      `json:"wip_limit"`
 	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.

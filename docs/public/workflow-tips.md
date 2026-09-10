@@ -157,7 +157,8 @@ a new session when none is available. **Start a new session** always creates a
 fresh conversation. The source step's **Complete the session** setting closes
 the conversation, while **Park the session** stops the agent and keeps the
 conversation available for reuse or manual follow-up. These settings default
-to reuse on start and complete on end.
+to reuse on start and park on end. An explicitly selected completion policy is
+preserved.
 
 ### Continue a completed conversation
 
