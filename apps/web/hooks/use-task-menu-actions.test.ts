@@ -38,6 +38,91 @@ beforeEach(() => {
   }));
 });
 
+describe("concurrent shared task menu removal", () => {
+  it.each(["runArchive", "runDelete"] as const)(
+    "%s accepts another task while retaining the first task's duplicate guard",
+    async (method) => {
+      let releaseA!: () => void;
+      let releaseB!: () => void;
+      const requestA = new Promise<void>((resolve) => {
+        releaseA = resolve;
+      });
+      const requestB = new Promise<void>((resolve) => {
+        releaseB = resolve;
+      });
+      const request = method === "runArchive" ? api.archiveTask : api.deleteTask;
+      request.mockImplementation((id: string) => (id === "A" ? requestA : requestB));
+      const { result } = renderHook(() => useTaskMenuActions({ stayOnListing: true }));
+      let outcomeA!: Promise<boolean>;
+      let outcomeB!: Promise<boolean>;
+      await act(async () => {
+        outcomeA = result.current[method]("A");
+        outcomeB = result.current[method]("B");
+      });
+      expect(request.mock.calls.map(([id]) => id)).toEqual(["A", "B"]);
+      expect(result.current.pendingTaskId).toBe("A");
+      await act(async () => {
+        expect(await result.current[method]("A")).toBe(false);
+        expect(await result.current[method]("B")).toBe(false);
+        releaseB();
+        expect(await outcomeB).toBe(true);
+      });
+      expect(result.current.pendingTaskId).toBe("A");
+      expect(store.getState().kanban.tasks.map(({ id }) => id)).toEqual(["A"]);
+      await act(async () => {
+        expect(await result.current[method]("A")).toBe(false);
+        releaseA();
+        expect(await outcomeA).toBe(true);
+      });
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(result.current.pendingTaskId).toBeNull();
+      expect(store.getState().kanban.tasks).toEqual([]);
+    },
+  );
+
+  it.each(["runArchive", "runDelete"] as const)(
+    "%s failing A keeps B pending and permits retrying only A",
+    async (method) => {
+      let rejectA!: (error: Error) => void;
+      let releaseB!: () => void;
+      const requestA = new Promise<void>((_, reject) => {
+        rejectA = reject;
+      });
+      const requestB = new Promise<void>((resolve) => {
+        releaseB = resolve;
+      });
+      const request = method === "runArchive" ? api.archiveTask : api.deleteTask;
+      request.mockImplementation((id: string) => (id === "A" ? requestA : requestB));
+      const { result } = renderHook(() => useTaskMenuActions({ stayOnListing: true }));
+      let outcomeA!: Promise<boolean>;
+      let outcomeB!: Promise<boolean>;
+      await act(async () => {
+        outcomeA = result.current[method]("A");
+        outcomeB = result.current[method]("B");
+      });
+      expect(request.mock.calls.map(([id]) => id)).toEqual(["A", "B"]);
+      await act(async () => {
+        rejectA(new Error("offline"));
+        expect(await outcomeA).toBe(false);
+      });
+      expect(result.current.pendingTaskId).toBe("B");
+      expect(api.toast).toHaveBeenCalledTimes(1);
+      request.mockResolvedValueOnce(undefined);
+      await act(async () => {
+        expect(await result.current[method]("B")).toBe(false);
+        expect(await result.current[method]("A")).toBe(true);
+      });
+      expect(result.current.pendingTaskId).toBe("B");
+      await act(async () => {
+        releaseB();
+        expect(await outcomeB).toBe(true);
+      });
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(result.current.pendingTaskId).toBeNull();
+    },
+  );
+});
+
 describe("shared task menu removal", () => {
   // @covers AC-TASKS-THREADS-ACTIONS-002.2, AC-TASKS-THREADS-ACTIONS-002.4, AC-TASKS-THREADS-ACTIONS-002.6
   it.each(["runArchive", "runDelete"] as const)(

@@ -23,7 +23,7 @@ import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import { SidebarLinkDialogs } from "./task-session-sidebar-dialogs";
-import { selectTaskLinkActions } from "./task-switcher-link-menu";
+import { selectTaskLinkActions, type TaskLinkHandlers } from "./task-switcher-link-menu";
 
 type Flow = ReturnType<typeof useTaskManagementFlow>;
 export type TaskMenuPoint = { x: number; y: number };
@@ -129,16 +129,20 @@ function useManagementLinks(flow: Flow) {
   useEffect(() => {
     if (flow.stage === "link" && !linking) flow.close();
   }, [flow.stage, flow.close, linking]);
-  const guardedHandlers = Object.fromEntries(
-    Object.entries(handlers).map(([key, handler]) => [
-      key,
-      handler
-        ? (taskId: string, title?: string) => {
-            if (flow.getTarget()?.id === taskId) handler(taskId, title);
-          }
-        : undefined,
-    ]),
-  );
+  const guard = (handler: TaskLinkHandlers[keyof TaskLinkHandlers]) =>
+    handler
+      ? (taskId: string, title?: string) => {
+          if (flow.getTarget()?.id === taskId) handler(taskId, title);
+        }
+      : undefined;
+  const guardedHandlers = {
+    onLinkPullRequest: guard(handlers.onLinkPullRequest),
+    onLinkIssue: guard(handlers.onLinkIssue),
+    onLinkMergeRequest: guard(handlers.onLinkMergeRequest),
+    onLinkJiraTicket: guard(handlers.onLinkJiraTicket),
+    onLinkLinearIssue: guard(handlers.onLinkLinearIssue),
+    onLinkSentryIssue: guard(handlers.onLinkSentryIssue),
+  } satisfies Record<keyof TaskLinkHandlers, TaskLinkHandlers[keyof TaskLinkHandlers]>;
   const linkActions = flow.task
     ? selectTaskLinkActions(flow.task, () => flow.setStage("link"), guardedHandlers)
     : {};

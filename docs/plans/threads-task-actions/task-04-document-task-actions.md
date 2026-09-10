@@ -42,7 +42,7 @@ results without publishing unimplemented intent.
 - Link to the existing archive/delete guidance in `tasks-and-workflows.md` for
   consequences and confirmation preference; add only a small Threads entry
   reference there if useful. Preserve both pages' parent changes.
-- Update `components/threads/AGENTS.md` to name the shared action owner,
+- Update `apps/web/components/threads/AGENTS.md` to name the shared action owner,
   header-only context boundary, and fallback integration.
 - Reconcile this package with the final implementation, record exact prior
   test/image evidence, and update requirement/design/work-order statuses as

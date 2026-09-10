@@ -187,3 +187,17 @@ option through the shared helper and retains its explicit close-focus override.
 Two added dialog compatibility cases verify both focus paths. The integrated
 suite passed 252 tests in 29 files; 27 desktop browser cases also passed,
 including task-detail and preview archive/delete behavior and dismissal focus.
+
+### CI concurrency regression (2026-09-10)
+
+The existing desktop archive redirect test exposed a global duplicate guard
+rejecting B after optimistic navigation while A's archive request was pending.
+Four new held-request tests reproduced that failure for archive/delete, then
+passed with the shared guard keyed by task ID. They retain same-task exclusion,
+prove independent completion, and keep B guarded while a failed A is retried.
+The shared hook's public busy indicator and navigation/error owners remain
+unchanged. CodeRabbit's handler-map typing and awaited inline-containment test
+improvements also pass. The exact commands in the plan's CI correction section
+passed 141 focused unit/component tests, eight desktop browser tests and nine
+phone browser tests with one browser worker and no retries. Typecheck, affected
+ESLint and locale checks passed. No public contract or product copy changed.

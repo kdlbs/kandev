@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
@@ -187,8 +187,8 @@ describe("TaskArchiveConfirmation inline surface", () => {
         </StateProvider>,
       );
       if (count === 0) {
-        expect(await screen.findByTestId("inline-surface")).toBeTruthy();
-        expect(await screen.findByTestId(CONFIRM_TEST_ID)).toBeTruthy();
+        const surface = await screen.findByTestId("inline-surface");
+        expect(await within(surface).findByTestId(CONFIRM_TEST_ID)).toBeTruthy();
         expect(screen.queryByRole("alertdialog")).toBeNull();
       } else {
         expect(await screen.findByRole("alertdialog")).toBeTruthy();

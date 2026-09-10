@@ -402,6 +402,49 @@ above remain historical.
 Remote exact-head CI/review confirmation remains part of the ongoing fixup,
 not a completed claim in this local verification record.
 
+### CI archive concurrency correction (2026-09-10)
+
+E2E run `34527249627`, shard job `103043769179`, reproduced a shared-sidebar
+regression: after optimistic navigation from A to B, archiving B while A's
+request was pending was silently rejected by the shared global single-flight
+guard. The trace contained only A's archive request. The unchanged
+`archive-task-redirect.spec.ts` reproduced the same last-task URL failure
+locally with retries disabled. Its dependent report and final gate failed from
+that one unexpected test; no additional failed leaf was reported.
+
+Four held-request unit cases failed before the fix for archive and delete,
+covering concurrent A/B requests, same-task duplicate rejection, out-of-order
+completion, and A's failure/retry while B remains pending. The shared removal
+owner now guards pending task IDs independently and retains the first pending
+ID for existing busy consumers. Navigation, confirmation, error feedback and
+Threads' listing-only cleanup still belong to their existing owners.
+
+After the fix, the focused unit/component checks passed 141 tests in 17 files,
+including those four regressions. Typecheck, zero-warning affected-file ESLint
+and locale validation passed. After `pnpm run build:e2e`, these managed browser
+runs passed with one worker and no retries: eight desktop cases and nine phone
+cases, including all six actions, cancellation, nested containment and swipe
+coexistence.
+
+```sh
+cd apps/web
+pnpm exec vitest run --maxWorkers=2 hooks/use-task-menu-actions.test.ts hooks/use-task-actions.test.ts hooks/use-task-actions-menu-move-targets.test.tsx hooks/use-task-removal.test.ts hooks/use-task-removal-listing.test.ts hooks/use-task-removal-session-loading.test.ts hooks/use-task-workflow-move.test.ts hooks/use-task-management-flow.test.ts components/task/task-management-surface.test.tsx components/task/task-archive-confirmation.test.tsx components/task/task-delete-confirm-dialog.test.tsx components/task/task-session-sidebar-link-actions.test.ts components/task/task-session-sidebar-move.test.ts components/task/task-session-sidebar-selection.test.ts components/threads/thread-task-actions.test.tsx components/threads/threads-board.test.tsx
+pnpm exec vitest run --maxWorkers=2 lib/tasks/task-menu-target.test.ts
+pnpm e2e:run --host --no-build --project chromium tests/task/archive-task-redirect.spec.ts tests/task/threads-task-actions.spec.ts -- --retries=0
+pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/task/mobile-threads-swipe.spec.ts tests/task/mobile-archive-task-redirect.spec.ts -- --retries=0
+```
+
+CodeRabbit's valid follow-up suggestions also corrected the work-order path,
+strengthened inline confirmation containment with an awaited scoped query,
+and preserved all six link-handler keys with compile-time checking. The
+suggested Threads-agent contract is not a repository requirement: the scoped
+guide documents component ownership, not a separate agent. The optional
+layout-effect optimization is not applied; its effect reads `orderedIds` and
+refreshes geometry/focus bookkeeping, and no lint suppression is introduced.
+These changes preserve the approved contract and rendered layout. Remote CI
+and current-head review are rechecked after pushing, not assumed from local
+results.
+
 ## Risks
 
 - Parent files and archive-confirmation work can change before integration;

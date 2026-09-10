@@ -10,7 +10,7 @@ import {
 } from "./use-task-actions";
 import { collectTaskTreeIdsFromStore, useTaskRemoval } from "./use-task-removal";
 
-/** Shared single-flight removal lifecycle. The caller owns confirmation and captures the task ID. */
+/** Shared per-task single-flight removal. The caller owns confirmation and captures the task ID. */
 export function useTaskMenuActions(options?: {
   stayOnListing?: boolean;
   useLayoutSwitch?: boolean;
@@ -21,13 +21,13 @@ export function useTaskMenuActions(options?: {
   const archive = useArchiveAndSwitchTask(options);
   const { deleteTaskById } = useTaskActions();
   const { removeTaskFromBoard } = useTaskRemoval({ store, ...options });
-  const pending = useRef<string | null>(null);
+  const pending = useRef(new Set<string>());
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const run = useCallback(
     async (kind: "archive" | "delete", taskId: string, opts?: TaskActionOptions) => {
-      if (pending.current) return false;
-      pending.current = taskId;
-      setPendingTaskId(taskId);
+      if (pending.current.has(taskId)) return false;
+      pending.current.add(taskId);
+      setPendingTaskId(pending.current.values().next().value ?? null);
       try {
         if (kind === "archive") {
           await archive(taskId, opts);
@@ -55,8 +55,8 @@ export function useTaskMenuActions(options?: {
         }
         return false;
       } finally {
-        pending.current = null;
-        setPendingTaskId(null);
+        pending.current.delete(taskId);
+        setPendingTaskId(pending.current.values().next().value ?? null);
       }
     },
     [archive, deleteTaskById, removeTaskFromBoard, store, t, toast],
