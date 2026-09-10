@@ -5,7 +5,7 @@ description: "Move Kanban workflows between workspaces with Kandev's portable YA
 
 # Workflow Import / Export
 
-Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and the explicit-cancellation completion policy. It deliberately omits database IDs and workspace ownership.
+Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. New exports use version 2; version 1 documents remain accepted and receive compatibility defaults at import.
 
 Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md) when a GitHub repository should remain the source of truth.
 
@@ -66,7 +66,7 @@ If Kandev is behind a reverse proxy, use its externally protected base URL rathe
 Every document uses this envelope:
 
 ```yaml
-version: 1
+version: 2
 type: kandev_workflow
 workflows:
   - name: My Workflow
@@ -75,7 +75,7 @@ workflows:
 
 | Field | Type | Validation |
 |-------|------|------------|
-| `version` | integer | Must be exactly `1`. |
+| `version` | integer | Must be `1` or `2`. New exports use `2`; version 1 is accepted for compatibility. |
 | `type` | string | Must be exactly `kandev_workflow`. |
 | `workflows` | list | Must contain at least one item. |
 
@@ -130,6 +130,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
     agent_name: Claude Code
   profile_session_start_policy: reuse
   profile_session_end_policy: park
+  complete_task_on_enter: false
 ```
 
 | Field | Type | Exact behavior |
@@ -146,6 +147,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `agent_profile` | object | Omitted when unset; exact-match behavior is below. |
 | `profile_session_start_policy` | enum | `reuse` or `new`; controls whether this destination step reuses the newest eligible nonterminal session for its profile or always starts a fresh conversation. Missing or unknown values use `reuse`. |
 | `profile_session_end_policy` | enum | `complete` or `park`; controls whether this source step's session is closed or kept available when the workflow leaves it for a different profile. Missing or unknown values use `complete`. |
+| `complete_task_on_enter` | boolean | Always exported in version 2. On the final workflow step, `true` marks the task `COMPLETED` when it enters that step. On non-final steps the value is retained but inactive. Version 1 derives the legacy name-based behavior only when this field is absent. |
 | `auto_advance_requires_signal` | boolean | Always exported. `true` makes `on_turn_complete` transitions wait for `step_complete_kandev`; missing input is `false`. |
 | `cancel_triggers_turn_complete` | boolean | Always exported. `true` lets an explicit user cancellation run the step's normal `on_turn_complete` actions after the cancelled turn settles; missing input is `false`. Pending clarification and non-user interruption/failure paths are not eligible. |
 | `wip_limit` | integer | Omitted when `0`. Must be non-negative; `0` is unlimited. |
@@ -238,7 +240,7 @@ The validator currently does **not** require a step, contiguous or non-negative 
 This file creates a three-step queue. Work has a capacity of two and pulls from Backlog whenever a slot opens. Its turn-complete transition only runs after the agent emits the explicit completion signal.
 
 ```yaml
-version: 1
+version: 2
 type: kandev_workflow
 workflows:
   - name: Review Queue
@@ -251,6 +253,7 @@ workflows:
         is_start_step: false
         show_in_command_panel: false
         allow_manual_move: true
+        complete_task_on_enter: false
         auto_advance_requires_signal: false
         cancel_triggers_turn_complete: false
 
@@ -271,6 +274,7 @@ workflows:
         is_start_step: true
         show_in_command_panel: true
         allow_manual_move: true
+        complete_task_on_enter: false
         auto_advance_requires_signal: true
         cancel_triggers_turn_complete: true
         wip_limit: 2
@@ -287,6 +291,7 @@ workflows:
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true
+        complete_task_on_enter: true
         auto_advance_requires_signal: false
         cancel_triggers_turn_complete: false
 ```
@@ -297,7 +302,7 @@ After import, assign a workflow default or affected step agent profile if the de
 
 ## Troubleshooting
 
-- **`unsupported export version/type`:** keep `version: 1` and `type: kandev_workflow` exactly.
+- **`unsupported export version/type`:** use `version: 2` and `type: kandev_workflow` for new documents. Version 1 remains accepted for compatibility.
 - **Duplicate step position:** give every step in that workflow a unique integer and update every position reference.
 - **Missing `step_position`:** portable `move_to_step` never accepts a database or template `step_id`.
 - **Pull reference error:** ensure the target position exists, is not the same step, and does not participate in a cycle.

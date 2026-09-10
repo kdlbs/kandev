@@ -36,6 +36,8 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Task completion and conversation follow-ups](requirements/task-completion.md)
+
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
@@ -77,6 +79,7 @@ signals, and task-scoped scheduling contracts.
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)
+- [Resume prompt queue](requirements/resume-prompt-queue.md)
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
@@ -128,6 +131,8 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [Task completion and conversation follow-ups](system-design/task-completion.md)
+
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
@@ -157,6 +162,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
+- [Resume prompt queue](system-design/resume-prompt-queue.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
 - [Edit task dependencies](system-design/task-dependency-detail-editing.md)
@@ -165,6 +171,7 @@ signals, and task-scoped scheduling contracts.
 - [Task priority visibility](system-design/task-priority-visibility.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow completion-signal payload delivery](system-design/workflow-completion-signal-payload-delivery.md)
+- [Signal-Gated Manual Move Visibility](system-design/workflow-signal-gated-manual-move-visibility.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)

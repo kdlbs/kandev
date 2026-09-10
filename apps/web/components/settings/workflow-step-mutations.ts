@@ -29,6 +29,7 @@ export function newWorkflowStep(workflow: Workflow, position: number, id: string
     ...NEW_STEP_DEFAULTS,
     position,
     allow_manual_move: true,
+    complete_task_on_enter: false,
     created_at: "",
     updated_at: "",
   };

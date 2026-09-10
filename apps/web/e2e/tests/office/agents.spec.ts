@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("Agents", () => {
   test("list agents returns CEO agent from onboarding", async ({ officeApi, officeSeed }) => {
@@ -110,6 +111,23 @@ test.describe("Agents", () => {
     });
   });
 
+  test("paused agent remains reachable from the agents list", async ({
+    testPage,
+    officeApi,
+    officeSeed,
+  }) => {
+    await officeApi.updateAgentStatus(officeSeed.agentId, "paused");
+
+    await testPage.goto("/office/agents");
+    const agentCardLink = testPage.locator(`a[href="/office/agents/${officeSeed.agentId}"]`);
+    await expect(agentCardLink).toBeVisible({ timeout: 10_000 });
+    await agentCardLink.click();
+    await testPage.waitForURL(new RegExp(`/office/agents/${officeSeed.agentId}/dashboard$`));
+    await expect(testPage.getByTestId("agent-recovery-control")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test("newly created agent appears on agents page", async ({
     testPage,
     officeApi,
@@ -130,5 +148,48 @@ test.describe("Agents", () => {
     ).toBeVisible({
       timeout: 10_000,
     });
+  });
+
+  test("recovery control returns a paused agent to idle and then disappears", async ({
+    testPage,
+    officeApi,
+    officeSeed,
+  }) => {
+    await officeApi.updateAgentStatus(officeSeed.agentId, "paused", "Manually paused for testing");
+
+    await testPage.goto(`/office/agents/${officeSeed.agentId}/dashboard`);
+    const recoveryControl = testPage.getByTestId("agent-recovery-control");
+    await expect(recoveryControl).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("agent-pause-reason")).toBeVisible();
+
+    const recovered = waitForHttp(
+      testPage,
+      "PATCH",
+      new RegExp(`/agents/${officeSeed.agentId}/status$`),
+    );
+    await recoveryControl.click();
+    await recovered;
+
+    await expect(recoveryControl).toBeHidden();
+    await expect(testPage.getByTestId("agent-pause-reason")).toBeHidden();
+
+    const agent = await officeApi.getAgent(officeSeed.agentId);
+    expect((agent as Record<string, unknown>).status).toBe("idle");
+  });
+
+  test("recovery control is absent for an idle agent and appears again after a manual stop", async ({
+    testPage,
+    officeApi,
+    officeSeed,
+  }) => {
+    await testPage.goto(`/office/agents/${officeSeed.agentId}/dashboard`);
+    await expect(testPage.getByTestId("agent-tab-dashboard")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("agent-recovery-control")).toHaveCount(0);
+
+    await officeApi.updateAgentStatus(officeSeed.agentId, "paused");
+    await officeApi.updateAgentStatus(officeSeed.agentId, "stopped");
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("agent-recovery-control")).toBeVisible({ timeout: 10_000 });
   });
 });

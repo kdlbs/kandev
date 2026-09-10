@@ -13,6 +13,8 @@ import { useToast } from "@/components/toast-provider";
 import { useSerializedMutationQueue } from "./use-serialized-mutation-queue";
 import type { WorkflowMutationGuardController } from "./workflow-mutation-guard";
 import { applyWorkflowStepUpdates } from "./workflow-step-mutations";
+import { areStepDraftsEqual, stepUpdatePayload } from "./workflow-step-equality";
+export { areStepDraftsEqual } from "./workflow-step-equality";
 import {
   createWorkflowAction,
   createWorkflowStepAction,
@@ -93,6 +95,7 @@ function createDraftStep(workflow: Workflow, position: number): WorkflowStep {
     ...NEW_STEP_DEFAULTS,
     position,
     allow_manual_move: true,
+    complete_task_on_enter: false,
     created_at: "",
     updated_at: "",
   };
@@ -330,6 +333,7 @@ async function createMissingSteps(
       position: step.position,
       color: step.color,
       stage_type: step.stage_type ?? "custom",
+      complete_task_on_enter: step.complete_task_on_enter ?? false,
       cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
       agent_profile_id: step.agent_profile_id,
       profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
@@ -407,46 +411,6 @@ function remapStepReferences<T>(value: T, mappings: Map<string, string>): T {
       : remapStepReferences(item, mappings),
   ]);
   return Object.fromEntries(mapped) as T;
-}
-
-function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
-  return {
-    name: step.name,
-    position: step.position,
-    color: step.color,
-    stage_type: step.stage_type ?? "custom",
-    prompt: step.prompt ?? "",
-    events: step.events ?? {},
-    allow_manual_move: step.allow_manual_move ?? true,
-    is_start_step: step.is_start_step ?? false,
-    show_in_command_panel: step.show_in_command_panel ?? false,
-    auto_archive_after_hours: step.auto_archive_after_hours ?? 0,
-    agent_profile_id: step.agent_profile_id ?? "",
-    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
-      step.profile_session_start_policy,
-    ),
-    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
-      step.profile_session_end_policy,
-    ),
-    auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
-    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
-    wip_limit: step.wip_limit ?? 0,
-    pull_from_step_id: step.pull_from_step_id ?? "",
-  };
-}
-
-export function areStepDraftsEqual(left: WorkflowStep[], right: WorkflowStep[]): boolean;
-export function areStepDraftsEqual(left: WorkflowStep, right: WorkflowStep): boolean;
-export function areStepDraftsEqual(
-  left: WorkflowStep[] | WorkflowStep,
-  right: WorkflowStep[] | WorkflowStep,
-): boolean {
-  if (Array.isArray(left) && Array.isArray(right)) {
-    if (left.length !== right.length) return false;
-    return left.every((step, index) => areStepDraftsEqual(step, right[index]));
-  }
-  if (Array.isArray(left) || Array.isArray(right)) return false;
-  return JSON.stringify(stepUpdatePayload(left)) === JSON.stringify(stepUpdatePayload(right));
 }
 
 type WorkflowDeleteHandlersParams = {

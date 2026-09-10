@@ -269,6 +269,10 @@ func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
+	// SessionMetaKeyCompletionFollowUp marks a completed conversation that was
+	// explicitly resumed for conversational follow-up. It is not workflow
+	// ownership and must not be treated as a task-state transition.
+	SessionMetaKeyCompletionFollowUp = "completion_follow_up"
 	// SessionMetaKeyWorkflowProfileSwitchStopIntent identifies the transient
 	// coordination record used to suppress the lifecycle event caused by a
 	// parked workflow profile switch.
@@ -284,6 +288,14 @@ const (
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
+
+// IsCompletionFollowUpSession reports whether a session was explicitly
+// reopened only to continue its completed conversation. The marker remains
+// meaningful after the session settles back to WAITING_FOR_INPUT.
+func IsCompletionFollowUpSession(metadata map[string]interface{}) bool {
+	followUp, ok := metadata[SessionMetaKeyCompletionFollowUp].(bool)
+	return ok && followUp
+}
 
 // WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
 // one exact runtime execution. Stamp is compared before the metadata value is
@@ -983,12 +995,11 @@ type OfficeDecisionWaitCursor struct {
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {
-	ID                   string       `json:"id" db:"id"`
-	State                v1.TaskState `json:"state" db:"state"`
-	Title                string       `json:"title" db:"title"`
-	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
-	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
-	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
+	ID             string       `json:"id" db:"id"`
+	State          v1.TaskState `json:"state" db:"state"`
+	Title          string       `json:"title" db:"title"`
+	WorkflowStepID string       `json:"workflow_step_id" db:"workflow_step_id"`
+	UpdatedAt      time.Time    `json:"updated_at" db:"updated_at"`
 }
 
 // HasStartWhenUnblockedIntent reports whether a task's deferred launch intent

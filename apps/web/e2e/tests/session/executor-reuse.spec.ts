@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -48,6 +49,11 @@ test.describe("Executor reuse", () => {
     expect(env!.status).toBe("ready");
     // executor_type should be present (standalone for mock agent)
     expect(env!.executor_type).toBeDefined();
+
+    // Keep cleanup and verification in one attempt so a retry cannot recreate
+    // the worker-scoped seed checkout and mask a cleanup regression.
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+    expect(existsSync(seedData.repositoryPath)).toBe(true);
   });
 
   test("second session reuses same task environment by default", async ({

@@ -13,6 +13,17 @@ Kandev includes short-lived chat, reusable AI helpers, dictation, file and edito
 2. Use a task session for work that needs files, review, or workflow state.
 3. Add utility agents, editors, language servers, or terminals only when their host boundary is acceptable.
 
+## Configure Apprise notifications
+
+To detect Apprise after you install it, open **Settings > Preferences > Notifications** and select
+**Rescan Apprise** under **External Providers**. Kandev checks for the `apprise` executable in the
+environment of the running Kandev backend. When it is found, **Add Apprise Provider** becomes
+available. Rescanning does not save notification drafts or send a notification.
+
+If Kandev does not detect Apprise, check the `PATH` used by the backend process. If you install
+Apprise in a directory already in that `PATH`, rescan. If you install it elsewhere or change `PATH`
+after Kandev starts, restart Kandev so the running backend receives the new environment, then rescan.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.

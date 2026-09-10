@@ -76,6 +76,8 @@ type ChatInputContainerProps = {
    * steering) rather than queued. Defaults to false. */
   supportsSteering?: boolean;
   isStarting: boolean;
+  /** True when startup submission can be persisted to this session's queue. */
+  canQueueWhileStarting?: boolean;
   /** True only while a containerized executor is bootstrapping (Docker
    * prepare, Sprites sandbox spin-up). Distinct from the brief STARTING
    * state every session — including local quick-chat — passes through;
@@ -298,7 +300,7 @@ function useChatInputRecoveryActions(taskId: string | null, sessionId: string | 
 }
 
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
-  // eslint-disable-next-line complexity -- top-level component chooses the stopped or editor surface after shared hook setup.
+  // eslint-disable-next-line complexity, max-lines-per-function -- top-level component chooses the stopped or editor surface after shared hook setup.
   function ChatInputContainer(props, ref) {
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
       props;
@@ -314,6 +316,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       isSending,
       isStarting,
       isPreparingEnvironment: props.isPreparingEnvironment ?? false,
+      canQueueWhileStarting: props.canQueueWhileStarting ?? false,
       isMoving,
       isFailed: p.isFailed,
       needsRecovery: props.needsRecovery ?? false,

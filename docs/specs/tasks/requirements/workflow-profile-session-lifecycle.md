@@ -54,7 +54,9 @@ starts and ends, so repeated stages use the intended context.
   reuse another session for that profile.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.3:** When a source step selects
   **Complete the session**, Kandev shall complete its session during a profile
-  switch. Kandev shall not reuse that completed session later.
+  switch. Kandev shall not automatically reuse that completed session later.
+  Explicit conversation follow-ups follow
+  [task completion](task-completion.md), without changing workflow ownership.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.4:** When a source step selects
   **Park the session**, Kandev shall stop its runtime and keep the session
   nonterminal. The conversation shall remain available for reuse or manual
@@ -96,7 +98,9 @@ starts and ends, so repeated stages use the intended context.
 - Lifecycle settings on transition edges.
 - Reusing a session from a different agent profile.
 - Keeping an inactive agent process or executor backend running.
-- Reviving a terminal `COMPLETED`, `FAILED`, or `CANCELLED` session.
+- Automatic revival of a terminal session. Explicit completed-chat follow-ups
+  belong to [task completion](task-completion.md); existing FAILED/CANCELLED
+  recovery keeps its own rules.
 - Automatically removing parked or historical sessions.
 - Changing Office agent-session ownership or automation thread policies.
 - Moving conditional original-session model settings into this selector.

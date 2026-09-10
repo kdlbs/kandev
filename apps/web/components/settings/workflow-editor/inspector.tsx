@@ -23,7 +23,10 @@ import {
   HelpTip,
   STEP_COLORS,
 } from "@/components/settings/workflow-pipeline-editor-helpers";
-import { useStepActions } from "@/components/settings/workflow-pipeline-editor-step-actions";
+import {
+  CompleteTaskOnEnterToggle,
+  useStepActions,
+} from "@/components/settings/workflow-pipeline-editor-step-actions";
 import { isWorkflowStepValueDirty } from "@/components/settings/workflow-dirty-state";
 import { StepPromptSection } from "@/components/settings/workflow-step-prompt-section";
 
@@ -253,6 +256,8 @@ function AgentTab({
     setLocalPrompt(step.prompt ?? "");
   }, [step.id]);
 
+  const isFinalStep = steps[steps.length - 1]?.id === step.id;
+
   return (
     <div className="space-y-5" data-testid="workflow-agent-tab">
       <WorkflowStepAgentProfileSelector
@@ -266,6 +271,13 @@ function AgentTab({
         savedStep={savedStep}
         readOnly={readOnly}
         onUpdate={onUpdate}
+      />
+      <CompleteTaskOnEnterToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+        isFinalStep={isFinalStep}
       />
       <SessionConfigToggle
         step={step}

@@ -2,13 +2,13 @@ package models
 
 import "strings"
 
-// IsTerminalStep reports whether a workflow step represents finished work by
-// the existing board convention: a final column named Done/Complete/Approved.
+// IsTerminalStep reports whether a workflow step is configured to complete its
+// task and has no successor in the committed workflow order.
 func IsTerminalStep(step, nextStep *WorkflowStep) bool {
 	if step == nil || nextStep != nil {
 		return false
 	}
-	return IsTerminalStepName(step.Name)
+	return step.CompleteTaskOnEnter
 }
 
 // IsTerminalStepName recognizes the existing built-in terminal column names.

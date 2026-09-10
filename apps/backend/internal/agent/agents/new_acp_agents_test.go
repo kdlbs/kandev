@@ -80,8 +80,8 @@ var newACPAgentSpecs = []struct {
 	}},
 	{func() Agent { return NewPiACP() }, acpAgentSpec{
 		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi"},
-		expectedArgv:       []string{"npx", "-y", "pi-acp"},
-		inferenceArgv:      []string{"npx", "-y", "pi-acp"},
+		expectedArgv:       []string{"npx", "--yes", "--prefer-offline", "pi-acp@0.0.33"},
+		inferenceArgv:      []string{"npx", "--yes", "--prefer-offline", "pi-acp@0.0.33"},
 		passthroughArgv:    []string{"pi"},
 		installViaNpm:      true,
 		installScript:      "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",

@@ -213,6 +213,35 @@ export class WorkflowSettingsPage {
     return card.locator(".group.relative").filter({ hasText: stepName });
   }
 
+  completeTaskOnEnterCheckbox(card: Locator, stepId: string): Locator {
+    return card.getByTestId(`${stepId}-complete-task-on-enter-checkbox`);
+  }
+
+  completeTaskOnEnterHelp(card: Locator, stepId: string): Locator {
+    return card.getByTestId(`${stepId}-complete-task-on-enter-help`);
+  }
+
+  async reorderStep(card: Locator, fromName: string, toName: string): Promise<void> {
+    const source = this.stepNodeByName(card, fromName).locator("button").first();
+    const target = this.stepNodeByName(card, toName);
+    const sourceBox = await source.boundingBox();
+    const targetBox = await target.boundingBox();
+    if (!sourceBox || !targetBox) throw new Error(`Cannot drag ${fromName} to ${toName}`);
+    const sourcePoint = {
+      x: sourceBox.x + sourceBox.width / 2,
+      y: sourceBox.y + sourceBox.height / 2,
+    };
+    const targetPoint = {
+      x: targetBox.x + targetBox.width / 2,
+      y: targetBox.y + targetBox.height / 2,
+    };
+    await this.page.mouse.move(sourcePoint.x, sourcePoint.y);
+    await this.page.mouse.down();
+    await this.page.mouse.move(sourcePoint.x + 12, sourcePoint.y, { steps: 2 });
+    await this.page.mouse.move(targetPoint.x, targetPoint.y, { steps: 8 });
+    await this.page.mouse.up();
+  }
+
   /** A replay-cycle diagnostic rendered inside a workflow card or guard dialog. */
   cycleDiagnostic(container: Locator, autoStartStepId: string): Locator {
     return container.getByTestId(`workflow-cycle-diagnostic-${autoStartStepId}`);

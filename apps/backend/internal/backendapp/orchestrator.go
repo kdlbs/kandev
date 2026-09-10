@@ -143,6 +143,10 @@ func provideOrchestrator(
 	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	orchestratorSvc.SetLaunchAttachmentClaimer(taskSvc)
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		orchestratorSvc.SetSessionAttachmentCleaner(taskSvc)
+	}
+	orchestratorSvc.SetSessionAttachmentTransferer(taskSvc)
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})

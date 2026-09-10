@@ -1,8 +1,10 @@
 import type { Task } from "@/components/kanban-card";
 import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import { changeRequestSearchText } from "@/lib/kanban/task-search-index";
 
 type FilterTasksOptions = {
   searchQuery?: string;
+  vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   hiddenStepIds?: Set<string>;
 };
@@ -16,7 +18,8 @@ export function filterTasks(
   const snapshot = snapshots[workflowId];
   if (!snapshot) return [];
   let tasks = snapshot.tasks;
-  const { hiddenStepIds, searchQuery, matchesPluginTaskFilters } = options ?? {};
+  const { hiddenStepIds, searchQuery, vcsSearchTextByTaskId, matchesPluginTaskFilters } =
+    options ?? {};
   if (hiddenStepIds && hiddenStepIds.size > 0) {
     const liveStepIds = new Set(snapshot.steps.map((step) => step.id));
     const effectiveHidden = new Set([...hiddenStepIds].filter((id) => liveStepIds.has(id)));
@@ -30,7 +33,9 @@ export function filterTasks(
     tasks = tasks.filter(
       (task) =>
         task.title.toLowerCase().includes(query) ||
-        (task.description && task.description.toLowerCase().includes(query)),
+        (task.description && task.description.toLowerCase().includes(query)) ||
+        changeRequestSearchText(task).toLowerCase().includes(query) ||
+        (vcsSearchTextByTaskId?.[task.id]?.toLowerCase().includes(query) ?? false),
     );
   }
   if (matchesPluginTaskFilters) {
@@ -41,6 +46,7 @@ export function filterTasks(
 
 type WorkflowTaskProjectionOptions = {
   searchQuery: string;
+  vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   hiddenStepIds?: Set<string>;
 };

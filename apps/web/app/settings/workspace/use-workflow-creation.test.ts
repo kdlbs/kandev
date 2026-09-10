@@ -13,6 +13,7 @@ const template = {
       name: "Template Step",
       position: 0,
       color: "bg-blue-500",
+      complete_task_on_enter: true,
       cancel_triggers_turn_complete: true,
     },
   ],
@@ -119,6 +120,7 @@ describe("useWorkflowCreation", () => {
     expect(result.current.initialStepsByWorkflowId.get(workflow.id)?.[0]).toMatchObject({
       name: "Template Step",
       color: "bg-blue-500",
+      complete_task_on_enter: true,
       cancel_triggers_turn_complete: true,
     });
   });

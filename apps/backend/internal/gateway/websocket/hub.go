@@ -54,6 +54,11 @@ type Hub struct {
 	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
 
+	// clientDisconnectListener releases connection-bound resources after a
+	// client is removed from the hub. It runs asynchronously so durable cleanup
+	// cannot block the hub event loop.
+	clientDisconnectListener func(connectionID string)
+
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
 	sessionMode            *sessionModeTracker
@@ -137,7 +142,9 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
 	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
+	disconnectedIDs := make([]string, 0, len(h.clients))
 	for client := range h.clients {
+		disconnectedIDs = append(disconnectedIDs, client.ID)
 		if client.systemMetricsSubscribed {
 			metricClientIDs = append(metricClientIDs, client.ID)
 			client.systemMetricsSubscribed = false
@@ -146,6 +153,7 @@ func (h *Hub) closeAllClients() {
 		delete(h.clients, client)
 	}
 	tracker := h.metricsInterestTracker
+	listener := h.clientDisconnectListener
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
 	h.runSubscribers = make(map[string]map[*Client]bool)
@@ -156,6 +164,12 @@ func (h *Hub) closeAllClients() {
 	for _, clientID := range metricClientIDs {
 		if tracker != nil {
 			tracker.MetricsUnsubscribe(clientID)
+		}
+	}
+
+	if listener != nil {
+		for _, clientID := range disconnectedIDs {
+			go listener(clientID)
 		}
 	}
 
@@ -205,10 +219,15 @@ func (h *Hub) removeClient(client *Client) {
 		metricClientID = client.ID
 		tracker = h.metricsInterestTracker
 	}
+	listener := h.clientDisconnectListener
 	h.mu.Unlock()
 
 	if tracker != nil && metricClientID != "" {
 		tracker.MetricsUnsubscribe(metricClientID)
+	}
+
+	if listener != nil {
+		go listener(client.ID)
 	}
 
 	for _, sessionID := range dedupStrings(affectedSessions) {
@@ -216,6 +235,14 @@ func (h *Hub) removeClient(client *Client) {
 	}
 
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+// SetClientDisconnectListener registers a callback for connection teardown.
+// The callback runs once for each client that was present in the hub.
+func (h *Hub) SetClientDisconnectListener(listener func(connectionID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clientDisconnectListener = listener
 }
 
 func (h *Hub) SetSystemMetricsInterestTracker(tracker SystemMetricsInterestTracker) {

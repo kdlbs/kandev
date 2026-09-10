@@ -8,6 +8,7 @@ import { listBudgets, deleteBudget } from "@/lib/api/domains/office-api";
 import type { BudgetPolicy } from "@/lib/state/slices/office/types";
 import { BudgetPolicyCard } from "./budget-policy-card";
 import { CreateBudgetForm } from "./create-budget-form";
+import { DefaultCeilingCard } from "./default-ceiling-card";
 import { useTranslation } from "react-i18next";
 // Module-level `t` for the error-only strings inside the fetching effect below:
 // putting the hook's `t` in that dep array would re-issue the request on every
@@ -62,6 +63,8 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
           {t("office:addPolicy")}
         </Button>
       </div>
+
+      <DefaultCeilingCard workspaceId={workspaceId} />
 
       {showCreate && (
         <CreateBudgetForm

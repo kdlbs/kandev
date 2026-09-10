@@ -34,7 +34,8 @@ Antigravity has no automated install: Google distributes `agy_acp_server.par` (`
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use `npx -y pi-acp`.
+- Structured ACP sessions and one-shot inference use
+  `npx --yes --prefer-offline pi-acp@<effective-version>`.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -52,8 +53,8 @@ The status shown on this page is authoritative for the current host. A CLI that 
 
 ### Update a managed agent runtime
 
-The update icon is available on managed Claude, Codex, OpenCode, Copilot, and
-Gemini agent cards. It updates the runtime on the Kandev host.
+The update icon is available on managed Claude, Codex, OpenCode, Copilot,
+Gemini, and Pi agent cards. It updates the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -169,6 +170,14 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
+
+Agents can inspect and update declared profile settings through the compact
+`search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,
+and `update_settings_kandev` tools. Use the separate
+`agent_profile_mcp` target for the profile MCP document. The settings tools
+preserve profile validation and save replacement lists atomically. They never
+return environment values or MCP credentials; use references or the existing
+interactive credential flow when a secret is required.
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 

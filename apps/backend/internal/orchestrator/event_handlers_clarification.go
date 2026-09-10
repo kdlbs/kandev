@@ -599,6 +599,9 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 	if err != nil {
 		return fmt.Errorf("queue clarification resume prompt: %w", err)
 	}
+	// Queue insertion is observable even when a concurrent drain prevents the
+	// targeted take, so publish before attempting dispatch.
+	s.publishQueueStatusEvent(ctx, data.SessionID)
 	dispatched, err := s.takeAndDispatchEntryLocked(ctx, identity, queued.ID)
 	if err != nil {
 		return fmt.Errorf("dispatch clarification resume prompt: %w", err)

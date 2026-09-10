@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 
@@ -384,6 +385,47 @@ func (u *sshFileUploader) WriteFile(_ context.Context, path string, data []byte,
 		return fmt.Errorf("sftp: chmod %s: %w", path, err)
 	}
 	return nil
+}
+
+func (u *sshFileUploader) RemoveAll(ctx context.Context, target string) error {
+	c, err := newSFTPClientContext(ctx, u.client)
+	if err != nil {
+		return fmt.Errorf("sftp: new client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+	if err := removeSFTPPath(ctx, c, target); err != nil && !isSFTPNotExist(err) && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sftp: remove %s: %w", target, err)
+	}
+	return nil
+}
+
+func removeSFTPPath(ctx context.Context, client *sftp.Client, target string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := client.Lstat(target)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return client.Remove(target)
+	}
+	if !info.IsDir() {
+		return client.Remove(target)
+	}
+	entries, err := client.ReadDirContext(ctx, target)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := removeSFTPPath(ctx, client, path.Join(target, entry.Name())); err != nil {
+			if isSFTPNotExist(err) || errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+	}
+	return client.RemoveDirectory(target)
 }
 
 // sshMkdirAll mimics `mkdir -p` over SFTP. Walks every prefix of dir and

@@ -42,6 +42,16 @@ func TestMapKanbanStepStateIncludesProfileSessionPolicies(t *testing.T) {
 	}
 }
 
+func TestMapKanbanStepStateIncludesAutoAdvanceRequiresSignal(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:                        "step-signal-gated",
+		AutoAdvanceRequiresSignal: true,
+	})
+	if step["auto_advance_requires_signal"] != true {
+		t.Fatalf("auto_advance_requires_signal = %#v, want true", step["auto_advance_requires_signal"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
 // 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
 // auto_start_failed, so a task whose auto-start already failed rendered with
