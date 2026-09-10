@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -226,5 +227,102 @@ func TestExecuteTaskResourceCleanupJobRecordsReapRootDespiteCancellationDuringCl
 	if !found {
 		t.Fatalf("expected the removed directory %q to be recorded as a reap root despite the "+
 			"job's context being cancelled during cleanup; got roots=%+v", wantRoot, snapshot.OrphanReapRoots)
+	}
+}
+
+// cancellingWorktreeCleanupParent is cancellingWorktreeCleanup's sibling for
+// exercising the full processTaskResourceCleanupJob entry point: it cancels
+// the PARENT context passed into that function (registerTaskResourceCleanupRun
+// derives runCtx from it via context.WithCancel), the same way
+// CancelArchiveTaskResourceCleanup -> cancelAndJoinArchiveTaskResourceCleanupRuns
+// -> run.cancel() observes it from inside a running attempt.
+type cancellingWorktreeCleanupParent struct {
+	realPath string
+	cancel   context.CancelFunc
+}
+
+func (c *cancellingWorktreeCleanupParent) OnTaskDeleted(context.Context, string) error {
+	return nil
+}
+func (c *cancellingWorktreeCleanupParent) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	return nil, nil
+}
+func (c *cancellingWorktreeCleanupParent) CleanupWorktrees(_ context.Context, _ []*worktree.Worktree) error {
+	if err := os.RemoveAll(c.realPath); err != nil {
+		return err
+	}
+	c.cancel()
+	return nil
+}
+
+// AC-TASKS-ORPHAN-REAP-001.1 + AC-TASKS-ORPHAN-REAP-006.3: a reap root
+// recorded in memory during a cancelled attempt must actually reach durable
+// storage, not just the in-memory snapshot struct
+// TestExecuteTaskResourceCleanupJobRecordsReapRootDespiteCancellationDuringCleanup
+// checks. processTaskResourceCleanupJob is the only path that can persist it
+// on a cancelled attempt (persistOrphanReapProgressBestEffort), and it must
+// not silently drop the write because the context it was handed is the very
+// one that was just cancelled.
+func TestProcessTaskResourceCleanupJobPersistsReapRootDespiteCancellationDuringCleanup(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.StopTaskResourceCleanupWorker()
+	const taskID = "task-cancel-full-run"
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: taskID, WorkspaceID: "ws-orphan-reap", Title: taskID,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	wtPath := filepath.Join(t.TempDir(), "wt-cancel-full-run")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree dir: %v", err)
+	}
+	wantRoot := resolveOrphanReapPathBestEffort(wtPath)
+
+	svc.orphanReapHostSnapshotter = poisonOrphanReapHostSnapshotter{t: t}
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	svc.SetWorktreeCleanup(&cancellingWorktreeCleanupParent{realPath: wtPath, cancel: cancelParent})
+
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		Worktrees: []*worktree.Worktree{{ID: "wt-cancel-full-run", TaskID: taskID, Path: wtPath}},
+	})
+	if err != nil {
+		t.Fatalf("encode snapshot: %v", err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-cancel-full-run", OperationID: "delete:job-cancel-full-run",
+		TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerDelete,
+		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+		t.Fatalf("create cleanup job: %v", err)
+	}
+
+	if err := svc.processTaskResourceCleanupJob(parentCtx, job.ID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("processTaskResourceCleanupJob err = %v, want context cancellation", err)
+	}
+	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected the worktree directory to be really removed, got statErr=%v", statErr)
+	}
+
+	var encodedSnapshot string
+	if err := repo.DB().QueryRowContext(context.Background(), `
+		SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id = ?
+	`, job.ID).Scan(&encodedSnapshot); err != nil {
+		t.Fatalf("load persisted cleanup snapshot: %v", err)
+	}
+	var persisted taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(encodedSnapshot), &persisted); err != nil {
+		t.Fatalf("decode persisted cleanup snapshot: %v", err)
+	}
+	found := false
+	for _, root := range persisted.OrphanReapRoots {
+		if root == wantRoot {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the removed directory %q to survive as a persisted reap root despite "+
+			"cancellation during the full job run; persisted roots=%+v", wantRoot, persisted.OrphanReapRoots)
 	}
 }
