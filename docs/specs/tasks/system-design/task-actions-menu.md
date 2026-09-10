@@ -86,9 +86,10 @@ menu that opened it and is not nested inside a portal that unmounts on select.
 
 - *Identifier-only*: Archive, Delete. Available whenever a task identifier is
   known.
-- *Board-row*: Edit, Move to, Send to workflow, Link, Detach from parent. Each
-  needs fields carried only by the board row (workflow membership, step,
-  repositories, parent task id), and is omitted while that row is unresolved.
+- *Board-row*: Edit, Priority, Move to, Send to workflow, Link, Detach from
+  parent. Each needs fields carried by the board row (priority, workflow
+  membership, step, repositories, or parent task id), and is omitted while
+  that row is unresolved.
 
 The tiers describe availability, not precedence. An archived subject is filtered
 by the archived rule first, which is why Archive -- an identifier-only entry --
@@ -116,6 +117,12 @@ its own invalidation, and its own tests, to buy nothing a user can see.
 
 **Ordering.** The entry order is fixed by the shared builder, so parity is
 structural rather than asserted per surface.
+
+For a normal resolved row, the top-level order is Edit, Priority, Move to, Send
+to workflow, plugin primary actions, Link, Archive, Detach from parent, a
+separator, and Delete. The Priority submenu uses the row's current priority and
+the same update hook as the card. If the card builder omits an entry because its
+callback is unavailable, the new surface omits that entry too.
 
 Step ordering is ascending `position`, tie-broken by ascending step `id`. That
 rule is already implemented, once, by `sortWorkflowStepsByPosition`

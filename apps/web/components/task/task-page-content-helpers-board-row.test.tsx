@@ -64,6 +64,7 @@ describe("useTaskActionsMenuBoardRow (AC-TASKS-TASK-ACTIONS-MENU-002.5)", () => 
         title: "Fix the sidebar (live)",
         workflowStepId: "step-1",
         parentTaskId: "task-parent",
+        priority: "medium",
       }),
     );
   });

@@ -278,6 +278,7 @@ function buildPullRequestTargetsByRepository(
  */
 export function useTaskActionsMenuBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
   const taskId = task?.id ?? null;
+  const taskPriority = task?.priority;
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   return useMemo(() => {
@@ -290,13 +291,14 @@ export function useTaskActionsMenuBoardRow(task: Task | null): TaskActionsMenuBo
       description: boardTask.description,
       workflowStepId: boardTask.workflowStepId,
       state: boardTask.state,
+      priority: boardTask.priority ?? taskPriority,
       repositoryId: boardTask.repositoryId,
       repositories: boardTask.repositories,
       parentTaskId: boardTask.parentTaskId,
       primaryExecutorType: boardTask.primaryExecutorType,
       workspaceMode: boardTask.workspaceMode,
     };
-  }, [taskId, snapshots, kanbanTasks]);
+  }, [kanbanTasks, snapshots, taskId, taskPriority]);
 }
 
 export function resolveTaskPullRequestProps(

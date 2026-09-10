@@ -29,6 +29,8 @@ const baseArgs = {
   onDelete: vi.fn(),
   onDetach: vi.fn(),
   parentTaskId: "parent-1",
+  currentPriority: "high",
+  onSelectPriority: vi.fn(),
   onMoveToStep: vi.fn(),
   onSendToWorkflow: vi.fn(),
   // A real card always wires at least one link handler; omitting it here
@@ -58,6 +60,7 @@ describe("buildTaskActionsMenuEntries — normal tier", () => {
     const entries = buildTaskActionsMenuEntries("normal", baseArgs);
     expect(itemKeys(entries)).toEqual([
       "edit",
+      "priority",
       "move-to",
       "send-to-workflow",
       "link",

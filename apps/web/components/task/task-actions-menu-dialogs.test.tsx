@@ -61,6 +61,7 @@ const BOARD_ROW: TaskActionsMenuBoardRow = {
   id: TASK_ID,
   title: "Fix the sidebar",
   workflowStepId: "step-1",
+  priority: "high",
 };
 
 function Harness({ boardRow }: { boardRow: TaskActionsMenuBoardRow | null }) {
@@ -97,6 +98,9 @@ function Harness({ boardRow }: { boardRow: TaskActionsMenuBoardRow | null }) {
         boardRow={boardRow}
         menu={menu}
       />
+      <output data-testid="menu-entry-keys">
+        {menu.entries.map((entry) => entry.key).join(",")}
+      </output>
     </>
   );
 }
@@ -160,6 +164,14 @@ describe("TaskActionsMenuDialogs — Edit dialog stays mounted through a board-r
     fireEvent.click(screen.getByTestId("open-edit"));
 
     expect(capturedEditDialogProps.at(-1)?.focusReturnRef).toBeTruthy();
+  });
+});
+
+describe("TaskActionsMenuDialogs — card action parity", () => {
+  it("includes Priority for a resolved task", () => {
+    renderHarness(BOARD_ROW);
+
+    expect(screen.getByTestId("menu-entry-keys").textContent?.split(",")).toContain("priority");
   });
 });
 

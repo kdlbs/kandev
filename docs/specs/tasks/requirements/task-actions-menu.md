@@ -159,11 +159,12 @@ in the same order, with the same labels, wherever the menu is opened.
   AC-TASKS-TASK-ACTIONS-MENU-004.1b and so may differ from the card's for the
   duration of a request.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.2:** The order named in
-  AC-TASKS-TASK-ACTIONS-MENU-002.1 is: Edit, Move to, Send to workflow, plugin
-  primary actions, Link, Archive, Detach from parent, a separator, Delete. The
-  system shall omit any of Move to, Send to workflow, Link, and Detach from
-  parent whose availability condition in the card actions menu is unmet, and
-  shall not reorder the entries that remain.
+  AC-TASKS-TASK-ACTIONS-MENU-002.1 is: Edit, Priority, Move to, Send to
+  workflow, plugin primary actions, Link, Archive, Detach from parent, a
+  separator, Delete. The system shall omit Priority when the card actions menu
+  omits it. It shall omit any of Move to, Send to workflow, Link, and Detach
+  from parent whose availability condition in the card actions menu is unmet,
+  and shall not reorder the entries that remain.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.2a:** The Edit entry on these two surfaces
   shall always be the flat Edit item, never the card's submenu form: the system
   shall not present plugin task-menu actions registered with group `edit` on
@@ -172,10 +173,7 @@ in the same order, with the same labels, wherever the menu is opened.
   AC-TASKS-TASK-ACTIONS-MENU-002.2.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.3:** Within the Move to and Send to workflow
   submenus the system shall order steps by ascending `position`, breaking a tie
-  by ascending step `id`. This is not a new rule: `sortWorkflowStepsByPosition`
-  already implements it (`position` ascending, then `id.localeCompare`) and the
-  card's Move to submenu already renders through it. The new surfaces adopt that
-  helper rather than add a second ordering.
+  by ascending step `id`. The new surfaces shall use the same order as the card.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.3a:** Within the Send to workflow submenu the
   system shall order workflows in the order the workflow collection holds them,
   which is the order the card actions menu uses, and shall omit workflows marked

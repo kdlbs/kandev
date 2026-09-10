@@ -36,6 +36,8 @@ type TaskArchiveConfirmDialogProps = {
    * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
    * default restore-to-previously-focused-element behavior. */
   focusReturnRef?: RefObject<HTMLElement | null>;
+  /** Restore focus after confirmation when the task surface remains mounted. */
+  restoreFocusOnConfirm?: boolean;
   taskTitle?: string;
   isBulkOperation?: boolean;
   count?: number;
@@ -54,6 +56,10 @@ type TaskArchiveConfirmDialogProps = {
 };
 
 type ArchiveOpenMode = "pending" | "confirm" | "bypass";
+
+function shouldRestoreFocus(confirmed: boolean, restoreFocusOnConfirm?: boolean): boolean {
+  return !confirmed || restoreFocusOnConfirm === true;
+}
 
 function useArchiveConfirmationMode(
   open: boolean,
@@ -111,6 +117,7 @@ export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
   focusReturnRef,
+  restoreFocusOnConfirm,
   taskTitle,
   isBulkOperation,
   count,
@@ -140,7 +147,7 @@ export function TaskArchiveConfirmDialog({
   const [cascade, setCascade] = useState(false);
   const confirmedRef = useRef(false);
   const restoreFocus = () => {
-    if (confirmedRef.current) return;
+    if (!shouldRestoreFocus(confirmedRef.current, restoreFocusOnConfirm)) return;
     const focusReturnTarget = focusReturnRef?.current;
     if (focusReturnTarget?.isConnected) focusReturnTarget.focus();
   };

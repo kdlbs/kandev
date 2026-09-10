@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { StateProvider } from "@/components/state-provider";
 
 const getSubtaskCountMock = vi.hoisted(() => vi.fn());
@@ -205,5 +205,54 @@ describe("TaskArchiveConfirmation cleanup copy", () => {
       screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).querySelectorAll('[role="listitem"]'),
     ).toHaveLength(2);
     expect(screen.getByTestId(CLEANUP_NOTES_TEST_ID).tagName).toBe("SPAN");
+  });
+});
+
+describe("TaskArchiveConfirmation focus return", () => {
+  it("returns focus to the trigger when a confirmed archive fails", async () => {
+    pointerState.isFinePointer = false;
+    getSubtaskCountMock.mockResolvedValue({ count: 0 });
+    const onConfirm = vi.fn(() => {
+      const failure = Promise.reject(new Error("archive failed"));
+      void failure.catch(() => undefined);
+      return failure;
+    });
+
+    function FocusHarness() {
+      const [open, setOpen] = useState(true);
+      const anchorRef = useRef<HTMLButtonElement>(null);
+      return (
+        <>
+          <button ref={anchorRef} type="button" data-testid="archive-focus-anchor">
+            Archive source
+          </button>
+          <TaskArchiveConfirmation
+            open={open}
+            onOpenChange={setOpen}
+            anchorRef={anchorRef}
+            focusReturnRef={anchorRef}
+            restoreFocusOnConfirm
+            taskId="task-1"
+            taskTitle="Task One"
+            executorType="worktree"
+            forceDialog
+            onConfirm={onConfirm}
+          />
+        </>
+      );
+    }
+
+    render(
+      <StateProvider>
+        <FocusHarness />
+      </StateProvider>,
+    );
+
+    fireEvent.click(await screen.findByTestId(CONFIRM_TEST_ID));
+
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId("archive-focus-anchor")),
+    );
   });
 });

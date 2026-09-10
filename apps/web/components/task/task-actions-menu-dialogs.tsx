@@ -140,7 +140,6 @@ export function TaskActionsMenuDialogs({
   const editBoardRow = useLastResolvedBoardRow(taskId, boardRow);
   if (!taskId) return null;
   const linkDialogTask = buildLinkDialogTask(taskId, taskTitle, boardRow);
-  const executorType = boardRow?.primaryExecutorType ?? subjectExecutorType;
 
   return (
     <>
@@ -159,9 +158,10 @@ export function TaskActionsMenuDialogs({
         open={menu.showArchiveConfirm}
         anchorRef={menu.triggerRef}
         focusReturnRef={menu.triggerRef}
+        restoreFocusOnConfirm
         taskTitle={taskTitle}
         taskId={taskId}
-        executorType={executorType}
+        executorType={boardRow?.primaryExecutorType ?? subjectExecutorType}
         isArchiving={isArchiving}
         onOpenChange={menu.setShowArchiveConfirm}
         onConfirm={(values) => menu.onConfirmArchive(values)}
@@ -171,7 +171,7 @@ export function TaskActionsMenuDialogs({
         onOpenChange={menu.setShowDeleteConfirm}
         taskTitle={taskTitle}
         taskId={taskId}
-        executorType={executorType}
+        executorType={boardRow?.primaryExecutorType ?? subjectExecutorType}
         isDeleting={isDeleting}
         onConfirm={(opts) => menu.onConfirmDelete(opts)}
         focusReturnRef={menu.triggerRef}
@@ -180,6 +180,7 @@ export function TaskActionsMenuDialogs({
         open={menu.showDetachConfirm}
         anchorRef={menu.triggerRef}
         focusReturnRef={menu.triggerRef}
+        restoreFocusOnConfirm
         taskTitle={taskTitle}
         sharesParentWorkspace={boardRow?.workspaceMode === "inherit_parent"}
         onOpenChange={menu.setShowDetachConfirm}

@@ -11,11 +11,12 @@ import {
   useTaskMenuEditDialogState,
 } from "@/hooks/use-task-menu-dialog-state";
 import { useDetachTask } from "@/hooks/use-detach-task";
+import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useKanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
-import type { TaskState } from "@/lib/types/http";
+import type { TaskPriority, TaskState } from "@/lib/types/http";
 import { buildTaskActionsMenuEntries } from "@/lib/kanban/task-actions-menu-entries";
 
 export type TaskActionsMenuBoardRow = {
@@ -24,6 +25,7 @@ export type TaskActionsMenuBoardRow = {
   description?: string;
   workflowStepId?: string | null;
   state?: TaskState;
+  priority?: TaskPriority;
   repositoryId?: string;
   repositories?: Array<{
     id: string;
@@ -86,7 +88,19 @@ type ComputeEntriesArgs = {
   onMoveToStep: (stepId: string) => void;
   onSendToWorkflow: (workflowId: string, stepId: string) => void;
   pluginMenuContext: PluginTaskMenuContext;
+  onSelectPriority: (priority: TaskPriority) => void;
 };
+
+function useTaskPrioritySelector(taskId: string | null) {
+  const updateTaskPriority = useUpdateTaskPriority();
+  return useCallback(
+    (priority: TaskPriority) => {
+      if (!taskId) return;
+      void updateTaskPriority(taskId, priority);
+    },
+    [taskId, updateTaskPriority],
+  );
+}
 
 function computeTaskActionsMenuEntries(args: ComputeEntriesArgs) {
   if (args.taskId == null) return [];
@@ -101,6 +115,8 @@ function computeTaskActionsMenuEntries(args: ComputeEntriesArgs) {
     isArchiving: args.isArchiving,
     isDetaching: args.isDetaching,
     parentTaskId: boardRow?.parentTaskId,
+    currentPriority: boardRow?.priority,
+    onSelectPriority: args.onSelectPriority,
     onEdit: boardRow ? () => editDialog.setShowEditDialog(true) : undefined,
     onArchive: args.requestArchiveConfirmation,
     onDelete: () => dialogs.setShowDeleteConfirm(true),
@@ -201,6 +217,7 @@ export function useTaskActionsMenu({
   const dialogs = useTaskMenuDialogState();
   const editDialog = useTaskMenuEditDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
+  const onSelectPriority = useTaskPrioritySelector(taskId);
   const isDetaching = taskId != null && detachingTaskId === taskId;
   const externalLinkAvailability = useKanbanExternalLinkAvailability(workspaceId);
   const pluginLinkActions = useTaskPluginLinkActions(taskId ?? "", boardRow?.repositories ?? []);
@@ -276,6 +293,7 @@ export function useTaskActionsMenu({
     onMoveToStep,
     onSendToWorkflow,
     pluginMenuContext,
+    onSelectPriority,
   });
 
   // Strip each state slice's own `closeAll` before spreading: `closeDialogs`

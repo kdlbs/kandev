@@ -42,6 +42,7 @@ function buildBoardRow(task: Task | null): TaskActionsMenuBoardRow | null {
     description: task.description,
     workflowStepId: task.workflowStepId,
     state: task.state,
+    priority: task.priority,
     repositoryId: task.repositoryId,
     repositories: task.repositories,
     parentTaskId: task.parentTaskId,

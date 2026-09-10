@@ -92,17 +92,9 @@ a stuck menu, or a silent failure.
   (AC-TASKS-TASK-ACTIONS-MENU-004.4).
 - **AC-TASKS-TASK-ACTIONS-MENU-004.3b:** Detach from parent is idempotent rather
   than one-shot, and the system shall not treat a concurrent or repeated detach
-  of one task as a conflict. Two existing behaviours make it so, and both are
-  frozen by AC-TASKS-TASK-ACTIONS-MENU-002.10 and
-  AC-TASKS-TASK-ACTIONS-MENU-003.11 rather than introduced here: the client
-  request layer coalesces concurrent detach requests bearing one task identifier
-  into a single shared request, so a second caller joins the first instead of
-  issuing its own, and the detach endpoint answers a detach of an
-  already-parentless task with success and no task-row update. The system shall
-  therefore surface no failure feedback for a detach that finds the task already
-  detached, shall leave that task parentless, and shall add neither a conflict
-  contract nor a second detach request path. Failure feedback for a detach is
-  raised only when the request itself fails, per
+  of one task as a conflict. A task that is already parentless shall remain
+  parentless and shall produce no failure feedback. Failure feedback for a
+  detach is raised only when the detach operation fails, per
   AC-TASKS-TASK-ACTIONS-MENU-004.4.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.4:** When an archive, delete, move, detach,
   or link request started from either surface fails, the system shall surface
@@ -110,31 +102,11 @@ a stuck menu, or a silent failure.
   last confirmed state, and shall keep the surface open on that task.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.4a:** AC-TASKS-TASK-ACTIONS-MENU-004.5 takes
   precedence over AC-TASKS-TASK-ACTIONS-MENU-004.4 whenever both apply. When a
-  request fails *because the subject task was archived or deleted by another
-  actor*, which is the losing side of the concurrency
-  AC-TASKS-TASK-ACTIONS-MENU-004.3 describes, the subject no longer exists, so
-  the surface shall apply its existing missing-task behavior under
-  AC-TASKS-TASK-ACTIONS-MENU-004.5 rather than stay open on a task that is gone.
-  AC-TASKS-TASK-ACTIONS-MENU-004.4's keep-the-surface-open requirement governs
-  every other failure, meaning those that leave the subject in place. The
-  failure feedback required by AC-TASKS-TASK-ACTIONS-MENU-004.4 is surfaced in
-  both cases: it is raised at application level and does not depend on the
-  originating surface still being open. The system shall not derive that cause
-  by inspecting the failed request's response. The condition is observed through
-  task state: the subject's removal reaches the client as a store update, which
-  is the same signal AC-TASKS-TASK-ACTIONS-MENU-004.5 already names, and it is
-  that observation, not the response status, that triggers the missing-task
-  behavior. This is a decision, not an accident of implementation. The two
-  actions do not report a lost race comparably today, a delete of a removed task
-  answering not found while an archive of an already-archived task answers with
-  an undifferentiated server error, so a response-derived rule would be
-  unimplementable for archive without a backend change, and
-  AC-TASKS-TASK-ACTIONS-MENU-003.11 admits none. Where the failure response
-  arrives before the store update, the surface shall stay open until that update
-  lands and shall then close; the order of those two events changes when the
-  surface closes, never whether it closes. Where no such observation arrives at
-  all, AC-TASKS-TASK-ACTIONS-MENU-004.4's keep-the-surface-open behavior stands
-  with the failure feedback shown, which is the safe default.
+  request fails because another actor archived or deleted the subject task,
+  the surface shall apply its existing missing-task behavior instead of staying
+  open on a task that is gone. The system shall still surface the existing
+  failure feedback for the request. For every other failure, the surface shall
+  stay open on the task and show that feedback.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.5:** When a task disappears from beneath a
   surface for a reason other than the user's own action, such as another client
   archiving it, the system shall apply that surface's existing missing-task
