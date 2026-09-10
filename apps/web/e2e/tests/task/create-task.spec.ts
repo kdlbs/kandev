@@ -260,11 +260,12 @@ test.describe("Task creation", () => {
         launchStepInfoBox.x + launchStepInfoBox.width - 1,
       );
       await launchStepInfo.hover();
-      await expect(
-        testPage.getByRole("tooltip", {
-          name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
-        }),
-      ).toBeVisible();
+      const launchStepTooltip = testPage.getByRole("tooltip", {
+        name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+      });
+      await expect(launchStepTooltip).toBeVisible();
+      await testPage.mouse.move(0, 0);
+      await expect(launchStepTooltip).toBeHidden();
 
       await dialog.getByTestId("task-title-input").fill("Preview the launch prompt");
       const description = "Review the launch preview";
