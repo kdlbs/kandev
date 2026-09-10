@@ -21,8 +21,9 @@ system_design:
 ## Summary
 
 Carry the existing signal-gated workflow-step flag into task UI state and use it
-to distinguish a truly automatic turn-complete move from a signal-gated move.
-Prove the composer action stays available after the gated agent becomes idle.
+to distinguish a truly automatic `move_to_next` transition from a signal-gated
+one. Prove the adjacent-step composer action stays available after the gated
+agent becomes idle while unsupported gated destinations remain hidden.
 
 ## Inputs
 
@@ -36,26 +37,30 @@ Prove the composer action stays available after the gated agent becomes idle.
 
 ## TDD sequence
 
-1. **RED:** Add hook cases showing that a gated `on_turn_complete` move should
-   expose `proceedStepName` while the equivalent ungated move stays hidden.
+1. **RED:** Add hook cases showing that a gated `on_turn_complete` `move_to_next`
+   action should expose `proceedStepName` while the equivalent ungated move,
+   gated `move_to_previous`, and gated `move_to_step` stay hidden. Add coverage
+   that an omitted flag keeps the legacy ungated behavior.
 2. **RED:** Add mapping assertions for initial hydration, multi-workflow
    snapshot refresh, mobile workspace switching, and workflow-step WebSocket
    updates. Confirm they fail because the flag is absent from `KanbanState` or
    dropped by each mapper.
 3. **RED:** Add the focused Playwright scenario and confirm the next-step
    locator remains hidden after the mock agent returns idle.
-4. **GREEN:** Add the optional step field, preserve it through each mapper, and
-   narrow the automatic-transition suppression condition in
-   `useNextWorkflowStep`.
+4. **GREEN:** Add the optional step field, preserve it through each mapper and
+   the Go boot-state mapper, and narrow the automatic-transition suppression
+   condition in `useNextWorkflowStep`.
 5. **REFACTOR:** Keep the policy in the shared hook. Do not duplicate it in
    standard chat, passthrough, or mobile components.
 6. Run the focused unit, type, lint, desktop E2E, and mobile parity commands.
 
 ## Acceptance
 
-- An idle signal-gated step with a configured turn-complete move exposes the
-  existing next-step composer action.
+- An idle signal-gated step with a configured `move_to_next` action exposes the
+  existing adjacent-next-step composer action.
 - The equivalent ungated step does not expose a redundant action.
+- Signal-gated `move_to_previous` and `move_to_step` actions remain hidden
+  because the existing composer action submits the adjacent next step.
 - A busy agent still hides the action until it becomes idle.
 - Initial load, cached snapshot refresh, mobile workspace switching, and live
   workflow-step updates preserve identical behavior.
@@ -81,11 +86,15 @@ Prove the composer action stays available after the gated agent becomes idle.
 - `apps/web/hooks/domains/kanban/use-plan-actions.test.ts`
 - `apps/web/e2e/helpers/api-client.ts`
 - `apps/web/e2e/tests/workflow/workflow-step-proceed.spec.ts`
+- `apps/backend/internal/backendapp/boot_state_routes.go`
+- `apps/backend/internal/backendapp/boot_state_routes_test.go`
 
 ## Verification
 
 ```bash
-cd apps/web
+cd apps/backend
+go test ./internal/backendapp
+cd ../web
 pnpm exec vitest run hooks/domains/kanban/use-plan-actions.test.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.test.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts
 pnpm run typecheck
 pnpm exec eslint hooks/domains/kanban/use-plan-actions.ts hooks/domains/kanban/use-plan-actions.test.ts lib/state/slices/kanban/types.ts lib/ssr/mapper.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts e2e/helpers/api-client.ts e2e/tests/workflow/workflow-step-proceed.spec.ts
@@ -134,3 +143,8 @@ plan work-order checkbox to `completed` only after all acceptance criteria pass.
 - Mobile task-drawer parity regression passed: 1 test.
 - Specification tests passed: 30 tests. Full specification lint passed. Diff
   check passed.
+- PR fixup remediation: the shared policy now exposes only gated
+  `move_to_next`; gated `move_to_previous` and `move_to_step` remain hidden,
+  and omitted flags remain ungated. The Go boot-state mapper now preserves the
+  field for direct task-page hydration. The browser regression waits for the
+  task API to report the target step before asserting the UI.

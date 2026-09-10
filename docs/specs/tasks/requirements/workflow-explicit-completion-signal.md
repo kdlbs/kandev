@@ -33,12 +33,16 @@ when the agent did not emit its completion signal.
 #### Acceptance criteria
 
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.1:** When an idle task's
-  current step declares an `on_turn_complete` move and
+  current step declares an `on_turn_complete` `move_to_next` action and
   `auto_advance_requires_signal=true`, task composer surfaces that normally
-  provide the next-step action shall show the configured next step.
+  provide the adjacent-next-step action shall show the configured next step.
+  This does not extend to `move_to_previous` or `move_to_step`, because the
+  existing composer action submits the adjacent next step and cannot represent
+  either configured destination safely.
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.2:** When a step declares
-  the same `on_turn_complete` move without requiring a completion signal, task
-  composer surfaces shall continue to suppress the redundant next-step action.
+  the same `on_turn_complete` `move_to_next` action without requiring a
+  completion signal, task composer surfaces shall continue to suppress the
+  redundant next-step action.
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.3:** While the task's agent
   is busy, task composer surfaces shall hide the next-step action and shall
   evaluate its visibility again when the agent becomes idle.
@@ -62,9 +66,12 @@ Signal-gated Kanban and Office workflows need a reliable distinction between an 
 - Creating or loading an ACP session supplies the local Kandev MCP server. After a transient MCP reconnect, the client can list and call `step_complete_kandev` again without a user message or process restart.
 - Kandev does not pin the Claude ACP bridge version as part of this feature. Bridge selection retains the existing unversioned package behavior; diagnostics continue to report the version returned during ACP initialization.
 - Existing idempotency, clarification barriers, and re-open semantics remain unchanged. ADR 0015's planned manual "Mark complete & advance" fallback is not currently implemented and is outside this reliability fix.
-- The ordinary next-step action remains available after an idle turn on a
-  signal-gated step. It uses the existing manual task-move path and does not
-  create a `manual_fallback` completion signal.
+- The ordinary adjacent-next-step action remains available after an idle turn
+  on a signal-gated step whose `on_turn_complete` action is `move_to_next`. It
+  uses the existing manual task-move path and does not create a
+  `manual_fallback` completion signal. Signal-gated `move_to_previous` and
+  `move_to_step` actions remain outside this visibility exception because the
+  existing composer action always submits the adjacent next step.
 - Explicit user-cancel completion is owned by the [Cancelled Turn Completion](workflow-cancelled-turn-completion.md) spec. When a step opts into that policy, the user's cancel action is a human completion decision and may run `on_turn_complete` without an agent-emitted signal; internal cancellation paths remain non-completing.
 
 ## API Surface
@@ -115,16 +122,20 @@ The pending completion signal continues to use `TaskSession.Metadata` as specifi
 - **GIVEN** a signal-gated Office workflow step, **WHEN** its first-turn context is generated, **THEN** the context instructs the agent to call `step_complete_kandev` as the final action.
 - **GIVEN** a task-mode client has connected to Kandev MCP, **WHEN** its MCP connection drops and reconnects, **THEN** the client can list and call `step_complete_kandev` without another user message.
 - **GIVEN** a signal-gated workflow step, **WHEN** the agent finishes without calling the tool, **THEN** the task remains on the current step and no automatic transition runs.
-- **GIVEN** a signal-gated workflow step with a configured next-step move,
+- **GIVEN** a signal-gated workflow step with a configured `move_to_next` move,
   **WHEN** its agent becomes idle without calling the completion tool, **THEN**
   the normal next-step action is visible in task composer surfaces that provide
   that action.
-- **GIVEN** an ungated workflow step with the same configured next-step move,
+- **GIVEN** an ungated workflow step with the same configured `move_to_next` move,
   **WHEN** its composer is rendered, **THEN** the redundant next-step action is
   not visible because the turn-complete transition can advance automatically.
-- **GIVEN** a signal-gated workflow step with a configured next-step move,
+- **GIVEN** a signal-gated workflow step with a configured `move_to_next` move,
   **WHEN** its agent is busy, **THEN** the next-step action remains hidden until
   the agent returns to an idle state.
+- **GIVEN** a signal-gated workflow step with a configured `move_to_previous` or
+  `move_to_step` move, **WHEN** its composer is rendered, **THEN** the existing
+  adjacent-next-step action remains hidden because it cannot submit the
+  configured destination.
 - **GIVEN** a signal-gated workflow step that also enables explicit user-cancel completion, **WHEN** the user cancels the active turn, **THEN** the configured completion transition may run without `step_complete_kandev` as defined by the cancelled-turn completion policy.
 - **GIVEN** a client that displays fully qualified MCP names, **WHEN** it resolves the completion instruction, **THEN** it can associate canonical `step_complete_kandev` with its qualified runtime alias.
 - **GIVEN** Claude ACP initializes, **WHEN** the bridge reports its identity, **THEN** Kandev records the reported bridge name and version in diagnostics without constraining package resolution in this feature.

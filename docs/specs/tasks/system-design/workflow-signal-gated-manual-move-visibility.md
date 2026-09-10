@@ -34,9 +34,11 @@ ADR 0015 `manual_fallback` signal path.
 - HTTP hydration, multi-workflow snapshot refresh, mobile workspace switching,
   workflow-step WebSocket mapping, and live Kanban update mapping preserve the
   signal-gated flag.
-- `useNextWorkflowStep` classifies a turn-complete move as self-advancing only
-  when `auto_advance_requires_signal` is not true. It continues to identify the
-  adjacent next step and use the existing `moveTask` operation.
+- `useNextWorkflowStep` exposes the existing adjacent-next-step action only for
+  a signal-gated `move_to_next` action. Ungated move actions remain suppressed,
+  as do signal-gated `move_to_previous` and `move_to_step` actions, because the
+  existing `moveTask` operation submits the adjacent next step rather than a
+  configured arbitrary destination.
 - `ChatStatusBar` and `PassthroughToolbar` retain their existing busy-state gate
   and consume the shared next-step projection.
 - The phone task drawer remains the alternate manual step-move surface. This
@@ -61,8 +63,10 @@ visibility rule treats only the literal value `true` as signal-gated.
 3. It inspects current-step `on_turn_complete` actions for `move_to_next`,
    `move_to_previous`, or `move_to_step`.
 4. An ungated move suppresses the composer action because the turn completion
-   can perform the move. A signal-gated move does not suppress it because a bare
-   halt cannot perform the move.
+   can perform the move. A signal-gated `move_to_next` action does not suppress
+   it because a bare halt cannot perform the move. Signal-gated
+   `move_to_previous` and `move_to_step` actions remain suppressed because the
+   adjacent-next-step control would submit the wrong destination.
 5. The standard and passthrough composer surfaces show the existing action only
    when the shared projection returns a next-step name and the agent is idle.
 6. Selecting the action uses the existing manual task-move request and its
@@ -92,8 +96,11 @@ task-move API and backend policy checks.
 ## Observability
 
 No new production metric is required for visibility. Unit tests cover all
-client projection paths and the gated versus ungated decision. A browser test
-proves the user-visible action after an idle signal-gated turn.
+client projection paths, the gated versus ungated decision, and the unsupported
+gated move destinations. The boot mapper has a regression test for direct
+task-page hydration. A browser test proves the user-visible action after an
+idle signal-gated turn and waits for the causal backend move before asserting
+the stepper.
 
 ## Responsive behavior
 

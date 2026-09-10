@@ -249,6 +249,98 @@ describe("useNextWorkflowStep visibility", () => {
   });
 });
 
+describe("useNextWorkflowStep gated move destinations", () => {
+  beforeEach(setUpPlanActionsState);
+
+  it("suppresses the next step for a gated move to a previous step", () => {
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [
+          {
+            id: "plan-step",
+            title: "Plan",
+            position: 1,
+            auto_advance_requires_signal: true,
+            events: { on_turn_complete: [{ type: "move_to_previous" }] },
+          },
+          {
+            id: "work-step",
+            title: "Work",
+            position: 2,
+            events: { on_enter: [{ type: "auto_start_agent" }] },
+          },
+        ],
+        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBeNull();
+  });
+
+  it("suppresses the next step for a gated move to a configured step", () => {
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [
+          {
+            id: "plan-step",
+            title: "Plan",
+            position: 1,
+            auto_advance_requires_signal: true,
+            events: {
+              on_turn_complete: [{ type: "move_to_step", config: { step_id: "other-step" } }],
+            },
+          },
+          {
+            id: "work-step",
+            title: "Work",
+            position: 2,
+            events: { on_enter: [{ type: "auto_start_agent" }] },
+          },
+        ],
+        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBeNull();
+  });
+
+  it("treats an absent signal-gated flag as ungated", () => {
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [
+          {
+            id: "plan-step",
+            title: "Plan",
+            position: 1,
+            events: { on_turn_complete: [{ type: "move_to_next" }] },
+          },
+          {
+            id: "work-step",
+            title: "Work",
+            position: 2,
+            events: { on_enter: [{ type: "auto_start_agent" }] },
+          },
+        ],
+        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBeNull();
+  });
+});
+
 describe("usePlanActions", () => {
   beforeEach(setUpPlanActionsState);
 

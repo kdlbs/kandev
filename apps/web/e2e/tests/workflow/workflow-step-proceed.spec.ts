@@ -13,7 +13,7 @@ test.describe("Manual proceed to next workflow step", () => {
       "Signal Gated Proceed Workflow",
     );
     const signalStep = await apiClient.createWorkflowStep(workflow.id, "Signal Gate", 0);
-    await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
 
     await apiClient.updateWorkflowStep(signalStep.id, {
       prompt: 'e2e:message("signal-gated turn complete")\n{{task_prompt}}',
@@ -41,9 +41,12 @@ test.describe("Manual proceed to next workflow step", () => {
 
     await session.proceedNextStepButton().click();
 
-    await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
-      timeout: 15_000,
-    });
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 15_000,
+      })
+      .toBe(reviewStep.id);
+    await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step");
   });
 
   /**

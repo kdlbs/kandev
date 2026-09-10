@@ -13,10 +13,11 @@ legacy_specs: []
 ## Overview
 
 Preserve `auto_advance_requires_signal` in every workflow-step projection used
-by the task UI. Then refine the shared next-step derivation so only an ungated
-`on_turn_complete` move suppresses the composer action. Standard chat and
-passthrough composers retain their existing busy-state gate and manual task-move
-behavior.
+by the task UI. Then refine the shared next-step derivation so a signal-gated
+`on_turn_complete` `move_to_next` action remains available while ungated moves
+and gated moves to another configured destination suppress the adjacent-step
+composer action. Standard chat and passthrough composers retain their existing
+busy-state gate and manual task-move behavior.
 
 ## Scope
 
@@ -24,8 +25,11 @@ behavior.
 
 - Carry `auto_advance_requires_signal` from HTTP and WebSocket workflow-step
   payloads into active and cached Kanban state.
-- Show the existing next-step composer action after an idle signal-gated turn.
-- Continue suppressing the action for ungated turn-complete moves.
+- Show the existing next-step composer action after an idle signal-gated
+  `move_to_next` turn.
+- Continue suppressing the action for ungated turn-complete moves and for
+  signal-gated `move_to_previous` or `move_to_step` actions whose destinations
+  the adjacent-step control cannot represent.
 - Preserve the existing busy-state guard, click behavior, error handling, and
   mobile task-drawer path.
 - Add focused unit and production-build browser regression coverage.
@@ -55,7 +59,10 @@ behavior.
 - Keep the existing detection of `move_to_next`, `move_to_previous`, and
   `move_to_step` in current-step `on_turn_complete` actions.
 - Treat that configuration as an automatic transition for composer suppression
-  only when `auto_advance_requires_signal !== true`.
+  when the step is ungated, or when the configured action is not `move_to_next`.
+  Only a signal-gated `move_to_next` action is an exception.
+- Preserve the Go boot-state mapper field so direct task-page hydration has the
+  same signal-gated policy input as subsequent client refreshes.
 - Leave `ChatStatusBar` and `PassthroughToolbar` unchanged; both already hide
   the shared next-step action while the agent is busy.
 - Leave `proceed()` unchanged so the action continues to use the normal task
@@ -63,22 +70,25 @@ behavior.
 
 ## Tests
 
-- Hook tests prove a signal-gated turn-complete move exposes the next step and
-  an ungated move remains suppressed.
+- Hook tests prove a signal-gated `move_to_next` exposes the next step, an
+  ungated move remains suppressed, gated `move_to_previous` and `move_to_step`
+  remain suppressed, and an omitted flag keeps the legacy ungated behavior.
 - Mapper tests prove the field survives initial hydration, multi-workflow
   refresh, mobile workspace switching, workflow-step WebSocket updates, and
-  live Kanban updates.
+  live Kanban updates. A Go boot-state mapper test covers direct task-page
+  hydration.
 - Existing composer and passthrough tests continue to cover the busy-state
   display gate because their input contract does not change.
 
 ## E2E test
 
 Extend `apps/web/e2e/tests/workflow/workflow-step-proceed.spec.ts` with a workflow
-whose first step has an `on_turn_complete` move and
+whose first step has an `on_turn_complete` `move_to_next` action and
 `auto_advance_requires_signal=true`. Let the mock agent finish without a signal,
 assert that the task remains on the step, assert the next-step composer action is
-visible, select it, and assert the normal move succeeds. Extend the E2E API
-client update type to seed the existing workflow-step field.
+visible, select it, wait for the task API to report the target workflow step, and
+then assert the stepper reflects the normal move. Extend the E2E API client update
+type to seed the existing workflow-step field.
 
 The existing mobile task-drawer move test remains the parity check for the
 phone-specific path. No new responsive markup is introduced.
@@ -88,6 +98,12 @@ phone-specific path. No new responsive markup is introduced.
 - [completed] [Task 01: Preserve signal-gated proceed visibility](task-01-preserve-signal-gated-proceed-visibility.md)
 
 ## Verification
+
+Run the focused boot-state mapper test from `apps/backend`:
+
+```bash
+go test ./internal/backendapp
+```
 
 Run focused tests from `apps/web`:
 
@@ -112,10 +128,15 @@ git diff --check
 - Preserving the field in only one hydration path would make the control appear
   or disappear after reload, workflow refresh, or a live settings update.
 - Treating every gated step as manually movable would expose the action without
-  a configured move; the derivation must still require an applicable
-  `on_turn_complete` move and a next step.
+  a configured adjacent destination; the derivation must still require an
+  applicable `on_turn_complete` `move_to_next` action and a next step. Gated
+  `move_to_previous` and `move_to_step` actions remain suppressed because the
+  existing control submits the adjacent next step.
 - Removing the busy-state guard could race a manual move against an active turn;
   the presentation components keep that guard.
+- Omitting the server boot mapper field would make direct task-page hydration
+  disagree with later workflow refreshes; the boot mapper regression test covers
+  this path.
 - Conflating this action with ADR 0015's signal-writing fallback would silently
   broaden backend semantics and telemetry. This plan deliberately reuses the
   existing manual move only.

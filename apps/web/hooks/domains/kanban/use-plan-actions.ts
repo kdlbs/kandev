@@ -50,15 +50,16 @@ export function useNextWorkflowStep(taskId: string | null) {
     return { currentStep: current, nextStep: next };
   }, [sortedSteps, taskStepId]);
 
-  const currentStepAutoTransitions = useMemo(
-    () =>
-      currentStep?.auto_advance_requires_signal !== true &&
-      (currentStep?.events?.on_turn_complete?.some((a) =>
-        AUTO_TRANSITION_ACTIONS.includes(a.type),
-      ) ??
-        false),
-    [currentStep],
-  );
+  const currentStepAutoTransitions = useMemo(() => {
+    if (!currentStep) return false;
+    return (
+      currentStep.events?.on_turn_complete?.some(
+        (a) =>
+          AUTO_TRANSITION_ACTIONS.includes(a.type) &&
+          (currentStep.auto_advance_requires_signal !== true || a.type !== "move_to_next"),
+      ) ?? false
+    );
+  }, [currentStep]);
 
   const nextStepIsWorkStep = useMemo(() => {
     if (!nextStep) return false;
