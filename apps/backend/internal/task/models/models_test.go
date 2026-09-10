@@ -95,6 +95,19 @@ func TestIsOriginalTaskSessionUsesImmutableOriginMarker(t *testing.T) {
 	}))
 }
 
+func TestIsCompletionFollowUpSessionRequiresTrueBoolean(t *testing.T) {
+	require.True(t, IsCompletionFollowUpSession(map[string]interface{}{
+		SessionMetaKeyCompletionFollowUp: true,
+	}))
+	require.False(t, IsCompletionFollowUpSession(map[string]interface{}{
+		SessionMetaKeyCompletionFollowUp: false,
+	}))
+	require.False(t, IsCompletionFollowUpSession(map[string]interface{}{
+		SessionMetaKeyCompletionFollowUp: "true",
+	}))
+	require.False(t, IsCompletionFollowUpSession(nil))
+}
+
 func TestLoadSessionACPConfigBaselinePreservesEmptyJSONValues(t *testing.T) {
 	baseline, ok := LoadSessionACPConfigBaseline(map[string]interface{}{
 		SessionMetaKeyACPConfigBaseline: map[string]interface{}{

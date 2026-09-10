@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
+import { cn } from "@/lib/utils";
 
 /**
  * Monaco completion entries for the step-prompt editor. `key` is the
@@ -28,10 +29,12 @@ export function HelpTip({
   text,
   testId,
   ariaLabel,
+  mobileTouchTarget = false,
 }: {
   text: ReactNode;
   testId?: string;
   ariaLabel?: string;
+  mobileTouchTarget?: boolean;
 }) {
   const { t } = useTranslation();
   const label = ariaLabel ?? t("workflows:moreInformation");
@@ -41,7 +44,10 @@ export function HelpTip({
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(
+              "inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              mobileTouchTarget && "h-11 w-11 md:h-5 md:w-5",
+            )}
             aria-label={label}
             data-testid={testId}
           >

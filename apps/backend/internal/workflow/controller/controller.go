@@ -136,6 +136,7 @@ type CreateStepRequest struct {
 	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
 	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
 	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter        *bool              `json:"complete_task_on_enter,omitempty"`
 	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
@@ -189,6 +190,9 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.CancelTriggersTurnComplete != nil {
 		step.CancelTriggersTurnComplete = *req.CancelTriggersTurnComplete
 	}
+	if req.CompleteTaskOnEnter != nil {
+		step.CompleteTaskOnEnter = *req.CompleteTaskOnEnter
+	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {
 			return nil, fmt.Errorf("wip_limit must be non-negative")
@@ -224,6 +228,7 @@ type UpdateStepRequest struct {
 	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
 	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
 	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter        *bool              `json:"complete_task_on_enter,omitempty"`
 	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
@@ -286,6 +291,9 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	}
 	if req.CancelTriggersTurnComplete != nil {
 		step.CancelTriggersTurnComplete = *req.CancelTriggersTurnComplete
+	}
+	if req.CompleteTaskOnEnter != nil {
+		step.CompleteTaskOnEnter = *req.CompleteTaskOnEnter
 	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {

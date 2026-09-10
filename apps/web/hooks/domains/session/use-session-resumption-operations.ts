@@ -404,6 +404,9 @@ export type ResumeAction = "running" | "skip" | "resume" | "restore" | "idle";
 
 export function decideResumeAction(status: SessionStatus, preventAutoStart: boolean): ResumeAction {
   if (status.is_agent_running) return "running";
+  // Completed sessions remain passive until the user explicitly chooses the
+  // completed-chat Resume action. Open-time recovery must not revive them.
+  if (status.state === "COMPLETED") return "idle";
   if (preventAutoStart && status.needs_resume && status.is_resumable) return "skip";
   if (status.needs_resume && status.is_resumable) return "resume";
   if (status.needs_workspace_restore) return "restore";

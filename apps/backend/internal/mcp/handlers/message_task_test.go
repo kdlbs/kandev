@@ -17,6 +17,7 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -41,6 +42,7 @@ type fakeOrchestrator struct {
 	interruptCalls          []interruptCall
 	launchCalls             []*orchestrator.LaunchSessionRequest
 	launchErr               error
+	launchFunc              func(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	launchResponseProfileID string
 	renameCalls             []renameCall
 	renameErr               error
@@ -105,12 +107,17 @@ type renameCall struct {
 	sessionID, name string
 }
 
-func (f *fakeOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+func (f *fakeOrchestrator) LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.launchCalls = append(f.launchCalls, req)
+	launchFunc := f.launchFunc
 	if f.launchErr != nil {
+		f.mu.Unlock()
 		return nil, f.launchErr
+	}
+	f.mu.Unlock()
+	if launchFunc != nil {
+		return launchFunc(ctx, req)
 	}
 	response := &orchestrator.LaunchSessionResponse{
 		Success:   true,
@@ -124,6 +131,34 @@ func (f *fakeOrchestrator) LaunchSession(_ context.Context, req *orchestrator.La
 	}
 	response.AgentProfileID = profileID
 	return response, nil
+}
+
+func completedSessionLaunchFunc(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	taskID, sessionID string,
+) func(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	t.Helper()
+	return func(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+		require.Equal(t, orchestrator.IntentResume, req.Intent)
+		require.True(t, req.AllowCompletedSessionResume)
+		require.Equal(t, taskID, req.TaskID)
+		require.Equal(t, sessionID, req.SessionID)
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyCompletionFollowUp, true))
+		require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "exec-row-" + sessionID,
+			SessionID:        sessionID,
+			TaskID:           taskID,
+			Status:           "running",
+			Resumable:        true,
+			AgentExecutionID: "exec-" + sessionID,
+		}))
+		return &orchestrator.LaunchSessionResponse{
+			Success: true, TaskID: taskID, SessionID: sessionID,
+			State: string(models.TaskSessionStateWaitingForInput),
+		}, nil
+	}
 }
 
 func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -574,6 +609,57 @@ func TestHandleMessageTask_QueuesPromptWhenOnTurnStartQueuesTask(t *testing.T) {
 	status := orch.queue.GetStatus(context.Background(), session.ID)
 	require.Len(t, status.Entries, 1)
 	assert.Contains(t, status.Entries[0].Content, "wait for admission")
+}
+
+func TestHandleMessageTask_CompletedSessionResumesBeforePersistingPrompt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
+	ctx := context.Background()
+	require.NoError(t, repo.UpdateTaskState(ctx, target.ID, v1.TaskStateCompleted))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.launchFunc = func(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+		require.Equal(t, orchestrator.IntentResume, req.Intent)
+		require.True(t, req.AllowCompletedSessionResume)
+		require.Equal(t, target.ID, req.TaskID)
+		require.Equal(t, session.ID, req.SessionID)
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateWaitingForInput, ""))
+		require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "exec-row-" + session.ID,
+			SessionID:        session.ID,
+			TaskID:           target.ID,
+			Status:           "running",
+			Resumable:        true,
+			AgentExecutionID: "exec-" + session.ID,
+		}))
+		return &orchestrator.LaunchSessionResponse{
+			Success: true, TaskID: target.ID, SessionID: session.ID,
+			State: string(models.TaskSessionStateWaitingForInput),
+		}, nil
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayload(target.ID, "continue the conversation", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, session.ID, out["session_id"])
+	assert.Equal(t, taskMessageStatusSent, out[stopTaskStatusKey])
+	require.Len(t, orch.launchCalls, 1)
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, session.ID, orch.promptCalls[0].sessionID)
+	assert.Equal(t, 0, orch.resumeCalls, "completed follow-up must use the explicit launch permission")
+
+	messages, err := svc.ListMessages(ctx, session.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0].Content, "continue the conversation")
+	reloadedTask, err := svc.GetTask(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateCompleted, reloadedTask.State, "conversation follow-up must not reopen task work")
 }
 
 func TestHandleMessageTask_SessionIDWrongTask_Rejected(t *testing.T) {
@@ -1181,8 +1267,10 @@ func TestHandleMessageTask_CompletedSessionWithoutSwitch_PromptsSameSession(t *t
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
+	require.NoError(t, repo.UpdateTaskState(ctx, target.ID, v1.TaskStateCompleted))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.launchFunc = completedSessionLaunchFunc(t, repo, target.ID, sess.ID)
 
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "follow up completed", sender.ID))
 	resp, err := h.handleMessageTask(ctx, msg)
@@ -1205,27 +1293,16 @@ func TestHandleMessageTask_CompletedSessionWithoutSwitch_PromptsSameSession(t *t
 	assert.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
 }
 
-func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *testing.T) {
+func TestHandleMessageTask_CompletedSession_DoesNotReplayTurnStart(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCompleted)
-
-	replacement := &models.TaskSession{
-		ID:             "sess-2",
-		TaskID:         target.ID,
-		AgentProfileID: "agent-profile-2",
-		State:          models.TaskSessionStateWaitingForInput,
-		IsPrimary:      false,
-	}
-	require.NoError(t, repo.CreateTaskSession(ctx, replacement))
+	require.NoError(t, repo.UpdateTaskState(ctx, target.ID, v1.TaskStateCompleted))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
-	orch.onTurnStart = func(ctx context.Context, _, _ string) error {
-		oldSession, err := svc.GetTaskSession(ctx, sess.ID)
-		require.NoError(t, err)
-		oldSession.IsPrimary = false
-		require.NoError(t, repo.UpdateTaskSession(ctx, oldSession))
-		require.NoError(t, repo.SetSessionPrimary(ctx, replacement.ID))
+	orch.launchFunc = completedSessionLaunchFunc(t, repo, target.ID, sess.ID)
+	orch.onTurnStart = func(context.Context, string, string) error {
+		t.Fatal("completed follow-up must resume before on_turn_start")
 		return nil
 	}
 
@@ -1237,21 +1314,18 @@ func TestHandleMessageTask_CompletedSession_UsesSessionSelectedByTurnStart(t *te
 
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, "started", payload["status"])
-	assert.Equal(t, replacement.ID, payload["session_id"])
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, sess.ID, payload["session_id"])
 
-	require.Len(t, orch.startCreatedCalls, 1)
-	assert.Equal(t, replacement.ID, orch.startCreatedCalls[0].sessionID)
-	assert.Empty(t, orch.promptCalls)
+	assert.Empty(t, orch.startCreatedCalls)
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sess.ID, orch.promptCalls[0].sessionID)
 
 	oldMessages, err := svc.ListMessages(ctx, sess.ID)
 	require.NoError(t, err)
-	assert.Empty(t, oldMessages)
-	newMessages, err := svc.ListMessages(ctx, replacement.ID)
-	require.NoError(t, err)
-	require.Len(t, newMessages, 1)
-	assert.Contains(t, newMessages[0].Content, "handoff from completed")
-	assert.Equal(t, sender.ID, newMessages[0].Metadata["sender_task_id"])
+	require.Len(t, oldMessages, 1)
+	assert.Contains(t, oldMessages[0].Content, "handoff from completed")
+	assert.Equal(t, sender.ID, oldMessages[0].Metadata["sender_task_id"])
 }
 
 func TestHandleMessageTask_WaitingForInputCompletedWithoutPrimarySwitchRejects(t *testing.T) {

@@ -31,6 +31,9 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
         position: 0,
         color: "bg-neutral-400",
         allow_manual_move: true,
+        complete_task_on_enter: false,
+        auto_advance_requires_signal: false,
+        cancel_triggers_turn_complete: false,
       },
     ],
     tasks: [

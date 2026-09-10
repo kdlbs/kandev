@@ -36,6 +36,8 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Task completion and conversation follow-ups](requirements/task-completion.md)
+
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
@@ -127,6 +129,8 @@ signals, and task-scoped scheduling contracts.
 - [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
+
+- [Task completion and conversation follow-ups](system-design/task-completion.md)
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)

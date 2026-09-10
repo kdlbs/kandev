@@ -699,6 +699,11 @@ export class SessionPage {
     return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
   }
 
+  /** "Resume" action shown for an explicitly completed conversation. */
+  completedSessionResumeButton(): Locator {
+    return this.completedSessionBanner().getByTestId("recovery-resume-button");
+  }
+
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
   recoveryCancelRetryButton(): Locator {
     return this.page.getByTestId("recovery-cancel-retry-button");

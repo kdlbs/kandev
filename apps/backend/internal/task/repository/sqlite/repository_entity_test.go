@@ -691,6 +691,7 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 	}{
 		{name: "auto_advance_requires_signal", sql: `ALTER TABLE workflow_steps DROP COLUMN auto_advance_requires_signal`},
 		{name: "cancel_triggers_turn_complete", sql: `ALTER TABLE workflow_steps DROP COLUMN cancel_triggers_turn_complete`},
+		{name: "complete_task_on_enter", sql: `ALTER TABLE workflow_steps DROP COLUMN complete_task_on_enter`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := repo.db.Exec(column.sql); err != nil {
@@ -713,11 +714,11 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 			t.Fatalf("workflow_steps.%s column count = %d, want 1", column, count)
 		}
 	}
-	var autoAdvance, cancelComplete int
-	if err := repo.db.QueryRow(`SELECT auto_advance_requires_signal, cancel_triggers_turn_complete FROM workflow_steps WHERE id = 'legacy-projection-step'`).Scan(&autoAdvance, &cancelComplete); err != nil {
+	var autoAdvance, cancelComplete, completeTask int
+	if err := repo.db.QueryRow(`SELECT auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter FROM workflow_steps WHERE id = 'legacy-projection-step'`).Scan(&autoAdvance, &cancelComplete, &completeTask); err != nil {
 		t.Fatalf("read migrated workflow step: %v", err)
 	}
-	if autoAdvance != 0 || cancelComplete != 0 {
-		t.Fatalf("legacy workflow step defaults = (%d, %d), want (0, 0)", autoAdvance, cancelComplete)
+	if autoAdvance != 0 || cancelComplete != 0 || completeTask != 0 {
+		t.Fatalf("legacy workflow step defaults = (%d, %d, %d), want (0, 0, 0)", autoAdvance, cancelComplete, completeTask)
 	}
 }

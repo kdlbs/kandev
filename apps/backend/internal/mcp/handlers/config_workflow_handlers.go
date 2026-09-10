@@ -162,6 +162,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
 		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
 		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
+		CompleteTaskOnEnter        *bool                `json:"complete_task_on_enter"`
 		WIPLimit                   *int                 `json:"wip_limit"`
 		PullFromStepID             *string              `json:"pull_from_step_id"`
 		Events                     *wfmodels.StepEvents `json:"events"`
@@ -189,6 +190,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		ShowInCommandPanel:         req.ShowInCommandPanel,
 		AutoAdvanceRequiresSignal:  req.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: req.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        req.CompleteTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
 		Events:                     req.Events,
@@ -222,6 +224,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		AutoArchiveAfterHours      *int                 `json:"auto_archive_after_hours"`
 		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
 		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
+		CompleteTaskOnEnter        *bool                `json:"complete_task_on_enter"`
 		WIPLimit                   *int                 `json:"wip_limit"`
 		PullFromStepID             *string              `json:"pull_from_step_id"`
 		Events                     *wfmodels.StepEvents `json:"events"`
@@ -247,6 +250,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		AutoArchiveAfterHours:      req.AutoArchiveAfterHours,
 		AutoAdvanceRequiresSignal:  req.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: req.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        req.CompleteTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
 		Events:                     req.Events,

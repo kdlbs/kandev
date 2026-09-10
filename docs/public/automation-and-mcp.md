@@ -742,7 +742,7 @@ External MCP exposes 42 tools in these groups:
 - saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
-`export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
+`export_workflow_kandev` takes `workflow_id` and returns one version 2 `kandev_workflow` JSON document with explicit step completion booleans. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit. Version 1 documents remain accepted for compatibility.
 
 ### Read a saved prompt
 

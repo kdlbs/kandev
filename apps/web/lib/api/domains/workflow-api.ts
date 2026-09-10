@@ -26,6 +26,7 @@ type BackendTemplateStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
   profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -55,6 +56,7 @@ export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): Wo
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    complete_task_on_enter: step.complete_task_on_enter,
     auto_advance_requires_signal: step.auto_advance_requires_signal,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
     wip_limit: step.wip_limit,
@@ -129,6 +131,8 @@ export async function createWorkflowStep(
     color?: string;
     prompt?: string;
     events?: StepEvents;
+    complete_task_on_enter?: boolean;
+    auto_advance_requires_signal?: boolean;
     cancel_triggers_turn_complete?: boolean;
     agent_profile_id?: string;
     profile_session_start_policy?: StepDefinition["profile_session_start_policy"];

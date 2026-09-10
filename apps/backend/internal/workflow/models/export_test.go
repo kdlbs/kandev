@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -637,6 +638,46 @@ func TestCancelTriggersTurnCompleteYAMLExportIncludesFalse(t *testing.T) {
 	if got := string(encoded); !strings.Contains(got, "cancel_triggers_turn_complete: false") {
 		t.Fatalf("YAML export omitted false cancellation policy:\n%s", got)
 	}
+}
+
+func TestCompletionPolicyPortableContract(t *testing.T) {
+	wf := &taskmodels.Workflow{ID: "wf-completion", Name: "Completion"}
+	export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-completion": {
+		{ID: "work", Name: "Work", Position: 0},
+		{ID: "done", Name: "Done", Position: 1, CompleteTaskOnEnter: true},
+	}}, nil)
+	require.Equal(t, ExportVersion, export.Version)
+	payload, err := json.Marshal(export)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(payload, &fields))
+	steps := fields["workflows"].([]any)[0].(map[string]any)["steps"].([]any)
+	for i, raw := range steps {
+		if _, ok := raw.(map[string]any)["complete_task_on_enter"]; !ok {
+			t.Fatalf("exported step %d omitted complete_task_on_enter", i)
+		}
+	}
+
+	var decoded WorkflowExport
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"version": 1,
+		"type": "kandev_workflow",
+		"workflows": [{"name":"Legacy","steps":[
+			{"name":"Work","position":0,"color":"blue"},
+			{"name":"  dOnE  ","position":1,"color":"green"}
+		]}]
+	}`), &decoded))
+	require.NoError(t, decoded.Validate())
+	assert.False(t, decoded.Workflows[0].Steps[0].CompleteTaskOnEnter)
+	assert.True(t, decoded.Workflows[0].Steps[1].CompleteTaskOnEnter)
+
+	var missing WorkflowExport
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"version": 2,
+		"type": "kandev_workflow",
+		"workflows": [{"name":"Current","steps":[{"name":"Work","position":0,"color":"blue"}]}]
+	}`), &missing))
+	assert.ErrorContains(t, missing.Validate(), "must be explicitly set")
 }
 
 func TestPullFromStepPositionToID(t *testing.T) {
