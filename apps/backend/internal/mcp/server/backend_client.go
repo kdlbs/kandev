@@ -14,10 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// ErrEmptyBackendPayload is returned when a backend client's success branch
-// sees a non-nil result sink but a zero-byte response payload. ws.NewResponse
-// marshals every payload, so a well-formed response can never be zero bytes;
-// zero length always means the body was dropped or truncated in transit.
+// ErrEmptyBackendPayload identifies a response with no payload bytes when a result sink was provided.
 var ErrEmptyBackendPayload = errors.New("mcp backend response payload was empty")
 
 // MCPRequest represents an MCP request to be sent to the backend.
