@@ -1167,7 +1167,7 @@ export class ApiClient {
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
-      startup_page?: "task_overview" | "last_task";
+      startup_page?: "task_overview" | "last_task" | "threads";
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1198,7 +1198,7 @@ export class ApiClient {
     terminal_link_behavior?: "new_tab" | "browser_panel";
     terminal_font_family?: string;
     terminal_font_size?: number;
-    startup_page?: "task_overview" | "last_task";
+    startup_page?: "task_overview" | "last_task" | "threads";
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;

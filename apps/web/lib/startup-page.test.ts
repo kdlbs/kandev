@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { RecentTaskEntry } from "./recent-tasks";
-import { isExplicitHomeDestination, resolveStartupTaskId } from "./startup-page";
+import {
+  isExplicitHomeDestination,
+  resolveStartupTaskId,
+  resolveStartupListingRedirect,
+} from "./startup-page";
 
 const WORKSPACE_ID = "workspace-1";
 
@@ -14,6 +18,25 @@ function recentTask(taskId: string, workspaceId: string): RecentTaskEntry {
 }
 
 describe("startup page resolution", () => {
+  it("keeps fixed Threads independent of recent tasks and missing listing memory", () => {
+    expect(
+      resolveStartupTaskId({
+        startupPage: "threads",
+        workspaceId: WORKSPACE_ID,
+        recentTasks: [recentTask("local", WORKSPACE_ID)],
+        hasExplicitDestination: false,
+      }),
+    ).toBeNull();
+    expect(
+      resolveStartupListingRedirect({
+        startupPage: "threads",
+        preferredView: "kanban",
+        workspaceId: WORKSPACE_ID,
+        searchParams: new URLSearchParams(`workspaceId=${WORKSPACE_ID}`),
+      }),
+    ).toBe(`/threads?workspace=${WORKSPACE_ID}`);
+  });
+
   it("resumes the newest recent task in the active workspace", () => {
     expect(
       resolveStartupTaskId({

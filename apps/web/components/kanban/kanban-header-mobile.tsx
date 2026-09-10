@@ -36,9 +36,14 @@ type KanbanHeaderMobileProps = {
 
 function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspaceId">) {
   const { t } = useTranslation();
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
+  const workspace = useAppStore((s) => s.workspaces.items.find((item) => item.id === workspaceId));
   return (
     <Link
-      href={workspaceHomeHref(workspaceId ? { id: workspaceId } : undefined)}
+      href={workspaceHomeHref(
+        workspace ?? (workspaceId ? { id: workspaceId } : undefined),
+        startupPage,
+      )}
       aria-label={t("kanban:kandevHome")}
       className="relative z-10 shrink-0 cursor-pointer text-[15px] font-semibold leading-none transition-colors hover:text-foreground/80"
       data-testid="mobile-topbar-brand"
