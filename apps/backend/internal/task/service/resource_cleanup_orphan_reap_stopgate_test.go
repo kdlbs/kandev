@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // failingSessionStopper is a TaskExecutionStopper whose StopSession always
@@ -150,5 +151,80 @@ func TestExecuteTaskResourceCleanupJobRecordsReapRootForSucceededSessionDespiteM
 	// snapshot been read.
 	if len(snapshot.OrphanReapRecords) != 0 {
 		t.Fatalf("expected no candidate records this attempt, got %+v", snapshot.OrphanReapRecords)
+	}
+}
+
+// cancellingWorktreeCleanup really removes a worktree directory the way the
+// production cleaner would, then cancels the job's own context mid-call —
+// the same race an unarchive racing a running archive cleanup produces via
+// CancelArchiveTaskResourceCleanup -> cancelAndJoinArchiveTaskResourceCleanupRuns.
+type cancellingWorktreeCleanup struct {
+	realPath string
+	cancel   context.CancelFunc
+}
+
+func (c *cancellingWorktreeCleanup) OnTaskDeleted(context.Context, string) error { return nil }
+func (c *cancellingWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	return nil, nil
+}
+func (c *cancellingWorktreeCleanup) CleanupWorktrees(_ context.Context, _ []*worktree.Worktree) error {
+	if err := os.RemoveAll(c.realPath); err != nil {
+		return err
+	}
+	c.cancel()
+	return nil
+}
+
+// AC-TASKS-ORPHAN-REAP-001.1: recording a removed path as a reap root has no
+// cancellation gate, matching its "no clean-stop gate" posture. A directory
+// performTaskCleanup actually removed must be recorded even when the job's
+// own context is cancelled immediately afterward — the pre-existing
+// context.Cause(ctx) checks between performTaskCleanup and root recording
+// must not skip recording, or the removed path can never be recorded on any
+// later attempt either, since gatherOrphanReapRootCandidates only considers
+// paths that still exist on disk.
+func TestExecuteTaskResourceCleanupJobRecordsReapRootDespiteCancellationDuringCleanup(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	const taskID = "task-cancel-during-cleanup"
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: taskID, WorkspaceID: "ws-orphan-reap", Title: taskID,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	wtPath := filepath.Join(t.TempDir(), "wt-cancel-during-cleanup")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree dir: %v", err)
+	}
+	// Resolve while it still exists -- resolveOrphanReapPathBestEffort falls
+	// back to an unresolved absolute path once it is gone.
+	wantRoot := resolveOrphanReapPathBestEffort(wtPath)
+
+	svc.orphanReapHostSnapshotter = poisonOrphanReapHostSnapshotter{t: t}
+	ctx, cancel := context.WithCancel(context.Background())
+	svc.SetWorktreeCleanup(&cancellingWorktreeCleanup{realPath: wtPath, cancel: cancel})
+
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-cancel-during-cleanup", TaskID: taskID, Trigger: models.TaskResourceCleanupTriggerDelete,
+	}
+	snapshot := &taskResourceCleanupSnapshot{
+		Worktrees: []*worktree.Worktree{{ID: "wt-cancel-during-cleanup", TaskID: taskID, Path: wtPath}},
+	}
+	err := svc.executeTaskResourceCleanupJob(ctx, job, snapshot)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("executeTaskResourceCleanupJob err = %v, want context cancellation", err)
+	}
+	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected the worktree directory to be really removed, got statErr=%v", statErr)
+	}
+	found := false
+	for _, root := range snapshot.OrphanReapRoots {
+		if root == wantRoot {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the removed directory %q to be recorded as a reap root despite the "+
+			"job's context being cancelled during cleanup; got roots=%+v", wantRoot, snapshot.OrphanReapRoots)
 	}
 }

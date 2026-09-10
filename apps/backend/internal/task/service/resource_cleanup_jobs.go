@@ -530,6 +530,18 @@ func (s *Service) executeTaskResourceCleanupJob(
 			discardWorktreeChanges: snapshot.DiscardWorktreeChanges,
 		},
 		taskCleanupPreserveRows(stopOutcome))
+	// AC-TASKS-ORPHAN-REAP-001.1: record every path this attempt actually
+	// removed and confirmed absent as a reap root, before any early return
+	// below can skip it. This recording obligation has no clean-stop gate and
+	// no cancellation gate — only the reap phase's signal-sending below does
+	// (AC-TASKS-ORPHAN-REAP-006.2) — because performTaskCleanup above removes
+	// each non-preserved session's directory regardless of whether some other
+	// session's stop failed or the context was cancelled partway through, and
+	// a directory removed on this attempt will no longer exist to re-derive
+	// candidacy from on the next.
+	snapshot.OrphanReapRoots = mergeOrphanReapRoots(
+		snapshot.OrphanReapRoots, confirmOrphanReapRootsRemoved(reapRootCandidates),
+	)
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
 	}
@@ -544,16 +556,6 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
 	}
-	// AC-TASKS-ORPHAN-REAP-001.1: record every path this attempt actually
-	// removed and confirmed absent as a reap root. This recording obligation
-	// has no clean-stop gate — only the reap phase's signal-sending below
-	// does (AC-TASKS-ORPHAN-REAP-006.2) — because performTaskCleanup above
-	// removes each non-preserved session's directory regardless of whether
-	// some other session's stop failed, and a directory removed on this
-	// attempt will no longer exist to re-derive candidacy from on the next.
-	snapshot.OrphanReapRoots = mergeOrphanReapRoots(
-		snapshot.OrphanReapRoots, confirmOrphanReapRootsRemoved(reapRootCandidates),
-	)
 	// Reap phase: REQ-TASKS-ORPHAN-REAP-001..007. Last phase in the job
 	// (AC-TASKS-ORPHAN-REAP-006.1), gated on a clean stop
 	// (AC-TASKS-ORPHAN-REAP-006.2) exactly like remote reclamation above, and
