@@ -7,7 +7,15 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/constants"
 )
+
+// reservationExpiryAllowance is the slice of the backstop that follows the session's
+// STARTING write: the start deadline inside the launch goroutine. The preparation
+// phase before it is already bounded by constants.AgentLaunchTimeout, which is read
+// rather than copied so this tracks an operator-raised preparation budget.
+const reservationExpiryAllowance = 5 * time.Minute
 
 // launchOrigin is the explicit automatic/manual classification threaded from the
 // caller into the admission controller. It is never inferred from the transport or
@@ -39,7 +47,6 @@ type admittedSessionLister interface {
 // seam 1 and the session's creation.
 type ceilingReservation struct {
 	sessionID string
-	origin    launchOrigin
 	takenAt   time.Time
 }
 
@@ -60,6 +67,7 @@ type admissionDecision struct {
 	populationKnown bool
 	ceiling         int
 	reasonCode      string
+	handedOff       bool
 }
 
 // sessionCeilingController is the single admission controller. Every mutation of
@@ -138,12 +146,12 @@ func (c *sessionCeilingController) populationLocked(counted map[string]struct{})
 
 // reserveLocked records an in-flight reservation, keyed by session id where one
 // exists and by a launch-scoped identifier otherwise.
-func (c *sessionCeilingController) reserveLocked(sessionID string, origin launchOrigin) string {
+func (c *sessionCeilingController) reserveLocked(sessionID string) string {
 	key := sessionID
 	if key == "" {
 		key = c.newKey()
 	}
-	c.reservations[key] = &ceilingReservation{sessionID: sessionID, origin: origin, takenAt: c.now()}
+	c.reservations[key] = &ceilingReservation{sessionID: sessionID, takenAt: c.now()}
 	return key
 }
 
@@ -165,6 +173,12 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	if err != nil {
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
+	return c.decideLocked(req, origin, counted)
+}
+
+// decideLocked is the ordinary admission decision, taken against a population the
+// caller has already read inside the critical section.
+func (c *sessionCeilingController) decideLocked(req admissionRequest, origin launchOrigin, counted map[string]struct{}) admissionDecision {
 	population := c.populationLocked(counted)
 
 	if decision, ok := c.alreadyAdmittedLocked(req, counted, population); ok {
@@ -179,12 +193,12 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	switch {
 	case c.ceiling == unlimitedSessionCeiling || population < c.ceiling:
 		decision.admitted = true
-		decision.reservationKey = c.reserveLocked(req.sessionID, origin)
+		decision.reservationKey = c.reserveLocked(req.sessionID)
 	case origin == launchOriginManual:
 		decision.admitted = true
 		decision.manualOverride = true
 		decision.reasonCode = ceilingReasonManualOverride
-		decision.reservationKey = c.reserveLocked(req.sessionID, origin)
+		decision.reservationKey = c.reserveLocked(req.sessionID)
 	default:
 		decision.reasonCode = ceilingReasonRefused
 	}
@@ -230,7 +244,7 @@ func (c *sessionCeilingController) decideUnknownPopulationLocked(req admissionRe
 	if origin == launchOriginManual {
 		decision.admitted = true
 		decision.manualOverride = true
-		decision.reservationKey = c.reserveLocked(req.sessionID, origin)
+		decision.reservationKey = c.reserveLocked(req.sessionID)
 	}
 	c.logDecision(req, origin, decision)
 	return decision
@@ -265,4 +279,114 @@ func (c *sessionCeilingController) release(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.reservations, key)
+}
+
+// rebind moves a launch-scoped reservation onto the session id that launch just
+// created, as one operation rather than a release followed by an acquire, so the
+// population never momentarily drops and no concurrent admission can take the
+// freed unit.
+func (c *sessionCeilingController) rebind(launchKey, sessionID string) bool {
+	if launchKey == "" || sessionID == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	reservation, held := c.reservations[launchKey]
+	if !held {
+		return false
+	}
+	delete(c.reservations, launchKey)
+	reservation.sessionID = sessionID
+	c.reservations[sessionID] = reservation
+	return true
+}
+
+// rekey moves a reservation from the session that was gated onto the replacement
+// session that will actually be launched. Where the replacement is already counted
+// or already reserved, the original is released and no second unit is consumed:
+// this is still one launch.
+func (c *sessionCeilingController) rekey(ctx context.Context, fromSessionID, toSessionID string) bool {
+	if fromSessionID == "" || toSessionID == "" || fromSessionID == toSessionID {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	reservation, held := c.reservations[fromSessionID]
+	if !held {
+		return false
+	}
+	delete(c.reservations, fromSessionID)
+
+	if _, alreadyReserved := c.reservations[toSessionID]; alreadyReserved {
+		return true
+	}
+	if counted, err := c.countedRowsLocked(context.WithoutCancel(ctx)); err == nil {
+		if _, alreadyCounted := counted[toSessionID]; alreadyCounted {
+			return true
+		}
+	}
+	reservation.sessionID = toSessionID
+	c.reservations[toSessionID] = reservation
+	return true
+}
+
+// handOffOrAdmit serves the dynamic-route relaunch seam. Where the session is still
+// in the population, its counted membership is converted into a reservation under
+// the same mutex: a relaunch replaces one agent process with another rather than
+// adding one, so the hand-off is never refused and never changes the count.
+// Where the session is not counted there is no slot to hand off and this is an
+// ordinary admission request.
+func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admissionRequest) admissionDecision {
+	origin := req.origin
+	if origin != launchOriginManual && origin != launchOriginAutomatic {
+		origin = launchOriginAutomatic
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	counted, err := c.countedRowsLocked(ctx)
+	if err != nil {
+		return c.decideUnknownPopulationLocked(req, origin, err)
+	}
+	if _, isCounted := counted[req.sessionID]; req.sessionID == "" || !isCounted {
+		return c.decideLocked(req, origin, counted)
+	}
+
+	decision := admissionDecision{
+		admitted:        true,
+		handedOff:       true,
+		reservationKey:  req.sessionID,
+		population:      c.populationLocked(counted),
+		populationKnown: true,
+		ceiling:         c.ceiling,
+	}
+	c.reservations[req.sessionID] = &ceilingReservation{sessionID: req.sessionID, takenAt: c.now()}
+	c.logDecision(req, origin, decision)
+	return decision
+}
+
+// expireStaleReservations releases reservations whose launch neither reached a
+// counted state nor reported failure inside the launch budget. It is the backstop,
+// not the primary release edge.
+func (c *sessionCeilingController) expireStaleReservations() int {
+	budget := constants.AgentLaunchTimeout + reservationExpiryAllowance
+	now := c.now()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	released := 0
+	for key, reservation := range c.reservations {
+		if now.Sub(reservation.takenAt) <= budget {
+			continue
+		}
+		delete(c.reservations, key)
+		released++
+		c.logger.Warn("session ceiling released a reservation whose launch never reached a counted state",
+			zap.String("reservation_key", key),
+			zap.String("session_id", reservation.sessionID),
+			zap.Duration("held_for", now.Sub(reservation.takenAt)),
+			zap.Duration("budget", budget))
+	}
+	return released
 }
