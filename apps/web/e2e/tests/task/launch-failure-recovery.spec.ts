@@ -65,7 +65,9 @@ async function recoveryWorkflow(apiClient: ApiClient, workspaceId: string, name:
   const workflow = await apiClient.createWorkflow(workspaceId, name);
   const waiting = await apiClient.createWorkflowStep(workflow.id, "Waiting", 0);
   const review = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
-  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2, {
+    complete_task_on_enter: true,
+  });
   await apiClient.updateWorkflowStep(review.id, {
     events: { on_enter: [{ type: "auto_start_agent" }] },
   });

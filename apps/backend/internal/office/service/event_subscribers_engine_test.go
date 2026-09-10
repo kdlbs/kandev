@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -284,6 +286,34 @@ func (fallbackHandledRoutingDispatcher) MarkRunSuccessHealth(
 ) {
 }
 
+type blockingPostStartFallbackDispatcher struct {
+	t        *testing.T
+	svc      *service.Service
+	requeued chan struct{}
+	release  chan struct{}
+}
+
+func (d *blockingPostStartFallbackDispatcher) DispatchWithRouting(
+	context.Context, *models.Run, *models.AgentInstance, service.LaunchContext,
+) (bool, bool, error) {
+	return false, false, nil
+}
+
+func (d *blockingPostStartFallbackDispatcher) HandlePostStartFailure(
+	_ context.Context, run *models.Run, _ *models.AgentInstance, _ string, _ *streams.ProviderError,
+) (bool, error) {
+	d.svc.ExecSQL(d.t, `UPDATE runs SET status = 'queued', session_id = '',
+		claimed_at = NULL, finished_at = NULL WHERE id = ?`, run.ID)
+	close(d.requeued)
+	<-d.release
+	return true, nil
+}
+
+func (d *blockingPostStartFallbackDispatcher) MarkRunSuccessHealth(
+	context.Context, *models.Run, *models.AgentInstance,
+) {
+}
+
 // queueTaskAssignedRunForAgentFailedTests queues + claims a run for taskID
 // so an AgentFailed event resolves it via resolveLifecycleRun's
 // task+agent fallback (GetClaimedRunByTaskAndAgent).
@@ -437,6 +467,78 @@ func TestEngineDispatcher_AgentFailed_PostStartFallbackHandled_SkipsDispatch(t *
 	}
 	assertAgentStatus(t, svc, context.Background(), "worker-1", models.AgentStatusIdle,
 		"after a handled post-start fallback")
+}
+
+func TestAgentFailed_PostStartFallback_DelayedCleanupDoesNotIdleRelaunch(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	svc.SetSyncHandlers(true)
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+
+	createTestAgent(t, svc, "ws-1", "worker-reroute")
+	project := &models.Project{
+		WorkspaceID:    "ws-1",
+		Name:           "Project worker-reroute",
+		ExecutorConfig: `{"type":"local_pc"}`,
+	}
+	if err := svc.CreateProject(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, project_id, title, created_at, updated_at)
+		VALUES ('task-reroute', 'ws-1', ?, 'Reroute task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		project.ID)
+	run := queueTaskAssignedRunForAgentFailedTests(t, svc, "worker-reroute", "task-reroute")
+	svc.ExecSQL(t, `UPDATE runs SET resolved_provider_id = 'test-provider' WHERE id = ?`, run.ID)
+	svc.ExecSQL(t, `UPDATE agent_profiles SET status = 'working', working_run_id = ? WHERE id = ?`,
+		run.ID, "worker-reroute")
+
+	dispatcher := &blockingPostStartFallbackDispatcher{
+		t:        t,
+		svc:      svc,
+		requeued: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	svc.SetRoutingDispatcher(dispatcher)
+	event := bus.NewEvent(events.AgentFailed, "test", map[string]string{
+		"task_id":          "task-reroute",
+		"run_id":           run.ID,
+		"session_id":       "session-reroute",
+		"agent_profile_id": "worker-reroute",
+		"error_message":    "provider unavailable",
+	})
+	publishDone := make(chan error, 1)
+	go func() { publishDone <- eb.Publish(ctx, events.AgentFailed, event) }()
+
+	select {
+	case <-dispatcher.requeued:
+	case <-time.After(5 * time.Second):
+		t.Fatal("post-start fallback did not requeue the run")
+	}
+
+	relaunched, err := svc.ClaimNextRun(ctx)
+	if err != nil {
+		t.Fatalf("claim relaunched run: %v", err)
+	}
+	if relaunched == nil || relaunched.ID != run.ID {
+		t.Fatalf("relaunched run = %v, want run %q", relaunched, run.ID)
+	}
+	service.ProcessRunForTest(svc, ctx, relaunched)
+	if mock.callCount() != 1 {
+		t.Fatalf("StartTask calls = %d, want 1 for the relaunch", mock.callCount())
+	}
+	assertAgentStatus(t, svc, ctx, "worker-reroute", models.AgentStatusWorking,
+		"after the same run relaunches")
+
+	close(dispatcher.release)
+	if err := <-publishDone; err != nil {
+		t.Fatalf("publish agent failed: %v", err)
+	}
+	assertAgentStatus(t, svc, ctx, "worker-reroute", models.AgentStatusWorking,
+		"after the old failure cleanup completes")
 }
 
 // TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger pins

@@ -69,6 +69,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			state TEXT NOT NULL DEFAULT 'selecting',
 			continuation_json TEXT NOT NULL DEFAULT '',
 			policy_state_json TEXT NOT NULL DEFAULT '',
+			legacy_active_backfill_applied INTEGER NOT NULL DEFAULT 1,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
@@ -232,11 +233,13 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			show_in_command_panel INTEGER DEFAULT 1,
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
-			profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
-			profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
-			stage_type TEXT NOT NULL DEFAULT 'custom',
-			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
+		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		stage_type TEXT NOT NULL DEFAULT 'custom',
+		session_target TEXT,
+		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
+			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`); err != nil {
@@ -250,7 +253,8 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 		)`); err != nil {
 		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
 	}
@@ -619,12 +623,41 @@ func (r *Repository) initPlansSchema() error {
 		created_by TEXT NOT NULL DEFAULT 'agent',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		comments_revision INTEGER NOT NULL DEFAULT 0,
 		implementation_started_at TIMESTAMP,
 		implementation_started_session_id TEXT,
 		implementation_started_by TEXT,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_task_plans_id_task_id ON task_plans(id, task_id);
+	CREATE TABLE IF NOT EXISTS task_plan_comments (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		body TEXT NOT NULL,
+		selected_text TEXT NOT NULL,
+		anchor_from INTEGER NOT NULL,
+		anchor_to INTEGER NOT NULL,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comments_task_order
+		ON task_plan_comments(task_id, created_at, id);
+	CREATE TABLE IF NOT EXISTS task_plan_comment_admissions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comment_admissions_task
+		ON task_plan_comment_admissions(task_id, plan_id);
 	`); err != nil {
 		return err
 	}
@@ -974,6 +1007,7 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		queue_incarnation_id TEXT NOT NULL DEFAULT '',
 		agent_execution_id TEXT NOT NULL DEFAULT '',
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,

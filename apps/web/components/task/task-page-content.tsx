@@ -33,6 +33,7 @@ import {
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
 
 type TaskPageContentProps = {
@@ -239,17 +240,20 @@ function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
 
   useForegroundRefresh(loadTaskDetails, Boolean(activeTaskId), activeTaskId);
 
-  const onTaskUnarchived = useCallback((taskId: string) => {
-    setTaskDetails((current) =>
-      current?.id === taskId ? { ...current, archived_at: null } : current,
-    );
-  }, []);
+  const onTaskUnarchived = useCallback(
+    (taskId: string) => {
+      if (activeTaskId !== taskId) return;
+      void loadTaskDetails();
+    },
+    [activeTaskId, loadTaskDetails],
+  );
 
   return {
     task,
     kanbanTask,
     taskLoadError: hasTaskDetails ? null : taskLoadError,
     onTaskUnarchived,
+    refreshTask: loadTaskDetails,
   };
 }
 
@@ -278,7 +282,10 @@ function useTaskPageData(
     return session?.task_id === activeTaskId ? sid : null;
   });
 
-  const { task, taskLoadError, onTaskUnarchived } = useTaskDetails(activeTaskId, initialTask);
+  const { task, taskLoadError, onTaskUnarchived, refreshTask } = useTaskDetails(
+    activeTaskId,
+    initialTask,
+  );
 
   const agent = useSessionAgent(task);
   const ensureSession = useEnsureTaskSession({
@@ -321,10 +328,11 @@ function useTaskPageData(
     repositories: effectiveRepositories,
     ensureSession,
     onTaskUnarchived,
+    refreshTask,
   };
 }
 
-export function TaskPageContent({
+function TaskPageContentLive({
   task: initialTask,
   taskId: initialTaskId = null,
   sessionId = null,
@@ -350,6 +358,7 @@ export function TaskPageContent({
     repositories,
     ensureSession,
     onTaskUnarchived,
+    refreshTask,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
   const taskCanvases = useTaskCanvasesForTask(task, isMobile, canvasesEnabled);
   useExternalVcsFileLinkHydration(task, repositories);
@@ -357,7 +366,12 @@ export function TaskPageContent({
   const workflowSteps = useWorkflowStepsMapped();
   const sessionPanel = useSessionPanelState(effectiveSessionId);
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
-  const resumption = useSessionResumption(task?.id ?? null, effectiveSessionId);
+  const resumption = useSessionResumption(
+    task?.id ?? null,
+    effectiveSessionId,
+    task ? task.archived_at != null : null,
+    { onTaskArchiveConflict: refreshTask },
+  );
   const merged = useMergedAgentState(agent, resumption, sessionPanel, effectiveSessionId, task);
   const archivedValue = useMemo(() => buildArchivedValue(task, repository), [task, repository]);
   // Mark this session as actively focused so the backend lifts polling to fast.
@@ -402,5 +416,15 @@ export function TaskPageContent({
       onTaskUnarchived={onTaskUnarchived}
       taskCanvases={taskCanvases}
     />
+  );
+}
+
+export function TaskPageContent(props: TaskPageContentProps) {
+  const taskId = props.taskId ?? props.task?.id ?? null;
+
+  return (
+    <TaskRemovalBoundary taskId={taskId}>
+      <TaskPageContentLive {...props} />
+    </TaskRemovalBoundary>
   );
 }

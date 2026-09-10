@@ -36,9 +36,12 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Task completion and conversation follow-ups](requirements/task-completion.md)
+
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
+- [Task removal navigation](requirements/removal-navigation.md)
 - [Attach Workspace Sources](requirements/attach-workspace-sources.md)
 - [Task Autopilot Mode](requirements/autopilot-mode.md)
 - [Blocked Task Escalation](requirements/blocked-task-escalation.md)
@@ -66,6 +69,7 @@ signals, and task-scoped scheduling contracts.
 - [Parent-Child Task Stop](requirements/parent-child-task-stop.md)
 - [Passthrough Queued Prompt Dispatch](requirements/passthrough-queued-prompt-dispatch.md)
 - [Task plan content size limit](requirements/plan-content-size-limit.md)
+- [Task Plan Comments](requirements/plan-comments.md)
 - [Task plan write consistency](requirements/plan-write-consistency.md)
 - [Passthrough Initial Prompt Turn Boundary](requirements/passthrough-initial-prompt-turn-boundary.md)
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
@@ -77,11 +81,15 @@ signals, and task-scoped scheduling contracts.
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)
+- [Resume prompt queue](requirements/resume-prompt-queue.md)
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
+- [Task Actions Menu on Preview and Detail Surfaces](requirements/task-actions-menu.md)
+- [Task Actions Menu In-Flight and Concurrency](requirements/task-actions-menu-concurrency.md)
+- [Task Actions Menu Action Outcomes](requirements/task-actions-menu-outcomes.md)
 - [Subtasks as Workflow Checklist](requirements/subtask-checklist.md)
 - [Subtask Completion Trigger](requirements/subtask-completion-trigger.md)
 - [Subtask detachment](requirements/subtask-detachment.md)
@@ -102,11 +110,12 @@ signals, and task-scoped scheduling contracts.
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
 - [Tasks Without Repositories](requirements/without-repositories.md)
+- [Workflow completion-signal payload delivery](requirements/workflow-completion-signal-payload-delivery.md)
 - [Cancelled Turn Completion](requirements/workflow-cancelled-turn-completion.md)
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow Duplication](requirements/workflow-duplication.md)
 - [Explicit Workflow-Step Completion Signal](requirements/workflow-explicit-completion-signal.md)
-- [Workflow Profile Session Lifecycle](requirements/workflow-profile-session-lifecycle.md)
+- [Workflow Profile Session Lifecycle and Recipients](requirements/workflow-profile-session-lifecycle.md)
 - [Agent decision recording](requirements/workflow-quorum-decision-recording-agent-surface.md)
 - [Quorum ordering and concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
 - [Quorum diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
@@ -126,6 +135,8 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [Task completion and conversation follow-ups](system-design/task-completion.md)
+
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
@@ -144,16 +155,21 @@ signals, and task-scoped scheduling contracts.
 - [Saved Prompt Delivery](system-design/saved-prompt-delivery.md)
 - [Passthrough Initial Prompt Turn Boundary](system-design/passthrough-initial-prompt-turn-boundary.md)
 - [Prompt attachments](system-design/prompt-attachments.md)
+- [Task Actions Menu on Preview and Detail Surfaces](system-design/task-actions-menu.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
+- [Task removal navigation](system-design/removal-navigation.md)
 - [Task plan content size limit](system-design/plan-content-size-limit.md)
+- [Task Plan Comments](system-design/plan-comments.md)
 - [Task plan write consistency](system-design/plan-write-consistency.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task plan append-mode write](system-design/plan-write-append-mode.md)
 - [Task plan append-mode agent text](system-design/plan-write-append-mode-agent-text.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Task Cleanup Preparation](system-design/runtime-cleanup-preparation.md)
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
+- [Resume prompt queue](system-design/resume-prompt-queue.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
 - [Edit task dependencies](system-design/task-dependency-detail-editing.md)
@@ -161,20 +177,20 @@ signals, and task-scoped scheduling contracts.
 - [Task Create Launch Preview](system-design/task-create-launch-preview.md)
 - [Task priority visibility](system-design/task-priority-visibility.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
+- [Workflow completion-signal payload delivery](system-design/workflow-completion-signal-payload-delivery.md)
+- [Signal-Gated Manual Move Visibility](system-design/workflow-signal-gated-manual-move-visibility.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
-- [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
+- [Workflow Profile Session Lifecycle and Recipients](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 - [Human Assignee](system-design/human-assignee.md)
 - [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)
 
 ## Migration record
 
-Migration remains in progress. The seven requirements above now have
-authoritative, wrapper-free requirement/design pairs. Other migrated files still
-need the same extraction before this system can return to a complete migration
-state.
+Migration remains in progress. Files that retain migration wrappers still need
+extraction before this system can return to a complete migration state.
 
 ## Related systems
 

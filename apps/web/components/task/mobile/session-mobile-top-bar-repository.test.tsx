@@ -31,6 +31,11 @@ vi.mock("@/components/gitlab/mr-topbar-button", () => ({
   MRTopbarButton: () => null,
 }));
 
+vi.mock("@/components/task/task-unarchive-button", () => ({
+  TaskUnarchiveButton: ({ mobile }: { mobile?: boolean }) =>
+    mobile ? <button data-testid="mobile-unarchive-button">Unarchive</button> : null,
+}));
+
 const REPOSITORY_TEST_ID = "mobile-task-repository";
 
 function renderTopBar(props: Record<string, unknown> = {}) {
@@ -71,5 +76,11 @@ describe("SessionMobileTopBar repository", () => {
     renderTopBar();
 
     expect(screen.queryByTestId(REPOSITORY_TEST_ID)).toBeNull();
+  });
+
+  it("renders the existing unarchive action in the mobile top bar", () => {
+    renderTopBar({ isArchived: true });
+
+    expect(screen.getByTestId("mobile-unarchive-button")).toBeTruthy();
   });
 });

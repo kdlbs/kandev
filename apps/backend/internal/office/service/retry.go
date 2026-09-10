@@ -148,6 +148,36 @@ func (s *Service) escalateFailure(
 	return nil
 }
 
+// failRunNoEscalation performs escalateFailure's non-escalating half for a
+// budget-admission fault (AC-OFFICE-BUDGET-001.17/-006.4): it marks the run
+// permanently failed and records one operator-visible activity entry
+// naming cause, but does not re-fetch the agent and does not call
+// queueCEOAgentError. A run failed by a budget-admission fault must not
+// queue any new run, by any path.
+func (s *Service) failRunNoEscalation(
+	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	cause budgetDeferralCause, policyID string,
+) error {
+	if err := s.FailRun(ctx, run.ID); err != nil {
+		return fmt.Errorf("fail run: %w", err)
+	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+
+	fields := map[string]string{activityFieldCeiling: ceilingNotDetermined}
+	if policyID != "" {
+		fields["policy_id"] = policyID
+	}
+	s.LogActivityWithRun(ctx, agent.WorkspaceID, "system", "scheduler",
+		cause.failedAction(), "agent", run.AgentProfileID,
+		mustJSON(fields), run.ID, "")
+
+	s.logger.Warn("run permanently failed by budget admission fault",
+		zap.String("run_id", run.ID),
+		zap.String("agent", agent.Name),
+		zap.Int("retry_count", run.RetryCount))
+	return nil
+}
+
 // queueCEOAgentError finds the CEO agent in the workspace and queues an
 // agent_error run for it. When the failing run's agent IS the CEO, the
 // escalation is skipped rather than re-queuing the CEO to handle its own

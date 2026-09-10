@@ -11,6 +11,7 @@ import type {
   AgentProfileRecentUseApiRecord,
   WorkflowProfileSessionStartPolicy,
   WorkflowProfileSessionEndPolicy,
+  WorkflowSessionTarget,
   TaskPriority,
   SidebarTaskColorPatchApi,
 } from "../../lib/types/http";
@@ -53,6 +54,12 @@ import type {
 } from "../../lib/types/http-kubernetes";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 import { dwell } from "./causal-waits";
+
+export type QueueSessionIdentityInput = {
+  taskId: string;
+  sessionId: string;
+  sessionIncarnationId: string;
+};
 
 // --- GitHub Mock Types ---
 
@@ -192,6 +199,7 @@ type CreateTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   agent_profile_id?: string;
+  session_target?: WorkflowSessionTarget | null;
   executor_profile_id?: string;
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
@@ -260,6 +268,7 @@ function buildCreateTaskBody(
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
   setIf(body, "agent_profile_id", options.agent_profile_id);
+  if (options.session_target !== undefined) body.session_target = options.session_target;
   setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
   setIf(
@@ -486,6 +495,7 @@ export class ApiClient {
       workflow_step_id?: string;
       /** Stored in task.Metadata so auto_start_agent can pick it up on on_enter. */
       agent_profile_id?: string;
+      session_target?: WorkflowSessionTarget | null;
       /** Executor profile used when the task session is prepared. */
       executor_profile_id?: string;
       /** Repository IDs to associate with the task (required for agent execution). */
@@ -813,8 +823,10 @@ export class ApiClient {
     opts?: {
       is_start_step?: boolean;
       agent_profile_id?: string;
+      session_target?: WorkflowSessionTarget | null;
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+      complete_task_on_enter?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -828,11 +840,15 @@ export class ApiClient {
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
       ...(opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : {}),
+      ...(opts?.session_target !== undefined ? { session_target: opts.session_target } : {}),
       ...(opts?.profile_session_start_policy
         ? { profile_session_start_policy: opts.profile_session_start_policy }
         : {}),
       ...(opts?.profile_session_end_policy
         ? { profile_session_end_policy: opts.profile_session_end_policy }
+        : {}),
+      ...(opts?.complete_task_on_enter != null
+        ? { complete_task_on_enter: opts.complete_task_on_enter }
         : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
@@ -975,8 +991,16 @@ export class ApiClient {
     return this.request("GET", `/api/v1/secrets${suffix ? `?${suffix}` : ""}`);
   }
 
-  async deleteSecret(secretId: string, workspaceId?: string): Promise<void> {
-    const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  async deleteSecret(
+    secretId: string,
+    workspaceId?: string,
+    options?: { force?: boolean },
+  ): Promise<void> {
+    const query = new URLSearchParams();
+    if (workspaceId) query.set("workspace_id", workspaceId);
+    if (options?.force) query.set("force", "true");
+    const encodedQuery = query.toString();
+    const suffix = encodedQuery ? `?${encodedQuery}` : "";
     const response = await this.rawRequest("DELETE", `/api/v1/secrets/${secretId}${suffix}`);
     if (!response.ok) {
       throw new Error(
@@ -1150,10 +1174,12 @@ export class ApiClient {
 
   async getUserSettings(): Promise<{
     settings: {
+      workspace_id?: string;
+      workflow_filter_id?: string;
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
-      startup_page?: "task_overview" | "last_task";
+      startup_page?: "task_overview" | "last_task" | "threads";
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1184,7 +1210,7 @@ export class ApiClient {
     terminal_link_behavior?: "new_tab" | "browser_panel";
     terminal_font_family?: string;
     terminal_font_size?: number;
-    startup_page?: "task_overview" | "last_task";
+    startup_page?: "task_overview" | "last_task" | "threads";
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
@@ -1253,12 +1279,15 @@ export class ApiClient {
         on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
+      auto_advance_requires_signal?: boolean;
       wip_limit?: number;
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
+      complete_task_on_enter?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+      session_target?: WorkflowSessionTarget | null;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -1886,6 +1915,8 @@ export class ApiClient {
     author_login: string;
     state?: string;
     head_sha?: string;
+    head_repo_owner?: string;
+    head_repo_name?: string;
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
@@ -2005,6 +2036,39 @@ export class ApiClient {
       in_reply_to?: number | null;
       created_at?: string;
       updated_at?: string;
+    }>;
+    workflow_runs?: Array<{
+      id: number;
+      run_attempt?: number;
+      workflow_id?: number;
+      name: string;
+      event: string;
+      status: string;
+      conclusion?: string | null;
+      head_sha?: string;
+      head_branch?: string;
+      head_repo_owner?: string;
+      head_repo_name?: string;
+      html_url?: string;
+      created_at?: string;
+      updated_at?: string;
+      pull_requests?: Array<{
+        number: number;
+        head_sha?: string;
+        head_branch?: string;
+        head_repo_owner?: string;
+        head_repo_name?: string;
+      }>;
+    }>;
+    workflow_jobs?: Array<{
+      run_id: number;
+      run_attempt?: number;
+      jobs: Array<{
+        id: number;
+        name: string;
+        status: string;
+        conclusion?: string | null;
+      }>;
     }>;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/pr-feedback", data);
@@ -2357,6 +2421,7 @@ export class ApiClient {
     sessions: Array<{
       id: string;
       task_id: string;
+      queue_incarnation_id: string;
       agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
@@ -2376,6 +2441,22 @@ export class ApiClient {
     total: number;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async getQueueSessionIdentity(
+    taskId: string,
+    sessionId: string,
+  ): Promise<QueueSessionIdentityInput> {
+    const { sessions } = await this.listTaskSessions(taskId);
+    const session = sessions.find((candidate) => candidate.id === sessionId);
+    if (!session?.queue_incarnation_id) {
+      throw new Error(`Queue identity is unavailable for session ${sessionId}`);
+    }
+    return {
+      taskId,
+      sessionId,
+      sessionIncarnationId: session.queue_incarnation_id,
+    };
   }
 
   /**
@@ -2454,6 +2535,7 @@ export class ApiClient {
   async getTask(taskId: string): Promise<{
     id: string;
     title: string;
+    description?: string;
     autopilot?: boolean;
     primary_session_id?: string | null;
     primary_executor_type?: string | null;
@@ -2720,34 +2802,46 @@ export class ApiClient {
   }
 
   async queueMessage(
-    taskId: string,
-    sessionId: string,
+    identity: QueueSessionIdentityInput,
     content: string,
     attachments?: MessageAttachmentInput[],
   ): Promise<void> {
     await this.wsRequest("message.queue.add", {
-      task_id: taskId,
-      session_id: sessionId,
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
       content,
       attachments,
     });
   }
 
-  /** Removes every pending queued message for a session (message.queue.cancel). */
-  async clearQueue(sessionId: string): Promise<void> {
-    await this.wsRequest("message.queue.cancel", { session_id: sessionId });
+  /** Removes every pending queued message for an immutable session identity. */
+  async clearQueue(identity: QueueSessionIdentityInput): Promise<void> {
+    await this.wsRequest("message.queue.cancel", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+    });
   }
 
-  async getQueueStatus(sessionId: string): Promise<{ count: number; auto_run: boolean }> {
-    return this.wsRequest("message.queue.get", { session_id: sessionId });
+  async getQueueStatus(
+    identity: QueueSessionIdentityInput,
+  ): Promise<{ count: number; auto_run: boolean; auto_merge_enabled: boolean }> {
+    return this.wsRequest("message.queue.get", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+    });
   }
 
   async setQueueAutoRun(
-    sessionId: string,
+    identity: QueueSessionIdentityInput,
     enabled: boolean,
   ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
     return this.wsRequest("message.queue.auto_run.set", {
-      session_id: sessionId,
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
       enabled,
     });
   }

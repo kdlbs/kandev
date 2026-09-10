@@ -649,6 +649,41 @@ describe("hydrateState — session runtime model state", () => {
     expect(systemResult.system).toEqual(defaultState.system);
   });
 });
+
+describe("hydrateState — route MCP status freshness", () => {
+  it("keeps newer live MCP state when force-merging an older route snapshot", () => {
+    const routeHistory: MCPAttachmentHistory = {
+      version: 1,
+      current: {
+        attachment_attempt_id: "attempt-route",
+        started_at: "2026-06-10T00:00:00.000Z",
+        servers: [{ name: "route", status: "connected" }],
+      },
+    };
+    const liveHistory: MCPAttachmentHistory = {
+      version: 1,
+      current: {
+        attachment_attempt_id: "attempt-live",
+        started_at: "2026-06-11T00:00:00.000Z",
+        updated_at: "2026-06-11T00:01:00.000Z",
+        servers: [{ name: "live", status: "active" }],
+      },
+    };
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionMcpStatus.bySessionId["session-1"] = liveHistory;
+      hydrateState(
+        draft,
+        {
+          sessionMcpStatus: { bySessionId: { "session-1": routeHistory } },
+        } as unknown as Partial<AppState>,
+        { activeSessionId: "session-1", forceMergeSessionId: "session-1" },
+      );
+    });
+
+    expect(result.sessionMcpStatus.bySessionId["session-1"]).toEqual(liveHistory);
+  });
+});
+
 it.each([true, false])(
   "turn hydration marks a session only when it is force-merged",
   (forceMerge) => {

@@ -1,10 +1,14 @@
-import fs from "node:fs";
-import path from "node:path";
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import {
+  cleanupDelayedResumeFixture,
+  seedDelayedResumeFixture,
+  waitForSessionReady,
+  waitForQueuedCount,
+} from "../../helpers/session-resume-prompt-queue";
 
 type ContextWindowStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
@@ -111,7 +115,7 @@ const CRASH_RECOVERY_TIMEOUT = 170_000;
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
 
-  test("session startup keeps the composer editable while submission waits", async ({
+  test("session startup keeps the composer editable and queues a submitted prompt", async ({
     testPage,
     apiClient,
     seedData,
@@ -119,51 +123,46 @@ test.describe("Session recovery", () => {
   }) => {
     test.setTimeout(120_000);
 
-    // Keep workspace preparation in STARTING long enough to exercise the
-    // startup gate. The backend fixture's git shim reads this file before
-    // fetching the worktree, matching a slow real-world preparation phase.
-    const delayFile = path.join(backend.tmpDir, "git-delay-ms");
-    fs.writeFileSync(delayFile, "5000");
+    const fixture = await seedDelayedResumeFixture(
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      "Session startup composer readiness test",
+    );
 
     try {
-      const task = await apiClient.createTaskWithAgent(
-        seedData.workspaceId,
-        "Session startup composer readiness test",
-        seedData.agentProfileId,
-        {
-          description: "/e2e:simple-message",
-          workflow_id: seedData.workflowId,
-          workflow_step_id: seedData.startStepId,
-          repository_ids: [seedData.repositoryId],
-          executor_profile_id: seedData.worktreeExecutorProfileId,
-        },
-      );
-
-      await testPage.goto(`/t/${task.id}`);
-      const session = new SessionPage(testPage);
-      await session.waitForLoad();
-
-      const starting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-      const editor = session.activeChat().getByTestId("chat-input-editor");
-      const submit = session.submitButton();
-      await expect(starting).toBeVisible({ timeout: 15_000 });
+      const editor = fixture.session.activeChat().getByTestId("chat-input-editor");
+      const submit = fixture.session.submitButton();
 
       // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1
       await expect(editor).toHaveAttribute("contenteditable", "true");
-      await editor.fill("draft during startup");
+      await editor.fill('e2e:message("startup queue marker")');
 
-      // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.2
-      await expect(submit).toBeDisabled();
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.1
+      await expect(submit).toBeEnabled();
+      await submit.click();
 
-      await expect(starting).toBeHidden({ timeout: 60_000 });
-      // The initial task prompt may still be finishing after environment
-      // preparation. Wait for the same submit gate to clear, not a timer.
-      await expect(submit).toBeEnabled({ timeout: 60_000 });
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.2
+      await expect(editor).toHaveText("");
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expect(fixture.session.activeChat().getByTestId("queue-chip")).toBeVisible();
 
-      // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.3
-      await expect(editor).toHaveText("draft during startup");
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.8
+      await testPage.reload();
+      await fixture.session.waitForLoad();
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+
+      await waitForSessionReady(testPage, apiClient, fixture.task.id, fixture.identity.sessionId);
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.3
+      const responses = fixture.session
+        .activeChat()
+        .locator("[data-agent-message-body][data-message-id]")
+        .filter({ hasText: "startup queue marker" });
+      await expect(responses).toHaveCount(1, { timeout: 60_000 });
     } finally {
-      if (fs.existsSync(delayFile)) fs.unlinkSync(delayFile);
+      await cleanupDelayedResumeFixture(apiClient, fixture);
     }
   });
 
@@ -224,12 +223,9 @@ test.describe("Session recovery", () => {
     // Click "Start fresh session"
     await session.recoveryFreshButton().click();
 
-    // Recovery briefly exposes the idle placeholder before the replacement
-    // agent starts. Observe the starting phase before treating the composer as
-    // ready so that transient idle state cannot satisfy the assertion.
-    const freshStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-    await expect(freshStarting).toBeVisible({ timeout: 30_000 });
-    await expect(freshStarting).not.toBeVisible({ timeout: 30_000 });
+    // Native session resume can move directly from recovery into an editable
+    // replacement session, so assert stable readiness instead of a transient
+    // placeholder that may be skipped.
     await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
       "contenteditable",
       "true",

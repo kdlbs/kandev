@@ -85,6 +85,7 @@ func TestPendingMove_ReviewToInProgress_OneTransitionOnly(t *testing.T) {
 func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	sc.stepGetter.steps[stepReviewedID].Name = "Done"
+	sc.stepGetter.steps[stepReviewedID].CompleteTaskOnEnter = true
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {
@@ -396,7 +397,7 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       messagequeue.NewServiceMemory(log),
+		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -412,11 +413,13 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 	); err != nil {
 		t.Fatalf("queue hand-off prompt: %v", err)
 	}
-	svc.messageQueue.SetPendingMove(ctx, reviewSessionID, &messagequeue.PendingMove{
+	if err := svc.messageQueue.SetPendingMove(ctx, reviewSessionID, &messagequeue.PendingMove{
 		TaskID:         "task-1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: stepInProgressID,
-	})
+	}); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
 
 	return &pendingMoveScenario{
 		ctx:              ctx,
@@ -437,7 +440,8 @@ func newPendingMoveStepGetter() *mockStepGetter {
 	sg := newMockStepGetter()
 	sg.steps[stepInProgressID] = &wfmodels.WorkflowStep{
 		ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1,
-		AgentProfileID: profileImpl,
+		AgentProfileID:          profileImpl,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 		Events: wfmodels.StepEvents{
 			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
 			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
@@ -447,7 +451,8 @@ func newPendingMoveStepGetter() *mockStepGetter {
 	}
 	sg.steps[stepInReviewID] = &wfmodels.WorkflowStep{
 		ID: stepInReviewID, WorkflowID: "wf1", Name: "In Review", Position: 2,
-		AgentProfileID: profileReview,
+		AgentProfileID:          profileReview,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 		Events: wfmodels.StepEvents{
 			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
 			OnTurnComplete: []wfmodels.OnTurnCompleteAction{

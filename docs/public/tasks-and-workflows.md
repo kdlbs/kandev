@@ -393,9 +393,30 @@ deletion is not success.
 
 ## Find and organize tasks
 
-On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
+On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
+**Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
+different layouts. Threads shows agent conversations side by side. Kandev
+remembers the last selected view in that browser on the current device. Phones
+offer **Kanban**, **Threads**, and **List** in the topbar menu, with a native
+Threads deck showing one conversation at a time. A saved desktop Pipeline
+preference is kept but shown as Kanban on the phone.
 
-Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
+Kanban and List share a compact phone header showing the workspace and current
+mode. Tap that context or the menu button to change views, workspaces, or display
+options, or return **Home**. In Threads, tap the view name to choose a saved
+Threads view. Phone **Search tasks** lives in the menu: selecting it reveals
+and focuses the search field below the header. Selecting it again hides the
+field and clears the query.
+
+Under **Settings → Preferences → Appearance → Startup Page**, choose a destination, then select **Save changes**:
+
+- **Task overview** (the default): open the last listing view used on this device, including Threads.
+- **Last visited task**: resume the most recently opened task in the current workspace on this device when Kandev starts or you open the bare home address. If no matching task exists, open the remembered listing instead. Home navigation does not resume the task.
+- **Threads**: always open Threads on startup and Home navigation in the selected workspace, even after using a different listing view. This saved choice follows your user across devices; changing a listing view does not change it.
+
+Office workspaces keep their Office Home while Office is enabled. With Office disabled, Home keeps the workspace and uses the task-listing startup choice.
+
+Explicit view selections (including Kanban, Pipeline, and List), task, session, workflow, overview, and focused Threads links keep their destination on reload instead of applying the saved Threads default. A task's **Task overview** or Back action still opens the overview family using the remembered listing; it does not apply the fixed Threads default.
 
 The **TASKS** list in the left sidebar has two time-based sort choices. These choices are separate from the sort choices in the task **List** view.
 
@@ -436,7 +457,7 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | Setting                   | Effect                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Start step**            | Where a task is created when no agent starts with it. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step. This setting places tasks; it never starts agents, which is **Auto-start agent** below. |
-| **Agent profile and session handling** | The combined selector overrides the workflow/task profile when entering this step. Its session lifecycle settings control how this step starts and ends when the effective profile changes. Consecutive steps with the same profile keep the current session. The fixed profile override and original-session options are mutually exclusive. |
+| **Agent profile and session handling** | The combined selector can choose a profile, the task's initial conversation, or a conversation from an earlier direct-profile step. Its lifecycle settings control how this step starts and ends. The fixed profile override and original-session options are mutually exclusive. |
 | **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
 | **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
 | **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
@@ -454,8 +475,33 @@ For a profile change, configure two independent settings in the combined selecto
 - **When this step ends: Complete the session** closes the source session. The workflow cannot reuse it later.
 - **When this step ends: Park the session** stops the source runtime but keeps the conversation available for reuse or manual follow-up.
 
-Existing steps use **Reuse an available session** and **Complete the session** by
-default. A parked session is not an active process. You can answer it later, or
+The combined selector can target a specific conversation when a step changes
+the agent profile:
+
+- **Initial agent session** returns to the conversation that the task used at
+  launch. If that conversation is unavailable, Kandev starts a new conversation
+  with the target step's profile.
+- **Earlier workflow step** returns to the latest successful session recorded
+  for that earlier direct-profile step. The source step must be earlier and
+  must select a profile directly. Inherited profiles and indirect targets are
+  not valid sources.
+- **Agent profile** keeps the default profile-based routing. Kandev can select
+  any eligible conversation for that profile.
+
+For an explicit target, Kandev does not select an unrelated tab only because it
+uses the same profile. **Start a new session** always creates a new conversation,
+even when the target profile already has another session. A completed or
+missing source conversation uses a new conversation with the target profile.
+
+If a source step is moved, removed, or changed to an indirect profile, the
+workflow editor keeps the invalid target visible. Save changes stays disabled
+until you choose another target, clear the target, or undo the source edit.
+Synced workflows require the same repair in the source file before the next
+sync.
+
+New or unset steps use **Reuse an available session** and **Park the session** by
+default. An explicitly saved **Complete the session** choice remains unchanged.
+A parked session is not an active process. You can answer it later, or
 Kandev can reuse it when a later destination step selects the matching profile
 and start behavior. If Kandev cannot prepare the destination session or record
 the parked switch, it keeps the current session recoverable and reports the
@@ -590,8 +636,15 @@ Regular tasks have one shared Markdown plan, not a collection of named documents
 2. Write the plan or let an agent write it through task MCP.
 3. Edit it directly. The panel autosaves after 1.5 seconds.
 4. Use plan history to preview a revision, compare it with the previous or current revision, or restore it. Restore creates a new revision; it does not erase history or coalesce with the preceding revision.
-5. Select plan text to leave a comment. **Run** sends the selected feedback to the agent in plan mode.
+5. Select plan text to add pending feedback. Plan comments belong to the task plan, so the same comments appear above every session composer. A normal **Send** includes the visible comments in the message to the selected session. **Run** sends only that comment, in plan mode, to the task's current primary session. An accepted Send or Run removes the delivered comments from the plan and every composer.
 6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the current draft first and marks the plan as sent for implementation; the implement control is then disabled for that plan.
+
+Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
+text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
+and selected text. The complete message, including formatted comments, must
+also fit within 1 MiB. If a limit is exceeded, shorten the feedback, selection,
+or message and retry; rejected changes and deliveries do not remove pending
+comments.
 
 Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
 
@@ -627,7 +680,11 @@ Archive records the task as archived and removes it from active views immediatel
 
 The archive confirmation is enabled by default at **Settings → General → Task Actions → Archive Confirmation** under **Confirm before archiving tasks**. If a parent has children, **Also archive _N_ subtasks** is unchecked by default; without it, the children remain active. Task MCP archive/delete operations affect only the selected task and do not offer the cascade checkbox. MCP delete also does not reparent direct children the way the UI's non-cascade delete does; use the UI rather than task MCP to delete a parent that still has children.
 
-To restore a task, open **List**, enable **Show archived**, and choose unarchive. If the parent was archived with its children, the cascade-owned children are restored with it. For worktree tasks, archive keeps the environment identity and the local branch. The next session recreates the worktree directory from that branch. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If an external action or an older Kandev version removed the branch, Kandev also checks `origin`. If no branch exists, the next session starts from the base branch. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
+To restore a task, open **List**, enable **Show archived**, and choose **Unarchive**. You can also choose **Unarchive** in the open task view on desktop or a phone. If unarchive fails, the task stays archived and recovery stays disabled. If the parent was archived with its children, the cascade-owned children are restored with it.
+
+While a task is archived, Kandev shows its history but does not start its agent or restore its workspace. After a successful unarchive, the open task checks its existing session once and follows the normal start preference. It can resume the same session or restore its worktree while keeping the session and environment identity. If **Prevent auto-start on open** is enabled, select **Start agent** to begin recovery.
+
+If recovery fails, the task shows a short error with expandable details for the resume and workspace restore attempts. Select **Retry** to try again. If you archive the task during recovery, Kandev stops that recovery path and does not start a fallback restore. For worktree tasks, archive keeps the environment identity and the local branch. The next session recreates the worktree directory from that branch. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If an external action or an older Kandev version removed the branch, Kandev also checks `origin`. If no branch exists, the next session starts from the base branch. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
 
 Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous, best-effort rules as archive.
 

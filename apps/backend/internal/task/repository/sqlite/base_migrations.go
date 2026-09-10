@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -73,6 +75,9 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.downstream_acp_session_id", `ALTER TABLE task_sessions ADD COLUMN downstream_acp_session_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
+	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
+		return err
+	}
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
@@ -100,6 +105,9 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
+	if err := r.migrateWorkflowSessionBindings(); err != nil {
+		return err
+	}
 	r.migrate.Apply("tasks.parent_id", `ALTER TABLE tasks ADD COLUMN parent_id TEXT DEFAULT ''`)
 	r.migrate.Apply("tasks.autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
@@ -177,6 +185,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
+	_ = r.migrate.Apply("task_plans.comments_revision", `ALTER TABLE task_plans ADD COLUMN comments_revision INTEGER NOT NULL DEFAULT 0`)
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and
@@ -290,19 +299,32 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureRunnerProjectionTables(); err != nil {
 		return err
 	}
+	// Keep the projection table compatible with existing task-only stores.
+	// The workflow repository owns this table in production, but task queries
+	// can run before that repository initializes its schema in isolated stores.
+	_ = r.migrate.Apply("workflow_step_participants.created_at", `
+		ALTER TABLE workflow_step_participants
+		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+	`)
 	// Keep the projection table compatible with databases whose workflow
 	// repository has not replayed its own migrations yet. These additive
 	// migrations are idempotent and preserve the false default for legacy rows.
 	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("workflow_steps.complete_task_on_enter", `ALTER TABLE workflow_steps ADD COLUMN complete_task_on_enter INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
-	r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'complete'`)
+	_ = r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'park'`)
+	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
 	// frontend snapshots the prior value before the advance to position the
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+	_ = r.migrate.Apply("task_sessions.queue_incarnation_id", `ALTER TABLE task_sessions ADD COLUMN queue_incarnation_id TEXT NOT NULL DEFAULT ''`)
+	if err := r.backfillTaskSessionQueueIncarnations(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_session_turns.execution_profile_id", `ALTER TABLE task_session_turns ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_session_turns.route_generation", `ALTER TABLE task_session_turns ADD COLUMN route_generation BIGINT NOT NULL DEFAULT 0`)
 
@@ -364,6 +386,37 @@ func (r *Repository) runMigrations() error {
 		return fmt.Errorf("required task migration: %w", err)
 	}
 
+	return nil
+}
+func (r *Repository) backfillTaskSessionQueueIncarnations() error {
+	rows, err := r.db.Queryx(`SELECT id FROM task_sessions WHERE queue_incarnation_id = ''`)
+	if err != nil {
+		return fmt.Errorf("list sessions missing queue incarnation: %w", err)
+	}
+	var sessionIDs []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan session missing queue incarnation: %w", err)
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close queue incarnation rows: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sessions missing queue incarnation: %w", err)
+	}
+	for _, sessionID := range sessionIDs {
+		if _, err := r.db.Exec(r.db.Rebind(`
+			UPDATE task_sessions
+			   SET queue_incarnation_id = ?
+			 WHERE id = ? AND queue_incarnation_id = ''
+		`), uuid.NewString(), sessionID); err != nil {
+			return fmt.Errorf("backfill queue incarnation for session %s: %w", sessionID, err)
+		}
+	}
 	return nil
 }
 

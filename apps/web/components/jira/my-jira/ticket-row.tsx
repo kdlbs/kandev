@@ -54,7 +54,7 @@ function StartTaskMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" className="cursor-pointer h-7 px-2 gap-1 text-xs">
+        <Button size="sm" variant="outline" className="cursor-pointer px-2 gap-1 text-xs">
           <IconPlus className="h-3.5 w-3.5" />
           {t("jira:startTask")}
         </Button>

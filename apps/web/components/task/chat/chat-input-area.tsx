@@ -17,14 +17,13 @@ import { ComposerAgentStartHint } from "./composer-agent-start-hint";
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
-  formatPlanCommentsAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
 import { useToast } from "@/components/toast-provider";
-import { isMessageSendError } from "@/lib/chat/message-send-error";
+import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import type { DiffComment } from "@/lib/diff/types";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
@@ -34,6 +33,9 @@ import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
+import { hasPendingClarification } from "./types";
+import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
+import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -41,14 +43,7 @@ const PLAN_CONTEXT_PATH = "plan:context";
  * Prepends any pending review/walkthrough/PR-feedback/plan/message comments
  * to the composer text as Markdown, in a fixed stacking order, before send.
  */
-export function buildSubmitMessage({
-  message,
-  reviewComments,
-  pendingPRFeedback,
-  planComments,
-  walkthroughComments = [],
-  messageComments = [],
-}: {
+export function buildSubmitMessage(args: {
   message: string;
   reviewComments?: DiffComment[];
   pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[];
@@ -56,6 +51,13 @@ export function buildSubmitMessage({
   walkthroughComments?: import("@/lib/state/slices/comments").WalkthroughComment[];
   messageComments?: AgentMessageComment[];
 }): string {
+  const {
+    message,
+    reviewComments,
+    pendingPRFeedback,
+    walkthroughComments = [],
+    messageComments = [],
+  } = args;
   let finalMessage = message;
   if (reviewComments && reviewComments.length > 0) {
     finalMessage = formatReviewCommentsAsMarkdown(reviewComments) + (message || "");
@@ -65,10 +67,6 @@ export function buildSubmitMessage({
   }
   if (pendingPRFeedback.length > 0) {
     finalMessage = formatPRFeedbackAsMarkdown(pendingPRFeedback) + finalMessage;
-  }
-  if (planComments.length > 0) {
-    const planMarkdown = formatPlanCommentsAsMarkdown(planComments);
-    finalMessage = finalMessage ? `${planMarkdown}${finalMessage}` : planMarkdown;
   }
   if (messageComments.length > 0) {
     const messageCommentsMarkdown = formatAgentMessageCommentsAsMarkdown(messageComments);
@@ -165,6 +163,70 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     prompts,
   });
 }
+
+async function submitChatPayload({
+  payload,
+  panelState,
+  onSend,
+  storeApi,
+  handleSendMessage,
+}: {
+  payload: ChatSubmitPayload;
+  panelState: ChatPanelState;
+  onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
+  storeApi: ReturnType<typeof useAppStoreApi>;
+  handleSendMessage: (payload: ChatSubmitPayload) => Promise<void | boolean>;
+}) {
+  const {
+    resolvedSessionId,
+    planComments,
+    pendingPRFeedback,
+    walkthroughComments,
+    messageComments,
+    markCommentsSent,
+    handleClearPRFeedback,
+    handleClearWalkthroughComments,
+    clearEphemeral,
+    addContextFile,
+    planModeEnabled,
+    pendingClarification,
+  } = panelState;
+  const finalMessage = buildSubmitMessage({
+    message: payload.message,
+    reviewComments: payload.reviewComments,
+    pendingPRFeedback,
+    planComments,
+    walkthroughComments,
+    messageComments,
+  });
+  const planCommentRefs = toTaskPlanCommentRefs(planComments);
+  const outbound = {
+    ...payload,
+    message: finalMessage,
+    ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
+  };
+  let submissionResult: void | boolean;
+  if (onSend && !pendingClarification) {
+    const taskContext = payload.inlineTaskMentions?.length
+      ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
+      : "";
+    submissionResult = await onSend({ ...outbound, message: finalMessage + taskContext });
+  } else {
+    submissionResult = await handleSendMessage(outbound);
+  }
+  if (submissionResult === false) return false;
+  if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
+  if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
+  if (pendingPRFeedback.length > 0) handleClearPRFeedback();
+  if (walkthroughComments.length > 0) handleClearWalkthroughComments();
+  if (!resolvedSessionId) return true;
+  clearEphemeral(resolvedSessionId);
+  if (planModeEnabled) {
+    addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+  }
+  return true;
+}
+
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(
@@ -174,59 +236,31 @@ export function useSubmitHandler(
   const [isSending, setIsSending] = useState(false);
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
-  const {
-    resolvedSessionId,
-    planComments,
-    pendingPRFeedback,
-    walkthroughComments,
-    messageComments,
-    markCommentsSent,
-    clearSessionPlanComments,
-    handleClearPRFeedback,
-    handleClearWalkthroughComments,
-    clearEphemeral,
-    addContextFile,
-    planModeEnabled,
-    pendingClarification,
-  } = panelState;
   const { handleSendMessage } = usePanelMessageHandler(panelState);
 
   const handleSubmit = useCallback(
+    // eslint-disable-next-line complexity -- submission owns the shared cleanup and failure-preservation branches.
     async (payload: ChatSubmitPayload) => {
-      if (isSending) return;
+      if (isSending) return false;
+      if (panelState.planCommentMigration?.isBlocking) {
+        showMessageSendToast(
+          new MessageSendError(
+            "plan-comment-migration-pending",
+            t("task:planCommentMigrationPending"),
+          ),
+          toast,
+        );
+        return false;
+      }
       setIsSending(true);
       try {
-        const finalMessage = buildSubmitMessage({
-          message: payload.message,
-          reviewComments: payload.reviewComments,
-          pendingPRFeedback,
-          planComments,
-          walkthroughComments,
-          messageComments,
+        return await submitChatPayload({
+          payload,
+          panelState,
+          onSend,
+          storeApi,
+          handleSendMessage,
         });
-        const outbound = { ...payload, message: finalMessage };
-        if (onSend && !pendingClarification) {
-          // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
-          const taskCtx = payload.inlineTaskMentions?.length
-            ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
-            : "";
-          await onSend({ ...outbound, message: finalMessage + taskCtx });
-        } else {
-          await handleSendMessage(outbound);
-        }
-        if (payload.reviewComments && payload.reviewComments.length > 0)
-          markCommentsSent(payload.reviewComments.map((c) => c.id));
-        if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
-        if (pendingPRFeedback.length > 0) handleClearPRFeedback();
-        if (walkthroughComments.length > 0) handleClearWalkthroughComments();
-        if (planComments.length > 0) clearSessionPlanComments();
-        if (resolvedSessionId) {
-          clearEphemeral(resolvedSessionId);
-          // Re-add plan context if plan mode is still active (clearEphemeral removes unpinned files)
-          if (planModeEnabled) {
-            addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
-          }
-        }
       } catch (error) {
         showMessageSendToast(error, toast);
         return false;
@@ -237,22 +271,11 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
-      pendingClarification,
       storeApi,
       handleSendMessage,
-      markCommentsSent,
-      planComments,
-      clearSessionPlanComments,
-      walkthroughComments,
-      messageComments,
-      handleClearWalkthroughComments,
-      pendingPRFeedback,
-      handleClearPRFeedback,
-      resolvedSessionId,
-      clearEphemeral,
-      planModeEnabled,
-      addContextFile,
       toast,
+      panelState,
+      panelState.planCommentMigration,
     ],
   );
 
@@ -441,6 +464,10 @@ export function ChatInputArea({
     chatInputRef,
     placeholderOverride,
   );
+  const clarificationPending = hasPendingClarification(
+    Boolean(panelState.pendingClarification),
+    panelState.session?.pending_action,
+  );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
     panelState,
@@ -473,6 +500,7 @@ export function ChatInputArea({
         executorUnavailable={executor.unavailable}
         hasPendingClarification={Boolean(panelState.pendingClarification)}
       />
+      <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
       <QueueAffordance
         sessionId={resolvedSessionId}
         renderStatusBar={(queueChip) => (
@@ -484,6 +512,7 @@ export function ChatInputArea({
             nextStepName={proceedStepName}
             onProceed={proceed}
             isAgentBusy={isAgentBusy}
+            hasPendingClarification={clarificationPending}
             isMoving={isMoving}
             queueChip={queueChip}
             showScrollToLastPrompt={showScrollToLastPrompt}

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { IconChevronDown, IconGitMerge } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -213,8 +214,10 @@ function MergeButtonShell({
   const primaryBtn = (
     <Button
       data-testid="pr-merge-button"
-      size="sm"
-      className={`min-h-11 cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 ${showDropdown ? "rounded-r-none" : ""}`}
+      className={controlSizingClassName(
+        "standard",
+        `cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 ${showDropdown ? "rounded-r-none" : ""}`,
+      )}
       onClick={onPrimaryClick}
       disabled={disabled}
     >

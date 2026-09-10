@@ -118,6 +118,12 @@ Read these sources before designing the plugin:
 4. The current `kdlbs/kandev-plugin-template` repository, including its
    `README.md`, `Makefile`, tests, and release workflow.
 
+**Marketplace attribution:** The manifest `author` is independent from GitHub
+repository ownership or organization. Never infer author `kandev` from a
+`kdlbs/kandev-plugin-*` repository. Read and preserve the manifest author,
+verify `repo_url` separately, and require an explicit contributor identity when
+an externally maintained plugin is released.
+
 Prefer the public authoring docs and current template over old examples. The
 frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
 `apps/web/lib/plugins/types.ts`; concrete UI exports are in

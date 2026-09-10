@@ -142,23 +142,26 @@ func (s *Service) drainHistoryQueue() {
 }
 
 // EnqueueStepTransition records transition history outside the caller's
-// event-reader path. The queue is bounded. A full queue, or an enqueue after
-// Close has begun, is logged as a dropped best-effort telemetry row while the
-// workflow mutation itself succeeds.
-func (s *Service) EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) {
+// event-reader path. The queue is bounded. It returns false when a full queue,
+// an empty session ID, or shutdown prevents enqueueing, so callers carrying
+// signal data can use a bounded synchronous fallback instead of silently
+// losing that payload.
+func (s *Service) EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) bool {
 	if sessionID == "" {
-		return
+		return false
 	}
 	s.historyMu.RLock()
 	defer s.historyMu.RUnlock()
 	if s.historyClosed {
 		s.logger.Warn("dropped step transition enqueued after shutdown", zap.String("session_id", sessionID))
-		return
+		return false
 	}
 	select {
 	case s.historyQueue <- historyWrite{sessionID: sessionID, fromStepID: fromStepID, toStepID: toStepID, trigger: trigger, actorID: actorID, metadata: metadata}:
+		return true
 	default:
 		s.logger.Warn("step transition history queue is full", zap.String("session_id", sessionID))
+		return false
 	}
 }
 
@@ -387,8 +390,10 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			AgentProfileID:             stepDef.AgentProfileID,
 			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)),
 			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)),
+			SessionTarget:              models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap),
 			AutoAdvanceRequiresSignal:  stepDef.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: stepDef.CancelTriggersTurnComplete,
+			CompleteTaskOnEnter:        stepDef.CompleteTaskOnEnter,
 			WIPLimit:                   stepDef.WIPLimit,
 			PullFromStepID:             models.RemapStepID(stepDef.PullFromStepID, idMap),
 			StageType:                  stepDef.StageType,
@@ -398,6 +403,9 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			return fmt.Errorf("validate template step %q: %w", step.Name, err)
 		}
 		steps = append(steps, step)
+	}
+	if err := validateWorkflowSessionTargets(steps); err != nil {
+		return fmt.Errorf("validate template workflow session targets: %w", err)
 	}
 
 	for _, step := range steps {
@@ -601,8 +609,9 @@ func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs [
 
 // CreateStepTransition creates a new step transition history entry. metadata
 // is optional (nil for a plain move) and carries the ADR 0015 consumed-signal
-// shape ({"signal_source", "signal_summary"}) when a completion signal drove
-// the transition.
+// shape ({"signal_source", "signal_summary"}, plus "signal_handoff" and
+// "signal_blockers" when the signal carried a non-blank value for either)
+// when a completion signal drove the transition.
 func (s *Service) CreateStepTransition(ctx context.Context, sessionID string, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error {
 	history := &models.SessionStepHistory{
 		SessionID: sessionID,
@@ -672,7 +681,7 @@ func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*model
 		return nil, fmt.Errorf("failed to list steps: %w", err)
 	}
 	stepMap := map[string][]*models.WorkflowStep{wf.ID: steps}
-	return models.BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, s.resolveProfile), nil
+	return models.BuildWorkflowExportWithError([]*taskmodels.Workflow{wf}, stepMap, s.resolveProfile)
 }
 
 // ExportWorkflows exports workflows for a workspace. When workflowIDs is nil,
@@ -706,7 +715,7 @@ func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string, workf
 		}
 		stepMap[wf.ID] = steps
 	}
-	return models.BuildWorkflowExport(workflows, stepMap, s.resolveProfile), nil
+	return models.BuildWorkflowExportWithError(workflows, stepMap, s.resolveProfile)
 }
 
 // filterWorkflowsByID returns the subset of workflows whose ID is in ids,
@@ -729,6 +738,9 @@ func filterWorkflowsByID(workflows []*taskmodels.Workflow, ids []string) []*task
 func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, export *models.WorkflowExport) (*ImportResult, error) {
 	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
 		return nil, err
+	}
+	if err := export.NormalizeCompletionPolicy(); err != nil {
+		return nil, fmt.Errorf("invalid export data: %w", err)
 	}
 	if err := export.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid export data: %w", err)
@@ -781,6 +793,9 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 			return nil, err
 		}
 		steps = append(steps, step)
+	}
+	if err := validateWorkflowSessionTargets(steps); err != nil {
+		return nil, fmt.Errorf("validate workflow session targets: %w", err)
 	}
 
 	wf, err := s.workflowProvider.CreateWorkflow(ctx, workspaceID, pw.Name, pw.Description)
@@ -844,6 +859,34 @@ func (s *Service) validateImportedStepReferences(
 	return nil
 }
 
+func validateWorkflowSessionTargets(steps []*models.WorkflowStep) error {
+	byID := make(map[string]*models.WorkflowStep, len(steps))
+	for _, step := range steps {
+		if step != nil {
+			byID[step.ID] = step
+		}
+	}
+	for _, step := range steps {
+		if step == nil || step.SessionTarget == nil || step.SessionTarget.Kind != models.WorkflowSessionTargetStep {
+			continue
+		}
+		source, ok := byID[step.SessionTarget.StepID]
+		if !ok || source == nil {
+			return fmt.Errorf("step %q session target source %q was not found", step.Name, step.SessionTarget.StepID)
+		}
+		if source.WorkflowID != step.WorkflowID {
+			return fmt.Errorf("step %q session target source must be in the same workflow", step.Name)
+		}
+		if source.Position >= step.Position {
+			return fmt.Errorf("step %q session target source %q must be earlier", step.Name, source.Name)
+		}
+		if source.AgentProfileID == "" || source.SessionTarget != nil {
+			return fmt.Errorf("step %q session target source %q must use a direct agent profile", step.Name, source.Name)
+		}
+	}
+	return nil
+}
+
 // stepFromPortable builds a WorkflowStep from its portable form, remapping
 // position-based references to the step IDs in posToID and matching the
 // step-level agent profile when a matcher is wired. existingProfileID is the
@@ -873,8 +916,10 @@ func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepP
 		AutoArchiveAfterHours:      sp.AutoArchiveAfterHours,
 		ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(sp.ProfileSessionStartPolicy)),
 		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(sp.ProfileSessionEndPolicy)),
+		SessionTarget:              sp.WorkflowSessionTarget(posToID),
 		AutoAdvanceRequiresSignal:  sp.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: sp.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        sp.CompleteTaskOnEnter,
 		WIPLimit:                   sp.WIPLimit,
 		PullFromStepID:             sp.PullFromStepID(posToID),
 	}

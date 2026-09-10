@@ -14,6 +14,10 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   fetchMessageQueueSettings,
@@ -300,7 +304,7 @@ function QueueLimitFields({
           value={draft}
           disabled={disabled}
           onChange={(event) => onDraftChange(event.target.value)}
-          className="h-11 w-full max-w-xs"
+          className={settingsControlClassName("w-full max-w-xs")}
         />
         <p className="text-xs text-muted-foreground">{t("system:messageQueueUnlimitedHelp")}</p>
       </div>
@@ -497,7 +501,11 @@ function MessageQueueLoadError({ onRetry }: { onRetry: () => void }) {
           <IconAlertCircle className="size-4" />
           <AlertDescription>{t("system:messageQueueLoadFailed")}</AlertDescription>
         </Alert>
-        <Button variant="outline" className="h-11 cursor-pointer" onClick={onRetry}>
+        <Button
+          variant="outline"
+          className={settingsActionClassName("cursor-pointer")}
+          onClick={onRetry}
+        >
           {t("system:messageQueueRetry")}
         </Button>
       </CardContent>

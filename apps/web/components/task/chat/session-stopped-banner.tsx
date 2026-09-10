@@ -95,6 +95,16 @@ function StoppedRecoveryFeedback({
   );
 }
 
+function useSessionProfileExists(sessionId: string | null): boolean {
+  return useAppStore((s) => {
+    if (!sessionId) return false;
+    const agentProfileId = s.taskSessions.items[sessionId]?.agent_profile_id;
+    return (
+      !!agentProfileId && s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId)
+    );
+  });
+}
+
 function RecoverableSessionActions({
   onShowDialog,
   taskId,
@@ -131,13 +141,7 @@ function RecoverableSessionActions({
     handleNewBranch,
   } = recoveryActions ?? localRecoveryActions;
 
-  const profileExists = useAppStore((s) => {
-    if (!sessionId) return false;
-    const agentProfileId = s.taskSessions.items[sessionId]?.agent_profile_id;
-    return (
-      !!agentProfileId && s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId)
-    );
-  });
+  const profileExists = useSessionProfileExists(sessionId);
 
   const handleResume = useCallback(() => {
     if (taskId && sessionId) void handleRecover("resume");
@@ -176,6 +180,92 @@ function RecoverableSessionActions({
   );
 }
 
+function CompletedSessionActions({
+  onShowDialog,
+  taskId,
+  sessionId,
+  workspaceId,
+  recoveryActions,
+}: Pick<
+  SessionStoppedBannerProps,
+  "onShowDialog" | "taskId" | "sessionId" | "workspaceId" | "recoveryActions"
+>) {
+  const { t } = useTranslation();
+  const localRecoveryActions = useSessionRecoveryActions({
+    taskId: taskId ?? "",
+    sessionId: sessionId ?? "",
+  });
+  const {
+    busyAction,
+    recoveryError,
+    branchDetails,
+    recoveryNotice,
+    handleRecover,
+    handleRestore,
+    handleRetry,
+    handleNewBranch,
+  } = recoveryActions ?? localRecoveryActions;
+  const profileExists = useSessionProfileExists(sessionId);
+
+  const handleResume = useCallback(() => {
+    if (taskId && sessionId) void handleRecover("resume");
+  }, [handleRecover, sessionId, taskId]);
+
+  return (
+    <div className="flex w-full flex-col gap-2 sm:w-auto">
+      <StoppedRecoveryFeedback
+        workspaceId={workspaceId}
+        recoveryError={recoveryError}
+        recoveryNotice={recoveryNotice}
+        branchDetails={branchDetails}
+        busyAction={busyAction}
+        onRetry={handleRetry}
+        onRestore={() => void handleRestore()}
+        onNewBranch={handleNewBranch}
+      />
+      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        {sessionId && taskId && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="inline-flex w-full sm:w-auto"
+                data-testid="completed-session-resume-wrapper"
+                tabIndex={busyAction !== null || !profileExists ? 0 : -1}
+              >
+                <Button
+                  variant="default"
+                  data-testid="recovery-resume-button"
+                  className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+                  onClick={handleResume}
+                  disabled={busyAction !== null || !profileExists}
+                >
+                  <IconPlayerPlay className="h-3.5 w-3.5" />
+                  {busyAction === "resume" ? t("task:resuming") : t("task:resume")}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {!profileExists && (
+              <TooltipContent>{t("task:agentProfileNoLongerExists")}</TooltipContent>
+            )}
+          </Tooltip>
+        )}
+        <Button
+          variant="outline"
+          className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+          onClick={() => {
+            if (taskId) onShowDialog(true);
+          }}
+          disabled={busyAction !== null || !taskId}
+          data-testid="completed-session-new-agent-button"
+        >
+          <IconPlus className="h-3.5 w-3.5" />
+          {t("task:newAgent")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function RecoverableSessionButtons({
   taskId,
   sessionId,
@@ -204,12 +294,12 @@ function RecoverableSessionButtons({
             <span
               className="inline-flex w-full sm:w-auto"
               data-testid="failed-session-resume-wrapper"
+              tabIndex={busyAction !== null || !profileExists ? 0 : -1}
             >
               <Button
                 variant="default"
-                size="sm"
                 data-testid="recovery-resume-button"
-                className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+                className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
                 onClick={onResume}
                 disabled={busyAction !== null || !profileExists}
               >
@@ -225,8 +315,7 @@ function RecoverableSessionButtons({
       )}
       <Button
         variant="outline"
-        size="sm"
-        className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+        className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
         onClick={onFreshStart}
         disabled={busyAction !== null}
         data-testid="recovery-fresh-button"
@@ -278,19 +367,13 @@ export function SessionStoppedBanner({
           </div>
 
           {isCompleted ? (
-            <Button
-              variant="default"
-              size="sm"
-              data-testid="completed-session-new-agent-button"
-              className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-              onClick={() => {
-                if (taskId) onShowDialog(true);
-              }}
-              disabled={!taskId}
-            >
-              <IconPlus className="h-3.5 w-3.5" />
-              {t("task:newAgent")}
-            </Button>
+            <CompletedSessionActions
+              onShowDialog={onShowDialog}
+              taskId={taskId}
+              sessionId={sessionId}
+              workspaceId={workspaceId}
+              recoveryActions={recoveryActions}
+            />
           ) : (
             <RecoverableSessionActions
               onShowDialog={onShowDialog}

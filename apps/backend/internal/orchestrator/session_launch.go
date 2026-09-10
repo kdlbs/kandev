@@ -82,6 +82,11 @@ type LaunchSessionRequest struct {
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement bool `json:"-"`
+	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
+	// follow-up dispatcher. It is intentionally not part of the wire request:
+	// ordinary launch, ensure, and startup recovery paths must keep completed
+	// sessions terminal.
+	AllowCompletedSessionResume bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -271,14 +276,26 @@ func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bo
 	return info.CLIPassthrough
 }
 
+// blocksAutoStartLaunch reports whether an auto-start request must be
+// downgraded to a prepare, either because the task's current step does not
+// allow it or because it has an unresolved dependency. The dependency gate's
+// launch-token restore concern does not apply here: this path owns no
+// lifecycle token to restore.
+func (s *Service) blocksAutoStartLaunch(ctx context.Context, req *LaunchSessionRequest) bool {
+	if s.shouldBlockAutoStart(ctx, req) {
+		return true
+	}
+	blocked, _ := s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")
+	return blocked
+}
+
 // launchStart creates a new session and launches the agent.
 // If the request is an auto-start and the task's current workflow step does not
 // have auto_start_agent, or the task has unresolved dependencies, the request
 // is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
 // auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && (s.shouldBlockAutoStart(ctx, req) ||
-		s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")) {
+	if req.AutoStart && s.blocksAutoStartLaunch(ctx, req) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}
@@ -350,7 +367,8 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
-		AllowBranchReplacement: req.AllowBranchReplacement,
+		AllowBranchReplacement:      req.AllowBranchReplacement,
+		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
 	})
 	if err != nil {
 		return nil, err
@@ -385,6 +403,9 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	}
 	if session.TaskID != req.TaskID {
 		return nil, fmt.Errorf("session does not belong to task")
+	}
+	if err := s.ensureTaskNotArchived(ctx, req.TaskID); err != nil {
+		return nil, err
 	}
 
 	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
@@ -423,6 +444,9 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err := s.authorizeTask(ctx, taskID); err != nil {
 		return nil, err
 	}
+	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
+		return nil, err
+	}
 	if action == "runtime_retry" {
 		if s.wasResumeAttempt(ctx, sessionID) {
 			action = "resume"
@@ -445,10 +469,11 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	}
 
 	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID:                 taskID,
-		SessionID:              sessionID,
-		Intent:                 IntentResume,
-		AllowBranchReplacement: action == "resume_new_branch",
+		TaskID:                      taskID,
+		SessionID:                   sessionID,
+		Intent:                      IntentResume,
+		AllowBranchReplacement:      action == "resume_new_branch",
+		AllowCompletedSessionResume: action == "resume",
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)

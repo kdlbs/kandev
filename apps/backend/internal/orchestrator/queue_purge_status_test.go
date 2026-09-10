@@ -92,8 +92,17 @@ func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
+	if _, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "session-drop", "task-session-queue", "in-flight lifecycle", "", "workflow", false, nil,
+		map[string]interface{}{"origin": "github_pr_automation"}, "session-delete-lifecycle", true,
+	); err != nil || !accepted {
+		t.Fatalf("QueueLifecycleMessageWithCoalesceKey: accepted=%v err=%v", accepted, err)
+	}
 	if _, err := svc.messageQueue.QueueMessage(ctx, "session-drop", "task-session-queue", "orphan me", "", "user", false, nil); err != nil {
 		t.Fatalf("QueueMessage drop: %v", err)
+	}
+	if _, ok, autoRun := svc.messageQueue.ReserveQueuedWithAutoRun(ctx, "session-drop"); !autoRun || !ok {
+		t.Fatalf("reserve lifecycle queue entry: auto_run=%v ok=%v", autoRun, ok)
 	}
 	if _, err := svc.messageQueue.QueueMessage(ctx, "session-keep", "task-session-queue", "keep me", "", "user", false, nil); err != nil {
 		t.Fatalf("QueueMessage keep: %v", err)
@@ -106,6 +115,9 @@ func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 
+	if _, ok, autoRun := svc.messageQueue.ReserveQueuedWithAutoRun(ctx, "session-drop"); !autoRun || ok {
+		t.Fatalf("deleted session retained reserved queue entry: auto_run=%v ok=%v", autoRun, ok)
+	}
 	if got := svc.messageQueue.GetStatus(ctx, "session-drop").Count; got != 0 {
 		t.Fatalf("session-drop queue count = %d, want 0", got)
 	}

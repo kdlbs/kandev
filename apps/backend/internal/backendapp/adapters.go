@@ -22,6 +22,7 @@ import (
 	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -424,6 +425,7 @@ func buildLifecycleLaunchRequest(
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
+		AdditionalSkillSlugs:          append([]string(nil), req.AdditionalSkillSlugs...),
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
@@ -1005,6 +1007,8 @@ type orchestratorWrapper struct {
 	svc *orchestrator.Service
 }
 
+var _ taskhandlers.AtomicQueuedPromptCoordinator = (*orchestratorWrapper)(nil)
+
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
 func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -1042,6 +1046,25 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
 	return w.svc.StartCreatedSessionWithPromptContext(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidance forwards direct
+// startup together with the server-resolved capability projection used when
+// the message was persisted.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		canvasGuidanceResolved, includeCanvasGuidance,
 	)
 }
 
@@ -1131,9 +1154,23 @@ func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessi
 	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
+func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {
+	return w.svc.MaxQueuedPromptsPerSession()
+}
+
+func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
+	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
+}
+
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
+}
+
+// TaskSessionCanvasGuidanceEnabled forwards the resolved capability used when
+// the message handler persists a first-turn prompt.
+func (w *orchestratorWrapper) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	return w.svc.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
 }
 
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).
@@ -1147,6 +1184,10 @@ func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskS
 
 func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
+func (w *orchestratorWrapper) SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerRecordedMessage(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
 // subagentContextAdapter adapts the task service to the
@@ -1227,6 +1268,22 @@ func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, 
 // CreateUserMessage creates a message with author_type="user"
 func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
+func (a *messageCreatorAdapter) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,

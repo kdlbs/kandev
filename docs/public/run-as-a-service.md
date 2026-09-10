@@ -340,3 +340,16 @@ Reinstall using the upgraded `kandev` binary, preserve the original `--system` a
 ### Service starts but agents fail
 
 Read service logs first. A service has a smaller `PATH` and no interactive shell environment, so tools or credentials visible in a terminal may be absent. Configure executor credentials through Kandev's profile/settings paths, use stable executable paths, and verify Docker/SSH/Sprites connectivity as described in [Executors](executors.md#troubleshooting).
+
+Linux user services include `~/.npm-global/bin` in their generated `PATH` for
+agent CLIs installed with that npm prefix. After upgrading an existing user
+service, regenerate its unit and restart it to apply the updated `PATH`:
+
+```bash
+# Repeat your original install-time flags when used.
+kandev service install
+kandev service restart
+```
+
+Restarting alone does not update an older unit's `PATH`. Other custom npm
+prefixes are not automatically added to the service environment.

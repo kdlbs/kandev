@@ -19,6 +19,7 @@ import {
 } from "./workflow-pipeline-editor-helpers";
 import {
   useStepActions,
+  CompleteTaskOnEnterToggle,
   TurnStartSelect,
   TurnCompleteSelect,
   ChildrenCompletedSelect,
@@ -28,15 +29,18 @@ import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-con
 import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
 import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-selector";
+import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 
 // --- StepConfigHeader ---
 
 type StepConfigHeaderProps = {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
+  steps: WorkflowStep[];
   localName: string;
   onLocalNameChange: (name: string) => void;
   onUpdate: (updates: Partial<WorkflowStep>) => void;
+  onRestoreSource?: () => void;
   onRemove: () => void;
   readOnly: boolean;
   debouncedUpdateName: (name: string) => void;
@@ -45,9 +49,11 @@ type StepConfigHeaderProps = {
 function StepConfigHeader({
   step,
   savedStep,
+  steps,
   localName,
   onLocalNameChange,
   onUpdate,
+  onRestoreSource,
   onRemove,
   readOnly,
   debouncedUpdateName,
@@ -66,7 +72,7 @@ function StepConfigHeader({
           }}
           placeholder={t("workflows:stepNamePlaceholder")}
           disabled={readOnly}
-          className="h-8 w-full sm:max-w-[240px]"
+          className={settingsControlClassName("w-full sm:max-w-[240px]")}
           data-settings-dirty={!savedStep || localName !== savedStep.name}
         />
         <Select
@@ -78,7 +84,7 @@ function StepConfigHeader({
           disabled={readOnly}
         >
           <SelectTrigger
-            className="h-8 w-full sm:w-[120px]"
+            className={settingsControlClassName("w-full sm:w-[120px]")}
             data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, (item) => item.color)}
           >
             <SelectValue placeholder={t("workflows:color")} />
@@ -97,7 +103,9 @@ function StepConfigHeader({
         <WorkflowStepAgentProfileSelector
           step={step}
           savedStep={savedStep}
+          steps={steps}
           onUpdate={onUpdate}
+          onRestoreSource={onRestoreSource}
           readOnly={readOnly}
         />
         <SessionConfigToggle
@@ -110,10 +118,11 @@ function StepConfigHeader({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
         onClick={onRemove}
         disabled={readOnly}
-        className="h-8 self-end cursor-pointer text-destructive hover:text-destructive sm:self-auto"
+        className={settingsActionClassName(
+          "self-end cursor-pointer text-destructive hover:text-destructive sm:self-auto",
+        )}
       >
         <IconTrash className="h-3.5 w-3.5 mr-1" />
         {t("workflows:delete")}
@@ -159,7 +168,7 @@ function StepAutoArchiveRow({ step, savedStep, onUpdate, readOnly }: StepAutoArc
             id={`${step.id}-auto-archive-hours`}
             type="number"
             min={1}
-            className="w-20 h-7 text-sm"
+            className={settingsControlClassName("w-20 text-sm")}
             value={step.auto_archive_after_hours ?? 24}
             onChange={(e) => {
               if (readOnly) return;
@@ -220,10 +229,11 @@ type StepBehaviorSectionProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   toggleOnEnterAction: (type: string) => void;
+  isFinalStep: boolean;
   readOnly: boolean;
 };
 
-type StepToggleRowsProps = Omit<StepBehaviorSectionProps, "steps">;
+type StepToggleRowsProps = Omit<StepBehaviorSectionProps, "steps" | "isFinalStep">;
 
 // The six on-enter / board-behavior toggles. Split out of StepBehaviorSection
 // so that component stays under the 100-line function cap.
@@ -325,6 +335,7 @@ function StepBehaviorSection({
   steps,
   onUpdate,
   toggleOnEnterAction,
+  isFinalStep,
   readOnly,
 }: StepBehaviorSectionProps) {
   return (
@@ -338,6 +349,13 @@ function StepBehaviorSection({
           readOnly={readOnly}
         />
       </div>
+      <CompleteTaskOnEnterToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+        isFinalStep={isFinalStep}
+      />
       <StepWipControls
         step={step}
         savedStep={savedStep}
@@ -451,6 +469,7 @@ type StepConfigPanelProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   onRemove: () => void;
+  onRestoreSourceStep?: (sourceStepId: string) => void;
   readOnly?: boolean;
   onSessionConfigResolutionPendingChange?: (pending: boolean) => void;
 };
@@ -461,6 +480,7 @@ export function StepConfigPanel({
   steps,
   onUpdate,
   onRemove,
+  onRestoreSourceStep,
   readOnly = false,
   onSessionConfigResolutionPendingChange,
 }: StepConfigPanelProps) {
@@ -475,6 +495,8 @@ export function StepConfigPanel({
   }, 500);
 
   const actions = useStepActions({ step, onUpdate });
+  const sourceTarget = step.session_target?.kind === "step" ? step.session_target : undefined;
+  const isFinalStep = steps[steps.length - 1]?.id === step.id;
 
   return (
     <div
@@ -487,6 +509,12 @@ export function StepConfigPanel({
       <StepConfigHeader
         step={step}
         savedStep={savedStep}
+        steps={steps}
+        onRestoreSource={
+          sourceTarget && onRestoreSourceStep
+            ? () => onRestoreSourceStep(sourceTarget.step_id)
+            : undefined
+        }
         localName={localName}
         onLocalNameChange={setLocalName}
         onUpdate={onUpdate}
@@ -501,6 +529,7 @@ export function StepConfigPanel({
           steps={steps}
           onUpdate={onUpdate}
           toggleOnEnterAction={actions.toggleOnEnterAction}
+          isFinalStep={isFinalStep}
           readOnly={readOnly}
         />
         <SessionConfigEditor

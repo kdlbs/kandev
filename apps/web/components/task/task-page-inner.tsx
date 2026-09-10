@@ -27,6 +27,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -104,6 +105,7 @@ function resolveCurrentStepId(
 
 function buildTaskTopBarProps(params: {
   taskProps: ReturnType<typeof resolveTaskProps>;
+  actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
@@ -134,6 +136,13 @@ function buildTaskTopBarProps(params: {
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
+    actionsMenuBoardRow: params.actionsMenuBoardRow,
+    // The subject's own last-known values, independent of `actionsMenuBoardRow`:
+    // the board excludes archived (and can lag/miss cross-workflow) tasks, so
+    // these stay available for the actions menu's plugin context and
+    // executor-aware confirmation copy even when the board row is unresolvable.
+    subjectWorkflowStepId: taskProps.workflowStepId,
+    subjectPrimaryExecutorType: taskProps.primaryExecutorType,
   };
 }
 
@@ -147,6 +156,7 @@ function buildTaskLayoutProps(params: {
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   initialLayout?: string | null;
+  onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
@@ -173,6 +183,7 @@ function buildTaskLayoutProps(params: {
     remoteCheckedAt: params.remote.remoteCheckedAt,
     remoteStatusError: params.remote.remoteStatusError,
     isArchived: taskProps.isArchived,
+    onTaskUnarchived: params.onTaskUnarchived,
   };
 }
 
@@ -241,6 +252,7 @@ function useTaskPageDerivedProps({
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
   const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
+  const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -259,6 +271,7 @@ function useTaskPageDerivedProps({
   });
   const topBarProps = buildTaskTopBarProps({
     taskProps,
+    actionsMenuBoardRow,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,
@@ -279,6 +292,7 @@ function useTaskPageDerivedProps({
     merged,
     remote,
     initialLayout,
+    onTaskUnarchived,
     taskCanvases,
   });
 
@@ -343,7 +357,12 @@ export function TaskPageInner(props: TaskPageInnerProps) {
             <SessionRecoveryFeedback
               error={props.resumption.error}
               notice={props.resumption.notice}
+              recoveryFailure={props.resumption.recoveryFailure}
               onRetry={() => void props.resumption.resumeSession()}
+              retryDisabled={
+                props.resumption.resumptionState === "checking" ||
+                props.resumption.resumptionState === "resuming"
+              }
               workspaceId={task?.workspace_id ?? null}
             />
             <TaskArchivedProvider value={archivedValue}>

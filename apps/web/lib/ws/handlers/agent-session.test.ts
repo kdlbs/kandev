@@ -11,6 +11,9 @@ import type {
   TaskSessionCancellationChangedPayload,
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
+const QUEUE_STATUS_ACTION = `message.queue.status_changed`;
+const CURRENT_INCARNATION = `incarnation-2`;
+const CURRENT_STATUS_EPOCH = `status-epoch-1`;
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -55,12 +58,12 @@ describe("message.queue.status_changed handler", () => {
   it("stores the backend-owned Auto-run policy", () => {
     const setQueueEntries = vi.fn();
     const store = makeStore({ setQueueEntries });
-    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+    const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
 
     handler({
       id: "queue-status-1",
       type: "notification",
-      action: "message.queue.status_changed",
+      action: QUEUE_STATUS_ACTION,
       payload: {
         session_id: "s-1",
         entries: [],
@@ -90,12 +93,12 @@ describe("message.queue.status_changed handler", () => {
         },
       },
     });
-    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+    const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
 
     handler({
       id: "queue-status-compat",
       type: "notification",
-      action: "message.queue.status_changed",
+      action: QUEUE_STATUS_ACTION,
       payload: { session_id: "s-1", entries: [], count: 0, max: 10 },
     } as never);
 
@@ -106,6 +109,229 @@ describe("message.queue.status_changed handler", () => {
       autoRun: false,
     });
   });
+
+  it("preserves the known queue capacity when an older publisher omits max", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({
+      setQueueEntries,
+      queue: {
+        bySessionId: { "s-1": [] },
+        metaBySessionId: {
+          "s-1": { count: 1, max: 10, mergeEnabled: true, autoRun: true },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-capacity-compat",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: { session_id: "s-1", entries: [], count: 0 },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+    });
+  });
+});
+function makeIncarnationPolicyStore(setQueueEntries: ReturnType<typeof vi.fn>) {
+  return makeStore({
+    setQueueEntries,
+    taskSessions: {
+      items: {
+        "s-1": {
+          id: "s-1",
+          task_id: "task-1",
+          queue_incarnation_id: CURRENT_INCARNATION,
+        },
+      },
+    },
+    queue: {
+      bySessionId: { "s-1": [] },
+      metaBySessionId: {
+        "s-1": {
+          count: 0,
+          max: 10,
+          mergeEnabled: true,
+          autoRun: true,
+          taskId: "task-1",
+          sessionIncarnationId: CURRENT_INCARNATION,
+          statusEpoch: CURRENT_STATUS_EPOCH,
+          statusGeneration: 4,
+          autoMergeAvailable: true,
+          autoMergeEnabled: false,
+          autoMergeSource: "session",
+          autoMergeRevision: 1,
+        },
+      },
+    },
+  });
+}
+
+it("rejects delayed legacy queue status after an incarnated session refetch", () => {
+  const setQueueEntries = vi.fn();
+  const store = makeStore({
+    setQueueEntries,
+    taskSessions: {
+      items: {
+        "s-1": {
+          id: "s-1",
+          task_id: "task-1",
+          queue_incarnation_id: CURRENT_INCARNATION,
+        },
+      },
+    },
+    queue: { bySessionId: {}, metaBySessionId: {} },
+  });
+  const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+  handler({
+    id: "delayed-legacy-status",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      session_id: "s-1",
+      entries: [{ id: "stale-entry", content: "stale" }],
+      count: 1,
+      max: 10,
+      auto_run: false,
+    },
+  } as never);
+
+  expect(setQueueEntries).not.toHaveBeenCalled();
+});
+
+it("applies only the current incarnation's newest Auto-merge policy", () => {
+  const setQueueEntries = vi.fn();
+  const store = makeIncarnationPolicyStore(setQueueEntries);
+  const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+  handler({
+    id: "stale-incarnation",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: "incarnation-1",
+      status_epoch: "incarnation-1",
+      status_generation: 99,
+      entries: [],
+      count: 0,
+      max: 10,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "global",
+      auto_merge_revision: 8,
+    },
+  } as never);
+  expect(setQueueEntries).not.toHaveBeenCalled();
+
+  handler({
+    id: "new-status",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: CURRENT_INCARNATION,
+      status_epoch: CURRENT_STATUS_EPOCH,
+      status_generation: 5,
+      entries: [],
+      count: 0,
+      max: 10,
+      merge_enabled: true,
+      auto_run: true,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "session",
+      auto_merge_revision: 2,
+    },
+  } as never);
+  expect(setQueueEntries).toHaveBeenCalledWith(
+    "s-1",
+    [],
+    expect.objectContaining({
+      sessionIncarnationId: CURRENT_INCARNATION,
+      statusGeneration: 5,
+      autoMergeAvailable: true,
+      autoMergeEnabled: true,
+      autoMergeSource: "session",
+      autoMergeRevision: 2,
+    }),
+  );
+});
+
+it("establishes a new backend status epoch and rejects delayed retired events", () => {
+  const setQueueEntries = vi.fn();
+  const store = makeIncarnationPolicyStore(setQueueEntries);
+  const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
+
+  handler({
+    id: "new-backend-epoch",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: CURRENT_INCARNATION,
+      status_epoch: "status-epoch-2",
+      status_generation: 1,
+      entries: [{ id: "current-entry", content: "current" }],
+      count: 1,
+      max: 10,
+      merge_enabled: true,
+      auto_run: false,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "session",
+      auto_merge_revision: 2,
+    },
+  } as never);
+  expect(setQueueEntries).toHaveBeenCalledWith(
+    "s-1",
+    [{ id: "current-entry", content: "current" }],
+    expect.objectContaining({
+      statusEpoch: "status-epoch-2",
+      statusGeneration: 1,
+      retiredStatusEpochs: [CURRENT_STATUS_EPOCH],
+    }),
+    { establishStatusEpoch: true },
+  );
+
+  store.getState().queue.metaBySessionId["s-1"] = {
+    ...store.getState().queue.metaBySessionId["s-1"],
+    statusEpoch: "status-epoch-2",
+    statusGeneration: 1,
+    retiredStatusEpochs: [CURRENT_STATUS_EPOCH],
+  };
+  handler({
+    id: "delayed-retired-backend-epoch",
+    type: "notification",
+    action: QUEUE_STATUS_ACTION,
+    payload: {
+      task_id: "task-1",
+      session_id: "s-1",
+      session_incarnation_id: CURRENT_INCARNATION,
+      status_epoch: CURRENT_STATUS_EPOCH,
+      status_generation: 99,
+      entries: [{ id: "stale-entry", content: "stale" }],
+      count: 1,
+      max: 10,
+      merge_enabled: true,
+      auto_run: false,
+      auto_merge_available: true,
+      auto_merge_enabled: true,
+      auto_merge_source: "session",
+      auto_merge_revision: 2,
+    },
+  } as never);
+
+  expect(setQueueEntries).toHaveBeenCalledTimes(1);
 });
 
 const STATE_CHANGED_EVENT = "session.state_changed";

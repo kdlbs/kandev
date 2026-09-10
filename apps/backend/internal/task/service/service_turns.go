@@ -682,6 +682,7 @@ func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
 		}
 		switch m.Type {
 		case models.MessageTypeToolCall, models.MessageTypeToolEdit, models.MessageTypeToolRead,
+			models.MessageTypeToolSearch,
 			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo,
 			models.MessageTypePermissionRequest, models.MessageTypeClarificationRequest:
 			return true

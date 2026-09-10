@@ -23,6 +23,8 @@ type SecretListItemRowProps = {
   showCreate: boolean;
   isEditing: boolean;
   isDeleteConfirming: boolean;
+  isDeleteLoading?: boolean;
+  isDeleteBlocked?: boolean;
 };
 
 type SecretListItemRowActionsProps = {
@@ -37,6 +39,8 @@ type SecretListItemRowActionsProps = {
   showCreate: boolean;
   isEditing: boolean;
   isDeleteConfirming: boolean;
+  isDeleteLoading: boolean;
+  isDeleteBlocked: boolean;
   isFinePointer: boolean;
   revealed: boolean;
   revealing: boolean;
@@ -50,6 +54,8 @@ type SecretListItemRowDeleteActionProps = {
   onDeleteConfirm: () => void | Promise<void>;
   isBusy: boolean;
   isDeleteConfirming: boolean;
+  isDeleteLoading: boolean;
+  isDeleteBlocked: boolean;
   isFinePointer: boolean;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
 };
@@ -67,6 +73,8 @@ export function SecretListItemRow({
   showCreate,
   isEditing,
   isDeleteConfirming,
+  isDeleteLoading = false,
+  isDeleteBlocked = false,
 }: SecretListItemRowProps) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -124,6 +132,8 @@ export function SecretListItemRow({
           showCreate={showCreate}
           isEditing={isEditing}
           isDeleteConfirming={isDeleteConfirming}
+          isDeleteLoading={isDeleteLoading}
+          isDeleteBlocked={isDeleteBlocked}
           isFinePointer={isFinePointer}
           revealed={revealed}
           revealing={revealing}
@@ -151,6 +161,8 @@ function SecretListItemRowActions({
   showCreate,
   isEditing,
   isDeleteConfirming,
+  isDeleteLoading,
+  isDeleteBlocked,
   isFinePointer,
   revealed,
   revealing,
@@ -172,7 +184,7 @@ function SecretListItemRowActions({
               // A Move removes the source; it must never run while that secret's
               // edit/create draft is open (the draft would outlive its row).
               disabled={isBusy || showCreate || isEditing}
-              className="min-h-11 cursor-pointer"
+              className="cursor-pointer"
               aria-label={t("settings:copyMoveSecretNamed", { name: secret.name })}
             >
               <IconCopy className="h-4 w-4" />
@@ -183,7 +195,7 @@ function SecretListItemRowActions({
               size="icon"
               onClick={onReveal}
               disabled={revealing || isBusy}
-              className="min-h-11 min-w-11 cursor-pointer"
+              className="cursor-pointer"
               aria-label={
                 revealed
                   ? t("settings:hideSecretNamed", { name: secret.name })
@@ -197,7 +209,7 @@ function SecretListItemRowActions({
               size="icon"
               onClick={() => onEdit(secret)}
               disabled={isBusy || showCreate || isEditing}
-              className="min-h-11 min-w-11 cursor-pointer"
+              className="cursor-pointer"
               aria-label={t("settings:editSecretNamed", { name: secret.name })}
             >
               <IconEdit className="h-4 w-4" />
@@ -211,6 +223,8 @@ function SecretListItemRowActions({
           onDeleteConfirm={onDeleteConfirm}
           isBusy={isBusy}
           isDeleteConfirming={isDeleteConfirming}
+          isDeleteLoading={isDeleteLoading}
+          isDeleteBlocked={isDeleteBlocked}
           isFinePointer={isFinePointer}
           deleteAnchorRef={deleteAnchorRef}
         />
@@ -226,6 +240,8 @@ function SecretListItemRowDeleteAction({
   onDeleteConfirm,
   isBusy,
   isDeleteConfirming,
+  isDeleteLoading,
+  isDeleteBlocked,
   isFinePointer,
   deleteAnchorRef,
 }: SecretListItemRowDeleteActionProps) {
@@ -239,19 +255,24 @@ function SecretListItemRowDeleteAction({
           testId="secret-delete-inline-confirmation"
           ariaLabel={t("settings:deleteSecretNamed", { name: secret.name })}
           description={
-            <Trans
-              i18nKey="settings:thisWillPermanentlyRemoveSecret"
-              values={{ name: secret.name }}
-            >
-              This will permanently remove{" "}
-              <span className="font-medium text-foreground">{secret.name}</span>. This action cannot
-              be undone.
-            </Trans>
+            isDeleteLoading ? (
+              t("settings:checkingSecretReferences")
+            ) : (
+              <Trans
+                i18nKey="settings:thisWillPermanentlyRemoveSecret"
+                values={{ name: secret.name }}
+              >
+                This will permanently remove{" "}
+                <span className="font-medium text-foreground">{secret.name}</span>. This action
+                cannot be undone.
+              </Trans>
+            )
           }
           cancelLabel={t("settings:cancel")}
           confirmLabel={t("settings:deleteSecret")}
           confirmAriaLabel={t("settings:deleteSecretNamed", { name: secret.name })}
           confirmTestId="secret-delete-confirm"
+          confirmDisabled={isDeleteLoading}
           onCancel={onDeleteCancel}
           onClose={onDeleteCancel}
           onConfirm={onDeleteConfirm}
@@ -263,13 +284,13 @@ function SecretListItemRowDeleteAction({
           size="icon"
           onClick={() => onDelete(secret)}
           disabled={isBusy}
-          className="min-h-11 min-w-11 cursor-pointer"
+          className="cursor-pointer"
           aria-label={t("settings:deleteSecretNamed", { name: secret.name })}
         >
           <IconTrash className="h-4 w-4" />
         </Button>
       )}
-      {isFinePointer ? (
+      {isFinePointer && !isDeleteBlocked ? (
         <SecretDeleteConfirmation
           secret={secret}
           open={isDeleteConfirming}
@@ -279,6 +300,7 @@ function SecretListItemRowDeleteAction({
           }}
           onCancel={onDeleteCancel}
           onConfirm={onDeleteConfirm}
+          loading={isDeleteLoading}
         />
       ) : null}
     </>

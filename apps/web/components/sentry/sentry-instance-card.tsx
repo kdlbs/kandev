@@ -61,7 +61,6 @@ export function SentryInstanceCard({
         <div className="flex items-center gap-2 shrink-0">
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={onEdit}
             aria-label={t("sentry:editInstanceAria", { name: instance.name })}
@@ -75,11 +74,10 @@ export function SentryInstanceCard({
             <Button
               ref={deleteAnchorRef}
               type="button"
-              size="sm"
               variant="destructive"
               onClick={onDelete}
               aria-label={t("sentry:deleteInstanceAria", { name: instance.name })}
-              className="min-h-11 cursor-pointer gap-1"
+              className="cursor-pointer gap-1"
               data-testid="sentry-instance-delete-button"
             >
               <IconTrash className="h-3.5 w-3.5" />

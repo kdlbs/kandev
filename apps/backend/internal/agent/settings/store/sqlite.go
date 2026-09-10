@@ -488,12 +488,18 @@ func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profile
 		FROM agent_profile_mcp_configs
 		WHERE profile_id = ?
 	`), profileID)
+	return scanAgentProfileMcpConfig(row)
+}
+
+func scanAgentProfileMcpConfig(scanner interface {
+	Scan(dest ...any) error
+}) (*models.AgentProfileMcpConfig, error) {
 
 	var config models.AgentProfileMcpConfig
 	var enabled int
 	var serversJSON string
 	var metaJSON string
-	if err := row.Scan(&config.ProfileID, &enabled, &serversJSON, &metaJSON, &config.CreatedAt, &config.UpdatedAt); err != nil {
+	if err := scanner.Scan(&config.ProfileID, &enabled, &serversJSON, &metaJSON, &config.CreatedAt, &config.UpdatedAt); err != nil {
 		return nil, err
 	}
 	config.Enabled = enabled == 1
@@ -504,6 +510,89 @@ func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profile
 		return nil, fmt.Errorf("failed to parse MCP meta JSON: %w", err)
 	}
 	return &config, nil
+}
+
+// UpdateAgentProfileMcpConfigPatch updates only the requested MCP columns in
+// one database statement. The upsert keeps the other document columns intact,
+// including when two callers update different fields concurrently.
+//
+//nolint:cyclop // The transaction validates ownership, builds the partial SQL update, and returns the row.
+func (r *sqliteRepository) UpdateAgentProfileMcpConfigPatch(
+	ctx context.Context,
+	profileID string,
+	enabled *bool,
+	servers *map[string]interface{},
+) (*models.AgentProfileMcpConfig, error) {
+	if profileID == "" {
+		return nil, fmt.Errorf("profile ID is required")
+	}
+	if enabled == nil && servers == nil {
+		return nil, fmt.Errorf("MCP config patch is empty")
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var supportsMCP int
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`
+		SELECT a.supports_mcp
+		FROM agent_profiles p
+		JOIN agents a ON a.id = p.agent_id
+		WHERE p.id = ? AND p.deleted_at IS NULL
+	`), profileID).Scan(&supportsMCP); err != nil {
+		return nil, err
+	}
+	if supportsMCP != 1 {
+		return nil, fmt.Errorf("mcp not supported by agent")
+	}
+
+	const emptyJSON = "{}"
+	enabledValue := 0
+	if enabled != nil && *enabled {
+		enabledValue = 1
+	}
+	serversJSON := emptyJSON
+	if servers != nil {
+		encoded, marshalErr := json.Marshal(*servers)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("failed to serialize MCP servers: %w", marshalErr)
+		}
+		serversJSON = string(encoded)
+	}
+	updates := make([]string, 0, 3)
+	if enabled != nil {
+		updates = append(updates, "enabled = excluded.enabled")
+	}
+	if servers != nil {
+		updates = append(updates, "servers_json = excluded.servers_json")
+	}
+	updates = append(updates, "updated_at = excluded.updated_at")
+	now := time.Now().UTC()
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO agent_profile_mcp_configs (profile_id, enabled, servers_json, meta_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(profile_id) DO UPDATE SET
+			`+strings.Join(updates, ",\n\t\t\t")+
+		`
+	`), profileID, enabledValue, serversJSON, emptyJSON, now, now)
+	if err != nil {
+		return nil, err
+	}
+	config, err := scanAgentProfileMcpConfig(tx.QueryRowxContext(ctx, tx.Rebind(`
+		SELECT profile_id, enabled, servers_json, meta_json, created_at, updated_at
+		FROM agent_profile_mcp_configs
+		WHERE profile_id = ?
+	`), profileID))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return config, nil
 }
 
 func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error {

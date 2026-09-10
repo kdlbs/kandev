@@ -17,9 +17,7 @@ import (
 
 // ErrTaskNotFound is returned (wrapped) by repository task lookups when the
 // task row is absent. Callers that must distinguish "row missing" from
-// "lookup failed" should check with errors.Is — this is the positive
-// signal the office GC uses to classify a kandev-managed container as
-// safely removable.
+// "lookup failed" should check with errors.Is.
 var ErrTaskNotFound = errors.New("task not found")
 
 // Automation runs never appear in a task list: they are hidden by their
@@ -177,9 +175,9 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 		case sql.ErrNoRows:
 			if _, err := tx.ExecContext(ctx, tx.Rebind(`
 				INSERT INTO workflow_step_participants
-				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-				VALUES (?, ?, ?, 'runner', ?, 0, 0)
-			`), newParticipantUUID(), stepID, taskID, assigneeID); err != nil {
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+				VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+			`), newParticipantUUID(), stepID, taskID, assigneeID, time.Now().UTC()); err != nil {
 				return err
 			}
 		default:

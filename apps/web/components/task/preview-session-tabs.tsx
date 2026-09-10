@@ -12,8 +12,6 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
-import { sendMessageRequest } from "@/hooks/use-message-handler";
-import type { ChatSubmitPayload } from "./chat/chat-input-container";
 import { EnsureSessionErrorEmptyState, SessionRecoveryFeedback } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { PreviewSessionTabMenu } from "./preview-session-tab-menu";
@@ -40,6 +38,7 @@ const PREVIEW_TAB_CLASS_NAME =
 type PreviewSessionTabsProps = {
   taskId: string;
   sessionId: string | null;
+  isArchived?: boolean;
   ensureSession?: UseEnsureTaskSessionResult;
   workspaceId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
@@ -253,6 +252,7 @@ function PreviewSessionTabDialogHost({
 export function PreviewSessionTabs({
   taskId,
   sessionId,
+  isArchived,
   ensureSession,
   workspaceId,
   onSessionChange,
@@ -292,7 +292,7 @@ export function PreviewSessionTabs({
   // Mirrors the full-page task view: ensure the backend execution for the
   // active session is ready (resumes / restores workspace after a kandev
   // restart where the session row is persisted but agentctl isn't alive).
-  const resumption = useSessionResumption(taskId, activeSessionId);
+  const resumption = useSessionResumption(taskId, activeSessionId, isArchived ?? null);
 
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
   // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
@@ -355,7 +355,11 @@ export function PreviewSessionTabs({
       <SessionRecoveryFeedback
         error={resumption.error}
         notice={resumption.notice}
+        recoveryFailure={resumption.recoveryFailure}
         onRetry={() => void resumption.resumeSession()}
+        retryDisabled={
+          resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+        }
         workspaceId={workspaceId ?? null}
       />
       <div className="border-b px-2 py-1">
@@ -517,22 +521,6 @@ function PlanTabIcon({ hasUnseen }: { hasUnseen: boolean }) {
 }
 
 export function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
-  const handleSendMessage = useCallback(
-    async (payload: ChatSubmitPayload) => {
-      await sendMessageRequest({
-        taskId,
-        resolvedSessionId: session.id,
-        finalMessage: payload.message,
-        modelToSend: undefined,
-        planMode: false,
-        hasReviewComments: !!payload.reviewComments?.length,
-        attachments: payload.attachments,
-        entityReferences: payload.entityReferences,
-      });
-    },
-    [taskId, session.id],
-  );
-
   if (session.is_passthrough) {
     return <PassthroughToolbar sessionId={session.id} taskId={taskId} />;
   }
@@ -540,7 +528,6 @@ export function PreviewSessionBody({ session, taskId }: { session: TaskSession; 
   return (
     <div className="flex h-full flex-col">
       <TaskChatPanel
-        onSend={handleSendMessage}
         sessionId={session.id}
         taskId={taskId}
         hideSessionsDropdown
@@ -595,7 +582,11 @@ function PreviewNoSessionsState({
         <SessionRecoveryFeedback
           error={resumption.error}
           notice={resumption.notice}
+          recoveryFailure={resumption.recoveryFailure}
           onRetry={() => void resumption.resumeSession()}
+          retryDisabled={
+            resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+          }
           workspaceId={workspaceId ?? null}
         />
         <EnsureSessionErrorEmptyState

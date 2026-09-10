@@ -230,7 +230,7 @@ function CustomizerFooter({ submitting, invalid, onCancel, onSubmit }: Customize
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         onClick={onCancel}
         disabled={submitting}
       >
@@ -238,7 +238,7 @@ function CustomizerFooter({ submitting, invalid, onCancel, onSubmit }: Customize
       </Button>
       <Button
         type="button"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         disabled={submitting || invalid}
         onClick={onSubmit}
         data-testid="create-custom-diagnostic-bundle"
@@ -425,7 +425,7 @@ function SessionSelectionActions({
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 cursor-pointer sm:w-auto"
+        className="cursor-pointer sm:w-auto"
         disabled={!hasSelectableSessions}
         onClick={onSelectAll}
         data-testid="select-all-acp-sessions"
@@ -435,7 +435,7 @@ function SessionSelectionActions({
       <Button
         type="button"
         variant="ghost"
-        className="min-h-11 cursor-pointer sm:w-auto"
+        className="cursor-pointer sm:w-auto"
         disabled={!hasSelectedSessions}
         onClick={onClear}
         data-testid="clear-acp-session-selection"

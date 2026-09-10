@@ -193,6 +193,22 @@ describe("useTaskPendingInput", () => {
   });
 });
 
+describe("useTaskPendingInput task status summary authority", () => {
+  it("prefers the task status summary over a stale legacy task snapshot", () => {
+    const { result } = renderHook(
+      () =>
+        useTaskPendingInput("session-1", {
+          taskId: "task-1",
+          taskPendingAction: "clarification",
+          statusSummary: { pending_action: "permission" },
+        } as Parameters<typeof useTaskPendingInput>[1]),
+      { wrapper: wrapper() },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: true });
+  });
+});
+
 describe("useTaskPendingInput pending clarification turn authority", () => {
   it("preserves pending clarification while session state authority is still loading", () => {
     const olderTurn = turn("turn-older", PRIMARY_SESSION_ID, BASE_TIMESTAMP);

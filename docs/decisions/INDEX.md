@@ -14,13 +14,13 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0006 | [Tier routing vs cheap_agent_profile_id coexistence](0006-tier-routing-vs-cheap-agent-profile-coexistence.md)                       | superseded | backend                     | 2026-05-11 |
 | 0007 | [profiles.yaml — runtime defaults for prod / dev / e2e](0007-runtime-feature-flags.md)                                              | accepted   | backend, frontend           | 2026-05-16 |
 | 0008 | [DB upgrade safety - meta table, pre-migration backup, migration logging](0008-db-upgrade-safety.md)                                | accepted   | backend                     | 2026-05-16 |
-| 0009 | [Fail-closed GC semantics for filesystem and container cleanup](0009-fail-closed-gc-semantics.md)                                   | accepted   | backend                     | 2026-05-16 |
+| 0009 | [Fail-closed GC semantics for filesystem and container cleanup](0009-fail-closed-gc-semantics.md)                                   | accepted (implementation superseded 2026-09-08) | backend      | 2026-05-16 |
 | 0010 | [Worktree copy-files — per-repo, idempotent, host-local](0010-worktree-copy-files.md)                                               | accepted   | backend, frontend           | 2026-05-19 |
 | 0011 | [Transient provider errors (529 Overloaded) auto-retry with visible backoff](0011-transient-provider-error-retry.md)                | superseded by 2026-08-08-provider-neutral-agent-error-recovery | backend, frontend | 2026-05-30 |
 | 0012 | [Service-only UI self-update](0012-service-only-self-update.md)                                                                     | accepted   | backend, frontend, cli      | 2026-05-29 |
 | 0013 | [Multi-branch task support — N (repo, branch) pairs per task](0013-multi-branch-tasks.md)                                           | accepted   | backend, frontend           | 2026-06-01 |
 | 0014 | [Per-CLI MCP server injection for passthrough mode](0014-passthrough-mcp-injection-strategies.md)                                   | accepted   | backend                     | 2026-05-29 |
-| 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md)                                  | proposed (amended 2026-08-14) | backend, frontend | 2026-06-04 |
+| 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md)                                  | proposed (amended 2026-08-14, 2026-09-05) | backend, frontend | 2026-06-04 |
 | 0016 | [Read-only absolute file paths](0016-observed-external-file-reads.md)                                                               | accepted   | backend                     | 2026-06-14 |
 | 0017 | [Resource metrics sampling](0017-resource-metrics-sampling.md)                                                                      | accepted   | backend, frontend, protocol | 2026-06-14 |
 | 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md)                                                                    | accepted (amended 2026-08-11) | backend, frontend, cli | 2026-06-14 |
@@ -53,6 +53,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | superseded by 2026-08-13-dynamic-agent-profile-routing | backend, frontend | 2026-07-15 |
 | 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
 | 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-22) | backend, frontend, infra | 2026-07-14 |
+| 2026-09-10-storage-overlap-attribution | [Attribute storage by measured files](2026-09-10-storage-overlap-attribution.md) | accepted | backend, frontend | 2026-09-10 |
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted (amended 2026-08-09) | frontend                    | 2026-07-14 |
 | 0047 | [Plugins read conversation content via a capability-gated Host RPC](0047-plugin-host-conversation-reads.md)                          | accepted   | backend, protocol           | 2026-07-21 |
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |
@@ -243,6 +244,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |
 | 2026-09-01-passthrough-initial-prompt-turn-boundary | [Keep Passthrough Initial Prompt State in Lifecycle](2026-09-01-passthrough-initial-prompt-turn-boundary.md) | accepted | backend, workflow | 2026-09-01 |
 | 2026-09-02-automation-self-archive | [Permit Automation Self-Archive as Terminal Completion](2026-09-02-automation-self-archive.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-09-02 |
+| 2026-09-02-task-owned-plan-comments | [Persist Pending Plan Comments with the Task Plan](2026-09-02-task-owned-plan-comments.md) | accepted (amended 2026-09-09) | backend, frontend, protocol, persistence | 2026-09-02 |
 | 2026-09-02-separate-mcp-startup-and-tool-budgets | [Separate MCP Startup and Tool-Call Budgets](2026-09-02-separate-mcp-startup-and-tool-budgets.md) | proposed | backend, agents | 2026-09-02 |
 | 2026-09-03-separate-system-data-storage-pages | [Separate System Data and Storage Pages](2026-09-03-separate-system-data-storage-pages.md) | accepted | frontend | 2026-09-03 |
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
@@ -253,8 +255,12 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-06-opt-in-external-e2e-runners | [Opt in selected Linux CI jobs to external runners](2026-09-06-opt-in-external-e2e-runners.md) | accepted | infra, workflow, security | 2026-09-06 |
 | 2026-09-06-explicit-pr-auto-fix-outcomes | [Require Explicit Outcomes for PR Auto-Fix Attempts](2026-09-06-explicit-pr-auto-fix-outcomes.md) | proposed | backend, frontend, protocol, workflow, GitHub | 2026-09-06 |
 | 2026-09-05-bounded-progressive-storage-analysis | [Use bounded progressive storage analysis](2026-09-05-bounded-progressive-storage-analysis.md) | accepted | backend, frontend, protocol | 2026-09-05 |
+| 2026-09-04-inherit-queue-auto-merge-until-overridden | [Inherit Queue Auto-merge Until Overridden](2026-09-04-inherit-queue-auto-merge-until-overridden.md) | accepted | backend, frontend, protocol | 2026-09-04 |
 | 2026-09-07-separate-runtime-permissions-and-advisory-actions | [Keep MCP availability separate from runtime permissions](2026-09-07-separate-runtime-permissions-and-advisory-actions.md) | accepted | backend, protocol | 2026-09-07 |
 | 2026-09-07-isolate-fork-preview-builds | [Isolate contributor preview builds from deployment credentials](2026-09-07-isolate-fork-preview-builds.md) | accepted | infra, workflow, security | 2026-09-07 |
 | 2026-09-05-script-capable-html-preview-isolation | [Capability-Free Runtime for Script-Capable HTML Preview](2026-09-05-script-capable-html-preview-isolation.md) | proposed | frontend, desktop, security | 2026-09-05 |
 | 2026-09-05-trusted-browser-html-preview | [Treat HTML Preview as Trusted Workspace Code](2026-09-05-trusted-browser-html-preview.md) | accepted | frontend, backend, agentctl, security | 2026-09-05 |
 | 2026-09-07-activate-managed-runtime-defaults | [Activate Shipped Managed Runtime Defaults](2026-09-07-activate-managed-runtime-defaults.md) | accepted | backend, frontend, protocol | 2026-09-07 |
+| 2026-09-08-domain-owned-settings-catalog | [Discover settings through domain-owned contracts](2026-09-08-domain-owned-settings-catalog.md) | accepted | backend, frontend, protocol | 2026-09-08 |
+| 2026-09-09-task-completion-conversation-availability | [Separate task completion from conversation availability](2026-09-09-task-completion-conversation-availability.md) | accepted | workflow | 2026-09-09 |
+| 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |
