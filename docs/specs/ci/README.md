@@ -37,11 +37,13 @@ deployment, and pull request walkthrough generation.
 
 - [Unified contributor PR automation](requirements/unified-contributor-pr-automation.md)
 - [Contributor merge approval revocation](requirements/contributor-merge-approval-revocation.md)
+- [Pull request size labels](requirements/pull-request-size-labels.md)
 
 ### System design
 
 - [Unified contributor PR automation](system-design/unified-contributor-pr-automation.md)
 - [Contributor merge approval revocation](system-design/contributor-merge-approval-revocation.md)
+- [Pull request size labels](system-design/pull-request-size-labels.md)
 
 ## Migration
 
