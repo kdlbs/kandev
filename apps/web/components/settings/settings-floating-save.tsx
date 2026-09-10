@@ -132,7 +132,7 @@ export function SettingsFloatingSave({
       data-status={status}
     >
       <div
-        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 px-1 shadow-md backdrop-blur-sm md:py-0.5"
+        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 px-1 shadow-md backdrop-blur-sm md:py-1"
         data-testid="settings-floating-save-surface"
       >
         <div className="min-w-0 max-w-52 flex-1 space-y-0.5 px-1">
