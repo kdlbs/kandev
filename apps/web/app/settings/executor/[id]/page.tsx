@@ -26,6 +26,7 @@ import { useSettingsSaveContributor } from "@/components/settings/settings-save-
 import type { Executor, ExecutorType } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 import { useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 // The word the user must type to arm the delete button. It is compared with
@@ -341,9 +342,8 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
           {t("executors:backToExecutors")}
         </Button>

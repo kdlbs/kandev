@@ -462,6 +462,7 @@
   "workflow": "Workflow",
   "workflowsControlTheStepsAutomationAnd": "Workflows control the steps, automation, and agent behavior for your tasks. You can add more workflows from Settings.",
   "workspace": "Workspace",
+  "workspaceOrphaned": "Workspace orphaned",
   "workspaces": "Workspaces",
   "you": "You",
   "youCanUseTheNavigationOr": "You can use the navigation or reload to try again.",

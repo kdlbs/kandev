@@ -52,12 +52,17 @@ export function useTaskActions() {
 }
 
 /**
- * Archives a task and switches to the next available task.
- * Shared between the PR merged banner and the sidebar archive action.
+ * Runs a one-shot task action (archive or delete) and switches to the next
+ * available task, restoring the previous active task if the action rejects
+ * after an optimistic switch. Shared shape behind `useArchiveAndSwitchTask`
+ * and `useDeleteAndSwitchTask`.
  */
-export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
+function useSwitchAfterTaskAction(
+  action: "archive" | "delete",
+  runAction: (taskId: string, opts?: TaskActionOptions) => Promise<unknown>,
+  opts?: { useLayoutSwitch?: boolean },
+) {
   const store = useAppStoreApi();
-  const { archiveTaskById } = useTaskActions();
   const notifySuccess = useTaskRemovalSuccessNotifier();
   const { runTaskRemoval } = useTaskRemoval({
     store,
@@ -66,15 +71,35 @@ export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
   });
 
   return useCallback(
-    (taskId: string, opts?: TaskActionOptions) =>
+    (taskId: string, actionOpts?: TaskActionOptions) =>
       runTaskRemoval(
-        "archive",
+        action,
         {
           taskId,
-          mutate: () => archiveTaskById(taskId, opts),
+          mutate: async () => {
+            await runAction(taskId, actionOpts);
+          },
         },
-        { cascade: opts?.cascade },
+        { cascade: actionOpts?.cascade },
       ).then(() => undefined),
-    [archiveTaskById, runTaskRemoval],
+    [action, runAction, runTaskRemoval],
   );
+}
+
+/**
+ * Archives a task and switches to the next available task.
+ * Shared between the PR merged banner and the sidebar archive action.
+ */
+export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
+  const { archiveTaskById } = useTaskActions();
+  return useSwitchAfterTaskAction("archive", archiveTaskById, opts);
+}
+
+/**
+ * Deletes a task and switches to the next available task, mirroring
+ * `useArchiveAndSwitchTask`'s outcome for the task detail surface.
+ */
+export function useDeleteAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
+  const { deleteTaskById } = useTaskActions();
+  return useSwitchAfterTaskAction("delete", deleteTaskById, opts);
 }

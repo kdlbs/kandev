@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type RefObject } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,7 @@ import {
 } from "@kandev/ui/dialog";
 import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { createTaskPR } from "@/lib/api/domains/github-api";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 import type { Repository } from "@/lib/types/http";
 import {
   githubReposForTask,
@@ -28,6 +29,9 @@ type TaskGitHubPRDialogProps = {
   onOpenChange: (open: boolean) => void;
   task: TaskPullRequestLinkTarget;
   repositories: Repository[];
+  /** Element to return keyboard focus to on close (AC-TASKS-TASK-ACTIONS-MENU-001.12).
+   * Omitted callers keep Radix's default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 export function TaskGitHubPRDialog({
@@ -36,6 +40,7 @@ export function TaskGitHubPRDialog({
   onOpenChange,
   task,
   repositories,
+  focusReturnRef,
 }: TaskGitHubPRDialogProps) {
   const { t } = useTranslation();
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
@@ -59,7 +64,10 @@ export function TaskGitHubPRDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+      <DialogContent
+        className="w-[calc(100vw-2rem)] sm:max-w-lg"
+        onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
+      >
         <DialogHeader>
           <DialogTitle>{t("task:linkGithubPullRequest")}</DialogTitle>
           <DialogDescription>

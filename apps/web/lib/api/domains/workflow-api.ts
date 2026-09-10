@@ -24,6 +24,7 @@ type BackendTemplateStep = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: string;
+  session_target?: StepDefinition["session_target"];
   profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
   profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
   complete_task_on_enter?: boolean;
@@ -50,6 +51,7 @@ export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): Wo
     is_start_step: step.is_start_step,
     show_in_command_panel: step.show_in_command_panel,
     agent_profile_id: step.agent_profile_id ? agentProfileId(step.agent_profile_id) : undefined,
+    session_target: step.session_target ?? null,
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
     ),
@@ -135,6 +137,7 @@ export async function createWorkflowStep(
     auto_advance_requires_signal?: boolean;
     cancel_triggers_turn_complete?: boolean;
     agent_profile_id?: string;
+    session_target?: StepDefinition["session_target"];
     profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
     profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
     wip_limit?: number;

@@ -15,6 +15,7 @@ import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
 import type { Automation } from "@/lib/types/automation";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type AutomationsListPageProps = {
   workspaceId: string;
@@ -79,9 +80,8 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
             <AutomationsExportButton workspaceId={workspaceId} />
             <Button
               type="button"
-              size="sm"
               data-testid="new-automation-button"
-              className="min-h-11 cursor-pointer md:min-h-7"
+              className={controlSizingClassName("standard", "cursor-pointer")}
               onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
             >
               <IconPlus className="h-4 w-4 mr-2" />

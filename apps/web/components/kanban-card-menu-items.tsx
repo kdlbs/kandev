@@ -40,6 +40,7 @@ import {
 } from "@/lib/tasks/task-priority";
 import type { TaskPriority } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
 import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
@@ -91,7 +92,7 @@ export type KanbanPluginLinkAction = {
   onSelect: () => void;
 };
 
-type BuildKanbanCardMenuEntriesArgs = {
+export type BuildKanbanCardMenuEntriesArgs = {
   currentWorkflowId?: string | null;
   currentStepId?: string | null;
   workflows: TaskMoveWorkflow[];
@@ -119,6 +120,12 @@ type BuildKanbanCardMenuEntriesArgs = {
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
   /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
   pluginMenuContext?: PluginTaskMenuContext;
+  /**
+   * Forces the flat Edit item regardless of registered plugin `edit`-group
+   * actions. Group `edit` is a card-only plugin contract; surfaces outside
+   * the card set this so they never present the submenu form.
+   */
+  forceFlatEdit?: boolean;
 };
 
 const EMPTY_PLUGIN_MENU_CONTEXT: PluginTaskMenuContext = {
@@ -129,7 +136,7 @@ const EMPTY_PLUGIN_MENU_CONTEXT: PluginTaskMenuContext = {
   presentation: "desktop",
 };
 
-function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMenuContext {
+export function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMenuContext {
   return context ?? EMPTY_PLUGIN_MENU_CONTEXT;
 }
 
@@ -345,6 +352,7 @@ export function buildKanbanCardMenuEntries({
   onMoveToStep,
   onSendToWorkflow,
   pluginMenuContext,
+  forceFlatEdit,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
@@ -354,6 +362,7 @@ export function buildKanbanCardMenuEntries({
       onEdit,
       disabled: isProcessing,
       context: resolvePluginMenuContext(pluginMenuContext),
+      forceFlat: forceFlatEdit,
     }),
   ];
 
@@ -411,7 +420,7 @@ export function buildKanbanCardMenuEntries({
   return entries;
 }
 
-function buildArchiveEntry({
+export function buildArchiveEntry({
   isArchiving,
   isProcessing,
   onArchive,
@@ -434,7 +443,7 @@ function buildArchiveEntry({
   };
 }
 
-function buildDeleteEntry({
+export function buildDeleteEntry({
   isDeleting,
   isProcessing,
   onDelete,
@@ -482,6 +491,16 @@ function buildDetachEntry({
   };
 }
 
+/**
+ * The card's hot render path: a caller with column context already passes a
+ * `steps` list pre-filtered for this workflow, and its `currentWorkflowId`
+ * always resolves from `kanbanMulti.snapshots`. Kept to exactly these two
+ * subscriptions (system design: no `kanban.tasks`/`hiddenWorkflowStepIds`
+ * reads here) so unrelated writes to either slice never re-render every
+ * visible card. Callers without column context (preview panel, detail top
+ * bar) use `useTaskActionsMenuMoveTargets` instead, which layers the
+ * flat-list and hidden-step fallbacks this hook intentionally omits.
+ */
 export function useKanbanCardMoveTargets(
   taskId: string,
   steps?: WorkflowStep[],
@@ -513,15 +532,12 @@ export function useKanbanCardMoveTargets(
   const stepsByWorkflowId = useMemo<Record<string, TaskMoveStep[]>>(() => {
     const result: Record<string, TaskMoveStep[]> = {};
     for (const [workflowId, snapshotSteps] of Object.entries(snapshotStepsByWorkflowId)) {
-      result[workflowId] = snapshotSteps
-        .slice()
-        .sort((a, b) => a.position - b.position)
-        .map((step) => ({
-          id: step.id,
-          title: step.title,
-          color: step.color,
-          events: step.events,
-        }));
+      result[workflowId] = sortWorkflowStepsByPosition(snapshotSteps).map((step) => ({
+        id: step.id,
+        title: step.title,
+        color: step.color,
+        events: step.events,
+      }));
     }
     if (currentWorkflowId && steps) {
       result[currentWorkflowId] = steps.map((step) => ({

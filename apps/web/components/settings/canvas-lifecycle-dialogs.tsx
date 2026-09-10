@@ -24,8 +24,10 @@ import {
 } from "@/lib/api/domains/canvas-api";
 import { canvasErrorCodeMessage, canvasErrorMessage } from "@/lib/api/domains/canvas-error-copy";
 import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const CANVAS_ACTION_FAILED_KEY = "canvases:actionFailed";
+const canvasActionClassName = controlSizingClassName("standard", "cursor-pointer");
 
 function releaseStatusLabel(status: string, t: (key: string) => string): string {
   const labels: Record<string, string> = {
@@ -191,13 +193,13 @@ export function CanvasPromotionDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={canvasActionClassName}
             onClick={() => onOpenChange(false)}
           >
             {t("common:cancel")}
           </Button>
           <Button
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={canvasActionClassName}
             disabled={
               !preview ||
               !preview.active_release_id ||
@@ -439,8 +441,7 @@ function CanvasReleaseActions({
       {pending && (
         <>
           <Button
-            className="min-h-11 cursor-pointer md:min-h-7"
-            size="sm"
+            className={canvasActionClassName}
             disabled={busy || mutationsDisabled}
             onClick={() => releaseAction(release.id, "approve")}
           >
@@ -448,8 +449,7 @@ function CanvasReleaseActions({
           </Button>
           <Button
             variant="outline"
-            className="min-h-11 cursor-pointer md:min-h-7"
-            size="sm"
+            className={canvasActionClassName}
             disabled={busy || mutationsDisabled}
             onClick={() => releaseAction(release.id, "reject")}
           >
@@ -460,8 +460,7 @@ function CanvasReleaseActions({
       {canRollback && (
         <Button
           variant="outline"
-          className="min-h-11 cursor-pointer md:min-h-7"
-          size="sm"
+          className={canvasActionClassName}
           disabled={busy || mutationsDisabled}
           onClick={() => releaseAction(release.id, "rollback")}
         >
@@ -569,7 +568,7 @@ export function CanvasReleaseDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={canvasActionClassName}
             onClick={() => onOpenChange(false)}
           >
             {t("common:close")}

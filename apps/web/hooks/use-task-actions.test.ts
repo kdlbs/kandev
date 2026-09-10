@@ -43,7 +43,11 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: toastMock }),
 }));
 
-import { useArchiveAndSwitchTask, useTaskActions } from "./use-task-actions";
+import {
+  useArchiveAndSwitchTask,
+  useDeleteAndSwitchTask,
+  useTaskActions,
+} from "./use-task-actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -117,6 +121,34 @@ describe("useArchiveAndSwitchTask", () => {
     expect(setActiveSessionMock).not.toHaveBeenCalled();
     expect(setActiveTaskMock).not.toHaveBeenCalled();
     expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDeleteAndSwitchTask", () => {
+  it("delegates delete mutation and navigation to the shared coordinator", async () => {
+    const { result } = renderHook(() => useDeleteAndSwitchTask());
+
+    await act(() => result.current("task-A"));
+
+    expect(runTaskRemovalMock).toHaveBeenCalledWith(
+      "delete",
+      { taskId: "task-A", mutate: expect.any(Function) },
+      { cascade: undefined },
+    );
+    expect(deleteTaskMock).toHaveBeenCalledWith("task-A", undefined);
+  });
+
+  it("propagates coordinator failures without a second rollback", async () => {
+    const error = new Error("delete failed");
+    runTaskRemovalMock.mockRejectedValueOnce(error);
+    const { result } = renderHook(() => useDeleteAndSwitchTask());
+
+    await expect(result.current("task-A")).rejects.toThrow("delete failed");
+
+    expect(setActiveSessionMock).not.toHaveBeenCalled();
+    expect(setActiveTaskMock).not.toHaveBeenCalled();
+    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+    expect(deleteTaskMock).not.toHaveBeenCalled();
   });
 });
 

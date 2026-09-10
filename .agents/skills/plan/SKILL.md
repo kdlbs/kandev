@@ -92,6 +92,13 @@ State the result, the implementation order, and the reason for that order.
 Name exact files, symbols, schema changes, contracts, and integration points.
 Organize this section by implementation boundary or vertical slice.
 
+## ASCII UI preview
+
+Required when rendered UI changes. Follow the preview contract in
+`docs/specs/guide/plans-and-work-orders.md`: show labelled views, relevant
+states, desktop/phone composition, and structural requirements. Omit for
+packages without UI changes.
+
 ## Tests
 
 Map every relevant acceptance criterion to its unit or integration evidence.
@@ -158,6 +165,12 @@ State the implementation outcome in two or three sentences.
 ## Acceptance
 
 - Give one to three concrete implementation conditions.
+
+## ASCII UI preview
+
+For a UI work order, include its relevant view or excerpt from the plan with
+the same view label, a link to the full preview, and applicable AC references.
+Omit for work orders without rendered UI changes.
 
 ## Verification
 
@@ -234,7 +247,10 @@ review after the PR opens.
 ### 5. End the design turn
 
 Report the requirement IDs, system designs, plan, work orders, dependency
-order, exact checks, and open risks. Then end the turn.
+order, exact checks, and open risks. For UI changes, also render a compact
+ASCII preview inline in the final conversation summary; links alone are not
+enough. Follow the shared preview contract, including phone composition when
+it differs. Then end the turn.
 
 Do not ask for plan approval or a model switch. The user reviews the artifacts
 and sends a later explicit implementation request.

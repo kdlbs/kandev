@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useAppStore } from "@/components/state-provider";
 import {
   ChangeRequestDetail,
@@ -230,8 +231,10 @@ function ApproveButton({
   return (
     <Button
       data-testid="pr-approve-button"
-      size="sm"
-      className="cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500"
+      className={controlSizingClassName(
+        "standard",
+        "cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500",
+      )}
       onClick={handleApprove}
       disabled={submitting}
     >

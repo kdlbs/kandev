@@ -21,6 +21,7 @@ import { useArchiveAndSwitchTask, useTaskActions } from "@/hooks/use-task-action
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import type { MessageAction } from "@/components/task/chat/types";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export const ACTION_ICON_MAP: Record<string, ElementType> = {
   archive: IconArchive,
@@ -87,6 +88,71 @@ type StandardActionButtonProps = Omit<ActionButtonProps, "action"> & {
   action: MessageAction & { type: "archive_task" | "ws_request" };
 };
 
+type ArchiveAndSwitchTask = ReturnType<typeof useArchiveAndSwitchTask>;
+
+async function executeStandardAction(
+  action: StandardActionButtonProps["action"],
+  taskId: string | null,
+  archiveAndSwitch: ArchiveAndSwitchTask,
+  onCompleted?: () => void,
+): Promise<void> {
+  if (action.type === "archive_task") {
+    if (taskId) await archiveAndSwitch(taskId);
+    return;
+  }
+
+  const client = getWebSocketClient();
+  const params = action.params as { method: string; payload: Record<string, unknown> } | undefined;
+  // i18n-exempt: technical error for unavailable WebSocket recovery client.
+  if (!client || !params) throw new Error("WebSocket recovery request is unavailable");
+  await client.request(params.method, params.payload);
+  onCompleted?.();
+}
+
+type ActionButtonVisualProps = {
+  action: MessageAction;
+  compact: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  labelOverride?: string;
+  destructive?: boolean;
+};
+
+function ActionButtonVisual({
+  action,
+  compact,
+  disabled,
+  onClick,
+  labelOverride,
+  destructive = false,
+}: ActionButtonVisualProps): ReactElement {
+  const Icon = action.icon ? ACTION_ICON_MAP[action.icon] : null;
+  const sizingClassName = controlSizingClassName(
+    compact ? "compact" : "standard",
+    compact ? "max-md:min-h-11 [@media(pointer:coarse)]:min-h-11" : undefined,
+  );
+
+  return (
+    <Button
+      variant={compact ? "ghost" : "outline"}
+      size={compact ? "sm" : "default"}
+      className={cn(
+        compact
+          ? "shrink-0 px-2 text-xs cursor-pointer"
+          : "w-full gap-1.5 text-xs cursor-pointer sm:w-auto",
+        sizingClassName,
+        destructive && "text-destructive hover:text-destructive",
+      )}
+      disabled={disabled}
+      onClick={onClick}
+      data-testid={action.test_id}
+    >
+      {Icon && <Icon className="h-3 w-3" />}
+      {labelOverride ?? action.label}
+    </Button>
+  );
+}
+
 function StandardActionButton({
   action,
   messageTaskId,
@@ -103,24 +169,8 @@ function StandardActionButton({
     if (state === "busy") return;
     setState("busy");
     try {
-      switch (action.type) {
-        case "archive_task": {
-          if (taskId) await archiveAndSwitch(taskId);
-          break;
-        }
-        case "ws_request": {
-          const client = getWebSocketClient();
-          const params = action.params as
-            | { method: string; payload: Record<string, unknown> }
-            | undefined;
-          // i18n-exempt: technical error for unavailable WebSocket recovery client.
-          if (!client || !params) throw new Error("WebSocket recovery request is unavailable");
-          await client.request(params.method, params.payload);
-          break;
-        }
-      }
+      await executeStandardAction(action, taskId, archiveAndSwitch, onCompleted);
       setState("done");
-      if (action.type === "ws_request") onCompleted?.();
     } catch {
       setState("error");
       setTimeout(() => setState("idle"), 3000);
@@ -133,27 +183,18 @@ function StandardActionButton({
   // buttons, so this stale one would just confuse the user.
   if (state === "done" && action.type === "ws_request") return null;
 
-  const Icon = action.icon ? ACTION_ICON_MAP[action.icon] : null;
   const disabled = state === "busy" || state === "done";
   const isDestructive = action.variant === "destructive";
 
   const button = (
-    <Button
-      variant={compact ? "ghost" : "outline"}
-      size="sm"
-      className={cn(
-        compact
-          ? "h-auto min-h-11 shrink-0 px-2 text-xs cursor-pointer sm:min-h-8"
-          : "h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto",
-        isDestructive && "text-destructive hover:text-destructive",
-      )}
+    <ActionButtonVisual
+      action={action}
+      compact={compact}
       disabled={disabled}
       onClick={execute}
-      data-testid={action.test_id}
-    >
-      {Icon && <Icon className="h-3 w-3" />}
-      {labelOverride ?? action.label}
-    </Button>
+      labelOverride={labelOverride}
+      destructive={isDestructive}
+    />
   );
 
   if (action.tooltip) {
@@ -200,7 +241,7 @@ function DeleteActionButton({
       if (!taskId || state === "busy") return;
       setState("busy");
       try {
-        await runTaskRemoval(
+        const result = await runTaskRemoval(
           "delete",
           {
             taskId,
@@ -208,7 +249,7 @@ function DeleteActionButton({
           },
           { cascade },
         );
-        setState("done");
+        setState(result.skipped ? "idle" : "done");
       } catch {
         setState("error");
         setTimeout(() => setState("idle"), 3000);
@@ -221,25 +262,16 @@ function DeleteActionButton({
     if (state !== "busy") setDeleteDialogOpen(true);
   }, [state]);
 
-  const Icon = action.icon ? ACTION_ICON_MAP[action.icon] : null;
   const disabled = state === "busy" || state === "done";
   const button = (
-    <Button
-      variant={compact ? "ghost" : "outline"}
-      size="sm"
-      className={cn(
-        compact
-          ? "h-auto min-h-11 shrink-0 px-2 text-xs cursor-pointer sm:min-h-8"
-          : "h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto",
-        "text-destructive hover:text-destructive",
-      )}
+    <ActionButtonVisual
+      action={action}
+      compact={compact}
       disabled={disabled}
       onClick={execute}
-      data-testid={action.test_id}
-    >
-      {Icon && <Icon className="h-3 w-3" />}
-      {labelOverride ?? action.label}
-    </Button>
+      labelOverride={labelOverride}
+      destructive
+    />
   );
   const dialog = (
     <TaskDeleteConfirmDialog
