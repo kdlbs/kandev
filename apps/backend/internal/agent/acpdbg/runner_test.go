@@ -114,17 +114,26 @@ func waitForPIDFile(t *testing.T, path string) int {
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+	var lastContents string
+	var lastErr error
 	for {
-		if raw, err := os.ReadFile(path); err == nil {
-			pid, err := strconv.Atoi(string(raw))
-			if err != nil {
-				t.Fatalf("parse child pid %q: %v", string(raw), err)
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			lastContents = string(raw)
+			pid, parseErr := strconv.Atoi(lastContents)
+			if parseErr == nil && pid > 0 {
+				return pid
 			}
-			return pid
+			if parseErr == nil {
+				parseErr = fmt.Errorf("invalid child pid %d", pid)
+			}
+			lastErr = parseErr
+		} else {
+			lastErr = err
 		}
 		select {
 		case <-deadline.C:
-			t.Fatalf("timed out waiting for child pid file %s", path)
+			t.Fatalf("timed out waiting for child pid file %s (last contents %q: %v)", path, lastContents, lastErr)
 		case <-ticker.C:
 		}
 	}

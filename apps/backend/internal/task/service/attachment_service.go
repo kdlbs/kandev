@@ -280,6 +280,35 @@ func (s *AttachmentService) Claim(ctx context.Context, ownerID, workspaceID, tas
 	return s.repo.ClaimMessageAttachments(ctx, ids, ownerID, workspaceID, taskID, sessionID)
 }
 
+func (s *AttachmentService) ClaimQueued(
+	ctx context.Context,
+	ownerID, workspaceID, taskID, sessionID, queueID string,
+	ids []string,
+) error {
+	if s.authorizeWorkspace != nil {
+		if err := s.authorizeWorkspace(ctx, workspaceID); err != nil {
+			return err
+		}
+	}
+	repo, ok := s.repo.(repository.QueueAttachmentAdmissionRepository)
+	if !ok {
+		return errors.New("queued attachment admission is unavailable")
+	}
+	return repo.ClaimQueuedMessageAttachments(ctx, ids, ownerID, workspaceID, taskID, sessionID, queueID)
+}
+
+func (s *AttachmentService) RestoreQueued(
+	ctx context.Context,
+	ownerID, taskID, sessionID, queueID string,
+	ids []string,
+) error {
+	repo, ok := s.repo.(repository.QueueAttachmentAdmissionRepository)
+	if !ok {
+		return errors.New("queued attachment admission is unavailable")
+	}
+	return repo.RestoreQueuedMessageAttachments(ctx, ids, ownerID, taskID, sessionID, queueID)
+}
+
 // Release removes claimed descriptors that are no longer referenced by a
 // queued message. It is used after an atomic queue replacement succeeds.
 func (s *AttachmentService) Release(ctx context.Context, ownerID, taskID, sessionID string, ids []string) error {

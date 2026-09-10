@@ -3,8 +3,10 @@ package messagequeue
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,7 +65,7 @@ func TestRepositoryRetainedDeliveryReservationLifecycle(t *testing.T) {
 			require.Len(t, stored, 1)
 			require.True(t, stored[0].IsReservedInFlight())
 
-			require.NoError(t, repository.ReleaseDeliveryReservationForSession(ctx, identity, reserved.ID))
+			require.NoError(t, repository.ReleaseDeliveryReservationForSession(ctx, identity, reserved))
 			stored, err = repository.ListBySession(ctx, identity.SessionID)
 			require.NoError(t, err)
 			require.Len(t, stored, 1)
@@ -72,11 +74,151 @@ func TestRepositoryRetainedDeliveryReservationLifecycle(t *testing.T) {
 			reserved, autoRun, err = repository.ReserveHeadForDeliveryIfAutoRunForSession(ctx, identity)
 			require.NoError(t, err)
 			require.True(t, autoRun)
-			require.NoError(t, repository.AcknowledgeByIDForSession(ctx, identity, reserved.ID))
+			require.NoError(t, repository.AcknowledgeByIDForSession(ctx, identity, reserved))
 			stored, err = repository.ListBySession(ctx, identity.SessionID)
 			require.NoError(t, err)
 			require.Empty(t, stored)
 		})
+	}
+}
+
+func TestRepositoryPlanCommentReservationLeaseBlocksConcurrentOwner(t *testing.T) {
+	for _, factory := range autoRunRepositoryFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			ctx := context.Background()
+			repository := factory.new(t)
+			identity := QueueSessionIdentity{
+				TaskID: "task-lease", SessionID: "session-lease", SessionIncarnationID: "incarnation-lease",
+			}
+			seedQueueSessionIdentity(t, repository, identity)
+			require.NoError(t, repository.InsertForSession(ctx, identity, planCommentLeaseMessage(identity), DefaultMaxPerSession))
+
+			first, autoRun, err := repository.ReserveHeadIfAutoRunForSession(ctx, identity)
+			require.NoError(t, err)
+			require.True(t, autoRun)
+			require.NotNil(t, first)
+			require.NotEmpty(t, first.reservationToken)
+
+			second, autoRun, err := repository.ReserveHeadIfAutoRunForSession(ctx, identity)
+			require.NoError(t, err)
+			require.True(t, autoRun)
+			require.Nil(t, second)
+			require.NoError(t, repository.ReleaseDeliveryReservationForSession(ctx, identity, first))
+		})
+	}
+}
+
+func TestRepositoryExpiredPlanCommentLeaseRejectsStaleOwner(t *testing.T) {
+	for _, factory := range autoRunRepositoryFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			ctx := context.Background()
+			repository := factory.new(t)
+			identity := QueueSessionIdentity{
+				TaskID: "task-expired", SessionID: "session-expired", SessionIncarnationID: "incarnation-expired",
+			}
+			seedQueueSessionIdentity(t, repository, identity)
+			message := planCommentLeaseMessage(identity)
+			expiredMetadata, _, _ := markReservedMetadataWithLease(
+				message.Metadata, identity.SessionIncarnationID, time.Now().Add(-DeliveryReservationTTL-time.Minute),
+			)
+			message.Metadata = expiredMetadata
+			require.NoError(t, repository.InsertForSession(ctx, identity, message, DefaultMaxPerSession))
+
+			stale := *message
+			stale.reservedDelivery = true
+			stale.reservationIdentity = identity
+			stale.bindDeliveryReservation(expiredMetadata)
+			current, _, err := repository.ReserveHeadIfAutoRunForSession(ctx, identity)
+			require.NoError(t, err)
+			require.NotNil(t, current)
+			require.NotEqual(t, stale.reservationToken, current.reservationToken)
+
+			require.ErrorIs(t, repository.AcknowledgeByIDForSession(ctx, identity, &stale), ErrEntryNotFound)
+			require.NoError(t, repository.MarkDeliveryAttemptedForSession(ctx, identity, []QueuedMessage{*current}))
+			require.NoError(t, repository.AcknowledgeByIDForSession(ctx, identity, current))
+		})
+	}
+}
+
+func TestPostgresPlanCommentReservationLeaseBlocksSecondRepository(t *testing.T) {
+	ctx := context.Background()
+	repositoryA, repositoryB, _ := newTestPostgresRepoPair(t)
+	identity := QueueSessionIdentity{
+		TaskID: "task-pg-lease", SessionID: "session-pg-lease", SessionIncarnationID: "incarnation-pg-lease",
+	}
+	seedQueueSessionIdentity(t, repositoryA, identity)
+	require.NoError(t, repositoryA.InsertForSession(ctx, identity, planCommentLeaseMessage(identity), DefaultMaxPerSession))
+
+	first, _, err := repositoryA.ReserveHeadIfAutoRunForSession(ctx, identity)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	second, _, err := repositoryB.ReserveHeadIfAutoRunForSession(ctx, identity)
+	require.NoError(t, err)
+	require.Nil(t, second)
+	require.NoError(t, repositoryA.ReleaseDeliveryReservationForSession(ctx, identity, first))
+}
+
+func TestSQLitePlanCommentDeliveryAttemptRejectsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repository := newTestSQLiteRepo(t)
+	identity := QueueSessionIdentity{
+		TaskID: "task-archived-delivery", SessionID: "session-archived-delivery",
+		SessionIncarnationID: "incarnation-archived-delivery",
+	}
+	seedQueueSessionIdentity(t, repository, identity)
+	require.NoError(t, repository.InsertForSession(
+		ctx, identity, planCommentLeaseMessage(identity), DefaultMaxPerSession,
+	))
+	reserved, _, err := repository.ReserveHeadIfAutoRunForSession(ctx, identity)
+	require.NoError(t, err)
+	require.NotNil(t, reserved)
+
+	sqliteRepo := repository.(*sqliteRepository)
+	_, err = sqliteRepo.db.ExecContext(
+		ctx, `UPDATE tasks SET archived_at = ? WHERE id = ?`, time.Now().UTC(), identity.TaskID,
+	)
+	require.NoError(t, err)
+	require.ErrorIs(
+		t, repository.MarkDeliveryAttemptedForSession(ctx, identity, []QueuedMessage{*reserved}),
+		ErrTaskInactive,
+	)
+	stored, err := repository.ListBySession(ctx, identity.SessionID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.False(t, stored[0].IsDeliveryAttempted())
+}
+
+func TestPostgresPlanCommentDeliveryAttemptRejectsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repository, _, database := newTestPostgresRepoPair(t)
+	identity := QueueSessionIdentity{
+		TaskID: "task-pg-archived-delivery", SessionID: "session-pg-archived-delivery",
+		SessionIncarnationID: "incarnation-pg-archived-delivery",
+	}
+	seedQueueSessionIdentity(t, repository, identity)
+	require.NoError(t, repository.InsertForSession(
+		ctx, identity, planCommentLeaseMessage(identity), DefaultMaxPerSession,
+	))
+	reserved, _, err := repository.ReserveHeadIfAutoRunForSession(ctx, identity)
+	require.NoError(t, err)
+	require.NotNil(t, reserved)
+	_, err = database.ExecContext(
+		ctx, `UPDATE tasks SET archived_at = $1 WHERE id = $2`, time.Now().UTC(), identity.TaskID,
+	)
+	require.NoError(t, err)
+	require.ErrorIs(
+		t, repository.MarkDeliveryAttemptedForSession(ctx, identity, []QueuedMessage{*reserved}),
+		ErrTaskInactive,
+	)
+}
+
+func planCommentLeaseMessage(identity QueueSessionIdentity) *QueuedMessage {
+	return &QueuedMessage{
+		ID: "queued-plan-comment", TaskID: identity.TaskID, SessionID: identity.SessionID, Content: "feedback",
+		Metadata: map[string]interface{}{
+			plancomments.MetadataClientQueueID:      "caller-plan-comment",
+			plancomments.MetadataRequestFingerprint: "fingerprint-plan-comment",
+		},
 	}
 }
 
@@ -171,7 +313,7 @@ func TestRepositoryCoalescingReleasePrefersPendingSuccessor(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, replaced)
 
-			require.NoError(t, repository.ReleaseDeliveryReservationForSession(ctx, identity, reserved.ID))
+			require.NoError(t, repository.ReleaseDeliveryReservationForSession(ctx, identity, reserved))
 			stored, err := repository.ListBySession(ctx, identity.SessionID)
 			require.NoError(t, err)
 			require.Len(t, stored, 1)

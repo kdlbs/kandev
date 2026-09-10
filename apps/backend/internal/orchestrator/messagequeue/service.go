@@ -158,6 +158,12 @@ func (s *Service) SessionGeneration(ctx context.Context, sessionID string) (int6
 	return s.repo.SessionGeneration(ctx, sessionID)
 }
 
+// ListDurableDeliveryEntries returns all durable queue receipts used by
+// startup reconciliation.
+func (s *Service) ListDurableDeliveryEntries(ctx context.Context) ([]QueuedMessage, error) {
+	return s.repo.ListDurableDeliveryEntries(ctx)
+}
+
 // SetMaxPerSession applies a new admission cap without pruning existing rows.
 // Non-positive values disable the cap.
 func (s *Service) SetMaxPerSession(maxPerSession int) {
@@ -1977,13 +1983,13 @@ func (s *Service) AcknowledgeQueued(ctx context.Context, msg *QueuedMessage) err
 func (s *Service) AcknowledgeQueuedForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	reserved *QueuedMessage,
 ) error {
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		if err := s.validateSessionIdentity(admittedCtx, identity); err != nil {
 			return err
 		}
-		return s.repo.AcknowledgeByIDForSession(admittedCtx, identity, entryID)
+		return s.repo.AcknowledgeByIDForSession(admittedCtx, identity, reserved)
 	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
@@ -1991,15 +1997,27 @@ func (s *Service) AcknowledgeQueuedForSession(
 	return err
 }
 
+// MarkDeliveryAttemptedForSession atomically crosses the at-most-once boundary
+// for token-owned plan-comment receipts immediately before external I/O.
+func (s *Service) MarkDeliveryAttemptedForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	messages []QueuedMessage,
+) error {
+	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.MarkDeliveryAttemptedForSession(admittedCtx, identity, messages)
+	})
+}
+
 // ReleaseQueuedDeliveryForSession makes an unaccepted retained entry visible
 // again for the same session incarnation.
 func (s *Service) ReleaseQueuedDeliveryForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	reserved *QueuedMessage,
 ) error {
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		return s.repo.ReleaseDeliveryReservationForSession(admittedCtx, identity, entryID)
+		return s.repo.ReleaseDeliveryReservationForSession(admittedCtx, identity, reserved)
 	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
@@ -2013,10 +2031,10 @@ func (s *Service) ReleaseQueuedDeliveryForSession(
 func (s *Service) DiscardLifecycleReservation(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	reserved *QueuedMessage,
 ) error {
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		return s.repo.DiscardLifecycleReservation(admittedCtx, identity, entryID)
+		return s.repo.DiscardLifecycleReservation(admittedCtx, identity, reserved)
 	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
@@ -3008,9 +3026,9 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		}
 		pending := make([]QueuedMessage, 0, len(entries))
 		for _, entry := range entries {
-			// A reserved lifecycle row is already being delivered; listing it next
-			// to the message it produced reads as a stuck duplicate.
-			if entry.IsReservedInFlight() {
+			// Unattempted comment receipts remain queryable during lost-response reconciliation.
+			if entry.IsReservedInFlight() &&
+				(!entry.IsDurablePlanComment() || entry.IsDeliveryAttempted()) {
 				continue
 			}
 			// Repositories may return shallow copies. The status is also handed to
@@ -3038,7 +3056,8 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 	}
 	pending := make([]QueuedMessage, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
-		if !entry.IsReservedInFlight() {
+		if !entry.IsReservedInFlight() ||
+			(entry.IsDurablePlanComment() && !entry.IsDeliveryAttempted()) {
 			pending = append(pending, entry)
 		}
 	}

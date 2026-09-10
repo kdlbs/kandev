@@ -252,7 +252,7 @@ func TestIdentityBoundPostClaimMutationsRejectRecreatedSession(t *testing.T) {
 			}
 			seedQueueSessionIdentity(t, repo, replacement)
 
-			if err := repo.AcknowledgeByIDForSession(ctx, first, claimed.ID); !errors.Is(err, ErrSessionIdentityMismatch) {
+			if err := repo.AcknowledgeByIDForSession(ctx, first, claimed); !errors.Is(err, ErrSessionIdentityMismatch) {
 				t.Fatalf("acknowledge error = %v, want ErrSessionIdentityMismatch", err)
 			}
 			ordinary := &QueuedMessage{

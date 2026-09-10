@@ -510,9 +510,10 @@ func (s *Service) executeSendNowClaimWithContext(
 			return
 		}
 	}
-	if err := s.promptSendNowClaim(ctx, claim); err != nil {
+	deliveryAttempted, err := s.promptSendNowClaim(ctx, claim)
+	if err != nil {
 		var acceptedDispatch *acceptedPromptDispatchError
-		if errors.As(err, &acceptedDispatch) {
+		if deliveryAttempted || errors.As(err, &acceptedDispatch) {
 			s.logger.Warn("send-now replacement prompt was accepted but acceptance persistence failed; settling without restore",
 				zap.String("session_id", sessionID), zap.Error(err))
 			if markErr := s.markSendNowClaimAcceptedWithRetry(ctx, claim); markErr != nil {
@@ -551,51 +552,127 @@ func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
 	return nil
 }
 
-func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) error {
+func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) (bool, error) {
 	sessionID := claim.Dispatch.SessionID
-	attachments := make([]v1.MessageAttachment, len(claim.Dispatch.Attachments))
-	for i, attachment := range claim.Dispatch.Attachments {
-		attachments[i] = v1.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
-			Data:         attachment.Data,
-			MimeType:     attachment.MimeType,
-			Name:         attachment.Name,
-			SizeBytes:    attachment.SizeBytes,
-			DeliveryMode: attachment.DeliveryMode,
-		}
-	}
+	deliveryAttempted := false
+	attachments := queuedMessageAttachmentsToV1(claim.Dispatch.Attachments)
 	references := entityrefs.NormalizePersisted(claim.Dispatch.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(claim.Dispatch.Content, references)
 	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(claim.Dispatch.Metadata))
+	durablePlanComments := claim.HasDurablePlanComment()
+	if err := s.prepareSendNowTranscript(ctx, claim, attachments, durablePlanComments); err != nil {
+		return false, err
+	}
 
 	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, promptTaskOptions{
-			claimEntryID: claim.Dispatch.ID,
+			claimEntryID:         claim.Dispatch.ID,
+			afterClaim:           s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
+			beforeDispatch:       s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),
+			disableDispatchRetry: durablePlanComments,
 			afterDispatch: func() error {
 				return s.markSendNowClaimAcceptedWithRetry(ctx, claim)
 			},
-			afterClaim: func() error {
-				if !s.queuedDispatchIdentityIsCurrent(ctx, claim.Identity) {
-					return errLifecyclePromptReservationSuperseded
-				}
-				if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
-					s.logger.Warn("failed to record send-now user message after prompt claim",
-						zap.String("session_id", sessionID), zap.Error(err))
-				} else if s.messageCreator != nil {
-					for i := range claim.Sources {
-						markQueuedUserMessageRecorded(&claim.Sources[i])
-					}
-				}
-				if session, loadErr := s.repo.GetTaskSession(ctx, sessionID); loadErr == nil &&
-					s.queuedSessionMatchesIdentity(session, claim.Identity) &&
-					!turnStartAlreadyProcessed(claim.Dispatch.Metadata) {
-					s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)
-				}
-				return nil
-			},
 		})
-	return err
+	return deliveryAttempted, err
+}
+
+func (s *Service) prepareSendNowTranscript(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+	attachments []v1.MessageAttachment,
+	durablePlanComments bool,
+) error {
+	if !durablePlanComments {
+		return nil
+	}
+	if s.messageCreator == nil {
+		return fmt.Errorf("%w: message creator is unavailable", errLifecyclePromptMessagePersistence)
+	}
+	sourceIDs := make([]string, 0, len(claim.Sources))
+	for i := range claim.Sources {
+		sourceIDs = append(sourceIDs, claim.Sources[i].ID)
+	}
+	if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments, sourceIDs...); err != nil {
+		return fmt.Errorf("%w: %v", errLifecyclePromptMessagePersistence, err)
+	}
+	markSendNowSourcesRecorded(claim)
+	return nil
+}
+
+func markSendNowSourcesRecorded(claim *messagequeue.SendNowClaim) {
+	for i := range claim.Sources {
+		markQueuedUserMessageRecorded(&claim.Sources[i])
+	}
+}
+
+func (s *Service) sendNowAfterClaim(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+	attachments []v1.MessageAttachment,
+	durablePlanComments bool,
+) func() error {
+	return func() error {
+		if !s.queuedDispatchIdentityIsCurrent(ctx, claim.Identity) {
+			return errLifecyclePromptReservationSuperseded
+		}
+		if durablePlanComments {
+			return nil
+		}
+		if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+			s.logger.Warn("failed to record send-now user message after prompt claim",
+				zap.String("session_id", claim.Dispatch.SessionID), zap.Error(err))
+		} else if s.messageCreator != nil {
+			markSendNowSourcesRecorded(claim)
+		}
+		s.processSendNowTurnStart(ctx, claim)
+		return nil
+	}
+}
+
+func (s *Service) sendNowDeliveryBoundary(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+	durablePlanComments bool,
+	deliveryAttempted *bool,
+) func() error {
+	return func() error {
+		if !durablePlanComments {
+			return nil
+		}
+		if err := s.messageQueue.MarkDeliveryAttemptedForSession(
+			ctx, claim.Identity, planCommentSendNowReceipts(claim),
+		); err != nil {
+			return err
+		}
+		*deliveryAttempted = true
+		for i := range claim.Sources {
+			if claim.Sources[i].IsDurablePlanComment() {
+				claim.Sources[i].Metadata[messagequeue.MetadataDeliveryAttempted] = true
+			}
+		}
+		s.processSendNowTurnStart(ctx, claim)
+		return nil
+	}
+}
+
+func planCommentSendNowReceipts(claim *messagequeue.SendNowClaim) []messagequeue.QueuedMessage {
+	receipts := make([]messagequeue.QueuedMessage, 0, len(claim.Sources))
+	for i := range claim.Sources {
+		if claim.Sources[i].IsDurablePlanComment() {
+			receipts = append(receipts, claim.Sources[i])
+		}
+	}
+	return receipts
+}
+
+func (s *Service) processSendNowTurnStart(ctx context.Context, claim *messagequeue.SendNowClaim) {
+	session, err := s.repo.GetTaskSession(ctx, claim.Dispatch.SessionID)
+	if err != nil || !s.queuedSessionMatchesIdentity(session, claim.Identity) ||
+		turnStartAlreadyProcessed(claim.Dispatch.Metadata) {
+		return
+	}
+	s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)
 }
 
 func (s *Service) restoreSendNowClaimWithRetry(

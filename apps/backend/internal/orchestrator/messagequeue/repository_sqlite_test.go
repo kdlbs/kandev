@@ -54,7 +54,10 @@ func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessi
 				t.Fatalf("prepare queue session authority: %v", err)
 			}
 		}
-		if _, err := typed.db.Exec(`INSERT OR IGNORE INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)`, identity.TaskID); err != nil {
+		if _, err := typed.db.Exec(typed.db.Rebind(`
+			INSERT INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)
+			ON CONFLICT(id) DO NOTHING
+		`), identity.TaskID); err != nil {
 			t.Fatalf("seed queue task authority: %v", err)
 		}
 		if _, err := typed.db.Exec(`

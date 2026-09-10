@@ -8,14 +8,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -129,6 +136,13 @@ type QueueIdentityEntryService interface {
 
 type QueueIdentityAttachmentMutationService interface {
 	UpdateMessageWithMetadataForSessionWithClaim(context.Context, messagequeue.QueueSessionIdentity, string, string, []messagequeue.MessageAttachment, map[string]interface{}, string, messagequeue.QueueAttachmentClaim) error
+}
+
+type planCommentQueueService interface {
+	QueueMessageWithPlanComments(
+		context.Context,
+		messagequeue.PlanCommentQueueRequest,
+	) (*messagequeue.PlanCommentQueueResult, error)
 }
 
 // QueueDrainer drains a single queued entry when the session is promptable.
@@ -508,16 +522,19 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 }
 
 type wsQueueMessageRequest struct {
-	SessionID            string                           `json:"session_id"`
-	TaskID               string                           `json:"task_id"`
-	SessionIncarnationID string                           `json:"session_incarnation_id"`
-	Content              string                           `json:"content"`
-	Model                string                           `json:"model,omitempty"`
-	PlanMode             bool                             `json:"plan_mode,omitempty"`
-	Attachments          []messagequeue.MessageAttachment `json:"attachments,omitempty"`
-	ContextFiles         []v1.ContextFileMeta             `json:"context_files,omitempty"`
-	EntityReferences     []v1.EntityReference             `json:"entity_references,omitempty"`
-	UserID               string                           `json:"user_id,omitempty"`
+	SessionID             string                           `json:"session_id"`
+	TaskID                string                           `json:"task_id"`
+	SessionIncarnationID  string                           `json:"session_incarnation_id"`
+	ClientQueueID         string                           `json:"client_queue_id,omitempty"`
+	Content               string                           `json:"content"`
+	Model                 string                           `json:"model,omitempty"`
+	PlanMode              bool                             `json:"plan_mode,omitempty"`
+	Attachments           []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	ContextFiles          []v1.ContextFileMeta             `json:"context_files,omitempty"`
+	EntityReferences      []v1.EntityReference             `json:"entity_references,omitempty"`
+	PlanCommentRefs       []models.TaskPlanCommentRef      `json:"plan_comment_refs,omitempty"`
+	RequirePrimarySession bool                             `json:"require_primary_session,omitempty"`
+	UserID                string                           `json:"user_id,omitempty"`
 }
 
 // wsQueueMessage handles ActionMessageQueueAdd, appending a new entry to the session queue.
@@ -526,6 +543,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	req.ClientQueueID = strings.TrimSpace(req.ClientQueueID)
 
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
@@ -539,8 +557,11 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
 		return denied, nil
 	}
-	if req.Content == "" && len(req.Attachments) == 0 {
+	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
+	}
+	if validationError := validatePlanCommentQueueRequest(req); validationError != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validationError, nil)
 	}
 	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
@@ -570,7 +591,18 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
-	queued, err := h.admitQueuedMessage(ctx, &req, queuedBy, metadata)
+	var snapshot *models.TaskPlanCommentSnapshot
+	var replay bool
+	var queued *messagequeue.QueuedMessage
+	if len(req.PlanCommentRefs) > 0 {
+		result, admissionErr := h.admitPlanCommentQueuedMessage(ctx, &req, queuedBy, metadata)
+		err = admissionErr
+		if result != nil {
+			queued, snapshot, replay = result.Message, result.Snapshot, result.Replay
+		}
+	} else {
+		queued, err = h.admitQueuedMessage(ctx, &req, queuedBy, metadata)
+	}
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			return h.queueFullResponse(ctx, msg, messagequeue.QueueSessionIdentity{
@@ -589,6 +621,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		if errors.Is(err, errQueuedAttachmentUnavailable) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
 		}
+		if conflict := planCommentQueueError(msg, err); conflict != nil {
+			return conflict, nil
+		}
 		h.logger.Error("failed to queue message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
@@ -597,6 +632,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		SessionIncarnationID: req.SessionIncarnationID,
+	}
+	if !replay {
+		h.publishPlanCommentSnapshot(ctx, snapshot)
 	}
 	h.publishStatusForIdentity(ctx, identity, queued)
 	if h.queueReadiness != nil {
@@ -709,6 +747,119 @@ func (h *QueueHandlers) admitQueuedMessage(ctx context.Context, req *wsQueueMess
 		ctx, identity, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
 		h.claimQueuedAttachmentsAfterInsert(req),
 	)
+}
+
+func (h *QueueHandlers) admitPlanCommentQueuedMessage(
+	ctx context.Context,
+	req *wsQueueMessageRequest,
+	queuedBy string,
+	metadata map[string]interface{},
+) (*messagequeue.PlanCommentQueueResult, error) {
+	service, ok := h.queueService.(planCommentQueueService)
+	if !ok {
+		return nil, errors.New("plan comment queue admission is unavailable")
+	}
+	attachments := queueAttachmentsToV1(req.Attachments)
+	var attachmentClaim *messagequeue.QueueAttachmentClaim
+	if h.attachmentClaimer != nil && len(attachments) > 0 {
+		preparer, ok := h.attachmentClaimer.(QueueAttachmentClaimPreparer)
+		if !ok {
+			return nil, errors.New("transactional attachment admission is unavailable")
+		}
+		claim, err := preparer.PrepareQueueAttachmentClaim(ctx, req.TaskID, attachments)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
+		}
+		attachmentClaim = &claim
+	}
+	return service.QueueMessageWithPlanComments(ctx, messagequeue.PlanCommentQueueRequest{
+		ClientQueueID: req.ClientQueueID, SessionID: req.SessionID, TaskID: req.TaskID,
+		SessionIncarnationID: req.SessionIncarnationID,
+		Content:              req.Content, Model: req.Model, UserID: queuedBy, PlanMode: req.PlanMode,
+		Attachments: req.Attachments, Metadata: metadata, PlanCommentRefs: req.PlanCommentRefs,
+		RequirePrimarySession: req.RequirePrimarySession, AttachmentClaim: attachmentClaim,
+	})
+}
+
+func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
+	if len(req.PlanCommentRefs) == 0 {
+		return ""
+	}
+	if req.ClientQueueID == "" {
+		return "client_queue_id is required with plan comments"
+	}
+	if len(req.ClientQueueID) > 128 {
+		return "client_queue_id is too long"
+	}
+	if plancomments.ContainsReservedPlaceholder(req.Content) {
+		return "content contains a reserved plan comment marker"
+	}
+	seen := make(map[string]struct{}, len(req.PlanCommentRefs))
+	for _, ref := range req.PlanCommentRefs {
+		if ref.ID == "" || ref.Version <= 0 {
+			return "plan_comment_refs are invalid"
+		}
+		if _, duplicate := seen[ref.ID]; duplicate {
+			return "plan_comment_refs contain duplicates"
+		}
+		seen[ref.ID] = struct{}{}
+	}
+	return ""
+}
+
+func planCommentQueueError(msg *ws.Message, err error) *ws.Message {
+	var commentsChanged *plancommenttx.CommentsChangedError
+	if errors.As(err, &commentsChanged) {
+		details := map[string]interface{}{}
+		if commentsChanged.Snapshot != nil {
+			details["snapshot"] = dto.TaskPlanCommentSnapshotFromModel(commentsChanged.Snapshot)
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePlanCommentsChanged, "Task plan comments changed", details)
+		return response
+	}
+	var primaryChanged *plancommenttx.PrimarySessionChangedError
+	if errors.As(err, &primaryChanged) {
+		details := map[string]interface{}{
+			"primary_session_id": nil, "primary_session_state": nil,
+		}
+		if primaryChanged.SessionID != "" {
+			details["primary_session_id"] = primaryChanged.SessionID
+			details["primary_session_state"] = primaryChanged.State
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePrimarySessionChanged, "Primary session changed",
+			details)
+		return response
+	}
+	if errors.Is(err, repoerrors.ErrTaskSessionMismatch) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session does not belong to task", nil)
+		return response
+	}
+	var unavailable *plancommenttx.SessionUnavailableError
+	if errors.As(err, &unavailable) {
+		response, _ := ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable,
+			"Session is not ready for input", map[string]interface{}{
+				fieldSessionID: unavailable.SessionID, "session_state": unavailable.State,
+			})
+		return response
+	}
+	if errors.Is(err, messagequeue.ErrQueueIDConflict) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_queue_id is already used", nil)
+		return response
+	}
+	return nil
+}
+
+func (h *QueueHandlers) publishPlanCommentSnapshot(
+	ctx context.Context,
+	snapshot *models.TaskPlanCommentSnapshot,
+) {
+	if snapshot == nil || h.eventBus == nil {
+		return
+	}
+	if err := h.eventBus.Publish(ctx, events.TaskPlanCommentsChanged,
+		bus.NewEvent(events.TaskPlanCommentsChanged, "queue-handlers", snapshot)); err != nil {
+		h.logger.Error("publish consumed plan comments", zap.String("task_id", snapshot.TaskID), zap.Error(err))
+	}
 }
 
 func (h *QueueHandlers) claimQueuedAttachmentsAfterInsert(req *wsQueueMessageRequest) func(context.Context, *messagequeue.QueuedMessage) error {

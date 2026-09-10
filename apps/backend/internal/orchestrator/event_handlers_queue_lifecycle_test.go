@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -374,6 +375,169 @@ func TestExecuteQueuedMessage_LifecycleMessagePersistenceFailureDoesNotDispatch(
 			"visible-message persistence lifecycle retries = %d, want 1; snapshot=%+v err=%v",
 			got, entries, snapshotErr,
 		)
+	}
+}
+
+func TestExecuteQueuedMessage_PlanCommentPersistenceFailureRetainsReplayReceipt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = &mockMessageCreator{userMessageErr: errors.New("persist plan-comment message")}
+	_, err = svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "plan feedback", "", messagequeue.QueuedByUser, false, nil,
+		map[string]interface{}{
+			plancomments.MetadataClientQueueID:      "client-queue-1",
+			plancomments.MetadataRequestFingerprint: "fingerprint-1",
+		},
+	)
+	if err != nil {
+		t.Fatalf("queue plan-comment delivery: %v", err)
+	}
+	queued, ok := svc.messageQueue.ReserveQueued(ctx, "s1")
+	if !ok || !queued.IsReservedDelivery() {
+		t.Fatalf("reserve durable plan-comment delivery: queued=%+v ok=%v", queued, ok)
+	}
+
+	svc.markQueuedDispatchInFlight("s1", queued.ID)
+	svc.executeQueuedMessage("s1", queued)
+
+	if got := len(agentMgr.capturedPromptCalls); got != 0 {
+		t.Fatalf("prompt calls after transcript persistence failure = %d, want 0", got)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	if status.Count != 1 || status.Entries[0].ID != queued.ID {
+		t.Fatalf("plan-comment replay receipt after persistence failure = %+v, want retained", status)
+	}
+}
+
+func TestExecuteQueuedMessage_PlanCommentDispatchFailureDoesNotRetryAfterAttempt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		promptErr:              errors.New("agent stream disconnected while prompting"),
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	_, err = svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "plan feedback", "", messagequeue.QueuedByUser, false, nil,
+		map[string]interface{}{
+			plancomments.MetadataClientQueueID:      "client-queue-2",
+			plancomments.MetadataRequestFingerprint: "fingerprint-2",
+		},
+	)
+	if err != nil {
+		t.Fatalf("queue plan-comment delivery: %v", err)
+	}
+
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t1", "s1")
+	if err != nil {
+		t.Fatalf("resolve session identity: %v", err)
+	}
+	first, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	if err != nil || !ok {
+		t.Fatal("reserve first plan-comment attempt")
+	}
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, first.ID, first)
+	svc.executeQueuedMessageWithReservation("s1", first, reservation)
+	if got := len(messages.userMessages); got != 1 {
+		t.Fatalf("recorded messages after first attempt = %d, want 1", got)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Fatalf("queue count after attempted delivery = %d, want 0", got)
+	}
+	if got := len(agentMgr.capturedPromptCalls); got != 1 {
+		t.Fatalf("prompt calls after failed attempted delivery = %d, want 1", got)
+	}
+}
+
+func TestQueuedPlanCommentTranscriptIsIdempotentAcrossRestartCopies(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	queued := messagequeue.QueuedMessage{
+		ID: "queue-transcript", SessionID: "s1", TaskID: "t1", Content: "feedback",
+		Metadata: map[string]interface{}{
+			plancomments.MetadataClientQueueID:      "queue-transcript",
+			plancomments.MetadataRequestFingerprint: "fingerprint-transcript",
+		},
+	}
+	restartedCopy := queued
+	restartedCopy.Metadata = map[string]interface{}{
+		plancomments.MetadataClientQueueID:      "queue-transcript",
+		plancomments.MetadataRequestFingerprint: "fingerprint-transcript",
+	}
+
+	if err := svc.recordQueuedUserMessage(ctx, &queued, nil, "source-a", "source-b"); err != nil {
+		t.Fatalf("record first transcript: %v", err)
+	}
+	if err := svc.recordQueuedUserMessage(ctx, &restartedCopy, nil, "source-a", "source-b"); err != nil {
+		t.Fatalf("replay transcript: %v", err)
+	}
+	if got := len(messages.userMessages); got != 1 {
+		t.Fatalf("transcript rows = %d, want 1", got)
+	}
+	if got := len(messages.idempotentUserMessages); got != 1 {
+		t.Fatalf("transcript identities = %d, want 1", got)
+	}
+}
+
+func TestStartupReconciliationDoesNotRedispatchAttemptedPlanComment(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	agentManager := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	_, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "feedback", "", messagequeue.QueuedByUser, true, nil,
+		map[string]interface{}{
+			plancomments.MetadataClientQueueID:      "startup-attempted",
+			plancomments.MetadataRequestFingerprint: "fingerprint-startup",
+			messagequeue.MetadataDeliveryAttempted:  true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("queue attempted receipt: %v", err)
+	}
+
+	svc.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
+
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Fatalf("attempted startup receipts = %d, want 0", got)
+	}
+	if got := len(agentManager.capturedPromptCalls); got != 0 {
+		t.Fatalf("startup prompt calls = %d, want 0", got)
 	}
 }
 

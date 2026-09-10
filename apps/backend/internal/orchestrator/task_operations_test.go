@@ -4728,6 +4728,7 @@ type mockMessageCreator struct {
 	toolCallWrites         int
 	toolUpdateWrites       int
 	userMessageErr         error
+	idempotentUserMessages map[string]struct{}
 	permissionClaimFn      func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	permissionFinishFn     func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn      func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
@@ -4753,6 +4754,27 @@ func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, conten
 	if m.userMessageErr != nil {
 		return m.userMessageErr
 	}
+	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
+	return nil
+}
+
+func (m *mockMessageCreator) CreateUserMessageIdempotent(
+	_ context.Context,
+	messageID, taskID, content, sessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userMessageErr != nil {
+		return m.userMessageErr
+	}
+	if m.idempotentUserMessages == nil {
+		m.idempotentUserMessages = make(map[string]struct{})
+	}
+	if _, exists := m.idempotentUserMessages[messageID]; exists {
+		return nil
+	}
+	m.idempotentUserMessages[messageID] = struct{}{}
 	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
 	return nil
 }

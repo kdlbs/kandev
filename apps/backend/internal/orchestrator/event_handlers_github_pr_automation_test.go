@@ -60,9 +60,9 @@ func (r *lifecycleAcknowledgingRepository) AcknowledgeReserved(
 func (r *lifecycleAcknowledgingRepository) AcknowledgeByIDForSession(
 	ctx context.Context,
 	identity messagequeue.QueueSessionIdentity,
-	entryID string,
+	message *messagequeue.QueuedMessage,
 ) error {
-	if err := r.Repository.AcknowledgeByIDForSession(ctx, identity, entryID); err != nil {
+	if err := r.Repository.AcknowledgeByIDForSession(ctx, identity, message); err != nil {
 		return err
 	}
 	close(r.acknowledged)

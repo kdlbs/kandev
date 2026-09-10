@@ -476,7 +476,7 @@ func (r *memoryRepository) requeuePreservingFIFOLocked(
 		r.sessionGeneration[msg.SessionID] != msg.reservationSessionGeneration {
 		return ErrQueueDispatchClaimChanged
 	}
-	if msg.IsReservedLifecycleDelivery() {
+	if msg.IsReservedDelivery() {
 		return r.releaseLifecycleReservationForRetryLocked(msg, expectedIncarnationID)
 	}
 	list := r.entries[msg.SessionID]
@@ -531,6 +531,9 @@ func (r *memoryRepository) releaseLifecycleReservationForRetryLocked(
 		if existing.ID != msg.ID || !existing.IsReservedInFlight() {
 			continue
 		}
+		if existing.IsDeliveryAttempted() || !msg.reservationMatches(existing.Metadata) {
+			return ErrEntryNotFound
+		}
 		if expectedIncarnationID != "" &&
 			lifecycleReservationIncarnation(existing.Metadata) != expectedIncarnationID {
 			return ErrEntryNotFound
@@ -545,7 +548,11 @@ func (r *memoryRepository) releaseLifecycleReservationForRetryLocked(
 			r.removeEntryLocked(msg.SessionID, index)
 			return nil
 		}
-		existing.Metadata = clearReservedMetadata(existing.Metadata)
+		releasedMetadata := copyMessageMetadata(existing.Metadata, len(msg.Metadata))
+		for key, value := range msg.Metadata {
+			releasedMetadata[key] = value
+		}
+		existing.Metadata = clearReservedMetadata(releasedMetadata)
 		return nil
 	}
 	return ErrEntryNotFound
@@ -836,6 +843,28 @@ func (r *memoryRepository) FindByID(_ context.Context, entryID string) (*QueuedM
 	return nil, ErrEntryNotFound
 }
 
+// ListDurableDeliveryEntries returns every retained lifecycle or plan-comment
+// receipt in stable FIFO order.
+func (r *memoryRepository) ListDurableDeliveryEntries(_ context.Context) ([]QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []QueuedMessage
+	for _, list := range r.entries {
+		for _, msg := range list {
+			if msg.IsDurableDelivery() {
+				out = append(out, *cloneQueuedMessage(msg))
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SessionID == out[j].SessionID {
+			return out[i].Position < out[j].Position
+		}
+		return out[i].SessionID < out[j].SessionID
+	})
+	return out, nil
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *memoryRepository) CountBySession(_ context.Context, sessionID string) (int, error) {
 	r.mu.Lock()
@@ -898,31 +927,66 @@ func (r *memoryRepository) reserveHeadLocked(
 	}
 	headIndex := lowestPositionIndex(list)
 	head := list[headIndex]
-	out := cloneQueuedMessage(head)
-	r.captureReservationLocked(out)
-	if head.IsDurableLifecycle() || retainOrdinary {
+	if head.IsDeliveryAttempted() {
+		r.removeEntryLocked(sessionID, headIndex)
+		return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
+	}
+	if head.IsDurablePlanComment() && head.IsReservedInFlight() {
 		reservationIncarnation := lifecycleReservationIncarnation(head.Metadata)
-		if identity != nil && reservationIncarnation != "" && reservationIncarnation != identity.SessionIncarnationID {
+		expiresAt := deliveryReservationExpiresAt(head.Metadata)
+		if (identity == nil || reservationIncarnation == "" ||
+			reservationIncarnation == identity.SessionIncarnationID) &&
+			deliveryReservationToken(head.Metadata) != "" && expiresAt.After(time.Now()) {
+			return nil
+		}
+	}
+	if head.IsDurableDelivery() || retainOrdinary {
+		if reservationBelongsToDifferentIncarnation(head.Metadata, identity) {
 			r.removeEntryLocked(sessionID, headIndex)
 			return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
 		}
-		// Mirror the SQLite reservation: the stored row is flagged in flight so
-		// queue status stops listing it, while the returned copy keeps the
-		// unmarked metadata a requeue would write back.
-		out.Metadata = clearReservedMetadata(out.Metadata)
-		out.reservedLifecycleDelivery = head.IsDurableLifecycle()
-		if identity != nil {
-			out.reservationIdentity = *identity
-			head.Metadata = markReservedMetadataForIncarnation(out.Metadata, identity.SessionIncarnationID)
-		} else if head.IsDurableLifecycle() {
-			out.lifecycleReservationID = uuid.NewString()
-			head.Metadata = markReservedMetadata(out.Metadata, out.lifecycleReservationID)
-		} else {
-			head.Metadata = markReservedMetadata(out.Metadata)
-		}
+		out := reserveMemoryDelivery(head, identity)
+		r.captureReservationLocked(out)
 		return out
 	}
+	out := cloneQueuedMessage(head)
+	r.captureReservationLocked(out)
 	r.removeEntryLocked(sessionID, headIndex)
+	return out
+}
+
+func reservationBelongsToDifferentIncarnation(
+	metadata map[string]interface{},
+	identity *QueueSessionIdentity,
+) bool {
+	reservationIncarnation := lifecycleReservationIncarnation(metadata)
+	return identity != nil && reservationIncarnation != "" &&
+		reservationIncarnation != identity.SessionIncarnationID
+}
+
+func reserveMemoryDelivery(
+	head *QueuedMessage,
+	identity *QueueSessionIdentity,
+) *QueuedMessage {
+	out := cloneQueuedMessage(head)
+	out.Metadata = clearReservedMetadata(head.Metadata)
+	out.reservedDelivery = true
+	out.reservedLifecycleDelivery = head.IsDurableLifecycle()
+	incarnationID := ""
+	if identity != nil {
+		out.reservationIdentity = *identity
+		incarnationID = identity.SessionIncarnationID
+	}
+	out.lifecycleReservationID = uuid.NewString()
+	reservationMetadata := markReservedMetadataForIncarnation(
+		markReservedMetadata(out.Metadata, out.lifecycleReservationID), incarnationID,
+	)
+	if head.IsDurablePlanComment() {
+		reservationMetadata, out.reservationToken, out.reservationExpiresAt = markReservedMetadataWithLease(
+			reservationMetadata, incarnationID, time.Now(),
+		)
+	}
+	head.Metadata = reservationMetadata
 	return out
 }
 
@@ -1110,19 +1174,23 @@ func (r *memoryRepository) AcknowledgeByID(_ context.Context, sessionID, entryID
 func (r *memoryRepository) AcknowledgeByIDForSession(
 	_ context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	reserved *QueuedMessage,
 ) error {
+	if reserved == nil {
+		return ErrEntryNotFound
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.bindIdentityLocked(identity); err != nil {
 		return err
 	}
 	for index, msg := range r.entries[identity.SessionID] {
-		if msg.ID != entryID {
+		if msg.ID != reserved.ID {
 			continue
 		}
 		if !msg.IsReservedInFlight() ||
-			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID {
+			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID ||
+			!reserved.reservationMatches(msg.Metadata) {
 			return ErrEntryNotFound
 		}
 		r.removeEntryLocked(identity.SessionID, index)
@@ -1131,22 +1199,69 @@ func (r *memoryRepository) AcknowledgeByIDForSession(
 	return ErrEntryNotFound
 }
 
-func (r *memoryRepository) ReleaseDeliveryReservationForSession(
+func (r *memoryRepository) MarkDeliveryAttemptedForSession(
 	_ context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	messages []QueuedMessage,
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.bindIdentityLocked(identity); err != nil {
 		return err
 	}
+	stored := make(map[string]*QueuedMessage, len(messages))
+	seen := make(map[string]struct{}, len(messages))
+	for index := range messages {
+		candidate := &messages[index]
+		if candidate.ID == "" || candidate.SessionID != identity.SessionID ||
+			candidate.TaskID != identity.TaskID || !candidate.IsDurablePlanComment() {
+			return ErrEntryNotFound
+		}
+		if _, duplicate := seen[candidate.ID]; duplicate {
+			return ErrQueueChanged
+		}
+		seen[candidate.ID] = struct{}{}
+		var found *QueuedMessage
+		for _, msg := range r.entries[identity.SessionID] {
+			if msg.ID == candidate.ID {
+				found = msg
+				break
+			}
+		}
+		if found == nil || !found.IsReservedInFlight() ||
+			lifecycleReservationIncarnation(found.Metadata) != identity.SessionIncarnationID ||
+			!candidate.reservationMatches(found.Metadata) {
+			return ErrEntryNotFound
+		}
+		stored[candidate.ID] = found
+	}
+	for _, msg := range stored {
+		msg.Metadata[MetadataDeliveryAttempted] = true
+		msg.Metadata[metadataUserMessageRecorded] = true
+	}
+	return nil
+}
+
+func (r *memoryRepository) ReleaseDeliveryReservationForSession(
+	_ context.Context,
+	identity QueueSessionIdentity,
+	reserved *QueuedMessage,
+) error {
+	if reserved == nil {
+		return ErrEntryNotFound
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.bindIdentityLocked(identity); err != nil {
+		return err
+	}
 	for index, msg := range r.entries[identity.SessionID] {
-		if msg.ID != entryID {
+		if msg.ID != reserved.ID {
 			continue
 		}
-		if !msg.IsReservedInFlight() ||
-			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID {
+		if !msg.IsReservedInFlight() || msg.IsDeliveryAttempted() ||
+			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID ||
+			!reserved.reservationMatches(msg.Metadata) {
 			return ErrEntryNotFound
 		}
 		coalesceKey := metadataString(msg.Metadata, MetadataCoalesceKey)
@@ -1167,16 +1282,20 @@ func (r *memoryRepository) ReleaseDeliveryReservationForSession(
 func (r *memoryRepository) DiscardLifecycleReservation(
 	_ context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	reserved *QueuedMessage,
 ) error {
+	if reserved == nil {
+		return ErrEntryNotFound
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for index, msg := range r.entries[identity.SessionID] {
-		if msg.ID != entryID {
+		if msg.ID != reserved.ID {
 			continue
 		}
 		if !msg.IsReservedInFlight() ||
-			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID {
+			lifecycleReservationIncarnation(msg.Metadata) != identity.SessionIncarnationID ||
+			!reserved.reservationMatches(msg.Metadata) {
 			return ErrEntryNotFound
 		}
 		r.removeEntryLocked(identity.SessionID, index)
@@ -1276,7 +1395,7 @@ func (r *memoryRepository) claimSendNowLocked(
 	sessionGeneration := r.sessionGeneration[sessionID]
 
 	sources := cloneSendNowSources(selected)
-	bindSendNowLifecycleReservations(sources, identity)
+	bindSendNowDeliveryReservations(sources, identity)
 	envelope, err := BuildSendNowEnvelope(sources)
 	if err != nil {
 		return nil, err
@@ -1287,17 +1406,33 @@ func (r *memoryRepository) claimSendNowLocked(
 			generations[source.TaskID] = r.generation[source.TaskID]
 		}
 	}
+
+	sourceByID := make(map[string]*QueuedMessage, len(sources))
+	for index := range sources {
+		sourceByID[sources[index].ID] = &sources[index]
+	}
 	remaining := make([]*QueuedMessage, 0, len(list))
 	for _, entry := range list {
 		if _, ok := requested[entry.ID]; !ok {
 			remaining = append(remaining, entry)
 			continue
 		}
-		if entry.IsDurableLifecycle() {
-			entry.Metadata = markReservedMetadataForIncarnation(
-				markReservedMetadata(entry.Metadata, uuid.NewString()),
-				identity.SessionIncarnationID,
+		if entry.IsDurableDelivery() {
+			metadata := markReservedMetadataForIncarnation(
+				markReservedMetadata(entry.Metadata, uuid.NewString()), identity.SessionIncarnationID,
 			)
+			var token string
+			var expiresAt time.Time
+			if entry.IsDurablePlanComment() {
+				metadata, token, expiresAt = markReservedMetadataWithLease(
+					metadata, identity.SessionIncarnationID, time.Now(),
+				)
+			}
+			entry.Metadata = metadata
+			if source := sourceByID[entry.ID]; source != nil {
+				source.reservationToken = token
+				source.reservationExpiresAt = expiresAt
+			}
 			remaining = append(remaining, entry)
 		}
 	}
@@ -1391,7 +1526,7 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 			continue
 		}
 		if existing[source.ID] != nil {
-			if source.IsDurableLifecycle() {
+			if source.IsDurableDelivery() {
 				existing[source.ID].Metadata = restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata)
 			}
 			continue
@@ -1424,8 +1559,9 @@ func validateMemorySendNowRestore(
 			continue
 		}
 		entry := existing[source.ID]
-		if source.IsDurableLifecycle() {
-			if entry == nil || (!entry.IsReservedInFlight() && !sameQueuedMessageContent(entry, &source)) {
+		if source.IsDurableDelivery() {
+			if entry == nil || entry.IsDeliveryAttempted() || !source.reservationMatches(entry.Metadata) ||
+				(!entry.IsReservedInFlight() && !sameQueuedMessageContent(entry, &source)) {
 				return ErrSendNowClaimChanged
 			}
 			continue
@@ -1461,7 +1597,7 @@ func (r *memoryRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 		!sendNowClaimSourcesAllInvalidated(claim, generations) {
 		return ErrSendNowClaimChanged
 	}
-	requested := make(map[string]struct{})
+	requested := make(map[string]*QueuedMessage)
 	for _, source := range claim.Sources {
 		if source.SessionID != sessionID {
 			return ErrSendNowClaimChanged
@@ -1469,14 +1605,17 @@ func (r *memoryRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 		if source.TaskID != "" {
 			generations[source.TaskID] = r.generation[source.TaskID]
 		}
-		if !source.IsDurableLifecycle() || sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+		if !source.IsDurableDelivery() || sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
 			continue
 		}
-		requested[source.ID] = struct{}{}
+		sourceCopy := source
+		requested[source.ID] = &sourceCopy
 	}
 	for _, entry := range r.entries[sessionID] {
-		if _, ok := requested[entry.ID]; ok && !entry.IsReservedInFlight() {
-			return ErrSendNowClaimChanged
+		if source, ok := requested[entry.ID]; ok {
+			if !entry.IsReservedInFlight() || !source.reservationMatches(entry.Metadata) {
+				return ErrSendNowClaimChanged
+			}
 		}
 	}
 	if len(requested) == 0 {
@@ -1504,8 +1643,9 @@ func cloneSendNowSources(entries []*QueuedMessage) []QueuedMessage {
 	for _, entry := range entries {
 		clone := cloneQueuedMessage(entry)
 		clone.Metadata = clearReservedMetadata(clone.Metadata)
-		if entry.IsDurableLifecycle() {
-			clone.reservedLifecycleDelivery = true
+		if entry.IsDurableDelivery() {
+			clone.reservedDelivery = true
+			clone.reservedLifecycleDelivery = entry.IsDurableLifecycle()
 		}
 		sources = append(sources, *clone)
 	}
@@ -1545,6 +1685,8 @@ func sameQueuedMessageContent(left, right *QueuedMessage) bool {
 	rightCopy.QueuedAt = rightCopy.QueuedAt.Truncate(time.Microsecond)
 	leftCopy.Metadata = clearReservedMetadata(leftCopy.Metadata)
 	rightCopy.Metadata = clearReservedMetadata(rightCopy.Metadata)
+	leftCopy.reservedDelivery = false
+	rightCopy.reservedDelivery = false
 	leftCopy.reservedLifecycleDelivery = false
 	rightCopy.reservedLifecycleDelivery = false
 	leftCopy.dispatchAttemptID = ""
