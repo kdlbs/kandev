@@ -13,6 +13,8 @@ import { useToast } from "@/components/toast-provider";
 import { useSerializedMutationQueue } from "./use-serialized-mutation-queue";
 import type { WorkflowMutationGuardController } from "./workflow-mutation-guard";
 import { applyWorkflowStepUpdates } from "./workflow-step-mutations";
+import { areStepDraftsEqual, stepUpdatePayload } from "./workflow-step-equality";
+export { areStepDraftsEqual } from "./workflow-step-equality";
 import {
   createWorkflowAction,
   createWorkflowStepAction,
@@ -23,7 +25,6 @@ import {
   listWorkflowStepsAction,
   getStepTaskCount,
   getWorkflowTaskCount,
-  exportWorkflowAction,
   bulkMoveTasks,
 } from "@/app/actions/workspaces";
 
@@ -94,6 +95,7 @@ function createDraftStep(workflow: Workflow, position: number): WorkflowStep {
     ...NEW_STEP_DEFAULTS,
     position,
     allow_manual_move: true,
+    complete_task_on_enter: false,
     created_at: "",
     updated_at: "",
   };
@@ -123,6 +125,19 @@ function createRemoveWorkflowStepHandler(
   const isNewWorkflow = params.isNewWorkflow ?? workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   return async (stepId: string) => {
     if (readOnly) return;
+    const dependentStep = workflowSteps.find(
+      (step) => step.session_target?.kind === "step" && step.session_target.step_id === stepId,
+    );
+    if (dependentStep) {
+      toast({
+        title: t("workflows:sessionTargetDependentMustBeRepaired"),
+        description: t("workflows:sessionTargetDependentRepairDescription", {
+          stepName: dependentStep.name,
+        }),
+        variant: "error",
+      });
+      return;
+    }
     const proposedSteps = workflowSteps
       .filter((step) => step.id !== stepId)
       .map((step, position) => ({ ...step, position }));
@@ -323,6 +338,7 @@ async function createMissingSteps(
       position: step.position,
       color: step.color,
       stage_type: step.stage_type ?? "custom",
+      complete_task_on_enter: step.complete_task_on_enter ?? false,
       cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
       agent_profile_id: step.agent_profile_id,
       profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
@@ -331,6 +347,7 @@ async function createMissingSteps(
       profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
         step.profile_session_end_policy,
       ),
+      session_target: undefined,
       auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     });
     mappings.set(step.id, created.id);
@@ -339,11 +356,52 @@ async function createMissingSteps(
 
 async function updateChangedSteps(remapped: WorkflowStep[], savedSteps: WorkflowStep[]) {
   const savedById = new Map(savedSteps.map((step) => [step.id, step]));
-  for (const step of remapped) {
+  const changed = remapped.filter((step) => {
     const saved = savedById.get(step.id);
-    if (!saved || !areStepDraftsEqual(step, saved)) {
+    return !saved || !areStepDraftsEqual(step, saved);
+  });
+
+  const targetChanged = (step: WorkflowStep, saved: WorkflowStep) =>
+    JSON.stringify(step.session_target ?? null) !== JSON.stringify(saved.session_target ?? null);
+  const targetNeedsSourceProfileFirst = (step: WorkflowStep) => {
+    const target = step.session_target;
+    if (target?.kind !== "step") return false;
+    const sourceDraft = remapped.find((candidate) => candidate.id === target.step_id);
+    const sourceSaved = sourceDraft ? savedById.get(sourceDraft.id) : undefined;
+    return sourceSaved?.agent_profile_id === "" && sourceDraft?.agent_profile_id !== "";
+  };
+
+  // Existing targets must be detached before their source profile is removed.
+  // A replacement target also clears the mutually-exclusive direct profile in
+  // the same request, so the controller never observes an invalid half-state.
+  for (const step of changed) {
+    const saved = savedById.get(step.id);
+    if (!saved || !targetChanged(step, saved) || saved.session_target == null) continue;
+    const attachAfterSourceProfile = targetNeedsSourceProfileFirst(step);
+    await updateWorkflowStepAction(step.id, {
+      session_target: attachAfterSourceProfile ? null : (step.session_target ?? null),
+      ...(!attachAfterSourceProfile && step.session_target != null ? { agent_profile_id: "" } : {}),
+    });
+  }
+
+  // A newly attached target can refer to a source whose direct profile is also
+  // being enabled in this save. Persist all other changes first, then attach
+  // those targets once the source profile is valid on the server.
+  const targetAdditions = changed.filter((step) => {
+    const saved = savedById.get(step.id);
+    return (
+      (saved?.session_target == null && step.session_target != null) ||
+      targetNeedsSourceProfileFirst(step)
+    );
+  });
+  const targetAdditionIDs = new Set(targetAdditions.map((step) => step.id));
+  for (const step of changed) {
+    if (!targetAdditionIDs.has(step.id)) {
       await updateWorkflowStepAction(step.id, stepUpdatePayload(step));
     }
+  }
+  for (const step of targetAdditions) {
+    await updateWorkflowStepAction(step.id, stepUpdatePayload(step));
   }
 }
 
@@ -376,6 +434,10 @@ function remapDraftStep(
     workflow_id: persistedWorkflowId as WorkflowStep["workflow_id"],
     position,
     pull_from_step_id: remapId(step.pull_from_step_id),
+    session_target:
+      step.session_target?.kind === "step"
+        ? { kind: "step", step_id: remapId(step.session_target.step_id)! }
+        : (step.session_target ?? null),
     events: remapStepReferences(step.events, mappings),
   };
 }
@@ -400,46 +462,6 @@ function remapStepReferences<T>(value: T, mappings: Map<string, string>): T {
       : remapStepReferences(item, mappings),
   ]);
   return Object.fromEntries(mapped) as T;
-}
-
-function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
-  return {
-    name: step.name,
-    position: step.position,
-    color: step.color,
-    stage_type: step.stage_type ?? "custom",
-    prompt: step.prompt ?? "",
-    events: step.events ?? {},
-    allow_manual_move: step.allow_manual_move ?? true,
-    is_start_step: step.is_start_step ?? false,
-    show_in_command_panel: step.show_in_command_panel ?? false,
-    auto_archive_after_hours: step.auto_archive_after_hours ?? 0,
-    agent_profile_id: step.agent_profile_id ?? "",
-    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
-      step.profile_session_start_policy,
-    ),
-    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
-      step.profile_session_end_policy,
-    ),
-    auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
-    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
-    wip_limit: step.wip_limit ?? 0,
-    pull_from_step_id: step.pull_from_step_id ?? "",
-  };
-}
-
-export function areStepDraftsEqual(left: WorkflowStep[], right: WorkflowStep[]): boolean;
-export function areStepDraftsEqual(left: WorkflowStep, right: WorkflowStep): boolean;
-export function areStepDraftsEqual(
-  left: WorkflowStep[] | WorkflowStep,
-  right: WorkflowStep[] | WorkflowStep,
-): boolean {
-  if (Array.isArray(left) && Array.isArray(right)) {
-    if (left.length !== right.length) return false;
-    return left.every((step, index) => areStepDraftsEqual(step, right[index]));
-  }
-  if (Array.isArray(left) || Array.isArray(right)) return false;
-  return JSON.stringify(stepUpdatePayload(left)) === JSON.stringify(stepUpdatePayload(right));
 }
 
 type WorkflowDeleteHandlersParams = {
@@ -629,30 +651,4 @@ export function useStepDeleteHandlers({
   };
 
   return { handleMigrateAndDeleteStep, handleDeleteStepAndTasks };
-}
-
-type WorkflowExportActionsParams = {
-  workflowId: string;
-  setExportYaml: (yaml: string) => void;
-  setExportOpen: (open: boolean) => void;
-  toast: ReturnType<typeof useToast>["toast"];
-};
-
-export async function handleExportWorkflow({
-  workflowId,
-  setExportYaml,
-  setExportOpen,
-  toast,
-}: WorkflowExportActionsParams) {
-  try {
-    const yamlText = await exportWorkflowAction(workflowId);
-    setExportYaml(yamlText);
-    setExportOpen(true);
-  } catch (error) {
-    toast({
-      title: t("workflows:failedToExportWorkflow"),
-      description: fallbackErrorMessage(error),
-      variant: "error",
-    });
-  }
 }

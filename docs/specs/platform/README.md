@@ -21,6 +21,9 @@ This system owns startup and shutdown contracts, process and port-independent
 runtime safety, configuration precedence, diagnostics, notifications,
 localization, feature toggles, health, and shared session recovery services.
 
+Settings discovery and interface parity belong to Platform. Each settings domain
+retains ownership of its values, validation, authority, and persistence.
+
 ## Exclusions
 
 - Executor-specific runtime environments belong to the [executor
@@ -31,6 +34,8 @@ localization, feature toggles, health, and shared session recovery services.
 ## Specification map
 
 ### Requirements
+
+- [Agent-accessible Kandev settings](requirements/agent-settings-parity.md)
 
 
 
@@ -74,6 +79,9 @@ localization, feature toggles, health, and shared session recovery services.
 - [Workspace Git Status](requirements/workspace-git-status.md)
 
 ### System design
+
+- [Agent-accessible Kandev settings](system-design/agent-settings-parity.md)
+- [Core settings domain adoption](system-design/agent-settings-domains.md)
 
 
 

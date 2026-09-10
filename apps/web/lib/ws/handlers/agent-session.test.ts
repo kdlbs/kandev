@@ -109,6 +109,34 @@ describe("message.queue.status_changed handler", () => {
       autoRun: false,
     });
   });
+
+  it("preserves the known queue capacity when an older publisher omits max", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({
+      setQueueEntries,
+      queue: {
+        bySessionId: { "s-1": [] },
+        metaBySessionId: {
+          "s-1": { count: 1, max: 10, mergeEnabled: true, autoRun: true },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-capacity-compat",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: { session_id: "s-1", entries: [], count: 0 },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+    });
+  });
 });
 function makeIncarnationPolicyStore(setQueueEntries: ReturnType<typeof vi.fn>) {
   return makeStore({

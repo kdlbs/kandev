@@ -3,6 +3,7 @@ status: current
 system: agents
 requirements:
   - REQ-AGENTS-MCP-BRIDGE-RELIABILITY-001
+  - REQ-AGENTS-MCP-BRIDGE-RELIABILITY-002
 created: 2026-09-04
 owners:
   - Kandev
@@ -25,6 +26,7 @@ operation keeps its own context and deadline.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-MCP-BRIDGE-RELIABILITY-001` | [Current dispatcher binding](#current-dispatcher-binding), [Request ownership](#request-ownership), [Failure behavior](#failure-behavior), [Observability](#observability) |
+| `REQ-AGENTS-MCP-BRIDGE-RELIABILITY-002` | [Empty response classification](#empty-response-classification), [Failure behavior](#failure-behavior), [Observability](#observability), [Testing strategy](#testing-strategy) |
 
 ## Confirmed fault
 
@@ -127,6 +129,27 @@ This design does not add a common response deadline. Such a deadline can stop
 valid clarification waits and long launch operations. Transport ownership and
 caller contexts provide the required termination signals.
 
+## Empty response classification
+
+`ChannelBackendClient` and `DispatcherBackendClient` classify a response after
+the transport has returned a non-nil message without an error.
+
+Both clients apply this order:
+
+1. An error response returns the existing backend error.
+2. A nil result sink returns success without payload decoding.
+3. A zero-byte payload returns the shared `ErrEmptyBackendPayload` error.
+4. A non-empty payload passes to JSON decoding, which returns any existing error.
+
+The clients use an action-specific wrapped error for the empty-payload case.
+The channel client logs the configured session ID and elapsed duration. The
+dispatcher client logs only fields that exist at its in-process boundary.
+
+The rule detects an empty response envelope. It does not identify the cause of
+the missing payload, validate a response schema, or classify valid `null` data.
+Valid `{}`, `[]`, `null`, and other non-empty JSON values keep their current
+behavior.
+
 ## Observability
 
 The backend records one request-received event at `Info`. The event includes
@@ -153,6 +176,9 @@ Unit tests cover these cases:
 - A stream disconnect releases only requests owned by that stream.
 - Successful responses, context cancellation, reset, close, and clarification
   waits keep their current behavior.
+- Both clients return an error for a zero-byte success payload when a result
+  sink exists, and they preserve the nil-sink, error-response, valid JSON, and
+  decode-error cases described in [Empty response classification](#empty-response-classification).
 
 Race-enabled tests cover concurrent dispatcher updates, request completion,
 stream replacement, reset, and close.

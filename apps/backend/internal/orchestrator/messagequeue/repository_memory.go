@@ -18,7 +18,9 @@ type memoryRepository struct {
 	nextPosition       map[string]int64            // sessionID -> monotonic counter
 	pendingMoves       map[string]*PendingMove
 	generation         map[string]int64
+	sessionGeneration  map[string]int64
 	sendNowGeneration  map[string]int64
+	sendNowClaims      map[string]map[string]struct{}
 	autoRun            map[string]bool
 	autoRunIncarnation map[string]string
 	autoMergeOverrides map[QueueSessionIdentity]AutoMergeOverride
@@ -34,7 +36,9 @@ func NewMemoryRepository() Repository {
 		nextPosition:       make(map[string]int64),
 		pendingMoves:       make(map[string]*PendingMove),
 		generation:         make(map[string]int64),
+		sessionGeneration:  make(map[string]int64),
 		sendNowGeneration:  make(map[string]int64),
+		sendNowClaims:      make(map[string]map[string]struct{}),
 		autoRun:            make(map[string]bool),
 		autoRunIncarnation: make(map[string]string),
 		autoMergeOverrides: make(map[QueueSessionIdentity]AutoMergeOverride),
@@ -58,6 +62,7 @@ func (r *memoryRepository) clearSessionStateLocked(sessionID string) {
 	delete(r.nextPosition, sessionID)
 	delete(r.pendingMoves, sessionID)
 	delete(r.sendNowGeneration, sessionID)
+	delete(r.sendNowClaims, sessionID)
 	delete(r.autoRun, sessionID)
 	delete(r.autoRunIncarnation, sessionID)
 	delete(r.statusGeneration, sessionID)
@@ -167,23 +172,32 @@ func (r *memoryRepository) LifecycleGeneration(_ context.Context, taskID string)
 	return r.generation[taskID], nil
 }
 
+// SessionGeneration returns the current destructive-mutation generation for a
+// session.
+func (r *memoryRepository) SessionGeneration(_ context.Context, sessionID string) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessionGeneration[sessionID], nil
+}
+
 // PurgeTask removes all task rows and advances its generation.
 func (r *memoryRepository) PurgeTask(_ context.Context, taskID string) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	removed := 0
+	affectedSessions := make(map[string]struct{})
 	for sessionID, list := range r.entries {
 		kept := list[:0]
 		for _, msg := range list {
 			if msg.TaskID == taskID {
 				removed++
+				affectedSessions[sessionID] = struct{}{}
 				continue
 			}
 			kept = append(kept, msg)
 		}
 		if len(kept) == 0 {
 			delete(r.entries, sessionID)
-			delete(r.nextPosition, sessionID)
 			continue
 		}
 		r.entries[sessionID] = kept
@@ -191,7 +205,11 @@ func (r *memoryRepository) PurgeTask(_ context.Context, taskID string) (int, err
 	for sessionID, move := range r.pendingMoves {
 		if move != nil && move.TaskID == taskID {
 			delete(r.pendingMoves, sessionID)
+			affectedSessions[sessionID] = struct{}{}
 		}
+	}
+	for sessionID := range affectedSessions {
+		r.sessionGeneration[sessionID]++
 	}
 	r.generation[taskID]++
 	return removed, nil
@@ -300,6 +318,13 @@ func (r *memoryRepository) RestoreForSession(
 }
 
 func (r *memoryRepository) restoreLocked(msg *QueuedMessage, maxPerSession int) error {
+	if msg == nil {
+		return ErrEntryNotFound
+	}
+	if msg.reservationGenerationsCaptured &&
+		r.sessionGeneration[msg.SessionID] != msg.reservationSessionGeneration {
+		return ErrQueueDispatchClaimChanged
+	}
 	list := r.entries[msg.SessionID]
 	if maxPerSession > 0 && len(list) >= maxPerSession {
 		return ErrQueueFull
@@ -310,11 +335,11 @@ func (r *memoryRepository) restoreLocked(msg *QueuedMessage, maxPerSession int) 
 	if msg.QueuedAt.IsZero() {
 		msg.QueuedAt = time.Now().UTC()
 	}
-	clone := *msg
+	clone := cloneQueuedMessage(msg)
 	index := sort.Search(len(list), func(i int) bool { return list[i].Position > clone.Position })
 	list = append(list, nil)
 	copy(list[index+1:], list[index:])
-	list[index] = &clone
+	list[index] = clone
 	r.entries[msg.SessionID] = list
 	if clone.Position > r.nextPosition[msg.SessionID] {
 		r.nextPosition[msg.SessionID] = clone.Position
@@ -397,8 +422,8 @@ func (r *memoryRepository) insertLocked(msg *QueuedMessage, maxPerSession int) e
 	}
 	r.nextPosition[msg.SessionID]++
 	msg.Position = r.nextPosition[msg.SessionID]
-	clone := *msg
-	r.entries[msg.SessionID] = append(list, &clone)
+	clone := cloneQueuedMessage(msg)
+	r.entries[msg.SessionID] = append(list, clone)
 	return nil
 }
 
@@ -444,6 +469,13 @@ func (r *memoryRepository) requeuePreservingFIFOLocked(
 	msg *QueuedMessage,
 	expectedIncarnationID string,
 ) error {
+	if msg == nil {
+		return ErrEntryNotFound
+	}
+	if msg.reservationGenerationsCaptured &&
+		r.sessionGeneration[msg.SessionID] != msg.reservationSessionGeneration {
+		return ErrQueueDispatchClaimChanged
+	}
 	if msg.IsReservedLifecycleDelivery() {
 		return r.releaseLifecycleReservationForRetryLocked(msg, expectedIncarnationID)
 	}
@@ -464,8 +496,8 @@ func (r *memoryRepository) requeuePreservingFIFOLocked(
 			existing.Content = msg.Content
 			existing.Model = msg.Model
 			existing.PlanMode = msg.PlanMode
-			existing.Attachments = msg.Attachments
-			existing.Metadata = msg.Metadata
+			existing.Attachments = append([]MessageAttachment(nil), msg.Attachments...)
+			existing.Metadata = copyMessageMetadata(msg.Metadata, 0)
 			if msg.QueuedAt.IsZero() {
 				existing.QueuedAt = time.Now().UTC()
 			} else {
@@ -483,9 +515,9 @@ func (r *memoryRepository) requeuePreservingFIFOLocked(
 		msg.QueuedAt = time.Now().UTC()
 	}
 	msg.Position = r.nextRequeuePositionLocked(msg.SessionID, list)
-	clone := *msg
+	clone := cloneQueuedMessage(msg)
 	newList := make([]*QueuedMessage, 0, len(list)+1)
-	newList = append(newList, &clone)
+	newList = append(newList, clone)
 	newList = append(newList, list...)
 	r.entries[msg.SessionID] = newList
 	return nil
@@ -540,7 +572,9 @@ func (r *memoryRepository) hasPendingCoalescedSuccessorLocked(
 
 func (r *memoryRepository) nextRequeuePositionLocked(sessionID string, list []*QueuedMessage) int64 {
 	if len(list) == 0 {
-		r.nextPosition[sessionID] = 1
+		if r.nextPosition[sessionID] < 1 {
+			r.nextPosition[sessionID] = 1
+		}
 		return 1
 	}
 	minPos := list[0].Position
@@ -589,8 +623,8 @@ func (r *memoryRepository) appendOrInsertTailLocked(sessionID, taskID, content, 
 		tail := list[len(list)-1]
 		if tail.QueuedBy == queuedBy {
 			tail.Content = tail.Content + "\n\n---\n\n" + content
-			out := *tail
-			return &out, true, nil
+			out := cloneQueuedMessage(tail)
+			return out, true, nil
 		}
 	}
 
@@ -607,7 +641,7 @@ func (r *memoryRepository) appendOrInsertTailLocked(sessionID, taskID, content, 
 	if err := r.insertLocked(msg, maxPerSession); err != nil {
 		return nil, false, err
 	}
-	return msg, false, nil
+	return cloneQueuedMessage(msg), false, nil
 }
 
 // InsertOrReplaceByCoalesceKey replaces an entry with the same session/queued_by/coalesce key, or inserts when allowInsert is set.
@@ -661,11 +695,11 @@ func (r *memoryRepository) insertOrReplaceByCoalesceKeyLocked(
 		existing.Content = msg.Content
 		existing.Model = msg.Model
 		existing.PlanMode = msg.PlanMode
-		existing.Attachments = msg.Attachments
-		existing.Metadata = msg.Metadata
+		existing.Attachments = append([]MessageAttachment(nil), msg.Attachments...)
+		existing.Metadata = copyMessageMetadata(msg.Metadata, 0)
 		existing.QueuedAt = msg.QueuedAt
-		out := *existing
-		return &out, true, nil
+		out := cloneQueuedMessage(existing)
+		return out, true, nil
 	}
 	if !allowInsert {
 		return nil, false, ErrEntryNotFound
@@ -676,7 +710,7 @@ func (r *memoryRepository) insertOrReplaceByCoalesceKeyLocked(
 	if err := r.insertLocked(msg, maxPerSession); err != nil {
 		return nil, false, err
 	}
-	return msg, false, nil
+	return cloneQueuedMessage(msg), false, nil
 }
 func (r *memoryRepository) InsertOrReplaceLifecycleByCoalesceKey(
 	_ context.Context,
@@ -750,7 +784,7 @@ func (r *memoryRepository) insertOrReplaceLifecycleLocked(
 	if err := r.insertLocked(msg, maxPerSession); err != nil {
 		return nil, false, err
 	}
-	return msg, false, nil
+	return cloneQueuedMessage(msg), false, nil
 }
 
 // ListBySession returns all entries for a session ordered by position ascending.
@@ -760,7 +794,7 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	list := r.entries[sessionID]
 	out := make([]QueuedMessage, len(list))
 	for i, m := range list {
-		out[i] = *m
+		out[i] = *cloneQueuedMessage(m)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Position < out[j].Position })
 	return out, nil
@@ -789,11 +823,42 @@ func (r *memoryRepository) ListDurableLifecycleEntries(_ context.Context) ([]Que
 	return out, nil
 }
 
+func (r *memoryRepository) FindByID(_ context.Context, entryID string) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, list := range r.entries {
+		for _, message := range list {
+			if message.ID == entryID {
+				return cloneQueuedMessage(message), nil
+			}
+		}
+	}
+	return nil, ErrEntryNotFound
+}
+
 // CountBySession returns the number of entries for a session.
 func (r *memoryRepository) CountBySession(_ context.Context, sessionID string) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.entries[sessionID]), nil
+}
+
+func lowestPositionIndex(list []*QueuedMessage) int {
+	index := 0
+	for i := 1; i < len(list); i++ {
+		if list[i].Position < list[index].Position {
+			index = i
+		}
+	}
+	return index
+}
+
+func (r *memoryRepository) captureReservationLocked(msg *QueuedMessage) {
+	msg.reservationSessionGeneration = r.sessionGeneration[msg.SessionID]
+	if msg.TaskID != "" {
+		msg.reservationLifecycleGeneration = r.generation[msg.TaskID]
+	}
+	msg.reservationGenerationsCaptured = true
 }
 
 // TakeHead atomically returns and deletes the lowest-position entry for the session.
@@ -804,14 +869,15 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 	if len(list) == 0 {
 		return nil, nil
 	}
-	head := list[0]
-	r.entries[sessionID] = list[1:]
+	headIndex := lowestPositionIndex(list)
+	head := list[headIndex]
+	r.entries[sessionID] = append(list[:headIndex], list[headIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
-		delete(r.nextPosition, sessionID)
 	}
-	out := *head
-	return &out, nil
+	out := cloneQueuedMessage(head)
+	r.captureReservationLocked(out)
+	return out, nil
 }
 
 // ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
@@ -830,27 +896,34 @@ func (r *memoryRepository) reserveHeadLocked(
 	if len(list) == 0 {
 		return nil
 	}
-	head := list[0]
-	out := *head
+	headIndex := lowestPositionIndex(list)
+	head := list[headIndex]
+	out := cloneQueuedMessage(head)
+	r.captureReservationLocked(out)
 	if head.IsDurableLifecycle() || retainOrdinary {
 		reservationIncarnation := lifecycleReservationIncarnation(head.Metadata)
-		if identity != nil && reservationIncarnation != "" &&
-			reservationIncarnation != identity.SessionIncarnationID {
-			r.removeEntryLocked(sessionID, 0)
+		if identity != nil && reservationIncarnation != "" && reservationIncarnation != identity.SessionIncarnationID {
+			r.removeEntryLocked(sessionID, headIndex)
 			return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
 		}
-		out.Metadata = clearReservedMetadata(head.Metadata)
+		// Mirror the SQLite reservation: the stored row is flagged in flight so
+		// queue status stops listing it, while the returned copy keeps the
+		// unmarked metadata a requeue would write back.
+		out.Metadata = clearReservedMetadata(out.Metadata)
 		out.reservedLifecycleDelivery = head.IsDurableLifecycle()
 		if identity != nil {
 			out.reservationIdentity = *identity
 			head.Metadata = markReservedMetadataForIncarnation(out.Metadata, identity.SessionIncarnationID)
+		} else if head.IsDurableLifecycle() {
+			out.lifecycleReservationID = uuid.NewString()
+			head.Metadata = markReservedMetadata(out.Metadata, out.lifecycleReservationID)
 		} else {
 			head.Metadata = markReservedMetadata(out.Metadata)
 		}
-		return &out
+		return out
 	}
-	r.removeEntryLocked(sessionID, 0)
-	return &out
+	r.removeEntryLocked(sessionID, headIndex)
+	return out
 }
 
 func (r *memoryRepository) removeEntryLocked(sessionID string, index int) {
@@ -858,7 +931,6 @@ func (r *memoryRepository) removeEntryLocked(sessionID string, index int) {
 	r.entries[sessionID] = append(list[:index], list[index+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
-		delete(r.nextPosition, sessionID)
 	}
 }
 
@@ -997,20 +1069,39 @@ func (r *memoryRepository) ReserveHeadForDeliveryIfAutoRunForSession(
 	return r.reserveHeadLocked(identity.SessionID, &identity, true), true, nil
 }
 
-// AcknowledgeByID removes a reserved durable entry after executor acceptance.
+// AcknowledgeReserved removes only the exact lifecycle delivery attempt.
+func (r *memoryRepository) AcknowledgeReserved(_ context.Context, reserved *QueuedMessage) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := r.entries[reserved.SessionID]
+	for i, msg := range list {
+		if msg.ID != reserved.ID {
+			continue
+		}
+		storedReservationID, _ := msg.Metadata[metadataLifecycleReservationID].(string)
+		if reserved.lifecycleReservationID == "" || storedReservationID != reserved.lifecycleReservationID {
+			return ErrLifecycleReservationChanged
+		}
+		r.entries[reserved.SessionID] = append(list[:i], list[i+1:]...)
+		if len(r.entries[reserved.SessionID]) == 0 {
+			delete(r.entries, reserved.SessionID)
+		}
+		return nil
+	}
+	return ErrEntryNotFound
+}
+
 func (r *memoryRepository) AcknowledgeByID(_ context.Context, sessionID, entryID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	list := r.entries[sessionID]
-	for i, msg := range list {
+	for index, msg := range r.entries[sessionID] {
 		if msg.ID != entryID {
 			continue
 		}
-		r.entries[sessionID] = append(list[:i], list[i+1:]...)
-		if len(r.entries[sessionID]) == 0 {
-			delete(r.entries, sessionID)
-			delete(r.nextPosition, sessionID)
+		if !msg.IsReservedInFlight() {
+			return ErrEntryNotFound
 		}
+		r.removeEntryLocked(sessionID, index)
 		return nil
 	}
 	return ErrEntryNotFound
@@ -1127,10 +1218,10 @@ func (r *memoryRepository) takeByIDLocked(sessionID, entryID string) *QueuedMess
 		r.entries[sessionID] = append(list[:i], list[i+1:]...)
 		if len(r.entries[sessionID]) == 0 {
 			delete(r.entries, sessionID)
-			delete(r.nextPosition, sessionID)
 		}
-		out := *message
-		return &out
+		out := cloneQueuedMessage(message)
+		r.captureReservationLocked(out)
+		return out
 	}
 	return nil
 }
@@ -1182,6 +1273,7 @@ func (r *memoryRepository) claimSendNowLocked(
 	if err := validateSendNowSnapshot(selected, expected); err != nil {
 		return nil, ErrSendNowClaimChanged
 	}
+	sessionGeneration := r.sessionGeneration[sessionID]
 
 	sources := cloneSendNowSources(selected)
 	bindSendNowLifecycleReservations(sources, identity)
@@ -1195,7 +1287,6 @@ func (r *memoryRepository) claimSendNowLocked(
 			generations[source.TaskID] = r.generation[source.TaskID]
 		}
 	}
-
 	remaining := make([]*QueuedMessage, 0, len(list))
 	for _, entry := range list {
 		if _, ok := requested[entry.ID]; !ok {
@@ -1204,7 +1295,7 @@ func (r *memoryRepository) claimSendNowLocked(
 		}
 		if entry.IsDurableLifecycle() {
 			entry.Metadata = markReservedMetadataForIncarnation(
-				entry.Metadata,
+				markReservedMetadata(entry.Metadata, uuid.NewString()),
 				identity.SessionIncarnationID,
 			)
 			remaining = append(remaining, entry)
@@ -1212,18 +1303,28 @@ func (r *memoryRepository) claimSendNowLocked(
 	}
 	if len(remaining) == 0 {
 		delete(r.entries, sessionID)
-		delete(r.nextPosition, sessionID)
 	} else {
 		r.entries[sessionID] = remaining
+	}
+	claimIDs := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
+		if source.IsDurableLifecycle() {
+			claimIDs[source.ID] = struct{}{}
+		}
+	}
+	if len(claimIDs) > 0 {
+		r.sendNowClaims[sessionID] = claimIDs
 	}
 	r.setAutoRunLocked(identityPointer(identity), sessionID, true)
 	r.sendNowGeneration[sessionID]++
 	return &SendNowClaim{
+		ClaimID:             uuid.NewString(),
 		Identity:            identity,
 		OperationGeneration: r.sendNowGeneration[sessionID],
 		Sources:             sources,
 		Dispatch:            *envelope,
 		SourceGenerations:   generations,
+		SessionGeneration:   sessionGeneration,
 	}, nil
 }
 
@@ -1266,6 +1367,16 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 	if err != nil {
 		return err
 	}
+	generations := make(map[string]int64)
+	for _, source := range claim.Sources {
+		if source.TaskID != "" {
+			generations[source.TaskID] = r.generation[source.TaskID]
+		}
+	}
+	sessionChanged := claim.SessionGeneration != r.sessionGeneration[sessionID]
+	if sessionChanged && !sendNowClaimSourcesAllInvalidated(claim, generations) {
+		return ErrSendNowClaimChanged
+	}
 	list := r.entries[sessionID]
 	existing := make(map[string]*QueuedMessage, len(list))
 	for _, entry := range list {
@@ -1294,6 +1405,7 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Position < list[j].Position })
 	r.entries[sessionID] = list
+	delete(r.sendNowClaims, sessionID)
 	return nil
 }
 
@@ -1339,12 +1451,25 @@ func (r *memoryRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 	if err != nil {
 		return err
 	}
+	generations := make(map[string]int64)
+	for _, source := range claim.Sources {
+		if source.TaskID != "" {
+			generations[source.TaskID] = r.generation[source.TaskID]
+		}
+	}
+	if claim.SessionGeneration != r.sessionGeneration[sessionID] &&
+		!sendNowClaimSourcesAllInvalidated(claim, generations) {
+		return ErrSendNowClaimChanged
+	}
 	requested := make(map[string]struct{})
 	for _, source := range claim.Sources {
 		if source.SessionID != sessionID {
 			return ErrSendNowClaimChanged
 		}
-		if !source.IsDurableLifecycle() {
+		if source.TaskID != "" {
+			generations[source.TaskID] = r.generation[source.TaskID]
+		}
+		if !source.IsDurableLifecycle() || sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
 			continue
 		}
 		requested[source.ID] = struct{}{}
@@ -1366,10 +1491,10 @@ func (r *memoryRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 	}
 	if len(remaining) == 0 {
 		delete(r.entries, sessionID)
-		delete(r.nextPosition, sessionID)
 	} else {
 		r.entries[sessionID] = remaining
 	}
+	delete(r.sendNowClaims, sessionID)
 	return nil
 }
 
@@ -1413,10 +1538,25 @@ func sameQueuedMessageContent(left, right *QueuedMessage) bool {
 	}
 	leftCopy := cloneQueuedMessage(left)
 	rightCopy := cloneQueuedMessage(right)
+	// PostgreSQL stores TIMESTAMP values at microsecond precision. Normalize
+	// both snapshots before comparing so a caller's nanosecond timestamp does
+	// not look like a queue mutation after a round trip through the database.
+	leftCopy.QueuedAt = leftCopy.QueuedAt.Truncate(time.Microsecond)
+	rightCopy.QueuedAt = rightCopy.QueuedAt.Truncate(time.Microsecond)
 	leftCopy.Metadata = clearReservedMetadata(leftCopy.Metadata)
 	rightCopy.Metadata = clearReservedMetadata(rightCopy.Metadata)
 	leftCopy.reservedLifecycleDelivery = false
 	rightCopy.reservedLifecycleDelivery = false
+	leftCopy.dispatchAttemptID = ""
+	rightCopy.dispatchAttemptID = ""
+	leftCopy.lifecycleReservationID = ""
+	rightCopy.lifecycleReservationID = ""
+	leftCopy.reservationSessionGeneration = 0
+	rightCopy.reservationSessionGeneration = 0
+	leftCopy.reservationLifecycleGeneration = 0
+	rightCopy.reservationLifecycleGeneration = 0
+	leftCopy.reservationGenerationsCaptured = false
+	rightCopy.reservationGenerationsCaptured = false
 	return reflect.DeepEqual(leftCopy, rightCopy)
 }
 
@@ -1466,7 +1606,7 @@ func (r *memoryRepository) updateContentAndMetadataLocked(sessionID, entryID, co
 			return ErrEntryNotFound
 		}
 		m.Content = content
-		m.Attachments = attachments
+		m.Attachments = append([]MessageAttachment(nil), attachments...)
 		m.Metadata = applyMetadataUpdates(m.Metadata, metadataUpdates)
 		return nil
 	}
@@ -1544,8 +1684,7 @@ func (r *memoryRepository) mergeIntoAboveLocked(sessionID, sourceID, queuedBy st
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.nextPosition, sessionID)
 	}
-	merged := *target
-	return &merged, nil
+	return cloneQueuedMessage(target), nil
 }
 
 // AutoMergeIntoAbove folds one exact source into its immediate compatible
@@ -1812,7 +1951,6 @@ func (r *memoryRepository) deleteByIDLocked(sessionID, entryID string) error {
 		r.entries[sessionID] = append(list[:i], list[i+1:]...)
 		if len(r.entries[sessionID]) == 0 {
 			delete(r.entries, sessionID)
-			delete(r.nextPosition, sessionID)
 		}
 		return nil
 	}
@@ -1870,10 +2008,23 @@ func (r *memoryRepository) deleteAllBySessionLocked(sessionID string) (int, erro
 	}
 	if len(kept) == 0 {
 		delete(r.entries, sessionID)
-		delete(r.nextPosition, sessionID)
 	} else {
 		r.entries[sessionID] = kept
 	}
+	r.sessionGeneration[sessionID]++
+	return removed, nil
+}
+
+// PurgeSession removes all queue rows for a deleted session, including
+// reserved lifecycle deliveries, and clears its pending move and policy.
+func (r *memoryRepository) PurgeSession(_ context.Context, sessionID string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	removed := len(r.entries[sessionID])
+	delete(r.entries, sessionID)
+	delete(r.pendingMoves, sessionID)
+	delete(r.autoRun, sessionID)
+	r.sessionGeneration[sessionID]++
 	return removed, nil
 }
 
@@ -1919,8 +2070,10 @@ func (r *memoryRepository) transferSessionLocked(
 	if oldSessionID == newSessionID {
 		return nil
 	}
+	r.sessionGeneration[oldSessionID]++
+	r.sessionGeneration[newSessionID]++
 	for _, entry := range r.entries[oldSessionID] {
-		if entry.IsReservedInFlight() {
+		if entry.IsReservedInFlight() && !r.sendNowClaimContainsLocked(oldSessionID, entry.ID) {
 			return ErrQueueChanged
 		}
 	}
@@ -1946,18 +2099,20 @@ func (r *memoryRepository) transferSessionLocked(
 			m.Position += destMax
 		}
 		r.entries[newSessionID] = append(r.entries[newSessionID], list...)
-		// Recompute nextPosition for the destination so future inserts keep
-		// monotonic ordering.
-		var maxPos int64
+		// Keep the destination high-water mark even when its physical queue
+		// was drained before this transfer.
 		for _, m := range r.entries[newSessionID] {
-			if m.Position > maxPos {
-				maxPos = m.Position
+			if m.Position > r.nextPosition[newSessionID] {
+				r.nextPosition[newSessionID] = m.Position
 			}
 		}
-		r.nextPosition[newSessionID] = maxPos
 		delete(r.entries, oldSessionID)
-		delete(r.nextPosition, oldSessionID)
 	}
+	if claimIDs := r.sendNowClaims[oldSessionID]; len(claimIDs) > 0 {
+		r.sendNowClaims[newSessionID] = claimIDs
+		delete(r.sendNowClaims, oldSessionID)
+	}
+	delete(r.nextPosition, oldSessionID)
 	if move, ok := r.pendingMoves[oldSessionID]; ok {
 		if destination, exists := r.identities[newSessionID]; exists {
 			move.SessionIncarnationID = destination.SessionIncarnationID
@@ -1973,10 +2128,16 @@ func (r *memoryRepository) transferSessionLocked(
 	return nil
 }
 
+func (r *memoryRepository) sendNowClaimContainsLocked(sessionID, entryID string) bool {
+	_, ok := r.sendNowClaims[sessionID][entryID]
+	return ok
+}
+
 // ReplaceSession replaces a session's queue with the supplied snapshot.
 func (r *memoryRepository) ReplaceSession(_ context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.sessionGeneration[sessionID]++
 	return r.replaceSessionLocked(sessionID, entries, pendingMove)
 }
 
@@ -1995,20 +2156,24 @@ func (r *memoryRepository) ReplaceSessionForIdentity(_ context.Context, identity
 func (r *memoryRepository) replaceSessionLocked(sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
 	if len(entries) == 0 {
 		delete(r.entries, sessionID)
-		delete(r.nextPosition, sessionID)
 	} else {
 		replaced := make([]*QueuedMessage, 0, len(entries))
 		var maxPos int64
 		for _, entry := range entries {
-			clone := entry
+			clone := cloneQueuedMessage(&entry)
 			clone.SessionID = sessionID
 			if clone.Position > maxPos {
 				maxPos = clone.Position
 			}
-			replaced = append(replaced, &clone)
+			replaced = append(replaced, clone)
 		}
+		sort.Slice(replaced, func(i, j int) bool {
+			return replaced[i].Position < replaced[j].Position
+		})
 		r.entries[sessionID] = replaced
-		r.nextPosition[sessionID] = maxPos
+		if maxPos > r.nextPosition[sessionID] {
+			r.nextPosition[sessionID] = maxPos
+		}
 	}
 	if pendingMove == nil {
 		delete(r.pendingMoves, sessionID)

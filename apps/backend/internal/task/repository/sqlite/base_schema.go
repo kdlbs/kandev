@@ -70,6 +70,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			state TEXT NOT NULL DEFAULT 'selecting',
 			continuation_json TEXT NOT NULL DEFAULT '',
 			policy_state_json TEXT NOT NULL DEFAULT '',
+			legacy_active_backfill_applied INTEGER NOT NULL DEFAULT 1,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
@@ -255,11 +256,13 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			show_in_command_panel INTEGER DEFAULT 1,
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
-			profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
-			profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
-			stage_type TEXT NOT NULL DEFAULT 'custom',
-			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
+		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		stage_type TEXT NOT NULL DEFAULT 'custom',
+		session_target TEXT,
+		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
+			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`); err != nil {
@@ -273,7 +276,8 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 		)`); err != nil {
 		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
 	}

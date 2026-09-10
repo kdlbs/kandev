@@ -41,6 +41,9 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Port collision and backend ownership safety](requirements/port-collision-safety.md)
 - [SSH Executor](requirements/ssh-executor.md)
 - [Remote SSH task-directory reclamation](requirements/remote-task-directory-reclamation.md)
+- [Kubernetes worker presets](requirements/kubernetes-worker-presets.md)
+- [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
+- [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 
 ### System design
 
@@ -56,11 +59,19 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Executor-Profile Environment Precedence System Design Part 5](system-design/executor-profile-env-precedence-05.md)
 - [SSH Executor](system-design/ssh-executor.md)
 - [Remote SSH task-directory reclamation](system-design/remote-task-directory-reclamation.md)
+- [Kubernetes worker presets](system-design/kubernetes-worker-presets.md)
+- [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
+- [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
 
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
 canonical requirement and system-design documents above.
+
+The [Kubernetes executor foundation](../kubernetes-executor/spec.md) remains
+the current lifecycle contract. The three Kubernetes pairs own additive
+presets, launch diagnostics, and retained-compute visibility. They do not replace
+the foundation's resource ownership, recovery, or cleanup rules.
 
 ## Related systems
 

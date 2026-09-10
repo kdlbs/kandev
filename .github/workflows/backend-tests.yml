@@ -84,6 +84,9 @@ jobs:
         env:
           PATTERNS: |
             apps/backend/**
+            apps/web/lib/settings-discovery/contract.generated.json
+            apps/web/lib/settings-discovery/profile-contract.generated.json
+            scripts/settings-contract-ci.test.mjs
             # check-make-shells also lints the root Makefile's $(shell ...)
             # probes, so a change there has to be able to trip it.
             Makefile
@@ -177,6 +180,10 @@ jobs:
 
       - name: Build
         run: go build -v ./cmd/kandev
+
+      - name: Verify settings catalog contract
+        working-directory: ${{ github.workspace }}
+        run: node --test scripts/settings-contract-ci.test.mjs
 
       - name: Check required-store SQL portability
         run: go run ./cmd/sqlguard ./internal
