@@ -2916,6 +2916,13 @@ func unmarshalSessionSnapshots(
 	return unmarshalSessionJSON(repositorySnapshotJSON, &session.RepositorySnapshot, "repository snapshot")
 }
 
+// queueSessionLockTablePresent reports whether queue mutations can participate
+// in this task transaction. Some repository unit tests intentionally omit the
+// message queue schema; production databases always include it.
+func (r *Repository) queueSessionLockTablePresent(ctx context.Context) (bool, error) {
+	return db.TableExistsContext(ctx, r.db, "queue_session_locks")
+}
+
 // DeleteTaskSession deletes the exact session incarnation and its pending queue
 // rows. The session identity fences delayed deletion from removing a replacement
 // that reuses the same textual session ID.
@@ -2939,7 +2946,6 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-
 	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
 		return nil, err
 	}
@@ -2950,6 +2956,7 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	r.notifyTaskSessionQueuePurged(ctx, session.TaskID, session.ID)
 	return deletedAttachments, nil
 }
 

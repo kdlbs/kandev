@@ -692,7 +692,7 @@ func TestSQLiteRepository_DeletePreservesReservedLifecycleEntry(t *testing.T) {
 	if removed != 0 {
 		t.Fatalf("clear removed %d reserved entries, want 0", removed)
 	}
-	if err := repo.AcknowledgeByID(ctx, "s1", msg.ID); err != nil {
+	if err := repo.AcknowledgeReserved(ctx, reserved); err != nil {
 		t.Fatalf("acknowledge reserved entry after cancellation attempts: %v", err)
 	}
 }
@@ -715,7 +715,7 @@ func TestSQLiteRepository_CancellationReservationOrdering(t *testing.T) {
 	t.Run("reservation wins before clear", func(t *testing.T) {
 		repo := newTestSQLiteRepo(t)
 		ctx := context.Background()
-		msg := insertDurableLifecycleEntry(t, repo, "reserve-first")
+		_ = insertDurableLifecycleEntry(t, repo, "reserve-first")
 
 		reserved, err := repo.ReserveHead(ctx, "reserve-first")
 		if err != nil || reserved == nil {
@@ -725,10 +725,55 @@ func TestSQLiteRepository_CancellationReservationOrdering(t *testing.T) {
 		if err != nil || removed != 0 {
 			t.Fatalf("clear after reserve: removed=%d err=%v", removed, err)
 		}
-		if err := repo.AcknowledgeByID(ctx, "reserve-first", msg.ID); err != nil {
+		if err := repo.AcknowledgeReserved(ctx, reserved); err != nil {
 			t.Fatalf("acknowledge: %v", err)
 		}
 	})
+}
+func TestSQLiteRepository_PurgeSessionRemovesReservedLifecycleAndPendingMove(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqlRepo := repo.(*sqliteRepository)
+	ctx := context.Background()
+	_ = insertDurableLifecycleEntry(t, repo, "purge-session")
+	if err := repo.SetPendingMove(ctx, "purge-session", &PendingMove{TaskID: "t1"}); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	if err := repo.SetAutoRun(ctx, "purge-session", false); err != nil {
+		t.Fatalf("set auto-run: %v", err)
+	}
+	if reserved, err := repo.ReserveHead(ctx, "purge-session"); err != nil || reserved == nil {
+		t.Fatalf("reserve lifecycle entry: msg=%+v err=%v", reserved, err)
+	}
+
+	removed, err := repo.PurgeSession(ctx, "purge-session")
+	if err != nil {
+		t.Fatalf("purge session: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("purged rows = %d, want 1", removed)
+	}
+	entries, err := repo.ListBySession(ctx, "purge-session")
+	if err != nil {
+		t.Fatalf("list purged session: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("purged session retained entries: %+v", entries)
+	}
+	move, err := repo.GetPendingMove(ctx, "purge-session")
+	if err != nil {
+		t.Fatalf("get purged pending move: %v", err)
+	}
+	if move != nil {
+		t.Fatalf("purged session retained pending move: %+v", move)
+	}
+	var autoRun int
+	if err := sqlRepo.db.GetContext(ctx, &autoRun,
+		`SELECT auto_run FROM queue_session_state WHERE session_id = ?`, "purge-session"); err != nil {
+		t.Fatalf("read purged session policy: %v", err)
+	}
+	if autoRun != 1 {
+		t.Fatalf("purged session retained auto-run=%d, want 1", autoRun)
+	}
 }
 
 func insertDurableLifecycleEntry(t *testing.T, repo Repository, sessionID string) *QueuedMessage {

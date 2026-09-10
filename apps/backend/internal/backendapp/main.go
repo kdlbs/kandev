@@ -943,6 +943,7 @@ func startGatewayAndServe(
 		// be resolved while authentication is enforced.
 		services.Auth,
 		cfg.ResolvedHomeDir(),
+		func(fn func() error) { addCleanup(fn) },
 		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {

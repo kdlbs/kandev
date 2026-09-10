@@ -74,6 +74,10 @@ type Repository interface {
 	// task. Lifecycle insertion verifies this generation atomically.
 	LifecycleGeneration(ctx context.Context, taskID string) (int64, error)
 
+	// SessionGeneration returns the current destructive-mutation generation for
+	// a session. Send Now restores use it to reject stale FIFO reservations.
+	SessionGeneration(ctx context.Context, sessionID string) (int64, error)
+
 	// PurgeTask is backend-only cleanup. It removes all task rows, including
 	// reserved server-owned lifecycle rows, and advances its generation.
 	PurgeTask(ctx context.Context, taskID string) (int, error)
@@ -102,7 +106,8 @@ type Repository interface {
 
 	// ReserveHead returns the lowest-position entry. Ordinary entries are
 	// atomically deleted, matching TakeHead. Durable lifecycle entries remain
-	// stored until AcknowledgeByID is called after executor acceptance.
+	// stored until AcknowledgeReserved receives the exact reservation returned
+	// by this call after executor acceptance.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
 	// GetAutoRun returns the durable per-session automatic-drain policy. Missing
@@ -138,6 +143,9 @@ type Repository interface {
 		identity QueueSessionIdentity,
 	) (*QueuedMessage, bool, error)
 
+	// AcknowledgeReserved removes only the exact lifecycle reservation carried
+	// by msg. A stale delivery attempt cannot remove a newer retry.
+	AcknowledgeReserved(ctx context.Context, msg *QueuedMessage) error
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
 	// entry regardless of its server-owned queued_by identity.
 	AcknowledgeByID(ctx context.Context, sessionID, entryID string) error
@@ -248,6 +256,11 @@ type Repository interface {
 	// persisted reservation owner matches identity. It deliberately does not
 	// require identity to remain current: stale workers use it after replacement.
 	DiscardLifecycleReservation(ctx context.Context, identity QueueSessionIdentity, entryID string) error
+
+	// PurgeSession removes every queue row for a deleted session, including
+	// durable lifecycle rows reserved in flight, and its pending workflow move.
+	// Returns the exact number of queue rows removed.
+	PurgeSession(ctx context.Context, sessionID string) (int, error)
 
 	// TransferSession moves all entries (and any pending move) from oldSessionID
 	// to newSessionID. Used on workflow session switches.

@@ -101,10 +101,11 @@ func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hu
 }
 
 // dispatchContext returns the hub's lifetime context carrying this client's
-// identity, so dispatched RPC handlers (workspace.list, task CRUD, …) and
-// subscription checks apply the same per-user scoping as HTTP requests.
+// identity and server-assigned connection ID. The latter is used by
+// connection-bound queue edit leases and never comes from the request payload.
 func (c *Client) dispatchContext() context.Context {
 	ctx := c.hub.DispatchContext()
+	ctx = ws.WithConnectionID(ctx, c.ID)
 	if c.identity.UserID != "" {
 		ctx = authn.WithIdentity(ctx, c.identity)
 	}

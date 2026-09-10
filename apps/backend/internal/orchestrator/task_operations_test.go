@@ -2187,6 +2187,25 @@ func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 	}
 }
 
+func TestDrainQueuedMessageIfAutoRunDoesNotResumePausedQueue(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	_, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "paused queued message", "", messagequeue.QueuedByUser, false, nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, "session1", false))
+
+	drained, err := svc.DrainQueuedMessageIfAutoRun(ctx, "session1")
+	require.NoError(t, err)
+	require.False(t, drained)
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	require.False(t, status.AutoRun)
+	require.Len(t, status.Entries, 1)
+}
+
 func queueAndInterruptForPeerMessage(
 	svc *Service,
 	ctx context.Context,

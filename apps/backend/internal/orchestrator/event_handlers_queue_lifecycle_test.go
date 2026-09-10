@@ -125,11 +125,17 @@ func TestExecuteQueuedMessage_LifecycleReselectsReplacementSession(t *testing.T)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-	queued := &messagequeue.QueuedMessage{
-		ID: "lifecycle-reselect", SessionID: "s1", TaskID: "t1", Content: "merged lifecycle prompt",
-		Metadata: map[string]interface{}{
-			"origin": githubPRAutomationOrigin, messagequeue.MetadataCoalesceKey: "github-pr:repo:1:merged",
-		},
+	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s1", "t1", "merged lifecycle prompt", "", messagequeue.QueuedByWorkflow,
+		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin},
+		"github-pr:repo:1:merged", true,
+	)
+	if err != nil || !accepted {
+		t.Fatalf("queue lifecycle prompt: accepted=%t err=%v", accepted, err)
+	}
+	queued, ok := svc.messageQueue.ReserveQueued(ctx, "s1")
+	if !ok {
+		t.Fatal("reserve lifecycle prompt")
 	}
 
 	// The event was accepted for s1, then s2 becomes the current primary at
@@ -145,6 +151,9 @@ func TestExecuteQueuedMessage_LifecycleReselectsReplacementSession(t *testing.T)
 	svc.markQueuedDispatchInFlight("s1", queued.ID)
 	svc.executeQueuedMessage("s1", queued)
 
+	if stale, ok := svc.messageQueue.ReserveQueued(ctx, "s1"); ok {
+		t.Fatalf("old lifecycle reservation remained after reselection: %#v", stale)
+	}
 	status := svc.messageQueue.GetStatus(ctx, "s2")
 	if status.Count != 1 {
 		t.Fatalf("replacement lifecycle retries = %d, want 1", status.Count)
