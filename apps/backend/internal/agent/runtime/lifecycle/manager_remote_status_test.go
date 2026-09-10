@@ -101,6 +101,21 @@ func (w *synchronizedRunningWriter) UpsertExecutorRunning(
 	return nil
 }
 
+func (w *synchronizedRunningWriter) UpdateExecutorRunningStatusIfCurrent(
+	_ context.Context, sessionID, executionID, status string,
+) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running == nil {
+		return nil
+	}
+	if w.running.SessionID != sessionID || w.running.AgentExecutionID != executionID {
+		return models.ErrExecutionRotated
+	}
+	w.running.Status = status
+	return nil
+}
+
 func (w *synchronizedRunningWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
 	w.mu.Lock()
 	w.running = nil
@@ -122,6 +137,18 @@ func (w *synchronizedRunningWriter) snapshot() *models.ExecutorRunning {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.running
+}
+
+func TestSynchronizedRunningWriterRejectsRotatedExecutionStatusUpdate(t *testing.T) {
+	writer := &synchronizedRunningWriter{running: &models.ExecutorRunning{
+		SessionID: "session-1", AgentExecutionID: "exec-current",
+	}}
+
+	err := writer.UpdateExecutorRunningStatusIfCurrent(
+		context.Background(), "session-1", "exec-stale", models.ExecutorRunningStatusStopped,
+	)
+	require.ErrorIs(t, err, models.ErrExecutionRotated)
+	require.Empty(t, writer.snapshot().Status)
 }
 
 func (e *statusProviderExecutor) GetRemoteStatus(_ context.Context, instance *ExecutorInstance) (*RemoteStatus, error) {
@@ -549,7 +576,16 @@ func TestStopAgentSerializesWithActiveKubernetesRefresh(t *testing.T) {
 	<-refreshDone
 	require.NoError(t, <-stopDone)
 
-	require.Nil(t, writer.snapshot(), "terminal stop must remain the final persistence owner")
+	// Terminal stop must remain the final persistence owner: whatever the
+	// committed refresh published, the row must not still look live once Stop
+	// returns. The lifecycle manager now always re-persists a terminal status
+	// after tearing down the runtime (so privileged MCP attestation reads never
+	// see a stale "running" row), so the final snapshot may be nil (cleared by
+	// the runtime's own stop) or an explicit terminal row -- never "running".
+	if final := writer.snapshot(); final != nil {
+		require.Equal(t, models.ExecutorRunningStatusStopped, final.Status,
+			"a surviving row must be terminal, not a live-looking attestation from the raced refresh")
+	}
 	_, exists := mgr.executionStore.Get(execution.ID)
 	require.False(t, exists)
 	store.mu.RLock()

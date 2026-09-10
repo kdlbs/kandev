@@ -249,6 +249,34 @@ func TestRepairExecutorRunningDeadIfCurrentRejectsRotatedExecution(t *testing.T)
 	}
 }
 
+func TestUpdateExecutorRunningStatusIfCurrentRejectsRotatedExecution(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedExecutorRunningCleanupTask(t, repo, "task-status-cas")
+	seedExecutorRunningCleanupSession(t, repo, "task-status-cas", "session-status-cas", models.TaskSessionStateRunning, "exec-successor")
+
+	err := repo.UpdateExecutorRunningStatusIfCurrent(
+		ctx, "session-status-cas", "exec-stale", models.ExecutorRunningStatusStopped,
+	)
+	if !errors.Is(err, models.ErrExecutionRotated) {
+		t.Fatalf("stale status update error = %v, want ErrExecutionRotated", err)
+	}
+	running, err := repo.GetExecutorRunningBySessionID(ctx, "session-status-cas")
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID: %v", err)
+	}
+	if running.AgentExecutionID != "exec-successor" || running.Status != models.ExecutorRunningStatusStarting {
+		t.Fatalf("stale status update changed successor row: %+v", running)
+	}
+
+	err = repo.UpdateExecutorRunningStatusIfCurrent(
+		ctx, "session-status-cas", "exec-successor", models.ExecutorRunningStatusStopped,
+	)
+	if err != nil {
+		t.Fatalf("current status update: %v", err)
+	}
+}
+
 // TestExecutorRunningLocalPIDMigrationOnLegacyDB is the same-database replay test
 // mandated by ADR 0027 for a schema change: it proves the `local_pid` ADD COLUMN
 // migration upgrades a DB that PREDATES the column, adding it with the default

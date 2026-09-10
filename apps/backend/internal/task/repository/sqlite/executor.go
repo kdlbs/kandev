@@ -606,6 +606,40 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 	return nil
 }
 
+// UpdateExecutorRunningStatusIfCurrent narrowly updates status only when the
+// caller still owns the execution row. A terminal callback from a replaced
+// execution must never mark its successor stopped.
+func (r *Repository) UpdateExecutorRunningStatusIfCurrent(ctx context.Context, sessionID, expectedExecID, status string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	if expectedExecID == "" {
+		return fmt.Errorf("expected execution_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executors_running
+		   SET status = ?, updated_at = ?
+		 WHERE session_id = ?
+		   AND agent_execution_id = ?
+	`), status, now, sessionID, expectedExecID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		return nil
+	}
+	exists, err := r.HasExecutorRunningRow(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return models.ErrExecutionRotated
+}
+
 // UpdateExecutorRunningWorktreeBranch narrowly updates the branch snapshot for
 // a live execution. The execution ID is part of the CAS so a rotated execution
 // cannot overwrite the successor's branch snapshot.

@@ -45,6 +45,10 @@ type ExecutorRunningWriter interface {
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 }
 
+type executorRunningStatusCASWriter interface {
+	UpdateExecutorRunningStatusIfCurrent(context.Context, string, string, string) error
+}
+
 // SetExecutorRunningWriter wires the writer used to persist row state in
 // lockstep with executionStore.Add / Remove. Must be called during DI before
 // any Launch / createExecution can run, otherwise the in-memory store will
@@ -247,6 +251,19 @@ func executorRunningStatusFromExecution(execution *AgentExecution) string {
 // fails closed because task cleanup relies on this row for race inventory.
 func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentExecution) {
 	_ = m.persistExecutorRunningResult(ctx, execution)
+}
+
+func (m *Manager) persistStoppedExecutorRunning(ctx context.Context, execution *AgentExecution) error {
+	if m.runningWriter == nil {
+		return nil
+	}
+	statusWriter, ok := m.runningWriter.(executorRunningStatusCASWriter)
+	if !ok {
+		return errors.New("executor-running writer does not support execution-scoped terminal status persistence")
+	}
+	return statusWriter.UpdateExecutorRunningStatusIfCurrent(
+		ctx, execution.SessionID, execution.ID, models.ExecutorRunningStatusStopped,
+	)
 }
 
 func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
