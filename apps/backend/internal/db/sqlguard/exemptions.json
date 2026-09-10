@@ -102,6 +102,7 @@
     {"file": "internal/task/repository/sqlite/worktree_ownership_migration.go", "symbol": "columnExists", "rule": "raw-placeholder", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "sqlite-catalog", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "raw-placeholder", "reason": "SQLite-only worktree ownership migration"},
+    {"file": "internal/workflow/repository/phase2_sqlite.go", "symbol": "backfillParticipantsCreatedAtFromRowid", "rule": "sqlite-date-function", "reason": "Guarded by dialect.IsPostgres and returns before this statement on every non-SQLite driver"},
     {"file": "internal/workflow/repository/sqlite.go", "symbol": "DeleteStep", "rule": "sqlite-catalog", "reason": "The workflow SQLite repository owns this catalog probe"},
     {"file": "internal/workflowsync/store.go", "symbol": "createTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
     {"file": "internal/agent/settings/store/sqlite.go", "symbol": "UpdateAgentProfileEnabled", "rule": "boolean-integer", "reason": "The agent settings schema stores user_modified as an INTEGER flag"},

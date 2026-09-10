@@ -253,6 +253,7 @@ type UpdateRepositoryRequest struct {
 	ProviderScope          *string `json:"provider_scope,omitempty"`
 	ProviderOwner          *string `json:"provider_owner,omitempty"`
 	ProviderName           *string `json:"provider_name,omitempty"`
+	RemoteURL              *string `json:"remote_url,omitempty"`
 	DefaultBranch          *string `json:"default_branch,omitempty"`
 	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix,omitempty"`
 	WorktreeBranchTemplate *string `json:"worktree_branch_template,omitempty"`

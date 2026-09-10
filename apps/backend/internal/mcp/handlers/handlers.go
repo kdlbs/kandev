@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/settingscatalog"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -272,12 +273,17 @@ type Handlers struct {
 	promptResolver       PromptReferenceResolver
 	promptReader         PromptReader
 	userSettingsProvider UserSettingsProvider
+	settingsRegistry     *settingscatalog.Registry
+	settingsOperations   SettingsOperations
 	logger               *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
-	workflowSvc       *workflowsvc.Service
-	agentSettingsCtrl *agentsettingscontroller.Controller
-	mcpConfigSvc      *mcpconfig.Service
+	workflowSvc         *workflowsvc.Service
+	agentSettingsCtrl   *agentsettingscontroller.Controller
+	mcpConfigSvc        *mcpconfig.Service
+	settingsBroadcaster interface {
+		Broadcast(*ws.Message)
+	}
 
 	// Cross-task handoff service (optional, set via SetHandoffService).
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
@@ -419,6 +425,12 @@ func (h *Handlers) SetConfigDeps(
 	h.mcpConfigSvc = mcpConfigSvc
 }
 
+// SetSettingsBroadcaster wires the notification path used by settings writes
+// that originate in legacy MCP configuration tools.
+func (h *Handlers) SetSettingsBroadcaster(broadcaster interface{ Broadcast(*ws.Message) }) {
+	h.settingsBroadcaster = broadcaster
+}
+
 // SetPluginService wires the plugin agent-tool catalog and invocation bridge.
 func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
@@ -515,6 +527,9 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	if h.settingsRegistry != nil {
+		h.registerSettingsHandlers(d)
+	}
 	if h.promptReader != nil {
 		h.registerPromptHandlers(d)
 	}

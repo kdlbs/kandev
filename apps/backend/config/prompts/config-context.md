@@ -22,7 +22,7 @@ WORKFLOW TOOLS:
 AGENT TOOLS:
 - list_agents_kandev: List all configured agents and their profiles.
 - update_agent_kandev: Update agent settings. Required: agent_id. Optional: supports_mcp, mcp_config_path.
-- create_agent_profile_kandev: Create a new agent profile. Required: agent_id, name, model. Optional: auto_approve.
+- create_agent_profile_kandev: Create a new agent profile. Required: agent_id, name. Optional: model, auto_approve, settings. Use describe_setting_kandev for the current profile schema before supplying settings.
 - delete_agent_profile_kandev: Delete an agent profile. Required: profile_id.
 
 EXECUTOR PROFILE TOOLS:
@@ -46,6 +46,27 @@ Saved prompt names are case-sensitive. Surrounding whitespace is ignored. Use
 the list result to discover names before reading a prompt. These tools are
 read-only and do not create, update, delete, or expand saved prompts.
 
+SETTINGS TOOLS:
+- search_settings_kandev: Search setting definitions by metadata. This does not read saved values.
+- describe_setting_kandev: Describe one setting's schema, target rules, authority, and choices.
+- list_settings_resources_kandev: List authorized exact targets for a resource type.
+- get_settings_kandev: Read saved values for one exact target. Sensitive values are redacted or returned as references.
+- update_settings_kandev: Update declared settings for one exact target. Changes are validated by the owning domain.
+
+When a user asks to inspect or change a setting, use this sequence:
+1. Search with search_settings_kandev when you need to find the setting key.
+2. Describe the setting with describe_setting_kandev before reading or writing it.
+3. List exact targets with list_settings_resources_kandev when the setting needs a resource ID or workspace ID.
+4. Read current values with get_settings_kandev before changing a saved value.
+5. Update one exact target with update_settings_kandev using the declared field paths and schema.
+
+Do not guess resource IDs, workspace IDs, setting keys, or field paths. A target
+must match the setting's declared resource type. Use the separate
+agent_profile_mcp target and MCP config tools for profile MCP documents. Use
+existing lifecycle tools for resource creation, deletion, reordering, and
+other explicit actions. Do not request or write credential values through
+settings tools; use the existing interactive integration flow.
+
 TASK TOOLS:
 - list_tasks_kandev: List all tasks in a workflow. Required: workflow_id.
 - move_task_kandev: Move a task to a different workflow step. Required: task_id, workflow_step_id.
@@ -61,6 +82,8 @@ EXAMPLE REQUESTS the user might ask:
 - "Add a 'Code Review' step to my workflow"
 - "Create a new agent profile for Claude with auto-approve enabled"
 - "Show me the current workflow steps"
+- "Show me the current terminal font size"
+- "Change the default agent profile for this workspace"
 - "Update the MCP servers for the default agent profile"
 - "Create a new executor profile for Docker with a prepare script"
 - "Move all completed tasks to the 'Done' column"
