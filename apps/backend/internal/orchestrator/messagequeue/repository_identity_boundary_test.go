@@ -147,6 +147,7 @@ func TestPostgresPlanCommentReservationLeaseBlocksSecondRepository(t *testing.T)
 		TaskID: "task-pg-lease", SessionID: "session-pg-lease", SessionIncarnationID: "incarnation-pg-lease",
 	}
 	seedQueueSessionIdentity(t, repositoryA, identity)
+	seedQueueSessionIdentity(t, repositoryB, identity)
 	require.NoError(t, repositoryA.InsertForSession(ctx, identity, planCommentLeaseMessage(identity), DefaultMaxPerSession))
 
 	first, _, err := repositoryA.ReserveHeadIfAutoRunForSession(ctx, identity)

@@ -15,6 +15,14 @@ import (
 
 const planCommentSelectCols = `id, task_id, plan_id, body, selected_text, anchor_from, anchor_to, version, created_at, updated_at`
 
+func (r *Repository) validatePlanCommentCollectionTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	snapshot, err := r.readPlanCommentSnapshot(ctx, tx, taskID)
+	if err != nil {
+		return err
+	}
+	return plancomments.ValidateCollection(snapshot.Comments)
+}
+
 // ListTaskPlanComments returns the complete pending-comment snapshot for the current plan.
 func (r *Repository) ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error) {
 	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
@@ -91,6 +99,9 @@ func (r *Repository) CreateTaskPlanComment(
 		comment.AnchorFrom, comment.AnchorTo, comment.Version, comment.CreatedAt, comment.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert task plan comment: %w", err)
+	}
+	if err := r.validatePlanCommentCollectionTx(ctx, tx, comment.TaskID); err != nil {
+		return nil, err
 	}
 	return r.incrementAndCommitPlanCommentSnapshot(ctx, tx, comment.TaskID)
 }
@@ -208,6 +219,9 @@ func (r *Repository) UpdateTaskPlanComment(
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return r.commitPlanCommentConflict(ctx, tx, comment.TaskID)
+	}
+	if err := r.validatePlanCommentCollectionTx(ctx, tx, comment.TaskID); err != nil {
+		return nil, err
 	}
 
 	stored, err := getPlanCommentInTx(ctx, tx, r.db, comment.ID)

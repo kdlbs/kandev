@@ -1020,7 +1020,7 @@ func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session
 	}
 }
 
-const maxMessageContentBytes = 1 << 20
+const maxMessageContentBytes = plancomments.MaxRenderedPromptBytes
 
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.
 func validateAddMessageRequest(req wsAddMessageRequest) string {
@@ -1078,6 +1078,10 @@ func queuedMessageAttachments(attachments []v1.MessageAttachment) []messagequeue
 }
 
 func planCommentMessageError(msg *ws.Message, err error) *ws.Message {
+	if errors.Is(err, plancomments.ErrRenderedTooLarge) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
+		return response
+	}
 	var commentsChanged *plancommenttx.CommentsChangedError
 	if errors.As(err, &commentsChanged) {
 		details := map[string]interface{}{}

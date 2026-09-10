@@ -44,6 +44,9 @@ func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessi
 		typed.identities[identity.SessionID] = identity
 		typed.mu.Unlock()
 	case *sqliteRepository:
+		if _, err := typed.db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (id TEXT PRIMARY KEY)`); err != nil {
+			t.Fatalf("create queue session authority: %v", err)
+		}
 		statements := []string{
 			`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, archived_at TIMESTAMP, updated_at TIMESTAMP)`,
 			`ALTER TABLE task_sessions ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`,
@@ -60,10 +63,10 @@ func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessi
 		`), identity.TaskID); err != nil {
 			t.Fatalf("seed queue task authority: %v", err)
 		}
-		if _, err := typed.db.Exec(`
+		if _, err := typed.db.Exec(typed.db.Rebind(`
 			INSERT INTO task_sessions (id, task_id, queue_incarnation_id) VALUES (?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id, queue_incarnation_id = excluded.queue_incarnation_id
-		`, identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
+		`), identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
 			t.Fatalf("seed queue session authority: %v", err)
 		}
 		typed.tasksTablePresent = true

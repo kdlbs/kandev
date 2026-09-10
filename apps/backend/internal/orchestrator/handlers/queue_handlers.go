@@ -808,6 +808,10 @@ func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
 }
 
 func planCommentQueueError(msg *ws.Message, err error) *ws.Message {
+	if errors.Is(err, plancomments.ErrRenderedTooLarge) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
+		return response
+	}
 	var commentsChanged *plancommenttx.CommentsChangedError
 	if errors.As(err, &commentsChanged) {
 		details := map[string]interface{}{}

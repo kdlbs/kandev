@@ -24,6 +24,7 @@ acceptance_criteria:
   - AC-TASKS-PLAN-COMMENTS-002.6
   - AC-TASKS-PLAN-COMMENTS-003.1
   - AC-TASKS-PLAN-COMMENTS-003.2
+  - AC-TASKS-PLAN-COMMENTS-003.4
   - AC-TASKS-PLAN-COMMENTS-003.5
   - AC-TASKS-PLAN-COMMENTS-003.6
 system_design:
@@ -131,3 +132,8 @@ Tasks 01 and 02.
 - Added awaited desktop Popover and mobile Drawer mutations, localized error
   states, reconnect refresh, and admission-conflict reconciliation.
 - TypeScript, ESLint, i18n checks, and the focused frontend test suite pass.
+- Deferred-response tests cover newer live primary changes, including an
+  uncached primary and change-back races. Initial-prompt tests cover rejected
+  delivery followed by remount, retained manual drafts, and session switching.
+- These recovery fixes change shared state only. Desktop and mobile keep the
+  existing layout, touch behavior, and composer controls.

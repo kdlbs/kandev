@@ -47,6 +47,9 @@ var (
 	commentIDRequired    = mapping{service.ErrPlanCommentIDRequired, ws.ErrorCodeValidation, "comment id is required"}
 	commentIDInvalid     = mapping{service.ErrPlanCommentIDInvalid, ws.ErrorCodeValidation, "comment id must be a UUID"}
 	commentBodyRequired  = mapping{service.ErrPlanCommentBodyRequired, ws.ErrorCodeValidation, "comment body is required"}
+	commentBodyTooLarge  = mapping{service.ErrPlanCommentBodyTooLarge, ws.ErrorCodeValidation, "plan comment body is too large"}
+	commentTextTooLarge  = mapping{service.ErrPlanCommentTextTooLarge, ws.ErrorCodeValidation, "plan comment selected text is too large"}
+	commentLimitExceeded = mapping{service.ErrPlanCommentLimitExceeded, ws.ErrorCodeValidation, "task plan comment collection is too large"}
 	commentVersionNeeded = mapping{service.ErrPlanCommentVersionNeeded, ws.ErrorCodeValidation, "expected_version must be positive"}
 	commentAnchorInvalid = mapping{service.ErrPlanCommentAnchorInvalid, ws.ErrorCodeValidation, "plan comment anchor is invalid"}
 	planCommentsChanged  = mapping{service.ErrTaskPlanCommentsChanged, ws.ErrorCodePlanCommentsChanged, "Task plan comments changed"}
@@ -133,6 +136,9 @@ func PlanCommentError(msg *ws.Message, err error, snapshot interface{}) (*ws.Mes
 		commentIDRequired,
 		commentIDInvalid,
 		commentBodyRequired,
+		commentBodyTooLarge,
+		commentTextTooLarge,
+		commentLimitExceeded,
 		commentVersionNeeded,
 		commentAnchorInvalid,
 		taskNotFound,

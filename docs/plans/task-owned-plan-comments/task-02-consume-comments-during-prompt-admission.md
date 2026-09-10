@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-TASKS-PLAN-COMMENTS-002.5
   - AC-TASKS-PLAN-COMMENTS-002.6
   - AC-TASKS-PLAN-COMMENTS-002.7
+  - AC-TASKS-PLAN-COMMENTS-002.8
   - AC-TASKS-PLAN-COMMENTS-003.1
   - AC-TASKS-PLAN-COMMENTS-003.2
   - AC-TASKS-PLAN-COMMENTS-003.3
@@ -117,3 +118,6 @@ Task 01.
   attachments on rollback, and map revision, primary, capacity, and replay
   conflicts to stable WebSocket errors.
 - Focused task handler/repository and orchestrator handler/queue suites pass.
+- Final rendered prompts now share the 1 MiB direct/queue admission limit.
+  SQLite and Postgres regressions prove rejection leaves comments unchanged;
+  handler tests verify validation errors rather than internal errors.

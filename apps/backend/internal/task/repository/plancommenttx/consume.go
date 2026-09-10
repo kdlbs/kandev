@@ -134,6 +134,9 @@ func resolve(
 	if err != nil {
 		return nil, fmt.Errorf("format task plan comments: %w", err)
 	}
+	if err := plancomments.ValidateRenderedPrompt(content); err != nil {
+		return nil, err
+	}
 	return &Resolution{
 		TaskID: taskID, PlanID: snapshot.PlanID, Content: content,
 		Comments: comments, Before: snapshot,

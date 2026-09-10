@@ -42,6 +42,10 @@ const mockSetState = vi.fn(
     mockStoreState = { ...mockStoreState, ...updater(mockStoreState) };
   },
 );
+const mockSubscribe = vi.fn(
+  (_listener: (current: Record<string, unknown>, previous: Record<string, unknown>) => void) =>
+    vi.fn(),
+);
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
 
@@ -67,7 +71,11 @@ vi.mock("@/hooks/use-message-handler", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({ getState: () => mockStoreState, setState: mockSetState }),
+  useAppStoreApi: () => ({
+    getState: () => mockStoreState,
+    setState: mockSetState,
+    subscribe: mockSubscribe,
+  }),
 }));
 
 vi.mock("@/lib/state/slices/comments", () => ({
@@ -549,11 +557,7 @@ describe("useRunComment — plan routing", () => {
       is_primary: true,
     };
     changed.taskSessions.items["primary-session"].is_primary = false;
-    const sessions = changed.taskSessions.items as Record<
-      string,
-      { id?: string; task_id?: string; state: string; is_primary?: boolean }
-    >;
-    sessions["new-primary"] = replacement;
+    changed.taskSessions.items["new-primary"] = replacement;
     changed.taskSessionsByTask.itemsByTaskId["task-1"] = [replacement];
     changed.kanban.tasks[0].primarySessionId = "new-primary";
     mockStoreState = changed;
@@ -591,6 +595,65 @@ describe("useRunComment — plan routing", () => {
 describe("useRunComment — plan availability failures", () => {
   beforeEach(setup);
 
+  it.each([false, true])(
+    "preserves live primary routing during recovery (ABA=%s)",
+    async (restoreOriginal) => {
+      const original = makeStoreState("WAITING_FOR_INPUT");
+      let resolveSessions!: (value: { sessions: MockSession[] }) => void;
+      mockListTaskSessions.mockReturnValueOnce(
+        new Promise<{ sessions: MockSession[] }>((resolve) => {
+          resolveSessions = resolve;
+        }),
+      );
+      mockSendMessageRequest.mockRejectedValueOnce(
+        new WebSocketRequestError("Primary session changed", "primary_session_changed"),
+      );
+      const { result } = renderCommentHook();
+      const outcome = result.current.runComment(makePlanComment()).catch((error) => error);
+      await vi.waitFor(() => expect(mockListTaskSessions).toHaveBeenCalledOnce());
+
+      const live = makeStoreState("WAITING_FOR_INPUT");
+      live.taskSessions.items["primary-session"].is_primary = false;
+      const primary: MockSession = {
+        id: "live-primary",
+        task_id: "task-1",
+        state: "WAITING_FOR_INPUT",
+        is_primary: true,
+        queue_incarnation_id: "inc-live",
+      };
+      live.taskSessions.items["live-primary"] = primary;
+      live.taskSessionsByTask.itemsByTaskId["task-1"].push(primary);
+      live.kanban.tasks[0].primarySessionId = "live-primary";
+      mockStoreState = live;
+      for (const [listener] of mockSubscribe.mock.calls) listener(live, original);
+      if (restoreOriginal) {
+        mockStoreState = original;
+        for (const [listener] of mockSubscribe.mock.calls) listener(original, live);
+      }
+      resolveSessions({
+        sessions: [
+          {
+            id: "stale-http-primary",
+            task_id: "task-1",
+            state: "WAITING_FOR_INPUT",
+            is_primary: true,
+            queue_incarnation_id: "inc-stale",
+          },
+        ],
+      });
+
+      expect(await outcome).toMatchObject({ code: "primary-session-changed" });
+      expect(mockSetTaskSessionsForTask).not.toHaveBeenCalled();
+      const state = mockStoreState as ReturnType<typeof makeStoreState>;
+      expect(state.kanban.tasks[0].primarySessionId).toBe(
+        restoreOriginal ? "primary-session" : "live-primary",
+      );
+      for (const subscription of mockSubscribe.mock.results) {
+        expect(subscription.value).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
   it("rejects Run when the task has no primary", async () => {
     const state = makeStoreState("WAITING_FOR_INPUT");
     state.taskSessions.items["primary-session"].is_primary = false;
@@ -608,8 +671,7 @@ describe("useRunComment — plan availability failures", () => {
 
   it("rejects Run when the primary is terminal", async () => {
     const state = makeStoreState("WAITING_FOR_INPUT");
-    (state.taskSessions.items["primary-session"] as { state: string }).state = "COMPLETED";
-    (state.taskSessionsByTask.itemsByTaskId["task-1"][0] as { state: string }).state = "COMPLETED";
+    state.taskSessions.items["primary-session"].state = "COMPLETED";
     mockStoreState = state;
     const { result } = renderCommentHook();
 

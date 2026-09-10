@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-TASKS-PLAN-COMMENTS-001.3
   - AC-TASKS-PLAN-COMMENTS-001.4
   - AC-TASKS-PLAN-COMMENTS-001.6
+  - AC-TASKS-PLAN-COMMENTS-001.8
 system_design:
   - ../../specs/tasks/system-design/plan-comments.md
 ---
@@ -100,3 +101,5 @@ None.
 - Added authorized PlanService operations, complete DTO snapshots, WebSocket
   actions, conflict snapshots, and committed-change broadcasts.
 - Focused repository, service, handler, and gateway suites pass.
+- Review remediation adds per-field byte limits and transactional pending
+  count/aggregate limits. Boundary and rollback tests pass on SQLite and Postgres.

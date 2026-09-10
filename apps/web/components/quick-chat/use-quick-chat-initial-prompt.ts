@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
 import type {
   ChatSubmitPayload,
   ChatSubmitResult,
@@ -10,7 +11,9 @@ type InitialPromptDelivery = {
   prompt?: string;
   blocked: boolean;
   submit: (payload: ChatSubmitPayload) => ChatSubmitResult;
+  onAttempted?: () => void;
   onAccepted?: () => void;
+  onRejected?: (sessionId: string, prompt: string) => void;
 };
 
 /** Sends a Quick Chat launch prompt once admission prerequisites are ready. */
@@ -20,14 +23,20 @@ export function useQuickChatInitialPrompt({
   prompt,
   blocked,
   submit,
+  onAttempted,
   onAccepted,
+  onRejected,
 }: InitialPromptDelivery) {
   const attemptedFor = useRef<string | null>(null);
   const inFlightFor = useRef<string | null>(null);
   const submitRef = useRef(submit);
+  const onAttemptedRef = useRef(onAttempted);
   const onAcceptedRef = useRef(onAccepted);
+  const onRejectedRef = useRef(onRejected);
   submitRef.current = submit;
+  onAttemptedRef.current = onAttempted;
   onAcceptedRef.current = onAccepted;
+  onRejectedRef.current = onRejected;
 
   useEffect(() => {
     if (!prompt || !taskId || blocked) return;
@@ -35,12 +44,27 @@ export function useQuickChatInitialPrompt({
     if (attemptedFor.current === attemptKey || inFlightFor.current === attemptKey) return;
     attemptedFor.current = attemptKey;
     inFlightFor.current = attemptKey;
+    const savedForRecovery = !getChatDraftText(sessionId);
+    if (savedForRecovery) setChatDraftText(sessionId, prompt);
+    const submit = submitRef.current;
+    const onAccepted = onAcceptedRef.current;
+    const restoreRejectedDraft = () => {
+      if (savedForRecovery && getChatDraftText(sessionId) === prompt)
+        onRejectedRef.current?.(sessionId, prompt);
+    };
+    onAttemptedRef.current?.();
     void Promise.resolve()
-      .then(() => submitRef.current({ message: prompt }))
+      .then(() => submit({ message: prompt }))
       .then((accepted) => {
-        if (accepted !== false) onAcceptedRef.current?.();
+        if (accepted === false) {
+          restoreRejectedDraft();
+          return;
+        }
+        if (savedForRecovery && getChatDraftText(sessionId) === prompt)
+          setChatDraftText(sessionId, "");
+        onAccepted?.();
       })
-      .catch(() => undefined)
+      .catch(restoreRejectedDraft)
       .finally(() => {
         if (inFlightFor.current === attemptKey) inFlightFor.current = null;
       });

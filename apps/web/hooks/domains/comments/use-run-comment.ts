@@ -141,6 +141,21 @@ function listedTaskSessions(state: AppState, taskId: string): TaskSession[] {
   return [...sessions.values()];
 }
 
+function taskPrimaryRoutingFingerprint(state: AppState, taskId: string): string {
+  const task =
+    state.kanban.tasks.find((candidate) => candidate.id === taskId) ??
+    findTaskInSnapshots(taskId, state.kanbanMulti.snapshots);
+  const sessions = listedTaskSessions(state, taskId)
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((session) => [
+      session.id,
+      session.is_primary,
+      session.state,
+      session.queue_incarnation_id,
+    ]);
+  return JSON.stringify([task?.primarySessionId, task?.primarySessionState, sessions]);
+}
+
 function applyTaskPrimaryProjection(
   taskId: string,
   primarySessionId: string | null,
@@ -377,8 +392,19 @@ async function refreshPrimarySessionProjection(
     stateAtRequestStart,
     taskId,
   );
+  // Track every routing change, including a primary that changes away and back.
+  let routingChanged = false;
+  const unsubscribe = storeApi.subscribe((current, previous) => {
+    if (
+      taskPrimaryRoutingFingerprint(current, taskId) !==
+      taskPrimaryRoutingFingerprint(previous, taskId)
+    ) {
+      routingChanged = true;
+    }
+  });
   try {
     const response = await listTaskSessions(taskId, { cache: "no-store" });
+    if (routingChanged) return;
     const fetchedSessions = response.sessions ?? [];
     const fetchedSessionIds = new Set(fetchedSessions.map((session) => session.id));
     const sessionsAddedDuringLoad = listedTaskSessions(storeApi.getState(), taskId).filter(
@@ -390,9 +416,12 @@ async function refreshPrimarySessionProjection(
     applyTaskPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);
     applySessionPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);
   } catch (error) {
+    if (routingChanged) return;
     // i18n-exempt: conflict recovery still applies the authoritative payload below.
     console.error("Failed to refresh task sessions after primary-session conflict:", error);
     applyPrimarySessionChangeFallback(conflict, taskId, storeApi);
+  } finally {
+    unsubscribe();
   }
 }
 

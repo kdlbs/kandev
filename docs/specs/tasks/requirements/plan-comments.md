@@ -62,6 +62,10 @@ unsent feedback.
   plan shall not attach comments from the deleted plan to the new plan.
 - **AC-TASKS-PLAN-COMMENTS-001.7:** Desktop and mobile task surfaces shall
   expose the same pending comment set and lifecycle.
+- **AC-TASKS-PLAN-COMMENTS-001.8:** Kandev shall limit each comment body to
+  64 KiB and its selected text to 256 KiB, measured as UTF-8 bytes. A task plan
+  shall hold at most 100 pending comments and 1 MiB of combined bodies and
+  selected text. An over-limit mutation shall leave the previous snapshot intact.
 
 ### REQ-TASKS-PLAN-COMMENTS-002: Selected-session composer delivery
 
@@ -101,6 +105,10 @@ context to a non-primary session when I choose.
   pending comment, no more than one attempt shall be accepted with that
   comment. A competing attempt shall fail without silently sending its typed
   text without the requested plan context.
+- **AC-TASKS-PLAN-COMMENTS-002.8:** Direct and queued admission shall reject
+  a final server-rendered prompt larger than 1 MiB before inserting the delivery
+  or consuming its comments. The comments and composer draft shall remain
+  available for the user to shorten and retry.
 
 ### REQ-TASKS-PLAN-COMMENTS-003: Primary-session Run routing
 
@@ -122,6 +130,8 @@ independent of the currently selected Agent tab.
 - **AC-TASKS-PLAN-COMMENTS-003.4:** Kandev shall validate primary ownership at
   delivery acceptance. If the primary changes during the action, Kandev shall
   not deliver to the stale target and shall preserve the comment for retry.
+  Recovery shall not overwrite a newer live primary-session change with an
+  older session-list response.
 - **AC-TASKS-PLAN-COMMENTS-003.5:** When there is no eligible primary session,
   **Run** shall be unavailable with an actionable reason. Adding and editing
   comments shall remain available.

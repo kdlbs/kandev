@@ -104,6 +104,12 @@ consumption increments it in the same transaction. A snapshot has this shape:
 The plan ID distinguishes a newly created plan from a deleted plan whose
 revision counter previously had the same value.
 
+The service bounds bodies to 64 KiB and selected text to 256 KiB, measured in
+UTF-8 bytes. Each create or update transaction also validates a maximum of 100
+pending comments and 1 MiB of combined bodies and selected text. Exceeding a
+limit rolls back the mutation and its revision. The shared `plancomments`
+package owns these limits so SQLite and Postgres use the same policy.
+
 ### Delivery references
 
 Message admission receives only identifiers and versions, never trusted
@@ -121,6 +127,11 @@ Message and queue metadata retain the accepted IDs and versions for provenance
 and idempotent replay. The persisted message or queued prompt contains the
 expanded Markdown, so later comment deletion cannot change what the agent
 receives.
+
+The transactional resolver checks the final rendered prompt against the 1 MiB
+message limit before direct or queued insertion and comment consumption. This
+also protects delivery of oversized legacy rows. Both transports return a
+validation error without changing the pending snapshot.
 
 ## WebSocket contracts and synchronization
 
@@ -343,7 +354,16 @@ legacy records remain in storage for recovery rather than being discarded.
   pending.
 - A primary-session conflict triggers an authoritative task-session refresh,
   including an explicitly absent primary or a replacement not yet in the local
-  store.
+  store. A request-local store subscription detects changes to primary identity,
+  session state, and queue incarnation while the request is pending. Once any
+  routing change occurs, neither the older response nor its error fallback may
+  replace that projection, even if routing changes back before the response.
+  The subscription is disposed when the request settles.
+- Quick Chat and config chat clear their automatic launch descriptor when the
+  first eligible attempt starts, keeping a session-scoped recovery draft. A
+  rejected attempt restores that draft to an empty composer for explicit retry;
+  reopening the panel must not automatically resend it. Settlement remains
+  bound to the original session and never replaces newer user-entered text.
 - Reconnect reloads a complete snapshot. A stale WebSocket snapshot cannot
   replace a newer revision.
 - A queue-capacity failure does not consume comments. Cancellation or editing

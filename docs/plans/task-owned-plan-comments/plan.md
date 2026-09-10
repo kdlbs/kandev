@@ -170,6 +170,10 @@ owns dialect parity.
 
 ## Verification results
 
+The original implementation checks below are historical. Current rebase and
+review-remediation evidence is recorded separately; these results do not certify
+the latest PR head.
+
 - Backend: full `make test` and `make lint` passed; focused task and queue
   admission packages also passed after final changes.
 - Frontend: TypeScript, ESLint, i18n catalog/ratchet checks, 128 focused tests,
@@ -180,6 +184,27 @@ owns dialect parity.
   overflow checks.
 - Specifications and public docs: spec lint, all 61 docs validator tests, and
   validation of all 42 published pages passed.
+
+### September 10 rebase and review remediation
+
+- Rebased onto `adbe4c2ef7f41ced25533ff19ef05d916eb9056b`, preserving main's
+  queue lifecycle guards and the feature's durable plan-comment reservations.
+  The unfinished broader lifecycle investigation remains outside this patch.
+- Added byte/count bounds, final rendered-prompt validation, stale primary
+  recovery protection, and manual-draft recovery for rejected initial prompts.
+- Focused SQLite/Postgres tests passed in task service, repositories, handlers,
+  plan WebSocket errors, and orchestrator queue handlers/repositories using
+  `go test ... -run 'PlanComment|ResolveRejectsOversizedRenderedPrompt' -count=1`
+  with an isolated PostgreSQL database.
+- The same focused repository checks passed with `-race` across task SQLite,
+  shared admission resolution, and message queue packages, including Postgres.
+- Frontend typecheck and 101 focused Vitest tests passed across Run recovery,
+  initial prompts, Quick Chat modal, queued ghost rows, and edit protection.
+  Desktop/mobile layout and touch behavior are unchanged by these fixes.
+- Full frontend lint, specification lint, all 62 public-doc validator tests,
+  and validation of 46 published pages passed.
+- Latest-head CI and automated review disposition remain delivery gates; consult
+  PR #3332 rather than the original implementation's historical full-suite run.
 
 ## Implementation waves and parallel candidates
 

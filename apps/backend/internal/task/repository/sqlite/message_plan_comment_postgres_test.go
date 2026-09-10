@@ -248,6 +248,15 @@ func TestPostgresPlanCommentMessageAdmissionLosesToArchive(t *testing.T) {
 	defer cancel()
 	message, attachment := seedPostgresPlanCommentMessageFixture(t, ctx, repo, "archive-race")
 
+	// Repository initialization takes schema locks, so it precedes the row-lock barrier.
+	admissionDB := openSecondPostgresConnection(t, dsn, db)
+	admissionRepo, err := NewWithDB(admissionDB, admissionDB, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observerDB := openSecondPostgresConnection(t, dsn, db)
+	admissionPID := pgBackendPID(t, admissionDB)
+
 	archiveTx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -259,13 +268,6 @@ func TestPostgresPlanCommentMessageAdmissionLosesToArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	admissionDB := openSecondPostgresConnection(t, dsn, db)
-	admissionRepo, err := NewWithDB(admissionDB, admissionDB, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	observerDB := openSecondPostgresConnection(t, dsn, db)
-	admissionPID := pgBackendPID(t, admissionDB)
 	admissionDone := make(chan struct{})
 	admissionResult := make(chan error, 1)
 	go func() {

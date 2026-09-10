@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository"
 	"go.uber.org/zap"
 )
@@ -21,6 +22,9 @@ var (
 	ErrPlanCommentVersionNeeded = errors.New("expected_version must be positive")
 	ErrPlanCommentAnchorInvalid = errors.New("plan comment anchor is invalid")
 	ErrTaskPlanCommentsChanged  = errors.New("task plan comments changed")
+	ErrPlanCommentBodyTooLarge  = plancomments.ErrBodyTooLarge
+	ErrPlanCommentTextTooLarge  = plancomments.ErrSelectionTooLarge
+	ErrPlanCommentLimitExceeded = plancomments.ErrCollectionTooLarge
 )
 
 // CreatePlanCommentRequest contains task-owned plan comment fields supplied by a client.
@@ -138,7 +142,7 @@ func validatePlanCommentCreate(req CreatePlanCommentRequest) error {
 	if req.SelectedText == "" || req.AnchorFrom < 0 || req.AnchorTo <= req.AnchorFrom {
 		return ErrPlanCommentAnchorInvalid
 	}
-	return nil
+	return plancomments.ValidateFields(req.Body, req.SelectedText)
 }
 
 func validatePlanCommentMutation(taskID, planID, commentID, body string, expectedVersion int64, needsBody bool) error {
@@ -153,6 +157,8 @@ func validatePlanCommentMutation(taskID, planID, commentID, body string, expecte
 		return ErrPlanCommentIDInvalid
 	case needsBody && strings.TrimSpace(body) == "":
 		return ErrPlanCommentBodyRequired
+	case needsBody && len(body) > plancomments.MaxBodyBytes:
+		return ErrPlanCommentBodyTooLarge
 	case expectedVersion <= 0:
 		return ErrPlanCommentVersionNeeded
 	default:
