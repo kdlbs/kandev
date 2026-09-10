@@ -611,3 +611,36 @@ func TestRecordOrphanReapSignalErrorOtherIsSkippedWithMessage(t *testing.T) {
 		t.Fatalf("expected a skipped record naming the failure, got %+v (found=%v)", rec, ok)
 	}
 }
+
+// AC-TASKS-ORPHAN-REAP-006.3: cancellation landing after the SIGKILL settle
+// window -- a race the settle-delay select cannot always resolve in the
+// cancellation's favor, since both its channels can already be ready --
+// must still persist every already-signalled candidate as skipped naming
+// the signal already sent, and return the retryable cancellation error,
+// instead of resolving them to a normal killed/survived outcome.
+func TestResolveOrphanReapSurvivorsRecordsCancelledWhenContextAlreadyDone(t *testing.T) {
+	svc := newOrphanReapSignalTestService()
+	verifier := newFakeOrphanReapVerifier()
+	verifier.set(500, "/tasks/task-a")
+	signaler := newFakeOrphanReapSignaler()
+	signaler.setAlive(500, false) // would otherwise resolve cleanly to "killed"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	killPending := []orphanReapPendingCandidate{{
+		orphanReapCandidate: newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a"),
+		lastSignal:          "sigkill already sent",
+	}}
+	snapshot := &taskResourceCleanupSnapshot{}
+	errs := svc.resolveOrphanReapSurvivors(ctx, "task-a", killPending, snapshot, verifier, signaler)
+
+	if len(errs) != 1 || !errors.Is(errs[0], errOrphanReapCancelledMidPhase) {
+		t.Fatalf("expected errOrphanReapCancelledMidPhase, got %v", errs)
+	}
+	rec, ok := findOrphanReapRecord(snapshot, 500)
+	if !ok || rec.Outcome != orphanReapOutcomeSkipped || rec.Reason != "sigkill already sent" {
+		t.Fatalf("expected pid 500 recorded skipped/\"sigkill already sent\" despite cancellation, "+
+			"not resolved to a normal outcome, got %+v (found=%v)", rec, ok)
+	}
+}
