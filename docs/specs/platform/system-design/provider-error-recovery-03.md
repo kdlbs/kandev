@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-09-04
-updated: 2026-09-04
+updated: 2026-09-11
 owners:
   - Kandev
 ---
@@ -30,14 +30,16 @@ candidate ordering.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Marker propagation](#marker-propagation), [Diagnostic text correlation](#diagnostic-text-correlation), [Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Marker propagation](#marker-propagation), [Diagnostic text correlation](#diagnostic-text-correlation), [Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata), [Failure modes](#failure-modes) |
 
 Acceptance criteria `.20` and `.21` are owned by
 [Marker propagation](#marker-propagation). `.23` is owned by
 [Diagnostic text correlation](#diagnostic-text-correlation). `.22` is owned by
 [Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata).
-`.17` through `.19` are owned by [Part 2](provider-error-recovery-02.md), whose
-`## Input inventory` records the sampled shapes this part reasons from.
+`.24` is owned by [Failure modes](#failure-modes), which states the exclusion it
+observes. `.17` through `.19` are owned by
+[Part 2](provider-error-recovery-02.md), whose `## Input inventory` records the
+sampled shapes this part reasons from.
 
 ## Marker propagation
 
@@ -262,6 +264,19 @@ to a later contract change.
 - Metadata present but the message unclassifiable: the projection carries the
   metadata, the diagnostic stays ordinary output, recovery fails closed.
 - The marker is absent from a skewed remote: manual recovery, as above.
+- The terminal message classifies to nothing because the signature lives only
+  in `RequestError.Data`: the projection carries whatever allowlisted metadata
+  it derived, the failure is presented as terminal, and manual recovery is
+  exposed. ACP peer-disconnect is the worked example, where `Message` is
+  `Internal error` and `peer disconnected before response` appears only in
+  `Data`, so `acp.transport_lost.v1` does not fire on this surface. The rule
+  itself is unchanged. It still fires on every other surface, and on a generic
+  prompt-error projection too whenever the projected `Message` itself carries
+  the signature; what this surface loses is only the case where the signature
+  never leaves `Data`. Its doc comment records that narrow exclusion rather
+  than its pattern changing, and stating it more broadly than that would be
+  false. The requirement's `## Out of scope` records this as an accepted
+  trade-off rather than a defect, and `.24` is the criterion that observes it.
 - A diagnostic classifies to the terminal code but is not contained in the
   terminal message: the fence holds and manual recovery is exposed. This is the
   `prose-matched` case, and it is the one the current code gets wrong.
@@ -300,6 +315,16 @@ to a later contract change.
 - **GIVEN** a message chunk arrives from an agentctl build that does not send
   `provider_diagnostic_candidate`, **THEN** it counts as ordinary output and
   automatic recovery does not start.
+- **GIVEN** a terminal `acp.RequestError` whose `Message` is `Internal error`
+  and whose `Data` is the map `{"error": "peer disconnected before response"}`,
+  **WHEN** no preceding stderr or message chunk carried that text, **THEN** the
+  projection's message is `Internal error`, no part of `Data` appears in it,
+  the failure does not classify as transient, no automatic retry starts, and
+  manual recovery is exposed. Only the first two outcomes are observable at the
+  layers AC `.19` assigns; the recovery outcomes are observed end to end under
+  AC `.24`, because the replay matrix's case enumeration in
+  [Part 2](provider-error-recovery-02.md#replay-fixture-matrix) is closed and
+  has no cell for a terminal error with no preceding diagnostic.
 
 ## Out of scope
 

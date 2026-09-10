@@ -156,7 +156,11 @@ const transportLostRuleID = "acp.transport_lost.v1"
 // signatures: the peer disconnecting before a response, or the underlying
 // connection closing outright. Deliberately narrow (only these two
 // substrings) so it never matches context-cancellation or shutdown-teardown
-// error strings, which must keep falling through to manual recovery.
+// error strings, which must keep falling through to manual recovery. It does
+// not fire when the signature never leaves a terminal ACP prompt error's
+// `RequestError.Data`, because the generic prompt-error projection classifies
+// on `Message` alone; it still fires whenever the projected `Message` itself
+// carries the signature.
 var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection closed`)
 
 // cursorRetriableStreamResetRe matches Cursor's complete control diagnostic.
