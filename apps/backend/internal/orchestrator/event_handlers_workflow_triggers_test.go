@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -462,6 +463,48 @@ func TestProcessOnEnter(t *testing.T) {
 
 		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.Count != 0 {
 			t.Fatalf("expected queue to be drained, count=%d entries=%+v", status.Count, status.Entries)
+		}
+	})
+
+	// A one-shot instruction overlay must use the same queue path when the
+	// destination has no on_enter actions. The durable step prompt is not sent
+	// through this path, so the extracted instruction block is the assertion.
+	t.Run("queues move instructions when destination has no on_enter actions", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateWaitingForInput
+		session.AgentExecutionID = "exec-1"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{isAgentRunning: true, promptDone: make(chan struct{})}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+		step := workflowmove.OverlayStep(&wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review", Position: 1,
+		}, &workflowmove.EntryOptions{Instructions: "focus on the auth bug"})
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "task description", 0, nil)
+
+		select {
+		case <-agentMgr.promptDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for move instructions to be sent to agent")
+		}
+
+		agentMgr.mu.Lock()
+		got := agentMgr.capturedPrompts[0]
+		agentMgr.mu.Unlock()
+		want := workflowmove.WrapInstructions("focus on the auth bug")
+		if got != want {
+			t.Fatalf("agent received %q, want one-time instruction block %q", got, want)
+		}
+		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.Count != 0 {
+			t.Fatalf("expected move instruction queue to be drained, count=%d entries=%+v", status.Count, status.Entries)
 		}
 	})
 

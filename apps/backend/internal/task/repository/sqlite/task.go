@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1060,6 +1061,21 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 			if _, exists := task.Metadata[models.MetaKeyQueuedMoveExitPending]; !exists {
 				task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
 			}
+		}
+	}
+	// A deferred move that cannot enter because the target is full has already
+	// consumed its pending-move row in this transaction. Keep its one-shot
+	// options on the queued task before the task update and pending-row delete
+	// commit, so promotion cannot observe the destination without its options.
+	if deferredMove != nil && !admitted && deferredMove.Move.EntryOptions != nil {
+		encoded, err := workflowmove.EncodeEntryOptionsJSON(deferredMove.Move.EntryOptions)
+		if err != nil {
+			return false, false, fmt.Errorf("encode deferred workflow move options: %w", err)
+		}
+		task.Metadata[models.MetaKeyWorkflowMovePending] = map[string]interface{}{
+			"from_step_id": expectedStepID,
+			"move_id":      deferredMove.Move.MoveID,
+			"options":      string(encoded),
 		}
 	}
 	metadata, err := json.Marshal(task.Metadata)

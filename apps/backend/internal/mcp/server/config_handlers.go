@@ -346,23 +346,7 @@ func (s *Server) registerConfigTaskTools() {
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
 			mcp.WithString("prompt", mcp.Description("Legacy alias for entry_options.instructions. Optional hand-off message applied once when the task enters the new step. Supplying both this and entry_options.instructions is rejected. Omit for self-moves like Work → Done.")),
-			mcp.WithObject("entry_options",
-				mcp.Description("One-shot overrides applied only when the task enters the target step; they never change durable step configuration and require an actual workflow step change."),
-				mcp.Properties(map[string]any{
-					"reset_context": map[string]any{
-						typeKey:        "boolean",
-						descriptionArg: "Reset the target session's agent context before the step's on_enter actions run.",
-					},
-					"instructions": map[string]any{
-						typeKey:        stringType,
-						descriptionArg: "One-time instructions appended to the target step's prompt (never replacing it) for this entry only.",
-					},
-					"skip_step_prompt": map[string]any{
-						typeKey:        "boolean",
-						descriptionArg: "Suppress the destination step's configured prompt (and its task-description fallback) for this one entry. With instructions the agent auto-starts a turn carrying only those instructions; without instructions no turn starts and the task lands idle.",
-					},
-				}),
-			),
+			moveTaskEntryOptionsToolOption(),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)

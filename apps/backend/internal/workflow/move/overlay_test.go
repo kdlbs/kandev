@@ -98,6 +98,9 @@ func TestOverlayStep_SkipStepPromptWithoutInstructionsDropsAutoStart(t *testing.
 	}
 
 	got := OverlayStep(step, &EntryOptions{SkipStepPrompt: true, ResetContext: true})
+	if got.Prompt != "" {
+		t.Fatalf("skip without instructions must clear the durable prompt, got %q", got.Prompt)
+	}
 	if got.HasOnEnterAction(models.OnEnterAutoStartAgent) {
 		t.Fatal("skip without instructions must drop auto_start_agent so no turn starts")
 	}

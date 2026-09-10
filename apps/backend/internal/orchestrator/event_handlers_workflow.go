@@ -38,11 +38,6 @@ import (
 // options. It must match the writer in task/service (workflowMoveOptionsKey).
 const workflowMoveMarkerOptionsKey = "options"
 
-// workflowMoveMarkerPersistAttempts bounds the retries setWorkflowMovePendingMarker
-// makes when persisting the sole surviving record of a consumed move's one-shot
-// options, so brief DB contention does not silently drop them.
-const workflowMoveMarkerPersistAttempts = 3
-
 type turnCompletionCause string
 
 var (
@@ -928,8 +923,8 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
 	if session != nil {
 		// A WIP-queued optioned move persists its one-shot options on the
-		// transient marker (setWorkflowMovePendingMarker) for consumption here,
-		// once admission clears. Overlay them onto a copy of the durable step so
+		// transient marker during deferred admission for consumption here, once
+		// admission clears. Overlay them onto a copy of the durable step so
 		// the on_enter path applies the reset, profile, and appended
 		// instructions; the durable step is never mutated. Clear the marker so
 		// the options are applied exactly once and cannot strand and block a
@@ -3528,6 +3523,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
 			return
 		}
+		s.queueMoveInstructionsForSession(ctx, taskID, sessionID, step)
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		// This step entry never reaches buildWorkflowEntryPrompt or
@@ -4162,17 +4158,9 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		zap.String("from_step_id", fromStepID),
 		zap.String("to_step_id", move.WorkflowStepID))
 	if stored, loadErr := s.repo.GetTask(ctx, taskID); loadErr == nil && stored != nil && stored.QueuedForStepID == move.WorkflowStepID && !stored.WIPAdmitted {
-		// The destination is visible and queued, but its entry lifecycle is
-		// deferred until promotion. The source exit still runs once now. The
-		// PendingMove was already consumed by TakePendingMove, so persist any
-		// one-shot options on the transient marker for the promotion path to
-		// apply once after admission (spec: options survive WIP wait).
-		if err := s.setWorkflowMovePendingMarker(ctx, taskID, fromStepID, move.MoveID, move.EntryOptions); err != nil {
-			s.logger.Error("pending move: failed to persist one-shot options for queued promotion; task will enter with durable step defaults",
-				zap.String("task_id", taskID),
-				zap.String("move_id", move.MoveID),
-				zap.Error(err))
-		}
+		// The repository persisted the one-shot marker in the same transaction
+		// that admitted the queued destination and consumed PendingMove. The
+		// source exit can now run without a second, lossy task write.
 		go s.processStepExitForDeferredMove(context.WithoutCancel(ctx), identity, freshSession, fromStepID)
 		return
 	}
@@ -4183,50 +4171,6 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		context.WithoutCancel(ctx), identity, freshSession,
 		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions,
 	)
-}
-
-// setWorkflowMovePendingMarker persists one-shot move options on the transient
-// workflow_move_pending marker so a WIP-queued destination applies them once at
-// promotion. A nil options value is a no-op. It returns an error when the
-// options cannot be persisted: the caller has already consumed the source
-// PendingMove (TakePendingMove), so this marker is the sole surviving record of
-// the one-shot behavior across the WIP wait, and a lost write silently
-// downgrades the move to durable step defaults. A transient write failure is
-// retried a bounded number of times before giving up.
-func (s *Service) setWorkflowMovePendingMarker(ctx context.Context, taskID, fromStepID, moveID string, options *workflowmove.EntryOptions) error {
-	if options == nil {
-		return nil
-	}
-	encoded, err := workflowmove.EncodeEntryOptionsJSON(options)
-	if err != nil {
-		return fmt.Errorf("encode workflow move options for task %s: %w", taskID, err)
-	}
-	marker := map[string]interface{}{
-		"from_step_id":               fromStepID,
-		"move_id":                    moveID,
-		workflowMoveMarkerOptionsKey: string(encoded),
-	}
-	var lastErr error
-	for attempt := 0; attempt < workflowMoveMarkerPersistAttempts; attempt++ {
-		task, err := s.repo.GetTask(ctx, taskID)
-		if err != nil || task == nil {
-			lastErr = err
-			if lastErr == nil {
-				lastErr = fmt.Errorf("task %s not found", taskID)
-			}
-			continue
-		}
-		if task.Metadata == nil {
-			task.Metadata = map[string]interface{}{}
-		}
-		task.Metadata[models.MetaKeyWorkflowMovePending] = marker
-		if updateErr := s.repo.UpdateTask(ctx, task); updateErr != nil {
-			lastErr = updateErr
-			continue
-		}
-		return nil
-	}
-	return fmt.Errorf("persist workflow move options for task %s: %w", taskID, lastErr)
 }
 
 func (s *Service) consumeUnfencedPendingMove(

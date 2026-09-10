@@ -42,6 +42,7 @@ func OverlayStep(step *models.WorkflowStep, opts *EntryOptions) *models.Workflow
 		// Skip with no instructions: suppress the auto-started turn entirely by
 		// dropping auto_start_agent, so the on_enter path treats this like a
 		// step without auto-start and the agent waits for manual input.
+		copy.Prompt = ""
 		copy.Events.OnEnter = withoutOnEnterAction(copy.Events.OnEnter, models.OnEnterAutoStartAgent)
 	case wrapped != "":
 		if copy.Prompt == "" {

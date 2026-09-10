@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -27,93 +26,6 @@ func encodeMoveMarker(t *testing.T, fromStepID, moveID string, opts *workflowmov
 		"from_step_id": fromStepID,
 		"move_id":      moveID,
 		"options":      string(encoded),
-	}
-}
-
-// failUpdateTaskRepo fails the first failures UpdateTask calls, then delegates.
-// Used to prove setWorkflowMovePendingMarker retries a transient write and
-// surfaces a persistent failure (finding D).
-type failUpdateTaskRepo struct {
-	sessionExecutorStore
-	failures int
-	calls    int
-}
-
-func (r *failUpdateTaskRepo) UpdateTask(ctx context.Context, task *models.Task) error {
-	r.calls++
-	if r.calls <= r.failures {
-		return errors.New("simulated update failure")
-	}
-	return r.sessionExecutorStore.UpdateTask(ctx, task)
-}
-
-func TestSetWorkflowMovePendingMarkerRetriesTransientWrite(t *testing.T) {
-	ctx := context.Background()
-	base := setupTestRepo(t)
-	seedTaskWithoutSession(t, base, "marker-retry", "step1")
-	svc := createTestService(base, newMockStepGetter(), newMockTaskRepo())
-	repo := &failUpdateTaskRepo{sessionExecutorStore: base, failures: 2}
-	svc.repo = repo
-
-	err := svc.setWorkflowMovePendingMarker(ctx, "marker-retry", "step1", "move-1",
-		&workflowmove.EntryOptions{Instructions: "do the thing"})
-	if err != nil {
-		t.Fatalf("expected marker persisted after retries, got %v", err)
-	}
-	if repo.calls != 3 {
-		t.Fatalf("expected 3 UpdateTask attempts (2 failures + 1 success), got %d", repo.calls)
-	}
-	stored, err := base.GetTask(ctx, "marker-retry")
-	if err != nil {
-		t.Fatalf("reload task: %v", err)
-	}
-	if _, ok := stored.Metadata[models.MetaKeyWorkflowMovePending]; !ok {
-		t.Fatal("marker must be persisted after a retried write succeeds")
-	}
-}
-
-func TestSetWorkflowMovePendingMarkerReturnsErrorWhenPersistFails(t *testing.T) {
-	ctx := context.Background()
-	base := setupTestRepo(t)
-	seedTaskWithoutSession(t, base, "marker-lost", "step1")
-	svc := createTestService(base, newMockStepGetter(), newMockTaskRepo())
-	repo := &failUpdateTaskRepo{sessionExecutorStore: base, failures: workflowMoveMarkerPersistAttempts}
-	svc.repo = repo
-
-	err := svc.setWorkflowMovePendingMarker(ctx, "marker-lost", "step1", "move-1",
-		&workflowmove.EntryOptions{Instructions: "do the thing"})
-	if err == nil {
-		t.Fatal("expected an error when every persist attempt fails")
-	}
-	if repo.calls != workflowMoveMarkerPersistAttempts {
-		t.Fatalf("expected %d attempts, got %d", workflowMoveMarkerPersistAttempts, repo.calls)
-	}
-	stored, err := base.GetTask(ctx, "marker-lost")
-	if err != nil {
-		t.Fatalf("reload task: %v", err)
-	}
-	if _, ok := stored.Metadata[models.MetaKeyWorkflowMovePending]; ok {
-		t.Fatal("no marker must be persisted when every write fails")
-	}
-}
-
-// TestSetWorkflowMovePendingMarkerNilOptionsIsNoop keeps the nil-options
-// fast-path a no-op that never touches the repository.
-func TestSetWorkflowMovePendingMarkerNilOptionsIsNoop(t *testing.T) {
-	ctx := context.Background()
-	base := setupTestRepo(t)
-	seedTaskWithoutSession(t, base, "marker-nil", "step1")
-	svc := createTestService(base, newMockStepGetter(), newMockTaskRepo())
-
-	if err := svc.setWorkflowMovePendingMarker(ctx, "marker-nil", "step1", "", nil); err != nil {
-		t.Fatalf("nil options must be a no-op, got %v", err)
-	}
-	stored, err := base.GetTask(ctx, "marker-nil")
-	if err != nil {
-		t.Fatalf("reload task: %v", err)
-	}
-	if _, ok := stored.Metadata[models.MetaKeyWorkflowMovePending]; ok {
-		t.Fatal("nil options must not write a marker")
 	}
 }
 

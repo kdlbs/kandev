@@ -77,6 +77,26 @@ func toolInputProperties(t *testing.T, s *Server, toolName string) map[string]in
 	return props
 }
 
+func TestMoveTaskToolSchemasExposeEntryOptions(t *testing.T) {
+	for name, server := range map[string]*Server{
+		"task":   newTaskModeServer(t, &testBackend{}, "task-current"),
+		"config": newTestServer(t, &testBackend{}),
+	} {
+		props := toolInputProperties(t, server, "move_task_kandev")
+		entryOptions, ok := props["entry_options"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s move_task schema must expose entry_options as an object", name)
+		}
+		nested, ok := entryOptions["properties"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s entry_options schema must expose nested properties", name)
+		}
+		for _, field := range []string{"reset_context", "instructions", "skip_step_prompt"} {
+			assert.Contains(t, nested, field, "%s entry_options schema must expose %s", name, field)
+		}
+	}
+}
+
 // --- Action constant tests ---
 
 func TestActionConstants_MatchWebSocketActions(t *testing.T) {
