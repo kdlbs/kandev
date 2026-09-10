@@ -7584,7 +7584,7 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 	}
 
 	s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)
-	s.reconcileCancelledAgentWorkflow(ctx, session, prepared.completionEligible)
+	s.reconcileCancelledAgentWorkflow(ctx, session, prepared.completionEligible, prepared.capturedTurnID)
 	return nil
 }
 
@@ -7612,14 +7612,14 @@ func (s *Service) recordCancelledAgentMessage(ctx context.Context, session *mode
 	}
 }
 
-func (s *Service) reconcileCancelledAgentWorkflow(ctx context.Context, session *models.TaskSession, completionEligible bool) {
+func (s *Service) reconcileCancelledAgentWorkflow(ctx context.Context, session *models.TaskSession, completionEligible bool, operationIDs ...string) {
 	if session == nil {
 		return
 	}
 	transitioned := false
 	if completionEligible {
 		transitioned = s.processOnTurnCompleteViaEngineWithCause(
-			ctx, session.TaskID, session, turnCompletionCauseUserCancellation,
+			ctx, session.TaskID, session, turnCompletionCauseUserCancellation, operationIDs...,
 		)
 	}
 	s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID, transitioned)

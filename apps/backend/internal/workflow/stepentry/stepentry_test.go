@@ -67,6 +67,22 @@ func TestBuildPendingAllocationNoEngineOwnedActions(t *testing.T) {
 	}
 }
 
+func TestBuildPendingAllocationForScriptOnlyEntry(t *testing.T) {
+	actions := []wfmodels.OnEnterAction{
+		{Type: wfmodels.OnEnterRunScript, Config: map[string]interface{}{"command": "echo ready"}},
+	}
+	pending, ok := BuildPendingAllocation("step-1", actions)
+	if !ok {
+		t.Fatalf("expected an allocation for a step declaring a script action")
+	}
+	if pending.StepID != "step-1" || len(pending.Positions) != 0 {
+		t.Fatalf("script-only allocation = %+v, want step-1 with no independent positions", pending)
+	}
+	if pending.Digest != ComputeDigest(actions) {
+		t.Fatalf("script-only allocation digest = %q, want %q", pending.Digest, ComputeDigest(actions))
+	}
+}
+
 func TestBuildPendingAllocationTracksDeclaredPositions(t *testing.T) {
 	actions := []wfmodels.OnEnterAction{
 		{Type: wfmodels.OnEnterEnablePlanMode},

@@ -43,6 +43,7 @@ import (
 
 // StartProcessRequest contains parameters for starting a new background process.
 type StartProcessRequest struct {
+	RequestID      string            `json:"request_id,omitempty"`       // Stable idempotency identity for retry-safe callers
 	SessionID      string            `json:"session_id"`                 // Required: Agent session owning this process
 	Kind           types.ProcessKind `json:"kind"`                       // Process type (user_command, agent_script, etc.)
 	ScriptName     string            `json:"script_name,omitempty"`      // Human-readable script identifier
@@ -50,6 +51,7 @@ type StartProcessRequest struct {
 	WorkingDir     string            `json:"working_dir"`                // Working directory (defaults to current dir)
 	Env            map[string]string `json:"env,omitempty"`              // Additional environment variables (merged with parent env)
 	BufferMaxBytes int64             `json:"buffer_max_bytes,omitempty"` // Max output buffer size (defaults to runner's default)
+	Timeout        time.Duration     `json:"timeout,omitempty"`          // Optional process lifetime limit
 }
 
 // StopProcessRequest identifies a process to stop.
@@ -59,17 +61,18 @@ type StopProcessRequest struct {
 
 // ProcessInfo represents the complete state of a background process.
 type ProcessInfo struct {
-	ID         string               `json:"id"`                    // Unique process identifier (UUID)
-	SessionID  string               `json:"session_id"`            // Agent session that owns this process
-	Kind       types.ProcessKind    `json:"kind"`                  // Process classification
-	ScriptName string               `json:"script_name,omitempty"` // User-friendly name
-	Command    string               `json:"command"`               // The shell command being executed
-	WorkingDir string               `json:"working_dir"`           // Execution directory
-	Status     types.ProcessStatus  `json:"status"`                // Current state (starting, running, exited, failed)
-	ExitCode   *int                 `json:"exit_code,omitempty"`   // Process exit code (nil if still running)
-	StartedAt  time.Time            `json:"started_at"`            // When the process was launched
-	UpdatedAt  time.Time            `json:"updated_at"`            // Last status change timestamp
-	Output     []ProcessOutputChunk `json:"output,omitempty"`      // Buffered output (only included if requested)
+	ID              string               `json:"id"`                         // Unique process identifier (UUID)
+	SessionID       string               `json:"session_id"`                 // Agent session that owns this process
+	Kind            types.ProcessKind    `json:"kind"`                       // Process classification
+	ScriptName      string               `json:"script_name,omitempty"`      // User-friendly name
+	Command         string               `json:"command"`                    // The shell command being executed
+	WorkingDir      string               `json:"working_dir"`                // Execution directory
+	Status          types.ProcessStatus  `json:"status"`                     // Current state (starting, running, exited, failed)
+	ExitCode        *int                 `json:"exit_code,omitempty"`        // Process exit code (nil if still running)
+	StartedAt       time.Time            `json:"started_at"`                 // When the process was launched
+	UpdatedAt       time.Time            `json:"updated_at"`                 // Last status change timestamp
+	Output          []ProcessOutputChunk `json:"output,omitempty"`           // Buffered output (only included if requested)
+	OutputTruncated bool                 `json:"output_truncated,omitempty"` // True after the bounded buffer evicts output
 }
 
 // ProcessOutputChunk represents a single piece of process output (stdout or stderr).
@@ -91,10 +94,11 @@ type ProcessOutputChunk struct {
 // recent ~2MB in memory. Clients can stream output in real-time via WebSocket without
 // loading the entire history.
 type ringBuffer struct {
-	mu       sync.Mutex           // Protects chunks and size
-	maxBytes int64                // Maximum total bytes to keep in memory
-	size     int64                // Current total bytes stored
-	chunks   []ProcessOutputChunk // FIFO queue of output chunks
+	mu        sync.Mutex           // Protects chunks and size
+	maxBytes  int64                // Maximum total bytes to keep in memory
+	size      int64                // Current total bytes stored
+	chunks    []ProcessOutputChunk // FIFO queue of output chunks
+	truncated bool                 // At least one chunk was evicted
 }
 
 // newRingBuffer creates a ring buffer with the specified size limit.
@@ -116,10 +120,17 @@ func (b *ringBuffer) append(chunk ProcessOutputChunk) {
 
 	// Evict oldest chunks until we're back under the limit
 	for b.size > b.maxBytes && len(b.chunks) > 0 {
+		b.truncated = true
 		removed := b.chunks[0]
 		b.size -= int64(len(removed.Data))
 		b.chunks = b.chunks[1:]
 	}
+}
+
+func (b *ringBuffer) wasTruncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.truncated
 }
 
 // snapshot returns a copy of all buffered chunks at the current moment.
@@ -134,18 +145,23 @@ func (b *ringBuffer) snapshot() []ProcessOutputChunk {
 
 // commandProcess represents a single running background process and its state.
 type commandProcess struct {
-	info       ProcessInfo // Process metadata and current status
-	cmd        *exec.Cmd   // Underlying OS process (nil after completion)
-	stdin      io.WriteCloser
-	buffer     *ringBuffer   // Memory-bounded output storage
-	stopOnce   sync.Once     // Ensures stopSignal is only closed once
-	stopSignal chan struct{} // Signals output readers to exit before process termination
-	done       chan struct{} // Closed after cmd.Wait returns and lifecycle cleanup finishes
-	pgid       int
-	lifecycle  processLifecycleHandle
-	waitErr    error
-	reapErr    error
-	mu         sync.Mutex // Protects info fields during updates
+	info          ProcessInfo // Process metadata and current status
+	requestID     string
+	fingerprint   string
+	cmd           *exec.Cmd // Underlying OS process (nil after completion)
+	processCtx    context.Context
+	cancel        context.CancelFunc
+	stdin         io.WriteCloser
+	buffer        *ringBuffer    // Memory-bounded output storage
+	stopOnce      sync.Once      // Ensures stopSignal is only closed once
+	stopSignal    chan struct{}  // Signals output readers to exit before process termination
+	done          chan struct{}  // Closed after cmd.Wait returns and lifecycle cleanup finishes
+	outputReaders sync.WaitGroup // Tracks output readers owned by the runner
+	pgid          int
+	lifecycle     processLifecycleHandle
+	waitErr       error
+	reapErr       error
+	mu            sync.Mutex // Protects info fields during updates
 }
 
 type workspaceStreamNotifier interface {
@@ -181,6 +197,9 @@ type ProcessRunner struct {
 
 	mu               sync.RWMutex               // Protects processes map
 	processes        map[string]*commandProcess // Active processes by ID
+	completed        map[string]*commandProcess // Retained idempotent terminal processes
+	completedOrder   []string
+	requestIndex     map[string]*commandProcess
 	admission        sync.RWMutex
 	stopping         bool
 	groupAliveFn     func(int) bool
@@ -215,6 +234,8 @@ func NewProcessRunner(workspaceTracker *WorkspaceTracker, log *logger.Logger, bu
 		workspaceTracker: notifier,
 		bufferMaxBytes:   bufferMaxBytes,
 		processes:        make(map[string]*commandProcess),
+		completed:        make(map[string]*commandProcess),
+		requestIndex:     make(map[string]*commandProcess),
 	}
 }
 
@@ -270,13 +291,20 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	if req.Command == "" {
 		return nil, fmt.Errorf("command is required")
 	}
+	req.RequestID = strings.TrimSpace(req.RequestID)
+	fingerprint := processRequestFingerprint(req)
 
 	id := uuid.New().String()
 	now := time.Now().UTC()
 
 	// Execute command through the system shell (Unix: sh -lc, Windows: cmd /c)
 	prog, shellArgs := shellExecArgs(req.Command)
-	cmd := exec.CommandContext(ctx, prog, shellArgs...)
+	processCtx := ctx
+	var cancel context.CancelFunc
+	if req.Timeout > 0 {
+		processCtx, cancel = context.WithTimeout(ctx, req.Timeout)
+	}
+	cmd := exec.CommandContext(processCtx, prog, shellArgs...)
 	if req.WorkingDir != "" {
 		cmd.Dir = req.WorkingDir
 	}
@@ -284,15 +312,24 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	// Create new process group for clean shutdown (allows killing entire subprocess tree)
 	setManagedProcGroup(cmd)
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("failed to attach stdout: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	cmd.Stdout = stdoutWriter
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("failed to attach stderr: %w", err)
 	}
+	cmd.Stderr = stderrWriter
 
 	bufferMaxBytes := req.BufferMaxBytes
 	if bufferMaxBytes <= 0 {
@@ -311,14 +348,41 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 			StartedAt:  now,
 			UpdatedAt:  now,
 		},
-		cmd:        cmd,
-		buffer:     newRingBuffer(bufferMaxBytes),
-		stopSignal: make(chan struct{}),
-		done:       make(chan struct{}),
+		requestID:   req.RequestID,
+		fingerprint: fingerprint,
+		cmd:         cmd,
+		processCtx:  processCtx,
+		cancel:      cancel,
+		buffer:      newRingBuffer(bufferMaxBytes),
+		stopSignal:  make(chan struct{}),
+		done:        make(chan struct{}),
 	}
 
 	r.mu.Lock()
+	if r.processes == nil {
+		r.processes = make(map[string]*commandProcess)
+	}
+	if r.completed == nil {
+		r.completed = make(map[string]*commandProcess)
+	}
+	if r.requestIndex == nil {
+		r.requestIndex = make(map[string]*commandProcess)
+	}
+	existing, identityErr := r.findExistingRequestLocked(req.RequestID, fingerprint)
+	if identityErr != nil {
+		r.mu.Unlock()
+		discardUnadmittedProcess(stdout, stderr, cancel)
+		return nil, identityErr
+	}
+	if existing != nil {
+		r.mu.Unlock()
+		discardUnadmittedProcess(stdout, stderr, cancel)
+		return existing, nil
+	}
 	r.processes[id] = proc
+	if req.RequestID != "" {
+		r.requestIndex[req.RequestID] = proc
+	}
 	r.mu.Unlock()
 
 	r.logger.Debug("process start requested",
@@ -331,12 +395,38 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 
 	r.publishStatus(proc)
 
-	if err := r.startAndActivate(proc, cmd, id, stdout, stderr, true, true); err != nil {
+	if err := r.startAndActivate(
+		proc, cmd, id, stdout, stderr,
+		[]io.Closer{stdoutWriter, stderrWriter}, true, true,
+	); err != nil {
 		return nil, err
 	}
 
 	info := proc.snapshot(false)
 	return &info, nil
+}
+
+func (r *ProcessRunner) findExistingRequestLocked(requestID, fingerprint string) (*ProcessInfo, error) {
+	if requestID == "" {
+		return nil, nil
+	}
+	existing, ok := r.requestIndex[requestID]
+	if !ok {
+		return nil, nil
+	}
+	if existing.fingerprint != fingerprint {
+		return nil, fmt.Errorf("%w: %s", ErrProcessRequestIdentityConflict, requestID)
+	}
+	info := existing.snapshot(false)
+	return &info, nil
+}
+
+func discardUnadmittedProcess(stdout, stderr io.Closer, cancel context.CancelFunc) {
+	_ = stdout.Close()
+	_ = stderr.Close()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // startAndActivate starts the command and transitions the process to running state.
@@ -346,9 +436,11 @@ func (r *ProcessRunner) startAndActivate(
 	cmd *exec.Cmd,
 	id string,
 	stdout, stderr io.ReadCloser,
+	outputWriters []io.Closer,
 	consumeStdout, consumeStderr bool,
 ) error {
 	if err := cmd.Start(); err != nil {
+		closeOutputWriters(outputWriters)
 		if proc.stdin != nil {
 			_ = proc.stdin.Close()
 		}
@@ -361,10 +453,15 @@ func (r *ProcessRunner) startAndActivate(
 		r.publishStatus(proc)
 		r.mu.Lock()
 		delete(r.processes, id)
+		r.retainCompletedProcessLocked(proc)
 		r.mu.Unlock()
+		if proc.cancel != nil {
+			proc.cancel()
+		}
 		close(proc.done)
 		return fmt.Errorf("failed to start process: %w", err)
 	}
+	closeOutputWriters(outputWriters)
 	lifecycle, err := installProcessLifecycle(cmd)
 	if err != nil {
 		if proc.stdin != nil {
@@ -380,7 +477,11 @@ func (r *ProcessRunner) startAndActivate(
 		r.publishStatus(proc)
 		r.mu.Lock()
 		delete(r.processes, id)
+		r.retainCompletedProcessLocked(proc)
 		r.mu.Unlock()
+		if proc.cancel != nil {
+			proc.cancel()
+		}
 		close(proc.done)
 		return errors.Join(fmt.Errorf("failed to install workspace process lifecycle: %w", err), reapErr)
 	}
@@ -392,13 +493,27 @@ func (r *ProcessRunner) startAndActivate(
 	proc.mu.Unlock()
 	r.publishStatus(proc)
 	if consumeStdout {
-		go r.readOutput(proc, stdout, "stdout")
+		r.startOutputReader(proc, stdout, "stdout")
 	}
 	if consumeStderr {
-		go r.readOutput(proc, stderr, "stderr")
+		r.startOutputReader(proc, stderr, "stderr")
 	}
 	go r.wait(proc)
 	return nil
+}
+
+func (r *ProcessRunner) startOutputReader(proc *commandProcess, reader io.ReadCloser, stream string) {
+	proc.outputReaders.Add(1)
+	go func() {
+		defer proc.outputReaders.Done()
+		r.readOutput(proc, reader, stream)
+	}()
+}
+
+func closeOutputWriters(writers []io.Closer) {
+	for _, writer := range writers {
+		_ = writer.Close()
+	}
 }
 
 // Stop attempts to gracefully terminate a process, escalating to force-kill if needed.
@@ -523,6 +638,11 @@ func (r *ProcessRunner) StopAllAndWait(ctx context.Context) error {
 			}
 			if err := r.ensureProcessGroupReaped(ctx, proc); err != nil {
 				waitErrs = append(waitErrs, err)
+			} else {
+				// The initial wait completed without publishing because the
+				// process group was not yet reaped. Publish the terminal state
+				// only after this retry has released that ownership.
+				r.publishStatus(proc)
 			}
 		case <-ctx.Done():
 			waitErrs = append(waitErrs, fmt.Errorf("wait for workspace process %s: %w", proc.info.ID, ctx.Err()))
@@ -567,6 +687,28 @@ func (r *ProcessRunner) stopProcesses(ctx context.Context, processes []*commandP
 func (r *ProcessRunner) Get(id string, includeOutput bool) (*ProcessInfo, bool) {
 	proc, ok := r.get(id)
 	if !ok {
+		r.mu.RLock()
+		proc, ok = r.completed[id]
+		r.mu.RUnlock()
+		if !ok {
+			return nil, false
+		}
+	}
+	info := proc.snapshot(includeOutput)
+	return &info, true
+}
+
+// GetByRequestID retrieves an active or retained process by its stable start
+// request identity. It is used only to attach durable workflow runs after a
+// restart that interrupted process-ID persistence.
+func (r *ProcessRunner) GetByRequestID(requestID string, includeOutput bool) (*ProcessInfo, bool) {
+	if requestID == "" {
+		return nil, false
+	}
+	r.mu.RLock()
+	proc, ok := r.requestIndex[requestID]
+	r.mu.RUnlock()
+	if !ok || proc == nil {
 		return nil, false
 	}
 	info := proc.snapshot(includeOutput)
@@ -617,7 +759,7 @@ func (r *ProcessRunner) readOutput(proc *commandProcess, reader io.ReadCloser, s
 		if n > 0 {
 			chunk := ProcessOutputChunk{
 				Stream:    stream,
-				Data:      string(data[:n]),
+				Data:      strings.ToValidUTF8(string(data[:n]), "\uFFFD"),
 				Timestamp: time.Now().UTC(),
 			}
 			proc.buffer.append(chunk)
@@ -632,36 +774,45 @@ func (r *ProcessRunner) readOutput(proc *commandProcess, reader io.ReadCloser, s
 	}
 }
 
-// wait blocks until the process exits, then updates final status and cleans up.
+// wait blocks until the process exits, then reaps the process group before
+// publishing the final status.
 //
 // This runs in a background goroutine spawned by Start(). Responsibilities:
 //  1. Wait for process termination (blocks on cmd.Wait())
 //  2. Extract exit code from process state
 //  3. Determine final status: "exited" (code 0) vs "failed" (non-zero)
-//  4. Publish final status update to WebSocket clients
-//  5. Remove process from tracking map (makes ID unavailable for future lookups)
+//  4. Reap the complete process group
+//  5. Publish final status update to WebSocket clients
 //
 // Exit Code Extraction:
 //   - Success (exit code 0): Status = "exited"
 //   - Failure (exit code != 0): Status = "failed"
 //   - If exit code cannot be determined: Defaults to 1
 //
-// Cleanup Strategy:
-//   - Process is removed from r.processes after exit
-//   - This prevents Get() from returning stale/completed processes
-//   - Output is lost after removal (not persisted beyond memory)
-//   - Clients should stream output in real-time or call Get(id, true) before exit
+// Retention Strategy:
+//   - A completed process remains in the request-id index for idempotent
+//     recovery and bounded output lookup.
+//   - The terminal record is not published until the complete process group is
+//     reaped, so a caller never observes completion while descendants remain.
 //
 // Goroutine Safety:
 //   - Each process has exactly one wait() goroutine
 //   - wait() is the sole authority for final status updates
-//   - Cleanup happens after a delay to allow polling
+//   - The retained terminal record is removed by the existing retention cleanup.
 func (r *ProcessRunner) wait(proc *commandProcess) {
 	defer close(proc.done)
+	if proc.cancel != nil {
+		defer proc.cancel()
+	}
 	err := proc.cmd.Wait()
 	exitCode := 0
 	status := types.ProcessStatusExited
-	if err != nil {
+	if proc.processCtx != nil && errors.Is(proc.processCtx.Err(), context.DeadlineExceeded) {
+		status = types.ProcessStatusTimedOut
+		if err != nil {
+			exitCode = 1
+		}
+	} else if err != nil {
 		// Extract exit code from error
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
@@ -679,22 +830,39 @@ func (r *ProcessRunner) wait(proc *commandProcess) {
 		zap.Error(err),
 	)
 
-	// Update process info with final status
+	// Record the wait error before cleanup so piped callers can inspect it after
+	// the done channel closes, even if process-group reaping needs a retry.
 	proc.mu.Lock()
 	proc.waitErr = err
+	proc.mu.Unlock()
+
+	// A terminal process remains owned by the runner until its full process
+	// group is reaped. Do not publish the terminal state before that boundary:
+	// consumers may release the workspace as soon as they receive this event.
+	if err := r.ensureProcessGroupReaped(context.Background(), proc); err != nil {
+		proc.mu.Lock()
+		proc.reapErr = err
+		proc.info.Status = status
+		proc.info.ExitCode = &exitCode
+		proc.info.UpdatedAt = time.Now().UTC()
+		proc.mu.Unlock()
+		r.logger.Error("workspace process group was not reaped",
+			zap.String("process_id", proc.info.ID), zap.Error(err))
+		return
+	}
+
+	// cmd.Wait can return before the runner-owned stdout/stderr readers have
+	// appended their final bytes. Publish terminal state only after those
+	// readers finish so retained output is complete when callers observe it.
+	proc.outputReaders.Wait()
+	proc.mu.Lock()
 	proc.info.Status = status
 	proc.info.ExitCode = &exitCode
 	proc.info.UpdatedAt = time.Now().UTC()
 	proc.mu.Unlock()
 
-	// Publish final status to WebSocket clients
+	// Publish final status to WebSocket clients only after process-group reap.
 	r.publishStatus(proc)
-
-	if err := r.ensureProcessGroupReaped(context.Background(), proc); err != nil {
-		proc.mu.Lock()
-		proc.reapErr = err
-		proc.mu.Unlock()
-	}
 }
 
 func (r *ProcessRunner) ensureProcessGroupReaped(ctx context.Context, proc *commandProcess) error {
@@ -727,8 +895,35 @@ func (r *ProcessRunner) ensureProcessGroupReaped(ctx context.Context, proc *comm
 	if r.processes[proc.info.ID] == proc {
 		delete(r.processes, proc.info.ID)
 	}
+	r.retainCompletedProcessLocked(proc)
 	r.mu.Unlock()
 	return nil
+}
+
+func (r *ProcessRunner) retainCompletedProcessLocked(proc *commandProcess) {
+	if proc.requestID == "" {
+		return
+	}
+	if r.completed == nil {
+		r.completed = make(map[string]*commandProcess)
+	}
+	if r.requestIndex == nil {
+		r.requestIndex = make(map[string]*commandProcess)
+	}
+	if _, exists := r.completed[proc.info.ID]; exists {
+		return
+	}
+	r.completed[proc.info.ID] = proc
+	r.completedOrder = append(r.completedOrder, proc.info.ID)
+	for len(r.completedOrder) > maxRetainedIdempotentProcesses {
+		oldID := r.completedOrder[0]
+		r.completedOrder = r.completedOrder[1:]
+		old := r.completed[oldID]
+		delete(r.completed, oldID)
+		if old != nil && r.requestIndex[old.requestID] == old {
+			delete(r.requestIndex, old.requestID)
+		}
+	}
 }
 
 func (r *ProcessRunner) processGroupAlive(pid int) bool {
@@ -828,6 +1023,7 @@ func (p *commandProcess) snapshot(includeOutput bool) ProcessInfo {
 	info := p.info
 	if includeOutput && p.buffer != nil {
 		info.Output = p.buffer.snapshot()
+		info.OutputTruncated = p.buffer.wasTruncated()
 	}
 	return info
 }

@@ -65,6 +65,14 @@ func TestRingBufferTrimsOldest(t *testing.T) {
 	}
 }
 
+func TestRingBufferReportsWhenOutputWasTruncated(t *testing.T) {
+	buffer := newRingBuffer(3)
+	buffer.append(ProcessOutputChunk{Stream: "stdout", Data: "abcd", Timestamp: time.Now()})
+	if !buffer.wasTruncated() {
+		t.Fatal("expected an oversized chunk to mark the buffer truncated")
+	}
+}
+
 func TestProcessRunnerCapturesOutput(t *testing.T) {
 	log := newTestLogger(t)
 	runner := NewProcessRunner(nil, log, 2*1024*1024)

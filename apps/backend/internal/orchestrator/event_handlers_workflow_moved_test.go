@@ -1032,17 +1032,30 @@ func TestProcessStepExitAndEnter(t *testing.T) {
 	t.Run("handles missing to-step", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
+		if err := repo.UpdateSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true}); err != nil {
+			t.Fatalf("set plan mode: %v", err)
+		}
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
 			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{},
+			Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{
+				{Type: wfmodels.OnExitDisablePlanMode},
+			}},
 		}
 		// to-step not registered
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		// Should not panic
-		svc.processStepExitAndEnter(ctx, "t1", session, "step1", "nonexistent", "test task")
+		if err := svc.processStepExitAndEnter(ctx, "t1", session, "step1", "nonexistent", "test task"); err == nil {
+			t.Fatal("expected missing target step error")
+		}
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		if planMode, _ := updated.Metadata["plan_mode"].(bool); !planMode {
+			t.Fatal("source on_exit ran before missing target validation")
+		}
 	})
 }

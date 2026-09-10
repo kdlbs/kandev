@@ -98,6 +98,12 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 			zap.String("session_state", string(session.State)))
 		return
 	}
+	// Passthrough prompts are written directly to the PTY, so they do not pass
+	// through PromptTask's durable-turn admission. Start or adopt the turn here
+	// while the running event still represents the prompt that caused it. This
+	// gives the matching ready event a unique completion identity for workflow
+	// idempotency and keeps successive PTY prompts from sharing one operation ID.
+	s.startTurnForSession(ctx, data.SessionID)
 	s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
 
 	// Move session to running and task to in progress.
@@ -917,6 +923,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	}
 
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
+	transitioned := false
 	if completionFollowUp {
 		// A completed task's explicit follow-up turn is conversational only. It
 		// must become promptable again without re-evaluating the final step's
@@ -926,7 +933,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		// Check for workflow transition based on session's current step.
 		// Uses the engine when available; falls back to legacy evaluation.
 		// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-		transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+		completionOperationID := turnAtEventFire
+		if completionOperationID == "" {
+			completionOperationID = fmt.Sprintf("agent-ready:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+		}
+		transitioned = s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session, completionOperationID)
 
 		// When a workflow transition occurred (e.g. Work → Review), the new step's
 		// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
@@ -1810,7 +1821,16 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		return
 	}
 
-	s.finishAgentCompleted(ctx, data, session, guard)
+	completionOperationID, turnErr := s.peekActiveTurnID(ctx, data.SessionID)
+	if turnErr != nil {
+		s.logger.Debug("could not capture active turn for agent.completed workflow occurrence",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(turnErr))
+	}
+	if completionOperationID == "" {
+		completionOperationID = fmt.Sprintf("agent-completed:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	}
+
+	s.finishAgentCompleted(ctx, data, session, guard, completionOperationID)
 }
 
 func (s *Service) finishAgentCompleted(
@@ -1818,6 +1838,7 @@ func (s *Service) finishAgentCompleted(
 	data watcher.AgentEventData,
 	session *models.TaskSession,
 	guard *lockedCancelInFlightGuard,
+	completionOperationID string,
 ) {
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	// A successful, still-live completion clears retry state and scheduler
@@ -1849,9 +1870,11 @@ func (s *Service) finishAgentCompleted(
 		return
 	}
 
-	transitioned := !completionFollowUp &&
-		!s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) &&
-		s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+	transitioned := false
+	if !completionFollowUp {
+		transitioned = !s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) &&
+			s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session, completionOperationID)
+	}
 	s.finishAgentCompletedTurn(ctx, data, session, transitioned, completionFollowUp, guard)
 }
 

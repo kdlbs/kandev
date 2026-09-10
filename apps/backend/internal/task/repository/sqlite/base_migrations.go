@@ -314,6 +314,9 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
 	_ = r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'park'`)
 	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
+	if err := r.migrate.Apply("workflow_script_runs.workflow_step_name", `ALTER TABLE workflow_script_runs ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
@@ -372,6 +375,9 @@ func (r *Repository) runMigrations() error {
 			last_seq INTEGER NOT NULL
 		)`)
 	if err := r.backfillPromptSeq(); err != nil {
+		return err
+	}
+	if err := r.migrateTaskSessionMessagesTurnNullable(); err != nil {
 		return err
 	}
 

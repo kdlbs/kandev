@@ -294,6 +294,7 @@ func (r *Repository) executeBoundaryTransaction(
 func (r *Repository) GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
+	var turnID sql.NullString
 	var messageType string
 	var metadataJSON string
 	query := `
@@ -303,13 +304,14 @@ func (r *Repository) GetMessageWithPromptIndex(ctx context.Context, id string) (
 		FROM task_session_messages
 		WHERE id = ?`
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), id).Scan(
-		&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+		&message.ID, &message.TaskSessionID, &message.TaskID, &turnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt,
 		&message.PromptIndex,
 	)
 	if err != nil {
 		return nil, err
 	}
+	message.TurnID = turnID.String
 	message.RequestsInput = requestsInput == 1
 	message.Type = models.MessageType(messageType)
 	if metadataJSON != "" && metadataJSON != "{}" {

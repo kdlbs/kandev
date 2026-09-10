@@ -208,7 +208,10 @@ func TestPollModeGrace_StopJoinsFinalScan(t *testing.T) {
 		return types.GitStatusUpdate{}, ctx.Err()
 	}
 
-	wt.Start(context.Background())
+	// Start only the grace callback here. The monitor and Git-poll loops have
+	// their own lifecycle coverage and can race this teardown on Windows while
+	// the test is waiting for the interactive final scan.
+	wt.armPollModeGrace()
 	<-finalScanStarted
 	wt.Stop()
 

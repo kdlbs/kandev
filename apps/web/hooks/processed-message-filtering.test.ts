@@ -120,6 +120,11 @@ describe("isSuccessfulScriptExecutionMetadata", () => {
     expect(isSuccessfulScriptExecutionMetadata({ status: "exited", exit_code: 1 })).toBe(false);
     expect(isSuccessfulScriptExecutionMetadata({ status: "running" })).toBe(false);
   });
+
+  it("recognizes the terminal success status used by workflow scripts", () => {
+    expect(isSuccessfulScriptExecutionMetadata({ status: "succeeded", exit_code: 0 })).toBe(true);
+    expect(isSuccessfulScriptExecutionMetadata({ status: "succeeded", exit_code: 1 })).toBe(false);
+  });
 });
 
 function baseMessage(overrides: Partial<Message>): Message {

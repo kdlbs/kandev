@@ -16,6 +16,7 @@ var sessionShapedActionKinds = map[ActionKind]bool{
 	ActionAutoStartAgent:    true,
 	ActionResetAgentContext: true,
 	ActionSetSessionMode:    true,
+	ActionRunScript:         true,
 }
 
 // sessionIndependentActionKinds are the step-entry action kinds

@@ -57,6 +57,29 @@ func (testStepNotFound) Error() string { return "step not found" }
 
 var errStepNotFoundForTest = testStepNotFound{}
 
+type workflowMoveLifecycleGateFake struct {
+	calls      int
+	taskID     string
+	fromStepID string
+	toStepID   string
+	sessionID  string
+	occurrence string
+	err        error
+}
+
+func (f *workflowMoveLifecycleGateFake) BeforeWorkflowMove(
+	_ context.Context,
+	taskID, fromStepID, toStepID, sessionID, occurrenceID string,
+) error {
+	f.calls++
+	f.taskID = taskID
+	f.fromStepID = fromStepID
+	f.toStepID = toStepID
+	f.sessionID = sessionID
+	f.occurrence = occurrenceID
+	return f.err
+}
+
 // TestService_SetWorkflowHidden_HealsStaleRecord verifies the helper used by
 // the improve-kandev bootstrap to flip Hidden=true on workflows created
 // before the flag was honored on insert.
@@ -464,6 +487,75 @@ func TestService_MoveTaskWithOptionsAllowsRunningPrimarySession(t *testing.T) {
 	transitionID, ok := data["step_transition_id"].(int64)
 	if !ok || transitionID == 0 {
 		t.Fatalf("step_transition_id = %v (%T), want a positive ledger identifier", data["step_transition_id"], data["step_transition_id"])
+	}
+}
+
+func TestService_MoveTaskWithOptionsBlocksBeforeCommitWhenLifecycleGateFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-gated-move", "wf-source", "step-source", nil)
+	createMoveSession(t, ctx, repo, "session-gated-move", "task-gated-move", models.TaskSessionStateRunning, models.ReviewStatusNone)
+
+	gateErr := errors.New("source exit blocked")
+	gate := &workflowMoveLifecycleGateFake{err: gateErr}
+	svc.SetWorkflowMoveLifecycleGate(gate)
+	eventBus.ClearEvents()
+
+	_, err := svc.MoveTaskWithOptions(ctx, "task-gated-move", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		AllowActivePrimarySession: true,
+	})
+	if err == nil || !errors.Is(err, gateErr) {
+		t.Fatalf("MoveTaskWithOptions error = %v, want lifecycle gate error", err)
+	}
+	if gate.calls != 1 || gate.taskID != "task-gated-move" || gate.fromStepID != "step-source" ||
+		gate.toStepID != "step-review-target" || gate.sessionID != "session-gated-move" || gate.occurrence == "" {
+		t.Fatalf("unexpected lifecycle gate call: %+v", gate)
+	}
+
+	stored, err := repo.GetTask(ctx, "task-gated-move")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if stored.WorkflowStepID != "step-source" {
+		t.Fatalf("task step = %q after blocked move, want step-source", stored.WorkflowStepID)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TaskMoved {
+			t.Fatal("blocked move published task.moved")
+		}
+	}
+}
+
+func TestService_MoveTaskWithOptionsCarriesLifecycleOccurrenceIntoMoveEvent(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-gated-success", "wf-source", "step-source", nil)
+	createMoveSession(t, ctx, repo, "session-gated-success", "task-gated-success", models.TaskSessionStateRunning, models.ReviewStatusNone)
+
+	gate := &workflowMoveLifecycleGateFake{}
+	svc.SetWorkflowMoveLifecycleGate(gate)
+
+	_, err := svc.MoveTaskWithOptions(ctx, "task-gated-success", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		AllowActivePrimarySession: true,
+	})
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if gate.occurrence == "" {
+		t.Fatal("lifecycle gate did not receive an occurrence ID")
+	}
+
+	event := findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskMoved)
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", event.Data)
+	}
+	if got := data["workflow_step_occurrence_id"]; got != gate.occurrence {
+		t.Fatalf("workflow_step_occurrence_id = %v, want %q", got, gate.occurrence)
 	}
 }
 
