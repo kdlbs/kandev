@@ -6,7 +6,6 @@ import type { CommandPanelMode } from "@/lib/commands/types";
 import type { Task } from "@/lib/types/http";
 import { MODE_COMMANDS, MODE_SEARCH_TASKS } from "@/components/command-panel-results";
 
-const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 /** Task rows previewed alongside the commands in the commands scope. */
 const TASK_PREVIEW_SIZE = 5;
 /** Task rows listed in the dedicated tasks scope. */
@@ -45,7 +44,7 @@ type ActiveTaskQuery = {
   resultLimit: number;
 };
 
-/** Active tasks for the idle palette: no backlog or done steps, workflow order. */
+/** Unarchived task preview for the idle palette, ordered by workflow step. */
 async function fetchActiveTasks(query: ActiveTaskQuery): Promise<Task[]> {
   const { workspaceId, signal, visibleStepIds, stepPositionMap, resultLimit } = query;
   // Deliberately over-fetched: the step and archived filters below run on the
@@ -57,8 +56,7 @@ async function fetchActiveTasks(query: ActiveTaskQuery): Promise<Task[]> {
     { init: { signal } },
   );
   const tasks = (res.tasks ?? []).filter(
-    (t) =>
-      (!visibleStepIds || visibleStepIds.has(t.workflow_step_id)) && !ARCHIVED_STATES.has(t.state),
+    (t) => (!visibleStepIds || visibleStepIds.has(t.workflow_step_id)) && t.archived_at == null,
   );
   tasks.sort(
     (a, b) =>
@@ -68,23 +66,33 @@ async function fetchActiveTasks(query: ActiveTaskQuery): Promise<Task[]> {
   return tasks.slice(0, resultLimit);
 }
 
-/** Task search results, archived matches last. */
+/** Task search results, with archived matches fetched only as a fallback. */
 async function fetchMatchingTasks(
   workspaceId: string,
   query: string,
   resultLimit: number,
   signal: AbortSignal,
 ): Promise<Task[]> {
-  const res = await listTasksByWorkspace(
+  const activeResponse = await listTasksByWorkspace(
     workspaceId,
-    { query, page: 1, pageSize: resultLimit, includeArchived: true },
+    { query, page: 1, pageSize: resultLimit },
     { init: { signal } },
   );
-  const tasks = res.tasks ?? [];
-  tasks.sort(
-    (a, b) => (ARCHIVED_STATES.has(a.state) ? 1 : 0) - (ARCHIVED_STATES.has(b.state) ? 1 : 0),
+  const activeTasks = (activeResponse.tasks ?? []).filter((task) => task.archived_at == null);
+  if (activeTasks.length >= resultLimit) return activeTasks.slice(0, resultLimit);
+
+  const archivedResponse = await listTasksByWorkspace(
+    workspaceId,
+    {
+      query,
+      page: 1,
+      pageSize: resultLimit - activeTasks.length,
+      onlyArchived: true,
+    },
+    { init: { signal } },
   );
-  return tasks;
+  const archivedTasks = (archivedResponse.tasks ?? []).filter((task) => task.archived_at != null);
+  return [...activeTasks, ...archivedTasks].slice(0, resultLimit);
 }
 
 export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
@@ -109,7 +117,7 @@ export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
 
-    // No search: load active tasks (excluding backlog + done steps)
+    // No search: load unarchived tasks in the visible workflow steps.
     if (!search.trim()) {
       if (!open || !workspaceId) {
         setTaskResults([]);

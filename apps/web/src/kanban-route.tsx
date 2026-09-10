@@ -82,7 +82,13 @@ function useKanbanWorkspaceMismatchRedirect(route: KanbanRouteSelection): string
   return redirectHref;
 }
 
-function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
+/**
+ * Hydrates workspaces, workflows and repositories for a board-backed route.
+ * Exported because Threads renders the same workspace data from a different
+ * arrangement, and a second bootstrap would be a second source of truth for
+ * which workspace is active.
+ */
+export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
   const store = useAppStoreApi();
 
   useEffect(() => {

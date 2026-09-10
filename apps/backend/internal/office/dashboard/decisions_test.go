@@ -165,6 +165,9 @@ func TestRequestTaskChanges_QueuesAssigneeRun(t *testing.T) {
 	if got.DecisionComment != "tighten the diff" {
 		t.Errorf("comment lost: %q", got.DecisionComment)
 	}
+	if got.IdempotencyKey == "" || !strings.HasPrefix(got.IdempotencyKey, "decision:") {
+		t.Errorf("idempotency key = %q, want a decision-scoped key", got.IdempotencyKey)
+	}
 }
 
 // TestApproveTask_QueuesReadyToCloseOnFinalApproval — when the last
@@ -543,7 +546,7 @@ func TestInbox_TaskReviewRequest_IgnoresRunnerOnlyTask(t *testing.T) {
 // mustAddParticipant inserts a participant row directly via the repo.
 func mustAddParticipant(t *testing.T, deps *testDeps, taskID, agentID, role string) {
 	t.Helper()
-	if err := deps.repo.AddTaskParticipant(context.Background(), taskID, agentID, role); err != nil {
+	if _, err := deps.repo.AddTaskParticipant(context.Background(), taskID, agentID, role); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
 }

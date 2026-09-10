@@ -103,6 +103,7 @@ func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason strin
 	if err := s.repo.CancelRun(ctx, run.ID, reason); err != nil {
 		return err
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	s.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	return nil
 }
@@ -115,6 +116,7 @@ func (s *Service) escalateFailure(
 	if err := s.FailRun(ctx, run.ID); err != nil {
 		return fmt.Errorf("fail run: %w", err)
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 
 	agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID)
 	if err != nil {
@@ -168,9 +170,10 @@ func (s *Service) queueCEOAgentError(
 		return
 	}
 	payload := mustJSON(map[string]string{
-		"agent_profile_id": run.AgentProfileID,
-		"run_id":           run.ID,
-		"error":            errMsg,
+		"failed_agent_id":   run.AgentProfileID,
+		"failed_session_id": run.SessionID,
+		"run_id":            run.ID,
+		"error":             errMsg,
 	})
 	_ = s.QueueRun(ctx, ceos[0].ID, RunReasonAgentError, payload, "")
 }

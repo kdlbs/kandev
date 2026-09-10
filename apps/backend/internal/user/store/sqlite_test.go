@@ -227,6 +227,42 @@ func TestScanUserSettingsPreservesExplicitEmptySidebarSettings(t *testing.T) {
 	}
 }
 
+func TestSidebarTaskColorAutomationStorageRoundTripAndMalformedFallback(t *testing.T) {
+	raw := `{"sidebar_task_color_automation":{"enabled":true,"rules":[{"id":"blocked","enabled":true,"condition":{"dimension":"task_state","value":"BLOCKED","label":"Blocked"},"output":{"kind":"fixed","color":"red"}}]}}`
+	settings, err := scanUserSettings(settingsScanner{raw: raw}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan automatic colors: %v", err)
+	}
+	if !settings.SidebarTaskColorAutomation.Enabled || len(settings.SidebarTaskColorAutomation.Rules) != 1 {
+		t.Fatalf("automatic colors = %#v, want enabled rule", settings.SidebarTaskColorAutomation)
+	}
+	encoded, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatalf("marshal automatic colors: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode normalized settings: %v", err)
+	}
+	if got := payload["sidebar_task_color_automation"].(map[string]any)["enabled"]; got != true {
+		t.Fatalf("stored automatic colors enabled = %#v, want true", got)
+	}
+
+	for _, malformed := range []string{
+		`{"sidebar_task_color_automation":null}`,
+		`{"sidebar_task_color_automation":{"enabled":true,"rules":"bad"}}`,
+		`{"sidebar_task_color_automation":{"enabled":true,"rules":[{"id":"bad","enabled":true,"condition":{"dimension":"task_state","value":null},"output":{"kind":"fixed","color":"red"}}]}}`,
+	} {
+		settings, err := scanUserSettings(settingsScanner{raw: malformed}, DefaultUserID)
+		if err != nil {
+			t.Fatalf("scan malformed automatic colors %q: %v", malformed, err)
+		}
+		if settings.SidebarTaskColorAutomation.Enabled || len(settings.SidebarTaskColorAutomation.Rules) != 0 {
+			t.Fatalf("malformed automatic colors = %#v, want disabled empty default", settings.SidebarTaskColorAutomation)
+		}
+	}
+}
+
 // TestScanUserSettingsChangesPanelLayoutDefault verifies changes_panel_layout defaults to tree and preserves an explicit flat value.
 func TestScanUserSettingsChangesPanelLayoutDefault(t *testing.T) {
 	t.Run("empty settings default to tree", func(t *testing.T) {

@@ -4,6 +4,7 @@ import {
   linkToTask,
   linkToTaskOverview,
   linkToTasks,
+  linkToThreads,
   normalizePathname,
   replaceTaskUrl,
 } from "./links";
@@ -39,6 +40,20 @@ describe("task links", () => {
     replaceTaskUrl("task-123");
 
     expect(replaceState).toHaveBeenCalledWith({}, "", "/t/task-123");
+  });
+});
+
+describe("Threads links", () => {
+  it("carries the task and selected session for a Threads deep link", () => {
+    expect(linkToThreads("workspace-123", "task-123", "session-123")).toBe(
+      "/threads?workspace=workspace-123&taskId=task-123&sessionId=session-123",
+    );
+  });
+
+  it("does not emit a session parameter without a task", () => {
+    expect(linkToThreads("workspace-123", undefined, "session-123")).toBe(
+      "/threads?workspace=workspace-123",
+    );
   });
 });
 

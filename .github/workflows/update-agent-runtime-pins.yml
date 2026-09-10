@@ -2,16 +2,18 @@ name: Update managed runtime pins
 
 on:
   schedule:
-    # Refresh the reviewed runtime pins every Monday at 06:17 UTC, then open
+    # Refresh the reviewed runtime pins every Friday at 09:00 UTC, then open
     # or refresh the single grouped updater PR when a stable version changes.
-    - cron: "17 6 * * 1"
+    - cron: "0 9 * * 5"
   workflow_dispatch:
 
-# The job mints a narrower GitHub App token only after checkout. The default
-# workflow token is never used to create the generated PR, so its events retain
-# the repository's normal CI behavior.
+# The job uses the repository-scoped workflow token for the branch, PR, and
+# explicit validation-workflow dispatches. A GITHUB_TOKEN-created push or PR
+# does not recursively trigger push/pull_request workflows.
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+  actions: write
 
 concurrency:
   group: managed-runtime-pin-update
@@ -21,8 +23,6 @@ jobs:
   update:
     name: Open managed runtime pin PR
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     env:
       BOT_BRANCH: automation/update-managed-runtime-pins
 
@@ -42,18 +42,9 @@ jobs:
       - name: Test pin updater
         run: node --test scripts/update-agent-runtime-pins.test.mjs
 
-      - name: Create managed runtime pin App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.MANAGED_RUNTIME_PIN_APP_CLIENT_ID }}
-          private-key: ${{ secrets.MANAGED_RUNTIME_PIN_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
       - name: Configure git authentication
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: gh auth setup-git
 
       - name: Prepare stable bot branch
@@ -74,7 +65,7 @@ jobs:
       - name: Commit and push one grouped change
         if: steps.update.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "kandev-runtime-updater[bot]"
@@ -89,7 +80,7 @@ jobs:
       - name: Create or refresh the single grouped PR
         if: steps.update.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cat > /tmp/managed-runtime-pin-pr-body.md <<'EOF'
@@ -113,3 +104,25 @@ jobs:
               --title "chore: update managed runtime pins" \
               --body-file /tmp/managed-runtime-pin-pr-body.md
           fi
+
+      # GITHUB_TOKEN-created push and pull-request events do not recursively
+      # start validation workflows. Dispatch the six required checks explicitly
+      # against the exact bot-branch commit after the PR exists.
+      - name: Dispatch required checks for generated PR
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in \
+            backend-tests.yml \
+            frontend-tests.yml \
+            e2e-tests.yml \
+            architecture-lint.yml \
+            lint-action-pinning.yml \
+            lint-harness-files.yml
+          do
+            gh workflow run "$workflow" \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref "$BOT_BRANCH"
+          done

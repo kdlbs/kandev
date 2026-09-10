@@ -1,3 +1,4 @@
+// Package infra provides infrastructure-level startup reconciliation for the office domain.
 package infra
 
 import (
@@ -32,6 +33,9 @@ func NewReconciler(repo *sqlite.Repository, log *logger.Logger) *Reconciler {
 // ReconcileAll runs every reconciliation step. Errors are logged, not returned,
 // so that startup is never blocked by a single reconciliation failure.
 func (r *Reconciler) ReconcileAll(ctx context.Context) {
+	if err := r.reconcileAgentWorkingStatus(ctx); err != nil {
+		r.logger.Warn("reconcile agent working status", zap.Error(err))
+	}
 	if err := r.reconcileAgentRuntime(ctx); err != nil {
 		r.logger.Warn("reconcile agent runtime", zap.Error(err))
 	}
@@ -44,6 +48,14 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) {
 	if err := r.reconcileChannels(ctx); err != nil {
 		r.logger.Warn("reconcile channels", zap.Error(err))
 	}
+}
+
+// reconcileAgentWorkingStatus clears the display projection for runs that no
+// longer have an active claim. This makes terminal status cleanup recoverable
+// after a process stop or a transient database error.
+func (r *Reconciler) reconcileAgentWorkingStatus(ctx context.Context) error {
+	_, err := r.repo.ReconcileAgentWorkingStatus(ctx)
+	return err
 }
 
 // reconcileAgentRuntime drops legacy runtime rows for agents that no longer

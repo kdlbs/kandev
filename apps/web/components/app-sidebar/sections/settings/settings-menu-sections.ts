@@ -6,6 +6,7 @@ import {
   IconCommand,
   IconCpu,
   IconDatabase,
+  IconBuilding,
   IconFlask,
   IconFolder,
   IconInfoCircle,
@@ -19,6 +20,7 @@ import {
   IconRobot,
   IconShieldLock,
   IconTerminal2,
+  IconSitemap,
   IconUsers,
   IconWand,
 } from "@tabler/icons-react";
@@ -37,6 +39,7 @@ import {
   SECRETS_SETTINGS_HREF,
   SYSTEM_ABOUT_SETTINGS_HREF,
   SYSTEM_DATA_STORAGE_SETTINGS_HREF,
+  SYSTEM_STORAGE_SETTINGS_HREF,
   SYSTEM_STATUS_SETTINGS_HREF,
   TASK_BEHAVIOR_SETTINGS_HREF,
   TERMINAL_EDITORS_SETTINGS_HREF,
@@ -69,7 +72,7 @@ export type SettingsMenuItem = {
    * the page that owns them.
    */
   activePrefixes?: string[];
-  requires?: "account" | "users";
+  requires?: "account" | "users" | "organizations";
   /** Rows whose page owns a list show its size as a trailing badge. */
   countKey?: MenuCountKey;
 };
@@ -173,6 +176,23 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
         icon: IconUsers,
         requires: "users",
       },
+      // An organization is a tenant boundary above users, so it belongs with
+      // the other who-can-reach-what settings rather than under System, which
+      // is instance operation. The href keeps its /settings/system/ prefix,
+      // like the Users row above it: these sections group by subject, not by
+      // URL.
+      {
+        href: "/settings/units",
+        labelKey: "settings:navUnits",
+        icon: IconSitemap,
+        requires: "users",
+      },
+      {
+        href: "/settings/system/organizations",
+        labelKey: "orgs:navOrganizations",
+        icon: IconBuilding,
+        requires: "organizations",
+      },
       {
         href: ACCOUNT_SECURITY_SETTINGS_HREF,
         labelKey: "sidebar:profileAndPassword",
@@ -195,6 +215,11 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
       {
         href: SYSTEM_DATA_STORAGE_SETTINGS_HREF,
         labelKey: "system:navDataStorage",
+        icon: IconDatabase,
+      },
+      {
+        href: SYSTEM_STORAGE_SETTINGS_HREF,
+        labelKey: "system:storageTitle",
         icon: IconDatabase,
       },
       {

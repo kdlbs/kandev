@@ -2,6 +2,7 @@ import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import type { KanbanState } from "../slices/kanban/types";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
+import { normalizeThreadViews } from "../slices/ui/thread-view-builtins";
 import {
   mergeHydratedQuickChatSessions,
   reconcileQuickTerminalTabs,
@@ -14,6 +15,11 @@ import {
   reconcileActiveTurnAfterHydrationDraft,
   seedSettledSessionBoundaries,
 } from "@/lib/state/slices/session/turn-actions";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import {
+  readMcpAttachmentHistory,
+  shouldReplaceMcpAttachmentHistory,
+} from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
@@ -144,6 +150,7 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.userSettings && shouldHydrateUserSettings(draft.userSettings, state.userSettings)) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
+    bridgeThreadViewsFromUserSettings(draft, state.userSettings);
   }
 }
 
@@ -187,6 +194,32 @@ function bridgeSidebarViewsFromUserSettings(
     const nextPrefs = { ...userSettings.sidebarTaskPrefs };
     if (draft.sidebarTaskPrefs.syncError) nextPrefs.syncError = draft.sidebarTaskPrefs.syncError;
     draft.sidebarTaskPrefs = nextPrefs;
+  }
+}
+
+/** Applies server-side Threads saved-view preferences without touching sidebar state. */
+function bridgeThreadViewsFromUserSettings(
+  draft: Draft<AppState>,
+  userSettings: Partial<AppState["userSettings"]>,
+): void {
+  const serverViews = userSettings.threadViews;
+  if (serverViews) {
+    const normalized = normalizeThreadViews(serverViews);
+    draft.threadViews.views = normalized;
+  }
+  if (
+    userSettings.threadActiveViewId &&
+    draft.threadViews.views.some((view) => view.id === userSettings.threadActiveViewId)
+  ) {
+    draft.threadViews.activeViewId = userSettings.threadActiveViewId;
+  } else if (
+    draft.threadViews.views.length > 0 &&
+    !draft.threadViews.views.some((view) => view.id === draft.threadViews.activeViewId)
+  ) {
+    draft.threadViews.activeViewId = draft.threadViews.views[0].id;
+  }
+  if (userSettings.threadViewDraft !== undefined) {
+    draft.threadViews.draft = userSettings.threadViewDraft;
   }
 }
 
@@ -425,6 +458,28 @@ function hydrateSessionRuntime(
     mergeSessionMap(target.bySessionId, source.bySessionId, activeSessionId, forceMergeSessionId);
   };
 
+  /** Hydrate MCP history without allowing a stale forced route snapshot to regress live evidence. */
+  const mergeHydratedMcpStatus = (source: Record<string, unknown> | undefined): void => {
+    if (!source) return;
+    const target = draft.sessionMcpStatus.bySessionId as unknown as Record<
+      string,
+      MCPAttachmentHistory
+    >;
+    for (const [sessionId, rawHistory] of Object.entries(source)) {
+      const shouldForceMerge = forceMergeSessionId === sessionId;
+      if (!shouldForceMerge && sessionId === activeSessionId) continue;
+
+      const incoming = readMcpAttachmentHistory(rawHistory);
+      if (!incoming) continue;
+
+      const existing = target[sessionId];
+      if (!shouldForceMerge && existing) continue;
+      if (shouldReplaceMcpAttachmentHistory(existing, incoming)) {
+        target[sessionId] = incoming;
+      }
+    }
+  };
+
   if (state.terminal) deepMerge(draft.terminal, state.terminal);
   if (state.shell) {
     mergeSessionMap(
@@ -454,7 +509,9 @@ function hydrateSessionRuntime(
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
   mergeBySession("sessionModels");
-  mergeBySession("sessionMcpStatus");
+  mergeHydratedMcpStatus(
+    state.sessionMcpStatus?.bySessionId as Record<string, unknown> | undefined,
+  );
   if (state.agents) deepMerge(draft.agents, state.agents);
   mergeBySession("prepareProgress");
 }

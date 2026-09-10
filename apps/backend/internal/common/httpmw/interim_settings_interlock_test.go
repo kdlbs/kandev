@@ -1,6 +1,7 @@
 package httpmw
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,6 +40,15 @@ func TestInterimSettingsInterlockRejectsMissingWrongBearerAndEmptyServerToken(t 
 
 			if response.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+			}
+			var body struct {
+				ErrorCode string `json:"error_code"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response body: %v", err)
+			}
+			if body.ErrorCode != InterimSettingsInterlockErrorCode {
+				t.Fatalf("error_code = %q, want %q", body.ErrorCode, InterimSettingsInterlockErrorCode)
 			}
 			if called {
 				t.Fatal("handler was called")

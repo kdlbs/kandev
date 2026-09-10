@@ -22,3 +22,13 @@ func TestMapUserSettingsStateIncludesAppStatusBarVisibility(t *testing.T) {
 		t.Fatalf("revision = %#v, want int64(42)", state["revision"])
 	}
 }
+func TestMapUserSettingsStateIncludesResolveSessionHostnames(t *testing.T) {
+	var response userdto.UserSettingsResponse
+	if err := json.Unmarshal([]byte(`{"settings":{"resolve_session_hostnames":true}}`), &response); err != nil {
+		t.Fatalf("decode user settings response: %v", err)
+	}
+	state := mapUserSettingsState(response, "workspace-1")
+	if got, ok := state["resolveSessionHostnames"].(bool); !ok || !got {
+		t.Fatalf("resolveSessionHostnames = %#v, want true", state["resolveSessionHostnames"])
+	}
+}

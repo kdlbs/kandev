@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/office/approvals"
 	"github.com/kandev/kandev/internal/office/channels"
 	officeconfig "github.com/kandev/kandev/internal/office/config"
+	"github.com/kandev/kandev/internal/office/configsync"
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/labels"
@@ -233,6 +234,7 @@ func officeTestServices() *office.Services {
 		Approvals:    &approvals.ApprovalService{},
 		Channels:     &channels.ChannelService{},
 		Config:       &officeconfig.ConfigService{},
+		ConfigSync:   &configsync.Service{},
 		Dashboard:    &dashboard.DashboardService{},
 		Labels:       &labels.LabelService{},
 		Onboarding:   &onboarding.OnboardingService{},

@@ -59,8 +59,8 @@ None.
 
 ## Acceptance Criteria
 
-- Structured `BuildCommand`, `Runtime().Cmd`, and one-shot inference remain
-  `npx -y pi-acp`.
+- Structured `BuildCommand`, `Runtime().Cmd`, and one-shot inference use
+  `npx --yes --prefer-offline pi-acp@<effective-version>`.
 - Passthrough lifecycle command resolution returns `pi`, including the path
   that materializes Pi's project MCP configuration.
 - Pi discovery requires `pi`, and installation runs exactly
@@ -89,7 +89,8 @@ regression, and documentation describe one coupled behavior.
   because adapter-only installation cannot run passthrough.
 - The package is installed with `--ignore-scripts` exactly as reported. The
   implementation must not relax or remove that safety flag.
-- No package version-management support is added for `pi-acp` in this repair.
+- Managed version selection applies to structured ACP and inference launches;
+  passthrough remains on the separately installed `pi` executable.
 
 ## Output Contract
 

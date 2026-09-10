@@ -158,6 +158,22 @@ func TestTaskPublication_PreservesSameSecondActivityOrdering(t *testing.T) {
 	}
 }
 
+func TestTaskPublication_KnownPrimaryWithoutAgentIdentityEmitsExplicitNulls(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	data := make(map[string]interface{})
+	svc.addPrimarySessionEventFields(context.Background(), "task-1", data, &models.TaskSession{
+		ID:    "session-1",
+		State: models.TaskSessionStateRunning,
+	})
+
+	if value, ok := data["primary_agent_profile_id"]; !ok || value != nil {
+		t.Fatalf("primary_agent_profile_id = %#v (present = %t), want explicit null", value, ok)
+	}
+	if value, ok := data["primary_agent_name"]; !ok || value != nil {
+		t.Fatalf("primary_agent_name = %#v (present = %t), want explicit null", value, ok)
+	}
+}
+
 func TestTaskPublication_QueuedActivityOutlivesCallerCancellation(t *testing.T) {
 	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(repo *sqliterepo.Repository) repository.SessionRepository {
 		return cancellationAwareSessionRepository{SessionRepository: repo}

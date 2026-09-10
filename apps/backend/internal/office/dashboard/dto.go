@@ -374,6 +374,7 @@ type TaskDTO struct {
 	ParentID               string         `json:"parentId,omitempty"`
 	ProjectID              string         `json:"projectId,omitempty"`
 	AssigneeAgentProfileID string         `json:"assigneeAgentProfileId,omitempty"`
+	AssigneeUserID         string         `json:"assigneeUserId,omitempty"`
 	Labels                 []LabelDTO     `json:"labels"`
 	Children               []*TaskDTO     `json:"children,omitempty"`
 	BlockedBy              []string       `json:"blockedBy,omitempty"`

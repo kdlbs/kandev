@@ -453,6 +453,32 @@ func TestMemoryEventBus_Request(t *testing.T) {
 	}
 }
 
+func TestMemoryEventBusHandlerCanSubscribeDuringPublish(t *testing.T) {
+	bus := NewMemoryEventBus(newTestLogger(t))
+
+	if _, err := bus.Subscribe("outer", func(context.Context, *Event) error {
+		_, err := bus.Subscribe("inner", func(context.Context, *Event) error { return nil })
+		return err
+	}); err != nil {
+		t.Fatalf("Subscribe outer: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- bus.Publish(context.Background(), "outer", NewEvent("outer", "test", nil))
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		bus.Close()
+	case <-time.After(time.Second):
+		t.Fatal("event handler could not subscribe while Publish was dispatching")
+	}
+}
+
 func TestMemoryEventBus_RequestTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		log := newTestLogger(t)

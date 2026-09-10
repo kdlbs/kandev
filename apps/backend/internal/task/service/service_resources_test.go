@@ -670,6 +670,9 @@ func TestService_FindOrCreateRepositoryRejectsInvalidLocalPathBackfill(t *testin
 // errWorkspaceRepo is a WorkspaceRepository that always returns an error from
 // ListWorkspaces. Used to exercise the DB-error path of GetOfficeWorkflowIDs.
 type errWorkspaceRepo struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	// embed the real repo for all methods except ListWorkspaces.
 	WorkspaceRepositoryStub
 }
@@ -996,6 +999,52 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 	if _, err := repo.GetWorkflow(ctx, "wf-keep"); err != nil {
 		t.Fatalf("unrelated workflow should remain: %v", err)
+	}
+}
+
+func TestService_DeleteWorkspaceRemovesStagedAndClaimedAttachmentBytes(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-delete", WorkspaceID: "ws-delete", Title: "Delete attachments"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	attachmentRoot := t.TempDir()
+	attachmentSvc, err := NewAttachmentService(repo, attachmentRoot, nil, commonlogger.Default())
+	if err != nil {
+		t.Fatalf("NewAttachmentService: %v", err)
+	}
+	svc.SetAttachmentService(attachmentSvc)
+
+	stage := func(name string) *models.TaskMessageAttachment {
+		t.Helper()
+		attachment, stageErr := attachmentSvc.Stage(
+			ctx, "owner", "ws-delete", name, "text/plain", "resource", "path", strings.NewReader(name),
+		)
+		if stageErr != nil {
+			t.Fatalf("Stage %s: %v", name, stageErr)
+		}
+		return attachment
+	}
+	staged := stage("staged.txt")
+	claimed := stage("claimed.txt")
+	if err := attachmentSvc.Claim(ctx, "owner", "ws-delete", "task-delete", "session-delete", []string{claimed.ID}); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+
+	for _, attachment := range []*models.TaskMessageAttachment{staged, claimed} {
+		if _, err := os.Stat(filepath.Join(attachmentRoot, "attachments", attachment.StorageKey)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("attachment %s bytes still exist: %v", attachment.ID, err)
+		}
+		if _, err := repo.GetMessageAttachment(ctx, attachment.ID); !errors.Is(err, models.ErrAttachmentNotFound) {
+			t.Fatalf("attachment %s registry row still exists: %v", attachment.ID, err)
+		}
 	}
 }
 

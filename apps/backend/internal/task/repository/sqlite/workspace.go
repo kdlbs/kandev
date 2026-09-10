@@ -40,6 +40,8 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			name,
 			description,
 			owner_id,
+			org_id,
+			unit_id,
 			default_executor_id,
 			default_environment_id,
 			default_agent_profile_id,
@@ -50,8 +52,8 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			created_at,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.CreatedAt, workspace.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -65,13 +67,15 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	var defaultConfigAgentProfileID sql.NullString
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
+		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
 	`), id).Scan(
 		&workspace.ID,
 		&workspace.Name,
 		&workspace.Description,
 		&workspace.OwnerID,
+		&workspace.OrgID,
+		&workspace.UnitID,
 		&defaultExecutorID,
 		&defaultEnvironmentID,
 		&defaultAgentProfileID,
@@ -109,13 +113,14 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 		UPDATE workspaces
 		SET name = ?,
 			description = ?,
+			unit_id = ?,
 			default_executor_id = ?,
 			default_environment_id = ?,
 			default_agent_profile_id = ?,
 			default_config_agent_profile_id = ?,
 			updated_at = ?
 		WHERE id = ?
-	`), workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID)
+	`), workspace.Name, workspace.Description, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID)
 	if err != nil {
 		return err
 	}
@@ -232,6 +237,11 @@ func (r *Repository) deleteWorkspaceCascade(
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err
 	}
+	if cleanup != nil {
+		if err := cleanup(ctx, tx); err != nil {
+			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
+		}
+	}
 
 	rows, err := r.deleteWorkspaceCascadeRow(ctx, tx, id, expectedName)
 	if err != nil {
@@ -266,11 +276,6 @@ func (r *Repository) deleteWorkspaceCascade(
 	`), id); err != nil {
 		return nil, nil, err
 	}
-	if cleanup != nil {
-		if err := cleanup(ctx, tx); err != nil {
-			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
@@ -288,8 +293,11 @@ func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.
 		if err != nil {
 			return fmt.Errorf("task queue sessions for cascade task %s: %w", task.ID, err)
 		}
-		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions); err != nil {
+		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions, true); err != nil {
 			return fmt.Errorf("purge task queue for workspace cascade task %s: %w", task.ID, err)
+		}
+		if err := r.purgeQueueSessionPoliciesInTx(ctx, tx, sessions); err != nil {
+			return fmt.Errorf("purge queue session policies for workspace cascade task %s: %w", task.ID, err)
 		}
 	}
 	return nil
@@ -408,7 +416,7 @@ func (r *Repository) ClaimUnownedWorkspaces(ctx context.Context, ownerID string)
 
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
+		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
 		FROM workspaces ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -428,6 +436,8 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 			&workspace.Name,
 			&workspace.Description,
 			&workspace.OwnerID,
+			&workspace.OrgID,
+			&workspace.UnitID,
 			&defaultExecutorID,
 			&defaultEnvironmentID,
 			&defaultAgentProfileID,

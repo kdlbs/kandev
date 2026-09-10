@@ -53,11 +53,21 @@ type taskTitleSessionClaimer interface {
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type taskCanvasGuidanceResolver interface {
+	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
+type canvasGuidanceProjection struct {
+	resolved bool
+	include  bool
+}
+
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
 	service             *service.Service
 	orchestrator        OrchestratorService
 	cancellationPending dto.CancellationPendingProvider
+	parkedProjection    dto.ParkedProvider
 	logger              *logger.Logger
 	referenceValidator  entityrefs.SubmissionValidator
 	messageIDMu         sync.Mutex
@@ -91,6 +101,9 @@ func NewMessageHandlers(
 	}
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		handlers.cancellationPending = cancellation
+	}
+	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
+		handlers.parkedProjection = parked
 	}
 	return handlers
 }
@@ -149,6 +162,7 @@ func (h *MessageHandlers) injectMessageContext(
 	configMode bool,
 	startCreatedSession bool,
 	titleOwner bool,
+	includeCanvasGuidance bool,
 	content string,
 	trustedPromptContext string,
 ) string {
@@ -174,10 +188,22 @@ func (h *MessageHandlers) injectMessageContext(
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
+		IncludeCanvasGuidance:          includeCanvasGuidance,
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
 	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
+}
+
+func (h *MessageHandlers) resolveCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	resolver, ok := h.orchestrator.(taskCanvasGuidanceResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(
@@ -425,6 +451,10 @@ type wsAddMessageRequest struct {
 	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
 	ContextFiles      []v1.ContextFileMeta   `json:"context_files,omitempty"`
 	EntityReferences  []v1.EntityReference   `json:"entity_references,omitempty"`
+	// These fields are server-owned and are carried only from message admission
+	// to the created-session dispatch. They are intentionally not JSON fields.
+	canvasGuidanceResolved bool
+	includeCanvasGuidance  bool
 }
 
 // wsAddMessage handles an incoming add-message WebSocket action, persisting the user message and dispatching the turn and orchestrator flow.
@@ -568,11 +598,13 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
-	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
-	var trustedPromptContext string
-	storedContent, trustedPromptContext = h.prepareDirectPrompt(
-		ctx, storedContent, sessionResp.Session.IsPassthrough,
+	storedContent, trustedPromptContext := h.prepareDirectPrompt(
+		ctx, req.Content, sessionResp.Session.IsPassthrough,
 	)
+	// Resolve browser prompt definitions before appending the server-owned
+	// entity block. The prompt sanitizer removes untrusted browser blocks and
+	// must not consume the opening tag of this trusted context.
+	storedContent = orchestrator.AppendEntityReferenceContext(storedContent, req.EntityReferences)
 	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
@@ -587,10 +619,29 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		// "type in chat to start the agent" path. Wrap with the Kandev MCP
 		// system block before persisting so the DB row matches what the agent
 		// receives (and "Show formatted" reveals it).
+		includeCanvasGuidance := false
+		canvasGuidanceResolved := false
+		if task != nil && !task.IsFromOffice && !sessionResp.Session.IsPassthrough && !configMode {
+			canvasGuidanceResolved = true
+			var resolveErr error
+			includeCanvasGuidance, resolveErr = h.resolveCanvasGuidance(ctx, req.TaskID, req.TaskSessionID)
+			if resolveErr != nil {
+				if errors.Is(resolveErr, orchestrator.ErrTaskSessionPairMismatch) {
+					return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task and session do not match", nil)
+				}
+				h.logger.Warn("failed to resolve canvas prompt capability; omitting optional guidance",
+					zap.String("task_id", req.TaskID),
+					zap.String("session_id", req.TaskSessionID),
+					zap.Error(resolveErr))
+				includeCanvasGuidance = false
+			}
+		}
 		storedContent = h.injectMessageContext(
-			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, storedContent,
+			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, includeCanvasGuidance, storedContent,
 			trustedPromptContext,
 		)
+		req.canvasGuidanceResolved = canvasGuidanceResolved
+		req.includeCanvasGuidance = includeCanvasGuidance
 	}
 	req.Content = storedContent
 	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {
@@ -706,6 +757,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	if reloaded.State != models.TaskSessionStateCompleted {
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
@@ -723,6 +775,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	}
 	sessionDTO := dto.FromTaskSession(primary)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 }
 
@@ -743,8 +796,13 @@ func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session
 	}
 }
 
+const maxMessageContentBytes = 1 << 20
+
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.
 func validateAddMessageRequest(req wsAddMessageRequest) string {
+	if len(req.Content) > maxMessageContentBytes {
+		return "content is too long"
+	}
 	if req.TaskSessionID == "" {
 		return "session_id is required"
 	}
@@ -775,6 +833,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	}
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
 	// A steer-eligible generating RUNNING session must pass this first guard:
 	// otherwise the busy error is returned here, before the steer branch in
@@ -851,7 +910,10 @@ func (h *MessageHandlers) dispatchPromptAsync(
 		h.forwardMessageAsPrompt(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
-			trustedPromptContext,
+			trustedPromptContext, canvasGuidanceProjection{
+				resolved: req.canvasGuidanceResolved,
+				include:  req.includeCanvasGuidance,
+			},
 		)
 	}()
 }
@@ -909,11 +971,22 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	references []v1.EntityReference,
 	startCreated bool,
 	trustedPromptContext string,
+	canvasGuidance ...canvasGuidanceProjection,
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
 		var err error
-		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
+		projection := canvasGuidanceProjection{}
+		if len(canvasGuidance) > 0 {
+			projection = canvasGuidance[0]
+		}
+		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidance); ok && len(canvasGuidance) > 0 {
+			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidance(
+				ctx, taskID, sessionID, agentProfileID,
+				content, true, planMode, false, attachments, references, trustedPromptContext,
+				projection.resolved, projection.include,
+			)
+		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
 			_, err = starter.StartCreatedSessionWithPromptContext(
 				ctx, taskID, sessionID, agentProfileID,
 				content, true, planMode, false, attachments, references, trustedPromptContext,
@@ -958,9 +1031,63 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		// Don't create a prompt error message if the agent itself reported the error.
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
-		if !isAgentReportedError(err) {
+		if !isAgentReportedError(err) &&
+			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) {
 			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
 		}
+	}
+}
+
+// queuePromptIfRuntimeUnavailable handles the window where a workflow step
+// move has promoted a new primary session but its runtime has not finished
+// launching: PromptTask fails with orchestrator.ErrSessionRuntimeUnavailable
+// before anything reached the agent, so the message is safe to queue for
+// delivery once the runtime comes up instead of being reported as failed.
+// Returns true when the message was queued, so the caller must not also
+// report promptErr as an error.
+func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptErr error,
+) bool {
+	if !errors.Is(promptErr, orchestrator.ErrSessionRuntimeUnavailable) {
+		return false
+	}
+	session, err := h.service.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || isTerminalSessionState(session.State) {
+		return false
+	}
+	// wsAddMessage already ran ProcessOnTurnStart synchronously for this prompt
+	// before the runtime-unavailable failure was even known; tag the queued
+	// entry so the drain path (executeQueuedMessageWithReservation) does not
+	// fire on_turn_start a second time on the replacement session.
+	queueMetadata := map[string]interface{}{orchestrator.MetaKeyTurnStartAlreadyProcessed: true}
+	if queueErr := h.orchestrator.QueueUserPrompt(
+		ctx, taskID, sessionID, content, model, planMode, attachments, queueMetadata, true,
+	); queueErr != nil {
+		h.logger.Warn("failed to queue prompt after runtime-unavailable prompt failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(queueErr))
+		return false
+	}
+	h.logger.Warn("queued prompt for delivery once session runtime finishes launching",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.Error(promptErr))
+	return true
+}
+
+// isTerminalSessionState reports whether a session in this state can no
+// longer accept a queued prompt for later delivery.
+func isTerminalSessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -119,6 +119,21 @@ type taskEnvironmentMaterializationFinalizer interface {
 	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
 }
 
+// taskEnvironmentTransitionPersister commits an existing environment rebind
+// and its repository inventory as one durable operation. Legacy adapters may
+// omit it and use the compatibility persistence path in executor_execute.go.
+type taskEnvironmentTransitionPersister interface {
+	PersistTaskEnvironmentTransition(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, bool) error
+}
+
+// taskEnvironmentTaskDirNameStamper claims the stable task-root identity on a
+// shared environment without rewriting unrelated environment fields. It is
+// optional so lightweight test and legacy stores can retain the compatibility
+// path in executor_execute.go.
+type taskEnvironmentTaskDirNameStamper interface {
+	SetTaskEnvironmentTaskDirNameIfEmpty(context.Context, string, string) (bool, error)
+}
+
 // workspaceBindingTaskSessionCreator elects the single materializing session
 // and inserts its creating environment in the same transaction as the session.
 // It is optional for lightweight test/legacy stores; production repositories
@@ -183,6 +198,18 @@ type PromptResult struct {
 	AgentMessage string // The agent's accumulated response message
 }
 
+// ProbeResult re-exports client.ProbeResult so callers above this package
+// (e.g. internal/orchestrator) can reference it without a direct import of
+// internal/agent/runtime/agentctl, which is restricted to this package and
+// internal/agent/runtime/ (see ARCH-RUNTIME-IMPORT).
+type ProbeResult = client.ProbeResult
+
+const (
+	ProbeResultLive    = client.ProbeResultLive
+	ProbeResultSettled = client.ProbeResultSettled
+	ProbeResultUnknown = client.ProbeResultUnknown
+)
+
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {
@@ -216,6 +243,11 @@ type AgentManagerClient interface {
 	ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error)
 	ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
 	CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
+
+	// ProbeBackgroundWorkloads samples a session's agent process for
+	// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+	// No timeout is applied here — the caller wraps ctx with the probe budget.
+	ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error)
 
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
@@ -399,6 +431,8 @@ type LaunchAgentRequest struct {
 	Priority             string
 	Metadata             map[string]interface{}
 	Env                  map[string]string
+	// AdditionalSkillSlugs are launch-scoped skills selected by Office.
+	AdditionalSkillSlugs []string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist. Values are
 	// still taken only from Env; the key list is the explicit repository grant.
@@ -562,6 +596,9 @@ type LaunchOptions struct {
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// durable profile selection.
+	AdditionalSkillSlugs []string
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. When nil, launch behavior is identical to today.
 	RouteOverride *RouteOverride
@@ -585,14 +622,15 @@ type RouteOverride struct {
 // preserve the Office-built prompt and configuration that the legacy
 // path receives via StartTaskWithEnv.
 type LaunchContext struct {
-	ExecutorID        string
-	ExecutorProfileID string
-	Priority          string
-	Prompt            string
-	WorkflowStepID    string
-	PlanMode          bool
-	Attachments       []v1.MessageAttachment
-	Env               map[string]string
+	ExecutorID           string
+	ExecutorProfileID    string
+	Priority             string
+	Prompt               string
+	WorkflowStepID       string
+	PlanMode             bool
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
+	AdditionalSkillSlugs []string
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -735,6 +773,15 @@ type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSes
 // its default FAILED state updates.
 type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) (handled bool)
 
+// AgentProcessStartedFunc is called after the agent process starts
+// successfully and the executor has run its normal success callback.
+type AgentProcessStartedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string)
+
+// AgentProcessStartFailedFunc is called after the executor has handled a
+// failed process start. It lets an owning subsystem settle any durable claim
+// that was made before the asynchronous start began.
+type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error)
+
 // LaunchFailedFunc is called when session launch fails before the agent starts.
 // repositoryID identifies the repository whose launch failed. Useful for
 // creating repository-scoped user-facing status messages tied to launch errors.
@@ -783,6 +830,7 @@ type Executor struct {
 	capabilities      ExecutorTypeCapabilities
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
+	canvasesEnabled   bool
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
 	gitCredentialBrokerURL         string
@@ -835,6 +883,10 @@ type Executor struct {
 	// delegates failure handling to this callback, allowing the orchestrator
 	// to detect auth errors and treat them as recoverable.
 	onAgentStartFailed AgentStartFailedFunc
+	// Callback after a process start succeeds or fails. These callbacks run
+	// after the executor's normal lifecycle bookkeeping.
+	onAgentProcessStarted     AgentProcessStartedFunc
+	onAgentProcessStartFailed AgentProcessStartFailedFunc
 
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
@@ -1063,6 +1115,13 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 	e.attachmentReader = reader
 }
 
+// SetCanvasesEnabled controls whether task MCP profiles receive the gated
+// canvas-authoring capability. The flag is applied during backend startup
+// before any new agent session is launched.
+func (e *Executor) SetCanvasesEnabled(enabled bool) {
+	e.canvasesEnabled = enabled
+}
+
 // SetOnTaskStateChange sets a callback for task state changes.
 // This allows the orchestrator to route state changes through the task service layer
 // which publishes WebSocket events. Without this, async goroutines would only update
@@ -1140,6 +1199,18 @@ func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
 	e.onAgentStartFailed = fn
 }
 
+// SetOnAgentProcessStarted sets a callback invoked after asynchronous process
+// startup succeeds and the session has been reconciled to RUNNING.
+func (e *Executor) SetOnAgentProcessStarted(fn AgentProcessStartedFunc) {
+	e.onAgentProcessStarted = fn
+}
+
+// SetOnAgentProcessStartFailed sets a callback invoked after asynchronous
+// process startup fails and the normal failure handler has run.
+func (e *Executor) SetOnAgentProcessStartFailed(fn AgentProcessStartFailedFunc) {
+	e.onAgentProcessStartFailed = fn
+}
+
 // SetOnPrimarySessionSet sets a callback for when the first session for a task
 // is marked primary. This publishes a task.updated event so the frontend
 // receives primary_session_id.
@@ -1174,4 +1245,10 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (e *Executor) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return e.agentManager.ProbeBackgroundWorkloads(ctx, sessionID)
 }

@@ -10,15 +10,14 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // ErrTaskNotFound is returned (wrapped) by repository task lookups when the
 // task row is absent. Callers that must distinguish "row missing" from
-// "lookup failed" should check with errors.Is — this is the positive
-// signal the office GC uses to classify a kandev-managed container as
-// safely removable.
+// "lookup failed" should check with errors.Is.
 var ErrTaskNotFound = errors.New("task not found")
 
 // Automation runs never appear in a task list: they are hidden by their
@@ -176,9 +175,9 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 		case sql.ErrNoRows:
 			if _, err := tx.ExecContext(ctx, tx.Rebind(`
 				INSERT INTO workflow_step_participants
-				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-				VALUES (?, ?, ?, 'runner', ?, 0, 0)
-			`), newParticipantUUID(), stepID, taskID, assigneeID); err != nil {
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+				VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+			`), newParticipantUUID(), stepID, taskID, assigneeID, time.Now().UTC()); err != nil {
 				return err
 			}
 		default:
@@ -237,9 +236,14 @@ type TaskSearchResult struct {
 	ParentID               string `db:"parent_id"`
 	ProjectID              string `db:"project_id"`
 	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
-	Labels                 string `db:"labels"`
-	CreatedAt              string `db:"created_at"`
-	UpdatedAt              string `db:"updated_at"`
+	// AssigneeUserID is the human assignee. It is only projected by the
+	// queries that need it (detail, workspace list); sqlx leaves it zero
+	// for the others rather than failing, so adding a projection later is
+	// additive.
+	AssigneeUserID string `db:"assignee_user_id"`
+	Labels         string `db:"labels"`
+	CreatedAt      string `db:"created_at"`
+	UpdatedAt      string `db:"updated_at"`
 	// IsSystem is true when the task lives in a kandev-managed system
 	// workflow (e.g. the standing coordination task; future routine
 	// tasks). The Office Tasks UI hides these by default and surfaces
@@ -282,6 +286,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
 		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
+		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at,
@@ -529,6 +534,7 @@ func (r *Repository) GetTaskByID(ctx context.Context, taskID string) (*TaskRow, 
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
 		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
+		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at
@@ -587,6 +593,9 @@ func (r *Repository) SearchTasks(ctx context.Context, workspaceID, query string,
 
 // hasFTSTable checks whether the tasks_fts virtual table exists.
 func (r *Repository) hasFTSTable() bool {
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		return false
+	}
 	var exists int
 	err := r.ro.QueryRow(
 		"SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks_fts'",

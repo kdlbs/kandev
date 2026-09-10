@@ -6,8 +6,16 @@ import {
 } from "@/lib/tasks/tasks-list-options";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
+import { fromApiThreadDraft, fromApiThreadView } from "@/lib/state/slices/ui/thread-view-wire";
+import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
+import {
+  DEFAULT_THREAD_VIEW,
+  DEFAULT_THREAD_VIEW_ID,
+} from "@/lib/state/slices/ui/thread-view-builtins";
 import { type UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { SidebarTaskPrefsApi, UserSettings, UserSettingsResponse } from "@/lib/types/http";
+import { parseSidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
+import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
   LastSeenDisplay,
@@ -58,7 +66,12 @@ export function createDefaultUserSettings(): UserSettingsState {
     sidebarViews: [],
     sidebarActiveViewId: null,
     sidebarDraft: null,
+    threadViews: [DEFAULT_THREAD_VIEW],
+    threadActiveViewId: DEFAULT_THREAD_VIEW_ID,
+    threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
+    sidebarTaskColorAutomation: parseSidebarTaskColorAutomation(undefined),
+    sidebarTaskColors: {},
     taskCreateLastUsed: {
       repositoryId: null,
       branch: null,
@@ -74,6 +87,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     gitlabSavedPresets: undefined,
     azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
+    defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
     terminalFontFamily: null,
@@ -82,6 +96,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     quickChatTabOrderByWorkspace: {},
     hiddenWorkflowStepIds: {},
@@ -235,6 +250,10 @@ function buildIdentityFields(s: UserSettingsData, current: UserSettingsState) {
       s.default_utility_agent_id,
       current.defaultUtilityAgentId,
     ),
+    defaultUtilityAgentProfileId: mapNullableString(
+      s.default_utility_agent_profile_id,
+      current.defaultUtilityAgentProfileId,
+    ),
   };
 }
 
@@ -297,10 +316,27 @@ export function buildCoreFields(
     sidebarDraft: mapDefined(s.sidebar_draft, current.sidebarDraft, (draft) =>
       draft ? (fromApiSidebarDraft(draft) as SidebarViewDraft) : null,
     ),
+    threadViews: mapDefined(s.thread_views, current.threadViews, (views) =>
+      views.map(fromApiThreadView),
+    ) as ThreadView[],
+    threadActiveViewId: mapNullableString(s.thread_active_view_id, current.threadActiveViewId),
+    threadViewDraft: mapDefined(s.thread_view_draft, current.threadViewDraft, (draft) =>
+      draft ? (fromApiThreadDraft(draft) as ThreadViewDraft) : null,
+    ),
     sidebarTaskPrefs: mapDefined(
       s.sidebar_task_prefs,
       current.sidebarTaskPrefs,
       parseSidebarTaskPrefs,
+    ),
+    sidebarTaskColorAutomation: mapDefined(
+      s.sidebar_task_color_automation,
+      current.sidebarTaskColorAutomation,
+      parseSidebarTaskColorAutomation,
+    ),
+    sidebarTaskColors: mapDefined(
+      s.sidebar_task_colors,
+      current.sidebarTaskColors,
+      parseSidebarTaskColors,
     ),
     taskCreateLastUsed: mapDefined(
       s.task_create_last_used,
@@ -337,6 +373,7 @@ export function buildCoreFields(
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
     quickChatTabOrderByWorkspace:
       s.quick_chat_tab_order_by_workspace ?? current.quickChatTabOrderByWorkspace,
+    resolveSessionHostnames: s.resolve_session_hostnames ?? current.resolveSessionHostnames,
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     workflowIdsWithAutoHideEmptySteps:
       s.workflow_ids_with_auto_hide_empty_steps ?? current.workflowIdsWithAutoHideEmptySteps,

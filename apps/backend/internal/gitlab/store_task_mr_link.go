@@ -17,8 +17,8 @@ import (
 // share one error so callers do not disclose resource existence.
 func (s *Store) ValidateTaskMRScope(ctx context.Context, workspaceID, taskID, repositoryID string) error {
 	var taskExists int
-	err := s.ro.GetContext(ctx, &taskExists,
-		`SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ? LIMIT 1`, taskID, workspaceID)
+	err := s.ro.GetContext(ctx, &taskExists, s.ro.Rebind(
+		`SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ? LIMIT 1`), taskID, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrTaskMRNotFound
 	}
@@ -29,12 +29,12 @@ func (s *Store) ValidateTaskMRScope(ctx context.Context, workspaceID, taskID, re
 		return nil
 	}
 	var repositoryExists int
-	err = s.ro.GetContext(ctx, &repositoryExists, `
+	err = s.ro.GetContext(ctx, &repositoryExists, s.ro.Rebind(`
 		SELECT 1
 		FROM task_repositories tr
 		JOIN repositories r ON r.id = tr.repository_id
 		WHERE tr.task_id = ? AND tr.repository_id = ? AND r.workspace_id = ?
-		LIMIT 1`, taskID, repositoryID, workspaceID)
+		LIMIT 1`), taskID, repositoryID, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrTaskMRNotFound
 	}
@@ -70,7 +70,7 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 		return ErrTaskMRRepositoryMismatch
 	}
 	var identity taskMRRepositoryIdentityRow
-	err := s.ro.GetContext(ctx, &identity, `
+	err := s.ro.GetContext(ctx, &identity, s.ro.Rebind(`
 		SELECT COALESCE(r.provider, '') AS provider,
 			COALESCE(r.provider_repo_id, '') AS provider_repo_id,
 			COALESCE(r.provider_host, '') AS provider_host,
@@ -83,7 +83,7 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 		JOIN tasks t ON t.id = tr.task_id
 		WHERE tr.task_id = ? AND tr.repository_id = ?
 			AND t.workspace_id = ? AND r.workspace_id = ?
-		LIMIT 1`, taskID, repositoryID, workspaceID, workspaceID)
+		LIMIT 1`), taskID, repositoryID, workspaceID, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrTaskMRNotFound
 	}
@@ -189,10 +189,10 @@ func localCheckoutIdentityCandidate(localPath string) (candidate taskMRIdentityC
 // effort: failures are swallowed since the caller already has what it needs
 // to proceed with the current request.
 func (s *Store) backfillRepositoryRemoteURL(ctx context.Context, repositoryID, remoteURL string) {
-	_, _ = s.db.ExecContext(ctx, `
+	_, _ = s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE repositories
 		SET remote_url = ?, updated_at = ?
-		WHERE id = ? AND (remote_url IS NULL OR remote_url = '')`,
+		WHERE id = ? AND (remote_url IS NULL OR remote_url = '')`),
 		remoteURL, time.Now().UTC(), repositoryID)
 }
 
@@ -347,12 +347,12 @@ func (s *Store) ResolveTaskMRRepository(
 		return "", err
 	}
 	var repositoryIDs []string
-	if err := s.ro.SelectContext(ctx, &repositoryIDs, `
+	if err := s.ro.SelectContext(ctx, &repositoryIDs, s.ro.Rebind(`
 		SELECT tr.repository_id
 		FROM task_repositories tr
 		JOIN repositories r ON r.id = tr.repository_id
 		WHERE tr.task_id = ? AND r.workspace_id = ?
-		ORDER BY tr.id`, taskID, workspaceID); err != nil {
+		ORDER BY tr.id`), taskID, workspaceID); err != nil {
 		return "", fmt.Errorf("list task repositories: %w", err)
 	}
 	switch len(repositoryIDs) {
@@ -375,28 +375,28 @@ func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, assoc
 	defer func() { _ = tx.Rollback() }()
 
 	var association TaskMR
-	err = tx.GetContext(ctx, &association, `
+	err = tx.GetContext(ctx, &association, tx.Rebind(`
 		SELECT `+taskMRSelectColsQualified+`
 		FROM gitlab_task_mrs gtm
 		JOIN tasks t ON t.id = gtm.task_id
 		WHERE gtm.id = ? AND t.workspace_id = ?
-		LIMIT 1`, associationID, workspaceID)
+		LIMIT 1`), associationID, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrTaskMRNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("find task MR association: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, `
+	if _, err = tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_mr_watches
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		association.TaskID, association.RepositoryID, association.ProjectPath, association.MRIID,
 	); err != nil {
 		return fmt.Errorf("delete task MR refresh watch: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, `
+	if _, err = tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_task_mr_state
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		association.TaskID, association.RepositoryID, association.ProjectPath, association.MRIID,
 	); err != nil {
 		return fmt.Errorf("delete task MR lifecycle state: %w", err)
@@ -408,14 +408,14 @@ func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, assoc
 	// "stop automating this" action, so it must not leave a latent enabled
 	// switch that no surface displays (taskMRAutomationOptionsList hides rows
 	// whose MR is not linked) but the evaluator still reads.
-	if _, err = tx.ExecContext(ctx, `
+	if _, err = tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_task_mr_automation_options
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		association.TaskID, association.RepositoryID, association.ProjectPath, association.MRIID,
 	); err != nil {
 		return fmt.Errorf("delete task MR automation options: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM gitlab_task_mrs WHERE id = ?`, association.ID); err != nil {
+	if _, err = tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_task_mrs WHERE id = ?`), association.ID); err != nil {
 		return fmt.Errorf("delete task MR association: %w", err)
 	}
 	return tx.Commit()

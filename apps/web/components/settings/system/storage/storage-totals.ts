@@ -1,4 +1,8 @@
-import type { StorageQuarantineEntry, StorageSummary } from "@/lib/types/system";
+import type {
+  StorageQuarantineEntry,
+  StorageSummary,
+  StorageSummaryPartial,
+} from "@/lib/types/system";
 
 export interface StorageAnalysisTotal {
   bytes: number;
@@ -9,7 +13,9 @@ function isMeasuredBytes(value: number | undefined): value is number {
   return value !== undefined && Number.isFinite(value) && value >= 0;
 }
 
-export function storageAnalysisTotal(summary: StorageSummary): StorageAnalysisTotal {
+export function storageAnalysisTotal(
+  summary: StorageSummary | StorageSummaryPartial,
+): StorageAnalysisTotal {
   const total: StorageAnalysisTotal = { bytes: 0, partial: false };
   const addMeasurement = (value: number | undefined, available = true) => {
     if (!available || !isMeasuredBytes(value)) {
@@ -19,20 +25,27 @@ export function storageAnalysisTotal(summary: StorageSummary): StorageAnalysisTo
     total.bytes += value;
   };
 
-  addMeasurement(summary.workspaces.total_bytes, summary.workspaces.available !== false);
   addMeasurement(
-    summary.quarantine.available === false ? undefined : summary.quarantine.size_bytes,
+    summary.workspaces?.total_bytes,
+    summary.workspaces != null && summary.workspaces.available !== false,
   );
-  addMeasurement(summary.go_cache.size_bytes, summary.go_cache.available !== false);
-  if (summary.go_cache.unmanaged_path) {
+  addMeasurement(
+    summary.quarantine?.available === false ? undefined : summary.quarantine?.size_bytes,
+    summary.quarantine != null && summary.quarantine.available !== false,
+  );
+  addMeasurement(
+    summary.go_cache?.size_bytes,
+    summary.go_cache != null && summary.go_cache.available !== false,
+  );
+  if (summary.go_cache?.unmanaged_path) {
     addMeasurement(summary.go_cache.unmanaged_size_bytes);
   }
   addMeasurement(
-    summary.temporary_artifacts.total_bytes,
-    summary.temporary_artifacts.available !== false,
+    summary.temporary_artifacts?.total_bytes,
+    summary.temporary_artifacts != null && summary.temporary_artifacts.available !== false,
   );
 
-  if (summary.docker.available) {
+  if (summary.docker?.available) {
     addMeasurement(summary.docker.managed_container_bytes);
     addMeasurement(summary.docker.image_layer_bytes);
     addMeasurement(summary.docker.build_cache_bytes);

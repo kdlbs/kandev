@@ -128,6 +128,29 @@ func TestReuseExistingEnvironment_SkipsReuseOnExecutorTypeMismatch(t *testing.T)
 	}
 }
 
+func TestPrepareExecutorTransitionClearsStaleWorkspacePath(t *testing.T) {
+	req := &LaunchAgentRequest{
+		ExecutorType:           string(models.ExecutorTypeLocal),
+		WorkspacePath:          "/stale/legacy-task/repository",
+		WorkspaceReuseRequired: true,
+	}
+	env := &models.TaskEnvironment{
+		ID:            "environment-1",
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorkspacePath: "/stale/legacy-task/repository",
+	}
+
+	if !prepareExecutorTransition(req, env) {
+		t.Fatal("prepareExecutorTransition() = false, want executor transition")
+	}
+	if req.WorkspacePath != "" {
+		t.Fatalf("WorkspacePath = %q, want stale path removed", req.WorkspacePath)
+	}
+	if req.WorkspaceReuseRequired {
+		t.Fatal("WorkspaceReuseRequired = true, want fresh executor preparation")
+	}
+}
+
 func TestReuseExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", UseWorktree: false}
@@ -365,6 +388,62 @@ func TestPersistTaskEnvironment_FinalizesCreatingEnvironmentWithInventory(t *tes
 	}
 	if got := repo.taskEnvironmentRepos[env.ID]; len(got) != 1 || got[0].WorktreeID != "wt-1" {
 		t.Fatalf("canonical inventory = %#v, want one finalized worktree", got)
+	}
+}
+
+func TestPersistTaskEnvironment_RebindsSuccessfulExecutorTransition(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:                                "env-1",
+		TaskID:                            "task-1",
+		ExecutorType:                      string(models.ExecutorTypeWorktree),
+		ExecutorID:                        models.ExecutorIDWorktree,
+		Status:                            models.TaskEnvironmentStatusReady,
+		WorkspacePath:                     "/stale/legacy-task/repository",
+		ContainerID:                       "stale-container",
+		ContainerBootstrapNonceSecretID:   "stale-bootstrap-secret",
+		ContainerControlAuthTokenSecretID: "stale-control-secret",
+		SandboxID:                         "stale-sandbox",
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	repo.taskEnvironmentRepos[env.ID] = []*models.TaskEnvironmentRepo{{
+		ID: env.ID + "-repo-1", TaskEnvironmentID: env.ID, RepositoryID: "repo-1", BranchSlug: "main",
+		WorktreeID: "stale-worktree", WorktreePath: "/stale/legacy-task/repository", WorktreeBranch: "feature/stale",
+	}}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{
+		ID: "session-2", TaskID: "task-1", TaskEnvironmentID: env.ID,
+		ExecutorProfileID: "local-profile-1",
+	}
+
+	err := e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{
+			TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocal),
+			RepositoryID: "repo-1", RepositoryPath: "/canonical/repository", BranchIdentitySlug: "main",
+		},
+		&LaunchAgentResponse{},
+		executorConfig{ExecutorID: "local-executor"})
+	if err != nil {
+		t.Fatalf("persistTaskEnvironment() error = %v", err)
+	}
+
+	persisted := repo.taskEnvironments[env.ID]
+	if persisted.ExecutorType != string(models.ExecutorTypeLocal) || persisted.ExecutorID != "local-executor" || persisted.ExecutorProfileID != "local-profile-1" {
+		t.Fatalf("executor binding = type %q id %q profile %q", persisted.ExecutorType, persisted.ExecutorID, persisted.ExecutorProfileID)
+	}
+	if persisted.WorkspacePath != "/canonical/repository" {
+		t.Fatalf("WorkspacePath = %q, want canonical repository", persisted.WorkspacePath)
+	}
+	if persisted.ContainerID != "" || persisted.ContainerBootstrapNonceSecretID != "" || persisted.ContainerControlAuthTokenSecretID != "" || persisted.SandboxID != "" {
+		t.Fatalf("stale runtime handles survived transition: %+v", persisted)
+	}
+	rows := repo.taskEnvironmentRepos[env.ID]
+	if len(rows) != 1 {
+		t.Fatalf("repository rows = %d, want 1", len(rows))
+	}
+	if rows[0].WorktreeID != "" || rows[0].WorktreePath != "" || rows[0].WorktreeBranch != "" {
+		t.Fatalf("stale physical worktree projection survived transition: %+v", rows[0])
 	}
 }
 
@@ -925,7 +1004,7 @@ func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testi
 // TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
 // that prevents a SECOND session on the same task from inheriting the FIRST
 // session's session-scoped runtime resources — agentctl PID/port, remote
-// session dir, local forward port. Without this filter, the SSH executor's
+// session dir, local forward port, and Office agent identity. Without this filter, the SSH executor's
 // ResumeRemoteInstance would interpret those keys as a resume hint and
 // reattach to session-1's agentctl process, so session 2 would end up
 // sharing session 1's ACP session and instance port and never finish its
@@ -953,6 +1032,7 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 			lifecycle.MetadataKeySSHRemoteAgentctlPID:  "12345",
 			lifecycle.MetadataKeySSHLocalForwardPort:   "59123",
 			lifecycle.MetadataKeySSHRemoteAgentctlURL:  "http://127.0.0.1:59123",
+			lifecycle.MetadataKeyOfficeAgentProfileID:  "reviewer",
 			// Non-persistent key — must NOT propagate (not in persistentMetadataKeys).
 			"task_description": "session 1 prompt",
 		},
@@ -988,6 +1068,9 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 		lifecycle.MetadataKeySSHRemoteAgentctlPID,
 		lifecycle.MetadataKeySSHLocalForwardPort,
 		lifecycle.MetadataKeySSHRemoteAgentctlURL,
+		lifecycle.MetadataKeySSHRuntimeAPILocalURL,
+		lifecycle.MetadataKeySSHRuntimeAPIRemotePort,
+		lifecycle.MetadataKeyOfficeAgentProfileID,
 	}
 	for _, k := range sessionScoped {
 		if v, ok := req.Metadata[k]; ok {

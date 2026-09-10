@@ -9,20 +9,21 @@ import {
   expectMemberApiGating,
   GATING_ADMIN,
   GATING_MEMBER,
+  STORAGE_ROUTE,
 } from "./data-storage-gating-helpers";
 
 /**
  * System backups and storage maintenance act on the whole install: a snapshot
  * is a byte copy of the multi-user database, and a cleanup pass rewrites
- * shared state. Both are admin only on the backend, so Settings > System >
- * Data & storage must not offer a member controls that can only answer 403.
+ * shared state. Both are admin only on the backend, so their owning pages must
+ * not offer a member controls that can only answer 403.
  *
  * Runs in the `auth` project (backend restarted with auth required). Serial:
  * the two tests share the admin, member, and snapshot created in beforeAll.
  * A per-file database keeps the single-shot auth setup from colliding with
  * the other auth specs sharing the worker; afterAll restarts to baseline.
  */
-test.describe.serial("Data & storage member gating", () => {
+test.describe.serial("Data & Logs and Storage member gating", () => {
   let snapshotName = "";
 
   test.beforeAll(async ({ backend, browser }) => {
@@ -68,6 +69,10 @@ test.describe.serial("Data & storage member gating", () => {
     await expect(page.getByTestId("system-backups-restore")).toHaveCount(0);
     await expect(page.getByTestId("system-backups-delete")).toHaveCount(0);
 
+    await expect(page.getByTestId("storage-analyze")).toHaveCount(0);
+    await expect(page.getByTestId("storage-run-now")).toHaveCount(0);
+
+    await page.goto(STORAGE_ROUTE);
     // Storage keeps its controls visible but inert, with the reason attached.
     await expect(page.getByTestId("storage-analyze")).toBeDisabled();
     await expect(page.getByTestId("storage-run-now")).toBeDisabled();
@@ -75,7 +80,10 @@ test.describe.serial("Data & storage member gating", () => {
     await ctx.close();
   });
 
-  test("an admin still gets every control on the same page", async ({ browser, backend }) => {
+  test("an admin still gets every control across both owning pages", async ({
+    browser,
+    backend,
+  }) => {
     const ctx = await browser.newContext({ baseURL: backend.frontendUrl });
     await login(ctx, backend.baseUrl, GATING_ADMIN);
 
@@ -87,6 +95,10 @@ test.describe.serial("Data & storage member gating", () => {
     await expect(page.getByTestId("system-backups-restore").first()).toBeVisible();
     await expect(page.getByTestId("system-backups-delete").first()).toBeVisible();
     await expect(page.getByTestId("system-backups-admin-only")).toHaveCount(0);
+    await expect(page.getByTestId("storage-analyze")).toHaveCount(0);
+    await expect(page.getByTestId("storage-run-now")).toHaveCount(0);
+
+    await page.goto(STORAGE_ROUTE);
     await expect(page.getByTestId("storage-analyze")).toBeEnabled();
     await expect(page.getByTestId("storage-run-now")).toBeEnabled();
 

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -31,6 +32,7 @@ const (
 	ModelSelectionOutcomeNone             ModelSelectionOutcome = ""
 	ModelSelectionOutcomeApplied          ModelSelectionOutcome = "applied"
 	ModelSelectionOutcomeExplicitFallback ModelSelectionOutcome = "explicit_fallback"
+	ModelSelectionOutcomeUniqueVariation  ModelSelectionOutcome = "unique_variation"
 	ModelSelectionOutcomeProviderDefault  ModelSelectionOutcome = "provider_default"
 )
 
@@ -42,6 +44,7 @@ const (
 	ModelSelectionReasonCatalogEmpty                = "catalog_empty"
 	ModelSelectionReasonSelectionUnsupported        = "selection_unsupported"
 	ModelSelectionReasonSelectionFailedAutoFallback = "selection_failed_auto_fallback"
+	ModelSelectionReasonUniqueVariationApplied      = "unique_variation_applied"
 )
 
 // ModelSelectionDecision is the single model-selection result shared by
@@ -84,6 +87,32 @@ func containsModel(ids []string, id string) bool {
 	return false
 }
 
+func uniqueAdvertisedModelVariation(requested string, advertised []string) string {
+	if requested == "" || strings.ContainsAny(requested, "[]") {
+		return ""
+	}
+
+	prefix := requested + "["
+	candidates := make(map[string]struct{})
+	for _, id := range advertised {
+		if !strings.HasPrefix(id, prefix) || !strings.HasSuffix(id, "]") {
+			continue
+		}
+		variant := strings.TrimSuffix(strings.TrimPrefix(id, prefix), "]")
+		if variant == "" || strings.ContainsAny(variant, "[]") {
+			continue
+		}
+		candidates[id] = struct{}{}
+		if len(candidates) > 1 {
+			return ""
+		}
+	}
+	for candidate := range candidates {
+		return candidate
+	}
+	return ""
+}
+
 func providerDefaultDecision(state *CachedModelState, policy StartModelPolicy, reason string) ModelSelectionDecision {
 	decision := ModelSelectionDecision{
 		RequestedModel: policy.Model,
@@ -114,6 +143,9 @@ func applyStartModelPolicy(
 	if policy.Model == "" {
 		return ModelSelectionDecision{Outcome: ModelSelectionOutcomeNone}, nil
 	}
+	if policy.AutoFallback {
+		policy.FallbackModel = ""
+	}
 
 	decision := ModelSelectionDecision{
 		RequestedModel: policy.Model,
@@ -125,8 +157,14 @@ func applyStartModelPolicy(
 	}
 
 	if !containsModel(advertised, policy.Model) {
+		if policy.AutoFallback {
+			return providerDefaultDecision(state, policy, ModelSelectionReasonRequestedNotAdvertised), nil
+		}
 		if policy.FallbackModel != "" && containsModel(advertised, policy.FallbackModel) {
 			return applyAdvertisedFallback(ctx, log, applier, state, policy, decision)
+		}
+		if variation := uniqueAdvertisedModelVariation(policy.Model, advertised); variation != "" {
+			return applyUniqueAdvertisedVariation(ctx, log, applier, state, policy, decision, variation)
 		}
 		reason := ModelSelectionReasonRequestedNotAdvertised
 		if policy.FallbackModel != "" {
@@ -156,6 +194,41 @@ func applyStartModelPolicy(
 
 	decision.EffectiveModel = policy.Model
 	decision.Outcome = ModelSelectionOutcomeApplied
+	return decision, nil
+}
+
+func applyUniqueAdvertisedVariation(
+	ctx context.Context,
+	log *logger.Logger,
+	applier modelApplier,
+	state *CachedModelState,
+	policy StartModelPolicy,
+	decision ModelSelectionDecision,
+	variation string,
+) (ModelSelectionDecision, error) {
+	decision.FallbackModel = ""
+	policy.FallbackModel = ""
+	decision.SetModelCalled = true
+	if err := applier.SetModel(ctx, variation); err != nil {
+		if sessionmodel.IsMethodNotFound(err) {
+			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
+			decision.SetModelCalled = true
+			return decision, nil
+		}
+		if policy.AutoFallback {
+			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionFailedAutoFallback)
+			decision.SetModelCalled = true
+			return decision, nil
+		}
+		return decision, fmt.Errorf("failed to set unique model variation %q: %w", variation, err)
+	}
+	decision.EffectiveModel = variation
+	decision.Outcome = ModelSelectionOutcomeUniqueVariation
+	decision.Reason = ModelSelectionReasonUniqueVariationApplied
+	decision.Warning = true
+	log.Info("start model unavailable, using unique advertised variation",
+		zap.String("start_model", policy.Model),
+		zap.String("variation_model", variation))
 	return decision, nil
 }
 

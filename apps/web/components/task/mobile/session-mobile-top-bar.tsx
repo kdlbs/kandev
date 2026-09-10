@@ -11,6 +11,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import type { FileInfo } from "@/lib/state/slices";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
@@ -36,6 +37,7 @@ type SessionMobileTopBarProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
 };
 
 function MobileTaskTitle({
@@ -180,6 +182,7 @@ type MobileTopBarActionsProps = {
   sessionId?: string | null;
   taskTitle?: string;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
   onMenuClick: () => void;
 };
 
@@ -198,12 +201,14 @@ function MobileTopBarActions({
   sessionId,
   taskTitle,
   isArchived,
+  onTaskUnarchived,
   onMenuClick,
 }: MobileTopBarActionsProps) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
+      {isArchived && <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} mobile />}
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
       {!isArchived && (
         <TaskTopBarPluginActions
@@ -283,6 +288,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         sessionId={props.sessionId}
         taskTitle={props.taskTitle}
         isArchived={props.isArchived}
+        onTaskUnarchived={props.onTaskUnarchived}
         onMenuClick={props.onMenuClick}
       />
     </header>

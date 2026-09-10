@@ -53,6 +53,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		project_id TEXT DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'TODO',
 		title TEXT DEFAULT '',
+		assignee_user_id TEXT NOT NULL DEFAULT '',
 		description TEXT DEFAULT '',
 		identifier TEXT DEFAULT '',
 		workflow_id TEXT DEFAULT '',
@@ -206,6 +207,9 @@ func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOption
 	}
 	if o.EventBus != nil {
 		opts.EventBus = o.EventBus
+	}
+	if o.TaskPRs != nil {
+		opts.TaskPRs = o.TaskPRs
 	}
 }
 

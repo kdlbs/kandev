@@ -19,6 +19,7 @@ export const DEFAULT_SECTION_EXPANDED: Record<string, boolean> = {
   projects: true,
   agents: true,
   integrations: false,
+  canvases: false,
   settings: false,
 };
 

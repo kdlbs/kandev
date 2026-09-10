@@ -77,10 +77,12 @@ make test-e2e
 
 ```bash
 cd apps/web
-pnpm e2e:run -- --project chromium -- tests/path/to/spec.ts
+pnpm e2e:run --project chromium tests/path/to/spec.ts
 ```
 
 The managed runner builds what it needs, chooses host or the CI runtime image, enables strict WebSocket assertions, and supports `--shards N`, `--no-build`, and `--project NAME`.
+
+Set `KANDEV_E2E_DOCKER_PROBE_TIMEOUT` to change the Docker availability limit in automatic mode. The default is 10 seconds. Set it to `0` to skip the probe and use host mode.
 
 Playwright uses one worker per process. Each worker fixture starts a real Go backend serving the built SPA with unique ports, a temporary `HOME`, Kandev home, SQLite database, repositories/worktrees, and agentctl port range. Each test receives a fresh browser context and resets seeded application state. Kandev process boundaries are real; external providers and the agent process are mocked unless a project says otherwise.
 
@@ -99,8 +101,7 @@ Run container-backed cases explicitly:
 
 ```bash
 cd apps/web
-pnpm exec playwright test --config e2e/playwright.config.ts \
-  --project=containers
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers
 ```
 
 E2E rules:
@@ -110,6 +111,9 @@ E2E rules:
 - never point tests at a developer's normal database or task workspace;
 - assert persisted or user-visible outcomes, not fixed sleeps;
 - preserve traces, screenshots, video, and backend logs for failures;
+- use the guarded `e2e:raw` or `e2e:run` commands. Both enforce one
+  Playwright worker per process; the managed runner also enforces a
+  memory-aware local shard limit;
 - cover reconnect, multi-repository, and mobile behavior when the feature depends on them.
 
 The internal `docs/test_e2e_web.md` contains fixture and debugging detail.

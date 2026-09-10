@@ -24,6 +24,8 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/quickterminal"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
+	systemsvc "github.com/kandev/kandev/internal/system"
+	systeminfo "github.com/kandev/kandev/internal/system/info"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -1430,6 +1432,34 @@ func TestBootPayloadOmitsUnsetTitlePrefix(t *testing.T) {
 	}
 }
 
+func TestBootPayloadCarriesSystemInfoBootID(t *testing.T) {
+	t.Parallel()
+
+	infoSvc := systeminfo.NewService("version", "commit", "build-time")
+	payload := bootPayload(
+		context.Background(),
+		nil,
+		routeParams{systemSvc: &systemsvc.Service{Info: infoSvc}},
+		webapp.ClassifyRoute("/"),
+	)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		Runtime struct {
+			BootID string `json:"bootId"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+	if decoded.Runtime.BootID != infoSvc.Info().BootID {
+		t.Fatalf("runtime.bootId = %q, want %q", decoded.Runtime.BootID, infoSvc.Info().BootID)
+	}
+}
+
 func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()
@@ -1927,6 +1957,15 @@ type bootStateTestHarness struct {
 	userSvc     *userservice.Service
 }
 
+// testWorkspacePolicyAttacher keeps boot-state tests focused on route and
+// service composition while satisfying the service's required attachment
+// boundary. Production wiring installs HandoffService here.
+type testWorkspacePolicyAttacher struct{}
+
+func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, taskservice.WorkspacePolicy) error {
+	return nil
+}
+
 func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowservice.Service) {
 	harness := newBootStateTestHarness(t)
 	return harness.taskSvc, harness.workflowSvc
@@ -1997,6 +2036,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	taskSvc.SetWorkspaceBootstrapper(taskRepo)
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+	taskSvc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	return bootStateTestHarness{
 		db:          sqlxDB,

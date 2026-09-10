@@ -278,9 +278,12 @@ type Adapter struct {
 	// Session configuration changes are serialized across model and option
 	// RPCs. configGeneration is incremented when a change begins so an older
 	// completion cannot overwrite a newer selection.
-	configChangeMu   sync.Mutex
-	configGeneration uint64
-	contextSamples   map[string]contextWindowSample
+	// Session transitions use a separate mutex because a reset must keep the
+	// adapter transitionally consistent from session/new through session/close.
+	sessionTransitionMu sync.Mutex
+	configChangeMu      sync.Mutex
+	configGeneration    uint64
+	contextSamples      map[string]contextWindowSample
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -311,6 +314,14 @@ type Adapter struct {
 	asyncTurnMu         sync.Mutex
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
 	asyncTurnEpochs     map[string]uint64
+
+	// turnStartedAt records, per session, the time agentctl last dispatched
+	// session/prompt for it (human or synthetic). It is agentctl's own clock
+	// and never crosses the process boundary; the background-workload
+	// liveness probe compares descendant process start times against it.
+	// Guarded by asyncTurnMu and cleared on the same lifecycle as the
+	// asyncTurn maps above (new session, adapter close).
+	turnStartedAt map[string]time.Time
 
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
@@ -439,6 +450,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
 		asyncTurnEpochs:           make(map[string]uint64),
+		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
@@ -501,9 +513,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 

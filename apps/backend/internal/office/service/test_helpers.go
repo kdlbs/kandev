@@ -95,6 +95,13 @@ func (s *Service) CoalesceRoutineWakeupForTest(
 	}
 }
 
+// RepoForTest exposes the service's underlying repository so external test
+// packages can share its DB connection with another package's store (e.g.
+// configsync.NewStore) instead of standing up a second, disconnected schema.
+func (s *Service) RepoForTest() *sqlite.Repository {
+	return s.repo
+}
+
 // ExecSQL executes raw SQL against the service's database for test setup.
 func (s *Service) ExecSQL(t *testing.T, query string, args ...interface{}) {
 	t.Helper()
@@ -186,8 +193,9 @@ func BuildSkillManifestForTest(
 	ctx context.Context,
 	agent *models.AgentInstance,
 	workspaceSlug string,
+	availableActions ...string,
 ) *SkillManifest {
-	return si.buildSkillManifest(ctx, agent, workspaceSlug)
+	return si.buildSkillManifest(ctx, agent, workspaceSlug, availableActions...)
 }
 
 // Skill delivery test helpers were removed in ADR 0005 Wave E along

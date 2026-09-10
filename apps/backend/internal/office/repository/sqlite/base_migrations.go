@@ -8,6 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -20,43 +22,72 @@ import (
 // fold office_agent_instances, drop dead task columns, etc.) have been
 // collapsed: those rows never landed on main so the migrations were
 // pure no-ops at first boot.
-func (r *Repository) runMigrations() {
-	r.migrateSchedulerColumns()
-	r.migrateFailureColumns()
+func (r *Repository) runMigrations() error {
+	if err := r.migrateSchedulerColumns(); err != nil {
+		return err
+	}
+	if err := r.migrateFailureColumns(); err != nil {
+		return err
+	}
 	r.migrateRunPayloadIndexes()
 	r.migrateCostEventContract()
-	if err := r.migrateTaskPriorityToText(); err != nil {
-		// Surface to stderr; this stage runs from initSchema which doesn't
-		// have a logger handle. The recreate is wrapped in a transaction
-		// so a failure leaves the DB intact.
-		fmt.Println("office sqlite migrate priority:", err)
+	// These migrations implement SQLite-only task search and table-rebuild
+	// behavior. PostgreSQL has no rowid or FTS5 virtual tables, and its task
+	// repository already creates the portable task shape. Keep the branch
+	// explicit so an office store opened on PostgreSQL never probes SQLite's
+	// catalog or executes SQLite DDL.
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		if err := r.migrateTaskPriorityToText(); err != nil {
+			return fmt.Errorf("tasks.priority_text_rebuild: %w", err)
+		}
+		// Run migrateTaskFTS LAST so its triggers survive any subsequent
+		// recreate-table migrations (notably migrateTaskPriorityToText, which
+		// drops + rebuilds `tasks` and would otherwise wipe the FTS triggers).
+		if err := r.migrateTaskFTS(); err != nil {
+			return err
+		}
 	}
-	// Run migrateTaskFTS LAST so its triggers survive any subsequent
-	// recreate-table migrations (notably migrateTaskPriorityToText, which
-	// drops + rebuilds `tasks` and would otherwise wipe the FTS triggers).
-	r.migrateTaskFTS()
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.
-	r.migrateProviderRouting()
-	r.migrateContinuationScope()
+	if err := r.migrateProviderRouting(); err != nil {
+		return err
+	}
+	if err := r.migrateContinuationScope(); err != nil {
+		return err
+	}
 	r.migrateRunOutcome()
-	r.migrateParentWakeIndexes()
+	if err := r.migrateParentWakeIndexes(); err != nil {
+		return err
+	}
 	r.migrateParentWakeReceiptColumns()
+	r.migrate.Apply("task_workspace_groups.ownership_generation",
+		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	if err := r.migrate.Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
 // created before WO-16's claim-time scope persistence. Existing rows receive
 // a scope from their stored context snapshot so queued or claimed taskless
 // runs keep their continuation chain after an upgrade.
-func (r *Repository) migrateContinuationScope() {
-	r.migrate.Apply("runs.continuation_scope",
-		`ALTER TABLE runs ADD COLUMN continuation_scope TEXT NOT NULL DEFAULT ''`)
-	r.backfillContinuationScopes()
-	r.migrate.Apply("runs.failure_scope_status_index",
-		`CREATE INDEX IF NOT EXISTS idx_run_failure_scope_status ON runs(agent_profile_id, continuation_scope, status)`)
+func (r *Repository) migrateContinuationScope() error {
+	if err := r.migrate.Apply("runs.continuation_scope",
+		`ALTER TABLE runs ADD COLUMN continuation_scope TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.backfillContinuationScopes(); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("runs.failure_scope_status_index",
+		`CREATE INDEX IF NOT EXISTS idx_run_failure_scope_status ON runs(agent_profile_id, continuation_scope, status)`); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (r *Repository) backfillContinuationScopes() {
+func (r *Repository) backfillContinuationScopes() error {
 	var legacyRuns []struct {
 		ID              string `db:"id"`
 		AgentProfileID  string `db:"agent_profile_id"`
@@ -64,11 +95,8 @@ func (r *Repository) backfillContinuationScopes() {
 	}
 	if err := r.db.Select(&legacyRuns,
 		`SELECT id, agent_profile_id, context_snapshot
-		 FROM runs WHERE continuation_scope = ''`); err != nil {
-		if r.log != nil {
-			r.log.Warn("continuation scope backfill query failed", zap.Error(err))
-		}
-		return
+			 FROM runs WHERE continuation_scope = ''`); err != nil {
+		return fmt.Errorf("runs.continuation_scope backfill query: %w", err)
 	}
 	for _, legacyRun := range legacyRuns {
 		scope := models.ContinuationScopeForRun(
@@ -79,12 +107,10 @@ func (r *Repository) backfillContinuationScopes() {
 			UPDATE runs SET continuation_scope = ?
 			WHERE id = ? AND continuation_scope = ''
 		`), scope, legacyRun.ID); err != nil {
-			if r.log != nil {
-				r.log.Warn("continuation scope backfill update failed",
-					zap.String("run_id", legacyRun.ID), zap.Error(err))
-			}
+			return fmt.Errorf("runs.continuation_scope backfill update %q: %w", legacyRun.ID, err)
 		}
 	}
+	return nil
 }
 
 // migrateCostEventContract adds the cache read/write split, turn
@@ -135,13 +161,26 @@ func (r *Repository) migrateRunPayloadIndexes() {
 // child, no-non-terminal-child, the child-set-key GROUP_CONCAT) need to
 // avoid a full tasks scan on every 30-second reconciler tick. Also
 // benefits AreAllChildrenTerminal and GetChildSummaries (blockers.go),
-// which query the same shape. Applied via r.migrate (non-fatal) rather
-// than createParentChildWakeReceiptsTable's r.db.Exec: tasks belongs to
-// a different package's schema, so a plain Exec against it is fatal in
-// the minimal single-domain test repos that don't create tasks until
-// after NewWithDB returns.
-func (r *Repository) migrateParentWakeIndexes() {
-	r.migrate.Apply(
+// which query the same shape. The office repository is also used in isolated
+// tests before the task schema is installed, so the migration is skipped when
+// tasks is absent. Once the table exists, an unexpected index failure is fatal
+// to the required office store.
+func (r *Repository) migrateParentWakeIndexes() error {
+	exists, err := db.TableExists(r.db, "tasks")
+	if err != nil {
+		return fmt.Errorf("inspect tasks table for parent wake index: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	columnExists, err := db.ColumnExists(r.db, "tasks", "parent_id")
+	if err != nil {
+		return fmt.Errorf("inspect tasks.parent_id for parent wake index: %w", err)
+	}
+	if !columnExists {
+		return nil
+	}
+	return r.migrate.Apply(
 		"idx_tasks_parent_id",
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)`,
 	)
@@ -155,12 +194,16 @@ func (r *Repository) migrateParentWakeIndexes() {
 // so it is re-admitted once on the next tick after upgrade rather than
 // silently trusted as current.
 func (r *Repository) migrateParentWakeReceiptColumns() {
-	r.migrate.Apply(
+	// Apply's errors are swallowed by design (see db.MigrateLogger.Apply) and
+	// surface instead through r.migrate.Err(), which runMigrations checks
+	// once after every migration step — explicitly discarded here rather
+	// than left unchecked, matching that contract for errcheck.
+	_ = r.migrate.Apply(
 		"parent_child_wake_receipts.delivery_operation_id",
 		`ALTER TABLE parent_child_wake_receipts
 		 ADD COLUMN delivery_operation_id TEXT NOT NULL DEFAULT ''`,
 	)
-	r.migrate.Apply(
+	_ = r.migrate.Apply(
 		"parent_child_wake_receipts.child_generation",
 		`ALTER TABLE parent_child_wake_receipts
 		 ADD COLUMN child_generation TEXT NOT NULL DEFAULT ''`,
@@ -171,8 +214,8 @@ func (r *Repository) migrateParentWakeReceiptColumns() {
 // office_run_route_attempts, and office_provider_health tables. The
 // routing columns are also added with replayable ALTER statements so
 // databases created before a column shipped converge to the fresh schema.
-func (r *Repository) migrateProviderRouting() {
-	_, _ = r.db.Exec(`
+func (r *Repository) migrateProviderRouting() error {
+	if _, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_workspace_routing (
 		workspace_id      TEXT PRIMARY KEY,
 		enabled           INTEGER NOT NULL DEFAULT 0,
@@ -182,9 +225,11 @@ func (r *Repository) migrateProviderRouting() {
 		tier_per_reason   TEXT    NOT NULL DEFAULT '{}',
 		role_tiers        TEXT    NOT NULL DEFAULT '{}',
 		updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`)
+	)`); err != nil {
+		return fmt.Errorf("office_workspace_routing table: %w", err)
+	}
 
-	_, _ = r.db.Exec(`
+	if _, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_run_route_attempts (
 		run_id           TEXT NOT NULL,
 		seq              INTEGER NOT NULL,
@@ -205,7 +250,9 @@ func (r *Repository) migrateProviderRouting() {
 		finished_at      TIMESTAMP,
 		PRIMARY KEY (run_id, seq),
 		FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-	)`)
+	)`); err != nil {
+		return fmt.Errorf("office_run_route_attempts table: %w", err)
+	}
 
 	r.migrate.Apply("runs.resolved_execution_profile_id",
 		`ALTER TABLE runs ADD COLUMN resolved_execution_profile_id TEXT`)
@@ -216,7 +263,7 @@ func (r *Repository) migrateProviderRouting() {
 	r.migrate.Apply("office_run_route_attempts.tier_source",
 		`ALTER TABLE office_run_route_attempts ADD COLUMN tier_source TEXT NOT NULL DEFAULT ''`)
 
-	_, _ = r.db.Exec(`
+	if _, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_provider_health (
 		workspace_id   TEXT NOT NULL,
 		provider_id    TEXT NOT NULL,
@@ -231,30 +278,54 @@ func (r *Repository) migrateProviderRouting() {
 		raw_excerpt    TEXT,
 		updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (workspace_id, provider_id, scope, scope_value)
-	)`)
+	)`); err != nil {
+		return fmt.Errorf("office_provider_health table: %w", err)
+	}
+	return nil
 }
 
-// migrateFailureColumns creates the auxiliary office_workspace_settings
-// and office_inbox_dismissals tables used by office-agent-error-handling.
+// migrateFailureColumns creates the auxiliary failure-handling tables:
+// workspace settings, inbox dismissals, and durable auto-pause recovery
+// snapshots.
 // The runs.error_message column is part of the canonical CREATE TABLE
 // in base.go, so no ALTER is needed here.
-func (r *Repository) migrateFailureColumns() {
-	_, _ = r.db.Exec(`
+func (r *Repository) migrateFailureColumns() error {
+	if _, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_workspace_settings (
 		workspace_id TEXT PRIMARY KEY,
 		agent_failure_threshold INTEGER NOT NULL DEFAULT 3,
 		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`)
+	)`); err != nil {
+		return fmt.Errorf("office_workspace_settings table: %w", err)
+	}
 
-	_, _ = r.db.Exec(`
+	if _, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_inbox_dismissals (
 		user_id TEXT NOT NULL,
 		item_kind TEXT NOT NULL,
 		item_id TEXT NOT NULL,
 		dismissed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (user_id, item_kind, item_id)
-	)`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_inbox_dismissals_kind ON office_inbox_dismissals(item_kind, item_id)`)
+	)`); err != nil {
+		return fmt.Errorf("office_inbox_dismissals table: %w", err)
+	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_inbox_dismissals_kind ON office_inbox_dismissals(item_kind, item_id)`); err != nil {
+		return fmt.Errorf("idx_office_inbox_dismissals_kind: %w", err)
+	}
+	if _, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_agent_pause_recoveries (
+		agent_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		failed_run_id TEXT NOT NULL,
+		captured_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (agent_id, task_id)
+	)`); err != nil {
+		return fmt.Errorf("office_agent_pause_recoveries table: %w", err)
+	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_agent_pause_recoveries_agent ON office_agent_pause_recoveries(agent_id)`); err != nil {
+		return fmt.Errorf("idx_office_agent_pause_recoveries_agent: %w", err)
+	}
+	return nil
 }
 
 // migrateSchedulerColumns adds the atomic task-checkout columns to the
@@ -263,21 +334,45 @@ func (r *Repository) migrateFailureColumns() {
 // live here have been folded into the canonical CREATE TABLE statements
 // (base.go) — office is new, so main upgrades pick up the final shape
 // directly without an interim ALTER step.
-func (r *Repository) migrateSchedulerColumns() {
-	r.migrate.Apply("tasks.checkout_agent_id", `ALTER TABLE tasks ADD COLUMN checkout_agent_id TEXT`)
-	r.migrate.Apply("tasks.checkout_at", `ALTER TABLE tasks ADD COLUMN checkout_at TIMESTAMP`)
-	r.migrate.Apply("tasks.checkout_run_id", `ALTER TABLE tasks ADD COLUMN checkout_run_id TEXT`)
+func (r *Repository) migrateSchedulerColumns() error {
+	// These columns belong to the task repository. They are replayed here for
+	// deployments that initialize the office package first, so skip them until
+	// that owner has created tasks. Once the table exists, the required migration
+	// logger makes every unexpected ALTER failure fatal.
+	exists, err := db.TableExists(r.db, "tasks")
+	if err != nil {
+		return fmt.Errorf("inspect tasks table for scheduler migration: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	for _, migration := range []struct {
+		name string
+		stmt string
+	}{
+		{"tasks.checkout_agent_id", `ALTER TABLE tasks ADD COLUMN checkout_agent_id TEXT`},
+		{"tasks.checkout_at", `ALTER TABLE tasks ADD COLUMN checkout_at TIMESTAMP`},
+		{"tasks.checkout_run_id", `ALTER TABLE tasks ADD COLUMN checkout_run_id TEXT`},
+	} {
+		if err := r.migrate.Apply(migration.name, migration.stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrateTaskFTS creates the FTS5 virtual table and triggers for full-text task search.
 // Skips entirely when the tasks table does not exist or when the SQLite build lacks FTS5.
-func (r *Repository) migrateTaskFTS() {
+func (r *Repository) migrateTaskFTS() error {
 	// Guard: tasks table may not exist yet (office schema runs before task schema).
 	var exists int
 	if err := r.db.QueryRow(
 		"SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'",
 	).Scan(&exists); err != nil {
-		return
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("inspect tasks table for FTS: %w", err)
 	}
 
 	// Attempt to create the FTS5 virtual table. If the SQLite build lacks FTS5,
@@ -291,17 +386,27 @@ func (r *Repository) migrateTaskFTS() {
 	// seeded onboarding tasks). Internal mode duplicates the text into the
 	// FTS table itself, so the trigger does a real INSERT and the index
 	// stays in sync. The storage cost is negligible for our task volumes.
-	r.maybeDropLegacyExternalContentFTS()
+	if err := r.maybeDropLegacyExternalContentFTS(); err != nil {
+		return err
+	}
 	if _, err := r.db.Exec(`
 		CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
 			title, description, identifier
 		)
 	`); err != nil {
-		return // FTS5 module not available
+		if strings.Contains(strings.ToLower(err.Error()), "no such module: fts5") {
+			return nil
+		}
+		return fmt.Errorf("create tasks FTS table: %w", err)
 	}
 
-	r.createFTSTriggers()
-	r.backfillFTS()
+	if err := r.createFTSTriggers(); err != nil {
+		return err
+	}
+	if err := r.backfillFTS(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // maybeDropLegacyExternalContentFTS drops the legacy external-content
@@ -311,22 +416,32 @@ func (r *Repository) migrateTaskFTS() {
 // never populated the index in this codebase. Dropping lets migrateTaskFTS
 // recreate it in internal-content mode and backfill from `tasks`. No-op when
 // the table doesn't exist or is already internal-content.
-func (r *Repository) maybeDropLegacyExternalContentFTS() {
+func (r *Repository) maybeDropLegacyExternalContentFTS() error {
 	var sqlText string
 	err := r.db.QueryRow(
 		`SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks_fts'`,
 	).Scan(&sqlText)
 	if err != nil {
-		return // no table to drop
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("inspect legacy tasks FTS table: %w", err)
 	}
 	if !strings.Contains(sqlText, "content='tasks'") &&
 		!strings.Contains(sqlText, `content="tasks"`) {
-		return // already internal-content
+		return nil // already internal-content
 	}
-	_, _ = r.db.Exec(`DROP TRIGGER IF EXISTS tasks_fts_insert`)
-	_, _ = r.db.Exec(`DROP TRIGGER IF EXISTS tasks_fts_update`)
-	_, _ = r.db.Exec(`DROP TRIGGER IF EXISTS tasks_fts_delete`)
-	_, _ = r.db.Exec(`DROP TABLE IF EXISTS tasks_fts`)
+	for _, statement := range []string{
+		`DROP TRIGGER IF EXISTS tasks_fts_insert`,
+		`DROP TRIGGER IF EXISTS tasks_fts_update`,
+		`DROP TRIGGER IF EXISTS tasks_fts_delete`,
+		`DROP TABLE IF EXISTS tasks_fts`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			return fmt.Errorf("drop legacy tasks FTS object: %w", err)
+		}
+	}
+	return nil
 }
 
 // createFTSTriggers installs INSERT/UPDATE/DELETE triggers to keep the FTS
@@ -334,32 +449,40 @@ func (r *Repository) maybeDropLegacyExternalContentFTS() {
 // INSERT/DELETE statements drive the index — the 'delete' command literal
 // is reserved for external-content mode and raises "SQL logic error" here
 // (the prior implementation broke every UPDATE on tasks).
-func (r *Repository) createFTSTriggers() {
-	_, _ = r.db.Exec(`DROP TRIGGER IF EXISTS tasks_fts_insert`)
-	_, _ = r.db.Exec(`DROP TRIGGER IF EXISTS tasks_fts_update`)
-	_, _ = r.db.Exec(`DROP TRIGGER IF EXISTS tasks_fts_delete`)
-	_, _ = r.db.Exec(`CREATE TRIGGER IF NOT EXISTS tasks_fts_insert AFTER INSERT ON tasks BEGIN
+func (r *Repository) createFTSTriggers() error {
+	for _, statement := range []string{
+		`DROP TRIGGER IF EXISTS tasks_fts_insert`,
+		`DROP TRIGGER IF EXISTS tasks_fts_update`,
+		`DROP TRIGGER IF EXISTS tasks_fts_delete`,
+		`CREATE TRIGGER IF NOT EXISTS tasks_fts_insert AFTER INSERT ON tasks BEGIN
 		INSERT INTO tasks_fts(rowid, title, description, identifier)
 		VALUES (new.rowid, new.title, COALESCE(new.description,''), COALESCE(new.identifier,''));
-	END`)
-
-	_, _ = r.db.Exec(`CREATE TRIGGER IF NOT EXISTS tasks_fts_update AFTER UPDATE ON tasks BEGIN
+	END`,
+		`CREATE TRIGGER IF NOT EXISTS tasks_fts_update AFTER UPDATE ON tasks BEGIN
 		DELETE FROM tasks_fts WHERE rowid = old.rowid;
 		INSERT INTO tasks_fts(rowid, title, description, identifier)
 		VALUES (new.rowid, new.title, COALESCE(new.description,''), COALESCE(new.identifier,''));
-	END`)
-
-	_, _ = r.db.Exec(`CREATE TRIGGER IF NOT EXISTS tasks_fts_delete AFTER DELETE ON tasks BEGIN
+	END`,
+		`CREATE TRIGGER IF NOT EXISTS tasks_fts_delete AFTER DELETE ON tasks BEGIN
 		DELETE FROM tasks_fts WHERE rowid = old.rowid;
-	END`)
+	END`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			return fmt.Errorf("create tasks FTS trigger: %w", err)
+		}
+	}
+	return nil
 }
 
 // backfillFTS populates the FTS index from existing task rows.
-func (r *Repository) backfillFTS() {
-	_, _ = r.db.Exec(`
+func (r *Repository) backfillFTS() error {
+	if _, err := r.db.Exec(`
 		INSERT OR IGNORE INTO tasks_fts(rowid, title, description, identifier)
 		SELECT rowid, title, COALESCE(description,''), COALESCE(identifier,'') FROM tasks
-	`)
+	`); err != nil {
+		return fmt.Errorf("backfill tasks FTS: %w", err)
+	}
+	return nil
 }
 
 // migrateTaskPriorityToText converts the tasks.priority column from INTEGER to
@@ -442,23 +565,27 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	// AFTER initTaskSchema creates the legacy INTEGER-priority table
 	// but BEFORE the office migrations run. On test fixtures that seed
 	// a pre-cascade legacy schema (see TestMigrate_PriorityIntegerToText)
-	// the column is absent — we add it idempotently here so the recreate
-	// SELECT below can reference it. Errors are swallowed because the
-	// most common cause is "column already exists" on real installs.
-	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
-	// Older priority-migration fixtures predate the WIP queue columns. Add
-	// them before the recreate SELECT so the migration remains compatible with
-	// those schemas as well as with real pre-queue installations.
-	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`)
-	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
-	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`)
-	// Same defensive add for external_id/external_id_settled_at
-	// (docs/specs/tasks/system-design/external-id-idempotency.md): real installs already have
-	// these from task/repository/sqlite/base.go runMigrations(), but older
-	// priority-migration fixtures predate them too.
-	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`)
-	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`)
+	// the column is absent, add it before the recreate SELECT. The legacy
+	// fixtures used by the priority migration predate several of these columns,
+	// while current installs have already received them from the task owner.
+	legacyColumns := []struct {
+		name string
+		stmt string
+	}{
+		{"archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`},
+		{"wip_admitted", `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`},
+		{"queued_for_step_id", `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`},
+		{"queued_at", `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`},
+		{"autopilot_enabled", `ALTER TABLE tasks ADD COLUMN autopilot_enabled INTEGER NOT NULL DEFAULT 0`},
+		{"external_id", `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`},
+		{"external_id_settled_at", `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`},
+		{"assignee_user_id", `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, column := range legacyColumns {
+		if _, err := conn.ExecContext(ctx, column.stmt); err != nil && !db.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add legacy tasks.%s: %w", column.name, err)
+		}
+	}
 
 	for _, stmt := range taskPriorityMigrationStatements() {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {
@@ -514,12 +641,13 @@ func taskPriorityMigrationStatements() []string {
 			checkout_at TIMESTAMP,
 			checkout_run_id TEXT,
 			external_id TEXT COLLATE BINARY,
-			external_id_settled_at TIMESTAMP
+			external_id_settled_at TIMESTAMP,
+			assignee_user_id TEXT NOT NULL DEFAULT ''
 		)`,
 		// archived_by_cascade_id and external_id/external_id_settled_at are
 		// added to the task schema by task/repository/sqlite/base.go
 		// runMigrations() via idempotent ALTER ADD COLUMN calls that run
-		// BEFORE this office recreate. If the recreate omitted them from the
+		// BEFORE this office recreate, as is assignee_user_id. If the recreate omitted them from the
 		// new shape: archived_by_cascade_id missing would 500
 		// httpArchiveTask -> HandoffService.ArchiveTaskTree (the CAS update
 		// in ArchiveTaskIfActive references it); external_id missing would
@@ -534,7 +662,7 @@ func taskPriorityMigrationStatements() []string {
 			origin, project_id,
 			labels, identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at
+			external_id, external_id_settled_at, assignee_user_id
 		) SELECT
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
@@ -548,7 +676,8 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(project_id,''),
 			COALESCE(labels,'[]'), identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at
+			external_id, external_id_settled_at,
+			COALESCE(assignee_user_id,'')
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_priority_new RENAME TO tasks`,

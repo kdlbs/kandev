@@ -37,6 +37,7 @@ import type {
   useMergedAgentState,
 } from "./task-page-content";
 import { useTranslation } from "react-i18next";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -59,6 +60,7 @@ export type TaskPageInnerProps = {
   officeTaskHref?: string | null;
   ensureSession: UseEnsureTaskSessionResult;
   onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
 };
 
 type RemoteExecutorStatus = {
@@ -145,9 +147,12 @@ function buildTaskLayoutProps(params: {
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   initialLayout?: string | null;
+  onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
+    taskId: taskProps.taskId,
     workspaceId: taskProps.workspaceId,
     workflowId: taskProps.workflowId,
     sessionId: effectiveSessionId,
@@ -156,6 +161,7 @@ function buildTaskLayoutProps(params: {
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
+    taskCanvases: params.taskCanvases ?? [],
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
     baseBranch: taskProps.baseBranch,
@@ -168,6 +174,7 @@ function buildTaskLayoutProps(params: {
     remoteCheckedAt: params.remote.remoteCheckedAt,
     remoteStatusError: params.remote.remoteStatusError,
     isArchived: taskProps.isArchived,
+    onTaskUnarchived: params.onTaskUnarchived,
   };
 }
 
@@ -230,6 +237,7 @@ function useTaskPageDerivedProps({
   initialLayout,
   officeTaskHref,
   onTaskUnarchived,
+  taskCanvases,
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
@@ -273,6 +281,8 @@ function useTaskPageDerivedProps({
     merged,
     remote,
     initialLayout,
+    onTaskUnarchived,
+    taskCanvases,
   });
 
   return { taskProps, debugEntries, topBarProps, layoutProps };
@@ -336,7 +346,12 @@ export function TaskPageInner(props: TaskPageInnerProps) {
             <SessionRecoveryFeedback
               error={props.resumption.error}
               notice={props.resumption.notice}
+              recoveryFailure={props.resumption.recoveryFailure}
               onRetry={() => void props.resumption.resumeSession()}
+              retryDisabled={
+                props.resumption.resumptionState === "checking" ||
+                props.resumption.resumptionState === "resuming"
+              }
               workspaceId={task?.workspace_id ?? null}
             />
             <TaskArchivedProvider value={archivedValue}>

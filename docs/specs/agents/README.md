@@ -34,6 +34,7 @@ surface shared by task and Office consumers.
 
 - [Agent Resume and Runtime Recovery](requirements/agent-resume-runtime-recovery.md)
 - [Agent Rich Output](requirements/agent-rich-output.md)
+- [Google Antigravity ACP Agent](requirements/antigravity-acp-agent.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
 - [Collapsible Agent Blocks on the Agents Settings Page](requirements/collapsible-agent-blocks.md)
 - [Cursor Subagent Metadata](requirements/cursor-subagent-metadata.md)
@@ -46,9 +47,11 @@ surface shared by task and Office consumers.
 - [Granular Agent Permissions](requirements/granular-permissions.md)
 - [Hide Disabled Agent Profiles from Left Panel Navigation](requirements/hide-disabled-profiles-nav.md)
 - [Injected Skill Naming](requirements/injected-skill-naming.md)
+- [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
 - [Mock-agent slow command duration syntax](requirements/mock-agent-slow-duration.md)
 - [Native Code Review](requirements/native-code-review.md)
-- [No Silent Model Fallback](requirements/no-silent-model-fallback.md)
+- [No Silent Model Fallback](requirements/no-silent-model-fallback.md), including
+  profile-selector warning placement and executor-authoritative task warnings.
 - [Copy agent configuration to isolated executors](requirements/portable-agent-configuration.md)
 - [Disable an Agent Profile](requirements/profile-disable.md)
 - [Agent Profile Recent Use](requirements/profile-recent-use.md)
@@ -56,7 +59,9 @@ surface shared by task and Office consumers.
 - [Agent Roles — Security, QA, and DevOps](requirements/roles.md)
 - [Managed npm runtime recovery](requirements/managed-npm-runtime-recovery.md)
 - [Managed Agent Runtime Versions and Updates](requirements/runtime-updates.md)
+- [MCP Bridge Reliability](requirements/mcp-bridge-reliability.md)
 - [MCP Protocol Compatibility](requirements/mcp-protocol-compatibility.md)
+- [MCP tool discovery guidance](requirements/mcp-tool-discovery-guidance.md)
 - [Simplify the agent settings profile layout](requirements/settings-profile-layout.md)
 - [Spawn Session Effective Agent Profile](requirements/spawn-session-effective-profile.md)
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
@@ -66,6 +71,7 @@ surface shared by task and Office consumers.
 ### System design
 
 - [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
+- [Google Antigravity ACP Agent](system-design/antigravity-acp-agent.md)
 - [Injected Skill Naming](system-design/injected-skill-naming.md)
 - [Injected Skill Naming Migration](system-design/injected-skill-naming-migration.md)
 - [Dynamic Agent Routing System Design Part 1](system-design/dynamic-agent-routing-01.md)
@@ -75,8 +81,12 @@ surface shared by task and Office consumers.
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 2](system-design/runtime-updates-02.md)
+- [Managed Runtime Default Activation](system-design/runtime-default-activation.md)
 - [Managed npm runtime recovery](system-design/managed-npm-runtime-recovery.md)
+- [MCP Bridge Reliability](system-design/mcp-bridge-reliability.md)
+- [Agent MCP Timeout Budgets](system-design/mcp-timeout-budgets.md)
 - [MCP Protocol Compatibility](system-design/mcp-protocol-compatibility.md)
+- [MCP tool discovery guidance](system-design/mcp-tool-discovery-guidance.md)
 - [Subagent context persistence System Design Part 1](system-design/subagent-context-persistence-01.md)
 - [Subagent context persistence System Design Part 2](system-design/subagent-context-persistence-02.md)
 - [Subagent context persistence System Design Part 3](system-design/subagent-context-persistence-03.md)
@@ -95,6 +105,9 @@ Migration remains in progress while legacy source detail is extracted from the
 canonical requirement and system-design documents above.
 
 ## Related systems
+
+- [Settings parity](../platform/requirements/agent-settings-parity.md): owns the
+  shared discovery and interface contract. Agents retain profile data ownership.
 
 - [Tasks](../tasks/README.md): consumes agent profiles for task execution.
 - [Office](../office/README.md): consumes agent identities for autonomous work.

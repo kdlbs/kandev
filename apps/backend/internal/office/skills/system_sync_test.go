@@ -345,6 +345,44 @@ func TestBundledSkillCLIExamplesAvoidKnownUnsupportedOperations(t *testing.T) {
 	}
 }
 
+func TestBundledDecisionSkillContract(t *testing.T) {
+	specs, err := skills.LoadBundledSystemSkills()
+	if err != nil {
+		t.Fatalf("LoadBundledSystemSkills: %v", err)
+	}
+
+	for _, spec := range specs {
+		if spec.Slug != "kandev-step-decision" {
+			continue
+		}
+		if len(spec.DefaultForRoles) != 0 {
+			t.Fatalf("decision skill default roles = %v, want none", spec.DefaultForRoles)
+		}
+		for _, fragment := range []string{
+			`$KANDEV_CLI kandev task decision --decision approved --reason "..."`,
+			"approved",
+			"rejected",
+			"non-empty reason",
+			"supersedes",
+			"decision",
+			"role",
+			"step_id",
+			"decision_id",
+			"decided_at",
+			"transition_applied",
+			"guards",
+			"comments do not count",
+			"Approval-inbox commands do not count",
+		} {
+			if !strings.Contains(spec.Content, fragment) {
+				t.Errorf("decision skill missing %q:\n%s", fragment, spec.Content)
+			}
+		}
+		return
+	}
+	t.Fatal("kandev-step-decision bundled system skill not found")
+}
+
 func TestBundledProtocolSkillDocumentsScopedTaskMessages(t *testing.T) {
 	specs, err := skills.LoadBundledSystemSkills()
 	if err != nil {

@@ -55,10 +55,15 @@ type EngineHandle interface {
 	RecordParticipantDecision(ctx context.Context, sessionID string, in engine.DecisionInfo) (engine.RecordDecisionResult, error)
 	EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (engine.QuorumSnapshot, error)
 	// ResolveParticipantRole is the AC-2/3/4/4a role-and-seat resolution
-	// entry point the agent decision tool needs. Reached the same way as
+	// entry point the runtime decision path needs. Reached the same way as
 	// the two methods above: via Dispatcher.ResolveParticipantRole plus a
 	// narrow caller-side type assertion.
 	ResolveParticipantRole(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
+	// ResolveParticipantRoleReadOnly is ResolveParticipantRole's
+	// side-effect-free counterpart, for callers that only observe seat
+	// occupancy (e.g. a runtime capability grant) rather than evaluate a
+	// guard or record a decision. Reached via Dispatcher.ResolveParticipantRoleReadOnly.
+	ResolveParticipantRoleReadOnly(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
 }
 
 // RecordDecisionInput is what a transport must resolve before calling
@@ -367,6 +372,15 @@ func (d *Dispatcher) ResolveParticipantRole(
 	return d.engine.ResolveParticipantRole(ctx, taskID, stepID, agentProfileID)
 }
 
+// ResolveParticipantRoleReadOnly is ResolveParticipantRole's side-effect-free
+// counterpart (see EngineHandle.ResolveParticipantRoleReadOnly): no session
+// resolution is needed here either.
+func (d *Dispatcher) ResolveParticipantRoleReadOnly(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) (role, participantID string, err error) {
+	return d.engine.ResolveParticipantRoleReadOnly(ctx, taskID, stepID, agentProfileID)
+}
+
 // resolveActiveSessionID returns AC-16's active-session id, or "" when no
 // such session is resolvable (AC-16a) — never an error for that case.
 func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) (string, error) {
@@ -393,10 +407,8 @@ func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) 
 // unresolvable active session already gets, rather than rejecting the
 // decision outright.
 //
-// The active-state set mirrors GetActiveTaskSessionByTaskID's own query
-// (internal/task/repository/sqlite/session.go) — there is no shared
-// models-level predicate for that set, so this local copy must be kept in
-// sync with it.
+// The active-state set is taskmodels.IsTaskLookupActiveSessionState, the same
+// predicate GetActiveTaskSessionByTaskID's own query is cross-checked against.
 func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessionID string) (string, error) {
 	session, err := d.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -410,7 +422,7 @@ func (d *Dispatcher) resolveDeciderSessionID(ctx context.Context, taskID, sessio
 		d.logSessionUnresolvable(taskID, sessionID, "foreign")
 		return "", nil
 	}
-	if !isActiveSessionState(session.State) {
+	if !taskmodels.IsTaskLookupActiveSessionState(session.State) {
 		d.logSessionUnresolvable(taskID, sessionID, "terminal")
 		return "", nil
 	}
@@ -422,18 +434,6 @@ func (d *Dispatcher) logSessionUnresolvable(taskID, sessionID, reason string) {
 		zap.String("task_id", taskID),
 		zap.String("supplied_session_id", sessionID),
 		zap.String("reason", reason))
-}
-
-func isActiveSessionState(state taskmodels.TaskSessionState) bool {
-	switch state {
-	case taskmodels.TaskSessionStateCreated,
-		taskmodels.TaskSessionStateStarting,
-		taskmodels.TaskSessionStateRunning,
-		taskmodels.TaskSessionStateWaitingForInput:
-		return true
-	default:
-		return false
-	}
 }
 
 // resolveLatestSessionID returns the F38 "any session" id (the task's

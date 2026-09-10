@@ -19,6 +19,12 @@ type dbStepResolver struct {
 	repo *sqliterepo.Repository
 }
 
+type noOpWorkspacePolicyAttacher struct{}
+
+func (noOpWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, WorkspacePolicy) error {
+	return nil
+}
+
 func (r *dbStepResolver) ResolveStartStep(ctx context.Context, workflowID string) (string, error) {
 	var stepID string
 	err := r.repo.DB().QueryRowContext(ctx,
@@ -83,6 +89,7 @@ func setupOfficeTest(t *testing.T) (*Service, *sqliterepo.Repository) {
 		t.Fatalf("EnsureOfficeWorkflow: %v", err)
 	}
 	svc.SetStartStepResolver(&dbStepResolver{repo: repo})
+	svc.SetWorkspacePolicyAttacher(noOpWorkspacePolicyAttacher{})
 	return svc, repo
 }
 

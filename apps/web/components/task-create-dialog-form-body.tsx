@@ -6,13 +6,17 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { WorkflowSelectorRow } from "@/components/workflow-selector-row";
 import { AgentLogo } from "@/components/agent-logo";
-import type { DialogFormState } from "@/components/task-create-dialog-types";
-import type { DialogPromptEnhance } from "@/components/task-create-dialog-types";
+import type {
+  AgentCompatState,
+  DialogFormState,
+  DialogPromptEnhance,
+} from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 import { useTranslation } from "react-i18next";
 
 type SelectorOption = {
@@ -56,7 +60,9 @@ type CreateEditSelectorsProps = {
     popoverPortal?: boolean;
   }>;
   workflowAgentLocked: boolean;
-  noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  selectedAgentProfileName: string | null;
+  effectiveWorkflowName: string | null;
   executorProfileName: string | null;
 };
 
@@ -70,10 +76,21 @@ type AgentColumnProps = Pick<
   | "isCreatingSession"
   | "AgentSelectorComponent"
   | "workflowAgentLocked"
-  | "noCompatibleAgent"
+  | "agentCompatState"
+  | "selectedAgentProfileName"
+  | "effectiveWorkflowName"
   | "executorProfileName"
   | "executorProfileId"
 >;
+
+function credentialsHref(executorProfileId: string): string {
+  return executorProfileId ? `/settings/executors/${executorProfileId}` : "/settings/executors";
+}
+
+function useExecutorTarget(executorProfileName: string | null): string {
+  const { t } = useTranslation();
+  return executorProfileName ? `“${executorProfileName}”` : t("task:thisExecutor");
+}
 
 function NoCompatibleAgentState({
   executorProfileName,
@@ -83,19 +100,89 @@ function NoCompatibleAgentState({
   executorProfileId: string;
 }) {
   const { t } = useTranslation();
-  const target = executorProfileName ? `“${executorProfileName}”` : "this executor";
-  const href = executorProfileId
-    ? `/settings/executors/${executorProfileId}`
-    : "/settings/executors";
+  const target = useExecutorTarget(executorProfileName);
   return (
     <div
       className="flex h-auto min-h-7 items-center justify-between gap-3 rounded-sm border border-input px-3 py-1.5 text-xs text-muted-foreground"
       data-testid="agent-profile-empty-state"
     >
       <span>{t("task:noCompatibleAgentProfilesFor", { target })}</span>
-      <Link href={href} className="shrink-0 cursor-pointer text-primary hover:underline">
+      <Link
+        href={credentialsHref(executorProfileId)}
+        className="shrink-0 cursor-pointer text-primary hover:underline"
+      >
         {t("task:configureCredentials")}
       </Link>
+    </div>
+  );
+}
+
+/**
+ * The selected agent is not configured on the executor while another agent
+ * is. Under a workflow lock the note replaces the selector, because the
+ * locked profile is not among the compatible options; otherwise it sits under
+ * the selector until the automatic replacement lands.
+ */
+function IncompatibleAgentNote({
+  workflowName,
+  agentName,
+  executorProfileName,
+  executorProfileId,
+}: {
+  workflowName: string | null;
+  agentName: string | null;
+  executorProfileName: string | null;
+  executorProfileId: string;
+}) {
+  const { t } = useTranslation();
+  const target = useExecutorTarget(executorProfileName);
+  const agent =
+    agentName ??
+    t(
+      workflowName
+        ? "task:selectedAgentProfileFallbackInline"
+        : "task:selectedAgentProfileFallback",
+    );
+  const copy = workflowName
+    ? t("task:workflowAgentNotConfiguredOnExecutor", { workflow: workflowName, agent, target })
+    : t("task:agentNotConfiguredOnExecutor", { agent, target });
+  const boxed = workflowName !== null;
+  return (
+    <div
+      className={
+        boxed
+          ? "flex h-auto min-h-7 flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-sm border border-input px-3 py-1.5 text-xs text-muted-foreground"
+          : "mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+      }
+      data-testid="agent-profile-incompatible-note"
+    >
+      <span>{copy}</span>
+      <Link
+        href={credentialsHref(executorProfileId)}
+        className="shrink-0 cursor-pointer text-primary hover:underline"
+      >
+        {t("task:configureCredentials")}
+      </Link>
+    </div>
+  );
+}
+
+function UnavailableAgentNote({
+  agentName,
+  visible,
+}: {
+  agentName: string | null;
+  visible: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!visible) return null;
+  const agent = agentName ?? t("task:selectedAgentProfileFallback");
+  return (
+    <div
+      className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+      data-testid="agent-profile-unavailable-note"
+    >
+      <span>{t("task:selectedAgentProfileUnavailable", { agent })}</span>
     </div>
   );
 }
@@ -109,7 +196,9 @@ function AgentColumn({
   isCreatingSession,
   AgentSelectorComponent,
   workflowAgentLocked,
-  noCompatibleAgent,
+  agentCompatState,
+  selectedAgentProfileName,
+  effectiveWorkflowName,
   executorProfileName,
   executorProfileId,
 }: AgentColumnProps) {
@@ -127,9 +216,22 @@ function AgentColumn({
       </div>
     );
   }
-  if (noCompatibleAgent && !agentProfilesLoading) {
+  const settled = !agentProfilesLoading;
+  if (settled && agentCompatState === "none-compatible") {
     return (
       <NoCompatibleAgentState
+        executorProfileName={executorProfileName}
+        executorProfileId={executorProfileId}
+      />
+    );
+  }
+  const selectedIncompatible = settled && agentCompatState === "selected-incompatible";
+  const selectedUnavailable = settled && agentCompatState === "selected-unavailable";
+  if (selectedIncompatible && workflowAgentLocked) {
+    return (
+      <IncompatibleAgentNote
+        workflowName={effectiveWorkflowName ?? ""}
+        agentName={selectedAgentProfileName}
         executorProfileName={executorProfileName}
         executorProfileId={executorProfileId}
       />
@@ -146,6 +248,15 @@ function AgentColumn({
         disabled={agentProfilesLoading || isCreatingSession || workflowAgentLocked}
         popoverPortal
       />
+      {selectedIncompatible && (
+        <IncompatibleAgentNote
+          workflowName={null}
+          agentName={selectedAgentProfileName}
+          executorProfileName={executorProfileName}
+          executorProfileId={executorProfileId}
+        />
+      )}
+      <UnavailableAgentNote agentName={selectedAgentProfileName} visible={selectedUnavailable} />
       {workflowAgentLocked && (
         <p className="text-[11px] text-muted-foreground mt-1">{t("task:agentSetByWorkflow")}</p>
       )}
@@ -274,6 +385,7 @@ type WorkflowSectionProps = {
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
+  launchPreview?: TaskCreateLaunchPreview | null;
   /**
    * When true the picker is hidden entirely. Used by feature wrappers
    * (Improve Kandev) where the workflow is enforced and the user must not be
@@ -291,6 +403,7 @@ function renderWorkflowSection({
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
+  launchPreview,
   workflowLocked,
 }: WorkflowSectionProps) {
   // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
@@ -308,6 +421,7 @@ function renderWorkflowSection({
         selectedWorkflowId={effectiveWorkflowId ?? null}
         onWorkflowChange={onWorkflowChange}
         agentProfiles={agentProfiles}
+        launchPreview={launchPreview}
       />
     );
   }
@@ -375,6 +489,7 @@ export type DialogPromptSectionProps = {
   descriptionPlaceholder?: string;
   /** Optional slot rendered above the description textarea (e.g. a tab toggle). */
   aboveDescriptionSlot?: React.ReactNode;
+  launchPreview?: TaskCreateLaunchPreview | null;
   /**
    * Whether the description textarea should grab focus on mount. Defaults to
    * `!isTaskStarted`. Callers that render a task-name input above the
@@ -412,6 +527,7 @@ export function DialogPromptSection({
   extraFormSlot,
   descriptionPlaceholder,
   aboveDescriptionSlot,
+  launchPreview,
   autoFocusDescription,
   onComposerSubmit,
 }: DialogPromptSectionProps) {
@@ -436,6 +552,7 @@ export function DialogPromptSection({
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
+        launchPreview={launchPreview}
         jiraImport={importBindings(importsEnabled, ws, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, onLinearImport)}
         onComposerSubmit={onComposerSubmit}

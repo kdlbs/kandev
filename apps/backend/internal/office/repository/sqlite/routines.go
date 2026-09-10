@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -124,7 +125,30 @@ func (r *Repository) CreateRoutine(ctx context.Context, routine *models.Routine)
 	if routine.CatchUpMax <= 0 {
 		routine.CatchUpMax = 25
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return r.insertRoutine(ctx, r.db, routine)
+}
+
+// CreateRoutineTx is CreateRoutine scoped to a caller-owned transaction,
+// letting config sync write a new routine and its ownership manifest row
+// atomically (AC-OFFICE-CONFIG-SYNC-003.14).
+func (r *Repository) CreateRoutineTx(ctx context.Context, tx *sqlx.Tx, routine *models.Routine) error {
+	if routine.ID == "" {
+		routine.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	routine.CreatedAt = now
+	routine.UpdatedAt = now
+	if routine.CatchUpPolicy == "" {
+		routine.CatchUpPolicy = "enqueue_missed_with_cap"
+	}
+	if routine.CatchUpMax <= 0 {
+		routine.CatchUpMax = 25
+	}
+	return r.insertRoutine(ctx, tx, routine)
+}
+
+func (r *Repository) insertRoutine(ctx context.Context, ext sqlx.ExtContext, routine *models.Routine) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_routines (
 			id, workspace_id, name, description, task_template,
 			assignee_agent_profile_id, status, concurrency_policy,
@@ -205,8 +229,22 @@ type RoutineConfigFields struct {
 func (r *Repository) UpdateRoutineConfigFields(
 	ctx context.Context, id string, fields RoutineConfigFields,
 ) error {
+	return r.updateRoutineConfigFields(ctx, r.db, id, fields)
+}
+
+// UpdateRoutineConfigFieldsTx is UpdateRoutineConfigFields scoped to a
+// caller-owned transaction.
+func (r *Repository) UpdateRoutineConfigFieldsTx(
+	ctx context.Context, tx *sqlx.Tx, id string, fields RoutineConfigFields,
+) error {
+	return r.updateRoutineConfigFields(ctx, tx, id, fields)
+}
+
+func (r *Repository) updateRoutineConfigFields(
+	ctx context.Context, ext sqlx.ExtContext, id string, fields RoutineConfigFields,
+) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := ext.ExecContext(ctx, r.db.Rebind(`
 		UPDATE office_routines SET
 			description = ?, task_template = ?, concurrency_policy = ?, updated_at = ?
 		WHERE id = ?
@@ -216,7 +254,16 @@ func (r *Repository) UpdateRoutineConfigFields(
 
 // DeleteRoutine deletes a routine by ID.
 func (r *Repository) DeleteRoutine(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(
+	return r.deleteRoutine(ctx, r.db, id)
+}
+
+// DeleteRoutineTx is DeleteRoutine scoped to a caller-owned transaction.
+func (r *Repository) DeleteRoutineTx(ctx context.Context, tx *sqlx.Tx, id string) error {
+	return r.deleteRoutine(ctx, tx, id)
+}
+
+func (r *Repository) deleteRoutine(ctx context.Context, ext sqlx.ExtContext, id string) error {
+	_, err := ext.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM office_routines WHERE id = ?`), id)
 	return err
 }
@@ -274,7 +321,11 @@ func (r *Repository) ListAllRuns(ctx context.Context, workspaceID string, limit 
 	return runs, nil
 }
 
-// GetActiveRunForFingerprint returns an active run matching the fingerprint.
+// GetActiveRunForFingerprint returns the newest active run matching the
+// fingerprint, if any. "Active" means status = task_created (the only
+// status a run can gate another fire from — see
+// routines.RoutineService's materialise* methods). The caller repairs
+// terminal, archived, or missing linked tasks before it applies policy.
 func (r *Repository) GetActiveRunForFingerprint(
 	ctx context.Context, routineID, fingerprint string,
 ) (*models.RoutineRun, error) {
@@ -294,6 +345,77 @@ func (r *Repository) GetActiveRunForFingerprint(
 	return &run, nil
 }
 
+// GetRoutineRunByLinkedTaskID returns the most recent run linked to
+// taskID, or nil if no run is linked to it (most tasks aren't
+// routine-created). Used by SyncRunStatus to find the run to close out
+// when its task reaches a terminal step. taskID must be non-empty:
+// linked_task_id defaults to "" for every lightweight run, so an empty
+// taskID would match (and let a caller rewrite) an arbitrary lightweight
+// run instead of correctly finding nothing.
+func (r *Repository) GetRoutineRunByLinkedTaskID(
+	ctx context.Context, taskID string,
+) (*models.RoutineRun, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	var run models.RoutineRun
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM office_routine_runs
+		WHERE linked_task_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`), taskID).StructScan(&run)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// GetTaskTerminalStatus reports the linked task outcome: "done" for
+// COMPLETED, "failed" for FAILED, "cancelled" for CANCELLED or archived
+// tasks, "missing" when the task row was deleted, and "" otherwise.
+// Reads the shared tasks table directly because the routines gate must
+// distinguish an active task from a terminal, archived, or missing task.
+func (r *Repository) GetTaskTerminalStatus(ctx context.Context, taskID string) (string, error) {
+	var state string
+	var archivedAt sql.NullTime
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(state, ''), archived_at FROM tasks WHERE id = ?`), taskID).Scan(&state, &archivedAt)
+	if err == sql.ErrNoRows {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if archivedAt.Valid {
+		return "cancelled", nil
+	}
+	switch state {
+	case taskStateCompleted:
+		return "done", nil
+	case taskStateFailed:
+		return "failed", nil
+	case taskStateCancelled:
+		return "cancelled", nil
+	default:
+		return "", nil
+	}
+}
+
+// TouchRoutineLastRun updates only last_run_at (+ updated_at) on a
+// routine. Deliberately narrower than UpdateRoutine, whose whole-row
+// snapshot write can revert concurrent edits to other columns (see
+// UpdateRoutineConfigFields above) — a dispatch in flight should never
+// clobber a config change made while it ran, or vice versa.
+func (r *Repository) TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routines SET last_run_at = ?, updated_at = ? WHERE id = ?
+	`), at, time.Now().UTC(), routineID)
+	return err
+}
+
 // UpdateRunStatus updates a run's status and optionally its linked task.
 func (r *Repository) UpdateRunStatus(
 	ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string,
@@ -305,6 +427,31 @@ func (r *Repository) UpdateRunStatus(
 		WHERE id = ?
 	`), status, linkedTaskID, now, runID)
 	return err
+}
+
+// UpdateRunStatusIfTaskCreated closes a run out with a terminal status,
+// but only while it is still 'task_created' — the one status a routine
+// run can gate its fingerprint from. The WHERE clause makes this an
+// atomic claim: SyncRunStatus (TaskMoved-driven) and the concurrency
+// gate's own inline check (applyConcurrencyPolicy) can both observe the
+// same terminal task, and this is what lets exactly one of them win
+// instead of a read-then-write race rewriting an already-closed run's
+// status or completed_at. Returns whether this call was the one that
+// closed it.
+func (r *Repository) UpdateRunStatusIfTaskCreated(
+	ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string,
+) (bool, error) {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routine_runs
+		SET status = ?, linked_task_id = ?, completed_at = ?
+		WHERE id = ? AND status = 'task_created'
+	`), status, linkedTaskID, now, runID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
 }
 
 // UpdateRunCoalesced marks a run as coalesced into another run.

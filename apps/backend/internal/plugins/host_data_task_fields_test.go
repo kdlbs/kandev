@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The step a task stands on, its labels, and whether it is archived were all
+// The step a task stands on and whether it is archived were all
 // unreadable from a plugin before this. A plugin could see a task's State
 // (created / in progress / review / completed) but not WHERE on the board it
 // was, so it could not render or group by a workflow at all.
@@ -25,7 +25,6 @@ func TestTaskModelToDTOCarriesBoardAndPlanningFields(t *testing.T) {
 		WorkflowStepID:         "step-pr-review",
 		Position:               3,
 		AssigneeAgentProfileID: "agent-opus",
-		Labels:                 `["office","unblock"]`,
 		Autopilot:              true,
 		WIPAdmitted:            true,
 		QueuedForStepID:        "step-build",
@@ -40,7 +39,6 @@ func TestTaskModelToDTOCarriesBoardAndPlanningFields(t *testing.T) {
 	require.Equal(t, "step-pr-review", dto.WorkflowStepID)
 	require.Equal(t, int32(3), dto.Position)
 	require.Equal(t, "agent-opus", dto.AssigneeAgentProfileID)
-	require.Equal(t, []string{"office", "unblock"}, dto.Labels)
 	require.True(t, dto.Autopilot)
 	require.True(t, dto.WIPAdmitted)
 	require.Equal(t, "step-build", dto.QueuedForStepID)
@@ -58,17 +56,6 @@ func TestTaskModelToDTOLeavesArchivedAtNilForALiveTask(t *testing.T) {
 	dto := taskModelToDTO(&taskmodels.Task{ID: "t1"})
 	require.Nil(t, dto.ArchivedAt)
 	require.Nil(t, dto.QueuedAt)
-}
-
-// Labels are a JSON-array string on the model. A row holding something
-// unparseable must cost that row its labels, never the whole task read.
-func TestDecodeTaskLabelsToleratesEmptyAndMalformedValues(t *testing.T) {
-	require.Equal(t, []string{"a", "b"}, decodeTaskLabels(`["a","b"]`))
-	require.Nil(t, decodeTaskLabels(""))
-	require.Nil(t, decodeTaskLabels("[]"))
-	require.Nil(t, decodeTaskLabels("  "))
-	require.Nil(t, decodeTaskLabels("not json"))
-	require.Nil(t, decodeTaskLabels(`{"a":1}`))
 }
 
 // Review and check state ride along because kandev's PR watcher already syncs

@@ -3,8 +3,9 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
+const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
 
-const mockState = {};
+const mockState = { userSettings: { keyboardShortcuts: {} } };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
@@ -50,7 +51,7 @@ vi.mock("./pr-archive-banners", () => ({
 }));
 
 vi.mock("@/hooks/use-keyboard-shortcut", () => ({
-  useKeyboardShortcut: () => undefined,
+  useKeyboardShortcut: useKeyboardShortcutMock,
 }));
 
 vi.mock("@/hooks/use-message-handler", () => ({
@@ -78,11 +79,12 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ send: vi.fn() }),
 }));
 
-import { resolveInputPlaceholder, useSubmitHandler } from "./chat-input-area";
+import { resolveInputPlaceholder, useChatPanelHandlers, useSubmitHandler } from "./chat-input-area";
 
 beforeEach(() => {
   handleSendMessageMock.mockReset();
   handleSendMessageMock.mockResolvedValue(undefined);
+  useKeyboardShortcutMock.mockReset();
 });
 
 afterEach(() => {
@@ -143,6 +145,20 @@ describe("useSubmitHandler", () => {
   });
 });
 
+describe("useChatPanelHandlers", () => {
+  it("can disable the global focus shortcut for embedded panels", () => {
+    renderHook(() =>
+      useChatPanelHandlers("session-1", { current: null }, { enableFocusShortcut: false }),
+    );
+
+    expect(useKeyboardShortcutMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+});
+
 describe("useSubmitHandler routing", () => {
   it("queues through the shared handler instead of preview onSend while clarification is pending", async () => {
     const onSend = vi.fn();
@@ -168,6 +184,25 @@ describe("useSubmitHandler routing", () => {
 
     expect(onSend).toHaveBeenCalledWith({ message: "direct preview message" });
     expect(handleSendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("does not clear composer side effects when admission reports unsuccessful", async () => {
+    const clearEphemeral = vi.fn();
+    handleSendMessageMock.mockResolvedValueOnce(false);
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          contextFiles: [{ path: "src", name: "src", isDirectory: true }],
+          clearEphemeral,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "keep this draft" });
+    });
+
+    expect(clearEphemeral).not.toHaveBeenCalled();
   });
 });
 

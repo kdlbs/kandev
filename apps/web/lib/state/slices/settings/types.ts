@@ -9,6 +9,7 @@ import type {
   Executor,
   NotificationProvider,
   SavedLayout,
+  SidebarTaskColorAutomation,
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
@@ -16,6 +17,7 @@ import type {
   StartupPage,
 } from "@/lib/types/http";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
@@ -27,6 +29,7 @@ import type {
   AgentProfileRecentUseState,
 } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { TaskColor } from "@/lib/task-colors";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -379,6 +382,10 @@ export type NotificationProvidersState = {
   loading: boolean;
 };
 
+export type NotificationProvidersUpdate = Omit<NotificationProvidersState, "appriseAvailable"> & {
+  appriseAvailable?: boolean;
+};
+
 export type SettingsDataState = {
   executorsLoaded: boolean;
   agentsLoaded: boolean;
@@ -429,7 +436,12 @@ export type UserSettingsState = {
   sidebarViews: SidebarView[];
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
+  threadViews: ThreadView[];
+  threadActiveViewId: string | null;
+  threadViewDraft: ThreadViewDraft | null;
   sidebarTaskPrefs: SidebarTaskPrefsState;
+  sidebarTaskColorAutomation: SidebarTaskColorAutomation;
+  sidebarTaskColors: Record<string, TaskColor | null>;
   taskCreateLastUsed: TaskCreateLastUsedState;
   jiraSavedViews: unknown;
   jiraTaskPresets: unknown;
@@ -438,6 +450,7 @@ export type UserSettingsState = {
   gitlabSavedPresets: unknown;
   azureDevOpsBrowsePreferences: unknown;
   defaultUtilityAgentId: string | null;
+  defaultUtilityAgentProfileId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";
   terminalFontFamily: string | null;
@@ -446,6 +459,7 @@ export type UserSettingsState = {
   lastSeenDisplay: LastSeenDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  resolveSessionHostnames: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   quickChatTabOrderByWorkspace: Record<string, string[]>;
   hiddenWorkflowStepIds: Record<string, string[]>;
@@ -518,7 +532,8 @@ export type SettingsSliceActions = {
   setSpritesInstances: (instances: SpritesInstance[]) => void;
   setSpritesLoading: (loading: boolean) => void;
   removeSpritesInstance: (name: string) => void;
-  setNotificationProviders: (state: NotificationProvidersState) => void;
+  setNotificationProviders: (state: NotificationProvidersUpdate) => void;
+  setAppriseAvailable: (available: boolean) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setSleepInhibition: (response: SleepInhibitionResponse) => void;

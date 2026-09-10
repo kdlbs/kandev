@@ -12,16 +12,23 @@ function storedTaskSessions(getStoreState: () => AppState, taskId: string) {
   return getStoreState().taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS;
 }
 
+function resolveForcedReloadWaiters(waitersRef: { current: Array<() => void> }) {
+  const waiters = waitersRef.current.splice(0);
+  waiters.forEach((resolve) => resolve());
+}
+
 async function hydrateTaskSessions({
   taskId,
   force,
   getStoreState,
   setTaskSessionsForTask,
+  setTaskSessionsError,
 }: {
   taskId: string;
   force: boolean;
   getStoreState: () => AppState;
   setTaskSessionsForTask: AppState["setTaskSessionsForTask"];
+  setTaskSessionsError: AppState["setTaskSessionsError"];
 }): Promise<boolean> {
   const stateAtRequestStart = getStoreState();
   const sessionsAtRequestStart = storedTaskSessions(() => stateAtRequestStart, taskId);
@@ -45,19 +52,19 @@ async function hydrateTaskSessions({
     return sessionsAddedDuringLoad.length > 0;
   } catch (error) {
     console.error("Failed to load task sessions:", error);
-    if (!force) {
-      setTaskSessionsForTask(
-        taskId,
-        storedTaskSessions(getStoreState, taskId),
-        activityEpochsAtRequestStart,
-      );
+    // A failed initial request must not turn an empty list into an
+    // authoritative snapshot. Reconcile existing live rows when available so
+    // the activity-epoch guard still applies, then expose the retryable error.
+    const currentSessions = storedTaskSessions(getStoreState, taskId);
+    if (!force && currentSessions.length > 0) {
+      setTaskSessionsForTask(taskId, currentSessions, activityEpochsAtRequestStart);
     }
+    setTaskSessionsError(taskId, error instanceof Error ? error.message : String(error));
     return false;
   }
 }
 
-export function useTaskSessions(taskId: string | null) {
-  const getStoreState = useAppStoreApi().getState;
+function useTaskSessionState(taskId: string | null) {
   const sessions = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
@@ -67,9 +74,19 @@ export function useTaskSessions(taskId: string | null) {
   const isLoaded = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.loadedByTaskId[taskId] ?? false) : false,
   );
-  const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
-  const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
+  const error = useAppStore((state) =>
+    taskId ? (state.taskSessionsByTask.errorByTaskId?.[taskId] ?? null) : null,
+  );
   const connectionStatus = useAppStore((state) => state.connection.status);
+  return { sessions, isLoading, isLoaded, error, connectionStatus };
+}
+
+export function useTaskSessions(taskId: string | null) {
+  const getStoreState = useAppStoreApi().getState;
+  const { sessions, isLoading, isLoaded, error, connectionStatus } = useTaskSessionState(taskId);
+  const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
+  const setTaskSessionsError = useAppStore((state) => state.setTaskSessionsError);
+  const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
   const pendingForcedReloadRef = useRef(false);
   const pendingForcedReloadWaitersRef = useRef<Array<() => void>>([]);
   const requestInFlightRef = useRef(false);
@@ -95,30 +112,37 @@ export function useTaskSessions(taskId: string | null) {
           force,
           getStoreState,
           setTaskSessionsForTask,
+          setTaskSessionsError,
         });
         if (needsFollowUp) pendingForcedReloadRef.current = true;
       } finally {
         requestInFlightRef.current = false;
         setTaskSessionsLoading(taskId, false);
         if (force && !pendingForcedReloadRef.current) {
-          const waiters = pendingForcedReloadWaitersRef.current.splice(0);
-          waiters.forEach((resolve) => resolve());
+          resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
         }
       }
     },
-    [getStoreState, isLoaded, isLoading, setTaskSessionsForTask, setTaskSessionsLoading, taskId],
+    [
+      getStoreState,
+      isLoaded,
+      isLoading,
+      setTaskSessionsError,
+      setTaskSessionsForTask,
+      setTaskSessionsLoading,
+      taskId,
+    ],
   );
 
   useEffect(() => {
     if (!taskId) return;
-    if (isLoaded || isLoading) return;
+    if (isLoaded || isLoading || error) return;
     loadSessions();
-  }, [isLoaded, isLoading, loadSessions, taskId]);
+  }, [error, isLoaded, isLoading, loadSessions, taskId]);
 
   useEffect(() => {
     pendingForcedReloadRef.current = false;
-    const waiters = pendingForcedReloadWaitersRef.current.splice(0);
-    waiters.forEach((resolve) => resolve());
+    resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
   }, [taskId]);
 
   useEffect(() => {
@@ -154,5 +178,5 @@ export function useTaskSessions(taskId: string | null) {
     taskId,
   );
 
-  return { sessions, isLoading, isLoaded, loadSessions };
+  return { sessions, isLoading, isLoaded, error, loadSessions };
 }

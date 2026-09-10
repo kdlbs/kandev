@@ -436,3 +436,50 @@ describe("FileContextMenu touch actions", () => {
     await waitFor(() => expect(onDeleteFile).toHaveBeenCalledWith(FILE_NODE.path));
   });
 });
+
+describe("FileContextMenu upload guard", () => {
+  const UPLOAD_LABEL = "Upload files here";
+  const ROW = "upload-guard-row";
+
+  function renderFor(node: FileTreeNode, selectedCount = 1) {
+    const onUploadFilesHere = vi.fn();
+    render(
+      <FileContextMenu
+        node={node}
+        tree={node}
+        setTree={vi.fn()}
+        onDeleteFile={vi.fn().mockResolvedValue(true)}
+        onUploadFilesHere={onUploadFilesHere}
+        onStartRename={vi.fn()}
+        selectedCount={selectedCount}
+        selectedPaths={selectedCount > 1 ? new Set(["a.txt", "b.txt"]) : undefined}
+      >
+        <div data-testid={ROW}>row</div>
+      </FileContextMenu>,
+    );
+    openMenu(ROW);
+    return { onUploadFilesHere };
+  }
+
+  it("offers upload on a folder and targets that folder", async () => {
+    const { onUploadFilesHere } = renderFor(DIR_NODE);
+
+    const item = await screen.findByRole("menuitem", { name: UPLOAD_LABEL });
+    fireEvent.click(item);
+    await waitFor(() => expect(onUploadFilesHere).toHaveBeenCalledWith("src"));
+  });
+
+  it("is absent for a file, the exact inverse of the download guard", async () => {
+    renderFor(FILE_NODE);
+
+    await screen.findByRole("menuitem", { name: "Delete" });
+    expect(screen.queryByRole("menuitem", { name: UPLOAD_LABEL })).toBeNull();
+  });
+
+  it("is absent for a multi-selection, which has no single destination", async () => {
+    renderFor(DIR_NODE, 2);
+
+    await waitFor(() => expect(screen.queryAllByRole("menuitem").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("menuitem", { name: UPLOAD_LABEL })).toBeNull();
+  });
+});

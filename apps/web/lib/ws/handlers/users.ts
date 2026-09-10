@@ -4,6 +4,9 @@ import type { UserSettingsUpdatedPayload } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { mapUserSettingsData } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import { fromApiThreadDraft, fromApiThreadView } from "@/lib/state/slices/ui/thread-view-wire";
+import { normalizeThreadViews } from "@/lib/state/slices/ui/thread-view-builtins";
+import type { ThreadViewSnapshot } from "@/lib/state/slices/ui/thread-view-types";
 import { migrateSidebarViewDraft, migrateView } from "@/lib/state/slices/ui/ui-slice";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import {
@@ -32,6 +35,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
         return {
           ...state,
           sidebarViews: buildSidebarViewsState(state, message.payload),
+          threadViews: buildThreadViewsState(state, message.payload),
           sidebarTaskPrefs: buildSidebarTaskPrefsState(state, message.payload),
           userSettings: buildUserSettingsState(state, message.payload),
         };
@@ -83,4 +87,56 @@ function parseSidebarDraftForViews(state: AppState, payload: UserSettingsUpdated
   if (payload.sidebar_draft === undefined) return state.sidebarViews.draft;
   if (payload.sidebar_draft === null) return null;
   return migrateSidebarViewDraft(fromApiSidebarDraft(payload.sidebar_draft));
+}
+
+function buildThreadViewsState(state: AppState, payload: UserSettingsUpdatedPayload) {
+  const serverState = projectThreadViewsState(state, payload);
+  if (!serverState) return state.threadViews;
+  // Keep the complete authoritative projection for a pending write. The
+  // revision is advanced by the common settings handler, so dropping this
+  // payload would make it impossible to reconcile it after a write failure.
+  if (state.threadViews.syncPending) {
+    return { ...state.threadViews, deferredServerState: serverState };
+  }
+  return { ...state.threadViews, ...serverState, deferredServerState: null };
+}
+
+function projectThreadViewsState(
+  state: AppState,
+  payload: UserSettingsUpdatedPayload,
+): ThreadViewSnapshot | null {
+  const hasViews = payload.thread_views !== undefined;
+  const hasActive = payload.thread_active_view_id !== undefined;
+  const hasDraft = payload.thread_view_draft !== undefined;
+  if (!hasViews && !hasActive && !hasDraft) return null;
+
+  const views = hasViews
+    ? normalizeThreadViews(payload.thread_views?.map(fromApiThreadView))
+    : state.threadViews.views;
+  const activeViewId = resolveThreadActiveViewId(
+    state.threadViews.activeViewId,
+    payload.thread_active_view_id,
+    views,
+  );
+  const draft = resolveThreadDraft(state.threadViews.draft, payload.thread_view_draft);
+  return { views, activeViewId, draft };
+}
+
+function resolveThreadActiveViewId(
+  currentId: string,
+  payloadId: string | undefined,
+  views: ReturnType<typeof normalizeThreadViews>,
+): string {
+  if (payloadId && views.some((view) => view.id === payloadId)) return payloadId;
+  if (views.some((view) => view.id === currentId)) return currentId;
+  return views[0].id;
+}
+
+function resolveThreadDraft(
+  currentDraft: AppState["threadViews"]["draft"],
+  payloadDraft: UserSettingsUpdatedPayload["thread_view_draft"],
+) {
+  if (payloadDraft === undefined) return currentDraft;
+  if (payloadDraft === null) return null;
+  return fromApiThreadDraft(payloadDraft);
 }

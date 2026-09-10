@@ -62,26 +62,24 @@ func (s *HandoffService) CleanupWorkspaceGroups(ctx context.Context, workspaceID
 			s.logf().Warn("workspace group cleanup: active executions remain",
 				zap.String("workspace_id", workspaceID),
 				zap.String("group_id", g.ID))
-			if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
-				orchmodels.WorkspaceCleanupStatusPending,
-				"active executor still bound during workspace deletion", nil); err != nil {
-				return err
-			}
 			if err := s.waitForWorkspaceGroupIdle(ctx, workspaceID, g.ID); err != nil {
 				return err
 			}
 		}
-		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
-			orchmodels.WorkspaceCleanupStatusPending, "", nil); err != nil {
+		claimed, err := claimWorkspaceGroupCleanup(statusCtx, s.wsGroups, g)
+		if err != nil {
 			return err
 		}
+		if !claimed {
+			continue
+		}
 		if err := s.runWorkspaceGroupCleanup(ctx, g); err != nil {
-			_ = s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
+			_ = completeWorkspaceGroupCleanup(statusCtx, s.wsGroups, g,
 				orchmodels.WorkspaceCleanupStatusFailed, err.Error(), nil)
 			return fmt.Errorf("clean workspace group %s: %w", g.ID, err)
 		}
 		now := time.Now().UTC()
-		if err := s.wsGroups.UpdateWorkspaceGroupCleanupStatus(statusCtx, g.ID,
+		if err := completeWorkspaceGroupCleanup(statusCtx, s.wsGroups, g,
 			orchmodels.WorkspaceCleanupStatusCleaned, "", &now); err != nil {
 			return err
 		}

@@ -49,9 +49,9 @@ func (s *Store) GetMRWatchBySession(ctx context.Context, sessionID string) (*MRW
 // GetMRWatchBySessionAndRepo returns the MR watch keyed by (session, repository).
 func (s *Store) GetMRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*MRWatch, error) {
 	var w MRWatch
-	err := s.ro.GetContext(ctx, &w,
+	err := s.ro.GetContext(ctx, &w, s.ro.Rebind(
 		`SELECT `+mrWatchSelectCols+` FROM gitlab_mr_watches
-		 WHERE session_id = ? AND repository_id = ? LIMIT 1`, sessionID, repositoryID)
+		 WHERE session_id = ? AND repository_id = ? LIMIT 1`), sessionID, repositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -68,9 +68,9 @@ func (s *Store) GetMRWatchBySessionAndRepo(ctx context.Context, sessionID, repos
 // found.
 func (s *Store) GetMRWatchBySessionRepoAndBranch(ctx context.Context, sessionID, repositoryID, branch string) (*MRWatch, error) {
 	var w MRWatch
-	err := s.ro.GetContext(ctx, &w,
+	err := s.ro.GetContext(ctx, &w, s.ro.Rebind(
 		`SELECT `+mrWatchSelectCols+` FROM gitlab_mr_watches
-		 WHERE session_id = ? AND repository_id = ? AND branch = ? LIMIT 1`, sessionID, repositoryID, branch)
+		 WHERE session_id = ? AND repository_id = ? AND branch = ? LIMIT 1`), sessionID, repositoryID, branch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -83,9 +83,9 @@ func (s *Store) GetMRWatchBySessionRepoAndBranch(ctx context.Context, sessionID,
 // ListMRWatchesBySession returns every MR watch for a session.
 func (s *Store) ListMRWatchesBySession(ctx context.Context, sessionID string) ([]*MRWatch, error) {
 	var ws []MRWatch
-	if err := s.ro.SelectContext(ctx, &ws,
+	if err := s.ro.SelectContext(ctx, &ws, s.ro.Rebind(
 		`SELECT `+mrWatchSelectCols+` FROM gitlab_mr_watches
-		 WHERE session_id = ? ORDER BY created_at ASC`, sessionID); err != nil {
+		 WHERE session_id = ? ORDER BY created_at ASC`), sessionID); err != nil {
 		return nil, err
 	}
 	out := make([]*MRWatch, 0, len(ws))
@@ -105,9 +105,9 @@ func (s *Store) ListMRWatchesBySessionForWorkspace(ctx context.Context, workspac
 // ListMRWatchesByTask returns every MR watch for a task.
 func (s *Store) ListMRWatchesByTask(ctx context.Context, taskID string) ([]*MRWatch, error) {
 	var ws []MRWatch
-	if err := s.ro.SelectContext(ctx, &ws,
+	if err := s.ro.SelectContext(ctx, &ws, s.ro.Rebind(
 		`SELECT `+mrWatchSelectCols+` FROM gitlab_mr_watches
-		 WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		 WHERE task_id = ? ORDER BY created_at ASC`), taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*MRWatch, 0, len(ws))
@@ -124,8 +124,8 @@ func (s *Store) ListMRWatchesByTaskForWorkspace(ctx context.Context, workspaceID
 // ListActiveMRWatches returns every persisted MR watch (used by the poller).
 func (s *Store) ListActiveMRWatches(ctx context.Context) ([]*MRWatch, error) {
 	var ws []MRWatch
-	if err := s.ro.SelectContext(ctx, &ws,
-		`SELECT `+mrWatchSelectCols+` FROM gitlab_mr_watches ORDER BY created_at ASC`); err != nil {
+	if err := s.ro.SelectContext(ctx, &ws, s.ro.Rebind(
+		`SELECT `+mrWatchSelectCols+` FROM gitlab_mr_watches ORDER BY created_at ASC`)); err != nil {
 		return nil, err
 	}
 	out := make([]*MRWatch, 0, len(ws))
@@ -143,13 +143,13 @@ func (s *Store) ListActiveMRWatchesForWorkspace(ctx context.Context, workspaceID
 func (s *Store) listMRWatchesForWorkspace(ctx context.Context, workspaceID, predicate string, args ...interface{}) ([]*MRWatch, error) {
 	queryArgs := append([]interface{}{workspaceID}, args...)
 	var rows []MRWatch
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT w.id, w.session_id, w.task_id, w.repository_id, w.project_path,
 			w.mr_iid, w.branch, w.last_checked_at, w.last_note_at,
 			w.last_pipeline_state, w.last_approval_state, w.created_at, w.updated_at
 		 FROM gitlab_mr_watches w
 		 JOIN tasks t ON t.id = w.task_id
-		 WHERE t.workspace_id = ? AND `+predicate+` ORDER BY w.created_at ASC`, queryArgs...); err != nil {
+			 WHERE t.workspace_id = ? AND `+predicate+` ORDER BY w.created_at ASC`), queryArgs...); err != nil {
 		return nil, err
 	}
 	out := make([]*MRWatch, 0, len(rows))
@@ -161,33 +161,33 @@ func (s *Store) listMRWatchesForWorkspace(ctx context.Context, workspaceID, pred
 
 // UpdateMRWatchTimestamps records the last poll cycle's observation.
 func (s *Store) UpdateMRWatchTimestamps(ctx context.Context, id string, checkedAt time.Time, noteAt *time.Time, pipelineState, approvalState string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE gitlab_mr_watches SET
 			last_checked_at = ?, last_note_at = ?,
 			last_pipeline_state = ?, last_approval_state = ?, updated_at = ?
-		WHERE id = ?`, checkedAt, noteAt, pipelineState, approvalState, time.Now().UTC(), id)
+		WHERE id = ?`), checkedAt, noteAt, pipelineState, approvalState, time.Now().UTC(), id)
 	return err
 }
 
 // UpdateMRWatchMRIID stamps the watch with the MR iid once detected.
 func (s *Store) UpdateMRWatchMRIID(ctx context.Context, id string, iid int) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE gitlab_mr_watches SET mr_iid = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE gitlab_mr_watches SET mr_iid = ?, updated_at = ? WHERE id = ?`),
 		iid, time.Now().UTC(), id)
 	return err
 }
 
 // DeleteMRWatch removes a single MR watch by id.
 func (s *Store) DeleteMRWatch(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_mr_watches WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM gitlab_mr_watches WHERE id = ?`), id)
 	return err
 }
 
 func (s *Store) DeleteMRWatchForWorkspace(ctx context.Context, workspaceID, id string) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_mr_watches
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM gitlab_mr_watches
 		WHERE id = ? AND EXISTS (
 			SELECT 1 FROM tasks t WHERE t.id = gitlab_mr_watches.task_id AND t.workspace_id = ?
-		)`, id, workspaceID)
+		)`), id, workspaceID)
 	if err != nil {
 		return false, err
 	}
@@ -197,8 +197,8 @@ func (s *Store) DeleteMRWatchForWorkspace(ctx context.Context, workspaceID, id s
 
 // DeleteMRWatchesByTaskID removes all MR watches associated with a task.
 func (s *Store) DeleteMRWatchesByTaskID(ctx context.Context, taskID string) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM gitlab_mr_watches WHERE task_id = ?`, taskID)
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM gitlab_mr_watches WHERE task_id = ?`), taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -263,12 +263,12 @@ func (s *Store) GetReviewWatchIncludingDeleting(ctx context.Context, id string) 
 
 func (s *Store) getReviewWatch(ctx context.Context, id string, includeDeleting bool) (*ReviewWatch, error) {
 	var rw ReviewWatch
-	deletingClause := " AND deleting = 0"
+	deletingClause := " AND deleting = FALSE"
 	if includeDeleting {
 		deletingClause = ""
 	}
-	err := s.ro.GetContext(ctx, &rw,
-		`SELECT `+reviewWatchSelectCols+` FROM gitlab_review_watches WHERE id = ?`+deletingClause, id)
+	err := s.ro.GetContext(ctx, &rw, s.ro.Rebind(
+		`SELECT `+reviewWatchSelectCols+` FROM gitlab_review_watches WHERE id = ?`+deletingClause), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -285,31 +285,31 @@ func (s *Store) getReviewWatch(ctx context.Context, id string, includeDeleting b
 func (s *Store) ListReviewWatches(ctx context.Context, workspaceID string) ([]*ReviewWatch, error) {
 	return s.listReviewWatches(ctx,
 		`SELECT `+reviewWatchSelectCols+` FROM gitlab_review_watches
-		 WHERE workspace_id = ? AND deleting = 0 ORDER BY created_at ASC`, workspaceID)
+		 WHERE workspace_id = ? AND deleting = FALSE ORDER BY created_at ASC`, workspaceID)
 }
 
 // ListAllReviewWatches lists every review watch (used by the poller).
 func (s *Store) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
 	return s.listReviewWatches(ctx,
-		`SELECT `+reviewWatchSelectCols+` FROM gitlab_review_watches WHERE deleting = 0 ORDER BY created_at ASC`)
+		`SELECT `+reviewWatchSelectCols+` FROM gitlab_review_watches WHERE deleting = FALSE ORDER BY created_at ASC`)
 }
 
 // ListEnabledReviewWatches lists every enabled review watch.
 func (s *Store) ListEnabledReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
 	return s.listReviewWatches(ctx,
 		`SELECT `+reviewWatchSelectCols+` FROM gitlab_review_watches
-		 WHERE enabled = 1 AND deleting = 0 ORDER BY created_at ASC`)
+		 WHERE enabled = TRUE AND deleting = FALSE ORDER BY created_at ASC`)
 }
 
 func (s *Store) ListEnabledReviewWatchesForWorkspace(ctx context.Context, workspaceID string) ([]*ReviewWatch, error) {
 	return s.listReviewWatches(ctx,
 		`SELECT `+reviewWatchSelectCols+` FROM gitlab_review_watches
-		 WHERE enabled = 1 AND deleting = 0 AND workspace_id = ? ORDER BY created_at ASC`, workspaceID)
+		 WHERE enabled = TRUE AND deleting = FALSE AND workspace_id = ? ORDER BY created_at ASC`, workspaceID)
 }
 
 func (s *Store) listReviewWatches(ctx context.Context, query string, args ...interface{}) ([]*ReviewWatch, error) {
 	var rows []ReviewWatch
-	if err := s.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(query), args...); err != nil {
 		return nil, err
 	}
 	out := make([]*ReviewWatch, 0, len(rows))
@@ -355,16 +355,16 @@ func (s *Store) UpdateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 
 // RecordReviewWatchPoll stamps last_polled_at without touching other fields.
 func (s *Store) RecordReviewWatchPoll(ctx context.Context, id string, polledAt time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE gitlab_review_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE gitlab_review_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`),
 		polledAt, time.Now().UTC(), id)
 	return err
 }
 
 func (s *Store) DisableReviewWatchWithError(ctx context.Context, id, cause string) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `UPDATE gitlab_review_watches
-		SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE gitlab_review_watches
+		SET enabled = FALSE, last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ?`),
 		cause, now, now, id)
 	return err
 }
@@ -376,10 +376,10 @@ func (s *Store) DeleteReviewWatch(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM gitlab_review_mr_tasks WHERE review_watch_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_review_mr_tasks WHERE review_watch_id = ?`), id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM gitlab_review_watches WHERE id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_review_watches WHERE id = ?`), id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -394,9 +394,9 @@ const reviewMRTaskSelectCols = `id, review_watch_id, project_path, mr_iid,
 // dedup-claimed.
 func (s *Store) HasReviewMRTask(ctx context.Context, reviewWatchID, projectPath string, iid int) (bool, error) {
 	var count int
-	err := s.ro.GetContext(ctx, &count,
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
 		`SELECT COUNT(*) FROM gitlab_review_mr_tasks
-		 WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ?`,
+		 WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ?`),
 		reviewWatchID, projectPath, iid)
 	if err != nil {
 		return false, err
@@ -432,11 +432,11 @@ func (s *Store) reserveReviewMRTask(ctx context.Context, reviewWatchID string, g
 		INSERT INTO gitlab_review_mr_tasks (id, review_watch_id, project_path, mr_iid, mr_url, task_id, generation, created_at)
 		SELECT ?, ?, ?, ?, ?, '', ?, ?
 		WHERE EXISTS (SELECT 1 FROM gitlab_review_watches
-			WHERE id = ? AND generation = ? AND enabled = 1 AND deleting = 0)
+			WHERE id = ? AND generation = ? AND enabled = TRUE AND deleting = FALSE)
 		ON CONFLICT(review_watch_id, project_path, mr_iid) DO NOTHING`
 		args = append(args, reviewWatchID, generation)
 	}
-	result, err := s.db.ExecContext(ctx, query, args...)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -461,15 +461,15 @@ func (s *Store) assignReviewMRTaskID(ctx context.Context, reviewWatchID string, 
 	activeClause := ""
 	if requireActive {
 		activeClause = ` AND EXISTS (SELECT 1 FROM gitlab_review_watches
-			WHERE id = ? AND generation = ? AND enabled = 1 AND deleting = 0)`
+			WHERE id = ? AND generation = ? AND enabled = TRUE AND deleting = FALSE)`
 	}
 	args := []interface{}{taskID, reviewWatchID, projectPath, iid, generation}
 	if requireActive {
 		args = append(args, reviewWatchID, generation)
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE gitlab_review_mr_tasks SET task_id = ?
-		WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ? AND generation = ?`+activeClause,
+		WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ? AND generation = ?`+activeClause),
 		args...)
 	if err != nil {
 		return err
@@ -487,25 +487,25 @@ func (s *Store) assignReviewMRTaskID(ctx context.Context, reviewWatchID string, 
 // ReleaseReviewMRTask removes the (failed) reservation so future polls can
 // retry on the same MR.
 func (s *Store) ReleaseReviewMRTask(ctx context.Context, reviewWatchID, projectPath string, iid int) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`DELETE FROM gitlab_review_mr_tasks
-		 WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ?`,
+		 WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ?`),
 		reviewWatchID, projectPath, iid)
 	return err
 }
 
 func (s *Store) ReleaseReviewMRTaskForGeneration(ctx context.Context, reviewWatchID string, generation int64, projectPath string, iid int) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`DELETE FROM gitlab_review_mr_tasks
-		 WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ? AND generation = ?`,
+		 WHERE review_watch_id = ? AND project_path = ? AND mr_iid = ? AND generation = ?`),
 		reviewWatchID, projectPath, iid, generation)
 	return err
 }
 
 func (s *Store) reviewWatchGeneration(ctx context.Context, watchID string) (int64, error) {
 	var generation int64
-	if err := s.ro.GetContext(ctx, &generation,
-		`SELECT generation FROM gitlab_review_watches WHERE id = ?`, watchID); err != nil {
+	if err := s.ro.GetContext(ctx, &generation, s.ro.Rebind(
+		`SELECT generation FROM gitlab_review_watches WHERE id = ?`), watchID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 1, nil
 		}
@@ -517,9 +517,9 @@ func (s *Store) reviewWatchGeneration(ctx context.Context, watchID string) (int6
 // ListReviewMRTasksByWatch returns dedup rows for a given watch.
 func (s *Store) ListReviewMRTasksByWatch(ctx context.Context, watchID string) ([]*ReviewMRTask, error) {
 	var rows []ReviewMRTask
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT `+reviewMRTaskSelectCols+` FROM gitlab_review_mr_tasks
-		 WHERE review_watch_id = ? ORDER BY created_at ASC`, watchID); err != nil {
+		 WHERE review_watch_id = ? ORDER BY created_at ASC`), watchID); err != nil {
 		return nil, err
 	}
 	out := make([]*ReviewMRTask, 0, len(rows))
@@ -532,8 +532,8 @@ func (s *Store) ListReviewMRTasksByWatch(ctx context.Context, watchID string) ([
 // ListAllReviewMRTasks returns every dedup row (used by cleanup sweepers).
 func (s *Store) ListAllReviewMRTasks(ctx context.Context) ([]*ReviewMRTask, error) {
 	var rows []ReviewMRTask
-	if err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+reviewMRTaskSelectCols+` FROM gitlab_review_mr_tasks ORDER BY created_at ASC`); err != nil {
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
+		`SELECT `+reviewMRTaskSelectCols+` FROM gitlab_review_mr_tasks ORDER BY created_at ASC`)); err != nil {
 		return nil, err
 	}
 	out := make([]*ReviewMRTask, 0, len(rows))
@@ -545,12 +545,12 @@ func (s *Store) ListAllReviewMRTasks(ctx context.Context) ([]*ReviewMRTask, erro
 
 func (s *Store) ListReviewMRTasksForWorkspace(ctx context.Context, workspaceID string) ([]*ReviewMRTask, error) {
 	var rows []ReviewMRTask
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT t.id, t.review_watch_id, t.project_path, t.mr_iid,
 			t.mr_url, t.task_id, t.generation, t.created_at
 		 FROM gitlab_review_mr_tasks t
 		 JOIN gitlab_review_watches w ON w.id = t.review_watch_id
-		 WHERE w.workspace_id = ? ORDER BY t.created_at ASC`, workspaceID); err != nil {
+			 WHERE w.workspace_id = ? ORDER BY t.created_at ASC`), workspaceID); err != nil {
 		return nil, err
 	}
 	out := make([]*ReviewMRTask, 0, len(rows))
@@ -562,7 +562,7 @@ func (s *Store) ListReviewMRTasksForWorkspace(ctx context.Context, workspaceID s
 
 // DeleteReviewMRTask removes a dedup row by id.
 func (s *Store) DeleteReviewMRTask(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_review_mr_tasks WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM gitlab_review_mr_tasks WHERE id = ?`), id)
 	return err
 }
 
@@ -626,12 +626,12 @@ func (s *Store) GetIssueWatchIncludingDeleting(ctx context.Context, id string) (
 
 func (s *Store) getIssueWatch(ctx context.Context, id string, includeDeleting bool) (*IssueWatch, error) {
 	var iw IssueWatch
-	deletingClause := " AND deleting = 0"
+	deletingClause := " AND deleting = FALSE"
 	if includeDeleting {
 		deletingClause = ""
 	}
-	err := s.ro.GetContext(ctx, &iw,
-		`SELECT `+issueWatchSelectCols+` FROM gitlab_issue_watches WHERE id = ?`+deletingClause, id)
+	err := s.ro.GetContext(ctx, &iw, s.ro.Rebind(
+		`SELECT `+issueWatchSelectCols+` FROM gitlab_issue_watches WHERE id = ?`+deletingClause), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -648,31 +648,31 @@ func (s *Store) getIssueWatch(ctx context.Context, id string, includeDeleting bo
 func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	return s.listIssueWatches(ctx,
 		`SELECT `+issueWatchSelectCols+` FROM gitlab_issue_watches
-		 WHERE workspace_id = ? AND deleting = 0 ORDER BY created_at ASC`, workspaceID)
+		 WHERE workspace_id = ? AND deleting = FALSE ORDER BY created_at ASC`, workspaceID)
 }
 
 // ListAllIssueWatches lists every issue watch.
 func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	return s.listIssueWatches(ctx,
-		`SELECT `+issueWatchSelectCols+` FROM gitlab_issue_watches WHERE deleting = 0 ORDER BY created_at ASC`)
+		`SELECT `+issueWatchSelectCols+` FROM gitlab_issue_watches WHERE deleting = FALSE ORDER BY created_at ASC`)
 }
 
 // ListEnabledIssueWatches lists every enabled issue watch.
 func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	return s.listIssueWatches(ctx,
 		`SELECT `+issueWatchSelectCols+` FROM gitlab_issue_watches
-		 WHERE enabled = 1 AND deleting = 0 ORDER BY created_at ASC`)
+		 WHERE enabled = TRUE AND deleting = FALSE ORDER BY created_at ASC`)
 }
 
 func (s *Store) ListEnabledIssueWatchesForWorkspace(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	return s.listIssueWatches(ctx,
 		`SELECT `+issueWatchSelectCols+` FROM gitlab_issue_watches
-		 WHERE enabled = 1 AND deleting = 0 AND workspace_id = ? ORDER BY created_at ASC`, workspaceID)
+		 WHERE enabled = TRUE AND deleting = FALSE AND workspace_id = ? ORDER BY created_at ASC`, workspaceID)
 }
 
 func (s *Store) listIssueWatches(ctx context.Context, query string, args ...interface{}) ([]*IssueWatch, error) {
 	var rows []IssueWatch
-	if err := s.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(query), args...); err != nil {
 		return nil, err
 	}
 	out := make([]*IssueWatch, 0, len(rows))
@@ -723,16 +723,16 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 
 // RecordIssueWatchPoll stamps last_polled_at on the watch.
 func (s *Store) RecordIssueWatchPoll(ctx context.Context, id string, polledAt time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE gitlab_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE gitlab_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`),
 		polledAt, time.Now().UTC(), id)
 	return err
 }
 
 func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `UPDATE gitlab_issue_watches
-		SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE gitlab_issue_watches
+		SET enabled = FALSE, last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ?`),
 		cause, now, now, id)
 	return err
 }
@@ -744,10 +744,10 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM gitlab_issue_watch_tasks WHERE issue_watch_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_issue_watch_tasks WHERE issue_watch_id = ?`), id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM gitlab_issue_watches WHERE id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_issue_watches WHERE id = ?`), id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -761,9 +761,9 @@ const issueWatchTaskSelectCols = `id, issue_watch_id, project_path, issue_iid,
 // HasIssueWatchTask reports whether the (watch, project, iid) is dedup-claimed.
 func (s *Store) HasIssueWatchTask(ctx context.Context, issueWatchID, projectPath string, iid int) (bool, error) {
 	var count int
-	err := s.ro.GetContext(ctx, &count,
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
 		`SELECT COUNT(*) FROM gitlab_issue_watch_tasks
-		 WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ?`,
+		 WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ?`),
 		issueWatchID, projectPath, iid)
 	if err != nil {
 		return false, err
@@ -797,11 +797,11 @@ func (s *Store) reserveIssueWatchTask(ctx context.Context, issueWatchID string, 
 		INSERT INTO gitlab_issue_watch_tasks (id, issue_watch_id, project_path, issue_iid, issue_url, task_id, generation, created_at)
 		SELECT ?, ?, ?, ?, ?, '', ?, ?
 		WHERE EXISTS (SELECT 1 FROM gitlab_issue_watches
-			WHERE id = ? AND generation = ? AND enabled = 1 AND deleting = 0)
+			WHERE id = ? AND generation = ? AND enabled = TRUE AND deleting = FALSE)
 		ON CONFLICT(issue_watch_id, project_path, issue_iid) DO NOTHING`
 		args = append(args, issueWatchID, generation)
 	}
-	result, err := s.db.ExecContext(ctx, query, args...)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -826,15 +826,15 @@ func (s *Store) assignIssueWatchTaskID(ctx context.Context, issueWatchID string,
 	activeClause := ""
 	if requireActive {
 		activeClause = ` AND EXISTS (SELECT 1 FROM gitlab_issue_watches
-			WHERE id = ? AND generation = ? AND enabled = 1 AND deleting = 0)`
+			WHERE id = ? AND generation = ? AND enabled = TRUE AND deleting = FALSE)`
 	}
 	args := []interface{}{taskID, issueWatchID, projectPath, iid, generation}
 	if requireActive {
 		args = append(args, issueWatchID, generation)
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE gitlab_issue_watch_tasks SET task_id = ?
-		WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ? AND generation = ?`+activeClause,
+		WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ? AND generation = ?`+activeClause),
 		args...)
 	if err != nil {
 		return err
@@ -851,25 +851,25 @@ func (s *Store) assignIssueWatchTaskID(ctx context.Context, issueWatchID string,
 
 // ReleaseIssueWatchTask removes a failed reservation.
 func (s *Store) ReleaseIssueWatchTask(ctx context.Context, issueWatchID, projectPath string, iid int) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`DELETE FROM gitlab_issue_watch_tasks
-		 WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ?`,
+		 WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ?`),
 		issueWatchID, projectPath, iid)
 	return err
 }
 
 func (s *Store) ReleaseIssueWatchTaskForGeneration(ctx context.Context, issueWatchID string, generation int64, projectPath string, iid int) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`DELETE FROM gitlab_issue_watch_tasks
-		 WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ? AND generation = ?`,
+		 WHERE issue_watch_id = ? AND project_path = ? AND issue_iid = ? AND generation = ?`),
 		issueWatchID, projectPath, iid, generation)
 	return err
 }
 
 func (s *Store) issueWatchGeneration(ctx context.Context, watchID string) (int64, error) {
 	var generation int64
-	if err := s.ro.GetContext(ctx, &generation,
-		`SELECT generation FROM gitlab_issue_watches WHERE id = ?`, watchID); err != nil {
+	if err := s.ro.GetContext(ctx, &generation, s.ro.Rebind(
+		`SELECT generation FROM gitlab_issue_watches WHERE id = ?`), watchID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 1, nil
 		}
@@ -881,9 +881,9 @@ func (s *Store) issueWatchGeneration(ctx context.Context, watchID string) (int64
 // ListIssueWatchTasksByWatch lists dedup rows for an issue watch.
 func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) ([]*IssueWatchTask, error) {
 	var rows []IssueWatchTask
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT `+issueWatchTaskSelectCols+` FROM gitlab_issue_watch_tasks
-		 WHERE issue_watch_id = ? ORDER BY created_at ASC`, watchID); err != nil {
+		 WHERE issue_watch_id = ? ORDER BY created_at ASC`), watchID); err != nil {
 		return nil, err
 	}
 	out := make([]*IssueWatchTask, 0, len(rows))
@@ -896,8 +896,8 @@ func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) 
 // ListAllIssueWatchTasks returns every dedup row.
 func (s *Store) ListAllIssueWatchTasks(ctx context.Context) ([]*IssueWatchTask, error) {
 	var rows []IssueWatchTask
-	if err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+issueWatchTaskSelectCols+` FROM gitlab_issue_watch_tasks ORDER BY created_at ASC`); err != nil {
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
+		`SELECT `+issueWatchTaskSelectCols+` FROM gitlab_issue_watch_tasks ORDER BY created_at ASC`)); err != nil {
 		return nil, err
 	}
 	out := make([]*IssueWatchTask, 0, len(rows))
@@ -909,12 +909,12 @@ func (s *Store) ListAllIssueWatchTasks(ctx context.Context) ([]*IssueWatchTask, 
 
 func (s *Store) ListIssueWatchTasksForWorkspace(ctx context.Context, workspaceID string) ([]*IssueWatchTask, error) {
 	var rows []IssueWatchTask
-	if err := s.ro.SelectContext(ctx, &rows,
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT t.id, t.issue_watch_id, t.project_path, t.issue_iid,
 			t.issue_url, t.task_id, t.generation, t.created_at
 		 FROM gitlab_issue_watch_tasks t
 		 JOIN gitlab_issue_watches w ON w.id = t.issue_watch_id
-		 WHERE w.workspace_id = ? ORDER BY t.created_at ASC`, workspaceID); err != nil {
+			 WHERE w.workspace_id = ? ORDER BY t.created_at ASC`), workspaceID); err != nil {
 		return nil, err
 	}
 	out := make([]*IssueWatchTask, 0, len(rows))
@@ -926,7 +926,7 @@ func (s *Store) ListIssueWatchTasksForWorkspace(ctx context.Context, workspaceID
 
 // DeleteIssueWatchTask removes a dedup row by id.
 func (s *Store) DeleteIssueWatchTask(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_issue_watch_tasks WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM gitlab_issue_watch_tasks WHERE id = ?`), id)
 	return err
 }
 
@@ -941,9 +941,9 @@ func (s *Store) GetActionPresets(ctx context.Context, workspaceID string) (*Acti
 		IssuePresets string    `db:"issue_presets"`
 		UpdatedAt    time.Time `db:"updated_at"`
 	}
-	err := s.ro.GetContext(ctx, &row,
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(
 		`SELECT workspace_id, mr_presets, issue_presets, updated_at
-		 FROM gitlab_action_presets WHERE workspace_id = ?`, workspaceID)
+		 FROM gitlab_action_presets WHERE workspace_id = ?`), workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &ActionPresets{WorkspaceID: workspaceID}, nil
 	}
@@ -971,21 +971,21 @@ func (s *Store) UpsertActionPresets(ctx context.Context, presets *ActionPresets)
 		return fmt.Errorf("encode issue_presets: %w", err)
 	}
 	now := time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO gitlab_action_presets (workspace_id, mr_presets, issue_presets, updated_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			mr_presets = excluded.mr_presets,
 			issue_presets = excluded.issue_presets,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at`),
 		presets.WorkspaceID, string(mrJSON), string(issueJSON), now)
 	return err
 }
 
 // DeleteActionPresets resets a workspace to the default presets.
 func (s *Store) DeleteActionPresets(ctx context.Context, workspaceID string) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM gitlab_action_presets WHERE workspace_id = ?`, workspaceID)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM gitlab_action_presets WHERE workspace_id = ?`), workspaceID)
 	return err
 }
 

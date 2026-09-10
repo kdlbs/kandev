@@ -525,7 +525,7 @@ func TestQueuePromotionOfBlockedWIPOverflowDoesNotLaunch(t *testing.T) {
 	// only the deferred agent launch must remain gated.
 	dependencies := &launchDependencyReader{blocked: true}
 	svc.SetTaskDependencyReader(dependencies)
-	store := newWorkflowStore(repo, steps, svc.agentManager, noopPublisher, testLogger(),
+	store := newWorkflowStore(repo, steps, svc.agentManager, noopPublisher, testLogger(), &operationLedger{},
 		func(eventCtx context.Context, task *models.Task) {
 			svc.handleTaskQueuePromoted(eventCtx, watcher.TaskEventData{TaskID: task.ID})
 		})
