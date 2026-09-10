@@ -258,6 +258,69 @@ func TestRepairOrphanedWorkspaceMarkers_IdempotentSecondPass(t *testing.T) {
 	}
 }
 
+// TestRepairOrphanedWorkspaceMarkers_ClearsStaleClaimBeforeStamping covers
+// AC-003.1 when a child has both a stale marker and a current orphaned parent.
+// The stale claim must be removed before the stamping query runs, otherwise
+// the existing marker makes the real orphan invisible for one full startup.
+func TestRepairOrphanedWorkspaceMarkers_ClearsStaleClaimBeforeStamping(t *testing.T) {
+	_, _, repo := createTestService(t)
+	ctx := context.Background()
+	const currentParentID = "task-repair-current-archived-parent"
+	const staleParentID = "task-repair-stale-unarchived-parent"
+	const childID = "task-repair-stale-claim-child"
+
+	workspaceID, workflowID := seedArchiveOrphanParentAndChild(t, repo, currentParentID)
+	if err := repo.ArchiveTask(ctx, currentParentID); err != nil {
+		t.Fatalf("ArchiveTask(current parent): %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: staleParentID, WorkspaceID: workspaceID, WorkflowID: workflowID,
+		WorkflowStepID: "step", Title: "Stale parent", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask(stale parent): %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: childID, ParentID: currentParentID, WorkspaceID: workspaceID,
+		WorkflowID: workflowID, WorkflowStepID: "step", Title: "Child", Priority: "medium",
+		Metadata: map[string]interface{}{
+			"workspace": map[string]interface{}{
+				"mode": "inherit_parent", "orphaned": true,
+				"orphaned_parent_id": staleParentID,
+				"orphaned_reason":    "parent_archived",
+				"orphaned_at":        "2026-01-01T00:00:00Z",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateTask(child): %v", err)
+	}
+	if currentParent, err := repo.GetTask(ctx, currentParentID); err != nil || currentParent.ArchivedAt == nil {
+		t.Fatalf("setup: current parent should be archived, task=%v err=%v", currentParent, err)
+	}
+	markers, err := repo.ListStaleOrphanMarkers(ctx)
+	if err != nil || len(markers) != 1 {
+		t.Fatalf("setup: stale marker query = %v, err=%v", markers, err)
+	}
+	candidates, err := repo.ListOrphanRepairCandidates(ctx)
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("setup: marked child should not be a stamp candidate, got %v err=%v", candidates, err)
+	}
+
+	handoff := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	handoff.RepairOrphanedWorkspaceMarkers(ctx)
+
+	child, err := repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask(child): %v", err)
+	}
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	if orphaned, _ := workspace["orphaned"].(bool); !orphaned {
+		t.Fatalf("child lost orphan marker after one repair pass: workspace=%v", workspace)
+	}
+	if parentID, _ := workspace["orphaned_parent_id"].(string); parentID != currentParentID {
+		t.Fatalf("orphaned_parent_id = %q, want current archived parent %q", parentID, currentParentID)
+	}
+}
+
 func timePtr() *time.Time {
 	now := time.Now().UTC()
 	return &now

@@ -36,8 +36,10 @@ func (s *HandoffService) RepairOrphanedWorkspaceMarkers(ctx context.Context) {
 			zap.Int("count", count))
 	}
 
-	stamped := s.repairStampOrphanMarkers(ctx, repo)
+	// Clear stale claims first so a child with a stale marker is eligible for
+	// the stamping query again when its current parent is still archived.
 	cleared := s.repairClearStaleOrphanMarkers(ctx, repo)
+	stamped := s.repairStampOrphanMarkers(ctx, repo)
 	s.logf().Info("orphan marker repair pass complete",
 		zap.Int("stamped", stamped), zap.Int("cleared", cleared))
 }

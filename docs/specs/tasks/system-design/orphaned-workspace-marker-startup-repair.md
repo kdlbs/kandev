@@ -253,9 +253,9 @@ pass continues: the marker is durably stored either way, and the next boot paylo
 carries it (AC-003.8).
 
 **The two selections are independent**, and AC-003.11 applies to each: either
-failure warns and skips only its own pass. Run stamping first for log legibility;
-the passes commute, because the clearing predicate needs an unarchived named parent
-and a marker stamping wrote names an archived one.
+failure warns and skips only its own pass. Run clearing before stamping. A stale
+claim can otherwise make a real orphan ineligible for stamping; clearing it first
+lets the stamping query repair the current archived parent in the same startup.
 
 This is **not** a schema migration and must not live in `runMigrations()`. It writes
 through the guarded-write seam plus `PublishTaskUpdated` so the kanban WS view
