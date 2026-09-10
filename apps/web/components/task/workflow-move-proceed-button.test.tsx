@@ -194,6 +194,23 @@ describe("WorkflowMoveProceedButton", () => {
   });
 });
 
+describe("WorkflowMoveProceedButton label interaction", () => {
+  it("keeps the hovered form open when the skip-prompt label receives focus", () => {
+    renderProceed();
+    openHoverForm();
+
+    const proceed = screen.getByTestId(PROCEED_TEST_ID);
+    const skipCheckbox = screen.getByTestId("workflow-move-skip-step-prompt");
+    fireEvent.blur(proceed, { relatedTarget: skipCheckbox });
+    fireEvent.focus(skipCheckbox);
+    fireEvent.click(screen.getByText("Skip the step prompt"));
+    act(() => vi.advanceTimersByTime(200));
+
+    expect(skipCheckbox.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId(HOVER_OPTIONS_TEST_ID)).toBeTruthy();
+  });
+});
+
 describe("WorkflowMoveProceedButton — coarse pointer", () => {
   it("opens the Drawer after a long press and suppresses its duplicate click", () => {
     touchMocks.enabled = true;

@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type MouseEvent as ReactMouseEvent,
   type MouseEventHandler as ReactMouseEventHandler,
+  type FocusEvent as ReactFocusEvent,
   type RefObject,
 } from "react";
 import { IconArrowRight } from "@tabler/icons-react";
@@ -212,6 +213,10 @@ function FineProceedSurface({
   onContentLeave: () => void;
 }) {
   const { t } = useTranslation();
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const handleContentBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) onContentLeave();
+  };
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor asChild>
@@ -237,14 +242,19 @@ function FineProceedSurface({
         </Button>
       </PopoverAnchor>
       <PopoverContent
+        ref={contentRef}
         align="end"
         side="top"
         sideOffset={6}
         className="w-80 max-w-[calc(100vw-1rem)] p-3"
         data-testid={`${testId}-options`}
-        onMouseEnter={onContentEnter}
-        onMouseMove={onContentEnter}
-        onMouseLeave={onContentLeave}
+        onPointerEnter={onContentEnter}
+        onPointerMove={onContentEnter}
+        onPointerLeave={() => {
+          if (!contentRef.current?.contains(document.activeElement)) onContentLeave();
+        }}
+        onFocusCapture={onContentEnter}
+        onBlurCapture={handleContentBlur}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <div className="mb-2 text-xs font-medium">

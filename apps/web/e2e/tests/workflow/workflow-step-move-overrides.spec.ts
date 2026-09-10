@@ -155,6 +155,24 @@ test("uses the desktop next-step anchored form for the same one-shot move contra
     .toBe(1);
 });
 
+test("keeps the desktop next-step form open when clicking a checkbox label", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await seedMoveOverrideFixture(testPage, apiClient, seedData, "Desktop Label Focus");
+
+  const nextStepButton = testPage.getByTestId("proceed-next-step");
+  await nextStepButton.hover();
+  const form = testPage.getByTestId("proceed-next-step-options");
+  await expect(form).toBeVisible();
+
+  await form.getByText("Skip the step prompt", { exact: true }).click();
+
+  await expect(form).toBeVisible();
+  await expect(form.getByTestId("workflow-move-skip-step-prompt")).toBeChecked();
+});
+
 test("skip step prompt with instructions delivers only the instructions", async ({
   testPage,
   apiClient,
