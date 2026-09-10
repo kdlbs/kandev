@@ -276,7 +276,7 @@ func (s *Service) takeOrphanReapHostSnapshot(ctx context.Context) ([]hostProcess
 
 // recordOrphanReapRootSkip records a benign, informational root skip: a
 // working ownership check concluded this root is not this task's to reap
-// (e.g. AC-001.4's "exists again", or a genuine other-task ownership hit).
+// (the root exists again, or another task genuinely owns it).
 // Use recordOrphanReapRootSkipDetectionFailure instead when the check itself
 // could not run: a fail-closed detection failure gets an operator-facing
 // severity distinct from a benign ownership skip, because the host
