@@ -224,7 +224,7 @@ func kubernetesPrepareScript(req *ExecutorCreateRequest) (string, error) {
 	if script == "" {
 		return ":\n", nil
 	}
-	script += KandevBranchCheckoutPostlude()
+	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		addition, err := scriptengine.RemoteContributionSetupScript(&binding)
 		if err != nil {
