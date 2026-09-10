@@ -163,6 +163,61 @@ func TestListLiveWorkspaceSessionsUsesCurrentEnvironmentRootNotStaleSessionColum
 	}
 }
 
+// AC-TASKS-ORPHAN-REAP-003.2: ListLiveWorkspaceSessions is the ownership
+// check's authorization boundary, so the state list it filters on must be
+// exactly the five live states, no more and no fewer - a terminal-state
+// session must never block a reap root, and every live state must.
+func TestListLiveWorkspaceSessionsFiltersToExactlyTheLiveStates(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-live-state-filter"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live state filter"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	liveStates := map[models.TaskSessionState]bool{
+		models.TaskSessionStateCreated:         true,
+		models.TaskSessionStateStarting:        true,
+		models.TaskSessionStateRunning:         true,
+		models.TaskSessionStateIdle:            true,
+		models.TaskSessionStateWaitingForInput: true,
+		models.TaskSessionStateCompleted:       false,
+		models.TaskSessionStateFailed:          false,
+		models.TaskSessionStateCancelled:       false,
+	}
+
+	for state := range liveStates {
+		sessionID := "session-" + strings.ToLower(string(state))
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID:            sessionID,
+			TaskID:        taskID,
+			WorkspacePath: "/live-state-filter/" + strings.ToLower(string(state)),
+			State:         state,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", state, err)
+		}
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+
+	gotStates := make(map[models.TaskSessionState]bool, len(live))
+	for _, sess := range live {
+		gotStates[sess.State] = true
+	}
+	for state, wantLive := range liveStates {
+		if gotStates[state] != wantLive {
+			t.Fatalf("state %s: ListLiveWorkspaceSessions returned it = %v, want %v (full result: %+v)",
+				state, gotStates[state], wantLive, live)
+		}
+	}
+	if len(live) != 5 {
+		t.Fatalf("expected exactly the 5 live-state sessions, got %d: %+v", len(live), live)
+	}
+}
+
 func TestTaskSessionWorkspacePathFallsBackWithoutEnvironment(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
