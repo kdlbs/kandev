@@ -28,7 +28,7 @@ Implement the read-only database and backup reader, then wire both sources throu
 ## In scope
 
 - Both sources measure configured local locations and preserve independent failures, cancellation, and unsupported-driver behavior.
-- Overview responses and progress include both sources, with cache reuse and explicit overlap attribution.
+- Overview responses and progress include both sources, with cache reuse and explicit per-file overlap attribution.
 - Tests exercise main-file/sidecar sizes, manual backups, relative/custom paths, symlinks, unavailable reads, and no mutation.
 
 ## Out of scope
@@ -38,7 +38,7 @@ New cleanup behavior, retention changes, remote database measurement, and unrela
 ## Acceptance
 
 - Both sources measure configured local locations and preserve independent failures, cancellation, and unsupported-driver behavior.
-- Overview responses and progress include both sources, with cache reuse and explicit overlap attribution.
+- Overview responses and progress include both sources, with cache reuse and explicit overlap attribution. Partial nested overlap retains the full row footprint and reports only distinct counted bytes, while attribution uses effective scan roots only.
 - Tests exercise main-file/sidecar sizes, manual backups, relative/custom paths, symlinks, unavailable reads, and no mutation.
 
 ## Verification

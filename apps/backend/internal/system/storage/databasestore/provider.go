@@ -25,20 +25,22 @@ const (
 )
 
 const (
-	ReasonUnsupportedDriver      = "unsupported_driver"
-	ReasonMeasurementFailed      = "measurement_failed"
-	ReasonOverlapsExistingSource = "overlaps_existing_source"
+	ReasonUnsupportedDriver               = "unsupported_driver"
+	ReasonMeasurementFailed               = "measurement_failed"
+	ReasonOverlapsExistingSource          = "overlaps_existing_source"
+	ReasonPartiallyOverlapsExistingSource = "partially_overlaps_existing_source"
 )
 
 // Measurement is one independently attributed local storage measurement.
 // SizeBytes is a pointer so a measured zero is distinct from an unknown value.
 type Measurement struct {
-	Status          Status `json:"status"`
-	SizeBytes       *int64 `json:"size_bytes,omitempty"`
-	Path            string `json:"path,omitempty"`
-	IncludedInTotal bool   `json:"included_in_total"`
-	Reason          string `json:"reason,omitempty"`
-	Warning         string `json:"warning,omitempty"`
+	Status           Status `json:"status"`
+	SizeBytes        *int64 `json:"size_bytes,omitempty"`
+	CountedSizeBytes *int64 `json:"counted_size_bytes,omitempty"`
+	Path             string `json:"path,omitempty"`
+	IncludedInTotal  bool   `json:"included_in_total"`
+	Reason           string `json:"reason,omitempty"`
+	Warning          string `json:"warning,omitempty"`
 }
 
 type Config struct {
@@ -82,9 +84,10 @@ func (p *Provider) AnalyzeDatabase(
 	if err := validateRequiredFile(databasePath); err != nil {
 		return unavailableMeasurement(databasePath, err), err
 	}
+	overlapRoots := p.existingRootsFor(additionalRoots)
 
 	roots := []filescan.Root{{
-		Path: databasePath, SymlinkPolicy: filescan.RejectSymlinks,
+		Path: databasePath, SymlinkPolicy: filescan.RejectSymlinks, OverlapRoots: overlapRoots,
 	}}
 	for _, sidecar := range sidecarPaths(databasePath) {
 		info, statErr := os.Lstat(sidecar)
@@ -102,12 +105,14 @@ func (p *Provider) AnalyzeDatabase(
 		default:
 			roots = append(roots, filescan.Root{
 				Path: sidecar, MissingOK: true, SymlinkPolicy: filescan.RejectSymlinks,
+				OverlapRoots: overlapRoots,
 			})
 		}
 	}
 
 	measurements := p.scanner().Measure(ctx, roots, notify)
 	var total int64
+	var overlapped int64
 	for index, result := range measurements {
 		if result.Err != nil {
 			if isMissingOptionalSidecar(index, result.Err) {
@@ -116,8 +121,9 @@ func (p *Provider) AnalyzeDatabase(
 			return unavailableMeasurement(databasePath, result.Err), result.Err
 		}
 		total += result.Bytes
+		overlapped += result.OverlappedBytes
 	}
-	return p.measuredMeasurement(databasePath, total, p.existingRootsFor(additionalRoots)), nil
+	return measuredMeasurement(databasePath, total, total-overlapped), nil
 }
 
 func (p *Provider) AnalyzeBackups(
@@ -141,7 +147,7 @@ func (p *Provider) AnalyzeBackups(
 	}
 	info, statErr := os.Lstat(backupPath)
 	if errors.Is(statErr, os.ErrNotExist) {
-		return p.measuredMeasurement(backupPath, 0, p.existingRootsFor(additionalRoots)), nil
+		return measuredMeasurement(backupPath, 0, 0), nil
 	}
 	if statErr != nil {
 		return unavailableMeasurement(backupPath, statErr), statErr
@@ -164,6 +170,7 @@ func (p *Provider) AnalyzeBackups(
 	}
 	root := filescan.Root{
 		Path: backupPath, MissingOK: true, SymlinkPolicy: filescan.SkipSymlinks,
+		OverlapRoots: p.existingRootsFor(additionalRoots),
 		Exclude: func(path string, entry fs.DirEntry) bool {
 			cleanPath := filepath.Clean(path)
 			if _, overlaps := databasePaths[cleanPath]; overlaps {
@@ -186,8 +193,8 @@ func (p *Provider) AnalyzeBackups(
 	if results[0].Err != nil {
 		return unavailableMeasurement(backupPath, results[0].Err), results[0].Err
 	}
-	measurement := p.measuredMeasurement(
-		backupPath, results[0].Bytes, p.existingRootsFor(additionalRoots),
+	measurement := measuredMeasurement(
+		backupPath, results[0].Bytes, results[0].Bytes-results[0].OverlappedBytes,
 	)
 	warningMu.Lock()
 	if len(warningPaths) > 0 {
@@ -216,19 +223,28 @@ func (p *Provider) resolvedDatabasePath() (string, error) {
 	return resolvePathAllowMissing(p.databasePath)
 }
 
-func (p *Provider) measuredMeasurement(path string, bytes int64, existingRoots []string) Measurement {
-	measurement := Measurement{
-		Status:          StatusMeasured,
-		SizeBytes:       int64Pointer(bytes),
-		Path:            filepath.Clean(path),
-		IncludedInTotal: true,
+func measuredMeasurement(path string, bytes int64, countedBytes int64) Measurement {
+	if bytes < 0 {
+		bytes = 0
 	}
-	for _, root := range existingRoots {
-		if pathsOverlap(measurement.Path, root) {
-			measurement.IncludedInTotal = false
-			measurement.Reason = ReasonOverlapsExistingSource
-			break
-		}
+	if countedBytes < 0 {
+		countedBytes = 0
+	}
+	if countedBytes > bytes {
+		countedBytes = bytes
+	}
+	measurement := Measurement{
+		Status:           StatusMeasured,
+		SizeBytes:        int64Pointer(bytes),
+		CountedSizeBytes: int64Pointer(countedBytes),
+		Path:             filepath.Clean(path),
+		IncludedInTotal:  true,
+	}
+	if bytes > 0 && countedBytes == 0 {
+		measurement.IncludedInTotal = false
+		measurement.Reason = ReasonOverlapsExistingSource
+	} else if countedBytes < bytes {
+		measurement.Reason = ReasonPartiallyOverlapsExistingSource
 	}
 	return measurement
 }
@@ -317,20 +333,6 @@ func normalizePaths(paths []string) []string {
 		}
 	}
 	return normalized
-}
-
-func pathsOverlap(left, right string) bool {
-	left = filepath.Clean(left)
-	right = filepath.Clean(right)
-	if left == right {
-		return true
-	}
-	return isWithin(left, right) || isWithin(right, left)
-}
-
-func isWithin(path, root string) bool {
-	relative, err := filepath.Rel(root, path)
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func int64Pointer(value int64) *int64 {

@@ -144,6 +144,54 @@ func TestStorageOverviewIncludesDatabaseAndBackupMeasurements(t *testing.T) {
 	}
 }
 
+func TestStorageOverviewDoesNotSuppressDatabaseUnderFormerDefaultGoCache(t *testing.T) {
+	root := t.TempDir()
+	formerDefaultCache := filepath.Join(root, "cache", "go-build")
+	databasePath := filepath.Join(formerDefaultCache, "kandev.db")
+	writeStorageTestFile(t, databasePath, 11)
+
+	adoptedCache := filepath.Join(t.TempDir(), "adopted-go-build")
+	userCache := filepath.Join(t.TempDir(), "user-go-build")
+	t.Setenv("GOCACHE", userCache)
+	settings, store := newStorageMaintenanceStores(t)
+	if _, err := settings.AdoptGoCachePath(context.Background(), adoptedCache); err != nil {
+		t.Fatalf("AdoptGoCachePath: %v", err)
+	}
+
+	overview := &storageOverview{
+		settings:   settings,
+		quarantine: store,
+		database: databasestore.New(databasestore.Config{
+			Driver: "sqlite", DatabasePath: databasePath, ExistingRoots: storageExistingMeasurementRoots(root),
+		}),
+		workspaceFactory: func(current storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+			return workspaces.New(workspaces.Config{
+				TasksRoot: filepath.Join(root, "tasks"), TrashRoot: filepath.Join(root, "trash"),
+				Inventory: overviewWorkspaceInventory{}, Store: store,
+				GracePeriod: time.Duration(current.OrphanGraceHours) * time.Hour,
+				Retention:   time.Duration(current.QuarantineRetentionHours) * time.Hour,
+			})
+		},
+		goCache: gocache.New(gocache.Config{
+			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store,
+		}),
+		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
+		homeDir: root,
+	}
+
+	summary, err := overview.Summary(context.Background())
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	database, ok := summary.Database.(databasestore.Measurement)
+	if !ok {
+		t.Fatalf("database summary = %#v, want databasestore.Measurement", summary.Database)
+	}
+	if !database.IncludedInTotal {
+		t.Fatalf("database attribution = %#v, want included because the effective cache roots are elsewhere", database)
+	}
+}
+
 func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
 	settings, _ := newStorageMaintenanceStores(t)
 	docker := dockerstore.NewProvider(

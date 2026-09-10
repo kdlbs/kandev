@@ -513,7 +513,6 @@ func storageDatabasePath(cfg *config.Config) string {
 func storageExistingMeasurementRoots(homeDir string) []string {
 	return []string{
 		filepath.Join(homeDir, "tasks"),
-		filepath.Join(homeDir, "cache", "go-build"),
 	}
 }
 

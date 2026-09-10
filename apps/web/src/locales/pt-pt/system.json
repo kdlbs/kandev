@@ -293,6 +293,7 @@
   "storageAnalyzing": "A analisar...",
   "storageDatabase": "Base de dados",
   "storageDatabaseAlreadyCounted": "Já contabilizado noutra categoria de armazenamento",
+  "storageDatabasePartiallyCounted": "Alguns bytes sobrepõem-se a outra categoria medida e são contabilizados nessa categoria",
   "storageDatabaseBackups": "Cópias de segurança da base de dados",
   "storageDatabaseBackupsDetail": "Ficheiros regulares no diretório de cópias de segurança adjacente",
   "storageDatabaseDetail": "Ficheiro SQLite e ficheiros auxiliares -wal, -shm e -journal existentes",

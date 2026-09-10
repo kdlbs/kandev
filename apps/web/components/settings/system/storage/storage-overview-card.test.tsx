@@ -264,6 +264,40 @@ describe("StorageOverviewCard database footprint", () => {
   });
 });
 
+describe("StorageOverviewCard database progress", () => {
+  it("renders pending and scanning database rows while measurements are absent", () => {
+    const overview = {
+      ...degradedOverview,
+      analysis: {
+        ...degradedOverview.analysis,
+        state: "scanning",
+        progress: {
+          completed_sources: 2,
+          total_sources: 7,
+          sources: {
+            database: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+            database_backups: {
+              state: "scanning",
+              completed_items: 2,
+              total_items: 4,
+              bytes_scanned: 128,
+            },
+          },
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain(
+      "Waiting to measure",
+    );
+    expect(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID).textContent).toContain(
+      "Measuring 2 of 4",
+    );
+  });
+});
+
 describe("StorageOverviewCard temporary artifacts", () => {
   it("renders unavailable temporary artifacts without inventing zero usage", () => {
     render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />, {

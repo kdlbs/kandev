@@ -367,6 +367,7 @@ export type StorageFootprintMeasurement =
   | {
       status: "measured";
       size_bytes?: number;
+      counted_size_bytes?: number;
       path?: string;
       included_in_total: boolean;
       reason?: string;

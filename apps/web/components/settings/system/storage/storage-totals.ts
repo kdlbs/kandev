@@ -26,7 +26,12 @@ function addDatabaseMeasurement(
     return;
   }
   if (measurement.included_in_total === true) {
-    total.bytes += measurement.size_bytes;
+    const countedBytes = measurement.counted_size_bytes ?? measurement.size_bytes;
+    if (!isMeasuredBytes(countedBytes)) {
+      total.partial = true;
+      return;
+    }
+    total.bytes += countedBytes;
     return;
   }
   if (measurement.included_in_total !== false) {

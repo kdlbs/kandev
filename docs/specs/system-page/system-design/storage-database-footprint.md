@@ -51,9 +51,12 @@ while preserving the final database or backup component so final-component symli
 are rejected. Skip symlink entries inside the backup tree, with a warning; never
 recursively follow them.
 Deduplicate the primary file and its sidecars from the backup walk if the configured
-filename causes overlap. Check overlap with existing filesystem measurement roots.
-If attribution overlaps another source, retain the informational row but exclude its
-bytes from the aggregate with an explicit reason. This extension does not repair
+filename causes overlap. Check overlap with the effective filesystem measurement
+roots used by the current scan. The scanner retains the full row footprint and
+reports the regular-file bytes under those roots separately. If all non-zero bytes
+overlap, retain the informational row but exclude its bytes from the aggregate with
+an explicit reason. If only part overlaps, retain the row, expose its independently
+counted bytes, and identify the partial attribution. This extension does not repair
 pre-existing cross-provider overlap or hard-link accounting across workspace roots.
 
 The measurements are sampled file lengths, not allocated blocks or a transactional
@@ -69,9 +72,13 @@ Add `database` and `database_backups` to `storage.Summary` and
 
 - `status`: `measured | unavailable | not_applicable`.
 - `size_bytes`: present only for a complete measured result, including zero.
+- `counted_size_bytes`: present for a measured result and contains the bytes this
+  source contributes after effective-root overlap attribution.
 - `path`: resolved location only when applicable and resolved successfully.
-- `included_in_total`: true only for a measured, non-overlapping result.
-- `reason`: stable code for unsupported driver or overlap; localized in the UI.
+- `included_in_total`: true when the measured result contributes any bytes, including
+  a partial-overlap result; false only for a non-zero result fully covered elsewhere.
+- `reason`: stable code for unsupported driver, full overlap, or partial overlap;
+  localized in the UI.
 - `warning`: optional diagnostic for the authorized overview response.
 
 Run both measurements as independent source operations in `storageOverview.summary`.
@@ -87,7 +94,9 @@ Existing revision handling and atomic successful snapshots remain authoritative.
 Missing new fields from older responses are unknown measurements, not measured zero.
 An unavailable or unknown applicable source sets the counted total to partial.
 Not-applicable sources do not make an otherwise complete local total partial.
-An overlapping measured source is visibly identified as already counted elsewhere.
+An overlapping measured source is visibly identified as already counted elsewhere;
+partial overlap explains that only its distinct bytes contribute. During a pending
+or scanning first read, a missing database measurement uses its source progress.
 
 Keep authorization on the existing storage overview routes. Broadcast events contain
 only generation and state; database paths and sizes remain in authorized HTTP responses.

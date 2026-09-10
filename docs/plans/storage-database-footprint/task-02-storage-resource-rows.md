@@ -28,7 +28,7 @@ Render both resources and incorporate their measured bytes into the existing tot
 ## In scope
 
 - Both expandable rows display sizes, locations, and measurement explanations through existing shared desktop/mobile components.
-- Totals add each included measurement once and correctly handle unknown, unavailable, not-applicable, and overlap states.
+- Totals add each counted measurement once and correctly handle unknown, unavailable, not-applicable, full-overlap, and partial-overlap states.
 - All five language catalogs and targeted component fixtures include the new resources.
 
 ## Out of scope
@@ -38,7 +38,7 @@ New cleanup behavior, retention changes, remote database measurement, and unrela
 ## Acceptance
 
 - Both expandable rows display sizes, locations, and measurement explanations through existing shared desktop/mobile components.
-- Totals add each included measurement once and correctly handle unknown, unavailable, not-applicable, and overlap states.
+- Totals add each counted measurement once and correctly handle unknown, unavailable, not-applicable, full-overlap, and partial-overlap states. Missing measurements show pending or scanning source progress until a terminal response can classify them as unknown or unavailable.
 - All five language catalogs and targeted component fixtures include the new resources.
 
 ## Verification

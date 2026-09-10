@@ -295,6 +295,7 @@
   "storageAnalyzing": "正在分析…",
   "storageDatabase": "數據庫",
   "storageDatabaseAlreadyCounted": "已計入其他存儲類別",
+  "storageDatabasePartiallyCounted": "部分字節與其他已測量類別重疊，並計入該類別",
   "storageDatabaseBackups": "數據庫備份",
   "storageDatabaseBackupsDetail": "相鄰備份目錄中的普通檔案",
   "storageDatabaseDetail": "SQLite 檔案及現有 -wal、-shm 和 -journal 旁檔案",

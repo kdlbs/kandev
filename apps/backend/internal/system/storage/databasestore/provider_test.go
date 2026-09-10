@@ -212,6 +212,35 @@ func TestAnalyzeAdditionalRootsExcludeTotal(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBackupsPartiallyOverlappingNestedRootRetainsDistinctBytes(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "database.db")
+	backupPath := filepath.Join(root, "backups")
+	cachePath := filepath.Join(backupPath, "go-build")
+	writeSizedFile(t, databasePath, 4)
+	writeSizedFile(t, filepath.Join(backupPath, "snapshot.db"), 100)
+	writeSizedFile(t, filepath.Join(cachePath, "artifact"), 10)
+	provider := New(Config{
+		Driver:        "sqlite",
+		DatabasePath:  databasePath,
+		ExistingRoots: []string{cachePath},
+	})
+
+	backups, err := provider.AnalyzeBackups(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeBackups: %v", err)
+	}
+	if backups.Status != StatusMeasured || backups.SizeBytes == nil || *backups.SizeBytes != 110 {
+		t.Fatalf("backup measurement = %#v, want measured 110 bytes", backups)
+	}
+	if backups.CountedSizeBytes == nil || *backups.CountedSizeBytes != 100 {
+		t.Fatalf("counted backup bytes = %v, want 100", backups.CountedSizeBytes)
+	}
+	if !backups.IncludedInTotal || backups.Reason != ReasonPartiallyOverlapsExistingSource {
+		t.Fatalf("backup attribution = %#v, want partial overlap with 100 counted bytes", backups)
+	}
+}
+
 func TestAnalyzeCancellationDoesNotReturnMeasurement(t *testing.T) {
 	provider := New(Config{Driver: "sqlite", DatabasePath: filepath.Join(t.TempDir(), "missing.db")})
 	ctx, cancel := context.WithCancel(context.Background())

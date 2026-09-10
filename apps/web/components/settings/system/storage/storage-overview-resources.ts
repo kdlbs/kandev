@@ -175,6 +175,7 @@ function quarantineResourceOrPending(
 function databaseResource(
   t: Translate,
   measurement: StorageFootprintMeasurement | null | undefined,
+  progress: StorageSourceProgress | undefined,
   options: {
     id: string;
     label: string;
@@ -186,6 +187,9 @@ function databaseResource(
   },
 ): StorageResource {
   if (!measurement) {
+    if (progress?.state === "pending" || progress?.state === "scanning") {
+      return pendingStorageResource(t, options.id, options.label, progress, options.source);
+    }
     return {
       id: options.id,
       label: options.label,
@@ -218,6 +222,9 @@ function databaseResource(
         t(options.detailKey),
         measurement.included_in_total === false
           ? t("system:storageDatabaseAlreadyCounted")
+          : undefined,
+        measurement.reason === "partially_overlaps_existing_source"
+          ? t("system:storageDatabasePartiallyCounted")
           : undefined,
         measurement.path,
       ]
@@ -374,7 +381,7 @@ export function storageResources(
   const progress = overview.analysis.progress.sources;
   return [
     workspaceResource(t, summary.workspaces, progress.workspaces),
-    databaseResource(t, summary.database, {
+    databaseResource(t, summary.database, progress.database, {
       id: DATABASE_RESOURCE_ID,
       label: t("system:storageDatabase"),
       detailKey: "system:storageDatabaseDetail",
@@ -383,7 +390,7 @@ export function storageResources(
       notApplicableDetailKey: "system:storageDatabaseNotApplicable",
       source: "database",
     }),
-    databaseResource(t, summary.database_backups, {
+    databaseResource(t, summary.database_backups, progress.database_backups, {
       id: DATABASE_BACKUPS_RESOURCE_ID,
       label: t("system:storageDatabaseBackups"),
       detailKey: "system:storageDatabaseBackupsDetail",

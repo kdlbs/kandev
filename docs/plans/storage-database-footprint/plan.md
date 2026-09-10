@@ -12,7 +12,8 @@ legacy_specs: []
 
 ## Overview
 
-Show database and backup space in Storage analysis and include both in the counted total.
+Show database and backup space in Storage analysis and include each independently
+attributed byte in the counted total.
 Implement the measurement contract first, then its resource rows, then browser evidence.
 The system-page system owns this package because it owns the existing storage analysis contract.
 
@@ -26,7 +27,8 @@ existing capability with active requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE
 
 - Local SQLite database file lengths, including current journal sidecars.
 - The configured database's sibling backup directory, including manual snapshots.
-- Two independent progressive sources, explicit availability, and exactly-once total contribution.
+- Two independent progressive sources, explicit availability, per-file overlap attribution,
+  and exactly-once total contribution.
 - Localized desktop/mobile rows and visible explanation of analysis scope.
 
 ### Out of scope
@@ -43,7 +45,9 @@ existing capability with active requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE
 Introduce `apps/backend/internal/system/storage/databasestore` with injected driver, path,
 shared scanner, and testable filesystem boundaries. Follow the configured database
 location used by `apps/backend/internal/system/system.go`; do not use a hardcoded home path.
-Extend `storageOverview.summary` and `summaryFromMeasurements` in
+Pass only effective provider measurement roots into overlap attribution. Retain each
+row's full footprint and expose counted bytes after nested-root subtraction. Extend
+`storageOverview.summary` and `summaryFromMeasurements` in
 `apps/backend/internal/backendapp/storage_maintenance.go`.
 
 ### Overview contract
@@ -69,9 +73,9 @@ The following test names identify the implementation evidence.
 | Criteria | Evidence |
 | --- | --- |
 | .1, .2 | `apps/backend/internal/system/storage/databasestore/provider_test.go: TestAnalyzeSQLiteFootprint`, `TestAnalyzeCustomRelativePathAndMissingBackups` |
-| .3 | `TestAnalyzeOverlappingRootsRetainsMeasurementButExcludesTotal`; `apps/web/components/settings/system/storage/storage-totals.test.ts` exactly-once contribution cases |
+| .3 | `TestAnalyzeOverlappingRootsRetainsMeasurementButExcludesTotal`, `TestAnalyzeBackupsPartiallyOverlappingNestedRootRetainsDistinctBytes`, and `apps/web/components/settings/system/storage/storage-totals.test.ts` partial/exactly-once contribution cases |
 | .4 | `TestAnalyzeMissingAndUnreadableFiles`; resource unavailable rendering |
-| .5 | `apps/backend/internal/system/storage/overview_cache_progress_test.go` new-source cache/partial/refresh cases |
+| .5 | `apps/backend/internal/system/storage/overview_cache_progress_test.go` new-source cache/partial/refresh cases and `storage-overview-card.test.tsx` pending/scanning/terminal-missing cases |
 | .6 | `TestAnalyzeNonSQLiteDoesNotReadFilesystem`; not-applicable total cases |
 | .7, .9 | `apps/web/components/settings/system/storage/storage-overview-card.test.tsx` localized row details and scope copy |
 | .8 | `TestAnalyzeDoesNotModifyFiles`; overview permission and event payload regression coverage |
@@ -112,6 +116,6 @@ Implementation verification completed:
 
 - SQLite and backup files can change during scanning; the result is a sampled footprint.
 - Logical sizes and allocated blocks differ; this does not guarantee reconciliation with disk capacity.
-- Configured roots may overlap existing categories; attribution must prevent additional double counting.
+- Configured roots may overlap existing categories; effective roots must prevent additional double counting without dropping distinct nested files.
 - Unsupported drivers must be explicit, without reporting fabricated zero bytes.
 - Existing source-count fixtures and partial-response construction must include both new sources.

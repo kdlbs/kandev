@@ -133,6 +133,21 @@ describe("storageAnalysisTotal", () => {
     ).toEqual({ bytes: 49, partial: false });
   });
 
+  it("adds only the counted portion of a partial database footprint", () => {
+    expect(
+      storageAnalysisTotal({
+        ...completeSummary,
+        database_backups: {
+          status: "measured",
+          size_bytes: 110,
+          counted_size_bytes: 100,
+          included_in_total: true,
+          reason: "partially_overlaps_existing_source",
+        },
+      }),
+    ).toEqual({ bytes: 150, partial: false });
+  });
+
   it("marks unavailable or missing database measurements as partial", () => {
     expect(
       storageAnalysisTotal({

@@ -298,6 +298,7 @@
   "storageAnalyzing": "Analyzing...",
   "storageDatabase": "Database",
   "storageDatabaseAlreadyCounted": "Already counted in another storage category",
+  "storageDatabasePartiallyCounted": "Some bytes overlap another measured category and are counted there",
   "storageDatabaseBackups": "Database backups",
   "storageDatabaseBackupsDetail": "Regular files in the sibling backup directory",
   "storageDatabaseDetail": "SQLite file plus existing -wal, -shm, and -journal sidecars",
