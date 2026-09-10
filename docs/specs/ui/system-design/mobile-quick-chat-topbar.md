@@ -79,8 +79,9 @@ owns these capabilities:
 - The existing phone search toggle moves into the menu. On Kanban/List it
   closes the menu before revealing/focusing `MobileSearchBar`, which retains
   the existing `mobileKanban.isSearchOpen` state and query callbacks. Closing
-  search clears the query. Do not leave an independently editable duplicate
-  phone search input in the drawer; the tablet menu search remains unchanged.
+  search clears the query and returns focus to the persistent menu opener.
+  Do not leave an independently editable duplicate phone search input in the
+  drawer; the tablet menu search remains unchanged.
 - `MainTopBarPluginActions` retains the `main-top-bar` slot, workspace label,
   `presentation="mobile"`, and actual page identity. Contributions remain
   mounted only in their intended presentation, not hidden in a second header.

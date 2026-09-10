@@ -133,3 +133,9 @@ Passed 166 focused unit tests, seven mobile Threads tests, and 12 desktop
 Threads tests, all browser tests with one worker and retries disabled.
 Typecheck, scoped zero-warning lint, translation checks, and web build passed.
 The shared-header work order owns the final combined demo/visual verification.
+
+PR review follow-up adds a first-commit regression for returning from desktop
+with a changed fallback task. The stale measured phone identity now clears
+when disabled. It also tests picker closure across phone/tablet/desktop
+transitions and CDP cleanup when touch start or end fails. Each regression
+failed before its fix. Combined follow-up results are recorded in the plan.

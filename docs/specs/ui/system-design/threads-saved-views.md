@@ -264,8 +264,8 @@ session membership.
 ## Top-bar controls
 
 `KanbanHeader` gains optional task-listing control slots. Desktop and tablet
-place the slot before `ViewToggleGroup`. Phone places its slot first in the
-scrollable action strip.
+place the slot before `ViewToggleGroup`. Phone groups the page label and active
+view in the title control, with inline pagination and no scrolling action strip.
 
 Threads supplies two compact desktop/tablet controls:
 
@@ -323,6 +323,9 @@ detail-active.
   placeholder and does not write it back automatically.
 - A save error rolls back views, active ID, and draft to the last backend
   snapshot. The existing toast bridge shows a recoverable error.
+- On phones, a compact status icon beside the view control announces sync
+  failure. Retry and Dismiss live inside the saved-view drawer's scrolling body,
+  not the fixed-height page title row. Desktop and tablet keep inline recovery.
 - An unknown filter dimension, operator, sort key, or task ID is ignored during
   frontend normalization. Known valid fields remain available for editing.
 - If the active ID is invalid, normalization selects the canonical view. It

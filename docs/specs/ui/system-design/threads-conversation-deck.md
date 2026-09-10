@@ -181,7 +181,9 @@ first admitted task is the fallback; empty decks yield null. Native swipe,
 picker scrolling, and deep-link scrolling all use this one path. There is no
 touch interception, scroll-end debounce, second shell registry, stored
 preference, or network request. Leaving phone mode or unmounting removes
-listeners/resize observation and cancels any pending frame.
+listeners/resize observation and cancels any pending frame. Leaving phone mode
+also clears its measured identity, so returning uses the current fallback
+until the new phone geometry is available.
 
 The indicator and thread picker's selected row consume `mobileTaskId` directly
 through the board. Their update never enlarges the detail/preload window or
@@ -249,6 +251,9 @@ the shared menu. Saved-view semantics are not introduced into Kanban or List.
 
 Desktop metadata and tabs keep their existing regions. Phone pickers own their
 internal vertical scrolling, clear safe areas, and return focus on dismissal.
+If the opening task disappears while its picker is open, focus returns to the
+current mounted phone thread or the first remaining column, without scrolling.
+Leaving phone layout closes the thread picker; returning does not reopen it.
 Long labels truncate inside controls without document-level horizontal overflow.
 
 ## Failure and recovery

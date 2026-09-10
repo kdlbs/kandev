@@ -27,7 +27,7 @@ export function MobileListingMenuActions({
   workspaceLabel: string;
   currentPage: TaskListingPage;
   open: boolean;
-  closeMenu: () => void;
+  closeMenu: (restoreFocus?: boolean) => void;
   onToggleSearch?: () => void;
   isSearchOpen: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -38,8 +38,8 @@ export function MobileListingMenuActions({
   const openQuickTerminal = useQuickTerminalLauncher(workspaceId, { returnFocusRef });
   const statusBarEnabled = useAppStore((state) => state.userSettings.appStatusBarEnabled);
 
-  function launch(action: () => void) {
-    closeMenu();
+  function launch(action: () => void, restoreFocus = false) {
+    closeMenu(restoreFocus);
     requestAnimationFrame(action);
   }
 
@@ -51,7 +51,7 @@ export function MobileListingMenuActions({
           className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
           aria-pressed={isSearchOpen}
           data-testid="mobile-search-toggle"
-          onClick={() => launch(onToggleSearch)}
+          onClick={() => launch(onToggleSearch, isSearchOpen)}
         >
           <IconSearch className="h-4 w-4" />
           {t("kanban:searchTasks")}

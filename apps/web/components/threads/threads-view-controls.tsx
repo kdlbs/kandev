@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
   IconAdjustments,
+  IconAlertTriangle,
   IconArrowLeft,
   IconCheck,
   IconChevronDown,
@@ -328,7 +329,7 @@ function MobileThreadsViewControls({
 
   return (
     <>
-      {syncError && (
+      {syncError && !isMobile && (
         <ThreadViewSyncError
           error={syncError}
           mobile
@@ -361,6 +362,16 @@ function MobileThreadsViewControls({
           <span className="truncate">{activeViewName}</span>
           <IconChevronDown className="h-3.5 w-3.5 shrink-0" />
         </Button>
+      )}
+      {syncError && isMobile && (
+        <span
+          role="status"
+          className="shrink-0 text-destructive"
+          data-testid="threads-mobile-view-sync-status"
+        >
+          <IconAlertTriangle aria-hidden="true" className="h-4 w-4" />
+          <span className="sr-only">{t("threads:failedToSyncViews")}</span>
+        </span>
       )}
       <Drawer
         open={open}
@@ -406,6 +417,14 @@ function MobileThreadsViewControls({
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
             data-testid="threads-mobile-view-drawer-scroll-region"
           >
+            {syncError && isMobile && (
+              <ThreadViewSyncError
+                error={syncError}
+                mobile
+                onRetry={onRetrySync}
+                onDismiss={onDismissSyncError}
+              />
+            )}
             {page === "views" ? (
               <MobileThreadViewList
                 activeView={activeView}

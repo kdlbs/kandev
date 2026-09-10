@@ -61,11 +61,13 @@ export function MobileThreadColumnHeader({
       </div>
       <div className="flex min-h-8 min-w-0 items-center justify-between gap-2 px-1">
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <ThreadSessionStatusIcon
-            status={status}
-            label={t(status.labelKey)}
-            testId={`thread-status-${status.kind}`}
-          />
+          <span aria-hidden="true">
+            <ThreadSessionStatusIcon
+              status={status}
+              label={t(status.labelKey)}
+              testId={`thread-status-${status.kind}`}
+            />
+          </span>
           <span className="truncate">{t(status.labelKey)}</span>
         </span>
         <ThreadSessionSwitcher

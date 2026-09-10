@@ -54,8 +54,8 @@ export function KanbanHeaderMobile({
     setMenuOpen(true);
   }
 
-  function closeMenuForAction() {
-    restoreFocusRef.current = false;
+  function closeMenuForAction(restoreFocus = false) {
+    restoreFocusRef.current = restoreFocus;
     setMenuOpen(false);
   }
 

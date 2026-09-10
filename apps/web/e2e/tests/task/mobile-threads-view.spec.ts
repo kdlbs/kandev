@@ -76,6 +76,12 @@ test.describe("Mobile Threads view", () => {
     const column = testPage.getByTestId(`thread-column-${task.id}`);
     await expect(column).toBeVisible();
     await expect(column).toContainText(AGENT_TITLE);
+    expect(
+      await column
+        .locator("header")
+        .getByTestId(/^thread-status-/)
+        .ariaSnapshot(),
+    ).toBe("");
 
     // The phone layout pages the deck: one column fills the viewport rather
     // than shrinking several into an unreadable row.

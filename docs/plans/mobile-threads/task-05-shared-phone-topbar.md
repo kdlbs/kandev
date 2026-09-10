@@ -182,5 +182,15 @@ The existing demo was refreshed without reseeding. At 360px and 393px, all
 three headers measured 56px high with 44px menu buttons and no document
 overflow. The final held touch swipe reported 2/4 at 65.8% scroll before release, with
 one active chat after snap. Dark captures are in the runtime directory.
-HTTPS health and TLS WebSocket upgrade passed. The evaluation backend and
-private route remain running; the owned inspection browser is closed.
+HTTPS health and TLS WebSocket upgrade passed. After the user reviewed the
+demo, its backend and private route were stopped; the database and captures
+remain available for an explicitly requested restart.
+
+PR review follow-up moves saved-view recovery into the phone drawer with a
+compact warning beside the view name, removes duplicate tablet Threads
+navigation, restores focus when hiding search or archiving a picker opener,
+and hides the redundant phone status icon from assistive technology. New
+browser regressions failed before these fixes. A real plugin-registry test
+preserves stateful plugin controls: closing the menu on arbitrary plugin clicks
+would unmount their local state. Plugin and public UI guidance now documents
+the current composition. Combined follow-up results are recorded in the plan.
