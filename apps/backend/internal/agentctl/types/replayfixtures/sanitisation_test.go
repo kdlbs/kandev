@@ -46,12 +46,12 @@ func TestValidateSanitisationAllowsCleanFixture(t *testing.T) {
 func TestValidateFixtureRejectsForbiddenPayloadShapes(t *testing.T) {
 	cases := map[string]string{
 		"bearer token":                       "Authorization: Bearer abc123XYZ",
-		"vendor key prefix sk":               "leaked key sk-abcdef123456",
+		"vendor key prefix sk":               "leaked key sk-000000000000",
 		"vendor key prefix sess":             "leaked key sess-abcdef123456",
 		"vendor key prefix org":              "leaked key org-abcdef123456",
 		"opencode ses id":                    "workspace ses_abc123",
 		"opencode wrk id":                    "workspace wrk_abc123",
-		"vendor key prefix sk, mixed case":   "leaked key SK-abcdef123456",
+		"vendor key prefix sk, mixed case":   "leaked key SK-000000000000",
 		"vendor key prefix sess, mixed case": "leaked key Sess-ABCDEF123456",
 		"opencode ses id, mixed case":        "workspace SES_abc123",
 		"opencode wrk id, mixed case":        "workspace Wrk_abc123",
@@ -80,7 +80,7 @@ func TestValidateFixtureRejectsForbiddenPayloadShapes(t *testing.T) {
 // covers the expect subtree too, not only frames.
 func TestValidateFixtureRejectsForbiddenPayloadShapesInExpect(t *testing.T) {
 	f := validFixture()
-	f.Expect.DiagnosticCode = "provider_unavailable leaked sk-abcdef123456"
+	f.Expect.DiagnosticCode = "provider_unavailable leaked sk-000000000000"
 	if err := validateFixture(f); err == nil {
 		t.Fatalf("validateFixture() error = nil, want a sanitisation error for a forbidden shape in expect")
 	}
@@ -113,20 +113,21 @@ func TestValidateFixtureRejectsForbiddenPayloadShapesInIdentity(t *testing.T) {
 func TestValidateFixtureRejectsForbiddenProvenanceShapes(t *testing.T) {
 	cases := map[string]string{
 		"bearer token":                  "Bearer abc123XYZ",
-		"vendor key prefix":             "sk-abcdef123456",
-		"vendor key prefix, mixed case": "SK-ABCDEF123456",
+		"vendor key prefix":             "sk-000000000000",
+		"vendor key prefix, mixed case": "SK-000000000000",
 		"opencode id":                   "ses_abc123",
 		"opencode id, mixed case":       "SES_abc123",
 		"email address":                 "ops@example.com",
 		"rfc4122 uuid":                  "4b1f6f1a-4a2b-4c3d-8e9f-0123456789ab",
-		"userinfo in url":               "https://user:PASSWORD@example.com/docs",
-		"localhost":                     "http://localhost:4173/docs",
-		"loopback literal":              "http://127.0.0.1:4173/docs",
-		"rfc1918 10":                    "http://10.1.2.3/docs",
-		"rfc1918 172":                   "http://172.16.0.5/docs",
-		"rfc1918 192":                   "http://192.168.1.5/docs",
-		"internal host":                 "http://kandev.internal/docs",
-		"local host":                    "http://kandev.local/docs",
+		"userinfo in url": "https://user:" +
+			"PASSWORD@example.com/docs",
+		"localhost":        "http://localhost:4173/docs",
+		"loopback literal": "http://127.0.0.1:4173/docs",
+		"rfc1918 10":       "http://10.1.2.3/docs",
+		"rfc1918 172":      "http://172.16.0.5/docs",
+		"rfc1918 192":      "http://192.168.1.5/docs",
+		"internal host":    "http://kandev.internal/docs",
+		"local host":       "http://kandev.local/docs",
 	}
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {

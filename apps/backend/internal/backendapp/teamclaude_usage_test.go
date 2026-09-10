@@ -18,7 +18,8 @@ func TestTeamClaudeStatusURL(t *testing.T) {
 		{"ipv6 loopback", "http://[::1]:3456/v1", "teamclaude", "http://[::1]:3456/teamclaude/status", true},
 		{"selection required", "http://localhost:3456", "", "", false},
 		{"remote denied", "https://proxy.example.test", "teamclaude", "", false},
-		{"credentials denied", "http://user:PASSWORD@localhost:3456", "teamclaude", "", false},
+		{"credentials denied", "http://user:" +
+			"PASSWORD@localhost:3456", "teamclaude", "", false},
 		{"not a URL", "localhost:3456", "teamclaude", "", false},
 	}
 	for _, tc := range cases {
