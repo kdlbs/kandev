@@ -66,6 +66,7 @@ const degradedOverview = {
 const DATABASE_PATH = "/data/kandev.db";
 const DATABASE_BACKUP_PATH = "/data/backups";
 const DATABASE_TRIGGER_TEST_ID = "storage-resource-database-trigger";
+const DATABASE_BACKUPS_TRIGGER_TEST_ID = "storage-resource-database-backups-trigger";
 
 afterEach(cleanup);
 
@@ -202,11 +203,9 @@ describe("StorageOverviewCard database footprint", () => {
     render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
 
     expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain("5 GB");
-    expect(screen.getByTestId("storage-resource-database-backups-trigger").textContent).toContain(
-      "3 GB",
-    );
+    expect(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID).textContent).toContain("3 GB");
     fireEvent.click(screen.getByTestId(DATABASE_TRIGGER_TEST_ID));
-    fireEvent.click(screen.getByTestId("storage-resource-database-backups-trigger"));
+    fireEvent.click(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID));
     expect(screen.getByTestId("storage-resource-database").textContent).toContain(DATABASE_PATH);
     expect(screen.getByTestId("storage-resource-database-backups").textContent).toContain(
       DATABASE_BACKUP_PATH,
@@ -227,11 +226,13 @@ describe("StorageOverviewCard database footprint", () => {
         database: {
           status: "unavailable",
           included_in_total: false,
+          path: DATABASE_PATH,
           reason: "measurement_failed",
         },
         database_backups: {
           status: "not_applicable",
           included_in_total: false,
+          path: DATABASE_BACKUP_PATH,
           reason: "unsupported_driver",
         },
       },
@@ -240,10 +241,26 @@ describe("StorageOverviewCard database footprint", () => {
     render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
 
     expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain("Unavailable");
-    expect(screen.getByTestId("storage-resource-database-backups-trigger").textContent).toContain(
+    expect(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID).textContent).toContain(
       "Not applicable",
     );
     expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).not.toContain("0 GB");
+    fireEvent.click(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID));
+    expect(screen.getByTestId("storage-resource-database-backups").textContent).toContain(
+      DATABASE_BACKUP_PATH,
+    );
+  });
+
+  it("renders missing database measurements as unknown instead of complete", () => {
+    render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />);
+
+    const trigger = screen.getByTestId(DATABASE_TRIGGER_TEST_ID);
+    expect(trigger.textContent).toContain("Unavailable");
+    expect(trigger.textContent).not.toContain("Measurement complete");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("storage-resource-database").textContent).toContain(
+      "Database measurement is not available in this response.",
+    );
   });
 });
 

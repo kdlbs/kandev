@@ -17,7 +17,7 @@ Implement the measurement contract first, then its resource rows, then browser e
 The system-page system owns this package because it owns the existing storage analysis contract.
 
 [Requirements](../../specs/system-page/requirements/storage-maintenance.md) extend the
-existing capability with draft requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
+existing capability with active requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
 [System design](../../specs/system-page/system-design/storage-database-footprint.md) defines the measurement and presentation contract.
 
 ## Scope
@@ -40,15 +40,15 @@ existing capability with draft requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-
 
 ### Measurement and composition
 
-Introduce `internal/system/storage/databasestore` with injected driver, path,
+Introduce `apps/backend/internal/system/storage/databasestore` with injected driver, path,
 shared scanner, and testable filesystem boundaries. Follow the configured database
-location used by `internal/system/system.go`; do not use a hardcoded home path.
+location used by `apps/backend/internal/system/system.go`; do not use a hardcoded home path.
 Extend `storageOverview.summary` and `summaryFromMeasurements` in
-`backendapp/storage_maintenance.go`.
+`apps/backend/internal/backendapp/storage_maintenance.go`.
 
 ### Overview contract
 
-Extend `storage.Summary`, source identities, legacy progress mapping, and
+Extend `apps/backend/internal/system/storage.Summary`, source identities, legacy progress mapping, and
 `summaryFromSourceValues`. Distinguish measured, unavailable, and not-applicable
 results. Missing compatibility fields remain unknown. Include each new source in
 existing completion telemetry, cache snapshots, and progressive-response fixtures.
@@ -56,7 +56,7 @@ No schema migration is required.
 
 ### Web presentation
 
-Update `lib/types/system.ts`, resource construction, and total derivation.
+Update `apps/web/lib/types/system.ts`, resource construction, and total derivation.
 Keep the existing Storage accordion and document scroll. Paths wrap on phones;
 row taps expose all details. The nearest exemplar is the existing mobile Storage
 analysis flow. Both viewports share one view model and snapshot.
@@ -64,16 +64,16 @@ Add localized scope explanations and update public operations documentation.
 
 ## Tests
 
-The following test names are proposed implementation outputs.
+The following test names identify the implementation evidence.
 
 | Criteria | Evidence |
 | --- | --- |
-| .1, .2 | `databasestore/provider_test.go: TestAnalyzeSQLiteFootprint`, `TestAnalyzeCustomPath`, `TestAnalyzeBackups` |
-| .3 | `TestAnalyzeOverlappingRoots`; `storage-totals.test.ts` exactly-once contribution cases |
+| .1, .2 | `apps/backend/internal/system/storage/databasestore/provider_test.go: TestAnalyzeSQLiteFootprint`, `TestAnalyzeCustomRelativePathAndMissingBackups` |
+| .3 | `TestAnalyzeOverlappingRootsRetainsMeasurementButExcludesTotal`; `apps/web/components/settings/system/storage/storage-totals.test.ts` exactly-once contribution cases |
 | .4 | `TestAnalyzeMissingAndUnreadableFiles`; resource unavailable rendering |
-| .5 | `overview_cache_progress_test.go` new-source cache/partial/refresh cases |
+| .5 | `apps/backend/internal/system/storage/overview_cache_progress_test.go` new-source cache/partial/refresh cases |
 | .6 | `TestAnalyzeNonSQLiteDoesNotReadFilesystem`; not-applicable total cases |
-| .7, .9 | `storage-overview-card.test.tsx` localized row details and scope copy |
+| .7, .9 | `apps/web/components/settings/system/storage/storage-overview-card.test.tsx` localized row details and scope copy |
 | .8 | `TestAnalyzeDoesNotModifyFiles`; overview permission and event payload regression coverage |
 
 The criterion prefixes in this table are `AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
@@ -82,8 +82,8 @@ Tests use temporary files and injected failures, never the live database.
 
 ## E2E tests
 
-Add `storage-database-footprint.spec.ts` for chromium and
-`mobile-storage-database-footprint.spec.ts` for mobile-chrome under `e2e/tests/system`.
+Add `apps/web/e2e/tests/system/storage-database-footprint.spec.ts` for chromium and
+`apps/web/e2e/tests/system/mobile-storage-database-footprint.spec.ts` for mobile-chrome.
 Both cover .1, .3, .5, .7, and .9: inspect paths, compare rows and totals with
 the same snapshot, refresh after adding a disposable backup, and inspect scope copy.
 Controlled overview responses cover .4 and .6 without manipulating a production database.
@@ -102,8 +102,8 @@ All work orders are sequential. No delegation is authorized or required.
 
 Implementation verification completed:
 
-- Backend storage and overview checks passed: 210 storage-package tests and 9 targeted backend-app tests.
-- Focused web tests passed: 44 tests; web typecheck passed.
+- Backend storage and overview checks passed: 214 storage-package tests and 9 targeted backend-app tests.
+- Focused web tests passed: 45 tests; web typecheck and lint passed.
 - `i18n:zh-hant`, `i18n:check`, and `i18n:ratchet` passed.
 - Public documentation validation passed: 61 tests and 46 published pages.
 - Desktop and mobile database-footprint E2E checks passed, one test each.

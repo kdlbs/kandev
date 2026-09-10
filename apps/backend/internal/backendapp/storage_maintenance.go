@@ -341,6 +341,10 @@ func (o *storageOverview) summary(
 	if err != nil {
 		return storagepkg.Summary{}, err
 	}
+	var databaseExistingRoots []string
+	if o.goCache != nil {
+		databaseExistingRoots, _ = o.goCache.MeasurementRoots(settings)
+	}
 	reporter := newStorageProgressReporter(notify)
 	var (
 		workspaceSummary  workspaces.Analysis
@@ -396,13 +400,13 @@ func (o *storageOverview) summary(
 	go func() {
 		defer measurements.Done()
 		reporter.start(storagepkg.StorageSourceDatabase)
-		databaseSummary, databaseErr = o.analyzeDatabase(ctx, reporter)
+		databaseSummary, databaseErr = o.analyzeDatabase(ctx, reporter, databaseExistingRoots)
 		reporter.complete(storagepkg.StorageSourceDatabase, databaseSummary, databaseErr)
 	}()
 	go func() {
 		defer measurements.Done()
 		reporter.start(storagepkg.StorageSourceDatabaseBackups)
-		backupSummary, backupErr = o.analyzeDatabaseBackups(ctx, reporter)
+		backupSummary, backupErr = o.analyzeDatabaseBackups(ctx, reporter, databaseExistingRoots)
 		reporter.complete(storagepkg.StorageSourceDatabaseBackups, backupSummary, backupErr)
 	}()
 	if o.tempArtifacts != nil {
@@ -460,6 +464,7 @@ func summaryFromMeasurements(
 func (o *storageOverview) analyzeDatabase(
 	ctx context.Context,
 	reporter *storageProgressReporter,
+	existingRoots []string,
 ) (databasestore.Measurement, error) {
 	if o.database == nil {
 		return databasestore.Measurement{
@@ -467,12 +472,15 @@ func (o *storageOverview) analyzeDatabase(
 			Reason: databasestore.ReasonUnsupportedDriver,
 		}, nil
 	}
-	return o.database.AnalyzeDatabase(ctx, reporter.filesystem(storagepkg.StorageSourceDatabase))
+	return o.database.AnalyzeDatabase(
+		ctx, reporter.filesystem(storagepkg.StorageSourceDatabase), existingRoots...,
+	)
 }
 
 func (o *storageOverview) analyzeDatabaseBackups(
 	ctx context.Context,
 	reporter *storageProgressReporter,
+	existingRoots []string,
 ) (databasestore.Measurement, error) {
 	if o.database == nil {
 		return databasestore.Measurement{
@@ -480,7 +488,9 @@ func (o *storageOverview) analyzeDatabaseBackups(
 			Reason: databasestore.ReasonUnsupportedDriver,
 		}, nil
 	}
-	return o.database.AnalyzeBackups(ctx, reporter.filesystem(storagepkg.StorageSourceDatabaseBackups))
+	return o.database.AnalyzeBackups(
+		ctx, reporter.filesystem(storagepkg.StorageSourceDatabaseBackups), existingRoots...,
+	)
 }
 
 func databaseMeasurementValue(measurement databasestore.Measurement, err error) any {

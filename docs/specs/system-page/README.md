@@ -39,7 +39,7 @@ feedback.
 
 ### System design
 
-- [Database storage analysis (draft extension)](system-design/storage-database-footprint.md)
+- [Database Storage Analysis System Design](system-design/storage-database-footprint.md)
 
 
 

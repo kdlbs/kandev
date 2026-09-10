@@ -75,7 +75,7 @@ sequential
 
 ## Inputs
 
-- [Requirements](../../specs/system-page/requirements/storage-maintenance.md), draft extension `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
+- [Requirements](../../specs/system-page/requirements/storage-maintenance.md), active requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
 - [System design](../../specs/system-page/system-design/storage-database-footprint.md).
 - Existing storage provider, overview cache, resource rows, and mobile storage tests.
 
@@ -83,5 +83,5 @@ sequential
 
 Implemented the SQLite database and sibling backup measurements, source progress,
 cache projection, overlap attribution, unsupported-driver states, and regression
-coverage. The exact backend verification commands passed: 210 storage-package
+coverage. The exact backend verification commands passed: 214 storage-package
 tests and 9 targeted backend-app tests.

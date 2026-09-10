@@ -80,8 +80,12 @@ func TestAnalyzeNonSQLiteDoesNotReadFilesystem(t *testing.T) {
 		name string
 		fn   func(context.Context, func(filescan.Progress)) (Measurement, error)
 	}{
-		{name: "database", fn: provider.AnalyzeDatabase},
-		{name: "backups", fn: provider.AnalyzeBackups},
+		{name: "database", fn: func(ctx context.Context, notify func(filescan.Progress)) (Measurement, error) {
+			return provider.AnalyzeDatabase(ctx, notify)
+		}},
+		{name: "backups", fn: func(ctx context.Context, notify func(filescan.Progress)) (Measurement, error) {
+			return provider.AnalyzeBackups(ctx, notify)
+		}},
 	} {
 		t.Run(analyze.name, func(t *testing.T) {
 			measurement, err := analyze.fn(context.Background(), nil)
@@ -126,6 +130,36 @@ func TestAnalyzeMissingAndUnreadableFiles(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsDatabaseAndBackupSymlinks(t *testing.T) {
+	root := t.TempDir()
+	databaseTarget := filepath.Join(root, "database-target.db")
+	databasePath := filepath.Join(root, "database.db")
+	writeSizedFile(t, databaseTarget, 4)
+	if err := os.Symlink(databaseTarget, databasePath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	provider := New(Config{Driver: "sqlite", DatabasePath: databasePath})
+	database, err := provider.AnalyzeDatabase(context.Background(), nil)
+	if err == nil || database.Status != StatusUnavailable {
+		t.Fatalf("database symlink measurement = %#v, error = %v; want unavailable", database, err)
+	}
+
+	backupTarget := filepath.Join(root, "backups-target")
+	writeSizedFile(t, filepath.Join(backupTarget, "snapshot.db"), 6)
+	backupPath := filepath.Join(root, "backups")
+	if err := os.Symlink(backupTarget, backupPath); err != nil {
+		t.Skipf("backup symlinks unavailable: %v", err)
+	}
+	regularDatabase := filepath.Join(root, "regular.db")
+	writeSizedFile(t, regularDatabase, 4)
+	provider = New(Config{Driver: "sqlite", DatabasePath: regularDatabase})
+	backups, err := provider.AnalyzeBackups(context.Background(), nil)
+	if err == nil || backups.Status != StatusUnavailable {
+		t.Fatalf("backup symlink measurement = %#v, error = %v; want unavailable", backups, err)
+	}
+}
+
 func TestAnalyzeOverlappingRootsRetainsMeasurementButExcludesTotal(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "database.db")
@@ -152,8 +186,29 @@ func TestAnalyzeOverlappingRootsRetainsMeasurementButExcludesTotal(t *testing.T)
 	if err != nil {
 		t.Fatalf("AnalyzeBackups: %v", err)
 	}
+	if backups.Status != StatusMeasured || backups.SizeBytes == nil || *backups.SizeBytes != 6 {
+		t.Fatalf("backup measurement = %#v, want measured 6 bytes", backups)
+	}
 	if backups.IncludedInTotal || backups.Reason != ReasonOverlapsExistingSource {
 		t.Fatalf("backup attribution = %#v, want overlap exclusion", backups)
+	}
+}
+
+func TestAnalyzeAdditionalRootsExcludeTotal(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "database.db")
+	writeSizedFile(t, databasePath, 4)
+	provider := New(Config{Driver: "sqlite", DatabasePath: databasePath})
+
+	database, err := provider.AnalyzeDatabase(context.Background(), nil, root)
+	if err != nil {
+		t.Fatalf("AnalyzeDatabase: %v", err)
+	}
+	if database.Status != StatusMeasured || database.SizeBytes == nil || *database.SizeBytes != 4 {
+		t.Fatalf("database measurement = %#v, want measured 4 bytes", database)
+	}
+	if database.IncludedInTotal || database.Reason != ReasonOverlapsExistingSource {
+		t.Fatalf("database attribution = %#v, want additional-root overlap exclusion", database)
 	}
 }
 
@@ -168,6 +223,18 @@ func TestAnalyzeCancellationDoesNotReturnMeasurement(t *testing.T) {
 	}
 	if measurement.Status != StatusUnavailable || measurement.SizeBytes != nil {
 		t.Fatalf("cancelled measurement = %#v, want unavailable without bytes", measurement)
+	}
+}
+
+func TestMissingOptionalSidecarResultIsIgnored(t *testing.T) {
+	if !isMissingOptionalSidecar(1, os.ErrNotExist) {
+		t.Fatal("missing sidecar result was not recognized")
+	}
+	if isMissingOptionalSidecar(0, os.ErrNotExist) {
+		t.Fatal("missing primary database result was treated as optional")
+	}
+	if isMissingOptionalSidecar(1, errors.New("permission denied")) {
+		t.Fatal("non-missing sidecar failure was ignored")
 	}
 }
 

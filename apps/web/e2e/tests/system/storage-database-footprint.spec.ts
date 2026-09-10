@@ -1,6 +1,32 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+
+async function runStorageAnalysis(page: Page): Promise<void> {
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/system/storage/analyze",
+  );
+  await page.getByTestId("storage-analyze").click();
+  const response = await responsePromise;
+  expect(response.ok()).toBe(true);
+  const { job_id: jobId } = (await response.json()) as { job_id: string };
+
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async (id) => {
+          const jobResponse = await fetch(`/api/v1/system/jobs/${id}`);
+          if (!jobResponse.ok) return "missing";
+          return ((await jobResponse.json()) as { state: string }).state;
+        }, jobId),
+      { timeout: 30_000 },
+    )
+    .toBe("succeeded");
+  await expect(page.getByTestId("storage-analyze")).toHaveAttribute("data-job-state", "succeeded");
+}
 
 test.describe("System storage database footprint", () => {
   test("measures the SQLite database and refreshes sibling backup usage", async ({
@@ -16,12 +42,7 @@ test.describe("System storage database footprint", () => {
     fs.writeFileSync(firstBackup, "first database snapshot");
 
     await testPage.goto("/settings/system/storage");
-    await testPage.getByTestId("storage-analyze").click();
-    await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
-      "data-job-state",
-      "succeeded",
-      { timeout: 30_000 },
-    );
+    await runStorageAnalysis(testPage);
 
     const firstOverview = await testPage.evaluate(async () => {
       const response = await fetch("/api/v1/system/storage");
@@ -74,12 +95,7 @@ test.describe("System storage database footprint", () => {
     });
 
     fs.writeFileSync(secondBackup, "second database snapshot with more bytes");
-    await testPage.getByTestId("storage-analyze").click();
-    await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
-      "data-job-state",
-      "succeeded",
-      { timeout: 30_000 },
-    );
+    await runStorageAnalysis(testPage);
     const refreshedBackupBytes = fs.statSync(firstBackup).size + fs.statSync(secondBackup).size;
     await expect
       .poll(

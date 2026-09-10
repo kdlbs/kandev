@@ -84,7 +84,7 @@ sequential
 
 ## Inputs
 
-- [Requirements](../../specs/system-page/requirements/storage-maintenance.md), draft extension `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
+- [Requirements](../../specs/system-page/requirements/storage-maintenance.md), active requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
 - [System design](../../specs/system-page/system-design/storage-database-footprint.md).
 - Existing storage provider, overview cache, resource rows, and mobile storage tests.
 
@@ -92,4 +92,4 @@ sequential
 
 Implemented localized database and backup rows, exact-once totals, partial and
 status handling, scope explanation, and compatibility fixtures. The focused web
-tests passed 44 tests, followed by typecheck and all i18n gates.
+tests passed 45 tests, followed by typecheck, lint, and all i18n gates.

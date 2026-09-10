@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002
@@ -46,8 +46,10 @@ Use the shared four-partition `filescan.Limiter`; do not add an independent work
 A missing backup directory is measured zero. Permission or traversal errors make the
 backup source unavailable, independently of database measurement.
 
-Resolve explicitly configured location symlinks once to establish canonical roots.
-Skip symlink entries inside the backup tree, with a warning; never recursively follow them.
+Resolve symlinks in configured parent directories once to establish canonical roots,
+while preserving the final database or backup component so final-component symlinks
+are rejected. Skip symlink entries inside the backup tree, with a warning; never
+recursively follow them.
 Deduplicate the primary file and its sidecars from the backup walk if the configured
 filename causes overlap. Check overlap with existing filesystem measurement roots.
 If attribution overlaps another source, retain the informational row but exclude its
@@ -55,8 +57,8 @@ bytes from the aggregate with an explicit reason. This extension does not repair
 pre-existing cross-provider overlap or hard-link accounting across workspace roots.
 
 The measurements are sampled file lengths, not allocated blocks or a transactional
-snapshot. Files can change during analysis. Optional files disappearing before stat
-count as absent; a backup walk failing during rotation is unavailable until refresh.
+snapshot. Files can change during analysis. Optional sidecars disappearing during
+the scan count as absent; a backup walk failing during rotation is unavailable until refresh.
 PostgreSQL and other non-file drivers report these local measurements as not applicable.
 Do not query remote database sizes or scan a guessed local backup directory.
 
@@ -126,12 +128,13 @@ symlinks, overlap, and PostgreSQL with no filesystem probes.
 Overview tests prove both sources reach partial and completed responses, cache reuse,
 refresh, terminal unavailable states, and absence of sensitive event payload fields.
 Unit/component tests prove exactly-once addition and every row state.
-Desktop and mobile E2E tests inspect both rows, long paths, total contribution,
-and Analyze refresh after a disposable backup file changes.
+Desktop and mobile-chrome E2E tests inspect both rows, long paths, total contribution,
+and Analyze refresh after a disposable backup file changes. This is emulated mobile
+coverage; physical-device validation is not available in this environment and remains
+an explicit follow-up gate for closing mobile validation.
 
 ## Related decisions
 
 - [Install-wide storage maintenance](../../../decisions/0045-install-wide-storage-maintenance.md)
 - [Bounded progressive storage analysis](../../../decisions/2026-09-05-bounded-progressive-storage-analysis.md)
 - [Backup location guidance](backup-location-actions.md)
-

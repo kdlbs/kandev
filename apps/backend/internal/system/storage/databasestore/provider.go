@@ -67,6 +67,7 @@ func New(config Config) *Provider {
 func (p *Provider) AnalyzeDatabase(
 	ctx context.Context,
 	notify func(filescan.Progress),
+	additionalRoots ...string,
 ) (Measurement, error) {
 	if !p.localSQLite() {
 		return notApplicableMeasurement(), nil
@@ -99,24 +100,30 @@ func (p *Provider) AnalyzeDatabase(
 			err := fmt.Errorf("database sidecar is not a regular file: %s", sidecar)
 			return unavailableMeasurement(databasePath, err), err
 		default:
-			roots = append(roots, filescan.Root{Path: sidecar, SymlinkPolicy: filescan.RejectSymlinks})
+			roots = append(roots, filescan.Root{
+				Path: sidecar, MissingOK: true, SymlinkPolicy: filescan.RejectSymlinks,
+			})
 		}
 	}
 
 	measurements := p.scanner().Measure(ctx, roots, notify)
 	var total int64
-	for _, result := range measurements {
+	for index, result := range measurements {
 		if result.Err != nil {
+			if isMissingOptionalSidecar(index, result.Err) {
+				continue
+			}
 			return unavailableMeasurement(databasePath, result.Err), result.Err
 		}
 		total += result.Bytes
 	}
-	return p.measuredMeasurement(databasePath, total), nil
+	return p.measuredMeasurement(databasePath, total, p.existingRootsFor(additionalRoots)), nil
 }
 
 func (p *Provider) AnalyzeBackups(
 	ctx context.Context,
 	notify func(filescan.Progress),
+	additionalRoots ...string,
 ) (Measurement, error) {
 	if !p.localSQLite() {
 		return notApplicableMeasurement(), nil
@@ -134,7 +141,7 @@ func (p *Provider) AnalyzeBackups(
 	}
 	info, statErr := os.Lstat(backupPath)
 	if errors.Is(statErr, os.ErrNotExist) {
-		return p.measuredMeasurement(backupPath, 0), nil
+		return p.measuredMeasurement(backupPath, 0, p.existingRootsFor(additionalRoots)), nil
 	}
 	if statErr != nil {
 		return unavailableMeasurement(backupPath, statErr), statErr
@@ -179,7 +186,9 @@ func (p *Provider) AnalyzeBackups(
 	if results[0].Err != nil {
 		return unavailableMeasurement(backupPath, results[0].Err), results[0].Err
 	}
-	measurement := p.measuredMeasurement(backupPath, results[0].Bytes)
+	measurement := p.measuredMeasurement(
+		backupPath, results[0].Bytes, p.existingRootsFor(additionalRoots),
+	)
 	warningMu.Lock()
 	if len(warningPaths) > 0 {
 		sort.Strings(warningPaths)
@@ -207,14 +216,14 @@ func (p *Provider) resolvedDatabasePath() (string, error) {
 	return resolvePathAllowMissing(p.databasePath)
 }
 
-func (p *Provider) measuredMeasurement(path string, bytes int64) Measurement {
+func (p *Provider) measuredMeasurement(path string, bytes int64, existingRoots []string) Measurement {
 	measurement := Measurement{
 		Status:          StatusMeasured,
 		SizeBytes:       int64Pointer(bytes),
 		Path:            filepath.Clean(path),
 		IncludedInTotal: true,
 	}
-	for _, root := range p.existingRoots {
+	for _, root := range existingRoots {
 		if pathsOverlap(measurement.Path, root) {
 			measurement.IncludedInTotal = false
 			measurement.Reason = ReasonOverlapsExistingSource
@@ -222,6 +231,18 @@ func (p *Provider) measuredMeasurement(path string, bytes int64) Measurement {
 		}
 	}
 	return measurement
+}
+
+func (p *Provider) existingRootsFor(additionalRoots []string) []string {
+	if p == nil {
+		return normalizePaths(additionalRoots)
+	}
+	roots := append([]string(nil), p.existingRoots...)
+	return append(roots, normalizePaths(additionalRoots)...)
+}
+
+func isMissingOptionalSidecar(index int, err error) bool {
+	return index > 0 && errors.Is(err, os.ErrNotExist)
 }
 
 func notApplicableMeasurement() Measurement {
@@ -263,13 +284,6 @@ func resolvePathAllowMissing(path string) (string, error) {
 	path = absoluteCleanPath(path)
 	if path == "" {
 		return "", errors.New("database path is empty")
-	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		return filepath.Clean(resolved), nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
 	}
 	parent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
 	if parentErr == nil {

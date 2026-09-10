@@ -363,14 +363,22 @@ export interface StorageTemporaryArtifactsSummary {
 
 export type StorageFootprintMeasurementStatus = "measured" | "unavailable" | "not_applicable";
 
-export interface StorageFootprintMeasurement {
-  status: StorageFootprintMeasurementStatus;
-  size_bytes?: number;
-  path?: string;
-  included_in_total: boolean;
-  reason?: string;
-  warning?: string;
-}
+export type StorageFootprintMeasurement =
+  | {
+      status: "measured";
+      size_bytes?: number;
+      path?: string;
+      included_in_total: boolean;
+      reason?: string;
+      warning?: string;
+    }
+  | {
+      status: "unavailable" | "not_applicable";
+      path?: string;
+      included_in_total: false;
+      reason?: string;
+      warning?: string;
+    };
 
 export interface StorageSummary {
   workspaces: StorageWorkspaceSummary;

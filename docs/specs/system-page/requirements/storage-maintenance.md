@@ -51,14 +51,14 @@ of treating a `/tmp` name or mtime as sufficient evidence.
 
 ### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002: Database footprint visibility
 
-**Status:** Draft extension for the database storage plan package.
+**Status:** Active.
 
 **Intent:** Operators can see the space occupied by the local database and its backups.
 
 #### Acceptance criteria
 
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.1:** Storage analysis shall show separate Database and Database backups sizes, with their resolved locations available in row details.
-- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.2:** For SQLite, the Database measurement shall include the database file and existing journal sidecars. Backups shall include automatic and manual files in the active backup directory.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.2:** For SQLite, the Database measurement shall include the database file and its existing SQLite sidecars (`-wal`, `-shm`, `-journal`). Backups shall include automatic and manual files in the active backup directory.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.3:** Total counted shall include both measurements once. A measurement already included in another category shall identify that overlap without increasing the total again.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.4:** Missing backups shall show zero. Failed measurements shall show unavailable and make the total partial, while successful categories remain visible.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.5:** Both rows shall participate in initial scan progress, cached snapshots, and manual Analyze refresh. Missing response fields shall not appear as measured zero.
