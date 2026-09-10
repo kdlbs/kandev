@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERR
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Matching ACP diagnostic and error projection](#matching-acp-diagnostic-and-error-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle). Matching ACP diagnostic and error projection is owned by [Part 3](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection). |
 
 ## Migrated source detail
 
@@ -126,34 +126,6 @@ veto. It lacks `context canceled`, `context deadline exceeded`, or
 `cancel escalated`. The deliberately narrow `transportLostRe` remains
 unchanged.
 
-#### Matching ACP diagnostic and error projection
-
-Some ACP adapters emit a human-readable diagnostic as an
-`agent_message_chunk` before the same `session/prompt` call returns a JSON-RPC
-provider error. For example, an Anthropic route through a gateway can emit
-`API Error: Repeated 529 Overloaded errors` and then return `-32603` with that
-same provider diagnostic. Both frames are valid ACP behavior. The message
-remains visible in the transcript; it is not by itself model output that makes
-the failed attempt effectful.
-
-The ordered streaming observer classifies the diagnostic in the active prompt
-generation and records only its high-confidence, fallback-eligible semantic
-code. When lifecycle later receives the `session/prompt` failure, it preserves
-the actual sanitized error rather than replacing it with a generic initial
-prompt-delivery failure. The dynamic and concrete recovery gates may disregard
-the recorded diagnostic as output only if the terminal failure classifies to
-the identical semantic code and the same generation has no later assistant
-output, thought output, partial utility result, or tool activity.
-
-This is a correlation rule, not broad error-text suppression. A changed code
-(for example, a 529 diagnostic followed by a 500 failure), a stale generation,
-an unclassified or low-confidence signature, or any later progress leaves the
-diagnostic ordinary transcript output and fails recovery closed. The observer
-does not identify TeamClaude, Anthropic, or any other gateway; those providers
-contribute signatures through the shared catalogue. This permits a future ACP
-adapter or gateway to use the same safe projection without a provider-specific
-orchestration branch.
-
 ### Error classes
 
 The policy layer has two configurable classes:
@@ -189,9 +161,10 @@ Classification does not by itself authorize retry or switching.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
   delivery, or stale event ordering fails closed unless a durable continuation
   package makes successor delivery safe under the dynamic-routing contract.
-- A correlated ACP diagnostic that satisfies the matching projection above is
-  not assistant output for this gate. It remains transcript-visible, while any
-  non-diagnostic later progress restores the normal output/effect safety fence.
+- A correlated ACP diagnostic satisfying [Matching ACP diagnostic and error
+  projection](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection)
+  is not assistant output for this gate; non-diagnostic later progress
+  restores the normal output/effect safety fence.
 - User configuration cannot override this gate. An unsafe transient or hard
   failure stops for manual recovery even when its class policy requests retry
   or skip.
@@ -440,56 +413,9 @@ an earlier decision occurred.
 Raw streams, credentials, account identifiers, and unbounded error text are not
 stored in policy or route state.
 
-### Continuation package sanitization tiers
-
-The dynamic-routing continuation package (`dynamic.BuildBoundedContinuation`,
-persisted as `dynamic_route_states.continuation_json` and rendered into the
-successor's prompt by `ContinuationPrompt`) mixes two kinds of carrier text,
-and `routingerr` sanitizes them with two different rule sets:
-
-- **Provider diagnostics and the full `Conversation`** (`ToolSummary`,
-  `FailureReason`, and both the user and agent halves of `Conversation`) run
-  through `routingerr.Sanitize`, the full rule set. In addition to credential
-  patterns it collapses any 32-plus-character run, rewrites URLs down to
-  scheme and host, and normalizes home paths. `Conversation` is sanitized
-  before `sanitizedTail` applies its byte budget, so an identifier cannot
-  split a credential rule at the retained-tail boundary.
-- **User/agent-authored carrier text** (`TaskDescription`, `PlanSummary`, and
-  `RepositorySummary`) runs through `routingerr.SanitizeCredentials`, a
-  narrower tier covering only credential-shaped patterns (`sk-`, `ghp_`,
-  `github_pat_`, `kandev_pat_`, `Bearer`, `Authorization:`, `--api-key`,
-  `password|secret|token|api_key` assignments, and URL userinfo). Each field is
-  bounded to `continuationFieldLimit` after redaction, with the head retained.
-  The narrow tier excludes
-  the 32-plus-char catch-all, the scheme-and-host URL rewrite, and home-path
-  normalization, because this text is already shown to the user unredacted
-  and commonly carries legitimate long identifiers — commit SHAs, UUIDs, file
-  hashes — that the full rule set would render as `***`.
-
-Both tiers close the credential shapes they explicitly pattern-match: a `sk-`
-key, a GitHub/Kandev PAT, a bearer/auth header, a `--api-key` flag, a
-`password`/`secret`/`token`/`api_key` assignment — including a qualified
-env-var key where the keyword is a prefix or suffix rather than the whole
-name (`AWS_SECRET_ACCESS_KEY=`, `SECRET_KEY=`), and including a value that
-contains an embedded quote character — or a URL's `user:pass@` userinfo is
-redacted before persistence or a cross-provider fallback, in either tier. A
-quoted value not terminated on the same line (an embedded, unescaped newline
-before the closing quote) is redacted only up to the line break — unchanged
-from the plain-text matching this replaced. Neither tier is a general secret
-scanner: a credential shaped like something not on that list (a
-vendor-specific token prefix, for example) survives the narrow tier unless it
-also matches a listed pattern.
-
-The key match is a substring match, not exact-name, so it also matches a key
-merely containing a keyword without naming a credential (`max_tokens`,
-`tokenizer`); an exact-name allowlist would drop the qualified env-var keys
-(`AWS_SECRET_ACCESS_KEY=`) this match exists to catch. A bare decimal integer
-value is left untouched only for the explicit count-key allowlist
-(`tokens`, `max_tokens`, `input_tokens`, `output_tokens`, `total_tokens`,
-`prompt_tokens`, and `completion_tokens`). Numeric values under credential keys,
-such as `password: 123456` or `api_key=123456`, are redacted like other
-credential values. A non-numeric value (`tokenizer: cl100k_base`) is also
-redacted.
+Continuation package sanitization tiers are defined in [Part
+4](provider-error-recovery-04.md#continuation-package-sanitization-tiers),
+relocated there verbatim when this file reached its size limit.
 
 ## API surface
 

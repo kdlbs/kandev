@@ -12,10 +12,11 @@ owners:
 
 ## Purpose and boundaries
 
-Part 1 defines the provider-neutral error catalogue, the policy classes, the
-replay and effect-safety gate, and the matching ACP diagnostic projection.
-This part defines the raw ACP replay fixture matrix that makes the matching
-projection falsifiable across gateway shapes, and the harness that replays it.
+Part 1 defines the provider-neutral error catalogue, the policy classes, and
+the replay and effect-safety gate. [Part 3](provider-error-recovery-03.md)
+defines the matching ACP diagnostic projection. This part defines the raw ACP
+replay fixture matrix that makes the matching projection falsifiable across
+gateway shapes, and the harness that replays it.
 
 [Part 3](provider-error-recovery-03.md) defines the other three: the
 single-authority propagation path for the provider-diagnostic candidate marker,

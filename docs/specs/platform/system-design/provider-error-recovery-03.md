@@ -23,6 +23,12 @@ assert:
 3. the allowlisted structured metadata a generic ACP prompt-error projection
    may carry.
 
+It also carries [Matching ACP diagnostic and error
+projection](#matching-acp-diagnostic-and-error-projection), relocated here
+verbatim from Part 1 when Part 1 reached its file-size limit; Part 1's
+[Replay and effect-safety gate](provider-error-recovery.md#replay-and-effect-safety-gate)
+remains the authoritative gate bullet list and cross-references it here.
+
 It does not change classification rules, policy values, retry ownership, or
 candidate ordering.
 
@@ -30,7 +36,7 @@ candidate ordering.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Marker propagation](#marker-propagation), [Diagnostic text correlation](#diagnostic-text-correlation), [Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata), [Failure modes](#failure-modes) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Matching ACP diagnostic and error projection](#matching-acp-diagnostic-and-error-projection), [Marker propagation](#marker-propagation), [Diagnostic text correlation](#diagnostic-text-correlation), [Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata), [Failure modes](#failure-modes) |
 
 Acceptance criteria `.20` and `.21` are owned by
 [Marker propagation](#marker-propagation). `.23` is owned by
@@ -40,6 +46,34 @@ Acceptance criteria `.20` and `.21` are owned by
 observes. `.17` through `.19` are owned by
 [Part 2](provider-error-recovery-02.md), whose `## Input inventory` records the
 sampled shapes this part reasons from.
+
+## Matching ACP diagnostic and error projection
+
+Some ACP adapters emit a human-readable diagnostic as an
+`agent_message_chunk` before the same `session/prompt` call returns a JSON-RPC
+provider error. For example, an Anthropic route through a gateway can emit
+`API Error: Repeated 529 Overloaded errors` and then return `-32603` with that
+same provider diagnostic. Both frames are valid ACP behavior. The message
+remains visible in the transcript; it is not by itself model output that makes
+the failed attempt effectful.
+
+The ordered streaming observer classifies the diagnostic in the active prompt
+generation and records only its high-confidence, fallback-eligible semantic
+code. When lifecycle later receives the `session/prompt` failure, it preserves
+the actual sanitized error rather than replacing it with a generic initial
+prompt-delivery failure. The dynamic and concrete recovery gates may disregard
+the recorded diagnostic as output only if the terminal failure classifies to
+the identical semantic code and the same generation has no later assistant
+output, thought output, partial utility result, or tool activity.
+
+This is a correlation rule, not broad error-text suppression. A changed code
+(for example, a 529 diagnostic followed by a 500 failure), a stale generation,
+an unclassified or low-confidence signature, or any later progress leaves the
+diagnostic ordinary transcript output and fails recovery closed. The observer
+does not identify TeamClaude, Anthropic, or any other gateway; those providers
+contribute signatures through the shared catalogue. This permits a future ACP
+adapter or gateway to use the same safe projection without a provider-specific
+orchestration branch.
 
 ## Marker propagation
 
@@ -138,7 +172,8 @@ replayed on a second provider, which
 So a recorded diagnostic authorizes pre-result recovery only when **both** hold:
 
 1. the diagnostic and the terminal failure classify to the same high-confidence,
-   fallback-eligible code, as Part 1 already requires, and
+   fallback-eligible code, per [Matching ACP diagnostic and error
+   projection](#matching-acp-diagnostic-and-error-projection) above, and
 2. the diagnostic's normalized text is **contained in** the terminal failure's
    normalized message.
 
