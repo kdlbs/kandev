@@ -3,6 +3,7 @@ package service
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -107,6 +108,25 @@ func containsOrphanReapControlByte(s string) bool {
 		}
 	}
 	return false
+}
+
+// parseLsofVerifyCwdLine parses `lsof -a -p <pid> -d cwd -F n` output, the
+// single-pid pre-signal re-verification read. A raw control byte in the cwd
+// line is rejected the same way parseLsofCwdEntries rejects one in the
+// whole-host snapshot: this read gates an irreversible signal, so it must
+// not trust a corrupted or desynchronized line any more than that one does.
+func parseLsofVerifyCwdLine(out []byte) (string, error) {
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.HasPrefix(line, "n") {
+			continue
+		}
+		value := line[1:]
+		if containsOrphanReapControlByte(value) {
+			return "", errors.New("orphan reap: cwd entry contains a raw control byte")
+		}
+		return value, nil
+	}
+	return "", errors.New("orphan reap: no cwd entry for pid")
 }
 
 // parsePSAncestry parses `ps -Ao pid=,ppid=` output into a pid->ppid map.

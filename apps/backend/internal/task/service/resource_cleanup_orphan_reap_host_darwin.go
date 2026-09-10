@@ -4,10 +4,8 @@ package service
 
 import (
 	"context"
-	"errors"
 	"os/exec"
 	"strconv"
-	"strings"
 )
 
 // darwinOrphanReapHost implements the macOS detection mechanism:
@@ -41,10 +39,5 @@ func (darwinOrphanReapHost) VerifyCwd(ctx context.Context, pid int) (string, err
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "n") {
-			return line[1:], nil
-		}
-	}
-	return "", errors.New("orphan reap: no cwd entry for pid")
+	return parseLsofVerifyCwdLine(out)
 }
