@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,7 +39,21 @@ var (
 	errReusableSessionNoLongerActive        = errors.New("reusable session is no longer active")
 	errWorkflowAutoStartSessionTerminalized = errors.New("workflow auto-start session terminalized")
 	errContextResetCancellationConflict     = errors.New("context reset cancellation is already in progress")
+	errSessionAttachmentTransferUnavailable = errors.New("session attachment transfer service is unavailable")
 )
+
+func sessionAttachmentTransfererAvailable(transfer SessionAttachmentTransferer) bool {
+	if transfer == nil {
+		return false
+	}
+	value := reflect.ValueOf(transfer)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return !value.IsNil()
+	default:
+		return true
+	}
+}
 
 type workflowAutoStartSessionTerminalizedError struct {
 	state models.TaskSessionState
@@ -367,12 +382,25 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 			State:     session.State,
 		}
 	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return ProcessOnTurnStartResult{}, fmt.Errorf("load task for on_turn_start: %w", err)
+	}
+	if task != nil && task.State == v1.TaskStateCompleted && !models.IsCompletionFollowUpSession(session.Metadata) {
+		if err := s.repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyCompletionFollowUp, true); err != nil {
+			return ProcessOnTurnStartResult{}, fmt.Errorf("mark completed task follow-up: %w", err)
+		}
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyCompletionFollowUp] = true
+	}
 	// ADR 0015 — a fresh user message before the pending signal's
 	// transition has fired cancels the signal (re-open semantics). The
 	// user is continuing the conversation; this step is no longer "done".
 	s.clearPendingStepSignal(ctx, session)
 	s.processOnTurnStartViaEngine(ctx, taskID, session)
-	task, err := s.repo.GetTask(ctx, taskID)
+	task, err = s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		// Do not let a read race turn an unknown admission state into an
 		// immediate prompt. The caller can retry after reconciliation.
@@ -831,7 +859,7 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
 	if session != nil {
 		go func() {
-			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep); err != nil {
+			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep, data.StepTransitionID); err != nil {
 				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.queue_promoted")
 				return
 			}
@@ -1582,7 +1610,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		if workflowAgentProfileID != "" {
 			startAgentProfileID = ""
 		}
-		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, step.ID, planMode, true, nil)
+		_, err := s.startTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, step.ID, planMode, true, nil, startTaskOptions{WorkflowEntryID: stepTransitionID})
 		if err != nil {
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", task.ID),
@@ -1934,14 +1962,14 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	if manualBarrier {
 		go s.processManualMoveLifecycleWithFeederBarrier(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
-			data.FromStepID, data.ToStepID, data.TaskDescription,
+			data.FromStepID, data.ToStepID, data.TaskDescription, data.StepTransitionID,
 		)
 		return
 	}
 	go func() {
 		if err := s.processStepExitAndEnterWithSteps(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
-			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion, queuePromotionToken,
+			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion, queuePromotionToken, data.StepTransitionID,
 		); err != nil {
 			s.logger.Warn("task.moved: step exit and enter lifecycle failed",
 				zap.String("task_id", data.TaskID),
@@ -2198,6 +2226,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string,
+	entryIDs ...int64,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -2219,7 +2248,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	}
 	if err := s.processStepExitAndEnterWithSteps(
 		ctx, taskID, session, fromStep, targetStep,
-		fromStepID, toStepID, taskDescription, false, nil,
+		fromStepID, toStepID, taskDescription, false, nil, entryIDs...,
 	); err != nil {
 		s.logger.Warn("manual move lifecycle stopped before completion",
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
@@ -2264,6 +2293,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string, queuePromotion bool, queuePromotionToken interface{},
+	entryIDs ...int64,
 ) error {
 	if fromStep == nil {
 		var err error
@@ -2289,7 +2319,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	}
 
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep); err != nil {
+	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep, entryIDs...); err != nil {
 		if queuePromotion {
 			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved")
 		}
@@ -2301,7 +2331,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 // finalizeStepEnter optionally clears review status, reloads the session, and
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
-func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, sourceStep *wfmodels.WorkflowStep) error {
+func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, sourceStep *wfmodels.WorkflowStep, entryIDs ...int64) error {
 	if clearReview {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
@@ -2327,7 +2357,11 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 	// path" and skip with a log rather than executing — see
 	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
 	// plan's scope note for why E2-E5 dispatch is deferred.
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0, sourceStep)
+	var entryID int64
+	if len(entryIDs) > 0 {
+		entryID = entryIDs[0]
+	}
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
 	return nil
 }
 
@@ -2353,6 +2387,9 @@ func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskS
 // resolveStepAgentProfile returns the effective agent profile ID for a step.
 // Resolution order: step override -> workflow default -> empty (use current session's profile).
 func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	if step != nil && step.SessionTarget != nil {
+		return ""
+	}
 	if step.AgentProfileID != "" {
 		return step.AgentProfileID
 	}
@@ -2380,10 +2417,10 @@ func (s *Service) resolveStepProfileSessionStartPolicy(step *wfmodels.WorkflowSt
 }
 
 // resolveStepProfileSessionEndPolicy returns the source step's session end
-// behavior. Invalid or absent values use the safe complete default.
+// behavior. Invalid or absent values use the conversation-preserving park default.
 func (s *Service) resolveStepProfileSessionEndPolicy(step *wfmodels.WorkflowStep) models.WorkflowProfileSessionEndPolicy {
 	if step == nil {
-		return models.WorkflowProfileSessionEndPolicyComplete
+		return models.WorkflowProfileSessionEndPolicyPark
 	}
 	return models.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy))
 }
@@ -2394,6 +2431,13 @@ func (s *Service) resolveStepProfileSessionEndPolicy(step *wfmodels.WorkflowStep
 func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID string) {
 	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyCreatedBy, models.SessionCreatedByWorkflowSwitch); err != nil {
 		s.logger.Warn("failed to persist workflow-switch tag",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	// A workflow step explicitly taking ownership of this session is the only
+	// path that clears conversational-only follow-up ownership. Ordinary sends,
+	// page activation, and automatic profile lookup must leave the marker set.
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyCompletionFollowUp, nil); err != nil {
+		s.logger.Warn("failed to clear completed-conversation follow-up marker",
 			zap.String("session_id", sessionID), zap.Error(err))
 	}
 }
@@ -2522,6 +2566,9 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 		if sess.AgentProfileID != profileID {
 			continue
 		}
+		if models.IsCompletionFollowUpSession(sess.Metadata) {
+			continue
+		}
 		if isTerminalSessionState(sess.State) {
 			continue
 		}
@@ -2532,11 +2579,230 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 	return best, nil
 }
 
+// transferQueuedSessionState keeps queue rows and their claimed attachment
+// bindings aligned when workflow session ownership changes.
+func (s *Service) transferQueuedSessionState(ctx context.Context, taskID, oldSessionID, newSessionID string) error {
+	if s.messageQueue == nil {
+		return nil
+	}
+	transferErr := s.messageQueue.TransferSessionWithDurableAttachmentPreparation(
+		ctx,
+		taskID,
+		oldSessionID,
+		newSessionID,
+		func(admittedCtx context.Context, attachmentIDs []string) error {
+			if len(attachmentIDs) == 0 {
+				return nil
+			}
+			if !sessionAttachmentTransfererAvailable(s.sessionAttachmentTransferer) {
+				return errSessionAttachmentTransferUnavailable
+			}
+			return s.sessionAttachmentTransferer.TransferSessionMessageAttachments(
+				admittedCtx, taskID, oldSessionID, newSessionID, attachmentIDs,
+			)
+		},
+		func(rollbackCtx context.Context, attachmentIDs []string) error {
+			if len(attachmentIDs) == 0 {
+				return nil
+			}
+			if !sessionAttachmentTransfererAvailable(s.sessionAttachmentTransferer) {
+				return errSessionAttachmentTransferUnavailable
+			}
+			return s.sessionAttachmentTransferer.TransferSessionMessageAttachments(
+				rollbackCtx, taskID, newSessionID, oldSessionID, attachmentIDs,
+			)
+		},
+	)
+	if transferErr != nil {
+		return fmt.Errorf("transfer queued state: %w", transferErr)
+	}
+	s.publishQueueStatusEvent(ctx, oldSessionID)
+	s.publishQueueStatusEvent(ctx, newSessionID)
+	return nil
+}
+
+func (s *Service) reconcileSessionTransferCompensationsOnStartup(ctx context.Context) error {
+	if s.messageQueue == nil || !s.messageQueue.SessionTransferCompensationPersistenceAvailable() {
+		return nil
+	}
+	compensations, err := s.messageQueue.ListSessionTransferCompensations(ctx)
+	if err != nil {
+		return fmt.Errorf("list session transfer compensations: %w", err)
+	}
+	if sessionTransferCompensationsNeedAttachmentTransfer(compensations) &&
+		!sessionAttachmentTransfererAvailable(s.sessionAttachmentTransferer) {
+		return errors.New("reconcile session transfer compensations: attachment transfer service is unavailable")
+	}
+	for _, compensation := range compensations {
+		if err := s.reconcileSessionTransferCompensation(ctx, compensation); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func sessionTransferCompensationsNeedAttachmentTransfer(
+	compensations []messagequeue.SessionTransferCompensation,
+) bool {
+	for _, compensation := range compensations {
+		if len(compensation.AttachmentIDs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) reconcileSessionTransferCompensation(
+	ctx context.Context,
+	compensation messagequeue.SessionTransferCompensation,
+) (resultErr error) {
+	ownerID, err := s.messageQueue.ClaimSessionTransferCompensationRecovery(ctx, compensation)
+	if err != nil {
+		return fmt.Errorf("claim session transfer compensation recovery: %w", err)
+	}
+	transferCtx, cancelTransfer := context.WithCancel(ctx)
+	defer cancelTransfer()
+	operationCtx, stopLeaseRenewal := s.messageQueue.MaintainSessionTransferCompensationLeaseWithCancel(
+		transferCtx, compensation, ownerID, cancelTransfer,
+	)
+	stopped := false
+	defer func() {
+		if stopped {
+			return
+		}
+		if leaseErr := stopLeaseRenewal(); leaseErr != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("session transfer lease lost: %w", leaseErr))
+		}
+	}()
+	targetSessionID, err := s.sessionTransferCompensationTarget(operationCtx, compensation)
+	if err != nil {
+		return err
+	}
+	fromSessionID, toSessionID := compensation.FromSessionID, compensation.ToSessionID
+	if targetSessionID == compensation.FromSessionID {
+		fromSessionID, toSessionID = compensation.ToSessionID, compensation.FromSessionID
+	}
+	var transferErr error
+	if len(compensation.AttachmentIDs) > 0 {
+		transferErr = s.sessionAttachmentTransferer.TransferSessionMessageAttachments(
+			operationCtx,
+			compensation.TaskID,
+			fromSessionID,
+			toSessionID,
+			compensation.AttachmentIDs,
+		)
+	}
+	leaseErr := stopLeaseRenewal()
+	stopped = true
+	if transferErr != nil {
+		transferErr = fmt.Errorf("reconcile session transfer attachments: %w", transferErr)
+		if leaseErr != nil {
+			return errors.Join(transferErr, fmt.Errorf("session transfer lease lost: %w", leaseErr))
+		}
+		return transferErr
+	}
+	if leaseErr != nil {
+		return fmt.Errorf("session transfer lease lost: %w", leaseErr)
+	}
+	if err := s.messageQueue.DeleteClaimedSessionTransferCompensation(
+		context.WithoutCancel(ctx),
+		compensation,
+		ownerID,
+	); err != nil {
+		return fmt.Errorf("delete session transfer compensation: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) pendingDispatchTransferCompensationTarget(
+	ctx context.Context,
+	compensation messagequeue.SessionTransferCompensation,
+) (string, bool, error) {
+	entryIDs := make(map[string]struct{}, len(compensation.EntryIDs))
+	for _, entryID := range compensation.EntryIDs {
+		entryIDs[entryID] = struct{}{}
+	}
+	dispatches, err := s.messageQueue.ListPendingQueueDispatches(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("list compensated queue dispatches: %w", err)
+	}
+	for _, dispatch := range dispatches {
+		if _, ok := entryIDs[dispatch.Message.ID]; !ok {
+			continue
+		}
+		sessionID := dispatch.Message.SessionID
+		if sessionID != compensation.FromSessionID && sessionID != compensation.ToSessionID {
+			return "", false, fmt.Errorf(
+				"compensated queue dispatch %s belongs to unexpected session %s",
+				dispatch.Message.ID,
+				sessionID,
+			)
+		}
+		return sessionID, true, nil
+	}
+	return "", false, nil
+}
+
+func (s *Service) sessionTransferCompensationTarget(
+	ctx context.Context,
+	compensation messagequeue.SessionTransferCompensation,
+) (string, error) {
+	for _, entryID := range compensation.EntryIDs {
+		entry, err := s.messageQueue.FindEntryByID(ctx, entryID)
+		if err == nil {
+			if entry.SessionID != compensation.FromSessionID && entry.SessionID != compensation.ToSessionID {
+				return "", fmt.Errorf(
+					"compensated queue entry %s belongs to unexpected session %s",
+					entryID,
+					entry.SessionID,
+				)
+			}
+			return entry.SessionID, nil
+		}
+		if !errors.Is(err, messagequeue.ErrEntryNotFound) {
+			return "", fmt.Errorf("locate compensated queue entry %s: %w", entryID, err)
+		}
+	}
+	if sessionID, found, err := s.pendingDispatchTransferCompensationTarget(
+		ctx, compensation,
+	); err != nil {
+		return "", err
+	} else if found {
+		return sessionID, nil
+	}
+	for _, locator := range compensation.CleanupLocators {
+		cleanup, err := s.messageQueue.GetAttachmentCleanup(
+			ctx, locator.SessionID, locator.EntryID, locator.OperationID,
+		)
+		if err != nil {
+			return "", fmt.Errorf("locate compensated attachment cleanup %s: %w", locator.EntryID, err)
+		}
+		if cleanup == nil {
+			continue
+		}
+		currentSessionID := cleanup.CurrentSessionID
+		if currentSessionID == "" {
+			currentSessionID = cleanup.SessionID
+		}
+		if currentSessionID != compensation.FromSessionID && currentSessionID != compensation.ToSessionID {
+			return "", fmt.Errorf(
+				"compensated attachment cleanup %s belongs to unexpected session %s",
+				locator.EntryID,
+				currentSessionID,
+			)
+		}
+		return currentSessionID, nil
+	}
+	return compensation.ToSessionID, nil
+}
+
 func (s *Service) reuseSessionForStepWithEndPolicy(
 	ctx context.Context,
 	taskID string,
 	currentSession, existing *models.TaskSession,
 	endPolicy models.WorkflowProfileSessionEndPolicy,
+	routes ...*models.WorkflowSessionRoute,
 ) (*models.TaskSession, error) {
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("reusing existing session for profile",
@@ -2546,20 +2812,31 @@ func (s *Service) reuseSessionForStepWithEndPolicy(
 		zap.String("reused_profile", existing.AgentProfileID),
 		zap.String("reused_state", string(existing.State)))
 
-	promoted, err := s.setNonterminalSessionPrimary(ctx, existing.ID)
+	var promoted bool
+	var err error
+	var route *models.WorkflowSessionRoute
+	if len(routes) > 0 {
+		route = routes[0]
+	}
+	if route != nil {
+		promoted, err = s.promoteWorkflowSessionRoute(ctx, taskID, existing, route)
+	} else {
+		promoted, err = s.setNonterminalSessionPrimary(ctx, existing.ID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("conditional primary promotion: %w", err)
 	}
 	if !promoted {
 		return nil, errReusableSessionNoLongerActive
 	}
-	if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
-		s.logger.Warn("failed to load task after promoting reused session",
-			zap.String("task_id", taskID), zap.Error(taskErr))
-	} else if task != nil {
-		s.publishTaskUpdated(ctx, task)
+	if route == nil {
+		if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+			s.logger.Warn("failed to load task after promoting reused session",
+				zap.String("task_id", taskID), zap.Error(taskErr))
+		} else if task != nil {
+			s.publishTaskUpdated(ctx, task)
+		}
 	}
-	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
 	// Parking can fail while persisting stop ownership. Do it before queue
 	// transfer so that failure leaves both source and destination queues under
@@ -2570,6 +2847,7 @@ func (s *Service) reuseSessionForStepWithEndPolicy(
 		}
 		return existing, nil
 	}
+	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
 	if err := s.transferWorkflowProfileSwitchQueue(ctx, currentSession.ID, existing.ID); err != nil {
 		transferErr := fmt.Errorf("transfer queued state to reused session: %w", err)
@@ -2640,22 +2918,37 @@ func (s *Service) createNewSessionForStepWithEndPolicy(
 	newAgentProfileID string,
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 ) (*models.TaskSession, error) {
+	return s.createNewSessionForStepWithEndPolicyAndRoute(ctx, taskID, currentSession, newAgentProfileID, endPolicy, nil)
+}
+
+func (s *Service) createNewSessionForStepWithEndPolicyAndRoute(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	newAgentProfileID string,
+	endPolicy models.WorkflowProfileSessionEndPolicy,
+	workflowRoute *models.WorkflowSessionRoute,
+) (*models.TaskSession, error) {
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	// Prepare the new session BEFORE touching the old one.
 	// If any step below fails, the old session remains active and the task stays recoverable.
-	newSession, err := s.prepareWorkflowReplacementSession(ctx, taskID, currentSession, newAgentProfileID)
+	newSession, err := s.prepareWorkflowReplacementSession(ctx, taskID, currentSession, newAgentProfileID, workflowRoute)
 	if err != nil {
 		return nil, err
 	}
 
-	// Tag the session as workflow-spawned for provenance: its agent profile
-	// was selected by the workflow step override rather than direct user choice.
-	s.tagSessionAsWorkflowSwitched(ctx, newSession.ID)
-
 	// Promote the new session to primary so it's loaded when navigating back to this task.
 	// Use SetPrimarySession (not repo.SetSessionPrimary) to broadcast a task.updated WS
 	// event — the frontend reads primarySessionId from the task to render the star icon.
-	if err := s.SetPrimarySession(ctx, newSession.ID); err != nil {
+	if workflowRoute != nil {
+		promoted, promoteErr := s.promoteWorkflowSessionRoute(ctx, taskID, newSession, workflowRoute)
+		if promoteErr != nil {
+			return nil, fmt.Errorf("failed to promote new workflow session: %w", promoteErr)
+		}
+		if !promoted {
+			return nil, errReusableSessionNoLongerActive
+		}
+	} else if err := s.SetPrimarySession(ctx, newSession.ID); err != nil {
 		return nil, fmt.Errorf("failed to promote new workflow session: %w", err)
 	}
 
@@ -2689,6 +2982,7 @@ func (s *Service) prepareWorkflowReplacementSession(
 	taskID string,
 	currentSession *models.TaskSession,
 	newAgentProfileID string,
+	workflowRoute *models.WorkflowSessionRoute,
 ) (*models.TaskSession, error) {
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
@@ -2709,7 +3003,12 @@ func (s *Service) prepareWorkflowReplacementSession(
 
 	// Create a new session with the new agent profile.
 	// Reuse the same executor profile from the current session.
-	sessionID, err := s.executor.PrepareSessionForExistingEnvironment(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID, currentSession.TaskEnvironmentID)
+	var sessionID string
+	if workflowRoute != nil {
+		sessionID, err = s.executor.PrepareSessionForExistingEnvironmentWithWorkflowRoute(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID, currentSession.TaskEnvironmentID, workflowRoute)
+	} else {
+		sessionID, err = s.executor.PrepareSessionForExistingEnvironment(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID, currentSession.TaskEnvironmentID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare new session: %w", err)
 	}
@@ -2748,6 +3047,11 @@ func (s *Service) prepareWorkflowReplacementSession(
 		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
 	}
 
+	newSession, err = s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+
 	return newSession, nil
 }
 
@@ -2755,7 +3059,14 @@ func (s *Service) transferWorkflowProfileSwitchQueue(ctx context.Context, fromSe
 	if s.messageQueue == nil {
 		return nil
 	}
-	if err := s.transferCurrentQueueSessions(ctx, fromSessionID, toSessionID); err != nil {
+	from, err := s.repo.GetTaskSession(ctx, fromSessionID)
+	if err != nil {
+		return fmt.Errorf("load source queue session: %w", err)
+	}
+	if from == nil {
+		return fmt.Errorf("load source queue session %q: not found", fromSessionID)
+	}
+	if err := s.transferQueuedSessionState(ctx, from.TaskID, fromSessionID, toSessionID); err != nil {
 		return fmt.Errorf("transfer queue to new workflow session: %w", err)
 	}
 	return nil
@@ -2876,42 +3187,6 @@ func (s *Service) restoreWorkflowProfileSwitchSourcePrimary(ctx context.Context,
 	return nil
 }
 
-func (s *Service) transferCurrentQueueSessions(ctx context.Context, fromSessionID, toSessionID string) error {
-	from, err := s.repo.GetTaskSession(ctx, fromSessionID)
-	if err != nil {
-		return fmt.Errorf("load source queue session: %w", err)
-	}
-	if from == nil {
-		return fmt.Errorf("load source queue session %q: not found", fromSessionID)
-	}
-	to, err := s.repo.GetTaskSession(ctx, toSessionID)
-	if err != nil {
-		return fmt.Errorf("load destination queue session: %w", err)
-	}
-	if to == nil {
-		return fmt.Errorf("load destination queue session %q: not found", toSessionID)
-	}
-	fromIdentity := messagequeue.QueueSessionIdentity{
-		TaskID: from.TaskID, SessionID: from.ID, SessionIncarnationID: from.QueueIncarnationID,
-	}
-	if fromIdentity.SessionIncarnationID == "" {
-		fromIdentity, err = s.messageQueue.ResolveSessionIdentity(ctx, from.TaskID, from.ID)
-		if err != nil {
-			return fmt.Errorf("resolve source queue session: %w", err)
-		}
-	}
-	toIdentity := messagequeue.QueueSessionIdentity{
-		TaskID: to.TaskID, SessionID: to.ID, SessionIncarnationID: to.QueueIncarnationID,
-	}
-	if toIdentity.SessionIncarnationID == "" {
-		toIdentity, err = s.messageQueue.ResolveSessionIdentity(ctx, to.TaskID, to.ID)
-		if err != nil {
-			return fmt.Errorf("resolve destination queue session: %w", err)
-		}
-	}
-	return s.messageQueue.TransferSessionIdentities(ctx, fromIdentity, toIdentity)
-}
-
 // completeAndStopSession stops the agent for a session and marks it COMPLETED.
 // Used by both the reuse path and the create-new path to terminate the
 // previous session in a uniform way. The state transition is the only session
@@ -2944,7 +3219,7 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 // lifecycle helpers regardless of the source session transport.
 func (s *Service) prepareWorkflowStepSession(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
-	sourceStep *wfmodels.WorkflowStep,
+	sourceStep *wfmodels.WorkflowStep, entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
 	if session == nil {
 		return nil, false, fmt.Errorf("workflow step session is nil")
@@ -2953,11 +3228,12 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, fmt.Errorf("workflow step is nil")
 	}
 	ctx = withWorkflowMetaCache(ctx)
+	if step.SessionTarget != nil {
+		return s.prepareExplicitWorkflowSession(ctx, taskID, session, step, sourceStep, entryIDs...)
+	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
-		if effectiveProfile != "" {
-			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
-		}
+		s.tagSessionAsWorkflowSwitched(ctx, session.ID)
 		if !session.IsPrimary {
 			if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 				s.logger.Warn("failed to preserve session as primary for workflow step",
@@ -2969,6 +3245,9 @@ func (s *Service) prepareWorkflowStepSession(
 				session.IsPrimary = true
 			}
 		}
+		if err := s.recordWorkflowSourceBinding(ctx, taskID, step, session, entryIDs...); err != nil {
+			return nil, false, err
+		}
 		return session, false, nil
 	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
@@ -2978,6 +3257,9 @@ func (s *Service) prepareWorkflowStepSession(
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
 	newSession, err := s.switchSessionForStepWithPolicies(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession, entryIDs...); err != nil {
 		return nil, false, err
 	}
 	return newSession, true, nil
@@ -2993,6 +3275,26 @@ func (s *Service) preflightWorkflowStepCredentials(
 		return nil
 	}
 	ctx = withWorkflowMetaCache(ctx)
+	if targetStep.SessionTarget != nil {
+		resolution, err := s.resolveWorkflowSessionTarget(ctx, taskID, targetStep)
+		if err != nil {
+			return err
+		}
+		targetSession := currentSession
+		if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
+			targetSession = resolution.session
+		}
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("get task for explicit credential preflight: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task %s not found for explicit credential preflight", taskID)
+		}
+		return s.executor.PreflightManagedGitCredentials(
+			ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+		)
+	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
 	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
 		return nil
@@ -3025,9 +3327,9 @@ func (s *Service) preflightWorkflowStepCredentials(
 // workflow-engine dispatch.
 func (s *Service) maybySwitchSessionForProfile(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
-	sourceStep *wfmodels.WorkflowStep,
+	sourceStep *wfmodels.WorkflowStep, entryIDs ...int64,
 ) (*models.TaskSession, bool) {
-	effective, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceStep)
+	effective, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceStep, entryIDs...)
 	if err != nil {
 		s.logger.Error("failed to switch session for step agent profile",
 			zap.String("task_id", taskID),
@@ -3142,11 +3444,10 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	ctx = context.WithoutCancel(ctx)
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
-
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
-	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep); !ok {
+	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep, entryID); !ok {
 		return
 	}
 	sessionSwitched := session.ID != prevSessionID
@@ -3206,7 +3507,6 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	if dispatchResult.aborted {
 		return
 	}
-
 	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched)
 }
 
@@ -4086,6 +4386,16 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmission(
 	ctx context.Context,
 	taskID, sessionID string,
 ) queueDrainOutcome {
+	return s.drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIdentity(
+		ctx, taskID, sessionID, nil,
+	)
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) queueDrainOutcome {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -4102,6 +4412,12 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmission(
 	if session == nil {
 		return queueDrainSkipped
 	}
+	if session.TaskID != taskID {
+		return queueDrainSkipped
+	}
+	if identity != nil && session.QueueIncarnationID != identity.SessionIncarnationID {
+		return queueDrainSkipped
+	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		return queueDrainSkipped
 	}
@@ -4113,7 +4429,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmission(
 	if s.sessionHasLiveClarification(ctx, sessionID) {
 		return queueDrainSkipped
 	}
-	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(ctx, taskID, sessionID)
+	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
+		ctx, taskID, sessionID, identity,
+	)
 }
 
 // drainQueuedMessageForPromptableSessionLocked takes the next queued
@@ -4139,16 +4457,52 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 	ctx context.Context,
 	taskID, sessionID string,
 ) queueDrainOutcome {
+	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
+		ctx, taskID, sessionID, nil,
+	)
+}
+
+func (s *Service) resolveQueueDrainIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) (messagequeue.QueueSessionIdentity, bool) {
+	if identity != nil {
+		if identity.TaskID != taskID || identity.SessionID != sessionID {
+			return messagequeue.QueueSessionIdentity{}, false
+		}
+		return *identity, true
+	}
+	queueIdentity, err := s.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
+	return queueIdentity, err == nil
+}
+
+func (s *Service) resolveQueueDrainTaskID(
+	ctx context.Context,
+	taskID, sessionID string,
+) (string, bool) {
+	if taskID != "" {
+		return taskID, true
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return "", false
+	}
+	return session.TaskID, true
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return queueDrainSkipped
 	}
-	if taskID == "" {
-		session, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil || session == nil {
-			return queueDrainSkipped
-		}
-		taskID = session.TaskID
+	var ok bool
+	if taskID, ok = s.resolveQueueDrainTaskID(ctx, taskID, sessionID); !ok {
+		return queueDrainSkipped
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -4159,18 +4513,18 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 	if task == nil || (!task.WIPAdmitted && task.QueuedForStepID != "") {
 		return queueDrainSkipped
 	}
-	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
-	if err != nil {
+	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
+	if !ok {
 		return queueDrainSkipped
 	}
-	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, queueIdentity)
 	if err != nil {
 		return queueDrainSkipped
 	}
 	if !autoRun {
 		return queueDrainPaused
 	}
-	if s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok) {
+	if s.dispatchTakenQueuedMessageForSession(ctx, queueIdentity, queuedMsg, ok) {
 		return queueDrainDispatched
 	}
 	return queueDrainSkipped
@@ -4199,6 +4553,9 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 		s.logger.Warn("skipping empty queued message after transition",
 			zap.String("session_id", identity.SessionID),
 			zap.String("queue_id", queuedMsg.ID))
+		if queuedMsg.IsDurableLifecycle() {
+			s.acknowledgeLifecycleQueueEntry(ctx, identity.SessionID, queuedMsg)
+		}
 		return false
 	}
 	// Reserve entryID before handing off to the async goroutine. The worker
@@ -4211,6 +4568,38 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 		reservation = s.markQueuedDispatchInFlightWithSourceLocked(identity.SessionID, queuedMsg.ID, queuedMsg)
 	}
 	go s.executeQueuedMessageWithReservation(identity.SessionID, queuedMsg, reservation)
+	return true
+}
+
+// dispatchTakenQueuedMessage keeps the source-session reservation path used by
+// older queue callers and focused tests. New lifecycle code should pass the
+// captured session identity to dispatchTakenQueuedMessageForSession.
+func (s *Service) dispatchTakenQueuedMessage(
+	ctx context.Context,
+	sessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+	ok bool,
+) bool {
+	if !ok || queuedMsg == nil {
+		return false
+	}
+	if queuedMsg.TaskID != "" {
+		if identity, err := s.messageQueue.ResolveSessionIdentity(ctx, queuedMsg.TaskID, sessionID); err == nil {
+			return s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok)
+		}
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+		s.logger.Warn("discarding empty queued message after transition",
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", queuedMsg.ID))
+		if queuedMsg.IsDurableLifecycle() {
+			s.acknowledgeLifecycleQueueEntry(ctx, sessionID, queuedMsg)
+		}
+		return false
+	}
+	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, queuedMsg.ID, queuedMsg)
+	go s.executeQueuedMessageWithReservation(sessionID, queuedMsg, reservation)
 	return true
 }
 
@@ -4452,10 +4841,13 @@ func (s *Service) autoStartStepPrompt(
 	prompt = mergedPrompt
 	agentPrompt := AppendEntityReferenceContext(prompt, references)
 	effectiveAgentPrompt := s.effectivePromptForSession(sessionID, agentPrompt, planMode, session)
-	if strings.TrimSpace(effectiveAgentPrompt) == "" && len(attachments) == 0 && queuedHandoff == "" {
-		// The session is already running after ensureSessionRunning; no prompt
-		// means we leave it waiting for the first user message rather than
-		// auto-starting. Attachment-only handoffs are admitted below.
+	if strings.TrimSpace(effectiveAgentPrompt) == "" && len(attachments) == 0 && queuedHandoff == "" &&
+		session.State != models.TaskSessionStateCreated {
+		// Existing sessions are already running after ensureSessionRunning; no
+		// prompt means we leave them waiting for the first user message rather
+		// than auto-starting. A CREATED session is different: the explicit
+		// auto-start action must launch its prepared workspace even when the step
+		// has no prompt, while recordAutoStartMessage still skips an empty row.
 		return nil
 	}
 
@@ -4843,7 +5235,13 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 	if msg != nil {
 		queuedHandoff = stepHandoffFromQueuedMetadata(msg.Metadata)
 	}
-	if !ok || msg == nil || (msg.Content == "" && len(msg.Attachments) == 0 && queuedHandoff == "") {
+	if !ok || msg == nil {
+		return nil, basePrompt, nil, nil, ""
+	}
+	if msg.Content == "" && len(msg.Attachments) == 0 && queuedHandoff == "" {
+		s.logger.Warn("discarding empty hand-off queue entry",
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", msg.ID))
 		return nil, basePrompt, nil, nil, ""
 	}
 	prompt := basePrompt
@@ -5647,6 +6045,9 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	session *models.TaskSession,
 	cause turnCompletionCause,
 ) bool {
+	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
+		return false
+	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to load task for on_turn_complete",
@@ -6230,6 +6631,9 @@ func (s *Service) launchProcessOnEnter(
 // actions. Falls back to the legacy method when the engine is not initialized.
 // Returns true if a step transition occurred.
 func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
+		return false
+	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to load task for on_turn_start",

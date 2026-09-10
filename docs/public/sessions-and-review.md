@@ -67,6 +67,12 @@ The expanded queue also lets you pause or discard stale work. Its compact header
 
 Use **Auto-run** for normal queue motion. ON runs one eligible row per turn in FIFO order; OFF lets the current response finish and holds later rows. The setting belongs to the session and survives an empty queue, reload, and backend restart. A pending clarification or another lifecycle guard can leave the queue waiting while the switch remains ON. **Auto-merge** controls automatic folding of later compatible admissions. It initially follows the install-wide value and follows later global changes until you change the pill. That first change creates a session override that remains independent for the session's lifetime.
 
+### Send while a session resumes
+
+You can write and send the next prompt while an existing session is starting or resuming when its queue identity is ready. Kandev stores the prompt in the session queue, clears the composer after admission, and shows the normal queued-message indicator. The prompt runs when the session becomes ready and Auto-run is ON.
+
+If Auto-run is OFF, the prompt remains pending until you turn Auto-run ON in the queue controls. If resume fails, the accepted prompt stays in the queue with the session and is available after a later successful recovery. Environment preparation without a usable session queue does not enable Send.
+
 Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.

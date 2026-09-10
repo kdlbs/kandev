@@ -3,6 +3,7 @@ import { devices, type Browser, type Page } from "@playwright/test";
 import { backendFixture as test, type BackendContext } from "../../fixtures/backend";
 import { ApiClient } from "../../helpers/api-client";
 import { acceptInvite, createInviteToken, setupAdmin } from "../../helpers/auth";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { expect } from "@playwright/test";
 
 const ADMIN = { email: "k8s-admin@e2e.dev", password: "adminpass123", displayName: "K8s Admin" };
@@ -311,6 +312,112 @@ test("profile-less Kubernetes executors retain the standalone recovery page", as
     await expect(page.getByTestId("kubernetes-namespace")).toHaveValue("orphan-workloads");
     await expect(page.getByRole("button", { name: /delete executor/i })).toBeVisible();
   } finally {
+    await apiClient.deleteExecutor(executor.id).catch(() => undefined);
+    await context.close();
+  }
+});
+
+test("desktop session table shows retained state, requests, guidance, and task navigation", async ({
+  browser,
+  backend,
+}) => {
+  const apiClient = new ApiClient(backend.baseUrl);
+  const executor = await apiClient.createExecutor("Desktop session projection", "k8s", {
+    auth_mode: "kubeconfig",
+    kubeconfig_path: "/tmp/desktop-sessions.kubeconfig",
+    namespace: "default",
+    request_timeout_seconds: "30",
+  });
+  const profile = await apiClient.createExecutorProfile(executor.id, {
+    name: "Desktop session profile",
+    config: {
+      platform: "linux/amd64",
+      main_container: "kandev-agent",
+      pod_template_yaml: POD_TEMPLATE,
+      "workspace.mode": "empty_dir",
+    },
+    prepare_script: "",
+    cleanup_script: "",
+    env_vars: [],
+  });
+  const taskId = "task-desktop-123456789";
+  const sessionId = "session-desktop-987654321";
+  const { context, page } = await openContext(browser, backend);
+  const prCapture = new PrAssetCapture(page, path.join(__dirname, "kubernetes-executor.spec.ts"));
+  await page.route("**/api/v1/kubernetes/executors/" + executor.id + "/sessions", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          task_id: taskId,
+          session_id: sessionId,
+          pod_name: "kandev-desktop-session",
+          pod_phase: "Running",
+          container_state: "running",
+          restarts: 0,
+          workspace_kind: "empty_dir",
+          created_at: "2026-08-24T10:00:00Z",
+          session_state: "CANCELLED",
+          retention_state: "retained",
+          main_container_requests: { cpu: "0", memory: "512Mi" },
+        },
+      ]),
+    });
+  });
+  try {
+    await page.goto("/settings/executors/" + profile.id);
+    const table = page.getByTestId("kubernetes-sessions-table");
+    await expect(table).toContainText(taskId.slice(0, 8));
+    await expect(table).toContainText("Retained");
+    await expect(table).toContainText("0 CPU");
+    await expect(table).toContainText("512Mi memory");
+    const sessionRow = table.getByTestId("kubernetes-session-row");
+    await expect(sessionRow).toHaveCount(1);
+    const rowBox = await sessionRow.boundingBox();
+    expect(rowBox).not.toBeNull();
+    expect(rowBox!.height).toBeLessThanOrEqual(96);
+    const statusSummary = sessionRow.getByTestId("kubernetes-session-status-summary");
+    await expect(statusSummary).toContainText("Cancelled");
+    await expect(statusSummary).toContainText("Pod: Running");
+    await expect(statusSummary).toContainText("Container: Running");
+    const tableContainer = table.locator("..");
+    const createdCell = sessionRow.locator("td").last();
+    const [tableContainerBox, createdCellBox] = await Promise.all([
+      tableContainer.boundingBox(),
+      createdCell.boundingBox(),
+    ]);
+    expect(tableContainerBox).not.toBeNull();
+    expect(createdCellBox).not.toBeNull();
+    expect(createdCellBox!.x + createdCellBox!.width).toBeLessThanOrEqual(
+      tableContainerBox!.x + tableContainerBox!.width,
+    );
+    await expect(table.getByTestId("kubernetes-session-runtime-details")).toHaveCount(0);
+    await sessionRow.getByRole("button", { name: "Show session details" }).click();
+    const runtimeDetails = table.getByTestId("kubernetes-session-runtime-details");
+    await expect(runtimeDetails).toContainText("Session state: Cancelled");
+    await expect(runtimeDetails).toContainText("Resource retention: Retained");
+    await expect(runtimeDetails).toContainText("Pod state: Running");
+    await expect(runtimeDetails).toContainText("Main-container state: Running");
+    await sessionRow.getByRole("button", { name: "Hide session details" }).click();
+    await expect(table.getByTestId("kubernetes-session-runtime-details")).toHaveCount(0);
+    await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
+      "Stop preserves Kubernetes resources",
+    );
+    await expect(page.getByTestId("kubernetes-session-guidance")).toContainText(
+      "Existing claims are not deleted by Kandev",
+    );
+    const taskLink = table.getByTestId("kubernetes-session-task-link");
+    await expect(taskLink).toHaveAttribute("href", "/t/" + taskId);
+    await table.scrollIntoViewIfNeeded();
+    await prCapture.screenshot("retained-kubernetes-session-desktop", {
+      caption: "Desktop retained Kubernetes session status",
+      page,
+    });
+    await taskLink.click();
+    await expect(page).toHaveURL("/t/" + taskId);
+  } finally {
+    prCapture.flush();
     await apiClient.deleteExecutor(executor.id).catch(() => undefined);
     await context.close();
   }

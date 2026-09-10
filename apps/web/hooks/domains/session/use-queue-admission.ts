@@ -12,7 +12,7 @@ async function queueWithTerminalRefetch(
   params: QueueMessageParams,
   refetch: QueueRefetch,
   token: QueueOperationToken,
-): Promise<void> {
+): Promise<boolean> {
   let mutationError: unknown;
   try {
     await queueMessage(params);
@@ -26,6 +26,7 @@ async function queueWithTerminalRefetch(
     throw reconcileError;
   }
   if (mutationError) throw mutationError;
+  return true;
 }
 
 export function useQueueAdmissionAction(
@@ -44,12 +45,12 @@ export function useQueueAdmissionAction(
       entityReferences,
       contextFilesMeta,
     }: QueueMessageInput) => {
-      if (!identity || identity.task_id !== taskId) return;
+      if (!identity || identity.task_id !== taskId) return false;
       const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
       const token = beginQueueOperation(sessionId, incarnationId);
-      if (!token) return;
+      if (!token) return false;
       try {
-        await queueWithTerminalRefetch(
+        return await queueWithTerminalRefetch(
           {
             session_id: sessionId,
             session_incarnation_id: incarnationId,

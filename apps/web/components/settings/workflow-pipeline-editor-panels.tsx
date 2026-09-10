@@ -19,6 +19,7 @@ import {
 } from "./workflow-pipeline-editor-helpers";
 import {
   useStepActions,
+  CompleteTaskOnEnterToggle,
   TurnStartSelect,
   TurnCompleteSelect,
   ChildrenCompletedSelect,
@@ -34,9 +35,11 @@ import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-
 type StepConfigHeaderProps = {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
+  steps: WorkflowStep[];
   localName: string;
   onLocalNameChange: (name: string) => void;
   onUpdate: (updates: Partial<WorkflowStep>) => void;
+  onRestoreSource?: () => void;
   onRemove: () => void;
   readOnly: boolean;
   debouncedUpdateName: (name: string) => void;
@@ -45,9 +48,11 @@ type StepConfigHeaderProps = {
 function StepConfigHeader({
   step,
   savedStep,
+  steps,
   localName,
   onLocalNameChange,
   onUpdate,
+  onRestoreSource,
   onRemove,
   readOnly,
   debouncedUpdateName,
@@ -97,7 +102,9 @@ function StepConfigHeader({
         <WorkflowStepAgentProfileSelector
           step={step}
           savedStep={savedStep}
+          steps={steps}
           onUpdate={onUpdate}
+          onRestoreSource={onRestoreSource}
           readOnly={readOnly}
         />
         <SessionConfigToggle
@@ -220,10 +227,11 @@ type StepBehaviorSectionProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   toggleOnEnterAction: (type: string) => void;
+  isFinalStep: boolean;
   readOnly: boolean;
 };
 
-type StepToggleRowsProps = Omit<StepBehaviorSectionProps, "steps">;
+type StepToggleRowsProps = Omit<StepBehaviorSectionProps, "steps" | "isFinalStep">;
 
 // The six on-enter / board-behavior toggles. Split out of StepBehaviorSection
 // so that component stays under the 100-line function cap.
@@ -325,6 +333,7 @@ function StepBehaviorSection({
   steps,
   onUpdate,
   toggleOnEnterAction,
+  isFinalStep,
   readOnly,
 }: StepBehaviorSectionProps) {
   return (
@@ -338,6 +347,13 @@ function StepBehaviorSection({
           readOnly={readOnly}
         />
       </div>
+      <CompleteTaskOnEnterToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+        isFinalStep={isFinalStep}
+      />
       <StepWipControls
         step={step}
         savedStep={savedStep}
@@ -451,6 +467,7 @@ type StepConfigPanelProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   onRemove: () => void;
+  onRestoreSourceStep?: (sourceStepId: string) => void;
   readOnly?: boolean;
   onSessionConfigResolutionPendingChange?: (pending: boolean) => void;
 };
@@ -461,6 +478,7 @@ export function StepConfigPanel({
   steps,
   onUpdate,
   onRemove,
+  onRestoreSourceStep,
   readOnly = false,
   onSessionConfigResolutionPendingChange,
 }: StepConfigPanelProps) {
@@ -475,6 +493,8 @@ export function StepConfigPanel({
   }, 500);
 
   const actions = useStepActions({ step, onUpdate });
+  const sourceTarget = step.session_target?.kind === "step" ? step.session_target : undefined;
+  const isFinalStep = steps[steps.length - 1]?.id === step.id;
 
   return (
     <div
@@ -487,6 +507,12 @@ export function StepConfigPanel({
       <StepConfigHeader
         step={step}
         savedStep={savedStep}
+        steps={steps}
+        onRestoreSource={
+          sourceTarget && onRestoreSourceStep
+            ? () => onRestoreSourceStep(sourceTarget.step_id)
+            : undefined
+        }
         localName={localName}
         onLocalNameChange={setLocalName}
         onUpdate={onUpdate}
@@ -501,6 +527,7 @@ export function StepConfigPanel({
           steps={steps}
           onUpdate={onUpdate}
           toggleOnEnterAction={actions.toggleOnEnterAction}
+          isFinalStep={isFinalStep}
           readOnly={readOnly}
         />
         <SessionConfigEditor

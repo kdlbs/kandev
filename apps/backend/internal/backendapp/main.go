@@ -81,7 +81,6 @@ import (
 	"github.com/kandev/kandev/internal/office/configloader"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/orchestrator"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Office feature packages
 	office "github.com/kandev/kandev/internal/office"
@@ -944,6 +943,7 @@ func startGatewayAndServe(
 		// be resolved while authentication is enforced.
 		services.Auth,
 		cfg.ResolvedHomeDir(),
+		func(fn func() error) { addCleanup(fn) },
 		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {
@@ -1470,6 +1470,10 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// Publish task.updated for Office status changes so WS-driven UI outside
+	// the Office board (All-Workflows kanban, task views, task/statussummary)
+	// sees the mutation instead of rendering stale state until a refetch.
+	services.OfficeSvcs.Dashboard.SetTaskLifecyclePublisher(services.Task)
 	// Human assignee writes from the office PATCH surface go through the task
 	// service, which authorizes the caller and validates the assignee. That
 	// route carries no :wsId, so it is not covered by the office
@@ -2056,17 +2060,16 @@ func backfillAgentDefaultSkills(
 	}
 }
 
-// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnv in the
-// officeservice.TaskStarterWithEnvFunc adapter. Extracted from
+// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnvAndSkills in the
+// officeservice.TaskStarterWithLaunchContextFunc adapter. Extracted from
 // initOfficeServices to keep that function under the funlen cap.
 func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.TaskStarter {
-	return officeservice.TaskStarterWithEnvFunc(
-		func(ctx context.Context, taskID, agentProfileID, executorID,
-			executorProfileID string, priority string, prompt, workflowStepID string,
-			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
-			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
-				executorID, executorProfileID, priority, prompt,
-				workflowStepID, planMode, false, attachments, env)
+	return officeservice.TaskStarterWithLaunchContextFunc(
+		func(ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext) error {
+			_, err := orchestratorSvc.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+				launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
+				launch.WorkflowStepID, launch.PlanMode, false, launch.Attachments, launch.Env,
+				launch.AdditionalSkillSlugs)
 			return err
 		},
 	)

@@ -1,7 +1,6 @@
 import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { getWebSocketClient } from "@/lib/ws/connection";
-
 // i18n-exempt: precondition diagnostic for a programmer error; callers branch
 // on the error type, never render this message.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
@@ -26,6 +25,16 @@ export class QueueEntryNotFoundError extends Error {
   constructor() {
     super("Queue entry was already drained or no longer exists.");
     this.name = "QueueEntryNotFoundError";
+  }
+}
+
+/** Error thrown when a queued edit lost its lease or expected revision. */
+export class QueueEditConflictError extends Error {
+  readonly code = "edit_conflict" as const;
+
+  constructor() {
+    super("The queued entry changed before the edit could be saved.");
+    this.name = "QueueEditConflictError";
   }
 }
 
@@ -116,6 +125,9 @@ function knownQueueError(wsErr: WSError): Error | undefined {
     }
     case "entry_not_found":
       return new QueueEntryNotFoundError();
+    case "edit_conflict":
+    case "queue_conflict":
+      return new QueueEditConflictError();
     case "merge_reference_overflow":
       return new MergeReferenceOverflowError();
     default:
@@ -286,11 +298,66 @@ export async function appendToQueue(
     rethrowQueueError(err);
   }
 }
+export type QueueEditLease = {
+  session_id: string;
+  entry_id: string;
+  lease_id: string;
+  target_revision: number;
+  lease_generation?: number;
+  expires_at?: string;
+};
 
-/** Replace the content/attachments of a queued entry. Throws QueueEntryNotFoundError if drained. */
+export async function beginQueuedMessageEdit(
+  sessionId: string,
+  entryId: string,
+): Promise<QueueEditLease> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
+  try {
+    return await client.request<QueueEditLease>("message.queue.edit.begin", {
+      session_id: sessionId,
+      entry_id: entryId,
+    });
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+export async function renewQueuedMessageEdit(
+  lease: Pick<QueueEditLease, "session_id" | "entry_id" | "lease_id">,
+): Promise<QueueEditLease> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
+  try {
+    return await client.request<QueueEditLease>("message.queue.edit.renew", lease);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+export async function endQueuedMessageEdit(
+  lease: Pick<QueueEditLease, "session_id" | "entry_id" | "lease_id">,
+  dispatchIfAutoRun = false,
+): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
+  try {
+    await client.request("message.queue.edit.end", {
+      ...lease,
+      ...(dispatchIfAutoRun ? { dispatch_if_auto_run: true } : {}),
+    });
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+/** Replace a queued entry through its live target-bound edit lease. */
 export async function updateQueuedMessage(
   params: QueueSessionIdentity & {
     entry_id: string;
+    lease_id?: string;
+    operation_id?: string;
+    expected_target_revision?: number;
     content: string;
     attachments?: Array<{
       type: string;
@@ -304,13 +371,11 @@ export async function updateQueuedMessage(
     entity_references?: EntityReference[];
     user_id?: string;
   },
-): Promise<{ entry_id: string }> {
+): Promise<{ entry_id: string; operation_id?: string; target_revision?: number }> {
   const client = getWebSocketClient();
-  if (!client) {
-    throw new Error(WS_CLIENT_UNAVAILABLE);
-  }
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
   try {
-    return await client.request<{ entry_id: string }>("message.queue.update", {
+    return await client.request("message.queue.update", {
       ...params,
       entity_references: params.entity_references ?? [],
     });

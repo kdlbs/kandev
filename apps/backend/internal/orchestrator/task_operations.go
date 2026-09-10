@@ -1029,6 +1029,15 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{Env: env})
 }
 
+// StartTaskWithEnvAndSkills starts a task with launch-scoped environment and
+// skills selected by the Office run rather than by the durable profile.
+func (s *Service) StartTaskWithEnvAndSkills(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{
+		Env:                  env,
+		AdditionalSkillSlugs: append([]string(nil), additionalSkillSlugs...),
+	})
+}
+
 // startTaskOptions carries the optional, server-only launch inputs that only
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
@@ -1039,11 +1048,17 @@ type startTaskOptions struct {
 	ProfileExplicit bool
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// profile's durable skill selection.
+	AdditionalSkillSlugs []string
 	// Route pins a concrete execution profile chosen by Office provider routing.
 	Route *executor.RouteOverride
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
+	// WorkflowEntryID pins source bindings and explicit route retries to the
+	// immutable step-entry ledger row that initiated an automatic launch.
+	WorkflowEntryID int64
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1064,8 +1079,89 @@ func (s *Service) StartTaskWithRoute(
 	_, err := s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
 		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
-		launch.Attachments, startTaskOptions{Env: launch.Env, Route: &route})
+		launch.Attachments, startTaskOptions{
+			Env:                  launch.Env,
+			AdditionalSkillSlugs: append([]string(nil), launch.AdditionalSkillSlugs...),
+			Route:                &route,
+		})
 	return err
+}
+
+func (s *Service) prepareExplicitWorkflowStartRoute(
+	ctx context.Context,
+	taskID string,
+	workflowSessionConfigStepID string,
+	entryIDs ...int64,
+) (*models.TaskSession, string, *models.WorkflowSessionRoute, error) {
+	if workflowSessionConfigStepID == "" || s.workflowStepGetter == nil {
+		return nil, "", nil, nil
+	}
+
+	candidateStep, err := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("load workflow step for session target: %w", err)
+	}
+	if candidateStep == nil || candidateStep.SessionTarget == nil {
+		return nil, "", nil, nil
+	}
+
+	selectedSession, profileID, err := s.selectExplicitWorkflowStartSession(ctx, taskID, candidateStep)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, profileID); err != nil {
+			return nil, "", nil, err
+		}
+	}
+
+	startPolicy := s.resolveStepProfileSessionStartPolicy(candidateStep)
+	route := &models.WorkflowSessionRoute{
+		OperationID:       workflowSessionRouteID(taskID, candidateStep.ID, s.workflowEntryIdentity(ctx, taskID, entryIDs...), candidateStep.SessionTarget, startPolicy),
+		DestinationStepID: candidateStep.ID,
+		TargetKind:        string(candidateStep.SessionTarget.Kind),
+		TargetStepID:      candidateStep.SessionTarget.StepID,
+		AgentProfileID:    profileID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+	if recordedRoute, recordedSession, err := s.loadRecordedWorkflowSessionRoute(ctx, taskID, route.OperationID, candidateStep, profileID); err != nil {
+		return nil, "", nil, err
+	} else if recordedSession != nil {
+		selectedSession = recordedSession
+		route = recordedRoute
+	}
+	if selectedSession != nil || !s.supportsAtomicWorkflowSessionRouteCreation() {
+		if err := s.persistWorkflowSessionRoute(ctx, taskID, *route); err != nil {
+			return nil, "", nil, err
+		}
+	}
+	return selectedSession, profileID, route, nil
+}
+
+func (s *Service) promoteSelectedExplicitWorkflowSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	route *models.WorkflowSessionRoute,
+) (string, bool, error) {
+	if err := s.preflightWorkflowSessionTarget(ctx, taskID, session); err != nil {
+		return "", false, err
+	}
+	var promoted bool
+	var err error
+	if route != nil {
+		promoted, err = s.promoteWorkflowSessionRoute(ctx, taskID, session, route)
+	} else {
+		promoted, err = s.setNonterminalSessionPrimary(ctx, session.ID)
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("promote explicit workflow session: %w", err)
+	}
+	if !promoted {
+		return "", false, nil
+	}
+	s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+	return session.ID, true, nil
 }
 
 //nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
@@ -1211,6 +1307,23 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		task.Priority = priority
 	}
 
+	var explicitStartRoute *models.WorkflowSessionRoute
+	var selectedExplicitSession *models.TaskSession
+	var explicitProfileID string
+	selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
+		ctx,
+		task.ID,
+		workflowSessionConfigStepID,
+		opts.WorkflowEntryID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if explicitStartRoute != nil && explicitProfileID != "" {
+		agentProfileID = explicitProfileID
+		overrideApplied = agentProfileID != callerProfileID
+	}
+
 	// Use provided prompt, fall back to task description
 	effectivePrompt := prompt
 	if effectivePrompt == "" {
@@ -1220,9 +1333,37 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
-	if err != nil {
-		return nil, err
+	var sessionID string
+	var sessionCreated bool
+	if selectedExplicitSession != nil {
+		var promoted bool
+		var promoteErr error
+		sessionID, promoted, promoteErr = s.promoteSelectedExplicitWorkflowSession(ctx, task.ID, selectedExplicitSession, explicitStartRoute)
+		if promoteErr != nil {
+			return nil, promoteErr
+		}
+		if !promoted {
+			selectedExplicitSession = nil
+		}
+	}
+	if sessionID == "" {
+		if explicitStartRoute != nil {
+			sessionID, sessionCreated, err = s.prepareSessionForStartWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, explicitStartRoute)
+		} else {
+			sessionID, sessionCreated, err = s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if explicitStartRoute != nil && selectedExplicitSession == nil {
+		promoted, promoteErr := s.promoteWorkflowSessionRoute(ctx, task.ID, &models.TaskSession{ID: sessionID}, explicitStartRoute)
+		if promoteErr != nil {
+			return nil, fmt.Errorf("promote explicit workflow start session: %w", promoteErr)
+		}
+		if !promoted {
+			return nil, fmt.Errorf("explicit workflow start session became terminal before promotion")
+		}
 	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
@@ -1259,6 +1400,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload launch session: %w", err)
+	}
+	if explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
+		if sourceStep, stepErr := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID); stepErr != nil {
+			return nil, fmt.Errorf("load workflow source step for session binding: %w", stepErr)
+		} else if sourceStep != nil {
+			if bindErr := s.recordWorkflowSourceBinding(ctx, task.ID, sourceStep, launchSession, opts.WorkflowEntryID); bindErr != nil {
+				return nil, bindErr
+			}
+		}
 	}
 
 	if route == nil {
@@ -1354,6 +1504,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		McpMode:              mcpMode,
 		Attachments:          attachments,
 		Env:                  env,
+		AdditionalSkillSlugs: append([]string(nil), opts.AdditionalSkillSlugs...),
 		RouteOverride:        route,
 	})
 	if err != nil {
@@ -1575,7 +1726,15 @@ func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
-	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
+	return s.prepareSessionForStartWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, nil)
+}
+
+func (s *Service) prepareSessionForStartWithWorkflowRoute(
+	ctx context.Context, task *v1.Task,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
+	workflowRoute *models.WorkflowSessionRoute,
+) (string, bool, error) {
+	sessionID, created, err := s.createStartSessionWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
 	if err != nil {
 		return "", false, err
 	}
@@ -1786,16 +1945,42 @@ func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, bool, error) {
+	return s.createStartSessionWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, nil)
+}
+
+func (s *Service) createStartSessionWithWorkflowRoute(
+	ctx context.Context, task *v1.Task,
+	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
+	workflowRoute *models.WorkflowSessionRoute,
+) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err != nil || dbTask == nil || !dbTask.IsFromOffice {
-		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		var sessionID string
+		var prepareErr error
+		if workflowRoute != nil {
+			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRoute(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
+		} else {
+			sessionID, prepareErr = s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		}
 		return sessionID, prepareErr == nil, prepareErr
 	}
 
 	sessionOwnerID := s.officeSessionOwnerID(dbTask, agentProfileID, officeAgentProfileID)
 	if sessionOwnerID == "" {
-		sessionID, prepareErr := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		var sessionID string
+		var prepareErr error
+		if workflowRoute != nil {
+			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRoute(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
+		} else {
+			sessionID, prepareErr = s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+		}
 		return sessionID, prepareErr == nil, prepareErr
+	}
+	if workflowRoute != nil {
+		// Office sessions are identity-owned and may already exist. The route
+		// promotion path handles an exact selected row; a fresh Office session
+		// is not created through the generic PrepareSession transaction.
+		return "", false, fmt.Errorf("workflow session routes are not supported for new office sessions")
 	}
 	session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
 		ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID,
@@ -2284,25 +2469,32 @@ func (s *Service) ResumeTaskSessionWithOptions(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	allowCompletedResume := options.AllowCompletedSessionResume &&
+		session.State == models.TaskSessionStateCompleted
+	// The completed-session permission is valid only for the exact completed
+	// row admitted by the caller. Do not let an option intended for that state
+	// alter the ordinary FAILED/CANCELLED recovery paths.
+	options.AllowCompletedSessionResume = allowCompletedResume
+	// Completed sessions remain closed to every implicit resume path. Check this
+	// before looking for an executor row because cleanup commonly removes that
+	// row, and the caller should receive the terminal-state rejection rather
+	// than an incidental "no executor record" error.
+	if session.State == models.TaskSessionStateCompleted && !allowCompletedResume {
+		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
+	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if (err != nil || running == nil) &&
 		session.State != models.TaskSessionStateCancelled &&
-		session.State != models.TaskSessionStateFailed {
+		session.State != models.TaskSessionStateFailed &&
+		!allowCompletedResume {
 		// Executor record is required for non-terminal sessions. For cancelled/failed sessions
 		// the record may already have been cleaned up before the user clicked Resume — allow it.
+		// Explicit completed follow-up has the same cleanup shape and is admitted
+		// only through the narrow permission above.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	s.noteMissingWorktreesBeforeResume(sessionID, session)
 	branchRecoveryBefore := s.captureBranchRecoveryBeforeResume(ctx, taskID, sessionID, options)
-
-	// Completed sessions cannot be restarted — they require a new session.
-	// Failed and cancelled sessions keep the resume token so the relaunched
-	// agent continues the previous conversation (via ACP session/load for
-	// native-resume agents, or --resume on CLI). Users who want a fresh start
-	// after a failure can invoke RecoverSession with action="fresh_start".
-	if session.State == models.TaskSessionStateCompleted {
-		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
-	}
 
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
@@ -3661,8 +3853,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	s.clearTurnActivity(sessionID)
 
 	// Queue rows and per-session policy are removed atomically with the task
-	// session row. Publish only the task-scoped recount after commit.
-	s.publishTaskQueueStatusEvent(ctx, taskID, "")
+	// session row. The repository callback publishes a session-scoped event
+	// when it owns the purge; focused compositions use the task-scoped fallback.
+	if !s.sessionQueuePurgeNotifierRegistered {
+		s.publishTaskQueueStatusEvent(ctx, taskID, "")
+	}
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
@@ -3801,6 +3996,60 @@ func (s *Service) publishTaskSessionErrorEvent(
 	))
 }
 
+// purgeDeletedSessionQueue invalidates in-process edit state and publishes the
+// queue update after the task repository commits the durable session purge.
+// Request cancellation must not prevent this post-commit notification.
+func (s *Service) purgeDeletedSessionQueue(ctx context.Context, taskID, sessionID string) {
+	cleanupCtx := context.WithoutCancel(ctx)
+	if s.messageQueue == nil {
+		return
+	}
+	s.messageQueue.InvalidateEditLeasesForSession(sessionID)
+	s.publishTaskQueueStatusEvent(cleanupCtx, taskID, sessionID)
+}
+
+// cancelDeletedSessionQueue removes file-backed prompt attachments left on a
+// deleted session. Queue rows and their status notification are owned by the
+// repository's post-commit callback when that callback is registered. Focused
+// compositions without the callback retain the direct queue purge fallback.
+func (s *Service) cancelDeletedSessionQueue(ctx context.Context, taskID, sessionID string) {
+	cleanupCtx := context.WithoutCancel(ctx)
+	if s.messageQueue == nil {
+		if s.sessionAttachmentCleaner != nil {
+			if err := s.sessionAttachmentCleaner.DeleteSessionMessageAttachments(cleanupCtx, taskID, sessionID); err != nil {
+				s.logger.Warn("failed to remove session attachment bytes after session delete",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		}
+		return
+	}
+	_ = s.messageQueue.WithSessionAdmission(cleanupCtx, sessionID, func(admittedCtx context.Context) error {
+		if s.sessionAttachmentCleaner != nil {
+			if err := s.sessionAttachmentCleaner.DeleteSessionMessageAttachments(admittedCtx, taskID, sessionID); err != nil {
+				s.logger.Warn("failed to remove session attachment bytes after session delete",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		}
+		if s.sessionQueuePurgeNotifierRegistered {
+			return nil
+		}
+		if _, err := s.messageQueue.PurgeSession(admittedCtx, sessionID); err != nil {
+			s.logger.Warn("failed to purge queued prompts after session delete",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+		return nil
+	})
+	if !s.sessionQueuePurgeNotifierRegistered {
+		s.publishTaskQueueStatusEvent(cleanupCtx, taskID, sessionID)
+	}
+}
+
 // quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle
 // execution, if one exists, before a session row is removed. A runtime that
 // explicitly reports the exact execution as absent is already quiesced; other
@@ -3877,22 +4126,28 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
+	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	return nil
+}
 
+func (s *Service) publishPrimarySessionUpdate(ctx context.Context, taskID, sessionID string) {
 	// Broadcast task.updated so frontend updates the primary star indicator.
 	// The task service's publisher loads primary-session info from the DB,
 	// which already reflects the SetSessionPrimary write above.
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to fetch session after setting primary", zap.Error(err))
-		return nil
+		return
 	}
-	task, err := s.repo.GetTask(ctx, session.TaskID)
+	if taskID == "" {
+		taskID = session.TaskID
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to fetch task after setting primary", zap.Error(err))
-		return nil
+		return
 	}
 	s.publishTaskUpdated(ctx, task)
-	return nil
 }
 
 // maxSessionNameLength caps user-supplied session names to keep tab labels sane.
@@ -4368,6 +4623,7 @@ type promptTaskOptions struct {
 	claimEntryID          string
 	lifecyclePrompt       bool
 	afterClaim            func() error
+	afterDispatch         func() error
 	preservePromptContext bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
@@ -4648,6 +4904,15 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		promptCtx, taskID, sessionID, rollback.sessionIdentity,
 		session.AgentExecutionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
 	)
+	if options.afterDispatch != nil {
+		originalOnDispatched := onDispatched
+		onDispatched = func() {
+			durableOutcomeErr := options.afterDispatch()
+			originalOnDispatched()
+			_, publicationErr := dispatchOutcome.snapshot()
+			dispatchOutcome.recordAccepted(errors.Join(durableOutcomeErr, publicationErr))
+		}
+	}
 	if releaseDispatchGuard != nil {
 		originalOnDispatched := onDispatched
 		onDispatched = func() {
@@ -5953,6 +6218,40 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	}
 	if err := s.messageQueue.SetAutoRun(ctx, sessionID, true); err != nil {
 		return false, fmt.Errorf("resume queue Auto-run: %w", err)
+	}
+	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
+}
+
+// DrainQueuedMessageIfAutoRun dispatches one queued message only when the
+// persisted Auto-run policy is already enabled. Unlike DrainQueuedMessage, it
+// never changes the policy as a side effect.
+func (s *Service) DrainQueuedMessageIfAutoRun(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session_id is required")
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
+		return false, nil
+	}
+	if s.sessionHasPendingClarification(ctx, sessionID) {
+		return false, nil
+	}
+	if s.messageQueue == nil {
+		return false, errors.New("message queue is not configured")
+	}
+	status := s.messageQueue.GetStatus(ctx, sessionID)
+	if !status.AutoRun {
+		return false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get session: %w", err)
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		return false, nil
 	}
 	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
 }

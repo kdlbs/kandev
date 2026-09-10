@@ -129,11 +129,13 @@ export type StepDefinition = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
   route_state?: string;
   route_reason?: string;
   downstream_acp_session_id?: string;
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -156,6 +158,8 @@ export type WorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
+  complete_task_on_enter?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
@@ -228,6 +232,7 @@ export type TaskPendingActionRevision = {
 
 export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
 export type WorkflowProfileSessionEndPolicy = "complete" | "park";
+export type WorkflowSessionTarget = { kind: "initial" } | { kind: "step"; step_id: string };
 
 export function normalizeWorkflowProfileSessionStartPolicy(
   value: unknown,
@@ -238,7 +243,7 @@ export function normalizeWorkflowProfileSessionStartPolicy(
 export function normalizeWorkflowProfileSessionEndPolicy(
   value: unknown,
 ): WorkflowProfileSessionEndPolicy {
-  return typeof value === "string" && value.trim() === "park" ? "park" : "complete";
+  return typeof value === "string" && value.trim() === "complete" ? "complete" : "park";
 }
 
 /**
@@ -524,9 +529,13 @@ export type WorkflowStepDTO = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
   pull_from_step_id?: string | null;
+  complete_task_on_enter: boolean;
+  auto_advance_requires_signal: boolean;
+  cancel_triggers_turn_complete: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -556,6 +565,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   task_id: TaskId;
   /** Immutable queue ownership identity; changes when a textual session ID is recreated. */
   queue_incarnation_id?: string;
+  /** Frontend-only owner for an in-flight optimistic resume projection. */
+  resume_projection_id?: string;
   /** Optional user-supplied label shown on the session tab. */
   name?: string;
   agent_profile_id?: AgentProfileId;
@@ -982,6 +993,8 @@ export type StepPortable = {
   agent_profile?: AgentProfilePortable;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
+  complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;
   wip_limit?: number;

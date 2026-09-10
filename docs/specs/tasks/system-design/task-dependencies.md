@@ -155,10 +155,11 @@ model can ask — the answer is always "the last one to resolve".
 denormalized `is_blocked` column: a stale copy of it would gate launches
 incorrectly, which is the one failure this feature must not have.
 
-A predecessor is **resolved** when it satisfies the existing successful-completion
-convention: `state = COMPLETED`, or resident in a final workflow step whose name
-is `Done`, `Complete`, `Completed`, or `Approved` (`wfmodels.IsTerminalStepName`,
-which also persists `state = COMPLETED`).
+A predecessor is **resolved** when its persisted state is `COMPLETED`.
+[Task completion](task-completion.md) owns the explicit step-entry setting
+and compatibility backfill. Step name, position, or membership alone does not
+resolve a dependency. A conversation follow-up does not create another
+dependency-completion cycle.
 
 A predecessor is **failed** when `state` is `FAILED` or `CANCELLED`.
 

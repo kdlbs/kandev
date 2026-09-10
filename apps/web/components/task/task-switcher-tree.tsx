@@ -321,7 +321,7 @@ export const GroupSection = memo(function GroupSection({
   };
 
   return (
-    <div>
+    <div data-testid="sidebar-group" data-group-key={group.key}>
       {showHeader && (
         <GroupHeader
           label={group.label}
