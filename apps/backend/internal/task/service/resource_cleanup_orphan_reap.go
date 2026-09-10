@@ -189,13 +189,14 @@ func mergeOrphanReapRoots(existing, newlyRemoved []string) []string {
 // (AC-TASKS-ORPHAN-REAP-006.1); the caller gates it on a clean stop
 // (AC-TASKS-ORPHAN-REAP-006.2) and on the context not already being cancelled
 // (AC-TASKS-ORPHAN-REAP-006.3, first clause), mirroring reclaimSSHTaskDirs.
+// The caller records newly removed roots into snapshot.OrphanReapRoots before
+// calling this, unconditionally: recording a root and signalling against it
+// are gated separately (AC-TASKS-ORPHAN-REAP-001.1 has no clean-stop gate).
 func (s *Service) runOrphanReapPhase(
 	ctx context.Context,
 	job *models.TaskResourceCleanupJob,
 	snapshot *taskResourceCleanupSnapshot,
-	newlyRemovedRoots []string,
 ) []error {
-	snapshot.OrphanReapRoots = mergeOrphanReapRoots(snapshot.OrphanReapRoots, newlyRemovedRoots)
 	if len(snapshot.OrphanReapRoots) == 0 {
 		// AC-TASKS-ORPHAN-REAP-007.1: no roots, no snapshot read.
 		return nil

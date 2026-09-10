@@ -544,14 +544,23 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
 	}
+	// AC-TASKS-ORPHAN-REAP-001.1: record every path this attempt actually
+	// removed and confirmed absent as a reap root. This recording obligation
+	// has no clean-stop gate — only the reap phase's signal-sending below
+	// does (AC-TASKS-ORPHAN-REAP-006.2) — because performTaskCleanup above
+	// removes each non-preserved session's directory regardless of whether
+	// some other session's stop failed, and a directory removed on this
+	// attempt will no longer exist to re-derive candidacy from on the next.
+	snapshot.OrphanReapRoots = mergeOrphanReapRoots(
+		snapshot.OrphanReapRoots, confirmOrphanReapRootsRemoved(reapRootCandidates),
+	)
 	// Reap phase: REQ-TASKS-ORPHAN-REAP-001..007. Last phase in the job
 	// (AC-TASKS-ORPHAN-REAP-006.1), gated on a clean stop
 	// (AC-TASKS-ORPHAN-REAP-006.2) exactly like remote reclamation above, and
 	// on the context.Cause checks already run above
 	// (AC-TASKS-ORPHAN-REAP-006.3's pre-start clause).
 	if len(failedStops) == 0 {
-		newlyRemoved := confirmOrphanReapRootsRemoved(reapRootCandidates)
-		errs = append(errs, s.runOrphanReapPhase(ctx, job, snapshot, newlyRemoved)...)
+		errs = append(errs, s.runOrphanReapPhase(ctx, job, snapshot)...)
 	}
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)

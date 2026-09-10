@@ -10,6 +10,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -31,9 +32,9 @@ func TestRunOrphanReapPhaseSkipsRootThatExistsAgain(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	root := t.TempDir() // still exists on disk
 	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
-	snapshot := &taskResourceCleanupSnapshot{}
+	snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
 
-	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{root})
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors, got %v", errs)
 	}
@@ -63,9 +64,9 @@ func TestRunOrphanReapPhaseFailsClosedOnAmbiguousRootStatError(t *testing.T) {
 		snap: []hostProcess{{PID: 999, PPID: 1, Cwd: ambiguousRoot, Command: "sh"}},
 	}
 	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
-	snapshot := &taskResourceCleanupSnapshot{}
+	snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{ambiguousRoot}}
 
-	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{ambiguousRoot})
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
 	if len(errs) != 0 {
 		t.Fatalf("expected no job errors from a phase-wide skip, got %v", errs)
 	}
@@ -95,7 +96,7 @@ func TestRunOrphanReapPhaseSkipsSnapshotReadWhenNoRoots(t *testing.T) {
 	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
 	snapshot := &taskResourceCleanupSnapshot{}
 
-	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, nil)
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors, got %v", errs)
 	}
@@ -114,9 +115,9 @@ func TestRunOrphanReapPhaseSkipsPhaseWhenSnapshotUnavailable(t *testing.T) {
 	}
 	svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{err: errors.New("lsof unavailable")}
 	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
-	snapshot := &taskResourceCleanupSnapshot{}
+	snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
 
-	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{root})
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
 	if len(errs) != 0 {
 		t.Fatalf("expected no job errors from a phase-wide skip, got %v", errs)
 	}
@@ -135,9 +136,9 @@ func TestRunOrphanReapPhaseSkipsPhaseOnUnsupportedPlatform(t *testing.T) {
 	}
 	svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{err: errOrphanReapUnsupportedPlatform}
 	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
-	snapshot := &taskResourceCleanupSnapshot{}
+	snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
 
-	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{root})
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
 	if len(errs) != 0 {
 		t.Fatalf("expected no job errors, got %v", errs)
 	}
@@ -158,9 +159,9 @@ func TestRunOrphanReapPhaseNoRecordsWhenNoCandidatesMatch(t *testing.T) {
 		snap: []hostProcess{{PID: 999, PPID: 1, Cwd: "/unrelated/dir", Command: "sh"}},
 	}
 	job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
-	snapshot := &taskResourceCleanupSnapshot{}
+	snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
 
-	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{root})
+	errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors, got %v", errs)
 	}
@@ -201,8 +202,8 @@ func TestRunOrphanReapPhaseCapsCandidatesAt256(t *testing.T) {
 		svc.orphanReapSignaler = signaler
 
 		job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
-		snapshot := &taskResourceCleanupSnapshot{}
-		errs := svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{root})
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
 
 		foundCapErr := false
 		for _, err := range errs {
@@ -215,6 +216,169 @@ func TestRunOrphanReapPhaseCapsCandidatesAt256(t *testing.T) {
 		}
 		if len(snapshot.OrphanReapRecords) != orphanReapMaxCandidates {
 			t.Fatalf("expected exactly %d candidate records, got %d", orphanReapMaxCandidates, len(snapshot.OrphanReapRecords))
+		}
+	})
+}
+
+// AC-TASKS-ORPHAN-REAP-006.4 + AC-TASKS-ORPHAN-REAP-007.5: candidates are
+// processed in ascending PID order, and when the 256 cap truncates the list
+// it is the 256 LOWEST PIDs that get signalled, in ascending order -- not an
+// arbitrary or reversed 256. The host snapshot is built in descending PID
+// order so a broken or missing sort would signal the wrong 256, in the wrong
+// order, and this test would catch it (the sibling cap test above builds its
+// snapshot in already-ascending order, which cannot tell the two apart).
+func TestRunOrphanReapPhaseSignalsLowestPIDsInAscendingOrderWhenCapped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, _, _ := createTestService(t)
+		root := t.TempDir()
+		if err := os.RemoveAll(root); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
+
+		const total = 300
+		snap := make([]hostProcess, 0, total)
+		verifier := newFakeOrphanReapVerifier()
+		signaler := newFakeOrphanReapSignaler()
+		for i := total; i >= 1; i-- {
+			pid := i + 1000
+			cwd := filepath.Join(root, strconv.Itoa(i))
+			snap = append(snap, hostProcess{PID: pid, PPID: 1, Cwd: cwd, Command: "sh"})
+			verifier.set(pid, cwd)
+			signaler.setAlive(pid, true)
+		}
+		signaler.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm {
+				signaler.setAlive(pid, false)
+			}
+		}
+		svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{snap: snap}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = signaler
+
+		job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		_ = svc.runOrphanReapPhase(context.Background(), job, snapshot)
+
+		var sigtermPIDs []int
+		for _, s := range signaler.sentSignals() {
+			if s.sig == orphanReapSigterm {
+				sigtermPIDs = append(sigtermPIDs, s.pid)
+			}
+		}
+		if len(sigtermPIDs) != orphanReapMaxCandidates {
+			t.Fatalf("expected exactly %d SIGTERMs sent, got %d: %v", orphanReapMaxCandidates, len(sigtermPIDs), sigtermPIDs)
+		}
+		for i, pid := range sigtermPIDs {
+			wantPID := 1001 + i // the 256 lowest PIDs (1001..1256), ascending
+			if pid != wantPID {
+				t.Fatalf("expected SIGTERMs in ascending order over the 256 lowest PIDs starting at 1001, "+
+					"got %v at index %d (want %d)", sigtermPIDs, i, wantPID)
+			}
+		}
+	})
+}
+
+// blockedPIDPoisonSignaler wraps a fakeOrphanReapSignaler and fails the test
+// the instant the ownership-blocked PID is signalled or liveness-checked, so
+// the assertion holds even if the phase's ownership filter is the thing that
+// silently regresses (rather than the signaler happening to no-op for it).
+type blockedPIDPoisonSignaler struct {
+	t       *testing.T
+	blocked int
+	*fakeOrphanReapSignaler
+}
+
+func (s blockedPIDPoisonSignaler) Signal(pid int, sig orphanReapSignal) error {
+	if pid == s.blocked {
+		s.t.Fatalf("Signal must never be called for the ownership-blocked pid %d", pid)
+	}
+	return s.fakeOrphanReapSignaler.Signal(pid, sig)
+}
+
+func (s blockedPIDPoisonSignaler) Alive(pid int) (alive, known bool) {
+	if pid == s.blocked {
+		s.t.Fatalf("Alive must never be called for the ownership-blocked pid %d", pid)
+	}
+	return s.fakeOrphanReapSignaler.Alive(pid)
+}
+
+// AC-TASKS-ORPHAN-REAP-003.3: a candidate excluded by the ownership filter
+// must never reach the signaler at all, not merely end up unsignalled by
+// coincidence. Deleting applyOrphanReapOwnership's ancestry check would let
+// this candidate flow into signalOrphanReapCandidates alongside the unrelated
+// one, and the poison signaler above would fail the test the moment that
+// happened -- a gap where every prior test asserted only the final count.
+func TestRunOrphanReapPhaseNeverSignalsOwnershipBlockedCandidate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, _, repo := createTestService(t)
+		ctx := context.Background()
+		mustCreateOrphanReapTask(t, repo, "task-a")
+		mustCreateOrphanReapTask(t, repo, "task-other")
+		if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "exec-other", SessionID: "sess-other", TaskID: "task-other", ExecutorID: "executor-1",
+			Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+			LocalPID: 400,
+		}); err != nil {
+			t.Fatalf("UpsertExecutorRunning: %v", err)
+		}
+
+		root := t.TempDir()
+		if err := os.RemoveAll(root); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
+		const blockedPID = 500
+		const allowedPID = 600
+		blockedCwd := filepath.Join(root, "blocked")
+		allowedCwd := filepath.Join(root, "allowed")
+
+		// Both PIDs get a valid reverify entry: the point of this test is that
+		// the ownership filter itself excludes the blocked candidate before
+		// signalling, not that some unrelated downstream check happens to
+		// filter it out first.
+		verifier := newFakeOrphanReapVerifier()
+		verifier.set(blockedPID, blockedCwd)
+		verifier.set(allowedPID, allowedCwd)
+		fake := newFakeOrphanReapSignaler()
+		fake.setAlive(allowedPID, true)
+		fake.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm {
+				fake.setAlive(pid, false)
+			}
+		}
+
+		svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{snap: []hostProcess{
+			{PID: 400, PPID: 1, Cwd: "/other", Command: "sh"},            // another task's local_pid
+			{PID: blockedPID, PPID: 400, Cwd: blockedCwd, Command: "sh"}, // child of it: blocked
+			{PID: allowedPID, PPID: 1, Cwd: allowedCwd, Command: "sh"},   // unrelated ancestry: allowed
+		}}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = blockedPIDPoisonSignaler{t: t, blocked: blockedPID, fakeOrphanReapSignaler: fake}
+
+		job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		_ = svc.runOrphanReapPhase(ctx, job, snapshot)
+
+		foundBlockedSkip := false
+		for _, rec := range snapshot.OrphanReapRecords {
+			if rec.PID == blockedPID {
+				if rec.Outcome != orphanReapOutcomeSkipped {
+					t.Fatalf("expected blocked pid %d to be skipped, got outcome %q", blockedPID, rec.Outcome)
+				}
+				foundBlockedSkip = true
+			}
+		}
+		if !foundBlockedSkip {
+			t.Fatalf("expected a skip record for the ownership-blocked pid %d, got %+v", blockedPID, snapshot.OrphanReapRecords)
+		}
+
+		foundAllowedSignal := false
+		for _, sent := range fake.sentSignals() {
+			if sent.pid == allowedPID && sent.sig == orphanReapSigterm {
+				foundAllowedSignal = true
+			}
+		}
+		if !foundAllowedSignal {
+			t.Fatalf("expected the unrelated candidate %d to still be signalled, got %+v", allowedPID, fake.sentSignals())
 		}
 	})
 }

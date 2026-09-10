@@ -114,8 +114,8 @@ func TestOrphanReapCountersIncrementOnCapReached(t *testing.T) {
 		svc.orphanReapSignaler = signaler
 
 		job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
-		snapshot := &taskResourceCleanupSnapshot{}
-		_ = svc.runOrphanReapPhase(context.Background(), job, snapshot, []string{root})
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		_ = svc.runOrphanReapPhase(context.Background(), job, snapshot)
 
 		if got := orphanReapCounterValue(orphanReapCounterCapReached) - before; got != 1 {
 			t.Fatalf("expected cap_reached to increment by 1, got %d", got)
