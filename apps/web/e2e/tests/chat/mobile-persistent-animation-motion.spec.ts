@@ -1,5 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
-import { expectCompositorPulse } from "../../helpers/animation-assertions";
+import {
+  expectCompositorMotionPaused,
+  expectCompositorPulse,
+} from "../../helpers/animation-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 test("keeps the mobile composer pulse contained until the turn settles", async ({
@@ -27,6 +30,19 @@ test("keeps the mobile composer pulse contained until the turn settles", async (
   await session.sendMessageViaButton("/slow 8s");
   const glow = session.activeChat().getByTestId("chat-input-glow");
   await expectCompositorPulse(glow);
+
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.display = "none";
+  });
+  await expectCompositorMotionPaused(glow);
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.removeProperty("display");
+  });
+  await expectCompositorPulse(glow);
+
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.display = "none";
+  });
   expect(
     await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   ).toBe(true);

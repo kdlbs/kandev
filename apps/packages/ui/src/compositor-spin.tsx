@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cn } from "./lib/utils";
+import { createPersistentMotionVisibility } from "./persistent-motion-visibility";
 
 const DEFAULT_DURATION_MS = 1_000;
 const useCompositorEffect = typeof window === "undefined" ? React.useEffect : React.useLayoutEffect;
@@ -16,6 +17,8 @@ function CompositorSpin({ className, style, ...props }: React.ComponentProps<"sp
     const element = elementRef.current;
     if (!element || typeof element.animate !== "function") return;
 
+    const visibility = createPersistentMotionVisibility(element);
+    const registration = visibility.register(element);
     element.style.removeProperty("animation");
     const computedStyle = window.getComputedStyle(element);
     const duration = parseAnimationDuration(computedStyle.animationDuration);
@@ -30,9 +33,14 @@ function CompositorSpin({ className, style, ...props }: React.ComponentProps<"sp
         iterations: Infinity,
       },
     );
+    registration.setAnimation(animation);
     setCompositorReady(true);
 
-    return () => animation.cancel();
+    return () => {
+      animation.cancel();
+      registration.unregister();
+      visibility.dispose();
+    };
   }, [className]);
 
   const compositorStyle = compositorReady

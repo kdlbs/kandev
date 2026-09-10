@@ -1,5 +1,6 @@
 import * as React from "react";
 import { firstAnimationListValue, parseCssTime } from "./animation-utils";
+import { createPersistentMotionVisibility } from "./persistent-motion-visibility";
 
 type CompositorPulseProps = React.ComponentProps<"span"> & {
   minimumOpacity?: number;
@@ -20,6 +21,8 @@ function CompositorPulse({
     if (!element || typeof element.animate !== "function") return;
 
     const inlineAnimation = element.style.animation;
+    const visibility = createPersistentMotionVisibility(element);
+    const registration = visibility.register(element);
     let animation: Animation | null = null;
     let reducedMotionQuery: MediaQueryList | null = null;
     try {
@@ -32,6 +35,7 @@ function CompositorPulse({
     const restoreAnimation = () => {
       animation?.cancel();
       animation = null;
+      registration.setAnimation(null);
       element.style.animation = inlineAnimation;
     };
 
@@ -62,6 +66,7 @@ function CompositorPulse({
       }
 
       element.style.animation = "none";
+      registration.setAnimation(animation);
     };
 
     const handleMotionPreferenceChange = () => {
@@ -75,6 +80,8 @@ function CompositorPulse({
     return () => {
       reducedMotionQuery?.removeEventListener("change", handleMotionPreferenceChange);
       restoreAnimation();
+      registration.unregister();
+      visibility.dispose();
     };
   }, [minimumAtEndpoints, minimumOpacity, props.className]);
 
