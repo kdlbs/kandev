@@ -1102,16 +1102,23 @@ func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
 // or when it was written before this capability normalized on write. A
 // member outside the four priority tokens is dropped rather than retained,
 // covering a row written directly or before write-side validation existed.
+// Each element is decoded independently so one non-string member (also only
+// reachable via a row written directly) discards just that member instead of
+// the whole list.
 func decodeKanbanPriorityFilterTokens(raw json.RawMessage) []string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return []string{}
 	}
-	var tokens []string
-	if err := json.Unmarshal(raw, &tokens); err != nil || tokens == nil {
+	var rawTokens []json.RawMessage
+	if err := json.Unmarshal(raw, &rawTokens); err != nil || rawTokens == nil {
 		return []string{}
 	}
-	valid := make([]string, 0, len(tokens))
-	for _, token := range tokens {
+	valid := make([]string, 0, len(rawTokens))
+	for _, rawToken := range rawTokens {
+		var token string
+		if err := json.Unmarshal(rawToken, &token); err != nil {
+			continue
+		}
 		trimmed := strings.TrimSpace(token)
 		if models.IsValidKanbanPriorityFilterToken(trimmed) {
 			valid = append(valid, trimmed)

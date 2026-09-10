@@ -110,6 +110,7 @@ describe("multiSelectReducer", () => {
 });
 
 describe("buildPipelineStepIndexOf", () => {
+  const workflows = [{ id: "wf-1", name: "Workflow 1" }];
   const snapshots = {
     "wf-1": {
       steps: [
@@ -121,23 +122,49 @@ describe("buildPipelineStepIndexOf", () => {
   };
 
   it("indexes steps by their displayed (position) order", () => {
-    const indexOf = buildPipelineStepIndexOf(snapshots, {});
+    const indexOf = buildPipelineStepIndexOf(workflows, snapshots, {});
     expect(indexOf("todo")).toBe(0);
     expect(indexOf("review")).toBe(1);
     expect(indexOf("done")).toBe(2);
   });
 
   it("skips a hidden step when indexing the displayed order", () => {
-    const indexOf = buildPipelineStepIndexOf(snapshots, { "wf-1": ["review"] });
+    const indexOf = buildPipelineStepIndexOf(workflows, snapshots, { "wf-1": ["review"] });
     expect(indexOf("todo")).toBe(0);
     expect(indexOf("done")).toBe(1);
     expect(indexOf("review")).toBe(Infinity);
   });
 
   it("sorts an unknown or undefined step id last", () => {
-    const indexOf = buildPipelineStepIndexOf(snapshots, {});
+    const indexOf = buildPipelineStepIndexOf(workflows, snapshots, {});
     expect(indexOf("unknown-step")).toBe(Infinity);
     expect(indexOf(undefined)).toBe(Infinity);
+  });
+
+  it("accumulates indices across workflows in swimlane render order, so a later workflow's first step never ties with an earlier workflow's first step", () => {
+    const multiWorkflows = [
+      { id: "wf-1", name: "Workflow 1" },
+      { id: "wf-2", name: "Workflow 2" },
+    ];
+    const multiSnapshots = {
+      "wf-1": {
+        steps: [
+          { id: "wf1-todo", position: 0 },
+          { id: "wf1-done", position: 1 },
+        ],
+      },
+      "wf-2": {
+        steps: [
+          { id: "wf2-todo", position: 0 },
+          { id: "wf2-done", position: 1 },
+        ],
+      },
+    };
+    const indexOf = buildPipelineStepIndexOf(multiWorkflows, multiSnapshots, {});
+    expect(indexOf("wf1-todo")).toBe(0);
+    expect(indexOf("wf1-done")).toBe(1);
+    expect(indexOf("wf2-todo")).toBe(2);
+    expect(indexOf("wf2-done")).toBe(3);
   });
 });
 

@@ -9,29 +9,37 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { getEffectiveView } from "@/lib/kanban/view-registry";
 import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { taskMatchesPriorityFilter } from "@/lib/kanban/priority-filter-tokens";
+import { selectWorkflowSwimlanes, type WorkflowLike } from "@/lib/kanban/workflow-swimlanes";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPriority } from "@/lib/types/http";
 
 /**
  * Builds a step-id → displayed-index lookup spanning every known workflow's
  * currently displayed step order (position order, minus hidden steps),
- * matching what the pipeline view renders. Used only when the active view is
- * pipeline; a step id absent from every workflow (unknown to the caller)
- * sorts last.
+ * matching what the pipeline view renders. Indices accumulate across
+ * workflows in the same order `selectWorkflowSwimlanes` renders them, so a
+ * step in a later swimlane never ties with one in an earlier swimlane. Used
+ * only when the active view is pipeline; a step id absent from every
+ * workflow (unknown to the caller) sorts last.
  *
  * @internal Exported for testing.
  */
 export function buildPipelineStepIndexOf(
+  workflows: WorkflowLike[],
   snapshots: Record<string, { steps: Array<{ id: string; position: number }> }>,
   hiddenWorkflowStepIds: Record<string, string[]>,
 ): (stepId: string | undefined) => number {
   const indexByStepId = new Map<string, number>();
-  for (const [workflowId, snapshot] of Object.entries(snapshots)) {
-    const hidden = new Set(hiddenWorkflowStepIds[workflowId] ?? []);
+  let offset = 0;
+  for (const workflow of selectWorkflowSwimlanes(null, workflows, snapshots)) {
+    const snapshot = snapshots[workflow.id];
+    if (!snapshot) continue;
+    const hidden = new Set(hiddenWorkflowStepIds[workflow.id] ?? []);
     const displaySteps = sortWorkflowStepsByPosition(snapshot.steps).filter(
       (step) => !hidden.has(step.id),
     );
-    displaySteps.forEach((step, index) => indexByStepId.set(step.id, index));
+    displaySteps.forEach((step, index) => indexByStepId.set(step.id, offset + index));
+    offset += displaySteps.length;
   }
   return (stepId) => (stepId !== undefined ? (indexByStepId.get(stepId) ?? Infinity) : Infinity);
 }
@@ -161,6 +169,7 @@ export function useTaskMultiSelectStore() {
         getEffectiveView(state.userSettings.kanbanViewMode ?? "", isMobile).id === "graph2";
       const stepIndexOf = isPipelineView
         ? buildPipelineStepIndexOf(
+            state.workflows.items,
             state.kanbanMulti.snapshots,
             state.userSettings.hiddenWorkflowStepIds ?? {},
           )

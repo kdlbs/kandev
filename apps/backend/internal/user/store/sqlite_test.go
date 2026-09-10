@@ -1094,6 +1094,18 @@ func TestDecodeKanbanPriorityFilterTokensDropsInvalidMembers(t *testing.T) {
 	}
 }
 
+// TestDecodeKanbanPriorityFilterTokensDropsNonStringMembers verifies a member that isn't even a
+// string (a row written directly, bypassing this capability's write-side validation) is dropped
+// like any other invalid member, keeping the remaining valid tokens rather than discarding the
+// whole list because one element failed to type-assert as a string.
+func TestDecodeKanbanPriorityFilterTokensDropsNonStringMembers(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`["critical",42,"low",{"x":1},null,true]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
 // TestDecodeKanbanPriorityFilterTokensTrimsWhitespace verifies a legacy row with surrounding
 // whitespace around an otherwise-valid token is returned trimmed, not just validated as if
 // trimmed: the board compares tokens for exact equality, so an untrimmed member would validate

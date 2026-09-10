@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
 import { repositoryId, type Repository, type TaskPriority } from "@/lib/types/http";
+import { TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 
@@ -66,7 +67,8 @@ function hiddenStepIdsEqual(
 }
 
 function normalizePriorityFilterTokens(tokens: TaskPriority[]): TaskPriority[] {
-  return Array.from(new Set(tokens)).sort();
+  const selected = new Set(tokens);
+  return TASK_PRIORITY_TOKENS.filter((token) => selected.has(token));
 }
 
 function workflowIdsUnchanged(a: string[] | undefined, b: string[] | undefined): boolean {

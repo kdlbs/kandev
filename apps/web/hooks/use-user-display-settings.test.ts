@@ -129,6 +129,23 @@ describe("isSettingsUnchanged", () => {
   });
 });
 
+describe("buildNormalizedSettings — priority filter token order", () => {
+  it("normalizes a selection to priority-rank order, not lexicographic order", () => {
+    // Lexicographically "low" < "medium", but rank order (matching the board
+    // parser and backend normalizer) is critical, high, medium, low.
+    const normalized = buildNormalizedSettings(
+      {
+        workspaceId: WORKSPACE_ID,
+        workflowId: null,
+        repositoryIds: [],
+        kanbanPriorityFilterTokens: ["low", "medium"],
+      },
+      settingsWithKanbanBoard("created_desc", []),
+    );
+    expect(normalized.kanbanPriorityFilterTokens).toEqual(["medium", "low"]);
+  });
+});
+
 describe("normalizeHiddenStepIds", () => {
   it("dedupes and sorts ids within each workflow", () => {
     expect(normalizeHiddenStepIds({ "wf-1": ["step-b", "step-a", "step-b"] })).toEqual({
