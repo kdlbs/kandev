@@ -1172,6 +1172,15 @@ func (r *SSHExecutor) GetRemoteStatus(ctx context.Context, instance *ExecutorIns
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if !isRemoteAgentctlAlive(probeCtx, client, state.pid) {
+		// A concurrent teardown may have closed client after the read above
+		// but before (or during) this probe, so a failed probe alone doesn't
+		// distinguish "agentctl not answering" from "transport lost mid-probe"
+		// (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.7). Recheck the marker.
+		if r.isTransportLost(state) {
+			status.State = sshStatusDisconnected
+			status.ErrorMessage = "ssh session transport lost"
+			return status, nil
+		}
 		status.State = sshStatusAgentctlDown
 		return status, nil
 	}

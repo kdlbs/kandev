@@ -91,6 +91,44 @@ func TestSSHExecutorGetRemoteStatus(t *testing.T) {
 			t.Fatalf("State = %q, want %q", status.State, sshStatusAgentctlDown)
 		}
 	})
+
+	t.Run("transport lost during the probe reports disconnected, not agentctl-down", func(t *testing.T) {
+		// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.7: GetRemoteStatus reads the
+		// transport-lost marker and the client handle in one critical section,
+		// then releases the mutex before probing. A teardown racing in after
+		// that read (marker still false, client still open at read time) but
+		// before the probe completes must still surface as `disconnected`,
+		// not `agentctl-down` — a failed probe alone can't tell the two apart.
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		var state *sshSessionState
+		server := newFakeSSHServer(t, func(string, string) sshExecResult {
+			// Simulate a concurrent watchdog-driven teardown landing exactly
+			// between GetRemoteStatus's marker read and this probe: flip the
+			// marker under the same mutex the real teardown uses, then fail
+			// the probe the way a torn-down client would.
+			exec.mu.Lock()
+			state.transportLost = true
+			exec.mu.Unlock()
+			return sshFail("no such process")
+		})
+		state = &sshSessionState{
+			target: &SSHTarget{Host: "build.example"},
+			client: server.dial(t),
+			pid:    4242,
+		}
+		exec.sessions["i"] = state
+
+		status, err := exec.GetRemoteStatus(context.Background(), &ExecutorInstance{InstanceID: "i"})
+		if err != nil {
+			t.Fatalf("GetRemoteStatus: %v", err)
+		}
+		if status.State != sshStatusDisconnected {
+			t.Fatalf("State = %q, want %q", status.State, sshStatusDisconnected)
+		}
+		if status.ErrorMessage != "ssh session transport lost" {
+			t.Fatalf("ErrorMessage = %q", status.ErrorMessage)
+		}
+	})
 }
 
 func TestSSHShouldStopRemoteAgentctl(t *testing.T) {
