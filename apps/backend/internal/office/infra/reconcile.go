@@ -1,3 +1,4 @@
+// Package infra provides infrastructure-level startup reconciliation for the office domain.
 package infra
 
 import (

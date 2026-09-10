@@ -31,6 +31,9 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
         position: 0,
         color: "bg-neutral-400",
         allow_manual_move: true,
+        complete_task_on_enter: false,
+        auto_advance_requires_signal: false,
+        cancel_triggers_turn_complete: false,
       },
     ],
     tasks: [
@@ -102,6 +105,19 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.metadata).toEqual(snapshot.tasks[0].metadata);
   });
 
+  it("hydrates the signal-gated flag into the initial kanban step state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    Object.assign(snapshot.steps[0], {
+      auto_advance_requires_signal: true,
+    });
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.steps[0]).toMatchObject({
+      auto_advance_requires_signal: true,
+    });
+  });
+
   it.each([
     [0, 0],
     [3, 3],
@@ -130,6 +146,33 @@ describe("snapshotToState", () => {
       expect(state.kanban?.tasks[0]?.autoStartFailed).toBe(expected);
     },
   );
+
+  it("maps parked-on-background-work fields so a REST refresh cannot silently clear them", () => {
+    // Regression guard: snapshotToState previously omitted these three fields
+    // entirely, so hooks/use-workflow-snapshot's REST-based refresh stripped
+    // an already-parked task's icon on every re-fetch after the initial
+    // boot-hydration skip (AC-68/AC-73/AC-62).
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].parked_on_background_work = true;
+    snapshot.tasks[0].parked_revision = 3;
+    snapshot.tasks[0].parked_epoch = 2;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]).toMatchObject({
+      parkedOnBackgroundWork: true,
+      parkedRevision: 3,
+      parkedEpoch: 2,
+    });
+  });
+
+  it("leaves parked-on-background-work fields unset when the snapshot omits them", () => {
+    const state = snapshotToState(snapshotWithPendingAction(undefined));
+
+    expect(state.kanban?.tasks[0]?.parkedOnBackgroundWork).toBeUndefined();
+    expect(state.kanban?.tasks[0]?.parkedRevision).toBeUndefined();
+    expect(state.kanban?.tasks[0]?.parkedEpoch).toBeUndefined();
+  });
 
   it("hydrates the task status summary into the initial kanban state", () => {
     const snapshot = snapshotWithPendingAction(undefined);

@@ -51,5 +51,11 @@ export function buildGuardedSetters(
     setResumeSkipped: (sid, skipped) => {
       if (guard()) setters.setResumeSkipped?.(sid, skipped);
     },
+    setRecoveryFailure: (failure) => {
+      if (guard()) setters.setRecoveryFailure?.(failure);
+    },
+    onTaskArchiveConflict: () => {
+      if (guard()) setters.onTaskArchiveConflict?.();
+    },
   };
 }

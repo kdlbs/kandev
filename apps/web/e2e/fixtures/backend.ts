@@ -1,11 +1,12 @@
 import { test as base } from "@playwright/test";
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
 import { E2E_DOCKER_SCOPE } from "./docker-probe";
 import { dwell } from "../helpers/causal-waits";
+import { killProcessGroup } from "./process-group";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -49,6 +50,8 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Active structured backend log for assertions that need Info records. */
+  logPath: string;
   /** Current backend PID, exposed for process-owned socket assertions. */
   pid: () => number | undefined;
   /**
@@ -172,80 +175,31 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
   // port is still held and waitForHealth will surface the error.
 }
 
-type WindowsTreeKiller = (pid: number, done: (error?: Error) => void) => void;
-type ProcessAliveProbe = (pid: number) => boolean;
-
-const taskkillProcessTree: WindowsTreeKiller = (pid, done) => {
-  execFile("taskkill", ["/PID", String(pid), "/T", "/F"], (error) => done(error ?? undefined));
-};
-
-const isProcessAlive: ProcessAliveProbe = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Kills the backend and every child process it owns. POSIX uses the detached
- * process group; Windows needs taskkill because negative-PID signals are not
- * supported there.
- */
-export function killProcessGroup(
-  proc: ChildProcess,
-  platform: NodeJS.Platform = process.platform,
-  killWindowsTree: WindowsTreeKiller = taskkillProcessTree,
-  processIsAlive: ProcessAliveProbe = isProcessAlive,
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (!proc.pid) {
-      resolve();
-      return;
-    }
-
-    const pid = proc.pid;
-
-    if (platform === "win32") {
-      killWindowsTree(pid, (error) => {
-        if (error && processIsAlive(pid)) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-      return;
-    }
-
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      // Process group may already be gone
-      resolve();
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch {
-        // Already dead
-      }
-      resolve();
-    }, 7_000);
-
-    proc.on("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
-}
-
 type BackendFixtureLifecycle = {
   stopProcess?: (proc: ChildProcess) => Promise<void>;
   removeTempRoot?: (tmpDir: string) => void;
 };
+
+type BackendProcess = ChildProcess & {
+  waitForLogFile?: () => Promise<void>;
+};
+
+type LogFileStream = Pick<NodeJS.EventEmitter, "once" | "on">;
+
+export function observeLogFile(logFile: LogFileStream): () => Promise<void> {
+  let logFileError: Error | undefined;
+  const logFileClosed = new Promise<void>((resolve) => {
+    logFile.once("close", resolve);
+  });
+  logFile.on("error", (error: Error) => {
+    logFileError ??= error;
+  });
+
+  return async () => {
+    await logFileClosed;
+    if (logFileError) throw logFileError;
+  };
+}
 
 function removeOwnedTempRoot(tmpDir: string): void {
   fs.rmSync(tmpDir, {
@@ -258,18 +212,20 @@ function removeOwnedTempRoot(tmpDir: string): void {
 
 export async function runOwnedBackendFixture<T>(
   tmpDir: string,
-  run: (registerProcess: (proc: ChildProcess) => void) => Promise<T>,
+  run: (registerProcess: (proc: BackendProcess) => void) => Promise<T>,
   lifecycle: BackendFixtureLifecycle = {},
 ): Promise<T> {
   const stopProcess = lifecycle.stopProcess ?? killProcessGroup;
   const removeTempRoot = lifecycle.removeTempRoot ?? removeOwnedTempRoot;
-  let backendProc: ChildProcess | undefined;
+  let backendProc: BackendProcess | undefined;
+  const backendProcesses: BackendProcess[] = [];
   let result: T | undefined;
   const failures: unknown[] = [];
 
   try {
     result = await run((proc) => {
       backendProc = proc;
+      backendProcesses.push(proc);
     });
   } catch (error) {
     failures.push(error);
@@ -278,6 +234,15 @@ export async function runOwnedBackendFixture<T>(
   if (backendProc) {
     try {
       await stopProcess(backendProc);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  for (const proc of backendProcesses) {
+    if (!proc.waitForLogFile) continue;
+    try {
+      await proc.waitForLogFile();
     } catch (error) {
       failures.push(error);
     }
@@ -305,31 +270,37 @@ function spawnBackendProcess(
   env: Record<string, string>,
   debug: boolean,
   port: number,
-): ChildProcess {
+  logPath: string,
+): BackendProcess {
   const proc = spawn(KANDEV_BIN, ["__backend"], {
     env: env as unknown as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
 
-  const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${port}.log`) : null;
-  proc.once("exit", () => {
-    logFile?.end();
-  });
+  const logFile = fs.createWriteStream(logPath, { flags: "a" });
+  const waitForLogFile = observeLogFile(logFile);
+  const closeLogFile = () => {
+    if (!logFile.writableEnded) logFile.end();
+  };
+  proc.once("close", closeLogFile);
+  proc.once("error", closeLogFile);
   proc.stderr?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
   proc.stdout?.on("data", (chunk: Buffer) => {
+    logFile.write(chunk);
     if (debug) {
       process.stderr.write(`[backend-log:${port}] ${chunk.toString()}`);
-      logFile?.write(chunk);
     }
   });
 
-  return proc;
+  return Object.assign(proc, {
+    waitForLogFile,
+  });
 }
 
 /**
@@ -347,6 +318,8 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
       );
+      const processLogPath = path.join(tmpDir, "backend-process.log");
+      const backendLogPath = path.join(tmpDir, ".kandev", "logs", "backend-logs.log");
       let backendProc: ChildProcess | undefined;
 
       await runOwnedBackendFixture(tmpDir, async (registerProcess) => {
@@ -450,7 +423,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_WORKTREE_ENABLED: "true",
           KANDEV_WORKTREE_BASEPATH: worktreeBase,
           KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
-          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
+          KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "info",
           AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
           AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
           // AGENTCTL_AUTO_APPROVE_PERMISSIONS=true and
@@ -480,7 +453,12 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         const scopedEnv = new BackendFixtureEnvOverrides();
 
         // --- Spawn backend ---
-        backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
+        backendProc = spawnBackendProcess(
+          scopedEnv.apply(baselineEnv),
+          debug,
+          backendPort,
+          processLogPath,
+        );
         registerProcess(backendProc);
         // /ready (not /health) — /health flips green as soon as the listener
         // is bound, before routes are wired; tests that immediately issue API
@@ -507,7 +485,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
           // as soon as the port stops accepting connections (typically <200 ms).
           await waitForPortFree(backendPort);
-          backendProc = spawnBackendProcess(nextEnv, debug, backendPort);
+          backendProc = spawnBackendProcess(nextEnv, debug, backendPort, processLogPath);
           registerProcess(backendProc);
           // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use).
           // /ready, not /health — see the comment on the initial spawn above.
@@ -538,6 +516,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           frontendPort,
           frontendUrl,
           tmpDir,
+          logPath: backendLogPath,
           pid: () => backendProc?.pid,
           restart,
           ensureReady,

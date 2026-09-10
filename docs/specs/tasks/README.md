@@ -36,6 +36,8 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Task completion and conversation follow-ups](requirements/task-completion.md)
+
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
@@ -45,6 +47,7 @@ signals, and task-scoped scheduling contracts.
 - [Command-panel archived task results](requirements/command-panel-archived-task-results.md)
 - [Active clarification lifecycle scenarios](requirements/clarification-active-lifecycle-scenarios.md)
 - [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
+- [Clarification response reliability](requirements/clarification-response-reliability.md)
 - [Task Documents](requirements/documents.md)
 - [Detached Workspace Continuity](requirements/detached-workspace-continuity.md)
 - [Task plan append-mode write](requirements/plan-write-append-mode.md)
@@ -76,6 +79,7 @@ signals, and task-scoped scheduling contracts.
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)
+- [Resume prompt queue](requirements/resume-prompt-queue.md)
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
@@ -92,6 +96,7 @@ signals, and task-scoped scheduling contracts.
 - [Create Task Escape Dismissal](requirements/task-create-escape-dismissal.md)
 - [Task Create Agent Compatibility Recovery](requirements/task-create-agent-executor-compatibility.md)
 - [Task Create Executor Default](requirements/task-create-executor-default.md)
+- [Task Create Launch Preview](requirements/task-create-launch-preview.md)
 - [Task Create Workflow Memory](requirements/task-create-workflow-memory.md)
 - [Task-create advanced settings disclosure](requirements/task-dependencies-create-dialog-advanced-settings.md)
 - [Task-create dependency selector refinement](requirements/task-dependencies-create-dialog-dependency-selector.md)
@@ -103,6 +108,7 @@ signals, and task-scoped scheduling contracts.
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
 - [Tasks Without Repositories](requirements/without-repositories.md)
+- [Workflow completion-signal payload delivery](requirements/workflow-completion-signal-payload-delivery.md)
 - [Cancelled Turn Completion](requirements/workflow-cancelled-turn-completion.md)
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow Duplication](requirements/workflow-duplication.md)
@@ -127,6 +133,8 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [Task completion and conversation follow-ups](system-design/task-completion.md)
+
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
@@ -135,6 +143,7 @@ signals, and task-scoped scheduling contracts.
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
 - [Quick Chat Session Resumption](system-design/quick-chat-session-resumption.md)
 - [Active clarification lifecycle](system-design/clarification-active-lifecycle.md)
+- [Clarification response reliability](system-design/clarification-response-reliability.md)
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [Task model unification](system-design/model-unification.md)
@@ -152,15 +161,20 @@ signals, and task-scoped scheduling contracts.
 - [Task plan append-mode write](system-design/plan-write-append-mode.md)
 - [Task plan append-mode agent text](system-design/plan-write-append-mode-agent-text.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Task Cleanup Preparation](system-design/runtime-cleanup-preparation.md)
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
+- [Resume prompt queue](system-design/resume-prompt-queue.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
 - [Edit task dependencies](system-design/task-dependency-detail-editing.md)
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
+- [Task Create Launch Preview](system-design/task-create-launch-preview.md)
 - [Task priority visibility](system-design/task-priority-visibility.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
+- [Workflow completion-signal payload delivery](system-design/workflow-completion-signal-payload-delivery.md)
+- [Signal-Gated Manual Move Visibility](system-design/workflow-signal-gated-manual-move-visibility.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)

@@ -23,6 +23,23 @@ already-active session may emit no new subscribe frame; consume the original
 frame or trigger a distinct state transition. Verify ordering in the owning
 Playwright project with `--retries=0`.
 
+Arm every WebSocket wait before the action that should produce it, including all
+waits when one action emits multiple notifications. Establish startup state with
+REST `expect.poll`, then correlate each post-action event by an active-to-settled
+transition, revision, or timestamp; `watchWs` does not buffer frames, so never
+attach a wait after a spinner or visibility assertion.
+
+## Automatic lifecycle evidence
+
+When a test proves automatic start, resume, or recovery, seed and assert the
+exact precondition before the stimulus. For archive recovery, that means an
+active `WAITING_FOR_INPUT` session whose archive cancellation records the archive
+reason. Reset transport capture immediately before the stimulus, then require
+the automatic request or event and passive backend-state polling before any
+retry or manual recovery action. Do not call `SessionPage.waitForChatIdle()` or
+another helper that reloads/clicks recovery as the first proof, because it can
+mask a missing automatic request. Verify the full spec with `--retries=0`.
+
 ## Terminal and Dockview helpers
 
 - Scope terminal/mobile helpers to the active `data-testid="terminal-panel"`;
@@ -32,6 +49,20 @@ Playwright project with `--retries=0`.
 - If a helper uses `window.__dockviewApi__`, poll until the API is attached;
   silently skipping cleanup during page initialization leaks panels into later
   assertions.
+- Dockview-capable specs must activate a visible public entry point (a tab or
+  topbar/toolbar affordance) instead of assuming the default tab exists after
+  another scenario. Scope assertions to the visible panel and run the full spec
+  to catch order-dependent persisted-layout state.
+
+For a restored hidden-surface regression, seed the persisted multi-panel state,
+leave the target inactive, reload, and prove the target is mounted before
+activating it through the shipped control. If the failure depends on a browser
+observer missing the hidden-to-visible geometry transition, install a
+pre-navigation wrapper that suppresses callbacks only for the target entries
+and leaves unrelated observers intact. Assert both the correctly shaped
+network request, including its cursor or direction, and the visible user
+result. This distinguishes lifecycle recovery from an accidentally cooperative
+observer without exposing a test-only production entry point.
 
 ## Sidebar and context-menu editing
 

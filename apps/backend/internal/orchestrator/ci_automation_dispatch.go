@@ -29,7 +29,10 @@ const (
 )
 
 type ciAutomationDispatchResult struct {
-	kind ciAutomationDispatchKind
+	kind         ciAutomationDispatchKind
+	identity     messagequeue.QueueSessionIdentity
+	queueEntryID string
+	turnID       string
 }
 
 func (r ciAutomationDispatchResult) consumesRound() bool {
@@ -50,6 +53,13 @@ type ciAutomationDispatchParams struct {
 	CoalesceKey   string
 	Metadata      map[string]interface{}
 	AllowNewRound bool
+	// The callbacks keep provider-specific attempt persistence out of this
+	// shared GitHub/GitLab dispatcher. They run at the queue admission and
+	// agentctl acceptance boundaries, before PromptTask returns at turn end.
+	OnDirectAdmission func(turnID string) error
+	OnQueued          func(queueEntryID string, replaced bool) error
+	OnAccepted        func(turnID, queueEntryID string)
+	OnRejected        func(turnID, queueEntryID string)
 }
 
 // dispatchCIAutomationPrompt decides how to deliver an auto-fix prompt to a
@@ -76,26 +86,51 @@ func (s *Service) dispatchCIAutomationPromptToIdleSession(
 	if err != nil {
 		return ciAutomationDispatchResult{}, err
 	}
+	identity := result.identity
 	if replaced {
-		outcome := s.drainQueuedMessageForPromptableSessionOutcome(ctx, session.ID)
-		if outcome == queueDrainPaused {
-			return result, nil
+		dispatched, drainErr := s.drainQueuedMessageForPromptableSessionForIdentity(ctx, identity)
+		if drainErr != nil {
+			return ciAutomationDispatchResult{}, drainErr
 		}
-		if outcome != queueDrainDispatched {
-			return ciAutomationDispatchResult{}, fmt.Errorf("failed to dispatch replaced CI automation prompt")
+		if !dispatched {
+			return result, nil
 		}
 		return result, nil
 	}
 	if !params.AllowNewRound {
 		return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 	}
-	if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, params.ChatPrompt, params.Metadata) {
-		return ciAutomationDispatchResult{}, fmt.Errorf("failed to record CI automation user message")
-	}
-	if _, err := s.PromptTask(ctx, session.TaskID, session.ID, params.ChatPrompt, "", false, nil, true); err != nil {
+	identity, err = s.resolveQueueIdentityForSession(ctx, session)
+	if err != nil {
 		return ciAutomationDispatchResult{}, err
 	}
-	return ciAutomationDispatchResult{kind: ciAutomationDispatchDirect}, nil
+	turnID, recorded := s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, params.ChatPrompt, params.Metadata)
+	if !recorded {
+		return ciAutomationDispatchResult{}, fmt.Errorf("failed to record CI automation user message")
+	}
+	if params.OnDirectAdmission != nil {
+		if err := params.OnDirectAdmission(turnID); err != nil {
+			return ciAutomationDispatchResult{}, err
+		}
+	}
+	promptResult, promptErr := s.promptTask(ctx, session.TaskID, session.ID, params.ChatPrompt, "", false, nil, true, promptTaskOptions{
+		expectedSessionIdentity: &identity,
+		onAccepted: func(acceptedTurnID string) {
+			if params.OnAccepted != nil {
+				params.OnAccepted(acceptedTurnID, "")
+			}
+		},
+	})
+	if promptErr != nil {
+		if params.OnRejected != nil {
+			params.OnRejected(turnID, "")
+		}
+		return ciAutomationDispatchResult{}, promptErr
+	}
+	if promptResult != nil && promptResult.TurnID != "" {
+		turnID = promptResult.TurnID
+	}
+	return ciAutomationDispatchResult{kind: ciAutomationDispatchDirect, identity: identity, turnID: turnID}, nil
 }
 
 func (s *Service) replacePendingCIAutomationPrompt(
@@ -120,21 +155,43 @@ func (s *Service) queueOrReplaceCIAutomationPrompt(
 	if s.messageQueue == nil {
 		return ciAutomationDispatchResult{}, fmt.Errorf("message queue is not configured")
 	}
-	_, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(
-		ctx, session.ID, session.TaskID, params.ChatPrompt, "", messagequeue.QueuedByWorkflow,
-		false, nil, params.Metadata, params.CoalesceKey, allowInsert,
-	)
+	identity, err := s.resolveQueueIdentityForSession(ctx, session)
+	if err != nil {
+		return ciAutomationDispatchResult{}, err
+	}
+	var queued *messagequeue.QueuedMessage
+	var replaced, accepted bool
+	if params.OnQueued == nil {
+		queued, replaced, accepted, err = s.messageQueue.QueueLifecycleMessageWithCoalesceKeyForSession(
+			ctx, identity, params.ChatPrompt, "", messagequeue.QueuedByWorkflow,
+			false, nil, params.Metadata, params.CoalesceKey, allowInsert,
+		)
+	} else {
+		queued, replaced, accepted, err = s.messageQueue.QueueLifecycleMessageWithCoalesceKeyForSessionAfterInsert(
+			ctx, identity, params.ChatPrompt, "", messagequeue.QueuedByWorkflow,
+			false, nil, params.Metadata, params.CoalesceKey, allowInsert,
+			func(_ context.Context, queued *messagequeue.QueuedMessage, replaced bool) error {
+				return params.OnQueued(queued.ID, replaced)
+			},
+		)
+	}
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) && !allowInsert {
 			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
 		}
 		return ciAutomationDispatchResult{}, err
 	}
-	s.publishQueueStatusEvent(ctx, session.ID)
-	if replaced {
-		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace}, nil
+	if !accepted {
+		return ciAutomationDispatchResult{}, messagequeue.ErrLifecycleCancelled
 	}
-	return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
+	if queued == nil {
+		return ciAutomationDispatchResult{}, fmt.Errorf("CI automation queue returned no entry")
+	}
+	s.publishQueueStatusEventForIdentity(ctx, identity)
+	if replaced {
+		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace, identity: identity, queueEntryID: queued.ID}, nil
+	}
+	return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert, identity: identity, queueEntryID: queued.ID}, nil
 }
 
 // resolveAutoFixSession picks the session to receive the next auto-fix
@@ -177,6 +234,9 @@ func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
 	if session == nil {
 		return false
 	}
+	if models.IsCompletionFollowUpSession(session.Metadata) {
+		return false
+	}
 	switch session.State {
 	case models.TaskSessionStateCreated,
 		models.TaskSessionStateStarting,
@@ -189,9 +249,9 @@ func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
 	}
 }
 
-func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string, meta map[string]interface{}) bool {
+func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string, meta map[string]interface{}) (string, bool) {
 	if s.messageCreator == nil || prompt == "" {
-		return false
+		return "", false
 	}
 	turnID := s.getActiveTurnID(sessionID)
 	if turnID == "" {
@@ -203,7 +263,7 @@ func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, ses
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return false
+		return "", false
 	}
-	return true
+	return turnID, true
 }

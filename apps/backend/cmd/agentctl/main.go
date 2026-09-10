@@ -126,6 +126,9 @@ func runMain() int {
 	log.Info("starting agentctl",
 		zap.Int("port", cfg.Port),
 		zap.String("log_level", cfg.LogLevel))
+	log.Info("agentctl bootstrap nonce mode",
+		zap.Bool("configured", cfg.BootstrapNonceConfigured()),
+		zap.String("nonce_fingerprint", cfg.BootstrapNonceFingerprint()))
 
 	run(cfg, log)
 	return 0

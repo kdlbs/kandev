@@ -615,29 +615,30 @@ func prepareAutoTitle(req *CreateTaskRequest) error {
 	return nil
 }
 
-func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, feederStepID string) {
+func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, feederStepID string) error {
 	stepLister, ok := s.workflowStepGetter.(workflowStepLister)
 	if !ok || workflowID == "" || feederStepID == "" {
-		return
+		return nil
 	}
 	steps, err := stepLister.ListStepsByWorkflow(ctx, workflowID)
 	if err != nil {
 		s.logger.Warn("failed to list workflow steps after feeder task creation",
 			zap.String("workflow_id", workflowID), zap.Error(err))
-		return
+		return err
 	}
 	for _, step := range steps {
 		if step != nil && step.PullFromStepID == feederStepID {
 			s.pullNextTaskOnVacate(ctx, step.ID, "")
 		}
 	}
+	return nil
 }
 
 // ReconcileFeederPulls wakes steps that pull from feederStepID. The
 // orchestrator calls this after an admitted manual move's lifecycle barrier
 // completes so selection and promotion rules stay owned by this service.
-func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) {
-	s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
+func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) error {
+	return s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
 }
 
 func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {
@@ -2588,6 +2589,16 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 			}
 		}
 	}
+	if s.parkedProjectionCanceller != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			parkedCtx, cancelParked := context.WithTimeout(detachedCtx, taskPublicationTimeout)
+			s.parkedProjectionCanceller.ClearParkedProjectionOnSessionTerminated(parkedCtx, taskID, session.ID, session.State)
+			cancelParked()
+		}
+	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 
@@ -3615,7 +3626,11 @@ func (s *Service) cleanupDestructiveTaskResources(
 		return append(errs, cause)
 	}
 	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
-		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+		environmentCleanup := envCleanup
+		if s.canBatchCleanupTaskWorktrees(envCleanup) {
+			environmentCleanup.env = taskEnvironmentWithoutSnapshotWorktrees(envCleanup.env, worktrees)
+		}
+		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, environmentCleanup)...)
 		if cause := context.Cause(ctx); cause != nil {
 			return append(errs, cause)
 		}
@@ -3663,6 +3678,53 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
 	}
 	return errs
+}
+
+func (s *Service) canBatchCleanupTaskWorktrees(cleanup taskEnvironmentCleanup) bool {
+	if s.worktreeCleanup == nil {
+		return false
+	}
+	if cleanup.preserveBranches {
+		_, ok := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
+		return ok
+	}
+	if cleanup.discardWorktreeChanges {
+		_, ok := s.worktreeCleanup.(WorktreeBatchCleanerWithOptions)
+		return ok
+	}
+	_, ok := s.worktreeCleanup.(WorktreeBatchCleaner)
+	return ok
+}
+
+func taskEnvironmentWithoutSnapshotWorktrees(
+	env *models.TaskEnvironment, worktrees []*worktree.Worktree,
+) *models.TaskEnvironment {
+	if env == nil || len(worktrees) == 0 {
+		return env
+	}
+	worktreeIDs := make(map[string]struct{}, len(worktrees))
+	for _, wt := range worktrees {
+		if wt != nil && wt.ID != "" {
+			worktreeIDs[wt.ID] = struct{}{}
+		}
+	}
+	if len(worktreeIDs) == 0 {
+		return env
+	}
+
+	clone := *env
+	clone.Repos = make([]*models.TaskEnvironmentRepo, len(env.Repos))
+	for i, repo := range env.Repos {
+		if repo == nil {
+			continue
+		}
+		repoClone := *repo
+		if _, ok := worktreeIDs[repo.WorktreeID]; ok {
+			repoClone.WorktreeID = ""
+		}
+		clone.Repos[i] = &repoClone
+	}
+	return &clone
 }
 
 func (s *Service) filterSharedWorktreesForTaskCleanup(

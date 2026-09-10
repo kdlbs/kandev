@@ -90,8 +90,14 @@ jobs:
       - name: Test stale merge approval revocation workflow contract
         run: python3 .github/scripts/revoke-ready-to-merge-workflow-contract_test.py
 
+      - name: Test pull request size label workflow contract
+        run: python3 .github/scripts/pr-size-label-workflow-contract_test.py
+
       - name: Test managed runtime pin update workflow contract
         run: python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py
+
+      - name: Test backend tests workflow contract
+        run: python3 .github/scripts/backend-tests-workflow-contract_test.py
 
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6

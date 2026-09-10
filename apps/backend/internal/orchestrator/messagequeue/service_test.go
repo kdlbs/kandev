@@ -196,6 +196,49 @@ func TestLifecycleRetryBypassesCurrentCapacity(t *testing.T) {
 	assert.Equal(t, []int{3, 0}, repo.lifecycleMaxima())
 }
 
+func TestLifecycleAdmissionCallbackRollbackRestoresInsertAndReplacement(t *testing.T) {
+	t.Run("insert", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		failure := errors.New("attempt persistence failed")
+		_, replaced, accepted, err := svc.QueueLifecycleMessageWithCoalesceKeyAfterInsert(
+			ctx, "s", "t", "inserted", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+			func(_ context.Context, _ *QueuedMessage, _ bool) error { return failure },
+		)
+		require.ErrorIs(t, err, failure)
+		assert.False(t, replaced)
+		assert.False(t, accepted)
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	})
+
+	t.Run("replacement", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		original, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+			ctx, "s", "t", "original", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+		)
+		require.NoError(t, err)
+		require.True(t, accepted)
+
+		failure := errors.New("attempt persistence failed")
+		_, replaced, accepted, err := svc.QueueLifecycleMessageWithCoalesceKeyAfterInsert(
+			ctx, "s", "t", "replacement", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+			func(_ context.Context, _ *QueuedMessage, _ bool) error { return failure },
+		)
+		require.ErrorIs(t, err, failure)
+		assert.False(t, replaced)
+		assert.False(t, accepted)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Len(t, status.Entries, 1)
+		assert.Equal(t, original.ID, status.Entries[0].ID)
+		assert.Equal(t, "original", status.Entries[0].Content)
+	})
+}
+
 func TestQueueCapacityConcurrentReadWrite(t *testing.T) {
 	svc := setupService(t)
 	var wait sync.WaitGroup
@@ -632,6 +675,18 @@ func TestRemoveEntry(t *testing.T) {
 		assert.ErrorIs(t, err, ErrEntryNotFound)
 	})
 
+	t.Run("invalidates an edit lease for the removed entry", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		entry, err := svc.QueueMessage(ctx, "s", "t", "editable", "", QueuedByUser, false, nil)
+		require.NoError(t, err)
+		lease, err := svc.BeginEdit(ctx, "s", entry.ID, "connection-a")
+		require.NoError(t, err)
+
+		require.NoError(t, svc.RemoveEntry(ctx, "s", entry.ID))
+		assert.ErrorIs(t, svc.EndEdit(ctx, "s", entry.ID, lease.LeaseID, "connection-a"), ErrEditLeaseNotFound)
+	})
+
 	t.Run("rejects deletion from a foreign session", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
@@ -677,7 +732,7 @@ func TestRemoveEntry(t *testing.T) {
 		reserved, ok := svc.ReserveQueued(ctx, "s")
 		require.True(t, ok)
 		assert.ErrorIs(t, svc.RemoveEntry(ctx, "s", reserved.ID), ErrEntryNotFound)
-		require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
+		require.NoError(t, svc.AcknowledgeQueued(ctx, reserved))
 	})
 }
 
@@ -719,7 +774,7 @@ func TestCancelAllPreservesDurableEntryReservedInFlight(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, removed)
 	assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
-	require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
+	require.NoError(t, svc.AcknowledgeQueued(ctx, reserved))
 }
 
 func TestGetStatus(t *testing.T) {
@@ -768,16 +823,14 @@ func TestGetStatus(t *testing.T) {
 		assert.True(t, reserved.IsReservedLifecycleDelivery())
 		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
 
-		// A failed delivery requeues the same entry and it becomes visible again.
-		_, _, accepted, err = svc.RequeueLifecycleMessageWithCoalesceKey(
-			ctx, "s", "t", reserved.Content, "", QueuedByWorkflow, false, nil,
-			reserved.Metadata, "github-pr:repo:1:merged", true,
-		)
-		require.NoError(t, err)
-		require.True(t, accepted)
+		// A failed delivery releases the same entry and makes it visible again.
+		require.NoError(t, svc.RequeueAtHead(ctx, reserved))
 		assert.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
 
-		require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
+		require.ErrorIs(t, svc.AcknowledgeQueued(ctx, reserved), ErrLifecycleReservationChanged)
+		current, ok := svc.ReserveQueued(ctx, "s")
+		require.True(t, ok)
+		require.NoError(t, svc.AcknowledgeQueued(ctx, current))
 		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
 	})
 
@@ -798,6 +851,38 @@ func TestGetStatus(t *testing.T) {
 		assert.False(t, taken.IsReservedLifecycleDelivery())
 	})
 }
+func TestTakeQueuedDoesNotDeleteReservedLifecycleHead(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	_, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s", "t", "pr merged", "", QueuedByWorkflow, false, nil,
+		map[string]interface{}{"origin": "github_pr_automation"},
+		"github-pr:repo:1:merged", true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
+
+	reserved, ok := svc.ReserveQueued(ctx, "s")
+	require.True(t, ok)
+	require.NotNil(t, reserved)
+
+	taken, ok := svc.TakeQueued(ctx, "s")
+	assert.False(t, ok)
+	assert.Nil(t, taken)
+
+	restored, ok, err := svc.TakeQueuedEntry(ctx, "s", reserved.ID)
+	require.NoError(t, err)
+	require.True(t, ok, "destructive head cleanup must not consume a reserved lifecycle row")
+	require.Equal(t, reserved.ID, restored.ID)
+}
+func TestQueuedMessageLegacyGitLabLifecycleOriginIsDurable(t *testing.T) {
+	message := &QueuedMessage{Metadata: map[string]interface{}{
+		"origin": "gitlab_mr_automation",
+	}}
+
+	require.True(t, message.IsDurableLifecycle())
+}
 
 func TestTransferSession(t *testing.T) {
 	t.Run("moves entries and pending move", func(t *testing.T) {
@@ -806,7 +891,7 @@ func TestTransferSession(t *testing.T) {
 
 		_, err := svc.QueueMessage(ctx, "old", "task-1", "hand-off", "", "u", false, nil)
 		require.NoError(t, err)
-		svc.SetPendingMove(ctx, "old", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+		require.NoError(t, svc.SetPendingMove(ctx, "old", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"}))
 
 		require.NoError(t, svc.TransferSession(ctx, "old", "new"))
 
@@ -842,11 +927,11 @@ func TestRestoreSession(t *testing.T) {
 		{Type: "image", Data: "abc", MimeType: "image/png"},
 	}, map[string]interface{}{"sender": "task-a"})
 	require.NoError(t, err)
-	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
+	require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"}))
 
 	_, err = svc.QueueMessage(ctx, "s", "task-1", "mutated", "", "user", false, nil)
 	require.NoError(t, err)
-	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+	require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"}))
 
 	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
 		TaskID:          "task-1",
@@ -874,7 +959,7 @@ func TestPendingMove(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3, SenderSessionID: "sender-s"})
+		require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3, SenderSessionID: "sender-s"}))
 
 		got, ok := svc.TakePendingMove(ctx, "s")
 		require.True(t, ok)
@@ -892,8 +977,8 @@ func TestPendingMove(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "a"})
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "b"})
+		require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "a"}))
+		require.NoError(t, svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowStepID: "b"}))
 
 		got, ok := svc.TakePendingMove(ctx, "s")
 		require.True(t, ok)

@@ -63,6 +63,7 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 		`DELETE FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM agent_wakeup_requests WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM agent_continuation_summaries WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
+		`DELETE FROM office_agent_pause_recoveries WHERE agent_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_memory WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_instructions WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_runtime WHERE agent_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
@@ -72,6 +73,7 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 		`DELETE FROM office_workspace_routing WHERE workspace_id = ?`,
 		`DELETE FROM office_workspace_settings WHERE workspace_id = ?`,
 		`DELETE FROM office_budget_policies WHERE workspace_id = ?`,
+		`DELETE FROM office_budget_default_settings WHERE workspace_id = ?`,
 		`DELETE FROM office_routine_runs WHERE routine_id IN (SELECT id FROM office_routines WHERE workspace_id = ?)`,
 		`DELETE FROM office_routine_triggers WHERE routine_id IN (SELECT id FROM office_routines WHERE workspace_id = ?)`,
 		`DELETE FROM task_workspace_group_members WHERE workspace_group_id IN (

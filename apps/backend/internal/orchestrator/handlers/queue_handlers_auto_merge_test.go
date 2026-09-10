@@ -147,6 +147,15 @@ func (c *blockingQueueAttachmentClaimer) ClaimMessageAttachments(context.Context
 	return nil
 }
 
+func (*blockingQueueAttachmentClaimer) ReleaseMessageAttachments(
+	context.Context,
+	string,
+	string,
+	[]v1.MessageAttachment,
+) error {
+	return nil
+}
+
 func autoMergeQueueRequest(t *testing.T, content, attachmentID string) *ws.Message {
 	t.Helper()
 	return createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{

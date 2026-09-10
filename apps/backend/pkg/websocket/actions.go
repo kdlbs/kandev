@@ -142,10 +142,14 @@ const (
 	ActionMessageQueueCancel        = "message.queue.cancel" // Clears the entire queue for a session
 	ActionMessageQueueGet           = "message.queue.get"
 	ActionMessageQueueUpdate        = "message.queue.update"
+	ActionMessageQueueEditBegin     = "message.queue.edit.begin"
+	ActionMessageQueueEditRenew     = "message.queue.edit.renew"
+	ActionMessageQueueEditEnd       = "message.queue.edit.end"
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
+	ActionMessageQueueAutoMergeSet  = "message.queue.auto_merge.set" // Persist a per-session automatic-merge override
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -217,6 +221,7 @@ const (
 	ActionTaskReviewFindingUpdated      = "task.review.finding_updated"
 	ActionTaskReviewCleared             = "task.review.cleared"
 	ActionAgentUpdated                  = "agent.updated"
+	ActionAgentProfileMCPConfigUpdated  = "agent.profile.mcp_config.updated"
 	ActionAgentAvailableUpdated         = "agent.available.updated"
 	ActionAgentInstallStarted           = "agent.install.started"
 	ActionAgentInstallOutput            = "agent.install.output"
@@ -389,6 +394,7 @@ const (
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
 	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
@@ -430,6 +436,7 @@ const (
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
+	ActionMCPReportPRAutoFixOutcome     = "mcp.report_pr_auto_fix_outcome"
 	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
 	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
 	ActionMCPAddTaskDependency          = "mcp.add_task_dependency"
@@ -469,9 +476,6 @@ const (
 	ActionMCPGetCanvasState           = "mcp.get_canvas_state"
 	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
 
-	// Office quorum decision recording.
-	ActionMCPRecordStepDecision = "mcp.record_step_decision"
-
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"
@@ -487,14 +491,19 @@ const (
 	ActionMCPListAgents  = "mcp.list_agents"
 	ActionMCPUpdateAgent = "mcp.update_agent"
 
-	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
-	ActionMCPCreateAgentProfile = "mcp.create_agent_profile"
-	ActionMCPUpdateAgentProfile = "mcp.update_agent_profile"
-	ActionMCPDeleteAgentProfile = "mcp.delete_agent_profile"
-	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
-	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
-	ActionMCPListSharedPrompts  = "mcp.list_shared_prompts"
-	ActionMCPGetSharedPrompt    = "mcp.get_shared_prompt"
+	ActionMCPListAgentProfiles     = "mcp.list_agent_profiles"
+	ActionMCPCreateAgentProfile    = "mcp.create_agent_profile"
+	ActionMCPUpdateAgentProfile    = "mcp.update_agent_profile"
+	ActionMCPDeleteAgentProfile    = "mcp.delete_agent_profile"
+	ActionMCPGetMcpConfig          = "mcp.get_mcp_config"
+	ActionMCPUpdateMcpConfig       = "mcp.update_mcp_config"
+	ActionMCPListSharedPrompts     = "mcp.list_shared_prompts"
+	ActionMCPGetSharedPrompt       = "mcp.get_shared_prompt"
+	ActionMCPSearchSettings        = "mcp.search_settings"
+	ActionMCPDescribeSetting       = "mcp.describe_setting"
+	ActionMCPGetSettings           = "mcp.get_settings"
+	ActionMCPUpdateSettings        = "mcp.update_settings"
+	ActionMCPListSettingsResources = "mcp.list_settings_resources"
 
 	ActionMCPListExecutors         = "mcp.list_executors"
 	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"

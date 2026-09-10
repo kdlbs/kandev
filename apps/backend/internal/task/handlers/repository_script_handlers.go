@@ -41,7 +41,7 @@ type httpCreateRepositoryScriptRequest struct {
 func (h *RepositoryHandlers) httpCreateRepositoryScript(c *gin.Context) {
 	var body httpCreateRepositoryScriptRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if body.Name == "" || body.Command == "" {
@@ -80,7 +80,7 @@ type httpUpdateRepositoryScriptRequest struct {
 func (h *RepositoryHandlers) httpUpdateRepositoryScript(c *gin.Context) {
 	var body httpUpdateRepositoryScriptRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	script, err := h.service.UpdateRepositoryScript(c.Request.Context(), c.Param("id"), &service.UpdateRepositoryScriptRequest{

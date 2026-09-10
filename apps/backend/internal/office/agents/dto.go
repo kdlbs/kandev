@@ -48,6 +48,9 @@ type UpdateAgentRequest struct {
 type UpdateAgentStatusRequest struct {
 	Status      string `json:"status"`
 	PauseReason string `json:"pause_reason"`
+	// ExpectedStatus selects the compare-and-set recovery path. It is a
+	// concurrency precondition, not another agent field to update.
+	ExpectedStatus *models.AgentStatus `json:"expected_status,omitempty"`
 }
 
 // agentResponseBody wraps a models.AgentInstance for API responses,

@@ -192,6 +192,7 @@ export function useSubmitHandler(
   const { handleSendMessage } = usePanelMessageHandler(panelState);
 
   const handleSubmit = useCallback(
+    // eslint-disable-next-line complexity -- submission owns the shared cleanup and failure-preservation branches.
     async (payload: ChatSubmitPayload) => {
       if (isSending) return;
       setIsSending(true);
@@ -205,15 +206,17 @@ export function useSubmitHandler(
           messageComments,
         });
         const outbound = { ...payload, message: finalMessage };
+        let submissionResult: void | boolean;
         if (onSend && !pendingClarification) {
           // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
           const taskCtx = payload.inlineTaskMentions?.length
             ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
             : "";
-          await onSend({ ...outbound, message: finalMessage + taskCtx });
+          submissionResult = await onSend({ ...outbound, message: finalMessage + taskCtx });
         } else {
-          await handleSendMessage(outbound);
+          submissionResult = await handleSendMessage(outbound);
         }
+        if (submissionResult === false) return false;
         if (payload.reviewComments && payload.reviewComments.length > 0)
           markCommentsSent(payload.reviewComments.map((c) => c.id));
         if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
@@ -312,6 +315,8 @@ type ChatInputAreaProps = {
   onRequestChangesTooltipDismiss?: () => void;
   panelState: ChatPanelState;
   isSending: boolean;
+  /** The task-owned launch card renders recovery for the failed start. */
+  launchErrorOwned?: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
   /** Hide ACP/session-specific controls (model picker, mode, MCP, reset context,
@@ -428,6 +433,7 @@ export function ChatInputArea({
   onScrollToStart,
   statusTaskId = null,
   showAgentStartHint = false,
+  launchErrorOwned = false,
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
@@ -456,6 +462,7 @@ export function ChatInputArea({
     minimalToolbar,
     hideAgentControls,
     hidePlanMode,
+    launchErrorOwned,
   });
   return (
     <div

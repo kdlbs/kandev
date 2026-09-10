@@ -46,6 +46,7 @@ type TaskLayoutProps = {
   remoteStatusError?: string | null;
   initialLayout?: string | null;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
   taskCanvases?: Canvas[];
 };
 
@@ -71,6 +72,7 @@ export const TaskLayout = memo(function TaskLayout({
   remoteStatusError,
   initialLayout,
   isArchived,
+  onTaskUnarchived,
   taskCanvases = [],
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
@@ -93,7 +95,6 @@ export const TaskLayout = memo(function TaskLayout({
           taskId={launchErrorContext.taskId}
           workspaceId={launchErrorContext.workspaceId}
           statusSummary={launchErrorContext.statusSummary}
-          runErrors={[]}
           repositories={launchErrorContext.repositories}
         />
       </div>
@@ -119,6 +120,7 @@ export const TaskLayout = memo(function TaskLayout({
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
         isArchived={isArchived}
+        onTaskUnarchived={onTaskUnarchived}
         taskCanvases={taskCanvases}
         onOpenCanvas={onOpenCanvas}
       />

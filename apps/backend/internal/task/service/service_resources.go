@@ -283,14 +283,31 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		}
 	}
 
+	var deletedWorkspaceAttachments []*models.TaskMessageAttachment
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow
 	transactionalCleanup, hasTransactionalCleanup := s.workspaceSecretDeleter.(secrets.WorkspaceSecretTransactionalDeleter)
 	transactionalCascade, hasTransactionalCascade := s.workspaces.(transactionalWorkspaceCascade)
+	useTransactionalCleanup := hasTransactionalCascade &&
+		(hasTransactionalCleanup || s.attachmentSvc != nil)
 	switch {
-	case hasTransactionalCleanup && hasTransactionalCascade:
+	case useTransactionalCleanup:
 		cleanup := func(cleanupCtx context.Context, tx *sqlx.Tx) error {
-			return transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID)
+			if hasTransactionalCleanup {
+				if err := transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID); err != nil {
+					return err
+				}
+			}
+			if s.attachmentSvc != nil {
+				var err error
+				deletedWorkspaceAttachments, err = s.attachmentSvc.DeleteWorkspaceAttachmentsTx(
+					cleanupCtx, tx, workspace.ID,
+				)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		if confirmedName == nil {
 			deletedTasks, deletedWorkflows, err = transactionalCascade.DeleteWorkspaceCascadeWithSecretCleanup(ctx, workspace.ID, cleanup)
@@ -305,6 +322,9 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 		return s.mapWorkspaceDeleteError(workspace.ID, err)
+	}
+	if s.attachmentSvc != nil {
+		s.attachmentSvc.RemoveBytes(deletedWorkspaceAttachments)
 	}
 	if s.workspaceSecretDeleter != nil && (!hasTransactionalCleanup || !hasTransactionalCascade) {
 		if err := s.workspaceSecretDeleter.DeleteWorkspaceSecrets(ctx, workspace.ID); err != nil {
@@ -1246,6 +1266,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	}
 	if req.ProviderName != nil {
 		repository.ProviderName = *req.ProviderName
+	}
+	if req.RemoteURL != nil {
+		repository.RemoteURL = strings.TrimSpace(*req.RemoteURL)
 	}
 	if req.DefaultBranch != nil {
 		if *req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(*req.DefaultBranch) {
