@@ -381,7 +381,12 @@ func (s *Service) recordOrphanReapCandidate(
 // failed cleanup attempt so AC-TASKS-ORPHAN-REAP-006.5's cross-attempt
 // supersession has a durable record to supersede. Without this, an attempt
 // that fails for an unrelated reason (e.g. a worktree removal error) would
-// silently discard reap outcomes from the same attempt on every retry.
+// silently discard reap outcomes from the same attempt on every retry. The
+// caller's ctx is frequently the reason this attempt failed in the first
+// place (AC-TASKS-ORPHAN-REAP-006.3's mid-phase cancellation), so this write
+// runs on a context detached from that cancellation — the same pattern
+// retryTaskResourceCleanupJob already uses for its own transition — or every
+// cancelled attempt would silently lose this write before it reaches the DB.
 // Best-effort: a persistence failure here is logged, not folded into the
 // attempt's error, since the attempt is already retrying for its own reason.
 func (s *Service) persistOrphanReapProgressBestEffort(
@@ -396,8 +401,10 @@ func (s *Service) persistOrphanReapProgressBestEffort(
 			zap.String("job_id", job.ID), zap.Error(err))
 		return
 	}
+	persistCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
 	if _, err := s.resourceCleanups.UpdateClaimedTaskResourceCleanupSnapshot(
-		ctx, job.ID, job.Attempts, string(encoded),
+		persistCtx, job.ID, job.Attempts, string(encoded),
 	); err != nil {
 		s.logger.Warn("persist resource snapshot after failed cleanup attempt",
 			zap.String("job_id", job.ID), zap.Error(err))
