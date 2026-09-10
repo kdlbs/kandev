@@ -171,7 +171,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     setMenuKey((k) => k + 1);
   };
   const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(setContextOpen);
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const archive = useTaskSwitcherArchiveConfirmation({
     task: menuProps.task,
     onArchiveTask: menuProps.onArchiveTask,
@@ -179,8 +179,8 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     closeMenu,
   });
   const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
-  const inlineArchiveConfirmation = isFinePointer ? undefined : archiveConfirmation;
-  const portaledArchiveConfirmation = isFinePointer ? archiveConfirmation : undefined;
+  const inlineArchiveConfirmation = isMobile || isFinePointer ? undefined : archiveConfirmation;
+  const portaledArchiveConfirmation = isMobile || isFinePointer ? archiveConfirmation : undefined;
 
   return (
     <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
@@ -191,6 +191,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent
+        onCloseAutoFocus={archive.handleMenuCloseAutoFocus}
         className="w-48"
         // The menu renders in a portal whose fiber ancestors include the
         // dnd-kit drag handle that wraps the row. React synthetic events

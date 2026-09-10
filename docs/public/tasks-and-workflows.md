@@ -613,6 +613,10 @@ Regular Kanban reads and enforces blocker relationships (see [Task dependencies]
 
 ## Archive, unarchive, and delete
 
+On a phone, archive uses a focused confirmation step in the open Tasks sheet,
+or a compact bottom sheet from a page. [Phone confirmation controls](mobile-remote-access.md#confirm-an-action-on-a-phone)
+explain how to review the action and return to your list without losing your place.
+
 Archive records the task as archived and removes it from active views immediately. Runtime stopping and physical cleanup then run in the background with a 60-second timeout. Cleanup is best-effort: a stop or deletion failure is logged and does not undo the archive, and Kandev preserves a runtime or environment when a nonterminal session cannot be stopped. Shared inherited environments and borrowed worktrees are also preserved while another active task still uses them.
 
 | Executor      | Archive cleanup                                                                                                                                                                                 |

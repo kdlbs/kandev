@@ -256,7 +256,7 @@ test.describe("Mobile sidebar — view system", () => {
       }),
     ).toBe(true);
     await deleteButton.tap();
-    const confirmation = deleteEditor.getByTestId("saved-task-view-delete-confirmation");
+    const confirmation = deleteDrawer.getByTestId("saved-task-view-delete-confirmation");
     await expect(confirmation).toHaveAccessibleName("Delete New view?");
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(2);
     for (const action of await confirmation.getByRole("button").all()) {
@@ -264,7 +264,7 @@ test.describe("Mobile sidebar — view system", () => {
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     }
     await prCapture.screenshot("saved-task-view-delete-mobile", {
-      caption: "Mobile confirmation stays inline in the existing task-filter drawer.",
+      caption: "Mobile confirmation becomes a focused step in the existing task-filter drawer.",
     });
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(deleteDrawer).toBeVisible();
@@ -279,7 +279,7 @@ test.describe("Mobile sidebar — view system", () => {
         response.request().method() === "PATCH" &&
         response.ok(),
     );
-    await deleteEditor
+    await deleteDrawer
       .getByTestId("saved-task-view-delete-confirmation")
       .getByRole("button", { name: "Delete New view" })
       .tap();

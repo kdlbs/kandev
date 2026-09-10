@@ -61,7 +61,12 @@ export function WorkflowSyncSection({
           <Separator />
         </div>
       )}
-      <WorkflowSyncDialog open={dialogOpen} onOpenChange={onDialogOpenChange} sync={sync} />
+      <WorkflowSyncDialog
+        key={workspaceId}
+        open={dialogOpen}
+        onOpenChange={onDialogOpenChange}
+        sync={sync}
+      />
     </>
   );
 }

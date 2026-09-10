@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./search-bar";
 import type { SavedPreset } from "./saved-preset-model";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { SavedQueryDefaultButton } from "@/components/integrations/saved-query-default-button";
 import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
 import {
@@ -163,6 +164,7 @@ function SavedSection({
 }) {
   const { t } = useTranslation();
   const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(saved);
+  const { isMobile } = useResponsiveBreakpoint();
   const defaultMutationPending = defaultMutationPendingId !== null;
   return (
     <>
@@ -185,6 +187,19 @@ function SavedSection({
           onToggleDefault={() => void onToggleSavedDefault(preset)}
         />
       ))}
+      {isMobile && deletion.target && (
+        <SavedTaskViewDeleteConfirmation
+          target={deletion.target}
+          presentation="inline"
+          open
+          anchorRef={deletion.anchorRef}
+          confirmDisabled={defaultMutationPending}
+          onOpenChange={(open) => {
+            if (!open) deletion.close();
+          }}
+          onConfirm={onDelete}
+        />
+      )}
       <button
         type="button"
         onClick={onSaveCurrent}
@@ -232,7 +247,8 @@ function GitHubSavedPresetEntry({
   onToggleDefault: () => void;
 }) {
   const { t } = useTranslation();
-  if (deletion.target?.id === preset.id) {
+  const { isMobile } = useResponsiveBreakpoint();
+  if (!isMobile && deletion.target?.id === preset.id) {
     return (
       <div className="mx-1 min-w-0 p-1">
         <SavedTaskViewDeleteConfirmation

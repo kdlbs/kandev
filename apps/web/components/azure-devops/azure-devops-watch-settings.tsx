@@ -190,6 +190,8 @@ function WatchActions({
         <IconRefresh className="h-4 w-4" /> {t("common:reset")}
       </Button>
       <WatcherDeleteAction
+        targetKey={`${watch.workspaceId}:${kind}:${watch.id}`}
+        subject={"wiql" in watch ? watch.wiql : watch.projectId}
         title={t("azuredevops:deleteWatchConfirm")}
         cancelLabel={t("common:cancel")}
         confirmLabel={t("azuredevops:delete")}

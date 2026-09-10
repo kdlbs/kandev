@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import { ThreadsViewControls } from "./threads-view-controls";
 
-const responsive = vi.hoisted(() => ({ usesDesktopWorkbench: true, isFinePointer: true }));
+const responsive = vi.hoisted(() => ({
+  usesDesktopWorkbench: true,
+  isFinePointer: true,
+  isMobile: false,
+}));
 const EMPTY_CANDIDATES: never[] = [];
 const VIEW_PICKER_TEST_ID = "threads-view-picker";
 const DELETE_ACTION_TEST_ID = "threads-view-delete";
@@ -59,6 +63,7 @@ afterEach(() => {
   vi.clearAllMocks();
   responsive.usesDesktopWorkbench = true;
   responsive.isFinePointer = true;
+  responsive.isMobile = false;
   state.threadViews.draft = null;
   state.threadViews.syncError = null;
 });
@@ -91,7 +96,8 @@ describe("ThreadsViewControls", () => {
     await waitFor(() => expect(screen.queryByTestId("threads-view-settings-popover")).toBeNull());
   });
 
-  it("keeps mobile deletion inline until the user confirms", async () => {
+  it("hosts mobile deletion in the existing editor drawer until confirmed", async () => {
+    responsive.isMobile = true;
     responsive.usesDesktopWorkbench = false;
     responsive.isFinePointer = false;
     render(
@@ -105,13 +111,18 @@ describe("ThreadsViewControls", () => {
 
     fireEvent.click(screen.getByTestId("threads-mobile-view-trigger"));
     fireEvent.click(await screen.findByTestId("threads-mobile-view-settings"));
-    fireEvent.click(await screen.findByTestId(DELETE_ACTION_TEST_ID));
+    const trigger = await screen.findByTestId(DELETE_ACTION_TEST_ID);
+    const drawerId = screen.getByTestId(MOBILE_DRAWER_TEST_ID).id;
+    fireEvent.click(trigger);
 
     expect(state.deleteThreadView).not.toHaveBeenCalled();
     const confirmation = screen.getByRole("group", { name: "Delete All threads?" });
     expect(within(confirmation).getByRole("button", { name: "Cancel" }).className).toContain(
-      "h-11",
+      "min-h-12",
     );
+    expect(trigger.isConnected).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Delete All threads?" }).id).toBe(drawerId);
+    expect(document.querySelectorAll('[data-slot="drawer-content"]')).toHaveLength(1);
     fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId(MOBILE_DRAWER_TEST_ID).dataset.state).toBe("open");
 

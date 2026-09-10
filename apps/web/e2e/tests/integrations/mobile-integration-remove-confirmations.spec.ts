@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { SentrySettingsPage } from "../../pages/sentry-settings-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 function guardAgainstNativeDialogs(testPage: Page) {
   let seen = false;
@@ -14,7 +15,7 @@ function guardAgainstNativeDialogs(testPage: Page) {
 async function expectTouchSized(locator: Locator) {
   const box = await locator.boundingBox();
   expect(box).not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  expect(box!.height).toBeGreaterThanOrEqual(48);
 }
 
 async function expectNoHorizontalOverflow(testPage: Page) {
@@ -24,7 +25,11 @@ async function expectNoHorizontalOverflow(testPage: Page) {
 }
 
 test.describe("integration configuration removal confirmations on mobile", () => {
-  test("Azure DevOps uses inline touch confirmation", async ({ testPage, apiClient, seedData }) => {
+  test("Azure DevOps uses a touch confirmation sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const sawNativeDialog = guardAgainstNativeDialogs(testPage);
     await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
       organizationUrl: "https://dev.azure.com/acme",
@@ -36,7 +41,7 @@ test.describe("integration configuration removal confirmations on mobile", () =>
 
     const removeButton = testPage.getByTestId("azure-devops-delete-button");
     await removeButton.tap();
-    const inline = testPage.getByTestId("azure-devops-remove-inline-confirmation");
+    const inline = testPage.getByRole("dialog");
     await expect(inline).toBeVisible();
     await expectTouchSized(inline.getByTestId("azure-devops-remove-confirm"));
     await inline.getByRole("button", { name: "Cancel" }).tap();
@@ -48,7 +53,7 @@ test.describe("integration configuration removal confirmations on mobile", () =>
     await expectNoHorizontalOverflow(testPage);
   });
 
-  test("Jira uses inline touch confirmation", async ({ testPage, apiClient, seedData }) => {
+  test("Jira uses a touch confirmation sheet", async ({ testPage, apiClient, seedData }) => {
     const sawNativeDialog = guardAgainstNativeDialogs(testPage);
     await apiClient.setJiraConfig({
       workspaceId: seedData.workspaceId,
@@ -62,7 +67,7 @@ test.describe("integration configuration removal confirmations on mobile", () =>
 
     const removeButton = testPage.getByTestId("jira-delete-button");
     await removeButton.tap();
-    const inline = testPage.getByTestId("jira-remove-inline-confirmation");
+    const inline = testPage.getByRole("dialog");
     await expect(inline).toBeVisible();
     await expectTouchSized(inline.getByTestId("jira-remove-confirm"));
     await inline.getByRole("button", { name: "Cancel" }).tap();
@@ -74,7 +79,7 @@ test.describe("integration configuration removal confirmations on mobile", () =>
     await expectNoHorizontalOverflow(testPage);
   });
 
-  test("Linear uses inline touch confirmation", async ({ testPage, apiClient, seedData }) => {
+  test("Linear uses a touch confirmation sheet", async ({ testPage, apiClient, seedData }) => {
     const sawNativeDialog = guardAgainstNativeDialogs(testPage);
     await apiClient.setLinearConfig({
       workspaceId: seedData.workspaceId,
@@ -86,7 +91,7 @@ test.describe("integration configuration removal confirmations on mobile", () =>
 
     const removeButton = testPage.getByTestId("linear-delete-button");
     await removeButton.tap();
-    const inline = testPage.getByTestId("linear-remove-inline-confirmation");
+    const inline = testPage.getByRole("dialog");
     await expect(inline).toBeVisible();
     await expectTouchSized(inline.getByTestId("linear-remove-confirm"));
     await inline.getByRole("button", { name: "Cancel" }).tap();
@@ -98,10 +103,11 @@ test.describe("integration configuration removal confirmations on mobile", () =>
     await expectNoHorizontalOverflow(testPage);
   });
 
-  test("Sentry uses an inline confirmation identified by instance", async ({
+  test("Sentry uses a confirmation sheet identified by instance", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const sawNativeDialog = guardAgainstNativeDialogs(testPage);
     await apiClient.mockSentryReset();
@@ -116,10 +122,14 @@ test.describe("integration configuration removal confirmations on mobile", () =>
     const card = settings.cardByName("Mobile Sentry");
     const removeButton = card.getByTestId("sentry-instance-delete-button");
     await removeButton.tap();
-    const inline = card.getByTestId("sentry-remove-inline-confirmation");
+    const inline = testPage.getByRole("dialog");
     await expect(inline).toBeVisible();
     await expect(inline).toContainText("Mobile Sentry");
     await expectTouchSized(inline.getByTestId("sentry-remove-confirm"));
+    await waitForFiniteAnimations(inline);
+    await prCapture.screenshot("sentry-removal-sheet", {
+      caption: "Remove a named integration instance in a compact phone sheet.",
+    });
     await inline.getByRole("button", { name: "Cancel" }).tap();
     await expect(removeButton).toBeVisible();
     await removeButton.tap();

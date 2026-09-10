@@ -43,6 +43,7 @@ test.describe("Mobile terminal close", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     const destroyPause = await pauseNextTerminalDestroy(testPage);
@@ -91,14 +92,22 @@ test.describe("Mobile terminal close", () => {
       })
       .not.toBe("");
     await testPage.getByTestId("mobile-terminals-pill").tap();
+    const pickerId = await testPage
+      .getByRole("dialog", { name: "Terminals", exact: true })
+      .getAttribute("id");
     destroyPause.arm();
     await targetRow.getByRole("button", { name: /^Close / }).tap();
-    const confirmation = targetRow.getByTestId("mobile-terminal-close-confirmation");
+    const confirmation = testPage.getByTestId("mobile-terminal-close-confirmation");
     await expect(confirmation).toBeVisible({ timeout: 5_000 });
     await expect(confirmation).toHaveRole("group");
     await expect(confirmation).toHaveAccessibleName("Close terminal?");
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
-    await expect(targetRow).toBeVisible();
+    await expect(
+      testPage.getByRole("dialog", { name: "Close terminal?", exact: true }),
+    ).toHaveAttribute("id", pickerId!);
+    await expect(testPage.locator('[data-slot="drawer-content"]')).toHaveCount(1);
+    await expect(targetRow).toBeAttached();
+    await expect(targetRow).toBeHidden();
     const cancelConfirmation = confirmation.getByRole("button", { name: "Cancel", exact: true });
     const confirmClose = confirmation.getByRole("button", {
       name: "Close terminal",
@@ -110,6 +119,11 @@ test.describe("Mobile terminal close", () => {
       expect(actionBox!.width).toBeGreaterThanOrEqual(44);
       expect(actionBox!.height).toBeGreaterThanOrEqual(44);
     }
+    await prCapture.screenshot("terminal-close-step");
+    await cancelConfirmation.tap();
+    await expect(targetRow).toBeVisible();
+    await expect(targetRow.getByRole("button", { name: /^Close / })).toBeFocused();
+    await targetRow.getByRole("button", { name: /^Close / }).tap();
     await confirmClose.tap();
     await destroyPause.waitForRequest();
 

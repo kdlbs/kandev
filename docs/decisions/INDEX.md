@@ -261,3 +261,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-07-activate-managed-runtime-defaults | [Activate Shipped Managed Runtime Defaults](2026-09-07-activate-managed-runtime-defaults.md) | accepted | backend, frontend, protocol | 2026-09-07 |
 | 2026-09-08-domain-owned-settings-catalog | [Discover settings through domain-owned contracts](2026-09-08-domain-owned-settings-catalog.md) | accepted | backend, frontend, protocol | 2026-09-08 |
 | 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |
+| 2026-09-10-mobile-confirmation-surfaces | [Focus mobile confirmation in one surface](2026-09-10-mobile-confirmation-surfaces.md) | accepted | frontend | 2026-09-10 |

@@ -5,7 +5,7 @@ requirements:
   - REQ-TASKS-CONFIRMATION-WARNING-001
   - REQ-TASKS-CONFIRMATION-SURFACE-002
   - REQ-UI-TASK-CLEANUP-CONFIRMATION-001
-updated: 2026-09-07
+updated: 2026-09-10
 ---
 
 # Task Confirmation Surface System Design
@@ -19,6 +19,11 @@ discard choice for task worktrees. Task state and cleanup rules remain owned by
 the task runtime contract.
 
 ## Requirement mapping
+
+Phone archive surface selection is now owned by the
+[mobile action confirmation design](mobile-action-confirmations.md). The
+popover and inline mechanics below remain the desktop/tablet contract. Cleanup
+content and full task-delete consent remain owned here.
 
 | Requirement                            | Design section                                                                                                                                                                                                                                                                                                    |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -65,10 +70,10 @@ policy into a visual component.
 
 ### Full-dialog composition
 
-`TaskArchiveConfirmDialog` and `TaskDeleteConfirmDialog` keep Radix
-`AlertDialog` and the existing centered inset surface. The current `size="lg"`
-phone width remains because prose benefits from the available line length and
-the primitive already preserves 16px viewport insets.
+`TaskDeleteConfirmDialog` keeps Radix `AlertDialog` and the existing centered
+inset surface, including `size="lg"` on phones. Archive shares its state and
+content across the existing non-phone alert and the new phone confirmation
+surface described in the mobile design.
 
 `TaskDeleteConfirmDialog` shows an unchecked discard selection when the delete
 can remove a worktree. This includes a worktree executor, a bulk selection with
@@ -104,21 +109,16 @@ notes and the existing still-working warning.
 
 ### Source-specific archive routing
 
-Archive presentation is selected by the source surface, not by coarse-pointer
-classification alone. The mobile Kanban card opts into the existing full
-`TaskArchiveConfirmDialog` through `TaskArchiveConfirmation`'s internal
-`forceDialog` presentation prop. This keeps the confirmation portaled over the
-board, so a virtualized card row does not grow when a zero-descendant task is
-being archived.
+Phone archive uses a confirmation step in an open owned surface, or a compact
+standalone bottom drawer from a page. This includes Kanban, task rows, direct
+archive-flow callers, bulk archive, and the phone command panel's owned step.
+The mobile branch precedes legacy `forceDialog`, `inline`, and pointer routing.
+Cards and rows do not grow while the confirmation is open.
 
-Fine-pointer desktop and compact-desktop Kanban retain the anchored
-`ActionConfirmPopover`. Coarse-pointer tablet Kanban retains its existing
-coarse-pointer routing, including the current inline zero-descendant surface.
-The task-switcher/task-row adapter may explicitly own the coarse-pointer inline
-confirmation, and command-panel callers that request `inline` retain their
-existing row-owned surface. These callers keep their established focus,
-containment, and action contracts; only the mobile Kanban card changes its
-surface selection.
+Fine-pointer desktop and compact-desktop retain the anchored popover;
+coarse-pointer tablet retains its inline zero-descendant surface. Non-phone
+command-panel callers retain explicit inline confirmation. The mobile design
+owns focus transfer, retained host content, and cancellation restoration.
 
 ### Classification-gated surface selection
 
@@ -146,9 +146,10 @@ ignores any late response, so a dismissed request cannot surface later. The
 controller mounts no role, action, or visual confirmation shell.
 
 Callers whose final presentation is already known keep their current behavior.
-Forced mobile Kanban and bulk operations may mount the full dialog immediately
-with its action disabled until classification settles. Explicit inline and
-coarse-pointer row confirmations retain their established loading treatment.
+Non-phone forced and bulk operations may mount the full dialog immediately
+with its action disabled until classification settles. Phone archive may mount
+its known mobile surface with the same disabled action. Tablet inline
+confirmations retain their established loading treatment.
 
 ### Popover width contract
 
@@ -169,9 +170,9 @@ determines where the already-created archive confirmation node mounts:
   the existing anchor wrapper. It does not pass `archiveConfirmation` into
   `TaskItem`, so `TaskItem` does not add its `flex-wrap` row branch or the
   `basis-full` action slot for a portaled popover.
-- Coarse-pointer confirmation continues to pass through `TaskItem`'s existing
-  inline action slot. Its intentional row expansion and mobile action geometry
-  remain unchanged.
+- Tablet coarse-pointer confirmation continues through `TaskItem`'s existing
+  inline action slot. Phone confirmation mounts beside the row and uses the
+  mobile host, leaving the origin row's geometry unchanged.
 
 Both branches reuse the same `useTaskSwitcherArchiveConfirmation` node,
 callbacks, anchor ref, and focus-return ref. No business logic or duplicate
@@ -209,13 +210,13 @@ The existing task-level `foregroundActivity` projection and explicit
 `isInFlight` props continue to determine whether the warning is rendered. The
 dialog computes the localized task outcome and cleanup model during render,
 then passes the model to the shared task-local renderer. Archive/delete
-callbacks and dialog state remain untouched. The source adapter supplies the
-existing `presentation` value and, for mobile Kanban only, maps it to
-`forceDialog`. For a standard fine-pointer request, descendant classification
-settles before the selected popover or dialog mounts. Pointer classification
-continues to select the fine-pointer popover or the explicitly inline row
-surface after that gate. This changes presentation timing only, not archive
-commands, descendant classification, preference state, or callbacks.
+callbacks and domain state remain unchanged. Phone sources choose the shared
+mobile surface before legacy `forceDialog` and explicit-inline selection.
+Outside phone widths, descendant classification settles before a standard
+fine-pointer request mounts its popover or dialog. Tablet coarse-pointer and
+explicit non-phone inline callers retain their current routing. The mobile
+design owns presentation and focus timing; archive commands, preference state,
+classification and callbacks retain their existing ownership.
 
 The delete dialog resets discard selection when it closes. On confirm, it sends
 the cascade and discard choices through the existing callback. A typed dirty
@@ -270,16 +271,14 @@ For a parent task, a delayed descendant-count response leaves the confirmation
 shell absent until classification settles; after release, only the full cascade
 dialog is rendered and the anchored popover never becomes visible.
 
-The phone Kanban check enters through a card overflow menu and expects the
-mobile presentation to use the full alert dialog even for a zero-descendant
-task. It records the card height before and during the dialog, verifies the
-centered/inset surface, stacked actions, cleanup copy, dark theme tokens, and
-zero document horizontal overflow, then cancels and repeats the existing
-archive callback flow. The card remains unchanged while the dialog is open.
+The phone Kanban check enters through a card overflow menu and expects an inset
+bottom confirmation even for a zero-descendant task. It retains stable card
+geometry, stacked actions, cleanup copy, theme contrast, cancellation/focus,
+and zero horizontal-overflow checks.
 
-The phone task-switcher check keeps the existing coarse-pointer sidebar inline
-flow. It expects that confirmation to remain intentionally row-owned, keeps
-actions at or above 44px, and asserts zero document horizontal overflow.
+The phone task-switcher check expects one confirmation step inside the same
+drawer, unchanged row geometry, and restoration of list state/scroll on Cancel.
+It asserts reachable actions, one active scroll owner, and no horizontal overflow.
 
 The task-delete phone check enters through the real task drawer action menu and
 opens Delete with a long task title and a longer bundled locale. After portal

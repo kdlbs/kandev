@@ -31,6 +31,10 @@ import {
 import { toGitLabTaskPreset } from "@/components/gitlab/my-gitlab/task-presets";
 import { useAppStore } from "@/components/state-provider";
 import { Trans, useTranslation } from "react-i18next";
+import {
+  MobileConfirmationHost,
+  MobileConfirmationHostBody,
+} from "@/components/confirmation/mobile-confirmation-host";
 
 type GitLabPageClientProps = {
   workspaceId?: string;
@@ -298,25 +302,36 @@ function GitLabPageOverlays({
   };
   return (
     <>
-      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-sm overflow-y-auto p-0"
-          data-testid="gitlab-mobile-sidebar"
-        >
-          <SheetHeader className="px-4 pt-4 pb-2">
-            <SheetTitle>{t("gitlab:filters")}</SheetTitle>
-          </SheetHeader>
-          <PresetsSidebar
-            selected={state.selection}
-            onSelect={onMobileSidebarSelect}
-            savedPresets={state.savedPresets}
-            onDeleteSaved={state.onDeleteSaved}
-            canSaveCurrent={state.canSaveCurrent}
-            onSaveCurrent={onMobileSaveCurrent}
-          />
-        </SheetContent>
-      </Sheet>
+      <MobileConfirmationHost key={workspaceId} open={mobileSidebarOpen}>
+        {({ active, contentProps }) => (
+          <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+            <SheetContent
+              side="right"
+              className="w-full sm:max-w-sm overflow-hidden p-0"
+              data-testid="gitlab-mobile-sidebar"
+              showCloseButton={!active}
+              aria-describedby={undefined}
+              {...contentProps}
+            >
+              <MobileConfirmationHostBody>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <SheetHeader className="px-4 pt-4 pb-2">
+                    <SheetTitle>{t("gitlab:filters")}</SheetTitle>
+                  </SheetHeader>
+                  <PresetsSidebar
+                    selected={state.selection}
+                    onSelect={onMobileSidebarSelect}
+                    savedPresets={state.savedPresets}
+                    onDeleteSaved={state.onDeleteSaved}
+                    canSaveCurrent={state.canSaveCurrent}
+                    onSaveCurrent={onMobileSaveCurrent}
+                  />
+                </div>
+              </MobileConfirmationHostBody>
+            </SheetContent>
+          </Sheet>
+        )}
+      </MobileConfirmationHost>
       <SavePresetDialog
         open={state.saveDialogOpen}
         onOpenChange={state.setSaveDialogOpen}

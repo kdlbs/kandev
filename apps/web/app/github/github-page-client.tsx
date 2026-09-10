@@ -53,6 +53,10 @@ import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { hasGitHubPersonalActor } from "@/lib/github-auth";
 import { Trans, useTranslation } from "react-i18next";
+import {
+  MobileConfirmationHost,
+  MobileConfirmationHostBody,
+} from "@/components/confirmation/mobile-confirmation-host";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -440,29 +444,40 @@ function MobileFiltersSheet({
 }) {
   const { t } = useTranslation();
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-sm overflow-y-auto p-0"
-        data-testid="github-mobile-sidebar"
-      >
-        <SheetHeader className="px-4 pt-4 pb-2">
-          <SheetTitle>{t("github:filters")}</SheetTitle>
-        </SheetHeader>
-        <PresetsSidebar
-          selected={state.selection}
-          onSelect={onSelect}
-          savedPresets={state.savedPresets}
-          onDeleteSaved={state.onDeleteSaved}
-          onToggleSavedDefault={state.onToggleSavedDefault}
-          defaultMutationPendingId={state.defaultMutationPendingId}
-          canSaveCurrent={state.canSaveCurrent}
-          onSaveCurrent={onSaveCurrent}
-          prPresets={state.resolvedPrPresets}
-          issuePresets={state.resolvedIssuePresets}
-        />
-      </SheetContent>
-    </Sheet>
+    <MobileConfirmationHost open={open}>
+      {({ active, contentProps }) => (
+        <Sheet open={open} onOpenChange={onOpenChange}>
+          <SheetContent
+            side="right"
+            className="w-full sm:max-w-sm overflow-hidden p-0"
+            data-testid="github-mobile-sidebar"
+            showCloseButton={!active}
+            aria-describedby={undefined}
+            {...contentProps}
+          >
+            <MobileConfirmationHostBody>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <SheetHeader className="px-4 pt-4 pb-2">
+                  <SheetTitle>{t("github:filters")}</SheetTitle>
+                </SheetHeader>
+                <PresetsSidebar
+                  selected={state.selection}
+                  onSelect={onSelect}
+                  savedPresets={state.savedPresets}
+                  onDeleteSaved={state.onDeleteSaved}
+                  onToggleSavedDefault={state.onToggleSavedDefault}
+                  defaultMutationPendingId={state.defaultMutationPendingId}
+                  canSaveCurrent={state.canSaveCurrent}
+                  onSaveCurrent={onSaveCurrent}
+                  prPresets={state.resolvedPrPresets}
+                  issuePresets={state.resolvedIssuePresets}
+                />
+              </div>
+            </MobileConfirmationHostBody>
+          </SheetContent>
+        </Sheet>
+      )}
+    </MobileConfirmationHost>
   );
 }
 
@@ -537,6 +552,7 @@ export function GitHubPageClient({
         )}
       </div>
       <MobileFiltersSheet
+        key={workspaceId}
         open={mobileSidebarOpen}
         onOpenChange={setMobileSidebarOpen}
         state={state}

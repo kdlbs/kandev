@@ -30,7 +30,7 @@ import { Dialog } from "@kandev/ui/dialog";
 - When a Tailwind visibility class gates the same surface the hook picks, both must use the same boundary. A `sm:` class paired with a hook-driven mobile branch leaves 640-767px in a state neither side renders.
 - Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable. Apply the 44px minimum to coarse-pointer hit areas, touch rows, and mobile controls only; keep fine-pointer desktop controls at the surrounding design-system density and do not reuse a touch-sized `h-11` class as the shared visual button size.
 - Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
-- Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
+- Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the surface decision guide, design contract, and verification requirements; read [confirmation guidance](components/confirmation/AGENTS.md) when adopting phone confirmation surfaces.
 
 ## Data Flow Pattern (Critical)
 

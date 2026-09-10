@@ -9,6 +9,10 @@ import {
 import { selectTaskFromSheet } from "@/components/task/mobile/session-task-switcher-sheet-selection";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import type { TaskSession } from "@/lib/types/http";
+import { useState } from "react";
+import { DrawerTitle } from "@kandev/ui/drawer";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { TaskSwitcherDrawer } from "./task-switcher-drawer";
 
 const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
@@ -75,6 +79,45 @@ function task(id: string): TaskSwitcherItem {
     workflowStepTitle: "Build",
   };
 }
+
+it("keeps the Tasks drawer as the sole modal during confirmation and restores its list", () => {
+  const previousWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  function Tasks() {
+    const [confirm, setConfirm] = useState(false);
+    return (
+      <TaskSwitcherDrawer open onOpenChange={vi.fn()}>
+        <DrawerTitle>Tasks</DrawerTitle>
+        <input aria-label="Task filter" defaultValue="Work in progress" />
+        <button onClick={() => setConfirm(true)}>Archive target</button>
+        <MobileActionConfirmation
+          open={confirm}
+          onOpenChange={setConfirm}
+          targetKey="task"
+          title="Archive task?"
+          subject="Target"
+          cancelLabel="Cancel"
+          confirmLabel="Archive"
+          onConfirm={vi.fn()}
+        />
+      </TaskSwitcherDrawer>
+    );
+  }
+  const view = render(<Tasks />);
+  try {
+    const drawer = screen.getByRole("dialog", { name: "Tasks" });
+    const input = screen.getByRole("textbox", { name: "Task filter" });
+    fireEvent.click(screen.getByRole("button", { name: "Archive target" }));
+    expect(screen.getByRole("dialog", { name: "Archive task?" })).toBe(drawer);
+    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+    expect(screen.queryByRole("textbox", { name: "Task filter" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("textbox", { name: "Task filter" })).toBe(input);
+  } finally {
+    view.unmount();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+  }
+});
 
 describe("MobileTaskList", () => {
   beforeEach(() => {

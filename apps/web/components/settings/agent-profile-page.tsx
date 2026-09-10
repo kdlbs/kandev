@@ -64,6 +64,7 @@ import type { AgentProfileMcpConfig } from "@/lib/types/http";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 import { isHandledApiError } from "@/lib/api/client";
 
@@ -136,15 +137,23 @@ function ProfileEditorHeader({
 }
 
 type DeleteProfileCardProps = {
+  profile: AgentProfile;
   onDelete: () => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
 };
 
-function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeleteProfileCardProps) {
+function DeleteProfileCard({
+  profile,
+  onDelete,
+  open,
+  onOpenChange,
+  onConfirm,
+}: DeleteProfileCardProps) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  useConfirmationBoundary(open, profile.id, onOpenChange);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const closeDeleteConfirmation = () => {
     onOpenChange(false);
@@ -160,7 +169,7 @@ function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeletePr
           <p className="text-sm font-medium">{t("agents:removeThisProfile")}</p>
           <p className="text-xs text-muted-foreground">{t("agents:actionCannotBeUndone")}</p>
         </div>
-        {!open || isFinePointer ? (
+        {!open || isFinePointer || isMobile ? (
           <Button
             ref={deleteAnchorRef}
             variant="destructive"
@@ -172,9 +181,11 @@ function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeletePr
             {t("agents:delete")}
           </Button>
         ) : null}
-        {!isFinePointer && open ? (
+        {!isMobile && !isFinePointer && open ? (
           <div className="basis-full min-w-0">
             <AgentProfileDeleteConfirmation
+              profileId={profile.id}
+              profileName={profile.name}
               open={open}
               isFinePointer={false}
               anchorRef={deleteAnchorRef}
@@ -185,8 +196,10 @@ function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeletePr
           </div>
         ) : null}
       </CardContent>
-      {isFinePointer ? (
+      {isMobile || isFinePointer ? (
         <AgentProfileDeleteConfirmation
+          profileId={profile.id}
+          profileName={profile.name}
           open={open}
           isFinePointer
           anchorRef={deleteAnchorRef}
@@ -516,6 +529,7 @@ function ProfileEditor({
       />
 
       <DeleteProfileCard
+        profile={savedProfile}
         onDelete={deleteState.requestDelete}
         open={deleteState.showDeleteConfirm}
         onOpenChange={deleteState.setShowDeleteConfirm}

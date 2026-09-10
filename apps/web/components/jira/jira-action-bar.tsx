@@ -6,9 +6,11 @@ import { useTranslation } from "react-i18next";
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type JiraActionBarProps = {
+  workspaceId: string;
   testing: boolean;
   loading: boolean;
   hasConfig: boolean;
@@ -18,6 +20,7 @@ type JiraActionBarProps = {
 };
 
 export function JiraActionBar({
+  workspaceId,
   testing,
   loading,
   hasConfig,
@@ -26,10 +29,11 @@ export function JiraActionBar({
   onDelete,
 }: JiraActionBarProps) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const removeConfirmation = t("jira:removeJiraConfiguration");
+  const removeLabel = t("jira:removeConfiguration");
 
   useEffect(() => {
     if (!hasConfig && confirmingDelete) setConfirmingDelete(false);
@@ -48,7 +52,7 @@ export function JiraActionBar({
       >
         {testing ? t("jira:testingConnection") : t("jira:testConnection")}
       </Button>
-      {hasConfig && (isFinePointer || !confirmingDelete) && (
+      {hasConfig && (isMobile || isFinePointer || !confirmingDelete) && (
         <Button
           ref={deleteAnchorRef}
           type="button"
@@ -57,39 +61,52 @@ export function JiraActionBar({
           className="ml-auto min-h-11 cursor-pointer"
           data-testid="jira-delete-button"
         >
-          {t("jira:removeConfiguration")}
+          {removeLabel}
         </Button>
       )}
-      {hasConfig && !isFinePointer && confirmingDelete ? (
-        <InlineConfirmActions
-          density="touch"
-          testId="jira-remove-inline-confirmation"
-          ariaLabel={removeConfirmation}
-          description={removeConfirmation}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={t("jira:removeConfiguration")}
-          confirmAriaLabel={removeConfirmation}
-          confirmTestId="jira-remove-confirm"
-          onCancel={() => setConfirmingDelete(false)}
-          onClose={() => setConfirmingDelete(false)}
-          onConfirm={onDelete}
-        />
-      ) : null}
-      {hasConfig && isFinePointer ? (
-        <ActionConfirmPopover
-          open={confirmingDelete}
-          anchorRef={deleteAnchorRef}
-          title={removeConfirmation}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={t("jira:removeConfiguration")}
-          confirmAriaLabel={removeConfirmation}
-          confirmTestId="jira-remove-confirm"
-          testId="jira-remove-confirm-popover"
-          onOpenChange={setConfirmingDelete}
-          onCancel={() => setConfirmingDelete(false)}
-          onConfirm={onDelete}
-        />
-      ) : null}
+      <MobileActionConfirmation
+        open={hasConfig && confirmingDelete}
+        targetKey={workspaceId}
+        title={removeConfirmation}
+        cancelLabel={t("common:cancel")}
+        confirmLabel={removeLabel}
+        confirmAriaLabel={removeConfirmation}
+        confirmTestId="jira-remove-confirm"
+        onOpenChange={setConfirmingDelete}
+        focusReturnRef={deleteAnchorRef}
+        onConfirm={onDelete}
+        fallback={
+          !isFinePointer ? (
+            <InlineConfirmActions
+              density="touch"
+              testId="jira-remove-inline-confirmation"
+              ariaLabel={removeConfirmation}
+              description={removeConfirmation}
+              cancelLabel={t("common:cancel")}
+              confirmLabel={removeLabel}
+              confirmAriaLabel={removeConfirmation}
+              confirmTestId="jira-remove-confirm"
+              onCancel={() => setConfirmingDelete(false)}
+              onClose={() => setConfirmingDelete(false)}
+              onConfirm={onDelete}
+            />
+          ) : (
+            <ActionConfirmPopover
+              open={confirmingDelete}
+              anchorRef={deleteAnchorRef}
+              title={removeConfirmation}
+              cancelLabel={t("common:cancel")}
+              confirmLabel={removeLabel}
+              confirmAriaLabel={removeConfirmation}
+              confirmTestId="jira-remove-confirm"
+              testId="jira-remove-confirm-popover"
+              onOpenChange={setConfirmingDelete}
+              onCancel={() => setConfirmingDelete(false)}
+              onConfirm={onDelete}
+            />
+          )
+        }
+      />
     </div>
   );
 }

@@ -235,6 +235,7 @@ function PluginDangerZone({
   onUninstall,
 }: PluginDangerZoneProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const busy = actions.busyId === plugin.id || actions.uninstallBusy;
   const canEnable =
     plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
@@ -264,12 +265,12 @@ function PluginDangerZone({
           {t("plugins:disable")}
         </Button>
       )}
-      {(isFinePointer || !confirmingUninstall) && (
+      {(isMobile || isFinePointer || !confirmingUninstall) && (
         <Button
           ref={uninstallAnchorRef}
           variant="ghost"
           size="sm"
-          className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
+          className="cursor-pointer min-h-11 text-destructive hover:text-destructive md:min-h-0"
           disabled={busy}
           onClick={onUninstall}
         >

@@ -9,6 +9,38 @@ This how-to guide connects a phone to Kandev through Tailscale, Cloudflare Tunne
 
 Anyone who can reach an unauthenticated Kandev origin has administrator access. Use a protected network boundary.
 
+## Confirm an action on a phone
+
+Archiving from the **Tasks** sheet shows a dedicated confirmation step in that
+same sheet. Review the task name, cleanup effects, and optional subtask selection.
+The **Archive** and **Cancel** buttons sit at the bottom, above the phone's safe
+area. Longer details scroll without moving those buttons off screen.
+
+Choose **Cancel** or **Back** to return to the same task list, filters, and scroll
+position. Swiping the sheet away or tapping its backdrop cancels the decision and
+closes the sheet. From the board or a page, archive opens a compact bottom sheet.
+Inside the command panel, confirmation stays in the panel and Cancel keeps your
+search query. The archive-confirmation preference and cleanup behavior are unchanged.
+
+The same pattern applies to other inline confirmations:
+
+- Session deletion and terminal closing stay inside their open picker. Saved
+  sidebar, Threads, GitHub, and GitLab views stay inside their filter/editor sheet.
+- File deletion, chat context reset, plan revision restore, subtask detachment,
+  and walkthrough discard use a compact sheet from the page. Resetting context
+  inside Quick Chat stays in that dialog.
+- Deleting saved prompts, layouts, agent profiles, or views from a menu opens a
+  compact sheet. The menu closes first, leaving only one active decision.
+- Removing integrations, watches, secrets, or plugins, and changing a user's
+  role or status uses the same named confirmation. Secret values are never
+  included in the confirmation.
+- Removing workflow sync is a step in its existing configuration dialog. Cancel
+  returns to the draft; a failed removal keeps the confirmation available to retry.
+
+Full task-delete and discard-consent dialogs retain their existing layout and
+safeguards, as do in-use conflict and system maintenance dialogs. Desktop and
+tablet confirmation layouts are unchanged.
+
 ## How a phone request reaches an agent
 
 Each protected path reaches the same Kandev origin. Kandev then sends task work to the selected executor.

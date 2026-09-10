@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileGitHubPage } from "../../pages/mobile-github-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const DEFAULT_REPO = "mobileorg/defaultrepo";
 const DEFAULT_REPO_ISSUE = "Mobile issue in saved default repo";
@@ -273,14 +274,18 @@ test.describe("Mobile /github sidebar", () => {
     const deleteBox = await deleteAction.boundingBox();
     expect(deleteBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(deleteBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    const originalDialogId = await page.mobileSidebar.getAttribute("id");
     await deleteAction.tap();
     const deleteConfirmation = page.mobileSidebar.getByTestId(
       "saved-task-view-delete-confirmation",
     );
     await expect(deleteConfirmation).toHaveAccessibleName(`Delete ${savedQuery}?`);
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+    await expect(page.mobileSidebar).toHaveAttribute("id", originalDialogId!);
+    await expect(deleteConfirmation.getByRole("button", { name: "Back" })).toBeVisible();
+    await waitForFiniteAnimations(page.mobileSidebar);
     await prCapture.screenshot("saved-query-delete-mobile", {
-      caption: "A saved integration query confirms inline without nesting another sheet.",
+      caption: "A saved integration query becomes a confirmation step inside the filter sheet.",
     });
     await deleteConfirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(page.savedQueryByLabel(savedQuery)).toBeVisible();

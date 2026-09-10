@@ -9,6 +9,8 @@ import {
 } from "@/components/integrations/auth-status-banner";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { SentryConfig } from "@/lib/types/sentry";
 import { useTranslation } from "react-i18next";
 
@@ -48,7 +50,16 @@ export function SentryInstanceCard({
   const { t } = useTranslation();
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const confirmationTitle = t("sentry:removeInstanceConfirm", { name: instance.name });
+  const { isMobile } = useResponsiveBreakpoint();
   const cancelDelete = () => onDeleteCancel(instance.id);
+  const deleteLabel = t("sentry:delete");
+  const actions = {
+    cancelLabel: t("common:cancel"),
+    confirmLabel: deleteLabel,
+    confirmAriaLabel: confirmationTitle,
+    confirmTestId: "sentry-remove-confirm",
+    onConfirm: onDeleteConfirm,
+  };
   return (
     <div className="space-y-3 rounded-md border p-4" data-testid="sentry-instance-card">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -71,7 +82,7 @@ export function SentryInstanceCard({
             <IconPencil className="h-3.5 w-3.5" />
             {t("sentry:edit")}
           </Button>
-          {(isFinePointer || !confirmingDelete) && (
+          {(isMobile || isFinePointer || !confirmingDelete) && (
             <Button
               ref={deleteAnchorRef}
               type="button"
@@ -83,43 +94,46 @@ export function SentryInstanceCard({
               data-testid="sentry-instance-delete-button"
             >
               <IconTrash className="h-3.5 w-3.5" />
-              {t("sentry:delete")}
+              {deleteLabel}
             </Button>
           )}
         </div>
       </div>
-      {!isFinePointer && confirmingDelete ? (
-        <InlineConfirmActions
-          density="touch"
-          testId="sentry-remove-inline-confirmation"
-          ariaLabel={confirmationTitle}
-          description={confirmationTitle}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={t("sentry:delete")}
-          confirmAriaLabel={confirmationTitle}
-          confirmTestId="sentry-remove-confirm"
-          onCancel={cancelDelete}
-          onClose={cancelDelete}
-          onConfirm={onDeleteConfirm}
-        />
-      ) : null}
-      {isFinePointer ? (
-        <ActionConfirmPopover
-          open={confirmingDelete}
-          anchorRef={deleteAnchorRef}
-          title={confirmationTitle}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={t("sentry:delete")}
-          confirmAriaLabel={confirmationTitle}
-          confirmTestId="sentry-remove-confirm"
-          testId="sentry-remove-confirm-popover"
-          onOpenChange={(open) => {
-            if (!open) cancelDelete();
-          }}
-          onCancel={cancelDelete}
-          onConfirm={onDeleteConfirm}
-        />
-      ) : null}
+      <MobileActionConfirmation
+        open={confirmingDelete}
+        targetKey={`${instance.workspaceId}:${instance.id}`}
+        title={confirmationTitle}
+        {...actions}
+        onOpenChange={(open) => {
+          if (!open) cancelDelete();
+        }}
+        focusReturnRef={deleteAnchorRef}
+        fallback={
+          !isFinePointer ? (
+            <InlineConfirmActions
+              density="touch"
+              testId="sentry-remove-inline-confirmation"
+              ariaLabel={confirmationTitle}
+              description={confirmationTitle}
+              {...actions}
+              onCancel={cancelDelete}
+              onClose={cancelDelete}
+            />
+          ) : (
+            <ActionConfirmPopover
+              open={confirmingDelete}
+              anchorRef={deleteAnchorRef}
+              title={confirmationTitle}
+              {...actions}
+              testId="sentry-remove-confirm-popover"
+              onOpenChange={(open) => {
+                if (!open) cancelDelete();
+              }}
+              onCancel={cancelDelete}
+            />
+          )
+        }
+      />
       <IntegrationAuthStatusBanner health={configToHealth(instance)} />
     </div>
   );

@@ -298,7 +298,7 @@ test.describe("Mobile Threads view", () => {
     await drawer.getByTestId("threads-mobile-view-settings").tap();
     const editor = drawer.getByTestId("threads-view-editor");
     await editor.getByTestId("threads-view-delete").tap();
-    const confirmation = editor.getByTestId("saved-task-view-delete-confirmation");
+    const confirmation = drawer.getByTestId("saved-task-view-delete-confirmation");
     await expect(confirmation).toHaveAccessibleName("Delete Release threads?");
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
     for (const action of await confirmation.getByRole("button").all()) {
@@ -316,7 +316,7 @@ test.describe("Mobile Threads view", () => {
         response.request().method() === "PATCH" &&
         response.url().includes("/api/v1/user/settings"),
     );
-    await editor
+    await drawer
       .getByTestId("saved-task-view-delete-confirmation")
       .getByRole("button", { name: "Delete Release threads" })
       .tap();
