@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,7 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// Reap outcomes persisted per candidate (AC-TASKS-ORPHAN-REAP-005.1).
+// Reap outcomes persisted per candidate.
 const (
 	orphanReapOutcomeTerminated = "terminated"
 	orphanReapOutcomeKilled     = "killed"
@@ -23,8 +25,8 @@ const (
 	orphanReapOutcomeSurvived   = "survived"
 )
 
-// orphanReapCandidateRecord is the durable, per-PID outcome record
-// (AC-TASKS-ORPHAN-REAP-005.1, AC-TASKS-ORPHAN-REAP-006.5).
+// orphanReapCandidateRecord is the durable, per-PID outcome record. A
+// re-detected PID supersedes its earlier record.
 type orphanReapCandidateRecord struct {
 	PID     int    `json:"pid"`
 	Cwd     string `json:"cwd,omitempty"`
@@ -35,30 +37,29 @@ type orphanReapCandidateRecord struct {
 }
 
 // orphanReapSkipRecord is a root-level or phase-level skip with no
-// per-candidate record to carry its reason (AC-TASKS-ORPHAN-REAP-005.7). An
-// empty Root names a phase-level skip.
+// per-candidate record to carry its reason. An empty Root names a
+// phase-level skip.
 type orphanReapSkipRecord struct {
 	Root   string `json:"root,omitempty"`
 	Reason string `json:"reason"`
 }
 
-// orphanReapSnapshotTimeout bounds every read the host process snapshot makes
-// (AC-TASKS-ORPHAN-REAP-007.2), matching the lsof timeout already used by
+// orphanReapSnapshotTimeout bounds every read the host process snapshot
+// makes, matching the lsof timeout already used by
 // internal/agentctl/server/api/port_listener.go.
 const orphanReapSnapshotTimeout = 5 * time.Second
 
 // orphanReapGraceDelay matches internal/agentctl/server/process/runner.go's
-// SIGTERM->SIGKILL escalation window (AC-TASKS-ORPHAN-REAP-004.2). Only the
-// duration is borrowed: that code waits on an owned child and kills a process
-// group, both of which this contract forbids.
+// SIGTERM->SIGKILL escalation window. Only the duration is borrowed: that
+// code waits on an owned child and kills a process group, both of which this
+// capability forbids.
 const orphanReapGraceDelay = 2 * time.Second
 
 // orphanReapSettleDelay is the uninterruptible-sleep settle window after
-// SIGKILL (AC-TASKS-ORPHAN-REAP-004.6).
+// SIGKILL.
 const orphanReapSettleDelay = 1 * time.Second
 
-// orphanReapMaxCandidates bounds one job's signalled candidates
-// (AC-TASKS-ORPHAN-REAP-007.5).
+// orphanReapMaxCandidates bounds one job's signalled candidates.
 const orphanReapMaxCandidates = 256
 
 var errOrphanReapCandidateBoundReached = errors.New("orphan reap: candidate bound reached; remainder deferred to a later attempt")
@@ -67,10 +68,9 @@ var errOrphanReapCancelledMidPhase = errors.New("orphan reap: cancelled after th
 
 var errOrphanReapCandidateSurvived = errors.New("orphan reap: one or more candidates survived SIGKILL")
 
-// hostProcess is one process entry from a whole-host snapshot
-// (AC-TASKS-ORPHAN-REAP-002.1). Cwd is resolved and cleaned; an entry that
-// could not be parsed is dropped by the platform reader rather than appearing
-// here with a zero value.
+// hostProcess is one process entry from a whole-host snapshot. Cwd is
+// resolved and cleaned; an entry that could not be parsed is dropped by the
+// platform reader rather than appearing here with a zero value.
 type hostProcess struct {
 	PID     int
 	PPID    int
@@ -79,30 +79,29 @@ type hostProcess struct {
 }
 
 // orphanReapHostSnapshotter reads one host-wide process snapshot. Bound by
-// orphanReapSnapshotTimeout by the caller (AC-TASKS-ORPHAN-REAP-007.2).
-// Platform implementations live in resource_cleanup_orphan_reap_host_*.go.
+// orphanReapSnapshotTimeout by the caller. Platform implementations live in
+// resource_cleanup_orphan_reap_host_*.go.
 type orphanReapHostSnapshotter interface {
 	Snapshot(ctx context.Context) ([]hostProcess, error)
 }
 
 // errOrphanReapUnsupportedPlatform is returned by the platform snapshotter on
-// an OS with no supported detection mechanism (AC-TASKS-ORPHAN-REAP-007.4).
+// an OS with no supported detection mechanism.
 var errOrphanReapUnsupportedPlatform = errors.New("orphan reap: unsupported platform " + runtime.GOOS)
 
 // orphanReapVerifier re-reads one process's resolved working directory
-// (AC-TASKS-ORPHAN-REAP-003.7). Deliberately not the whole-host snapshotter:
+// immediately before a signal. Deliberately not the whole-host snapshotter:
 // this read is bounded independently (orphanReapVerifyTimeout) and falls
-// outside AC-TASKS-ORPHAN-REAP-007.2's combined snapshot bound. Platform
+// outside the whole-host snapshot's own combined timeout budget. Platform
 // implementations live in resource_cleanup_orphan_reap_host_*.go.
 type orphanReapVerifier interface {
 	VerifyCwd(ctx context.Context, pid int) (cwd string, err error)
 }
 
 // gatherOrphanReapRootCandidates resolves every local path this attempt might
-// remove WHILE IT STILL EXISTS (AC-TASKS-ORPHAN-REAP-001.1) — worktree
-// directories, each worktree's per-task container directory (Terminology:
-// "task ... directories"), and quick-chat session directories. Call this
-// BEFORE performTaskCleanup runs; pass the result to
+// remove WHILE IT STILL EXISTS — worktree directories, each worktree's
+// per-task container directory, and quick-chat session directories. Call
+// this BEFORE performTaskCleanup runs; pass the result to
 // confirmOrphanReapRootsRemoved afterward.
 func (s *Service) gatherOrphanReapRootCandidates(
 	snapshot *taskResourceCleanupSnapshot,
@@ -144,9 +143,9 @@ func (s *Service) gatherOrphanReapRootCandidates(
 
 // confirmOrphanReapRootsRemoved re-checks each pre-cleanup candidate after
 // performTaskCleanup has run and returns only the ones now confirmed absent —
-// the ones this attempt actually removed (AC-TASKS-ORPHAN-REAP-001.1,
-// AC-TASKS-ORPHAN-REAP-001.3). This runs every attempt, so whichever attempt
-// actually removes and confirms a path records it, not only the first.
+// the ones this attempt actually removed. This runs every attempt, so
+// whichever attempt actually removes and confirms a path records it, not
+// only the first.
 func confirmOrphanReapRootsRemoved(candidates []string) []string {
 	var removed []string
 	for _, path := range candidates {
@@ -162,8 +161,8 @@ func confirmOrphanReapRootsRemoved(candidates []string) []string {
 }
 
 // mergeOrphanReapRoots adds newlyRemoved paths to the durable root list,
-// deduplicated, preserving existing order (a root persists for the life of
-// the job — AC-TASKS-ORPHAN-REAP-001.1).
+// deduplicated, preserving existing order: a root persists for the life of
+// the job once recorded.
 func mergeOrphanReapRoots(existing, newlyRemoved []string) []string {
 	seen := make(map[string]struct{}, len(existing))
 	merged := make([]string, 0, len(existing)+len(newlyRemoved))
@@ -185,20 +184,21 @@ func mergeOrphanReapRoots(existing, newlyRemoved []string) []string {
 }
 
 // runOrphanReapPhase is the reap phase of the durable task-resource cleanup
-// job (REQ-TASKS-ORPHAN-REAP-001..007). It is the job's last phase
-// (AC-TASKS-ORPHAN-REAP-006.1); the caller gates it on a clean stop
-// (AC-TASKS-ORPHAN-REAP-006.2) and on the context not already being cancelled
-// (AC-TASKS-ORPHAN-REAP-006.3, first clause), mirroring reclaimSSHTaskDirs.
-// The caller records newly removed roots into snapshot.OrphanReapRoots before
+// job. It is the job's last phase; the caller gates it on a clean stop and on
+// the context not already being cancelled, mirroring reclaimSSHTaskDirs. The
+// caller records newly removed roots into snapshot.OrphanReapRoots before
 // calling this, unconditionally: recording a root and signalling against it
-// are gated separately (AC-TASKS-ORPHAN-REAP-001.1 has no clean-stop gate).
+// are gated separately, so an attempt whose stop failed still keeps the root
+// it removed even though it never reaches the signalling step below.
 func (s *Service) runOrphanReapPhase(
 	ctx context.Context,
 	job *models.TaskResourceCleanupJob,
 	snapshot *taskResourceCleanupSnapshot,
 ) []error {
 	if len(snapshot.OrphanReapRoots) == 0 {
-		// AC-TASKS-ORPHAN-REAP-007.1: no roots, no snapshot read.
+		// Nothing could be holding a root open if there are no roots; skip
+		// the host snapshot read entirely rather than pay its cost for
+		// nothing.
 		return nil
 	}
 
@@ -208,8 +208,8 @@ func (s *Service) runOrphanReapPhase(
 		_, err := os.Lstat(root)
 		switch {
 		case err == nil:
-			// AC-TASKS-ORPHAN-REAP-001.4: the root exists again; skip it for
-			// this attempt, but keep it recorded for a later one.
+			// The root exists again; skip it for this attempt, but keep it
+			// recorded for a later one.
 			s.recordOrphanReapRootSkip(snapshot, root, "reap root exists again at reap time")
 		case errors.Is(err, os.ErrNotExist):
 			activeRoots = append(activeRoots, root)
@@ -226,19 +226,18 @@ func (s *Service) runOrphanReapPhase(
 	snap, err := s.takeOrphanReapHostSnapshot(ctx)
 	if err != nil {
 		if errors.Is(err, errOrphanReapUnsupportedPlatform) {
-			// AC-TASKS-ORPHAN-REAP-007.4.
 			s.recordOrphanReapPhaseSkip(snapshot, "unsupported platform "+runtime.GOOS)
 			return nil
 		}
-		// AC-TASKS-ORPHAN-REAP-002.6: unreadable/unavailable/timed-out
-		// snapshot fails the whole phase closed, not the job.
+		// An unreadable, unavailable, or timed-out snapshot fails the whole
+		// phase closed, not the job.
 		s.recordOrphanReapPhaseSkipDetectionFailure(snapshot, "host process snapshot unavailable: "+err.Error())
 		return nil
 	}
 
 	byRoot := attributeOrphanReapCandidates(snap, activeRoots)
 	if len(byRoot) == 0 {
-		// AC-TASKS-ORPHAN-REAP-005.6: no candidates, empty result, no warning.
+		// No candidates: empty result, no warning.
 		return nil
 	}
 
@@ -255,6 +254,7 @@ func (s *Service) runOrphanReapPhase(
 	}
 
 	retErrs := s.signalOrphanReapCandidates(ctx, job.TaskID, toSignal, snapshot)
+	s.recordOrphanReapAggregateOutcome(job.TaskID, snapshot, toSignal)
 	if capped {
 		retErrs = append(retErrs, errOrphanReapCandidateBoundReached)
 		s.logger.Warn("orphan reap candidate bound reached; remainder deferred",
@@ -290,12 +290,12 @@ func (s *Service) recordOrphanReapRootSkip(snapshot *taskResourceCleanupSnapshot
 	}
 }
 
-// recordOrphanReapRootSkipDetectionFailure records a root skip caused by
-// AC-TASKS-ORPHAN-REAP-003.6's fail-closed posture itself firing (a
-// repository error, or an other task's stored path that could not be
-// resolved) rather than by a completed check finding real ownership. Logged
-// at Warn so an operator scanning logs sees a detection failure, not just an
-// inconclusive-by-design skip.
+// recordOrphanReapRootSkipDetectionFailure records a root skip caused by the
+// ownership check's own fail-closed posture firing (a repository error, or
+// an other task's stored path that could not be resolved) rather than by a
+// completed check finding real ownership. Logged at Warn so an operator
+// scanning logs sees a detection failure, not just an inconclusive-by-design
+// skip.
 func (s *Service) recordOrphanReapRootSkipDetectionFailure(snapshot *taskResourceCleanupSnapshot, root, reason string) {
 	snapshot.OrphanReapSkips = append(snapshot.OrphanReapSkips, orphanReapSkipRecord{Root: root, Reason: reason})
 	orphanReapCounters.Add(orphanReapCounterSkippedRoot, 1)
@@ -306,8 +306,7 @@ func (s *Service) recordOrphanReapRootSkipDetectionFailure(snapshot *taskResourc
 }
 
 // recordOrphanReapPhaseSkip records a benign or expected phase-level skip
-// (AC-TASKS-ORPHAN-REAP-007.4's unsupported platform is expected, not a
-// failure).
+// (an unsupported platform is expected, not a failure).
 func (s *Service) recordOrphanReapPhaseSkip(snapshot *taskResourceCleanupSnapshot, reason string) {
 	snapshot.OrphanReapSkips = append(snapshot.OrphanReapSkips, orphanReapSkipRecord{Reason: reason})
 	orphanReapCounters.Add(orphanReapCounterSkippedPhase, 1)
@@ -316,9 +315,9 @@ func (s *Service) recordOrphanReapPhaseSkip(snapshot *taskResourceCleanupSnapsho
 	}
 }
 
-// recordOrphanReapPhaseSkipDetectionFailure records AC-TASKS-ORPHAN-REAP-002.6's
-// case: the host process snapshot itself was unreadable, unavailable, or
-// timed out. Logged at Warn for the same operator-severity reason as
+// recordOrphanReapPhaseSkipDetectionFailure records the case where the host
+// process snapshot itself was unreadable, unavailable, or timed out. Logged
+// at Warn for the same operator-severity reason as
 // recordOrphanReapRootSkipDetectionFailure.
 func (s *Service) recordOrphanReapPhaseSkipDetectionFailure(snapshot *taskResourceCleanupSnapshot, reason string) {
 	snapshot.OrphanReapSkips = append(snapshot.OrphanReapSkips, orphanReapSkipRecord{Reason: reason})
@@ -329,7 +328,7 @@ func (s *Service) recordOrphanReapPhaseSkipDetectionFailure(snapshot *taskResour
 }
 
 // recordOrphanReapCandidate supersedes any earlier record for the same PID
-// (AC-TASKS-ORPHAN-REAP-006.5) and logs/counts the outcome.
+// and logs/counts the outcome.
 func (s *Service) recordOrphanReapCandidate(
 	snapshot *taskResourceCleanupSnapshot, taskID string, rec orphanReapCandidateRecord,
 ) {
@@ -372,19 +371,52 @@ func (s *Service) recordOrphanReapCandidate(
 		s.logger.Info("orphan reap: candidate skipped", fields...)
 		return
 	}
-	// AC-TASKS-ORPHAN-REAP-005.3: any reap (terminated/killed/survived) is
-	// warn-level so an operator scanning logs sees it without opting in.
+	// Any reap (terminated/killed/survived) is warn-level so an operator
+	// scanning logs sees it without opting in.
 	s.logger.Warn("orphan reap: candidate signalled", fields...)
 }
 
+// recordOrphanReapAggregateOutcome emits one aggregate warn log naming the
+// task, the count, and each pid/cwd this attempt terminated or killed, in
+// addition to the per-candidate logs recordOrphanReapCandidate already
+// emits. Silent when nothing was terminated or killed this attempt.
+func (s *Service) recordOrphanReapAggregateOutcome(
+	taskID string, snapshot *taskResourceCleanupSnapshot, attempted []orphanReapCandidate,
+) {
+	if s.logger == nil {
+		return
+	}
+	recordByPID := make(map[int]orphanReapCandidateRecord, len(snapshot.OrphanReapRecords))
+	for _, rec := range snapshot.OrphanReapRecords {
+		recordByPID[rec.PID] = rec
+	}
+	var processes []string
+	for _, cand := range attempted {
+		rec, ok := recordByPID[cand.PID]
+		if !ok {
+			continue
+		}
+		if rec.Outcome == orphanReapOutcomeTerminated || rec.Outcome == orphanReapOutcomeKilled {
+			processes = append(processes, fmt.Sprintf("%d:%s", rec.PID, rec.Cwd))
+		}
+	}
+	if len(processes) == 0 {
+		return
+	}
+	s.logger.Warn("orphan reap: phase reaped candidates",
+		zap.String("task_id", taskID),
+		zap.Int("count", len(processes)),
+		zap.String("processes", strings.Join(processes, ",")),
+	)
+}
+
 // persistOrphanReapProgressBestEffort saves reap outcomes recorded during a
-// failed cleanup attempt so AC-TASKS-ORPHAN-REAP-006.5's cross-attempt
-// supersession has a durable record to supersede. Without this, an attempt
-// that fails for an unrelated reason (e.g. a worktree removal error) would
-// silently discard reap outcomes from the same attempt on every retry. The
-// caller's ctx is frequently the reason this attempt failed in the first
-// place (AC-TASKS-ORPHAN-REAP-006.3's mid-phase cancellation), so this write
-// runs on a context detached from that cancellation — the same pattern
+// failed cleanup attempt so cross-attempt supersession has a durable record
+// to supersede. Without this, an attempt that fails for an unrelated reason
+// (e.g. a worktree removal error) would silently discard reap outcomes from
+// the same attempt on every retry. The caller's ctx is frequently the reason
+// this attempt failed in the first place (a mid-phase cancellation), so this
+// write runs on a context detached from that cancellation — the same pattern
 // retryTaskResourceCleanupJob already uses for its own transition — or every
 // cancelled attempt would silently lose this write before it reaches the DB.
 // Best-effort: a persistence failure here is logged, not folded into the
@@ -419,10 +451,10 @@ func resolveOrphanReapRoots(roots []string) []string {
 	return resolved
 }
 
-// resolveOrphanReapPathBestEffort fully resolves path (AC-TASKS-ORPHAN-REAP-002.3).
-// When the path no longer exists, EvalSymlinks cannot resolve it; fall back to
-// an absolute, cleaned form of the path as it was captured, which is exactly
-// what was compared going forward. An empty or unresolvable path yields "".
+// resolveOrphanReapPathBestEffort fully resolves path. When the path no
+// longer exists, EvalSymlinks cannot resolve it; fall back to an absolute,
+// cleaned form of the path as it was captured, which is exactly what was
+// compared going forward. An empty or unresolvable path yields "".
 func resolveOrphanReapPathBestEffort(path string) string {
 	if path == "" {
 		return ""

@@ -55,17 +55,16 @@ type taskResourceCleanupSnapshot struct {
 	// decodes with an empty list and reclaims nothing.
 	SSHTaskDirs []sshReclaimTarget `json:"ssh_task_dirs,omitempty"`
 	// OrphanReapRoots is the durable, only-growing list of resolved local
-	// paths this job has removed and confirmed absent (REQ-TASKS-ORPHAN-REAP-001).
-	// A root persists for the life of the job; it is never removed from this
-	// list once added.
+	// paths this job has removed and confirmed absent. A root persists for
+	// the life of the job; it is never removed from this list once added.
 	OrphanReapRoots []string `json:"orphan_reap_roots,omitempty"`
-	// OrphanReapRecords carries one outcome per candidate process this job has
-	// reaped or deliberately skipped, keyed by PID (REQ-TASKS-ORPHAN-REAP-005/006).
-	// A re-detected PID's record is replaced by the current attempt's outcome; a
-	// PID not re-detected keeps its existing record.
+	// OrphanReapRecords carries one outcome per candidate process this job
+	// has reaped or deliberately skipped, keyed by PID. A re-detected PID's
+	// record is replaced by the current attempt's outcome; a PID not
+	// re-detected keeps its existing record.
 	OrphanReapRecords []orphanReapCandidateRecord `json:"orphan_reap_records,omitempty"`
 	// OrphanReapSkips carries a root-level or phase-level skip that has no
-	// per-candidate record to attach its reason to (AC-TASKS-ORPHAN-REAP-005.7).
+	// per-candidate record to attach its reason to.
 	OrphanReapSkips []orphanReapSkipRecord `json:"orphan_reap_skips,omitempty"`
 }
 
@@ -518,8 +517,8 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
 	}
-	// Resolve every path this attempt might remove WHILE IT STILL EXISTS
-	// (AC-TASKS-ORPHAN-REAP-001.1), before performTaskCleanup can remove it.
+	// Resolve every path this attempt might remove WHILE IT STILL EXISTS,
+	// before performTaskCleanup can remove it.
 	reapRootCandidates := s.gatherOrphanReapRootCandidates(
 		snapshot, cleanupSessionIDs(snapshot.Sessions, targets),
 	)
@@ -530,15 +529,15 @@ func (s *Service) executeTaskResourceCleanupJob(
 			discardWorktreeChanges: snapshot.DiscardWorktreeChanges,
 		},
 		taskCleanupPreserveRows(stopOutcome))
-	// AC-TASKS-ORPHAN-REAP-001.1: record every path this attempt actually
-	// removed and confirmed absent as a reap root, before any early return
-	// below can skip it. This recording obligation has no clean-stop gate and
-	// no cancellation gate — only the reap phase's signal-sending below does
-	// (AC-TASKS-ORPHAN-REAP-006.2) — because performTaskCleanup above removes
-	// each non-preserved session's directory regardless of whether some other
-	// session's stop failed or the context was cancelled partway through, and
-	// a directory removed on this attempt will no longer exist to re-derive
-	// candidacy from on the next.
+	// Record every path this attempt actually removed and confirmed absent
+	// as a reap root, before any early return below can skip it. This
+	// recording obligation has no clean-stop gate and no cancellation gate:
+	// only the reap phase's signal-sending below has those, because
+	// performTaskCleanup above removes each non-preserved session's
+	// directory regardless of whether some other session's stop failed or
+	// the context was cancelled partway through, and a directory removed on
+	// this attempt will no longer exist to re-derive candidacy from on the
+	// next.
 	snapshot.OrphanReapRoots = mergeOrphanReapRoots(
 		snapshot.OrphanReapRoots, confirmOrphanReapRootsRemoved(reapRootCandidates),
 	)
@@ -556,11 +555,9 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
 	}
-	// Reap phase: REQ-TASKS-ORPHAN-REAP-001..007. Last phase in the job
-	// (AC-TASKS-ORPHAN-REAP-006.1), gated on a clean stop
-	// (AC-TASKS-ORPHAN-REAP-006.2) exactly like remote reclamation above, and
-	// on the context.Cause checks already run above
-	// (AC-TASKS-ORPHAN-REAP-006.3's pre-start clause).
+	// Reap phase: last phase in the job, gated on a clean stop exactly like
+	// remote reclamation above, and on the context.Cause checks already run
+	// above.
 	if len(failedStops) == 0 {
 		errs = append(errs, s.runOrphanReapPhase(ctx, job, snapshot)...)
 	}

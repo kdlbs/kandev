@@ -19,10 +19,9 @@ const (
 	orphanReapSigkill
 )
 
-// orphanReapVerifyTimeout bounds the single-process re-verification read
-// (AC-TASKS-ORPHAN-REAP-003.7). It is deliberately independent of
-// orphanReapSnapshotTimeout: AC-TASKS-ORPHAN-REAP-007.2 explicitly places this
-// read outside that combined bound.
+// orphanReapVerifyTimeout bounds the single-process re-verification read.
+// It is deliberately independent of orphanReapSnapshotTimeout: this read
+// sits outside that combined bound.
 const orphanReapVerifyTimeout = 2 * time.Second
 
 // orphanReapSignaler sends a signal to one PID and checks its liveness. The
@@ -52,12 +51,11 @@ type orphanReapPendingCandidate struct {
 	lastSignal string
 }
 
-// signalOrphanReapCandidates escalates SIGTERM -> SIGKILL per PID
-// (REQ-TASKS-ORPHAN-REAP-004): every SIGTERM is sent before the shared grace
-// period starts (AC-TASKS-ORPHAN-REAP-004.3), and identity is re-verified
-// immediately before every signal (AC-TASKS-ORPHAN-REAP-003.7). It returns a
-// retryable error when any candidate survives SIGKILL, or when cancellation
-// interrupts a signal already sent (AC-TASKS-ORPHAN-REAP-006.3).
+// signalOrphanReapCandidates escalates SIGTERM -> SIGKILL per PID: every
+// SIGTERM is sent before the shared grace period starts, and identity is
+// re-verified immediately before every signal. It returns a retryable error
+// when any candidate survives SIGKILL, or when cancellation interrupts a
+// signal already sent.
 func (s *Service) signalOrphanReapCandidates(
 	ctx context.Context, taskID string, candidates []orphanReapCandidate, snapshot *taskResourceCleanupSnapshot,
 ) []error {
@@ -116,11 +114,11 @@ func (s *Service) sendOrphanReapSigterms(
 	pending := make([]orphanReapPendingCandidate, 0, len(candidates))
 	for _, cand := range candidates {
 		if ctx.Err() != nil {
-			// AC-TASKS-ORPHAN-REAP-006.3: cancellation stops further
-			// signalling immediately; the caller's ctx.Done() branch records
-			// everyone already in pending as skipped. A context-blind
-			// verifier (e.g. Linux's VerifyCwd) must never let this loop
-			// keep sending signals after cancellation.
+			// Cancellation stops further signalling immediately; the
+			// caller's ctx.Done() branch records everyone already in
+			// pending as skipped. A context-blind verifier (e.g. Linux's
+			// VerifyCwd) must never let this loop keep sending signals
+			// after cancellation.
 			break
 		}
 		if !orphanReapReverifyInsideRoot(ctx, verifier, cand.PID, cand.Root) {
@@ -152,15 +150,17 @@ func (s *Service) sendOrphanReapSigkills(
 	signaler orphanReapSignaler,
 ) []orphanReapPendingCandidate {
 	killPending := make([]orphanReapPendingCandidate, 0, len(pending))
-	for _, cand := range pending {
+	for i, cand := range pending {
 		if ctx.Err() != nil {
-			// AC-TASKS-ORPHAN-REAP-006.3: same cancellation posture as
-			// sendOrphanReapSigterms — stop before sending SIGKILL to the
-			// remainder of this batch.
-			break
+			// Cancellation stops further escalation. Every remaining
+			// candidate, including this one, already received SIGTERM in a
+			// prior pass, so it carries forward unmodified rather than being
+			// dropped: the caller's cancellation branch persists everything
+			// still in this slice.
+			return append(killPending, pending[i:]...)
 		}
 		alive, known := signaler.Alive(cand.PID)
-		if !known || !alive {
+		if known && !alive {
 			s.recordOrphanReapCandidate(snapshot, taskID, orphanReapRecordFor(cand.orphanReapCandidate, orphanReapOutcomeTerminated, ""))
 			continue
 		}
@@ -172,7 +172,7 @@ func (s *Service) sendOrphanReapSigkills(
 			// Same recheck as sendOrphanReapSigterms: cancellation can land
 			// during the reverify call itself when the verifier is
 			// context-blind.
-			break
+			return append(killPending, pending[i:]...)
 		}
 		if err := signaler.Signal(cand.PID, orphanReapSigkill); err != nil {
 			s.recordOrphanReapSignalError(snapshot, taskID, cand.orphanReapCandidate, "sigkill", err)
@@ -195,7 +195,7 @@ func (s *Service) resolveOrphanReapSurvivors(
 	survived := false
 	for _, cand := range killPending {
 		alive, known := signaler.Alive(cand.PID)
-		if !known || !alive {
+		if known && !alive {
 			s.recordOrphanReapCandidate(snapshot, taskID, orphanReapRecordFor(cand.orphanReapCandidate, orphanReapOutcomeKilled, ""))
 			continue
 		}
@@ -232,11 +232,10 @@ func (s *Service) recordOrphanReapSkip(
 	s.recordOrphanReapCandidate(snapshot, taskID, orphanReapRecordFor(cand, orphanReapOutcomeSkipped, reason))
 }
 
-// recordOrphanReapSignalError classifies a failed signal send.
-// AC-TASKS-ORPHAN-REAP-004.4: the process is already gone -> terminated, no
-// error. AC-TASKS-ORPHAN-REAP-004.5: permission denied -> non-retryable skip.
-// Anything else is treated conservatively as a skip so a transient OS error
-// never masquerades as a successful reap.
+// recordOrphanReapSignalError classifies a failed signal send: the process
+// already being gone counts as terminated with no error, permission denied
+// is a non-retryable skip, and anything else is treated conservatively as a
+// skip so a transient OS error never masquerades as a successful reap.
 func (s *Service) recordOrphanReapSignalError(
 	snapshot *taskResourceCleanupSnapshot, taskID string, cand orphanReapCandidate, phase string, err error,
 ) {

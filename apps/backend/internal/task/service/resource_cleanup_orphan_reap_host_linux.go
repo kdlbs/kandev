@@ -6,19 +6,16 @@ import (
 	"context"
 	"os"
 	"strconv"
-	"strings"
 )
 
-// linuxOrphanReapHost implements AC-TASKS-ORPHAN-REAP-002.1's Linux
-// mechanism: /proc/<pid>/cwd (whose target carries a " (deleted)" suffix
-// after the directory is removed, stripped before comparison) plus
-// /proc/<pid>/stat for ancestry and command name.
+// linuxOrphanReapHost implements the Linux detection mechanism:
+// /proc/<pid>/cwd (whose target carries a " (deleted)" suffix after the
+// directory is removed, stripped before comparison) plus /proc/<pid>/stat
+// for ancestry and command name.
 type linuxOrphanReapHost struct{}
 
 func defaultOrphanReapHostSnapshotter() orphanReapHostSnapshotter { return linuxOrphanReapHost{} }
 func defaultOrphanReapVerifier() orphanReapVerifier               { return linuxOrphanReapHost{} }
-
-const procDeletedSuffix = " (deleted)"
 
 func (linuxOrphanReapHost) Snapshot(ctx context.Context) ([]hostProcess, error) {
 	entries, err := os.ReadDir("/proc")
@@ -38,13 +35,12 @@ func (linuxOrphanReapHost) Snapshot(ctx context.Context) ([]hostProcess, error) 
 		if statErr != nil {
 			// Gone since the directory listing, or unreadable: no ancestry
 			// or cwd is obtainable at all, so this pid can be neither a
-			// candidate nor an ancestry hop (AC-TASKS-ORPHAN-REAP-002.1).
+			// candidate nor an ancestry hop.
 			continue
 		}
 		// A cwd read failure still leaves ancestry (ppid) usable for the
-		// ownership walk (AC-TASKS-ORPHAN-REAP-003.3); leave Cwd empty so
-		// this pid never becomes a candidate (attributeOrphanReapCandidates
-		// skips empty-cwd entries).
+		// ownership walk; leave Cwd empty so this pid never becomes a
+		// candidate (attributeOrphanReapCandidates skips empty-cwd entries).
 		cwd, _ := readProcCwd(pid)
 		procs = append(procs, hostProcess{PID: pid, PPID: ppid, Cwd: cwd, Command: command})
 	}
@@ -60,31 +56,14 @@ func readProcCwd(pid int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSuffix(target, procDeletedSuffix), nil
+	return trimProcCwdDeletedSuffix(target), nil
 }
 
-// readProcStat parses /proc/<pid>/stat: "pid (comm) state ppid ...". comm is
-// located between the first '(' and the last ')' so an embedded space or
-// paren in the command name cannot desynchronize the field count.
+// readProcStat reads /proc/<pid>/stat and parses it via parseProcStatLine.
 func readProcStat(pid int) (ppid int, command string, err error) {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
 		return 0, "", err
 	}
-	line := strings.TrimSpace(string(data))
-	open := strings.IndexByte(line, '(')
-	closeParen := strings.LastIndexByte(line, ')')
-	if open < 0 || closeParen < open {
-		return 0, "", os.ErrInvalid
-	}
-	command = line[open+1 : closeParen]
-	rest := strings.Fields(line[closeParen+1:])
-	if len(rest) < 2 {
-		return 0, "", os.ErrInvalid
-	}
-	ppid, err = strconv.Atoi(rest[1])
-	if err != nil {
-		return 0, "", err
-	}
-	return ppid, command, nil
+	return parseProcStatLine(string(data))
 }

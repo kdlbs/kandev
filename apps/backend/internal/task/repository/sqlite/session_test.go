@@ -101,6 +101,68 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 }
 
+// ListLiveWorkspaceSessions backs the orphan-reap ownership check's other-task
+// path resolution. It must report the same effective (environment-overridden)
+// workspace_path as GetTaskSession/ListTaskSessions above, never the stale
+// task_sessions column left behind after the linked environment's root moved -
+// a check built on the stale column would compare candidate cwds against a
+// path that is no longer actually owned by anyone, missing real ownership.
+func TestListLiveWorkspaceSessionsUsesCurrentEnvironmentRootNotStaleSessionColumn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID    = "task-live-workspace-root"
+		sessionID = "session-live-workspace-root"
+		envID     = "env-live-workspace-root"
+	)
+
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live workspace root"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            envID,
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/stale-root/kandev",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                sessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: envID,
+		WorkspacePath:     "/stale-root/kandev",
+		State:             models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	// The environment's root moves (e.g. a promoted multi-repo task), but
+	// nothing ever rewrites the session row's own workspace_path column -
+	// that staleness is the case ListLiveWorkspaceSessions must not surface.
+	env, err := repo.GetTaskEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	env.WorkspacePath = "/current-root"
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+	if len(live) != 1 {
+		t.Fatalf("expected exactly one live session, got %+v", live)
+	}
+	if live[0].WorkspacePath != "/current-root" {
+		t.Fatalf("ListLiveWorkspaceSessions WorkspacePath = %q, want the current environment root %q (not the stale session column)",
+			live[0].WorkspacePath, "/current-root")
+	}
+}
+
 func TestTaskSessionWorkspacePathFallsBackWithoutEnvironment(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

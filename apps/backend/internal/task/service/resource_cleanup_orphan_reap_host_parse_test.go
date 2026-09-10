@@ -133,3 +133,62 @@ func TestCombineLsofAndPSSnapshotKeepsCwdOnlyEntry(t *testing.T) {
 		t.Fatalf("unexpected combined snapshot: %+v", got)
 	}
 }
+
+// These parsers previously only compiled under //go:build linux, so no
+// CI runner on a non-Linux host ever ran them directly. They are pure
+// string parsing untagged in resource_cleanup_orphan_reap_host_parse.go, so
+// this file exercises them directly on every platform CI does run.
+
+func TestTrimProcCwdDeletedSuffix(t *testing.T) {
+	if got := trimProcCwdDeletedSuffix("/task/root (deleted)"); got != "/task/root" {
+		t.Fatalf("expected the \" (deleted)\" suffix stripped, got %q", got)
+	}
+}
+
+func TestTrimProcCwdDeletedSuffixLeavesOrdinaryPathUnchanged(t *testing.T) {
+	if got := trimProcCwdDeletedSuffix("/task/root"); got != "/task/root" {
+		t.Fatalf("expected an ordinary path unchanged, got %q", got)
+	}
+}
+
+func TestParseProcStatLine(t *testing.T) {
+	ppid, command, err := parseProcStatLine("500 (node) S 400 400 400 0 -1 4194560 ...\n")
+	if err != nil {
+		t.Fatalf("parseProcStatLine: %v", err)
+	}
+	if ppid != 400 || command != "node" {
+		t.Fatalf("expected ppid=400 command=node, got ppid=%d command=%q", ppid, command)
+	}
+}
+
+// A command name containing a space or its own parens (e.g. "(sd-pam)" or
+// "my (weird) app") must not desynchronize the field count that follows:
+// comm is located between the FIRST '(' and the LAST ')', not by splitting
+// on whitespace.
+func TestParseProcStatLineHandlesCommandWithSpacesAndParens(t *testing.T) {
+	ppid, command, err := parseProcStatLine("500 (my (weird) app) S 400 400 400 0 -1 4194560\n")
+	if err != nil {
+		t.Fatalf("parseProcStatLine: %v", err)
+	}
+	if ppid != 400 || command != "my (weird) app" {
+		t.Fatalf("expected ppid=400 command=%q, got ppid=%d command=%q", "my (weird) app", ppid, command)
+	}
+}
+
+func TestParseProcStatLineRejectsMissingParens(t *testing.T) {
+	if _, _, err := parseProcStatLine("500 node S 400\n"); err == nil {
+		t.Fatalf("expected an error for a line missing comm parens")
+	}
+}
+
+func TestParseProcStatLineRejectsTooFewFieldsAfterComm(t *testing.T) {
+	if _, _, err := parseProcStatLine("500 (node) S\n"); err == nil {
+		t.Fatalf("expected an error for a line with too few fields after comm")
+	}
+}
+
+func TestParseProcStatLineRejectsNonNumericPPID(t *testing.T) {
+	if _, _, err := parseProcStatLine("500 (node) S not-a-number 400\n"); err == nil {
+		t.Fatalf("expected an error for a non-numeric ppid field")
+	}
+}

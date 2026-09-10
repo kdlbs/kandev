@@ -366,12 +366,12 @@ type SessionRepository interface {
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	// ListLiveWorkspaceSessions returns every session across all tasks in one of
-	// the five live states AC-TASKS-ORPHAN-REAP-003.2 names (CREATED, STARTING,
-	// RUNNING, IDLE, WAITING_FOR_INPUT), each carrying its effective
-	// workspace_path. Unlike ListActiveTaskSessions it includes IDLE, because
-	// this method exists only for the orphan-reap workspace-ownership check,
-	// not for the several unrelated "active session" callers that must not
-	// change behavior by picking up IDLE sessions.
+	// the five live states (CREATED, STARTING, RUNNING, IDLE,
+	// WAITING_FOR_INPUT), each carrying its effective workspace_path. Unlike
+	// ListActiveTaskSessions it includes IDLE, because this method exists
+	// only for the orphan-reap workspace-ownership check, not for the
+	// several unrelated "active session" callers that must not change
+	// behavior by picking up IDLE sessions.
 	ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error)
 	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)

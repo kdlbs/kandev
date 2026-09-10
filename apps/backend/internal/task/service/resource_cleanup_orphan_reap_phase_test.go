@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"testing/synctest"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/kandev/kandev/internal/agentruntime"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -439,4 +445,67 @@ func TestPersistOrphanReapProgressBestEffortPersistsSnapshot(t *testing.T) {
 	if len(decoded.OrphanReapSkips) != 1 {
 		t.Fatalf("expected persisted skips to survive, got %+v", decoded.OrphanReapSkips)
 	}
+}
+
+// AC-TASKS-ORPHAN-REAP-005.3: when the phase terminates or kills at least
+// one candidate, it emits one additional aggregate warn log naming the
+// task, the count, and each affected pid with its cwd, on top of the
+// per-candidate logs recordOrphanReapCandidate already emits.
+func TestRunOrphanReapPhaseEmitsAggregateWarnLogWhenCandidatesAreReaped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, _, _ := createTestService(t)
+		core, logs := observer.New(zapcore.WarnLevel)
+		log, logErr := commonlogger.NewFromZap(zap.New(core))
+		if logErr != nil {
+			t.Fatalf("create logger: %v", logErr)
+		}
+		svc.logger = log
+
+		root := t.TempDir()
+		if err := os.RemoveAll(root); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
+		const reapedPID = 700
+		cwd := filepath.Join(root, "child")
+
+		verifier := newFakeOrphanReapVerifier()
+		verifier.set(reapedPID, cwd)
+		fake := newFakeOrphanReapSignaler()
+		fake.setAlive(reapedPID, true)
+		fake.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm {
+				fake.setAlive(pid, false)
+			}
+		}
+		svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{snap: []hostProcess{
+			{PID: reapedPID, PPID: 1, Cwd: cwd, Command: "sh"},
+		}}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = fake
+
+		job := &models.TaskResourceCleanupJob{TaskID: "task-aggregate"}
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		_ = svc.runOrphanReapPhase(context.Background(), job, snapshot)
+
+		var found []observer.LoggedEntry
+		for _, entry := range logs.All() {
+			if entry.Message == "orphan reap: phase reaped candidates" {
+				found = append(found, entry)
+			}
+		}
+		if len(found) != 1 {
+			t.Fatalf("expected exactly one aggregate reap warn log, got %d: %+v", len(found), logs.All())
+		}
+		fields := found[0].ContextMap()
+		if fields["task_id"] != "task-aggregate" {
+			t.Fatalf("expected task_id field task-aggregate, got %+v", fields)
+		}
+		if fields["count"] != int64(1) {
+			t.Fatalf("expected count=1, got %+v", fields["count"])
+		}
+		wantProcesses := fmt.Sprintf("%d:%s", reapedPID, cwd)
+		if fields["processes"] != wantProcesses {
+			t.Fatalf("expected processes=%q, got %+v", wantProcesses, fields["processes"])
+		}
+	})
 }

@@ -404,3 +404,111 @@ func TestApplyOrphanReapOwnershipFailsClosedOnUnresolvableExecutorWorktreePath(t
 		t.Fatalf("expected both roots to be skipped as inconclusive, got %+v", snapshot.OrphanReapSkips)
 	}
 }
+
+// AC-TASKS-ORPHAN-REAP-003.2 vs 003.4: orphanReapFindOverlap matches "equal
+// to, inside, or containing" while orphanReapFindContainment only matches
+// the narrower "equal to or inside" -- a path nested inside root is an
+// overlap but not a containment.
+func TestOrphanReapFindOverlapAndContainmentDiffer(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "tasks", "root")
+
+	t.Run("path nested inside root: overlap yes, containment no", func(t *testing.T) {
+		nested := filepath.Join(root, "child")
+		paths := []orphanReapOwnedPath{{taskID: "other", path: nested}}
+
+		if _, found := orphanReapFindOverlap(paths, root); !found {
+			t.Fatalf("expected overlap to detect a path nested inside root")
+		}
+		if _, found := orphanReapFindContainment(paths, root); found {
+			t.Fatalf("expected containment to not match a path nested inside root")
+		}
+	})
+
+	t.Run("root nested inside path: both match", func(t *testing.T) {
+		ancestor := filepath.Dir(root)
+		paths := []orphanReapOwnedPath{{taskID: "other", path: ancestor}}
+
+		if _, found := orphanReapFindOverlap(paths, root); !found {
+			t.Fatalf("expected overlap to detect root nested inside path")
+		}
+		if _, found := orphanReapFindContainment(paths, root); !found {
+			t.Fatalf("expected containment to detect root nested inside path")
+		}
+	})
+
+	t.Run("equal paths: both match", func(t *testing.T) {
+		paths := []orphanReapOwnedPath{{taskID: "other", path: root}}
+
+		if owner, found := orphanReapFindOverlap(paths, root); !found || owner != "other" {
+			t.Fatalf("expected overlap to match an equal path, got owner=%q found=%v", owner, found)
+		}
+		if owner, found := orphanReapFindContainment(paths, root); !found || owner != "other" {
+			t.Fatalf("expected containment to match an equal path, got owner=%q found=%v", owner, found)
+		}
+	})
+
+	t.Run("unrelated paths: neither matches", func(t *testing.T) {
+		paths := []orphanReapOwnedPath{{taskID: "other", path: filepath.Join(string(filepath.Separator), "unrelated")}}
+
+		if _, found := orphanReapFindOverlap(paths, root); found {
+			t.Fatalf("expected overlap to not match an unrelated path")
+		}
+		if _, found := orphanReapFindContainment(paths, root); found {
+			t.Fatalf("expected containment to not match an unrelated path")
+		}
+	})
+}
+
+// AC-TASKS-ORPHAN-REAP-003.5: PID 0, 1, and any negative PID are always
+// protected regardless of ancestry, since none of them can be a real
+// process this task launched.
+func TestApplyOrphanReapOwnershipProtectsPIDsAtOrBelowOne(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+
+	for _, pid := range []int{0, 1, -1} {
+		root := t.TempDir()
+		byRoot := map[string][]orphanReapCandidate{root: {newOrphanReapOwnershipCandidate(pid, 1, root, root)}}
+		snap := []hostProcess{{PID: pid, PPID: 1, Cwd: root, Command: "sh"}}
+		snapshot := &taskResourceCleanupSnapshot{}
+
+		got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+		if len(got) != 0 {
+			t.Fatalf("expected pid %d to be protected, got %+v", pid, got)
+		}
+	}
+}
+
+// orphanReapProtectedPIDs must protect not just the backend's own pid but
+// every ancestor of it, walked over the same ppid chain every other check
+// in this phase uses.
+func TestOrphanReapProtectedPIDsWalksBackendAncestryChain(t *testing.T) {
+	self := os.Getpid()
+	parent := self + 10000
+	grandparent := self + 20000
+	ppidByPID := map[int]int{self: parent, parent: grandparent}
+
+	got := orphanReapProtectedPIDs(ppidByPID)
+	for _, pid := range []int{self, parent, grandparent} {
+		if !got[pid] {
+			t.Fatalf("expected pid %d to be protected, got %+v", pid, got)
+		}
+	}
+}
+
+// A ppid cycle must not spin orphanReapProtectedPIDs forever: the walk
+// stops the moment it revisits a pid it has already marked protected.
+func TestOrphanReapProtectedPIDsStopsOnCycle(t *testing.T) {
+	self := os.Getpid()
+	other := self + 10000
+	ppidByPID := map[int]int{self: other, other: self}
+
+	got := orphanReapProtectedPIDs(ppidByPID)
+	if !got[self] || !got[other] {
+		t.Fatalf("expected both pids in the cycle to be protected, got %+v", got)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected exactly the two cycle pids protected (no runaway walk), got %+v", got)
+	}
+}
