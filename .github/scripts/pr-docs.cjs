@@ -590,6 +590,7 @@ function validateWorkOrder(workOrderPath, fileContents, deletedPaths) {
             errors.push(error.message);
           }
         }
+        const declaredRequirements = new Set();
         for (const reference of workOrder.data.system_design) {
           try {
             const designPath = resolveReference(workOrderPath, reference);
@@ -617,11 +618,11 @@ function validateWorkOrder(workOrderPath, fileContents, deletedPaths) {
             const designRequirements = Array.isArray(design.data.requirements)
               ? design.data.requirements
               : [];
-            for (const requirementId of workOrder.data.requirements) {
-              if (!designRequirements.includes(requirementId)) {
-                errors.push(`${designPath} does not declare requirement ${requirementId}`);
-                continue;
-              }
+            const ownedRequirements = workOrder.data.requirements.filter(requirementId =>
+              designRequirements.includes(requirementId)
+            );
+            for (const requirementId of ownedRequirements) {
+              declaredRequirements.add(requirementId);
               const definitions = requirementDefinitions(fileContents, requirementId, system);
               if (definitions.length === 0) {
                 errors.push(`${requirementId} is not defined in ${system} requirements`);
@@ -641,9 +642,16 @@ function validateWorkOrder(workOrderPath, fileContents, deletedPaths) {
                 }
               }
             }
-            acceptedReferences.push({ designPath, requirements: workOrder.data.requirements });
+            acceptedReferences.push({ designPath, requirements: ownedRequirements });
           } catch (error) {
             errors.push(error.message);
+          }
+        }
+        for (const requirementId of workOrder.data.requirements) {
+          if (!declaredRequirements.has(requirementId)) {
+            errors.push(
+              `${workOrderPath} requirement ${requirementId} is not declared by any referenced system design`,
+            );
           }
         }
       } catch (error) {
@@ -1462,14 +1470,18 @@ function findAffectedMergeGroups({ entries, pullRequestNumber } = {}) {
     for (const entry of chain) {
       consumed.add(entry);
     }
-    if (
-      pullRequestNumber === undefined ||
-      chain.some(entry => entry.number === pullRequestNumber)
-    ) {
+    for (let prefixLength = 1; prefixLength <= chain.length; prefixLength += 1) {
+      const prefix = chain.slice(0, prefixLength);
+      if (
+        pullRequestNumber !== undefined &&
+        !prefix.some(entry => entry.number === pullRequestNumber)
+      ) {
+        continue;
+      }
       groups.push({
-        baseSha: chain[0].baseSha,
-        entries: chain.map(entry => entry.raw),
-        headSha: chain[chain.length - 1].headSha,
+        baseSha: prefix[0].baseSha,
+        entries: prefix.map(entry => entry.raw),
+        headSha: prefix[prefix.length - 1].headSha,
       });
     }
   }

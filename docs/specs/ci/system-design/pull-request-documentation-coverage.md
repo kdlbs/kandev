@@ -55,7 +55,11 @@ Read selected work orders and references at the exact PR head through the conten
 Validate the repository's existing frontmatter fields: `id`, `title`, `status`, `wave`, `depends_on`, `plan`, `requirements`, `acceptance_criteria`, and `system_design`.
 Require nonempty requirement, acceptance, and design lists. Resolve `plan` to the sibling `plan.md`; require a link back to the selected work order.
 The plan's requirement/design references must cover the selected work order's references.
-Resolve each design under `docs/specs/<system>/system-design/`; find the referenced requirement IDs and acceptance IDs in that owner's requirements directory.
+Resolve each design under `docs/specs/<system>/system-design/`. Each design
+owns the subset of work-order requirements that it declares, and the union of
+the referenced designs must cover every work-order requirement. Find each
+owned requirement and acceptance ID in that design system's requirements
+directory.
 Check that AC IDs belong to referenced REQ IDs and that the design declares those REQ IDs.
 Use a bounded parser for the documented frontmatter subset, not executable YAML tags or PR-supplied parsing code.
 
@@ -88,10 +92,12 @@ Set pending before evaluation; publish success, failure for missing coverage, or
 The status target URL points to the run summary, which lists reasons, paths, references, and remediation.
 Also fail the workflow job on policy failure or infrastructure error. Do not post PR comments.
 
-Serialize all events by the normalized target branch with `cancel-in-progress: false`.
-This shared lock is intentionally broader than a PR-number or group-SHA lock so
-queued label reevaluations cannot race with a merge-group evaluation for the
-same target branch. Every surviving run reads current state.
+Serialize all events by the normalized target branch with `queue: max` and
+`cancel-in-progress: false`. GitHub retains up to 100 pending runs in this
+shared lock; additional runs can be canceled when that bound is full. The
+lock is intentionally broader than a PR-number or group-SHA lock so queued
+label reevaluations cannot race with a merge-group evaluation for the same
+target branch. Every surviving run reads current state.
 Before publishing, reread the head, base, and label set. If changed, reevaluate with a bounded retry, then fail if state remains unstable.
 Do not report stale successes for a new head. Metadata publication is eventually consistent; GitHub does not provide an atomic label-read/status-write transaction.
 
@@ -114,7 +120,8 @@ synthetic group SHA.
 
 Integration must validate the entry-boundary mapping against real GitHub merge-group payloads before requiring this status.
 If GitHub cannot supply the expected chain for a supported queue mode, revise the mapping and fixtures before rollout.
-Label removal while queued must also reevaluate live groups containing that PR, through the same group evaluator and serialization key.
+Label removal while queued must also reevaluate every active group prefix
+containing that PR, through the same group evaluator and serialization key.
 Do not dequeue, requeue, or automatically merge PRs.
 
 ## Security

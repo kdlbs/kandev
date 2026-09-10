@@ -77,10 +77,11 @@ Do not confuse the size-label file filter with this policy; their exclusions dif
 Implemented `.github/scripts/pr-docs.cjs` path classification, bounded
 frontmatter parsing, and linked artifact validation. The validator handles
 renames, deleted references, malformed metadata, multi-requirement acceptance
-criteria, ambiguous requirement IDs, bounded requirement search, document
-limits, and the representative runtime-change fixture.
+criteria, ambiguous requirement IDs, bounded requirement search, disjoint
+multi-design ownership, document limits, and the representative runtime-change
+fixture.
 
 Verification:
 
-- `node --test .github/scripts/pr-docs.test.cjs`: 31 tests passed.
+- `node --test .github/scripts/pr-docs.test.cjs`: 35 tests passed.
 - `git diff --check`: passed.

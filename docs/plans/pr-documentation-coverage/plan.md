@@ -44,7 +44,7 @@ All named test suites below are proposed files.
 | AC-CI-PR-DOCS-001.2 through .6 | `pr-docs.test.cjs`: classification and artifact graph fixtures |
 | AC-CI-PR-DOCS-001.1; AC-CI-PR-DOCS-002.1 through .4 | Fake GitHub adapter exercises draft/fork events and label transitions |
 | AC-CI-PR-DOCS-003.1 through .3 | API failures, pagination caps, stale head/label reads, path and content restrictions |
-| AC-CI-PR-DOCS-003.4 through .5 | Per-member queue evaluation, mismatched queue boundaries, override removal, and rollout checklist |
+| AC-CI-PR-DOCS-003.4 through .5 | Per-member queue evaluation, active prefix reevaluation, mismatched queue boundaries, override removal, and rollout checklist |
 
 Use a representative #3137 fixture: `fix(worktree)` with runtime recovery paths and no artifacts fails.
 Do not fetch the live PR in unit tests.
@@ -78,7 +78,7 @@ activation remain deployment steps and are not claimed by this change.
 
 Implementation verification on 2026-09-10:
 
-- `node --test .github/scripts/pr-docs.test.cjs`: 31 tests passed.
+- `node --test .github/scripts/pr-docs.test.cjs`: 35 tests passed.
 - `python3 .github/scripts/pr-docs-workflow-contract_test.py`: 5 tests passed.
 - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
 - `python3 .github/scripts/lint-action-pinning.py`: 24 workflows passed.
@@ -92,6 +92,7 @@ unrelated workflows; the new workflow has no reported findings.
 ## Risks
 
 - Conservative defaults require labels for some small fixes, refactors, and dependency manifest changes.
+- The target-branch event queue retains up to 100 pending runs; higher bursts can still cancel new runs.
 - Structural validation cannot establish semantic relevance or planning chronology.
 - Merge queue boundary resolution needs real payload validation before mandatory rollout.
 - GitHub label/status publication is eventually consistent.

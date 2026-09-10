@@ -43,6 +43,7 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertIn("group: >-", self.workflow)
         self.assertIn("github.event.merge_group.base_ref", self.workflow)
         self.assertIn("github.event.pull_request.base.ref", self.workflow)
+        self.assertIn("queue: max", self.workflow)
         self.assertIn("cancel-in-progress: false", self.workflow)
 
     # @covers AC-CI-PR-DOCS-003.3

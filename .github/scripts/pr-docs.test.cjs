@@ -264,6 +264,73 @@ system: ui
   return contents;
 }
 
+function multiDesignFixtureContents() {
+  const contents = fixtureContents();
+  contents['docs/plans/recovery/plan.md'] = `---
+status: draft
+requirements:
+  - REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
+  - REQ-WEB-BROWSER-RETENTION-001
+system_design:
+  - ../../specs/platform/system-design/logging.md
+  - ../../specs/web/system-design/retention.md
+---
+
+# Recovery plan
+
+- [ ] [Task 01: Recover worktrees](task-01-recovery.md)
+`;
+  contents['docs/plans/recovery/task-01-recovery.md'] = `---
+id: "01-recovery"
+title: "Recover worktrees"
+status: pending
+wave: 1
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
+  - REQ-WEB-BROWSER-RETENTION-001
+acceptance_criteria:
+  - AC-PLATFORM-DIAGNOSTIC-LOGGING-001.1
+  - AC-WEB-BROWSER-RETENTION-001.1
+system_design:
+  - ../../specs/platform/system-design/logging.md
+  - ../../specs/web/system-design/retention.md
+---
+
+# Task 01
+`;
+  delete contents['docs/specs/ci/system-design/pull-request-documentation-coverage.md'];
+  delete contents['docs/specs/ci/requirements/pull-request-documentation-coverage.md'];
+  contents['docs/specs/platform/system-design/logging.md'] = `---
+status: current
+system: platform
+requirements:
+  - REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
+---
+
+# Diagnostic logging design
+`;
+  contents['docs/specs/web/system-design/retention.md'] = `---
+status: current
+system: web
+requirements:
+  - REQ-WEB-BROWSER-RETENTION-001
+---
+
+# Browser retention design
+`;
+  contents['docs/specs/platform/requirements/diagnostic-logging.md'] = `### REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
+
+- **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.1:** Runtime changes have a work order.
+`;
+  contents['docs/specs/web/requirements/browser-retention.md'] = `### REQ-WEB-BROWSER-RETENTION-001
+
+- **AC-WEB-BROWSER-RETENTION-001.1:** Runtime changes have a work order.
+`;
+  return contents;
+}
+
 // @covers AC-CI-PR-DOCS-001.3, AC-CI-PR-DOCS-001.4
 test('valid linked work order covers a runtime change without editing existing contracts', () => {
   const result = validator.validateCoverage({
@@ -309,6 +376,38 @@ test('multi-requirement work orders map acceptance criteria to their owning requ
 
   assert.equal(result.ok, true, result.errors.join('; '));
   assert.deepEqual(result.errors, []);
+});
+
+test('multi-design work orders validate each requirement against its owning design', () => {
+  const result = validator.validateCoverage({
+    changedFiles: runtimeAndWorkOrderDiff(),
+    fileContents: multiDesignFixtureContents(),
+  });
+
+  assert.equal(result.ok, true, result.errors.join('; '));
+  assert.deepEqual(result.errors, []);
+});
+
+test('multi-design work orders fail when a requirement has no owning design', () => {
+  const contents = multiDesignFixtureContents();
+  contents['docs/specs/web/system-design/retention.md'] = contents[
+    'docs/specs/web/system-design/retention.md'
+  ].replace('  - REQ-WEB-BROWSER-RETENTION-001\n', '');
+
+  const result = validator.validateCoverage({
+    changedFiles: runtimeAndWorkOrderDiff(),
+    fileContents: contents,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(
+    result.errors.some(error =>
+      error.includes('REQ-WEB-BROWSER-RETENTION-001')
+      && error.includes('not declared by any referenced system design')
+    ),
+    true,
+    result.errors.join('; '),
+  );
 });
 
 test('linked plans and designs accept existing update metadata', () => {
@@ -868,6 +967,81 @@ test('affected merge groups can be found for label-triggered reevaluation', () =
   assert.equal(groups[0].baseSha, SHA_A);
   assert.equal(groups[0].headSha, SHA_C);
   assert.deepEqual(groups[0].entries.map(entry => entry.pullRequest.number), [1, 2]);
+});
+
+test('label reevaluation includes every queued prefix containing the changed first member', () => {
+  const entries = [
+    {
+      baseCommit: { oid: SHA_A },
+      headCommit: { oid: SHA_B },
+      pullRequest: { number: 1, headRefOid: SHA_B },
+    },
+    {
+      baseCommit: { oid: SHA_B },
+      headCommit: { oid: SHA_C },
+      pullRequest: { number: 2, headRefOid: SHA_C },
+    },
+  ];
+
+  const groups = validator.findAffectedMergeGroups({ entries, pullRequestNumber: 1 });
+
+  assert.deepEqual(
+    groups.map(group => ({
+      baseSha: group.baseSha,
+      headSha: group.headSha,
+      members: group.entries.map(entry => entry.pullRequest.number),
+    })),
+    [
+      { baseSha: SHA_A, headSha: SHA_B, members: [1] },
+      { baseSha: SHA_A, headSha: SHA_C, members: [1, 2] },
+    ],
+  );
+});
+
+test('label removal reevaluates both prefix and full groups for the first queued member', async () => {
+  const statuses = [];
+  const entries = [
+    {
+      baseCommit: { oid: SHA_A },
+      headCommit: { oid: SHA_B },
+      pullRequest: { number: 42, headRefOid: SHA_B },
+    },
+    {
+      baseCommit: { oid: SHA_B },
+      headCommit: { oid: SHA_C },
+      pullRequest: { number: 43, headRefOid: SHA_C },
+    },
+  ];
+  const client = {
+    async getPullRequest(number) {
+      return number === 42 ? pullRequest(42, SHA_B) : pullRequest(43, SHA_C);
+    },
+    async listFiles(number) {
+      return [{
+        filename: number === 42 ? 'apps/backend/runtime.go' : 'docs/guide.md',
+        status: 'modified',
+      }];
+    },
+    async listMergeQueueEntries(branch) {
+      assert.equal(branch, 'main');
+      return entries;
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, state: status.state });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {},
+    event: { action: 'unlabeled', pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(result.result.affectedGroups.map(group => group.headSha), [SHA_B, SHA_C]);
+  assert.deepEqual(statuses.map(status => status.sha), [SHA_B, SHA_B, SHA_B, SHA_B, SHA_C, SHA_C]);
 });
 
 // @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-003.1

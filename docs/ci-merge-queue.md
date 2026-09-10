@@ -231,17 +231,21 @@ pull request with its own changed files, work-order references, and labels. A
 member's `no-docs-allow` label cannot exempt another member.
 
 All PR and merge-group events use the target branch as one non-cancelling
-concurrency key. This keeps a queued label reevaluation from racing with a
-merge-group status write while the published coverage status remains attached to
-the evaluated PR or synthetic group revision.
+concurrency key with `queue: max`. GitHub retains up to 100 pending runs in
+that key, so ordinary event bursts do not replace the one pending run; events
+that arrive after the bound is full can still be canceled. This keeps a queued
+label reevaluation from racing with a merge-group status write while the
+published coverage status remains attached to the evaluated PR or synthetic
+group revision. A label removal reevaluates every active queue-group prefix
+that contains the PR, not only the longest group.
 
 The status is not in the active required-check list above until live merge-group
 evidence is collected. Roll out the requirement in two stages:
 
 1. Observe ordinary, draft, fork, label-add, label-remove, manual-retry, and
    merge-group runs. Confirm that covered, missing, override, and incomplete
-   responses are attached to the evaluated revision and that an affected queue
-   group reevaluates after label removal.
+   responses are attached to the evaluated revision and that all affected queue
+   group prefixes reevaluate after label removal.
 2. Add `PR documentation coverage` as a separate required status through an
    administrator ruleset change. Preserve the existing six checks and bypass
    rules, then verify a covered PR, an uncovered PR, an override, and a mixed

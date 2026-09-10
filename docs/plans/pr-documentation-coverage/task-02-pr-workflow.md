@@ -92,14 +92,15 @@ A pull_request_target native job check is not sufficient evidence on the PR head
 ## Results
 
 Implemented the bounded GitHub API adapter, revision and label consistency
-checks, status reporting, manual retry handling, trusted workflow, and workflow
-contract coverage. The validator suite is registered in the lint workflow and
-the repository script test target. The workflow uses only read access to pull
-requests and contents plus commit-status writes.
+checks, status reporting, manual retry handling, trusted workflow, bounded
+pending event queue, and workflow contract coverage. The validator suite is
+registered in the lint workflow and the repository script test target. The
+workflow uses only read access to pull requests and contents plus commit-status
+writes.
 
 Verification:
 
-- `node --test .github/scripts/pr-docs.test.cjs`: 31 tests passed.
+- `node --test .github/scripts/pr-docs.test.cjs`: 35 tests passed.
 - `python3 .github/scripts/pr-docs-workflow-contract_test.py`: 5 tests passed.
 - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
 - `python3 .github/scripts/lint-action-pinning.py`: 24 workflows passed.

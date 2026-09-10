@@ -95,14 +95,14 @@ Queue head/base mapping is a GitHub integration assumption. Validate with captur
 ## Results
 
 Implemented exact merge-group boundary resolution, independent member
-evaluation, queued label-removal reevaluation, target-branch serialization,
-contributor guidance, and the administrator rollout notes. The workflow
-publishes the shared status on the synthetic group head without changing labels,
-queue membership, or rulesets.
+evaluation, all active prefix reevaluation after label removal, target-branch
+serialization with a bounded pending queue, contributor guidance, and the
+administrator rollout notes. The workflow publishes the shared status on the
+synthetic group head without changing labels, queue membership, or rulesets.
 
 Verification:
 
-- `node --test .github/scripts/pr-docs.test.cjs`: 31 tests passed.
+- `node --test .github/scripts/pr-docs.test.cjs`: 35 tests passed.
 - `python3 .github/scripts/pr-docs-workflow-contract_test.py`: 5 tests passed.
 - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
 - `python3 .github/scripts/lint-action-pinning.py`: 24 workflows passed.
