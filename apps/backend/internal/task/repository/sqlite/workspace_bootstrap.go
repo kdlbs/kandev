@@ -89,7 +89,7 @@ func (r *Repository) insertTemplateSteps(ctx context.Context, tx *sqlx.Tx, workf
 		`), idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color, stepDef.Prompt, string(events),
 			dialect.BoolToInt(stepDef.AllowManualMove), dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel),
 			stepDef.AutoArchiveAfterHours, stepDef.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), normalizeBootstrapStageType(stepDef.StageType),
-			dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), dialect.BoolToInt(stepDef.CompleteTaskOnEnter), stepDef.WIPLimit, wfmodels.RemapStepID(stepDef.PullFromStepID, idMap), now, now); err != nil {
+			dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), stepDef.WIPLimit, wfmodels.RemapStepID(stepDef.PullFromStepID, idMap), dialect.BoolToInt(stepDef.CompleteTaskOnEnter), now, now); err != nil {
 			return fmt.Errorf("create Kanban step %q: %w", stepDef.Name, err)
 		}
 	}

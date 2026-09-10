@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -78,12 +79,15 @@ type StepPortable struct {
 // build exports in Go keep the same ergonomic API.
 func (s *StepPortable) UnmarshalJSON(data []byte) error {
 	type plainStepPortable StepPortable
-	var decoded plainStepPortable
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["complete_task_on_enter"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+	}
+	var decoded plainStepPortable
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
 	*s = StepPortable(decoded)
@@ -96,6 +100,17 @@ func (s *StepPortable) UnmarshalJSON(data []byte) error {
 // version-2 completion field.
 func (s *StepPortable) UnmarshalYAML(node *yaml.Node) error {
 	type plainStepPortable StepPortable
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value != "complete_task_on_enter" {
+				continue
+			}
+			valueNode := node.Content[i+1]
+			if valueNode.Tag == "!!null" || valueNode.ShortTag() == "!!null" {
+				return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+			}
+		}
+	}
 	var decoded plainStepPortable
 	if err := node.Decode(&decoded); err != nil {
 		return err

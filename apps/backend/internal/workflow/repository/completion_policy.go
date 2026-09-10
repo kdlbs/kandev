@@ -90,15 +90,29 @@ func (r *Repository) backfillTemplateCompletionPolicy(tx *sqlx.Tx) error {
 	}
 	defer func() { _ = rows.Close() }()
 
+	type templateRow struct {
+		id        string
+		stepsJSON string
+	}
+	templates := make([]templateRow, 0)
 	for rows.Next() {
 		var id, stepsJSON string
 		if err := rows.Scan(&id, &stepsJSON); err != nil {
 			return fmt.Errorf("scan workflow template %q: %w", id, err)
 		}
+		templates = append(templates, templateRow{id: id, stepsJSON: stepsJSON})
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read workflow template steps: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close workflow template steps: %w", err)
+	}
 
-		normalized, changed, err := normalizeTemplateCompletionPolicy([]byte(stepsJSON))
+	for _, template := range templates {
+		normalized, changed, err := normalizeTemplateCompletionPolicy([]byte(template.stepsJSON))
 		if err != nil {
-			return fmt.Errorf("normalize workflow template %q: %w", id, err)
+			return fmt.Errorf("normalize workflow template %q: %w", template.id, err)
 		}
 		if !changed {
 			continue
@@ -107,12 +121,9 @@ func (r *Repository) backfillTemplateCompletionPolicy(tx *sqlx.Tx) error {
 			UPDATE workflow_templates
 			SET steps = ?
 			WHERE id = ?
-		`), string(normalized), id); err != nil {
-			return fmt.Errorf("update workflow template %q: %w", id, err)
+		`), string(normalized), template.id); err != nil {
+			return fmt.Errorf("update workflow template %q: %w", template.id, err)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("read workflow template steps: %w", err)
 	}
 	return nil
 }

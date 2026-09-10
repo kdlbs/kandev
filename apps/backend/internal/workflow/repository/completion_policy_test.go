@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -156,6 +157,60 @@ func TestCompletionPolicyReplayPreservesDisabled(t *testing.T) {
 	}
 	if marker == "" {
 		t.Fatal("completion policy marker is empty")
+	}
+}
+
+func TestBackfillTemplateCompletionPolicyUpdatesMultipleTemplates(t *testing.T) {
+	repo, database := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, template := range []struct {
+		id    string
+		steps string
+	}{
+		{id: "template-one", steps: `[{"name":"Work","position":0},{"name":"Done","position":1}]`},
+		{id: "template-two", steps: `[{"name":"Queue","position":0},{"name":"Approved","position":1}]`},
+	} {
+		_, err := database.ExecContext(ctx, `
+			INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
+			VALUES (?, ?, '', 0, ?, ?, ?)
+		`, template.id, template.id, template.steps, now, now)
+		if err != nil {
+			t.Fatalf("insert %s: %v", template.id, err)
+		}
+	}
+
+	tx, err := database.Beginx()
+	if err != nil {
+		t.Fatalf("begin template backfill: %v", err)
+	}
+	if err := repo.backfillTemplateCompletionPolicy(tx); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("backfill template completion policy: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit template backfill: %v", err)
+	}
+
+	for _, templateID := range []string{"template-one", "template-two"} {
+		var stepsJSON string
+		if err := database.Get(&stepsJSON, database.Rebind(`SELECT steps FROM workflow_templates WHERE id = ?`), templateID); err != nil {
+			t.Fatalf("read %s: %v", templateID, err)
+		}
+		var steps []map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(stepsJSON), &steps); err != nil {
+			t.Fatalf("decode %s: %v", templateID, err)
+		}
+		if len(steps) != 2 {
+			t.Fatalf("%s step count = %d, want 2", templateID, len(steps))
+		}
+		var enabled bool
+		if err := json.Unmarshal(steps[1]["complete_task_on_enter"], &enabled); err != nil {
+			t.Fatalf("decode %s completion policy: %v", templateID, err)
+		}
+		if !enabled {
+			t.Fatalf("%s final step completion policy = false, want true", templateID)
+		}
 	}
 }
 

@@ -1050,10 +1050,11 @@ func cancelCompletionStepGetter(enabled, signalRequired bool) *mockStepGetter {
 		}}},
 	}
 	getter.steps["step3"] = &wfmodels.WorkflowStep{
-		ID:         "step3",
-		WorkflowID: "wf1",
-		Name:       "Done",
-		Position:   2,
+		ID:                  "step3",
+		WorkflowID:          "wf1",
+		Name:                "Done",
+		Position:            2,
+		CompleteTaskOnEnter: true,
 	}
 	return getter
 }
@@ -1383,6 +1384,7 @@ func TestCancelAgent_TerminalTransitionSkipsIntermediateReview(t *testing.T) {
 	seedSession(t, repo, taskID, sessionID, "step1")
 	steps := cancelCompletionStepGetter(true, false)
 	steps.steps["step2"].Name = "Done"
+	steps.steps["step2"].CompleteTaskOnEnter = true
 	delete(steps.steps, "step3")
 
 	taskRepo := newMockTaskRepo()

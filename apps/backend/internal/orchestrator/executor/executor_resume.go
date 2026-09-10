@@ -1567,7 +1567,10 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 		// session metadata mirrors the provider conversation identity so an
 		// explicit completed follow-up can still restore the same conversation
 		// after runtime cleanup removed the operational row.
-		if startAgent {
+		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
+			isArchiveCancelledResumeSession(session) ||
+			session.State == models.TaskSessionStateCompleted
+		if startAgent && noAutoPromptState {
 			if token := persistedSessionResumeToken(session); token != "" {
 				req.ACPSessionID = token
 				req.TaskDescription = ""
@@ -1575,9 +1578,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 					zap.String("task_id", task.ID),
 					zap.String("session_id", session.ID),
 					zap.Bool("has_resume_token", true))
-			} else if session.State == models.TaskSessionStateWaitingForInput ||
-				isArchiveCancelledResumeSession(session) ||
-				session.State == models.TaskSessionStateCompleted {
+			} else {
 				// A missing token must still never turn recovery into an automatic
 				// task-description prompt.
 				req.TaskDescription = ""

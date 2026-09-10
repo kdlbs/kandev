@@ -680,6 +680,36 @@ func TestCompletionPolicyPortableContract(t *testing.T) {
 	assert.ErrorContains(t, missing.Validate(), "must be explicitly set")
 }
 
+func TestCompletionPolicyPortableContractRejectsNull(t *testing.T) {
+	t.Run("json", func(t *testing.T) {
+		var decoded WorkflowExport
+		err := json.Unmarshal([]byte(`{
+			"version": 2,
+			"type": "kandev_workflow",
+			"workflows": [{"name":"Current","steps":[
+				{"name":"Work","position":0,"color":"blue","complete_task_on_enter":null}
+			]}]
+		}`), &decoded)
+		assert.ErrorContains(t, err, "complete_task_on_enter")
+	})
+
+	t.Run("yaml", func(t *testing.T) {
+		var decoded WorkflowExport
+		err := yaml.Unmarshal([]byte(`
+version: 2
+type: kandev_workflow
+workflows:
+  - name: Current
+    steps:
+      - name: Work
+        position: 0
+        color: blue
+        complete_task_on_enter: null
+`), &decoded)
+		assert.ErrorContains(t, err, "complete_task_on_enter")
+	})
+}
+
 func TestPullFromStepPositionToID(t *testing.T) {
 	position := 0
 	step := StepPortable{
