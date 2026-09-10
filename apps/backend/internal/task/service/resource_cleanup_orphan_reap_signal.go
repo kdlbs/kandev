@@ -127,6 +127,13 @@ func (s *Service) sendOrphanReapSigterms(
 			s.recordOrphanReapSkip(snapshot, taskID, cand, "pid reused or moved before signal")
 			continue
 		}
+		if ctx.Err() != nil {
+			// Cancellation can land during the reverify call itself when the
+			// verifier is context-blind (e.g. Linux's bare os.Readlink);
+			// re-check immediately before the signal that would otherwise
+			// follow a successful reverify.
+			break
+		}
 		if err := signaler.Signal(cand.PID, orphanReapSigterm); err != nil {
 			s.recordOrphanReapSignalError(snapshot, taskID, cand, "sigterm", err)
 			continue
@@ -160,6 +167,12 @@ func (s *Service) sendOrphanReapSigkills(
 		if !orphanReapReverifyInsideRoot(ctx, verifier, cand.PID, cand.Root) {
 			s.recordOrphanReapSkip(snapshot, taskID, cand.orphanReapCandidate, "pid reused or moved before kill signal")
 			continue
+		}
+		if ctx.Err() != nil {
+			// Same recheck as sendOrphanReapSigterms: cancellation can land
+			// during the reverify call itself when the verifier is
+			// context-blind.
+			break
 		}
 		if err := signaler.Signal(cand.PID, orphanReapSigkill); err != nil {
 			s.recordOrphanReapSignalError(snapshot, taskID, cand.orphanReapCandidate, "sigkill", err)
