@@ -34,6 +34,10 @@ Before changing code:
   `docs/specs/INDEX.md` to find a legacy source.
 - When implementing from a plan, read `plan.md` for orientation and only the
   current work order. Follow its `REQ-*`, `AC-*`, and system-design references.
+- Dependency, sibling, and stacked PR references are snapshots. Resolve the
+  current dependency and base heads before implementation and again before
+  final fixup; if a dependency moved or landed, re-read the affected
+  requirements, designs, contracts, and traceability links.
 - For frontend/UI, include `/mobile-parity` and `/e2e` guidance when applicable.
 - For OpenAI/API docs or other fast-moving dependencies, use official docs or primary sources.
 

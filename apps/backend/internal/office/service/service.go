@@ -4,11 +4,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -45,6 +47,12 @@ type TaskStarterWithEnv interface {
 		planMode bool, attachments []v1.MessageAttachment, env map[string]string) error
 }
 
+// TaskStarterWithLaunchContext optionally carries the complete Office launch
+// context into the agent runtime, including per-run skill additions.
+type TaskStarterWithLaunchContext interface {
+	StartTaskWithLaunchContext(ctx context.Context, taskID string, agentProfileID string, launch LaunchContext) error
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -53,15 +61,16 @@ type TaskStarterWithEnv interface {
 // The scheduler.RoutingDispatcher implementation translates this to
 // the scheduler-side LaunchContext when calling StartTaskWithRoute.
 type LaunchContext struct {
-	ExecutorID        string
-	ExecutorProfileID string
-	Priority          string
-	Prompt            string
-	WorkflowStepID    string
-	PlanMode          bool
-	Attachments       []v1.MessageAttachment
-	Env               map[string]string
-	ProfileID         string
+	ExecutorID           string
+	ExecutorProfileID    string
+	Priority             string
+	Prompt               string
+	WorkflowStepID       string
+	PlanMode             bool
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
+	ProfileID            string
+	AdditionalSkillSlugs []string
 }
 
 // RoutingDispatcher is the seam the office scheduler integration uses to
@@ -167,6 +176,46 @@ func (f TaskStarterWithEnvFunc) StartTaskWithEnv(ctx context.Context, taskID, ag
 	planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
 	return f(ctx, taskID, agentProfileID, executorID, executorProfileID,
 		priority, prompt, workflowStepID, planMode, attachments, env)
+}
+
+// TaskStarterWithLaunchContextFunc adapts a complete launch-context function
+// to the TaskStarter interfaces used by the Office scheduler.
+type TaskStarterWithLaunchContextFunc func(ctx context.Context, taskID, agentProfileID string, launch LaunchContext) error
+
+// StartTask implements TaskStarter.
+func (f TaskStarterWithLaunchContextFunc) StartTask(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment) error {
+	return f(ctx, taskID, agentProfileID, LaunchContext{
+		ExecutorID:        executorID,
+		ExecutorProfileID: executorProfileID,
+		Priority:          priority,
+		Prompt:            prompt,
+		WorkflowStepID:    workflowStepID,
+		PlanMode:          planMode,
+		Attachments:       attachments,
+	})
+}
+
+// StartTaskWithEnv implements TaskStarterWithEnv.
+func (f TaskStarterWithLaunchContextFunc) StartTaskWithEnv(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
+	return f(ctx, taskID, agentProfileID, LaunchContext{
+		ExecutorID:        executorID,
+		ExecutorProfileID: executorProfileID,
+		Priority:          priority,
+		Prompt:            prompt,
+		WorkflowStepID:    workflowStepID,
+		PlanMode:          planMode,
+		Attachments:       attachments,
+		Env:               env,
+	})
+}
+
+// StartTaskWithLaunchContext implements TaskStarterWithLaunchContext.
+func (f TaskStarterWithLaunchContextFunc) StartTaskWithLaunchContext(ctx context.Context, taskID, agentProfileID string, launch LaunchContext) error {
+	return f(ctx, taskID, agentProfileID, launch)
 }
 
 // WorkspaceCreator creates a DB workspace row for kanban compatibility.
@@ -281,7 +330,27 @@ type Service struct {
 	// the budget pathways. Both CheckBudget and CheckPreExecutionBudget
 	// delegate to it.
 	budgetChecker BudgetEvaluator
+
+	// routineRunSyncer closes out a heavy routine run when its linked
+	// task reaches a terminal step. Wired to the routines.RoutineService
+	// at startup; nil in tests that don't exercise routines.
+	routineRunSyncer RoutineRunSyncer
 }
+
+// RoutineRunSyncer is the surface the office service needs from the
+// routines feature to close out a routine run once its linked task
+// finishes. Implemented by *routines.RoutineService.SyncRunStatus —
+// declared here so tests can supply fakes without pulling the routines
+// package. terminalStatus is "done" or "cancelled".
+type RoutineRunSyncer interface {
+	SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error
+}
+
+// SetRoutineRunSyncer wires the routines.RoutineService (or a test fake)
+// used to close out a heavy routine run when its linked task reaches a
+// terminal step. Without this wired, a heavy routine's run stays in
+// task_created until routines.activeRunMaxAge lets a later fire through.
+func (s *Service) SetRoutineRunSyncer(r RoutineRunSyncer) { s.routineRunSyncer = r }
 
 // BudgetEvaluator is the surface the office service needs from the
 // costs feature for budget evaluation. Implemented by
@@ -293,6 +362,22 @@ type BudgetEvaluator interface {
 	// pause). The office service discards the per-policy results; the
 	// costs package is responsible for any side effects.
 	EvaluateBudget(ctx context.Context, workspaceID, agentInstanceID, projectID string) error
+
+	// EvaluatePreLaunch and EvaluateDefaultCeiling back the pre-launch
+	// admission gates of REQ-OFFICE-BUDGET-001/-003/-006
+	// (internal/office/service/budget_admission.go). Unlike
+	// CheckPreExecutionBudget/EvaluateBudget above, neither has a
+	// nil-evaluator fallback: "no evaluator wired" is its own admission gate
+	// (AC-OFFICE-BUDGET-001.5/.6), decided by the caller before either method
+	// is invoked, never a fail-open default inside it.
+	EvaluatePreLaunch(
+		ctx context.Context,
+		workspaceID, agentInstanceID, projectID string,
+		hasProject bool,
+		provenance shared.RunProvenance,
+		at time.Time,
+	) (models.PreLaunchResult, error)
+	EvaluateDefaultCeiling(ctx context.Context, workspaceID string, at time.Time) (models.PreLaunchPolicyResult, error)
 }
 
 // SetBudgetChecker wires the costs.CostService (or a test fake) as the
@@ -680,6 +765,46 @@ func (s *Service) CheckBudget(ctx context.Context, workspaceID, agentInstanceID,
 		return nil
 	}
 	return s.budgetChecker.EvaluateBudget(ctx, workspaceID, agentInstanceID, projectID)
+}
+
+// errBudgetEvaluatorNotConfigured is returned by EvaluatePreLaunch and
+// EvaluateDefaultCeiling when no BudgetEvaluator is wired. Unlike
+// CheckBudget's no-op, both calls always need a real disposition -- there
+// is no zero-value PreLaunchResult/PreLaunchPolicyResult that means
+// anything -- so a nil budgetChecker is a distinguishable error rather than
+// a silent no-op. Safe today only because admitRun's gate 2
+// (budget_admission.go) already checks budgetChecker == nil before either
+// is ever called; this guard is what keeps a future caller that skips gate
+// 2 from a nil-pointer dereference instead.
+var errBudgetEvaluatorNotConfigured = errors.New("office: no budget evaluator configured")
+
+// EvaluatePreLaunch delegates to the wired BudgetEvaluator for the
+// pre-launch admission gates (budget_admission.go). Callers must check
+// gate 2 (evaluator presence, s.budgetChecker == nil) themselves before
+// calling this — see the BudgetEvaluator doc comment above.
+func (s *Service) EvaluatePreLaunch(
+	ctx context.Context,
+	workspaceID, agentInstanceID, projectID string,
+	hasProject bool,
+	provenance shared.RunProvenance,
+	at time.Time,
+) (models.PreLaunchResult, error) {
+	if s.budgetChecker == nil {
+		return models.PreLaunchResult{}, errBudgetEvaluatorNotConfigured
+	}
+	return s.budgetChecker.EvaluatePreLaunch(ctx, workspaceID, agentInstanceID, projectID, hasProject, provenance, at)
+}
+
+// EvaluateDefaultCeiling delegates to the wired BudgetEvaluator for gate 5
+// of budget_admission.go. See EvaluatePreLaunch above for the nil-evaluator
+// caveat.
+func (s *Service) EvaluateDefaultCeiling(
+	ctx context.Context, workspaceID string, at time.Time,
+) (models.PreLaunchPolicyResult, error) {
+	if s.budgetChecker == nil {
+		return models.PreLaunchPolicyResult{}, errBudgetEvaluatorNotConfigured
+	}
+	return s.budgetChecker.EvaluateDefaultCeiling(ctx, workspaceID, at)
 }
 
 // CreateBudgetPolicy creates a new budget policy.

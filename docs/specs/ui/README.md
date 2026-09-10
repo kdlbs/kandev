@@ -6,11 +6,18 @@ migration: in_progress
 owners:
   - kandev
 ---
+
 # UI
+
 ## Scope
+
 UI owns responsive behavior; other systems own behavior/state.
+
 ## Map
+
 ### Requirements
+
+- [Control sizing](requirements/control-sizing.md)
 - [ACP model summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
@@ -61,17 +68,20 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Mermaid Rendering](requirements/mermaid-rendering.md)
 - [Message favorite star mobile sizing](requirements/message-favorite-star-mobile-size.md)
 - [Metadata dialog](requirements/message-metadata-overflow.md)
-- [Queue auto-merge](requirements/message-queue-auto-merge.md)
+- [Queue auto-merge (deprecated)](requirements/message-queue-auto-merge.md)
+- [Queue auto-merge session overrides (active)](requirements/message-queue-auto-merge-session-overrides.md)
+- [Message queue automation controls (active)](requirements/message-queue-automation-controls.md)
 - [Message queue management](requirements/message-queue-management.md)
 - [Merge queued](requirements/message-queue-merge.md)
 - [Pin the Message Queue Panel](requirements/message-queue-pin.md)
 - [Reorder Queued Messages](requirements/message-queue-reorder.md)
-- [Pending auto-run](requirements/message-queue-run.md)
+- [Pending auto-run (deprecated)](requirements/message-queue-run.md)
 - [Send Queued Messages Now](requirements/message-queue-send-now.md)
 - [Mobile topbar actions](requirements/mobile-quick-chat-topbar.md)
 - [Mobile Task Chrome](requirements/mobile-task-chrome.md)
 - [Mobile Task Navigation](requirements/mobile-task-navigation.md)
 - [Plan comments](requirements/plan-comment-drafts.md)
+- [Plan Editor Task-Switch Stability](requirements/plan-editor-task-switch-stability.md)
 - [Port-forwarding discovery](requirements/port-forwarding-discovery.md)
 - [Open proxy URLs in the browser panel](requirements/port-proxy-browser-panel.md)
 - [Responsive PR Detail Header](requirements/pr-detail-header-width.md)
@@ -94,6 +104,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Review File Status Cues](requirements/review-file-status.md)
 - [Review Markdown Preview](requirements/review-markdown-preview.md)
 - [Search/filter dropdown scroll reset](requirements/search-filter-scroll-reset.md)
+- [Saved Task View Deletion Confirmation](requirements/saved-task-view-deletion-confirmation.md)
 - [Selected option prominence](requirements/selected-option-picker-prominence.md)
 - [Session](requirements/session-start-composer-readiness.md)
 - [Session tab delete feedback](requirements/session-tab-delete-feedback.md)
@@ -106,6 +117,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Sidebar Archived Task Views](requirements/sidebar-archived-filter.md)
 - [Sidebar Diff Stat Priority](requirements/sidebar-diff-stat-priority.md)
 - [Sidebar empty task alignment](requirements/sidebar-empty-task-alignment.md)
+- [Sidebar Effective Task Tree State](requirements/sidebar-effective-task-tree-state.md)
 - [Sidebar Last Activity Sort](requirements/sidebar-last-activity-sort.md)
 - [Sidebar Queued Prompt Count Badge](requirements/sidebar-queued-prompt-count.md)
 - [Repository Groups](requirements/sidebar-repository-grouping.md)
@@ -128,6 +140,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Terminal close feedback](requirements/terminal-close-feedback.md)
 - [Terminal Rendering](requirements/terminal-rendering.md)
 - [Terminal Touch Scrolling](requirements/terminal-touch-scrolling.md)
+- [Toast theme](requirements/toast-theme.md)
 - [Thinking Message Preview](requirements/thinking-message-preview.md)
 - [Transcript Auto-scroll Stability](requirements/transcript-auto-scroll.md)
 - [Transcript Navigation Settings](requirements/transcript-navigation-settings.md)
@@ -137,7 +150,9 @@ UI owns responsive behavior; other systems own behavior/state.
 - [WebKit Task Dialog Rendering](requirements/webkit-task-dialog-rendering.md)
 - [Active workspace first in settings](requirements/workspace-active-first-order.md)
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
+
 ### Design
+- [Control sizing](system-design/control-sizing.md)
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Dialog containment](system-design/dialog-content-containment.md)
@@ -163,23 +178,29 @@ UI owns responsive behavior; other systems own behavior/state.
 - [File Tree Chat](system-design/file-tree-chat-context.md)
 - [MCP results](system-design/kandev-mcp-tool-results.md)
 - [Message queue row controls](system-design/message-queue-row-controls.md)
+- [Message Queue Automation Controls (current)](system-design/message-queue-automation-controls.md)
 - [Native HTML File Preview](system-design/native-html-preview.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
+- [Mobile Menu Backdrops System Design](system-design/mobile-menu-backdrops.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Automatic Task Colors](system-design/sidebar-automatic-task-colors.md)
+- [Sidebar Effective Task Tree State](system-design/sidebar-effective-task-tree-state.md)
 - [Sidebar Task Focus](system-design/sidebar-task-focus.md)
 - [Sidebar task row](system-design/sidebar-task-row-presentation.md)
 - [PR walkthrough](system-design/pr-walkthrough.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
+- [Queued message editing](system-design/message-queue-edit.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
 - [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
 - [Quick Chat and Terminal Tabs](system-design/quick-terminal.md)
 - [Plan comments](system-design/plan-comment-drafts.md)
+- [Plan Editor Task-Switch Stability](system-design/plan-editor-task-switch-stability.md)
 - [Responsive Plan Formatting](system-design/responsive-plan-formatting.md)
 - [Confirmations](system-design/confirmation-warning-hierarchy.md)
 - [Resizable Markdown Table Columns](system-design/resizable-markdown-tables.md)
+- [Saved Task View Deletion Confirmation](system-design/saved-task-view-deletion-confirmation.md)
 - [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
 - [Task surface](system-design/task-surface-render-isolation.md)
@@ -189,9 +210,12 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Command-panel activity icons](system-design/command-panel-task-activity-icons.md)
 - [Terminal Rendering](system-design/terminal-rendering.md)
 - [Terminal Touch Scrolling](system-design/terminal-touch-scrolling.md)
+- [Toast theme](system-design/toast-theme.md)
 - [Thinking Message Preview](system-design/thinking-message-preview.md)
 - [Settings Menu Default](system-design/settings-menu-default.md)
 - [Transcript history visibility](system-design/task-prompt-transcript-visibility.md)
 - [Transcript Auto-scroll Stability](system-design/transcript-auto-scroll.md)
+
 ## Related
+
 - [Platform](../platform/README.md)

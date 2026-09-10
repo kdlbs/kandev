@@ -34,6 +34,7 @@ import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
+import { hasPendingClarification } from "./types";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -192,6 +193,7 @@ export function useSubmitHandler(
   const { handleSendMessage } = usePanelMessageHandler(panelState);
 
   const handleSubmit = useCallback(
+    // eslint-disable-next-line complexity -- submission owns the shared cleanup and failure-preservation branches.
     async (payload: ChatSubmitPayload) => {
       if (isSending) return;
       setIsSending(true);
@@ -205,15 +207,17 @@ export function useSubmitHandler(
           messageComments,
         });
         const outbound = { ...payload, message: finalMessage };
+        let submissionResult: void | boolean;
         if (onSend && !pendingClarification) {
           // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
           const taskCtx = payload.inlineTaskMentions?.length
             ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
             : "";
-          await onSend({ ...outbound, message: finalMessage + taskCtx });
+          submissionResult = await onSend({ ...outbound, message: finalMessage + taskCtx });
         } else {
-          await handleSendMessage(outbound);
+          submissionResult = await handleSendMessage(outbound);
         }
+        if (submissionResult === false) return false;
         if (payload.reviewComments && payload.reviewComments.length > 0)
           markCommentsSent(payload.reviewComments.map((c) => c.id));
         if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
@@ -441,6 +445,10 @@ export function ChatInputArea({
     chatInputRef,
     placeholderOverride,
   );
+  const clarificationPending = hasPendingClarification(
+    Boolean(panelState.pendingClarification),
+    panelState.session?.pending_action,
+  );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
     panelState,
@@ -484,6 +492,7 @@ export function ChatInputArea({
             nextStepName={proceedStepName}
             onProceed={proceed}
             isAgentBusy={isAgentBusy}
+            hasPendingClarification={clarificationPending}
             isMoving={isMoving}
             queueChip={queueChip}
             showScrollToLastPrompt={showScrollToLastPrompt}

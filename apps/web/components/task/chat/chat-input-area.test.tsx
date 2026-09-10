@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
 const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
+let mockProceedStepName: string | null = null;
 
-const mockState = { userSettings: { keyboardShortcuts: {} } };
+const mockState = {
+  userSettings: { keyboardShortcuts: {}, chatSubmitKey: "enter" },
+  quickChat: { sessions: [] },
+  kanban: { workflowId: null, tasks: [], steps: [] },
+  kanbanMulti: { snapshots: {} },
+  workflows: { items: [] },
+};
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
@@ -41,6 +49,42 @@ vi.mock("@/components/task/chat/chat-input-container", () => ({
   ChatInputContainer: () => null,
 }));
 
+vi.mock("@/components/task/chat/queued-ghost-list", () => ({
+  QueueAffordance: ({
+    children,
+    renderStatusBar,
+  }: {
+    children: ReactNode;
+    renderStatusBar?: (queueChip: ReactNode) => ReactNode;
+  }) => (
+    <>
+      {renderStatusBar?.(null)}
+      {children}
+    </>
+  ),
+}));
+
+vi.mock("./composer-agent-start-hint", () => ({
+  ComposerAgentStartHint: () => null,
+}));
+
+vi.mock("./dynamic-route-recovery", () => ({
+  DynamicRouteRecovery: () => null,
+}));
+
+vi.mock("./chat-status-bar", () => ({
+  ChatStatusBar: (props: {
+    nextStepName: string | null;
+    isAgentBusy: boolean;
+    hasPendingClarification: boolean;
+  }) =>
+    props.nextStepName && !props.isAgentBusy && !props.hasPendingClarification ? (
+      <button type="button" data-testid="proceed-next-step" />
+    ) : null,
+  resolveStatusRowTaskId: (sessionTaskId: string | null, statusTaskId: string | null) =>
+    sessionTaskId ?? statusTaskId,
+}));
+
 vi.mock("@/components/task/chat/todo-indicator", () => ({
   TodoIndicator: () => null,
 }));
@@ -62,7 +106,7 @@ vi.mock("@/hooks/use-message-handler", () => ({
 vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
   usePlanActions: () => ({
     implementPlanHandler: vi.fn(),
-    proceedStepName: null,
+    proceedStepName: mockProceedStepName,
     proceed: vi.fn(),
     isMoving: false,
   }),
@@ -79,7 +123,12 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ send: vi.fn() }),
 }));
 
-import { resolveInputPlaceholder, useChatPanelHandlers, useSubmitHandler } from "./chat-input-area";
+import {
+  ChatInputArea,
+  resolveInputPlaceholder,
+  useChatPanelHandlers,
+  useSubmitHandler,
+} from "./chat-input-area";
 
 beforeEach(() => {
   handleSendMessageMock.mockReset();
@@ -89,6 +138,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  mockProceedStepName = null;
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
@@ -118,11 +168,81 @@ function panelState(overrides = {}) {
   } as never;
 }
 
+function composerPanelState(overrides = {}) {
+  return {
+    ...panelState(),
+    session: { state: "WAITING_FOR_INPUT", pending_action: "clarification" },
+    task: { id: "task-1", title: "Task" },
+    taskDescription: "Task description",
+    needsRecovery: false,
+    planModeAvailable: true,
+    mcpServers: [],
+    mcpAttachmentHistory: [],
+    supportsSteering: false,
+    isStarting: false,
+    isQueueReady: true,
+    inputMode: "direct",
+    isPreparingEnvironment: false,
+    isFailed: false,
+    isCompleted: false,
+    agentCommands: [],
+    todoItems: [],
+    pendingCommentsByFile: {},
+    handleToggleContextFile: vi.fn(),
+    handleAddContextFile: vi.fn(),
+    contextItems: [],
+    planContextEnabled: false,
+    handlePlanModeChange: vi.fn(),
+    ...overrides,
+  } as never;
+}
+
+function renderComposer(panelStateOverride = {}) {
+  mockProceedStepName = "Review";
+  return render(
+    <ChatInputArea
+      chatInputRef={{ current: null }}
+      clarificationKey={0}
+      onClarificationResolved={vi.fn()}
+      handleSubmit={vi.fn()}
+      handleCancelTurn={vi.fn().mockResolvedValue(undefined)}
+      showRequestChangesTooltip={false}
+      panelState={composerPanelState(panelStateOverride)}
+      isSending={false}
+    />,
+  );
+}
+
 describe("resolveInputPlaceholder", () => {
   it("invites queueing while a clarification remains pending", () => {
     expect(resolveInputPlaceholder(false, undefined, false, true, false)).toBe(
       "Queue instructions while the question is pending...",
     );
+  });
+});
+
+describe("ChatInputArea proceed visibility", () => {
+  it("keeps proceed hidden until durable clarification hydration clears", () => {
+    const { rerender } = renderComposer();
+
+    expect(screen.queryByTestId("proceed-next-step")).toBeNull();
+
+    rerender(
+      <ChatInputArea
+        chatInputRef={{ current: null }}
+        clarificationKey={0}
+        onClarificationResolved={vi.fn()}
+        handleSubmit={vi.fn()}
+        handleCancelTurn={vi.fn().mockResolvedValue(undefined)}
+        showRequestChangesTooltip={false}
+        panelState={composerPanelState({
+          session: { state: "WAITING_FOR_INPUT", pending_action: null },
+        })}
+        isSending={false}
+      />,
+    );
+
+    expect(screen.getByTestId("proceed-next-step")).toBeTruthy();
   });
 });
 
@@ -184,6 +304,25 @@ describe("useSubmitHandler routing", () => {
 
     expect(onSend).toHaveBeenCalledWith({ message: "direct preview message" });
     expect(handleSendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("does not clear composer side effects when admission reports unsuccessful", async () => {
+    const clearEphemeral = vi.fn();
+    handleSendMessageMock.mockResolvedValueOnce(false);
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          contextFiles: [{ path: "src", name: "src", isDirectory: true }],
+          clearEphemeral,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "keep this draft" });
+    });
+
+    expect(clearEphemeral).not.toHaveBeenCalled();
   });
 });
 

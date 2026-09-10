@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -34,6 +35,41 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 	}
 	if values["model"] != modelFast || values["effort"] != reasoningEffortLow {
 		t.Fatalf("config values = %#v, want model=mock-fast and effort=low", values)
+	}
+}
+
+func TestLoadSessionReturnsCapabilitiesForResumedSession(t *testing.T) {
+	sessionID := acp.SessionId("session-load-test")
+	agent := &mockAgent{
+		conn:            &promptCancelUpdater{started: make(chan struct{})},
+		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+
+	response, err := agent.LoadSession(context.Background(), acp.LoadSessionRequest{SessionId: sessionID})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	select {
+	case <-agent.conn.(*promptCancelUpdater).started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resumed-session commands")
+	}
+	if len(response.ConfigOptions) == 0 {
+		t.Fatal("LoadSession() returned no config options")
+	}
+	if response.Modes == nil || len(response.Modes.AvailableModes) == 0 {
+		t.Fatal("LoadSession() returned no session modes")
+	}
+	values := make(map[string]string, len(response.ConfigOptions))
+	for _, option := range response.ConfigOptions {
+		if option.Select != nil {
+			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
+		}
+	}
+	if values["model"] != modelFast {
+		t.Fatalf("loaded model = %q, want %q", values["model"], modelFast)
 	}
 }
 
@@ -224,6 +260,26 @@ func TestMockSessionConfigOptionsForModelAdvertisesSlowModel(t *testing.T) {
 	}
 }
 
+func TestMockSessionConfigOptionsVariationCatalogs(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("MOCK_AGENT_MODEL_CATALOG", "")
+	unique := modelIDs(findModelOption(t))
+	if !containsString(unique, modelUnique) {
+		t.Fatalf("unique catalog = %v, missing %s", unique, modelUnique)
+	}
+	if containsString(unique, modelAmbiguousFirst) || containsString(unique, modelAmbiguousLast) {
+		t.Fatalf("unique catalog = %v, must not include ambiguous variations", unique)
+	}
+
+	t.Setenv("MOCK_AGENT_MODEL_CATALOG", "ambiguous")
+	ambiguous := modelIDs(findModelOption(t))
+	for _, want := range []string{modelAmbiguousFirst, modelAmbiguousLast} {
+		if !containsString(ambiguous, want) {
+			t.Errorf("ambiguous catalog = %v, missing %s", ambiguous, want)
+		}
+	}
+}
+
 func findModelOption(t *testing.T) acp.SessionConfigOption {
 	t.Helper()
 	for _, option := range mockSessionConfigOptionsForModel(modelFast) {
@@ -233,6 +289,17 @@ func findModelOption(t *testing.T) acp.SessionConfigOption {
 	}
 	t.Fatal("no model config option advertised")
 	return acp.SessionConfigOption{}
+}
+
+func modelIDs(option acp.SessionConfigOption) []string {
+	if option.Select == nil || option.Select.Options.Ungrouped == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(*option.Select.Options.Ungrouped))
+	for _, model := range *option.Select.Options.Ungrouped {
+		ids = append(ids, string(model.Value))
+	}
+	return ids
 }
 
 func containsString(values []string, want string) bool {

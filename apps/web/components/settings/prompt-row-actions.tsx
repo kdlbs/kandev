@@ -46,7 +46,7 @@ export function PromptRowActions({
             onClick={() => onStartEditing(prompt)}
             disabled={isBusy || showCreate}
             aria-label={t("settings:edit")}
-            className="min-h-11 min-w-11 cursor-pointer"
+            className="cursor-pointer"
             data-testid="prompt-edit-button"
           >
             <IconEdit className="h-4 w-4" />
@@ -58,7 +58,7 @@ export function PromptRowActions({
             onClick={() => onOpenDelete(prompt)}
             disabled={isBusy}
             aria-label={t("settings:promptDelete")}
-            className="min-h-11 min-w-11 cursor-pointer"
+            className="cursor-pointer"
             data-testid="prompt-delete-button"
           >
             <IconTrash className="h-4 w-4" />

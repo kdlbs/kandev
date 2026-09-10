@@ -147,7 +147,7 @@ var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection close
 // Requiring the whole normalized message prevents ordinary provider prose from
 // combining the control prefix with an unrelated transport fragment.
 var cursorRetriableStreamResetRe = regexp.MustCompile(
-	`(?i)^\s*Error:\s*RetriableError:\s*HTTP/2 stream closed with error code CANCEL \(0x8\)(?:\s+\[canceled\])?\s*$`,
+	`(?i)^\s*Error:\s*RetriableError:\s*(?:\[canceled\]\s+)?HTTP/2 stream closed with error code CANCEL \(0x8\)(?:\s+\[canceled\])?\s*$`,
 )
 
 // overloadedRe matches the transient 529 Overloaded signature: either the

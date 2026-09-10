@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	executorpkg "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -70,6 +71,8 @@ func provideOrchestrator(
 	promptSvc *promptservice.Service,
 	githubSvc *githubpkg.Service,
 	gitCredentialBroker *gitcredentials.Broker,
+	settingsStore *systemsettings.Store,
+	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -98,16 +101,22 @@ func provideOrchestrator(
 		zap.Int("agent_standalone_port", cfg.Agent.StandalonePort))
 
 	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
+	if len(trackers) > 0 && trackers[0] != nil {
+		if recordErr := recordRequiredStore(trackers[0], "message-queue", err); recordErr != nil {
+			return nil, nil, fmt.Errorf("message queue store: %w", recordErr)
+		}
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	queueSettings := resolveQueueSettings(pool, log, queueConfiguration(cfg)).Effective
+	queueResolution := resolveQueueSettingsWithStore(settingsStore, pool, log, queueConfiguration(cfg))
+	queueSettings := queueResolution.Effective
 	maxPerSession := queueSettings.MaxPerSession
 	mergeEnabled := queueSettings.MergeEnabled
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
-	msgQueue.SetAutoMergeEnabled(autoMergeEnabled)
+	msgQueue.SetAutoMergePolicy(autoMergeEnabled, queueResolution.Settings.AutoMergeRevision)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
 		zap.Bool("merge_enabled", mergeEnabled),
@@ -133,6 +142,10 @@ func provideOrchestrator(
 	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	orchestratorSvc.SetLaunchAttachmentClaimer(taskSvc)
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		orchestratorSvc.SetSessionAttachmentCleaner(taskSvc)
+	}
+	orchestratorSvc.SetSessionAttachmentTransferer(taskSvc)
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
@@ -175,6 +188,11 @@ func provideOrchestrator(
 	// Wired unconditionally: dependencies are a core Kanban relationship, not an
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
+
+	// Let the task service read the orchestrator's task-level
+	// parked_on_background_work OR-aggregate and its own monotonic revision so
+	// task.updated events carry it (spec: docs/specs/disambiguate-waiting/spec.md).
+	taskSvc.SetTaskParkedProvider(orchestratorSvc)
 
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
@@ -346,17 +364,29 @@ func resolveQueueSettings(
 	log *logger.Logger,
 	startup ...queuesettings.Configuration,
 ) queuesettings.Resolution {
+	return resolveQueueSettingsWithStore(nil, pool, log, startup...)
+}
+
+func resolveQueueSettingsWithStore(
+	settingsStore *systemsettings.Store,
+	pool *db.Pool,
+	log *logger.Logger,
+	startup ...queuesettings.Configuration,
+) queuesettings.Resolution {
 	var configured *queuesettings.Settings
-	if pool != nil {
-		rawStore, err := systemsettings.NewStore(pool)
+	if settingsStore == nil && pool != nil {
+		var err error
+		settingsStore, err = systemsettings.NewStore(pool)
 		if err != nil {
 			log.Warn("Failed to initialize message queue settings store", zap.Error(err))
+		}
+	}
+	if settingsStore != nil {
+		loaded, err := queuesettings.NewStore(settingsStore).Load(context.Background())
+		if err != nil {
+			log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
 		} else {
-			configured, err = queuesettings.NewStore(rawStore).Load(context.Background())
-			if err != nil {
-				log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
-				configured = nil
-			}
+			configured = loaded
 		}
 	}
 	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment(), startup...)

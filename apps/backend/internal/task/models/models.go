@@ -102,6 +102,12 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
+	// the first session identity used by workflow session targeting.
+	MetaKeyWorkflowInitialSession = "workflow_initial_session"
+	// MetaKeyWorkflowSessionRoute stores the bounded prepared/committed route
+	// identity used to retry an explicit workflow session selection.
+	MetaKeyWorkflowSessionRoute = "workflow_session_route"
 	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
 	// source-step on_exit side effect is not yet complete. Its value records the
 	// source step so recovery can resume the work after a restart.
@@ -215,7 +221,100 @@ const (
 	// whose Routine workflow start step has no other transition to carry it
 	// into an auto_start_agent evaluation.
 	MetaKeyAutoStartOnCreate = "auto_start_on_create"
+	// MetaKeyStepHandoffCarry is a single-slot, task-scoped token carrying one
+	// consuming transition's completion handoff exactly one hop, to the next
+	// step's first dispatched prompt. Its value is a StepHandoffCarryToken.
+	// Recording it replaces any existing token (single-slot by construction);
+	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
+	MetaKeyStepHandoffCarry = "step_handoff_carry"
 )
+
+// WorkflowInitialSessionSnapshot identifies the immutable task-initial
+// conversation and the logical profile selected when it was created.
+type WorkflowInitialSessionSnapshot struct {
+	SessionID      string `json:"session_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+}
+
+// WorkflowSessionRoute records one in-flight or committed explicit recipient
+// selection. It is replaced by the next route operation rather than growing a
+// task history.
+type WorkflowSessionRoute struct {
+	OperationID       string `json:"operation_id"`
+	DestinationStepID string `json:"destination_step_id"`
+	TargetKind        string `json:"target_kind"`
+	TargetStepID      string `json:"target_step_id,omitempty"`
+	AgentProfileID    string `json:"agent_profile_id,omitempty"`
+	SourceSessionID   string `json:"source_session_id,omitempty"`
+	DestinationID     string `json:"destination_session_id,omitempty"`
+	Phase             string `json:"phase"`
+}
+
+// LoadWorkflowSessionRoute decodes the bounded route record stored in task
+// metadata. Invalid or incomplete values are ignored so a stale record cannot
+// redirect a workflow entry to an unrelated session.
+func LoadWorkflowSessionRoute(metadata map[string]interface{}) (WorkflowSessionRoute, bool) {
+	value, ok := metadata[MetaKeyWorkflowSessionRoute]
+	if !ok {
+		return WorkflowSessionRoute{}, false
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	var route WorkflowSessionRoute
+	if err := json.Unmarshal(payload, &route); err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	if route.OperationID == "" || route.DestinationStepID == "" || route.TargetKind == "" || route.Phase == "" {
+		return WorkflowSessionRoute{}, false
+	}
+	return route, true
+}
+
+// WorkflowSessionBinding records the latest session selected when a direct
+// profile workflow step was entered. The session pointer is nullable because
+// deleting a session must preserve the logical profile for a later fresh
+// fallback.
+type WorkflowSessionBinding struct {
+	TaskID         string    `json:"task_id"`
+	TargetKey      string    `json:"target_key"`
+	WorkflowID     string    `json:"workflow_id"`
+	AgentProfileID string    `json:"agent_profile_id"`
+	SessionID      string    `json:"session_id,omitempty"`
+	OperationID    string    `json:"operation_id"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// LoadWorkflowInitialSessionSnapshot decodes the write-once task metadata
+// value. Invalid or incomplete values are treated as unavailable so callers
+// can apply the conservative legacy fallback.
+func LoadWorkflowInitialSessionSnapshot(metadata map[string]interface{}) (WorkflowInitialSessionSnapshot, bool) {
+	value, ok := metadata[MetaKeyWorkflowInitialSession]
+	if !ok {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	object, ok := value.(map[string]interface{})
+	if !ok {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	sessionID, _ := object["session_id"].(string)
+	profileID, _ := object["agent_profile_id"].(string)
+	if sessionID == "" {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	return WorkflowInitialSessionSnapshot{SessionID: sessionID, AgentProfileID: profileID}, true
+}
+
+// StepHandoffCarryToken is the JSON shape stored under
+// tasks.metadata[MetaKeyStepHandoffCarry]. Stamp is a fresh unique value
+// (uuid.NewString()) minted on every write, compared by the claim's
+// compare-and-swap alongside StepID; it must never be content-derived.
+type StepHandoffCarryToken struct {
+	Handoff string `json:"handoff"`
+	StepID  string `json:"step_id"`
+	Stamp   string `json:"stamp"`
+}
 
 // IsAgentTitlePending reports whether task metadata contains the durable
 // pending title marker. JSON rehydration produces bool values, while a
@@ -253,6 +352,10 @@ func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
+	// SessionMetaKeyCompletionFollowUp marks a completed conversation that was
+	// explicitly resumed for conversational follow-up. It is not workflow
+	// ownership and must not be treated as a task-state transition.
+	SessionMetaKeyCompletionFollowUp = "completion_follow_up"
 	// SessionMetaKeyWorkflowProfileSwitchStopIntent identifies the transient
 	// coordination record used to suppress the lifecycle event caused by a
 	// parked workflow profile switch.
@@ -268,6 +371,14 @@ const (
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
+
+// IsCompletionFollowUpSession reports whether a session was explicitly
+// reopened only to continue its completed conversation. The marker remains
+// meaningful after the session settles back to WAITING_FOR_INPUT.
+func IsCompletionFollowUpSession(metadata map[string]interface{}) bool {
+	followUp, ok := metadata[SessionMetaKeyCompletionFollowUp].(bool)
+	return ok && followUp
+}
 
 // WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
 // one exact runtime execution. Stamp is compared before the metadata value is
@@ -967,12 +1078,11 @@ type OfficeDecisionWaitCursor struct {
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {
-	ID                   string       `json:"id" db:"id"`
-	State                v1.TaskState `json:"state" db:"state"`
-	Title                string       `json:"title" db:"title"`
-	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
-	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
-	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
+	ID             string       `json:"id" db:"id"`
+	State          v1.TaskState `json:"state" db:"state"`
+	Title          string       `json:"title" db:"title"`
+	WorkflowStepID string       `json:"workflow_step_id" db:"workflow_step_id"`
+	UpdatedAt      time.Time    `json:"updated_at" db:"updated_at"`
 }
 
 // HasStartWhenUnblockedIntent reports whether a task's deferred launch intent
@@ -1073,10 +1183,10 @@ const (
 // and unknown workflow step session-end policy values.
 func NormalizeWorkflowProfileSessionEndPolicy(value string) WorkflowProfileSessionEndPolicy {
 	value = strings.TrimSpace(value)
-	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyPark {
-		return WorkflowProfileSessionEndPolicyPark
+	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyComplete {
+		return WorkflowProfileSessionEndPolicyComplete
 	}
-	return WorkflowProfileSessionEndPolicyComplete
+	return WorkflowProfileSessionEndPolicyPark
 }
 
 // WorkflowSource values are persisted in workflows.source and record where a
@@ -1237,6 +1347,8 @@ const (
 	MessageTypeToolEdit MessageType = "tool_edit"
 	// MessageTypeToolRead is for file read operations
 	MessageTypeToolRead MessageType = "tool_read"
+	// MessageTypeToolSearch is for code and file search operations
+	MessageTypeToolSearch MessageType = "tool_search"
 	// MessageTypeToolExecute is for command execution operations
 	MessageTypeToolExecute MessageType = "tool_execute"
 	// MessageTypeProgress is for progress updates
@@ -1580,6 +1692,7 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                     string                 `json:"id"`
 	TaskID                 string                 `json:"task_id"`
+	QueueIncarnationID     string                 `json:"queue_incarnation_id"`
 	Name                   string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
 	AgentExecutionID       string                 `json:"agent_execution_id"`   // Docker container/agent execution
 	ContainerID            string                 `json:"container_id"`         // Docker container ID for cleanup
@@ -1645,6 +1758,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
 		"id":                   s.ID,
 		"task_id":              s.TaskID,
+		"queue_incarnation_id": s.QueueIncarnationID,
 		"agent_execution_id":   s.AgentExecutionID,
 		"container_id":         s.ContainerID,
 		"agent_profile_id":     s.AgentProfileID,
@@ -2583,22 +2697,23 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
-		ID:              t.ID,
-		WorkspaceID:     t.WorkspaceID,
-		WorkflowID:      t.WorkflowID,
-		Title:           t.Title,
-		Description:     t.Description,
-		State:           t.State,
-		Priority:        t.Priority,
-		Repositories:    repositories,
-		CreatedAt:       t.CreatedAt,
-		UpdatedAt:       t.UpdatedAt,
-		Metadata:        PublicTaskMetadata(t.Metadata),
-		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
-		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
-		IsEphemeral:     t.IsEphemeral,
-		ParentID:        t.ParentID,
-		Autopilot:       t.Autopilot,
+		ID:                t.ID,
+		WorkspaceID:       t.WorkspaceID,
+		WorkflowID:        t.WorkflowID,
+		Title:             t.Title,
+		Description:       t.Description,
+		State:             t.State,
+		Priority:          t.Priority,
+		Repositories:      repositories,
+		CreatedAt:         t.CreatedAt,
+		UpdatedAt:         t.UpdatedAt,
+		Metadata:          PublicTaskMetadata(t.Metadata),
+		Interrupted:       t.Metadata[MetaKeyInterruptedAt] != nil,
+		AutoStartFailed:   t.Metadata[MetaKeyAutoStartFailed] != nil,
+		WorkspaceOrphaned: WorkspaceOrphaned(t.Metadata),
+		IsEphemeral:       t.IsEphemeral,
+		ParentID:          t.ParentID,
+		Autopilot:         t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

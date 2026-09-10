@@ -101,6 +101,19 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
+// ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
+// be sent to a session launch. Prompt producers use this read-only view so
+// optional guidance follows the same surface and capability resolver as the
+// runtime MCP server.
+func (e *Executor) ResolveTaskSessionMCPProfile(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowTitleTool bool,
+) (mcpprofile.Context, error) {
+	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
+}
+
 func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
 	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
 		return profile.WithCapability(mcpprofile.CapabilityCanvas)
@@ -577,11 +590,21 @@ func allowsSessionStartingRecovery(
 	nextState, expectedState, currentState models.TaskSessionState,
 	promoteTask bool,
 ) bool {
+	return allowsSessionStartingRecoveryWithPermission(
+		nextState, expectedState, currentState, promoteTask, false,
+	)
+}
+
+func allowsSessionStartingRecoveryWithPermission(
+	nextState, expectedState, currentState models.TaskSessionState,
+	promoteTask, allowCompletedResume bool,
+) bool {
 	return !promoteTask &&
 		nextState == models.TaskSessionStateStarting &&
 		currentState == expectedState &&
 		(expectedState == models.TaskSessionStateFailed ||
-			expectedState == models.TaskSessionStateCancelled)
+			expectedState == models.TaskSessionStateCancelled ||
+			(allowCompletedResume && expectedState == models.TaskSessionStateCompleted))
 }
 
 // updateSessionStarting persists a full session-row STARTING transition, using
@@ -594,6 +617,23 @@ func (e *Executor) updateSessionStarting(
 	expectedState models.TaskSessionState,
 	promoteTask bool,
 ) error {
+	return e.updateSessionStartingWithOptions(
+		ctx, taskID, session, expectedState, promoteTask, false,
+	)
+}
+
+func (e *Executor) updateSessionStartingWithOptions(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask, allowCompletedResume bool,
+) error {
+	if e.onSessionStartingWithOptions != nil {
+		return e.onSessionStartingWithOptions(
+			ctx, taskID, session, expectedState, promoteTask, allowCompletedResume,
+		)
+	}
 	if e.onSessionStarting != nil {
 		return e.onSessionStarting(ctx, taskID, session, expectedState, promoteTask)
 	}
@@ -607,6 +647,11 @@ func (e *Executor) updateSessionStarting(
 	allowedTerminalRecovery := allowsSessionStartingRecovery(
 		session.State, expectedState, current.State, promoteTask,
 	)
+	if allowCompletedResume {
+		allowedTerminalRecovery = allowsSessionStartingRecoveryWithPermission(
+			session.State, expectedState, current.State, promoteTask, true,
+		)
+	}
 	if isStopTerminalSessionState(current.State) && !allowedTerminalRecovery {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
 	}
@@ -788,7 +833,18 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 // This allows the caller to get the session ID immediately and launch the agent later.
 // Returns the session ID.
 func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "")
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", nil)
+}
+
+// PrepareSessionWithWorkflowRoute creates a fresh session and records the
+// prepared explicit-workflow destination in the same persistence transaction.
+func (e *Executor) PrepareSessionWithWorkflowRoute(
+	ctx context.Context,
+	task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	route *models.WorkflowSessionRoute,
+) (string, error) {
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", route)
 }
 
 // PrepareSessionForExistingEnvironment creates a workflow replacement session
@@ -801,7 +857,25 @@ func (e *Executor) PrepareSessionForExistingEnvironment(ctx context.Context, tas
 	if err := e.preflightWorkflowWorkspaceReuse(ctx, task, taskEnvironmentID); err != nil {
 		return "", err
 	}
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, nil)
+}
+
+// PrepareSessionForExistingEnvironmentWithWorkflowRoute is the route-aware
+// replacement-session path. The existing canonical environment is checked
+// before the atomic session-plus-route insert.
+func (e *Executor) PrepareSessionForExistingEnvironmentWithWorkflowRoute(
+	ctx context.Context,
+	task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID, taskEnvironmentID string,
+	route *models.WorkflowSessionRoute,
+) (string, error) {
+	if taskEnvironmentID == "" {
+		return "", fmt.Errorf("%w: workflow replacement requires a canonical workspace", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err := e.preflightWorkflowWorkspaceReuse(ctx, task, taskEnvironmentID); err != nil {
+		return "", err
+	}
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, route)
 }
 
 // preflightWorkflowWorkspaceReuse rejects an invalid retained environment
@@ -853,7 +927,7 @@ func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, reposi
 }
 
 //nolint:cyclop,funlen // Session construction keeps its existing validation sequence in one transaction boundary.
-func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string) (string, error) {
+func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return "", err
 	}
@@ -967,7 +1041,7 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 		return "", err
 	}
 
-	createErr := e.createPreparedSession(ctx, session, task.Metadata, bindWorkspace, execConfig)
+	createErr := e.createPreparedSession(ctx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if createErr != nil {
 		e.logger.Error("failed to persist agent session",
 			zap.String("task_id", task.ID),
@@ -1001,6 +1075,7 @@ func (e *Executor) createPreparedSession(
 	metadata map[string]interface{},
 	bindWorkspace bool,
 	execConfig executorConfig,
+	workflowRoute *models.WorkflowSessionRoute,
 ) error {
 	candidate := &models.TaskEnvironment{
 		TaskID:            session.TaskID,
@@ -1010,6 +1085,12 @@ func (e *Executor) createPreparedSession(
 		Status:            models.TaskEnvironmentStatusCreating,
 	}
 	if groupID := sharedWorkspaceGroupID(metadata); bindWorkspace && groupID != "" {
+		if workflowRoute != nil {
+			if creator, ok := e.repo.(sharedGroupWorkspaceBindingWorkflowRouteTaskSessionCreator); ok {
+				workflowRoute.DestinationID = session.ID
+				return creator.CreateTaskSessionWithSharedGroupWorkspaceBindingAndWorkflowRoute(ctx, session, candidate, groupID, workflowRoute)
+			}
+		}
 		binder, ok := e.repo.(sharedGroupWorkspaceBindingTaskSessionCreator)
 		if !ok {
 			return fmt.Errorf("%w: shared workspace binding is unavailable", models.ErrWorkspaceReuseUnsafe)
@@ -1017,10 +1098,28 @@ func (e *Executor) createPreparedSession(
 		return binder.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, session, candidate, groupID)
 	}
 	if binder, ok := e.repo.(workspaceBindingTaskSessionCreator); ok && bindWorkspace && !taskUsesDeferredEnvironmentInheritance(metadata) {
+		if workflowRoute != nil {
+			if creator, routeOK := e.repo.(workspaceBindingWorkflowRouteTaskSessionCreator); routeOK {
+				workflowRoute.DestinationID = session.ID
+				return creator.CreateTaskSessionWithWorkspaceBindingAndWorkflowRoute(ctx, session, candidate, workflowRoute)
+			}
+		}
 		return binder.CreateTaskSessionWithWorkspaceBinding(ctx, session, candidate)
 	}
 	if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
+		if workflowRoute != nil {
+			if creator, routeOK := e.repo.(initialRuntimeSeedWorkflowRouteTaskSessionCreator); routeOK {
+				workflowRoute.DestinationID = session.ID
+				return creator.CreateTaskSessionWithInitialRuntimeSeedAndWorkflowRoute(ctx, session, workflowRoute)
+			}
+		}
 		return atomicCreator.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
+	}
+	if workflowRoute != nil {
+		if creator, ok := e.repo.(workflowSessionRouteTaskSessionCreator); ok {
+			workflowRoute.DestinationID = session.ID
+			return creator.CreateTaskSessionWithWorkflowSessionRoute(ctx, session, workflowRoute)
+		}
 	}
 	return e.repo.CreateTaskSession(ctx, session)
 }
@@ -1048,6 +1147,20 @@ func taskUsesInheritedWorkspace(task *v1.Task) bool {
 	}
 	mode, _ := workspace["mode"].(string)
 	return mode == "inherit_parent" || mode == "shared_group"
+}
+
+func rejectInheritedEnvironmentExecutorMismatch(
+	task *v1.Task,
+	env *models.TaskEnvironment,
+	requestedExecutorType string,
+) error {
+	if task == nil || !taskUsesInheritedWorkspace(task) || env == nil ||
+		env.TaskID == "" || env.TaskID == task.ID || env.ExecutorType == "" ||
+		env.ExecutorType == requestedExecutorType {
+		return nil
+	}
+	return fmt.Errorf("%w: inherited task environment belongs to executor %q, launch selected %q",
+		models.ErrWorkspaceReuseUnsafe, env.ExecutorType, requestedExecutorType)
 }
 
 func (e *Executor) resolveLaunchTaskEnvironment(
@@ -1294,8 +1407,28 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, err
 	}
+	// An inherited policy keeps the child bound to its canonical environment and
+	// group membership. Do not detach across executor types without an explicit
+	// policy transition that updates both records.
+	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+		return nil, err
+	}
+	// A non-policy session can still carry a foreign environment reference from
+	// an older launch. Detach it after prepareExecutorTransition cleared the
+	// stale workspace path and reuse flag; persistTaskEnvironment then creates a
+	// fresh environment owned by the child and leaves the foreign row untouched.
 	if existingEnv != nil && existingEnv.TaskID != task.ID && existingEnv.ExecutorType != "" && existingEnv.ExecutorType != req.ExecutorType {
-		return nil, fmt.Errorf("%w: inherited task environment belongs to executor %q, launch selected %q", models.ErrWorkspaceReuseUnsafe, existingEnv.ExecutorType, req.ExecutorType)
+		inheritedExecutorType := existingEnv.ExecutorType
+		existingEnv = nil
+		session.TaskEnvironmentID = ""
+		session.WorkspacePath = ""
+		assignLaunchTaskEnvironmentID(session, nil)
+		req.TaskEnvironmentID = session.TaskEnvironmentID
+		e.logger.Info("detaching inherited task environment for executor mismatch",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.String("inherited_executor_type", inheritedExecutorType),
+			zap.String("elected_executor_type", req.ExecutorType))
 	}
 	if execCfg.ExecutorID != "" {
 		session.ExecutorID = execCfg.ExecutorID
@@ -1307,6 +1440,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 	req.StartAgent = startAgent
 	mergeEnv(req, opts.Env)
+	req.AdditionalSkillSlugs = append([]string(nil), opts.AdditionalSkillSlugs...)
 	if opts.RouteOverride != nil {
 		req.RouteOverride = opts.RouteOverride
 		if opts.RouteOverride.ExecutionProfileID == "" {

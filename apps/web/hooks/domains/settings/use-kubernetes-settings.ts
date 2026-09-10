@@ -81,7 +81,10 @@ export function useKubernetesSessions(executorId: string, enabled = true) {
       if (generation.current === current) setSessions(rows);
       return rows;
     } catch (cause) {
-      if (generation.current === current) setError(cause);
+      if (generation.current === current) {
+        setSessions([]);
+        setError(cause);
+      }
       throw cause;
     } finally {
       if (generation.current === current) setLoading(false);

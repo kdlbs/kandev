@@ -1,5 +1,5 @@
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
-import { areStepDraftsEqual } from "./workflow-card-actions";
+import { areStepDraftsEqual } from "./workflow-step-equality";
 
 function valuesEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;

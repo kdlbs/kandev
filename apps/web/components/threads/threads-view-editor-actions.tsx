@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { MAX_THREAD_VIEWS } from "@/lib/state/slices/ui/thread-view-builtins";
@@ -13,6 +14,8 @@ export function EditorActions({
   onSaveAs,
   onDiscard,
   onDelete,
+  deleteAnchorRef,
+  deleteConfirmation,
 }: {
   hasDraft: boolean;
   canDelete: boolean;
@@ -22,8 +25,15 @@ export function EditorActions({
   onSaveAs: () => void;
   onDiscard: () => void;
   onDelete: () => void;
+  deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
+  deleteConfirmation?: ReactNode;
 }) {
   const { t } = useTranslation();
+
+  if (deleteConfirmation) {
+    return <div className="min-w-0 p-2">{deleteConfirmation}</div>;
+  }
+
   return (
     <div className="flex flex-wrap items-center justify-end gap-1 p-2">
       {hasDraft && (
@@ -66,6 +76,7 @@ export function EditorActions({
       )}
       {!hasDraft && canDelete && (
         <Button
+          ref={deleteAnchorRef}
           type="button"
           variant="ghost"
           size="sm"

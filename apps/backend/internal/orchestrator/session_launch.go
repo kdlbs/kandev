@@ -82,6 +82,11 @@ type LaunchSessionRequest struct {
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement bool `json:"-"`
+	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
+	// follow-up dispatcher. It is intentionally not part of the wire request:
+	// ordinary launch, ensure, and startup recovery paths must keep completed
+	// sessions terminal.
+	AllowCompletedSessionResume bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -350,7 +355,8 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
-		AllowBranchReplacement: req.AllowBranchReplacement,
+		AllowBranchReplacement:      req.AllowBranchReplacement,
+		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
 	})
 	if err != nil {
 		return nil, err
@@ -385,6 +391,9 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	}
 	if session.TaskID != req.TaskID {
 		return nil, fmt.Errorf("session does not belong to task")
+	}
+	if err := s.ensureTaskNotArchived(ctx, req.TaskID); err != nil {
+		return nil, err
 	}
 
 	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
@@ -423,6 +432,9 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err := s.authorizeTask(ctx, taskID); err != nil {
 		return nil, err
 	}
+	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
+		return nil, err
+	}
 	if action == "runtime_retry" {
 		if s.wasResumeAttempt(ctx, sessionID) {
 			action = "resume"
@@ -445,10 +457,11 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	}
 
 	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID:                 taskID,
-		SessionID:              sessionID,
-		Intent:                 IntentResume,
-		AllowBranchReplacement: action == "resume_new_branch",
+		TaskID:                      taskID,
+		SessionID:                   sessionID,
+		Intent:                      IntentResume,
+		AllowBranchReplacement:      action == "resume_new_branch",
+		AllowCompletedSessionResume: action == "resume",
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)

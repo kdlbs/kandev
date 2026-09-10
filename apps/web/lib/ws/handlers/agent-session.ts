@@ -2,6 +2,7 @@
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
+import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
   sessionId as toSessionId,
@@ -11,13 +12,17 @@ import {
   type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueueStatusChangedPayload } from "@/lib/types/backend";
+import type {
+  QueueStatusChangedPayload,
+  TaskSessionActivityChangedPayload,
+} from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+import { applyForegroundActivity, applyCancellationPending } from "./session-activity";
 
 const debug = createDebugLogger("session:state");
 
@@ -531,6 +536,7 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
     // surfacing the frozen snapshot until the user reloads the tab, masking
     // the per-repo updates streaming in for both the primary and the sibling.
     store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    store.getState().bumpSessionGitCheckoutGeneration(payload.session_id);
     store.getState().bumpSessionCommitsRefetch(payload.session_id);
   }
 }
@@ -582,83 +588,6 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
   });
 }
 
-/** Apply a fine-grained busy-substate flip (ADR-0049). Annotates the
- *  existing session row so the composer gate and status indicator update; does
- *  nothing until the row exists (state_changed seeds it first). */
-function applyForegroundActivity(
-  store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-): void {
-  if (!payload?.task_id || !payload?.session_id) return;
-  const taskId = toTaskId(payload.task_id);
-  const sessionId = toSessionId(payload.session_id);
-  const existing = store.getState().taskSessions.items[sessionId];
-  if (!existing) return;
-  // Detached work can outlive the foreground turn, whose coarse state is then
-  // WAITING_FOR_INPUT. Terminal/parked sessions reject delayed activity frames;
-  // their execution teardown owns the final clear.
-  if (existing.state !== "RUNNING" && existing.state !== "WAITING_FOR_INPUT") return;
-  if (existing.task_id && existing.task_id !== taskId) return;
-  store.getState().upsertTaskSessionFromEvent(taskId, {
-    id: sessionId,
-    task_id: taskId,
-    state: existing.state,
-    cancellation_pending: existing.cancellation_pending,
-    cancellation_revision: existing.cancellation_revision,
-    started_at: existing.started_at ?? "",
-    updated_at: existing.updated_at ?? "",
-    foreground_activity: payload.foreground_activity ?? null,
-    active_subagent_count: pickActiveSubagentCount(payload, existing),
-    supports_steering: pickSupportsSteering(payload, existing),
-  });
-}
-
-/** Apply the backend-owned cancellation projection to the addressed session. */
-function applyCancellationPending(
-  store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-): void {
-  if (
-    !payload?.session_id ||
-    typeof payload.cancellation_pending !== "boolean" ||
-    typeof payload.cancellation_revision !== "number"
-  )
-    return;
-  const sessionId = toSessionId(payload.session_id);
-  const existing = store.getState().taskSessions.items[sessionId];
-  if (!existing) return;
-  store.getState().upsertTaskSessionFromEvent(existing.task_id, {
-    id: sessionId,
-    task_id: existing.task_id,
-    state: existing.state,
-    started_at: existing.started_at ?? "",
-    updated_at: existing.updated_at ?? "",
-    cancellation_pending: payload.cancellation_pending,
-    cancellation_revision: payload.cancellation_revision,
-  });
-}
-
-/** Prefers the event's active-subagent count, falling back to the existing session value. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
-  return payload.active_subagent_count !== undefined
-    ? payload.active_subagent_count
-    : (existing.active_subagent_count ?? 0);
-}
-
-/** Prefers the event's steering-support flag, falling back to the existing session value. */
-function pickSupportsSteering(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
-  existing: TaskSession,
-): boolean | undefined {
-  return payload.supports_steering !== undefined
-    ? payload.supports_steering
-    : existing.supports_steering;
-}
-
 /**
  * Applies a workspace-sources adoption event: updates the session's
  * workspace path and records the server-issued adoption boundary (WS envelope
@@ -688,13 +617,13 @@ function handleWorkspaceSourcesUpdated(
     .reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId], boundaryTimestamp);
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
   store.getState().clearLegacyGitStatusEntry(sessionId);
+  store.getState().bumpSessionGitCheckoutGeneration(sessionId);
   store.getState().bumpSessionCommitsRefetch(sessionId);
 }
 
 function handleForegroundActivityMessage(
   store: StoreApi<AppState>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any,
+  payload: TaskSessionActivityChangedPayload,
 ): void {
   applyForegroundActivity(store, payload);
 }
@@ -707,8 +636,130 @@ function handleCancellationPendingMessage(
   applyCancellationPending(store, payload);
 }
 
+function isCompleteQueueStatus(payload: QueueStatusChangedPayload): boolean {
+  return (
+    payload.task_id !== undefined &&
+    payload.session_incarnation_id !== undefined &&
+    payload.status_epoch !== undefined &&
+    payload.status_generation !== undefined &&
+    payload.entries !== undefined &&
+    typeof payload.count === "number" &&
+    typeof payload.max === "number" &&
+    typeof payload.merge_enabled === "boolean" &&
+    typeof payload.auto_run === "boolean"
+  );
+}
+
+// eslint-disable-next-line complexity -- incarnation, epoch, and generation form one ordering boundary.
+function rejectsQueueStatus(
+  state: AppState,
+  payload: QueueStatusChangedPayload,
+  previousMeta: QueueMeta | undefined,
+): boolean {
+  const currentSession = state.taskSessions.items[payload.session_id];
+  if (currentSession?.queue_incarnation_id && payload.session_incarnation_id === undefined) {
+    return true;
+  }
+  if (
+    payload.session_incarnation_id !== undefined &&
+    (!currentSession ||
+      currentSession.task_id !== payload.task_id ||
+      currentSession.queue_incarnation_id !== payload.session_incarnation_id)
+  ) {
+    return true;
+  }
+  const statusEpochChanged =
+    payload.status_epoch !== undefined &&
+    previousMeta?.statusEpoch !== undefined &&
+    payload.status_epoch !== previousMeta.statusEpoch;
+  if (statusEpochChanged && payload.status_epoch !== undefined) {
+    if (previousMeta.retiredStatusEpochs?.includes(payload.status_epoch)) {
+      return true;
+    }
+    return !isCompleteQueueStatus(payload);
+  }
+  return (
+    payload.status_generation !== undefined &&
+    previousMeta?.statusGeneration !== undefined &&
+    payload.status_generation <= previousMeta.statusGeneration
+  );
+}
+
+// eslint-disable-next-line complexity -- status-epoch replacement retains every prior epoch.
+function queueIdentityMeta(
+  payload: QueueStatusChangedPayload,
+  previousMeta: QueueMeta | undefined,
+) {
+  if (
+    payload.session_incarnation_id === undefined &&
+    previousMeta?.sessionIncarnationId === undefined
+  ) {
+    return {};
+  }
+  const statusEpoch = payload.status_epoch ?? previousMeta?.statusEpoch;
+  const statusEpochChanged =
+    payload.status_epoch !== undefined &&
+    previousMeta?.statusEpoch !== undefined &&
+    payload.status_epoch !== previousMeta.statusEpoch;
+  const retiredStatusEpochs = statusEpochChanged
+    ? [...(previousMeta?.retiredStatusEpochs ?? []), previousMeta?.statusEpoch]
+        .filter((epoch): epoch is string => epoch !== undefined && epoch !== statusEpoch)
+        .filter((epoch, index, epochs) => epochs.indexOf(epoch) === index)
+    : previousMeta?.retiredStatusEpochs;
+  return {
+    taskId: payload.task_id ?? previousMeta?.taskId,
+    sessionIncarnationId: payload.session_incarnation_id ?? previousMeta?.sessionIncarnationId,
+    statusEpoch,
+    statusGeneration: payload.status_generation ?? previousMeta?.statusGeneration,
+    retiredStatusEpochs,
+  };
+}
+
+function resolveQueuePolicyValue<T>(
+  preserveSessionPolicy: boolean,
+  previousValue: T | undefined,
+  incomingValue: T | undefined,
+): T | undefined {
+  return preserveSessionPolicy ? previousValue : (incomingValue ?? previousValue);
+}
+
+function queueAutoMergeMeta(
+  payload: QueueStatusChangedPayload,
+  previousMeta: QueueMeta | undefined,
+) {
+  if (
+    payload.auto_merge_available === undefined &&
+    previousMeta?.autoMergeAvailable === undefined
+  ) {
+    return {};
+  }
+  const preserveSessionPolicy =
+    previousMeta?.sessionIncarnationId === payload.session_incarnation_id &&
+    previousMeta?.autoMergeSource === "session" &&
+    payload.auto_merge_source === "global";
+  return {
+    autoMergeAvailable: payload.auto_merge_available ?? previousMeta?.autoMergeAvailable,
+    autoMergeEnabled: resolveQueuePolicyValue(
+      preserveSessionPolicy,
+      previousMeta?.autoMergeEnabled,
+      payload.auto_merge_enabled,
+    ),
+    autoMergeSource: resolveQueuePolicyValue(
+      preserveSessionPolicy,
+      previousMeta?.autoMergeSource,
+      payload.auto_merge_source,
+    ),
+    autoMergeRevision: resolveQueuePolicyValue(
+      preserveSessionPolicy,
+      previousMeta?.autoMergeRevision,
+      payload.auto_merge_revision,
+    ),
+  };
+}
+
 /** Writes a message.queue.status_changed broadcast into the queue slice,
- * preserving known policy values when an older publisher omits them. */
+ * preserving known policy and capacity values when an older publisher omits them. */
+// eslint-disable-next-line complexity -- one handler atomically establishes a queue snapshot.
 function handleQueueStatusChangedMessage(
   store: StoreApi<AppState>,
   payload: QueueStatusChangedPayload,
@@ -717,19 +768,30 @@ function handleQueueStatusChangedMessage(
     console.warn("[Queue] Missing session_id in queue status change event");
     return;
   }
+  const state = store.getState();
+  const previousMeta = state.queue.metaBySessionId[payload.session_id];
+  if (rejectsQueueStatus(state, payload, previousMeta)) return;
+
   const entries = payload.entries ?? [];
   const count = typeof payload.count === "number" ? payload.count : entries.length;
-  const max = typeof payload.max === "number" ? payload.max : 0;
-  const previousMeta = store.getState().queue.metaBySessionId[payload.session_id];
-  const mergeEnabled =
-    typeof payload.merge_enabled === "boolean"
-      ? payload.merge_enabled
-      : (previousMeta?.mergeEnabled ?? true);
-  const autoRun =
-    typeof payload.auto_run === "boolean" ? payload.auto_run : (previousMeta?.autoRun ?? true);
-  store
-    .getState()
-    .setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled, autoRun });
+  const max = typeof payload.max === "number" ? payload.max : (previousMeta?.max ?? 0);
+  const meta = {
+    count,
+    max,
+    mergeEnabled: payload.merge_enabled ?? previousMeta?.mergeEnabled ?? true,
+    autoRun: payload.auto_run ?? previousMeta?.autoRun ?? true,
+    ...queueIdentityMeta(payload, previousMeta),
+    ...queueAutoMergeMeta(payload, previousMeta),
+  };
+  const establishesStatusEpoch =
+    payload.status_epoch !== undefined &&
+    previousMeta?.statusEpoch !== undefined &&
+    payload.status_epoch !== previousMeta.statusEpoch;
+  if (establishesStatusEpoch) {
+    state.setQueueEntries(payload.session_id, entries, meta, { establishStatusEpoch: true });
+    return;
+  }
+  state.setQueueEntries(payload.session_id, entries, meta);
 }
 
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */

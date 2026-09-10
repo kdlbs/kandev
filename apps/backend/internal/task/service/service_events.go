@@ -52,6 +52,27 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowIDs...)
 }
 
+// PublishTaskUpdatedByID reloads and publishes the canonical task.updated
+// event inside the task's FIFO publication queue. Callers use this after a
+// direct task-row mutation when the database row is the source of truth.
+func (s *Service) PublishTaskUpdatedByID(ctx context.Context, taskID string) {
+	if s.eventBus == nil || taskID == "" {
+		return
+	}
+	s.enqueueTaskPublication(ctx, taskID, events.TaskUpdated, func(publicationCtx context.Context) {
+		task, err := s.GetTask(publicationCtx, taskID)
+		if err != nil {
+			s.logger.Error("failed to load task for task.updated publication",
+				zap.String("task_id", taskID), zap.Error(err))
+			return
+		}
+		if task == nil {
+			return
+		}
+		s.publishTaskEventNow(publicationCtx, events.TaskUpdated, task, nil, nil, nil, nil)
+	})
+}
+
 // PublishTaskQueuePromoted notifies subscribers that a queued task has been
 // admitted to its destination step. The event is distinct from task.updated so
 // orchestration can launch deferred work exactly when capacity is granted.
@@ -411,6 +432,10 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// unassigning invisible to every open client, and a takeover would
 		// leave the previous owner's name on their screens.
 		"assignee_user_id": task.AssigneeUserID,
+		// Same reasoning as auto_start_failed above: sent explicit so a clear
+		// (mode moved off inherit_parent, or the marker retracted) reaches
+		// already-open clients rather than being pinned by preserveOmittedField.
+		"workspace_orphaned": models.WorkspaceOrphaned(task.Metadata),
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
@@ -420,6 +445,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 
 	activity = s.addTaskSessionEventFieldsWithActivity(ctx, task.ID, data, activity)
+	s.addTaskParkedEventField(data, task.ID)
 
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
@@ -585,6 +611,22 @@ func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{
 		data["active_subagent_count"] = activity.activeSubagentCount
 	}
 	return activity
+}
+
+// addTaskParkedEventField stamps the task-level parked_on_background_work
+// OR-aggregate, its own monotonic revision, and the process epoch onto a
+// task.updated payload (AC-22, AC-62, AC-78). Always serialized when a
+// provider is wired, so a settled projection clears stale client state; a nil
+// provider (unwired, or in tests) omits the fields entirely rather than
+// asserting false values the backend cannot actually vouch for.
+func (s *Service) addTaskParkedEventField(data map[string]interface{}, taskID string) {
+	if s.taskParkedProvider == nil {
+		return
+	}
+	parked, revision := s.taskParkedProvider.TaskParkedSnapshot(taskID)
+	data["parked_on_background_work"] = parked
+	data["parked_revision"] = revision
+	data["parked_epoch"] = s.taskParkedProvider.ParkedEpoch()
 }
 
 func (s *Service) addPrimarySessionEventFields(ctx context.Context, taskID string, data map[string]interface{}, sessionInfo *models.TaskSession) {
@@ -938,6 +980,18 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 	}
 
 	s.publishEventToBus(ctx, eventType, "environment", environment.ID, data)
+}
+
+// PublishMessageEvent is publishMessageEvent's exported form, for callers
+// outside this package that insert a message directly (bypassing
+// CreateMessage) but still need the same message-added/updated event and its
+// session-scoped pending_action projection side effect. The e2e test harness
+// (internal/office/testharness) is the only current caller: it seeds messages
+// straight into the repository so specs can script clarification/permission
+// states deterministically, and without this it never triggers the
+// pending_action recompute a real agent turn would.
+func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+	return s.publishMessageEvent(ctx, eventType, message)
 }
 
 // publishMessageEvent publishes message events to the event bus.

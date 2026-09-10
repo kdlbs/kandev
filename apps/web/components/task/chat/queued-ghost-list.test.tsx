@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- queue panel behavior tests share one fixture matrix. */
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -10,9 +11,27 @@ import { toast } from "sonner";
 import { simulateReorderDrag } from "./queued-ghost-list.test-helpers";
 
 const useQueueMock = vi.fn();
+const useQueueEditProtectionMock = vi.fn();
+const STATE_ATTRIBUTE = "data-state";
 
 vi.mock("@/hooks/domains/session/use-queue", () => ({
   useQueue: (sessionId: string | null) => useQueueMock(sessionId),
+}));
+
+vi.mock("@/hooks/use-queue-edit-protection", () => ({
+  useQueueEditProtection: () => useQueueEditProtectionMock(),
+  useQueuedGhostStartEdit:
+    ({
+      onEditStart,
+      onStart,
+    }: {
+      onEditStart?: () => void | Promise<boolean | string | void>;
+      onStart: (editToken?: string) => void;
+    }) =>
+    async () => {
+      const editToken = await onEditStart?.();
+      if (editToken !== false) onStart(typeof editToken === "string" ? editToken : undefined);
+    },
 }));
 
 // The queue pin is desktop-only; these tests exercise the desktop path.
@@ -52,6 +71,7 @@ const EDIT_BUTTON_ID = "queue-entry-edit";
 const REMOVE_BUTTON_ID = "queue-entry-remove";
 const SEND_NOW_BUTTON_ID = "queue-entry-send-now";
 const AUTO_RUN_BUTTON_ID = "queue-auto-run";
+const QUEUE_EDIT_TEXTAREA_ID = "queue-edit-textarea";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -92,10 +112,13 @@ function baseState(entries: QueuedMessage[]) {
     isFull: false,
     mergeEnabled: true,
     autoRun: true,
+    autoMerge: true,
+    autoMergeAvailable: true,
     isLoading: false,
     queue: vi.fn(async () => {}),
     clearAll: vi.fn(async () => {}),
     setAutoRun: vi.fn(async () => {}),
+    setAutoMerge: vi.fn(async () => {}),
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
     mergeEntry: vi.fn(async () => {}),
@@ -122,9 +145,20 @@ function pressQueueEscape(): ReturnType<typeof vi.fn> {
   }
   return outerEscapeHandler;
 }
-
 beforeEach(() => {
   useQueueMock.mockReset();
+  useQueueEditProtectionMock.mockReset();
+  useQueueEditProtectionMock.mockReturnValue({
+    editingEntryId: null,
+    editLease: {
+      session_id: SESSION_ID,
+      entry_id: "q-1",
+      lease_id: "lease-default",
+      target_revision: 0,
+    },
+    beginEdit: vi.fn(async () => true),
+    completeEdit: vi.fn(async () => {}),
+  });
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
 });
@@ -214,20 +248,20 @@ describe("QueueAffordance", () => {
     expect(state.clearAll).toHaveBeenCalledTimes(1);
   });
 
-  it("shows Auto-run and removes legacy header dispatch actions", () => {
+  it("shows compact Auto-run and Auto-merge controls without legacy dispatch actions", () => {
     const state = queueState([entry()]);
     useQueueMock.mockReturnValue(state);
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
 
     const autoRun = screen.getByTestId(AUTO_RUN_BUTTON_ID);
-    expect(autoRun.getAttribute("data-state")).toBe("checked");
-    const autoRunHelpId = autoRun.getAttribute("aria-describedby");
-    expect(autoRunHelpId).toBeTruthy();
-    expect(document.getElementById(autoRunHelpId!)).toBeTruthy();
-    expect(screen.getByText("Runs queued messages one at a time.")).toBeTruthy();
+    const autoMerge = screen.getByTestId("queue-auto-merge");
+    expect(autoRun.getAttribute(STATE_ATTRIBUTE)).toBe("checked");
+    expect(autoMerge.getAttribute(STATE_ATTRIBUTE)).toBe("checked");
+    expect(autoRun.parentElement?.className).toContain("rounded-full");
+    expect(autoMerge.parentElement?.className).toContain("rounded-full");
     expect(autoRun.className).toContain("[@media(pointer:coarse)]:after:-inset-y-3.5");
-    expect(autoRun.parentElement?.className).toContain("[@media(pointer:coarse)]:min-h-11");
+    expect(autoMerge.className).toContain("[@media(pointer:coarse)]:after:-inset-y-3.5");
     expect(screen.queryByTestId("queue-drain-next")).toBeNull();
     expect(screen.queryByTestId("queue-send-now")).toBeNull();
   });
@@ -253,11 +287,12 @@ describe("QueueAffordance Send Now", () => {
   it.each([
     ["queue mutation", { isLoading: true }],
     ["cancellation", { cancellationPending: true }],
-  ])("disables row Send Now and Auto-run during %s", (_name, extra) => {
+  ])("disables row Send Now and both policy controls during %s", (_name, extra) => {
     useQueueMock.mockReturnValue(queueState([entry()], extra));
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
     expect((screen.getByTestId(AUTO_RUN_BUTTON_ID) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("queue-auto-merge") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId(SEND_NOW_BUTTON_ID) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -267,12 +302,19 @@ describe("QueueAffordance Send Now", () => {
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
     const autoRun = screen.getByTestId(AUTO_RUN_BUTTON_ID);
-    expect(autoRun.getAttribute("data-state")).toBe("unchecked");
-    expect(
-      screen.getByText("Finishes the current response, then queued messages wait."),
-    ).toBeTruthy();
+    expect(autoRun.getAttribute(STATE_ATTRIBUTE)).toBe("unchecked");
     fireEvent.click(autoRun);
     expect(state.setAutoRun).toHaveBeenCalledWith(true);
+  });
+  it("changes the backend-owned Auto-merge policy", () => {
+    const state = queueState([entry()], { autoMerge: false });
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    const autoMerge = screen.getByTestId("queue-auto-merge");
+    expect(autoMerge.getAttribute(STATE_ATTRIBUTE)).toBe("unchecked");
+    fireEvent.click(autoMerge);
+    expect(state.setAutoMerge).toHaveBeenCalledWith(true);
   });
 
   it("reports an Auto-run update failure", async () => {
@@ -290,6 +332,76 @@ describe("QueueAffordance Send Now", () => {
       expect(toast.error).toHaveBeenCalledWith("Failed to update queue Auto-run."),
     );
   });
+});
+it("acquires a target lease before activating an editor and releases it after cancel", async () => {
+  const state = queueState([entry()]);
+  useQueueMock.mockReturnValue(state);
+  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  fireEvent.click(screen.getByTestId(CHIP_ID));
+
+  fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
+  expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeNull();
+  await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeNull();
+});
+
+it("does not activate the editor when the target lease cannot be acquired", async () => {
+  const state = queueState([entry()]);
+  useQueueMock.mockReturnValue(state);
+  useQueueEditProtectionMock.mockReturnValue({
+    editingEntryId: null,
+    editLease: null,
+    beginEdit: vi.fn(async () => false),
+    completeEdit: vi.fn(async () => {}),
+  });
+  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  fireEvent.click(screen.getByTestId(CHIP_ID));
+
+  fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
+  await waitFor(() => expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeNull());
+});
+
+it("preserves queued attachments when saving a text edit", async () => {
+  const attachments = [
+    {
+      type: "resource",
+      attachment_id: "attachment-1",
+      mime_type: "text/plain",
+      name: "notes.txt",
+    },
+  ];
+  const state = queueState([entry({ attachments })]);
+  state.editEntry = vi.fn(async () => {});
+  useQueueMock.mockReturnValue(state);
+  useQueueEditProtectionMock.mockReturnValue({
+    editingEntryId: null,
+    editLease: {
+      session_id: SESSION_ID,
+      entry_id: "q-1",
+      lease_id: "lease-1",
+      target_revision: 0,
+    },
+    beginEdit: vi.fn(async () => true),
+    completeEdit: vi.fn(async () => {}),
+  });
+  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  fireEvent.click(screen.getByTestId(CHIP_ID));
+  fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
+  await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
+  fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID), { target: { value: "edited" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(state.editEntry).toHaveBeenCalledWith(
+      "q-1",
+      "edited",
+      attachments,
+      [],
+      expect.objectContaining({ lease_id: "lease-1" }),
+    ),
+  );
 });
 
 describe("QueueAffordance positions", () => {
@@ -422,13 +534,20 @@ describe("QueueAffordance entity-reference edits", () => {
 
     fireEvent.click(screen.getByTestId(CHIP_ID));
     fireEvent.click(screen.getByTitle("Edit queued message"));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
+    await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID), {
       target: { value: "reference removed" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(state.editEntry).toHaveBeenCalledWith("q-1", "reference removed", undefined, []),
+      expect(state.editEntry).toHaveBeenCalledWith(
+        "q-1",
+        "reference removed",
+        undefined,
+        [],
+        expect.objectContaining({ lease_id: "lease-default" }),
+      ),
     );
   });
 });
@@ -613,7 +732,7 @@ describe("QueueAffordance reorder", () => {
     for (const handle of handles) expect(handle.disabled).toBe(true);
   });
 
-  it("removes the handle while the row is being edited", () => {
+  it("removes the handle while the row is being edited", async () => {
     const state = queueState([
       entry({ id: "q-1", queued_by: QUEUED_BY_USER }),
       entry({ id: "q-2", content: "second" }),
@@ -623,7 +742,7 @@ describe("QueueAffordance reorder", () => {
     fireEvent.click(screen.getByTestId(CHIP_ID));
 
     fireEvent.click(screen.getAllByTestId(EDIT_BUTTON_ID)[0]);
-    expect(screen.getByTestId("queue-edit-textarea")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
     expect(screen.getAllByTestId(GRAB_HANDLE_ID)).toHaveLength(1);
   });
 

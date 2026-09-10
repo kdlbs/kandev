@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
 import { KanbanCardShell } from "@/components/kanban-card-content";
+import { KanbanCardDialogs } from "@/components/kanban-card-dialogs";
 import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
 export { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
 import {
@@ -13,26 +14,19 @@ import {
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
-import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
-import {
-  TaskExternalLinkDialog,
-  type ExternalLinkProvider,
-} from "@/components/task/task-external-link-dialog";
+import { type ExternalLinkProvider } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
-import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
-import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import type { TaskActionOptions } from "@/hooks/use-task-actions";
 import { useDetachTask } from "@/hooks/use-detach-task";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
+import { useTaskMenuDialogState } from "@/hooks/use-task-menu-dialog-state";
 import {
   type ForegroundActivity,
-  type Repository,
   type TaskPendingAction,
   type TaskPriority,
   type TaskState,
@@ -83,6 +77,20 @@ export interface Task {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   autoStartFailed?: boolean;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled
+   * background process still live (spec:
+   * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
+   * and any live foregroundActivity. The revision/epoch fields backing the
+   * stale-update discard rule live on the store's KanbanState Task shape
+   * (kanban/types.ts) and the wire payload, not here — this board-rendering
+   * type only needs the resolved boolean.
+   */
+  parkedOnBackgroundWork?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start. */
+  workspaceOrphaned?: boolean;
   /** Live subagents summed across this task's sessions; drives the count chip. */
   activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -130,7 +138,7 @@ export interface WorkflowStep {
 
 export type KanbanPresentation = PluginTaskMenuContext["presentation"];
 
-interface KanbanCardProps {
+export interface KanbanCardProps {
   task: Task;
   workspaceId: string | null;
   presentation?: KanbanPresentation;
@@ -223,7 +231,7 @@ function externalLinkHandlers(
 /** Link-dialog openers shared by both the dropdown and context menu builds. */
 function buildLinkDialogHandlers(
   externalLinkAvailability: KanbanExternalLinkAvailability,
-  dialogs: ReturnType<typeof useKanbanCardDialogState>,
+  dialogs: ReturnType<typeof useTaskMenuDialogState>,
 ) {
   return {
     onLinkPullRequest: () => dialogs.setShowPRDialog(true),
@@ -246,35 +254,6 @@ export function buildPluginMenuContext(
     taskTitle: task.title,
     workflowStepId: task.workflowStepId ?? null,
     presentation,
-  };
-}
-
-/** Every confirm/link-dialog open flag the card menus and their dialogs share. */
-function useKanbanCardDialogState() {
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
-  const [showDetachConfirm, setShowDetachConfirm] = useState(false);
-  const [showPRDialog, setShowPRDialog] = useState(false);
-  const [showIssueDialog, setShowIssueDialog] = useState(false);
-  const [showMRDialog, setShowMRDialog] = useState(false);
-  const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
-    null,
-  );
-  return {
-    showDeleteConfirm,
-    setShowDeleteConfirm,
-    showArchiveConfirm,
-    setShowArchiveConfirm,
-    showDetachConfirm,
-    setShowDetachConfirm,
-    showPRDialog,
-    setShowPRDialog,
-    showIssueDialog,
-    setShowIssueDialog,
-    showMRDialog,
-    setShowMRDialog,
-    externalLinkProvider,
-    setExternalLinkProvider,
   };
 }
 
@@ -315,7 +294,7 @@ function useKanbanCardMenus({
   // just disabled doesn't linger as a stale entry.
   usePluginRegistry();
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
-  const dialogs = useKanbanCardDialogState();
+  const dialogs = useTaskMenuDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
   const updateTaskPriority = useUpdateTaskPriority();
   const detachAnchorRef = useRef<HTMLDivElement>(null);
@@ -390,71 +369,7 @@ function useKanbanCardMenus({
   };
 }
 
-type KanbanCardMenuState = ReturnType<typeof useKanbanCardMenus>;
-
-function KanbanCardDialogs({
-  task,
-  workspaceId,
-  repositories,
-  menu,
-  isDeleting,
-  onDelete,
-}: {
-  task: Task;
-  workspaceId: string | null;
-  repositories: Repository[];
-  menu: KanbanCardMenuState;
-  isDeleting?: boolean;
-  onDelete?: KanbanCardProps["onDelete"];
-}) {
-  return (
-    <>
-      <TaskDeleteConfirmDialog
-        open={menu.showDeleteConfirm}
-        onOpenChange={menu.setShowDeleteConfirm}
-        taskTitle={task.title}
-        taskId={task.id}
-        executorType={task.primaryExecutorType}
-        isDeleting={isDeleting}
-        onConfirm={(opts) => onDelete?.(task, opts)}
-      />
-      <TaskGitHubPRDialog
-        workspaceId={workspaceId}
-        open={menu.showPRDialog}
-        onOpenChange={menu.setShowPRDialog}
-        task={task}
-        repositories={repositories}
-      />
-      <TaskGitHubIssueDialog
-        open={menu.showIssueDialog}
-        onOpenChange={menu.setShowIssueDialog}
-        task={task}
-        repositories={repositories}
-      />
-      {workspaceId && (
-        <TaskMRLinkDialog
-          open={menu.showMRDialog}
-          onOpenChange={menu.setShowMRDialog}
-          taskId={task.id}
-          workspaceId={workspaceId}
-          taskRepositories={task.repositories ?? []}
-          repositories={repositories}
-        />
-      )}
-      {menu.externalLinkProvider && workspaceId && (
-        <TaskExternalLinkDialog
-          open={true}
-          onOpenChange={(open) => {
-            if (!open) menu.setExternalLinkProvider(null);
-          }}
-          provider={menu.externalLinkProvider}
-          task={task}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
-  );
-}
+export type KanbanCardMenuState = ReturnType<typeof useKanbanCardMenus>;
 
 /**
  * Cmd/Ctrl-click toggles a single card; Shift-click range-selects within the

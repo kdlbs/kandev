@@ -112,7 +112,7 @@ function AgentSingleSelect({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+        <Button variant="outline" className="cursor-pointer text-xs">
           {selected?.name ?? placeholder}
         </Button>
       </PopoverTrigger>

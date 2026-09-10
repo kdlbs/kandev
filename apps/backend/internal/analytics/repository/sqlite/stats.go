@@ -65,6 +65,10 @@ func rangeStartArg(start *time.Time) any {
 	return start.UTC()
 }
 
+func rangeStartPredicate(driver, column string) string {
+	return fmt.Sprintf("(%s IS NULL OR %s >= ?)", dialect.NullableTimestamp(driver, "?"), column)
+}
+
 // GetTaskStats retrieves aggregated statistics for tasks in a workspace.
 func (r *Repository) GetTaskStats(
 	ctx context.Context,
@@ -104,7 +108,7 @@ func (r *Repository) GetTaskStats(
 			FROM task_sessions s
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
 			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-			WHERE (? IS NULL OR s.started_at >= ?)
+			WHERE `+rangeStartPredicate(drv, "s.started_at")+`
 			GROUP BY s.task_id
 		) session_stats ON session_stats.task_id = t.id
 		LEFT JOIN (
@@ -113,10 +117,10 @@ func (r *Repository) GetTaskStats(
 				%s as elapsed_span_ms
 			FROM task_sessions s
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			WHERE (? IS NULL OR s.started_at >= ?)
+			WHERE `+rangeStartPredicate(drv, "s.started_at")+`
 			GROUP BY s.task_id
 		) turn_stats ON turn_stats.task_id = t.id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "t.created_at")+`
 		ORDER BY t.updated_at DESC
 		LIMIT ?
 	`, dur, dialect.DurationMs(
@@ -207,13 +211,13 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 				SUM(CASE WHEN t.state = 'IN_PROGRESS' AND t.archived_at IS NULL THEN 1 ELSE 0 END) AS in_progress_tasks
 			FROM tasks t
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "t.created_at")+`
 		),
 		session_agg AS (
 			SELECT COUNT(*) AS total_sessions
 			FROM task_sessions s
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		),
 		turn_agg AS (
 			SELECT
@@ -222,7 +226,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			FROM task_session_turns turn
 			JOIN task_sessions s ON s.id = turn.task_session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		),
 		clean_turn_agg AS (
 			SELECT
@@ -235,7 +239,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 				FROM task_session_turns turn
 				JOIN task_sessions s ON s.id = turn.task_session_id
 				JOIN tasks t ON t.id = s.task_id
-				WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+				WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 				  AND turn.completed_at IS NOT NULL
 			) clean
 			WHERE dur_ms >= %d AND dur_ms < %d AND msg_count >= %d
@@ -248,7 +252,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			FROM task_session_messages msg
 			JOIN task_sessions s ON s.id = msg.task_session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		)
 		SELECT
 			task_agg.total_tasks, task_agg.completed_tasks, task_agg.in_progress_tasks,
@@ -469,7 +473,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			FROM task_repositories tr
 			JOIN tasks t ON t.id = tr.task_id
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "t.created_at")+`
 			GROUP BY tr.repository_id
 		) task_stats ON task_stats.repository_id = r.id
 		LEFT JOIN (
@@ -484,7 +488,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
 			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 			GROUP BY tr.repository_id
 		) session_stats ON session_stats.repository_id = r.id
 		LEFT JOIN (
@@ -494,7 +498,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			JOIN tasks t ON t.id = tr.task_id
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 			GROUP BY tr.repository_id
 		) duration_stats ON duration_stats.repository_id = r.id
 		LEFT JOIN (
@@ -506,7 +510,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			FROM task_session_commits c
 			JOIN task_sessions s ON s.id = c.session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.repository_id != '' AND (? IS NULL OR c.committed_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.repository_id != '' AND `+rangeStartPredicate(drv, "c.committed_at")+`
 			GROUP BY s.repository_id
 		) git_stats ON git_stats.repository_id = r.id
 		WHERE r.workspace_id = ? AND r.deleted_at IS NULL
@@ -541,7 +545,7 @@ func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limi
 				COALESCE(%s, %s, %s, '') as model
 			FROM task_sessions s
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		)
 		SELECT
 			scoped.model,
@@ -592,7 +596,7 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 		FROM task_session_commits c
 		JOIN task_sessions s ON s.id = c.session_id
 		JOIN tasks t ON t.id = s.task_id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0` + andNotAutomationOriginT + ` AND (? IS NULL OR c.committed_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0` + andNotAutomationOriginT + ` AND ` + rangeStartPredicate(r.ro.DriverName(), "c.committed_at") + `
 	`
 
 	var stats models.GitStats

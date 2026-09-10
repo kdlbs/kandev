@@ -45,6 +45,7 @@ export type KanbanState = {
     position: number;
     events?: KanbanStepEvents;
     allow_manual_move?: boolean;
+    auto_advance_requires_signal?: boolean;
     prompt?: string;
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
@@ -116,6 +117,21 @@ export type KanbanState = {
     /** True when a workflow step's auto_start_agent on_enter action failed to
      *  launch a run for this task. */
     autoStartFailed?: boolean;
+    /**
+     * True when the task is waiting on the operator to notice, not on the
+     * operator to act — a settled session with a positively-sampled
+     * background process still live (spec:
+     * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
+     * and any live foregroundActivity.
+     */
+    parkedOnBackgroundWork?: boolean;
+    /** Process-local transition generation for parkedOnBackgroundWork; used to discard a stale event. */
+    parkedRevision?: number;
+    /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+    parkedEpoch?: number;
+    /** True when this task inherits an archived parent's workspace and can no
+     *  longer materialize or start. */
+    workspaceOrphaned?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;

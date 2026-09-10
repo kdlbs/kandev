@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import importlib.util
+import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,15 +80,15 @@ requirements:
 # Dependencies System Design
 """
 
-    def valid_system_index(self) -> str:
+    def valid_system_index(self, migration: str = "in_progress") -> str:
         return """---
 status: draft
 system: task-system
 specification_version: 1
-migration: in_progress
+migration: {migration}
 ---
 # Task System
-"""
+""".format(migration=migration)
 
     def rules(self, violations) -> list[str]:
         return [violation.rule for violation in violations]
@@ -374,7 +376,7 @@ migration: in_progress
     def test_rejects_a_stray_markdown_file_in_a_migrated_system(self) -> None:
         self.write(
             "docs/specs/task-system/README.md",
-            "---\nstatus: active\nsystem: task-system\nspecification_version: 1\nmigration: complete\n---\n# Task System\n",
+            self.valid_system_index("complete"),
         )
         self.write("docs/specs/task-system/spec.md", "# Generic spec\n")
 
@@ -385,7 +387,7 @@ migration: in_progress
     def test_allows_legacy_files_while_a_system_migration_is_in_progress(self) -> None:
         self.write(
             "docs/specs/task-system/README.md",
-            "---\nstatus: active\nsystem: task-system\nspecification_version: 1\nmigration: in_progress\n---\n# Task System\n",
+            self.valid_system_index(),
         )
         self.write("docs/specs/task-system/spec.md", "# Legacy spec\n")
 
@@ -400,6 +402,109 @@ migration: in_progress
         violations = load_linter().lint_specs(self.root, self.config)
 
         self.assertIn("system-index-migration", self.rules(violations))
+
+    def test_completed_migration_accepts_real_requirement_and_design_content(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index("complete"))
+        self.write("docs/specs/task-system/requirements/dependencies.md", self.valid_requirement())
+        self.write("docs/specs/task-system/system-design/dependencies.md", self.valid_design())
+
+        self.assertNotIn(
+            "migration-content",
+            self.rules(load_linter().lint_specs(self.root, self.config)),
+        )
+
+    def test_completed_migration_allows_observable_quantifier_content(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index("complete"))
+        requirement = self.valid_requirement().replace(
+            "When a predecessor is pending, the system shall wait.",
+            "The response includes all details returned by the provider.",
+        )
+        self.write("docs/specs/task-system/requirements/dependencies.md", requirement)
+        self.write("docs/specs/task-system/system-design/dependencies.md", self.valid_design())
+
+        self.assertNotIn(
+            "migration-content",
+            self.rules(load_linter().lint_specs(self.root, self.config)),
+        )
+
+    def test_completed_migration_rejects_generic_criteria_and_source_wrapper(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index("complete"))
+        requirement = self.valid_requirement().replace(
+            "When a predecessor is pending, the system shall wait.",
+            "The system shall preserve all behavior described in the legacy source.",
+        )
+        self.write("docs/specs/task-system/requirements/dependencies.md", requirement)
+        self.write(
+            "docs/specs/task-system/system-design/dependencies.md",
+            self.valid_design() + "\n## Migrated source detail\n\nCopied source.\n",
+        )
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        migration_violations = [
+            violation for violation in violations if violation.rule == "migration-content"
+        ]
+        self.assertEqual(len(migration_violations), 2)
+        self.assertEqual(migration_violations[0].line, 12)
+        self.assertEqual(migration_violations[1].line, 10)
+        self.assertTrue(
+            all(
+                "legacy" in violation.message or "wrapper" in violation.message
+                for violation in migration_violations
+            )
+        )
+
+    def test_migration_audit_reports_in_progress_debt_without_blocking_normal_lint(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index())
+        requirement = self.valid_requirement().replace(
+            "When a predecessor is pending, the system shall wait.",
+            "The system shall preserve all behavior described in the legacy source.",
+        )
+        self.write("docs/specs/task-system/requirements/dependencies.md", requirement)
+        self.write(
+            "docs/specs/task-system/system-design/dependencies.md",
+            self.valid_design() + "\n## Migrated source detail\n",
+        )
+
+        linter = load_linter()
+        self.assertEqual(linter.lint_specs(self.root, self.config), [])
+        audit_rules = self.rules(linter.lint_specs(self.root, self.config, migration_audit=True))
+        self.assertEqual(audit_rules, ["migration-audit", "migration-audit"])
+
+    def test_templates_and_historical_docs_are_outside_the_migration_content_gate(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index("complete"))
+        self.write(
+            "docs/specs/templates/old-template.md",
+            "## Migrated source detail\n- **AC-TASK-DEP-001.1:** see the legacy source.\n",
+        )
+        self.write(
+            "docs/specs/legacy/historical.md",
+            "## Migrated source detail\n- **AC-TASK-DEP-001.1:** see the legacy source.\n",
+        )
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertNotIn("migration-content", self.rules(violations))
+
+    def test_migration_audit_cli_keeps_audit_findings_non_blocking(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index())
+        self.write("docs/specs/task-system/requirements/dependencies.md", self.valid_requirement())
+        self.write(
+            "docs/specs/task-system/system-design/dependencies.md",
+            self.valid_design() + "\n## Migrated source detail\n",
+        )
+        self.write("docs/specs/spec-lint.json", json.dumps(self.config))
+
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--all", "--migration-audit"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("non-blocking migration audit finding", result.stdout)
 
 
 if __name__ == "__main__":

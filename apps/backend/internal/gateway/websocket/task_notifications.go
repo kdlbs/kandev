@@ -285,10 +285,14 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 		return nil
 	case ws.ActionMessageQueueStatusChanged:
-		if sessionID != "" {
-			b.hub.BroadcastToSession(sessionID, msg)
+		// Queue status is session-scoped. An unscoped event cannot be safely
+		// attributed after a session is deleted, so fail closed rather than
+		// falling through to the global broadcast path.
+		if sessionID == "" {
 			return nil
 		}
+		b.hub.BroadcastToSession(sessionID, msg)
+		return nil
 	case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
 		// Broadcast to the owning workspace's clients so prepare
 		// progress/warnings are available when the user navigates to the

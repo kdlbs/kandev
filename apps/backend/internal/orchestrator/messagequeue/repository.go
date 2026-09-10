@@ -2,34 +2,53 @@ package messagequeue
 
 import "context"
 
+// RepositorySnapshot is one identity-validated queue/state read. A policy-only
+// failure preserves independently readable queue entries and Auto-run state.
+type RepositorySnapshot struct {
+	Entries           []QueuedMessage
+	PendingMove       *PendingMove
+	AutoRun           bool
+	AutoMergeOverride *AutoMergeOverride
+	AutoMergeError    error
+	StatusGeneration  int64
+}
+
 // Repository abstracts persistent storage of queued messages and pending moves.
 // Operations on queued messages are atomic per session.
 type Repository interface {
+	ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (QueueSessionIdentity, error)
+	Snapshot(ctx context.Context, identity QueueSessionIdentity) (RepositorySnapshot, error)
+
 	// Insert appends a new entry at the tail of the session's FIFO queue.
 	// Returns ErrQueueFull if maxPerSession > 0 and the count would exceed it.
 	Insert(ctx context.Context, msg *QueuedMessage, maxPerSession int) error
+	InsertForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, maxPerSession int) error
 
 	// Restore reinserts a previously dequeued entry at its original FIFO
 	// position. It is used when a delivery fails after TakeHead so later
 	// messages cannot overtake the failed one.
 	Restore(ctx context.Context, msg *QueuedMessage, maxPerSession int) error
+	RestoreForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, maxPerSession int) error
 
 	// AppendOrInsertTail concatenates content onto the tail entry when the tail
 	// exists AND its QueuedBy matches the supplied queuedBy. Otherwise inserts a
 	// new entry. Returns the resulting entry and whether the call appended (true)
 	// or inserted (false). Honors maxPerSession when inserting.
 	AppendOrInsertTail(ctx context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error)
+	AppendOrInsertTailForSession(ctx context.Context, identity QueueSessionIdentity, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error)
 
 	// InsertOrReplaceByCoalesceKey replaces an existing queued entry with the
 	// same session, queued_by, and metadata coalesce key. If no matching entry
 	// exists, it inserts a new tail entry when allowInsert is true. Returns
 	// ErrEntryNotFound when allowInsert is false and no matching entry exists.
 	InsertOrReplaceByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error)
+	InsertOrReplaceByCoalesceKeyForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error)
 
 	// InsertOrReplaceLifecycleByCoalesceKey is the lifecycle-specific variant
 	// that accepts the entry only while msg.TaskID exists and is not archived.
 	// SQLite implementations make that check and queue mutation one transaction.
 	InsertOrReplaceLifecycleByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error)
+	InsertOrReplaceLifecycleByCoalesceKeyForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error)
 
 	// RequeuePreservingFIFO re-enqueues an entry, preserving both FIFO order
 	// across the supersede→requeue cycle AND coalesce-replace semantics on
@@ -49,10 +68,15 @@ type Repository interface {
 	// positions up before inserting. Queue positions stay positive so session
 	// transfer and later queue mutations keep their ordering invariants.
 	RequeuePreservingFIFO(ctx context.Context, msg *QueuedMessage) error
+	RequeuePreservingFIFOForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage) error
 
 	// LifecycleGeneration returns the current archive/delete generation for a
 	// task. Lifecycle insertion verifies this generation atomically.
 	LifecycleGeneration(ctx context.Context, taskID string) (int64, error)
+
+	// SessionGeneration returns the current destructive-mutation generation for
+	// a session. Send Now restores use it to reject stale FIFO reservations.
+	SessionGeneration(ctx context.Context, sessionID string) (int64, error)
 
 	// PurgeTask is backend-only cleanup. It removes all task rows, including
 	// reserved server-owned lifecycle rows, and advances its generation.
@@ -82,7 +106,8 @@ type Repository interface {
 
 	// ReserveHead returns the lowest-position entry. Ordinary entries are
 	// atomically deleted, matching TakeHead. Durable lifecycle entries remain
-	// stored until AcknowledgeByID is called after executor acceptance.
+	// stored until AcknowledgeReserved receives the exact reservation returned
+	// by this call after executor acceptance.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
 	// GetAutoRun returns the durable per-session automatic-drain policy. Missing
@@ -92,19 +117,46 @@ type Repository interface {
 	// SetAutoRun persists the per-session automatic-drain policy independently
 	// of queue contents.
 	SetAutoRun(ctx context.Context, sessionID string, enabled bool) error
+	SetAutoRunForSession(ctx context.Context, identity QueueSessionIdentity, enabled bool) error
+
+	// GetAutoMergeOverride returns nil while the exact session inherits globally.
+	GetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity) (*AutoMergeOverride, error)
+
+	// SetAutoMergeOverride writes an explicit value and advances its session revision.
+	SetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity, enabled bool) (AutoMergeOverride, error)
 
 	// PauseAutoRunIfPending atomically persists OFF only when at least one
 	// visible pending entry remains. Reserved lifecycle rows do not count.
 	PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error)
+	PauseAutoRunIfPendingForSession(ctx context.Context, identity QueueSessionIdentity) (bool, error)
 
 	// ReserveHeadIfAutoRun reads the policy and reserves the FIFO head in one
 	// per-session transaction. The returned bool is false only when Auto-run is
 	// OFF; nil with true means the enabled queue is empty.
 	ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error)
+	ReserveHeadIfAutoRunForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error)
+	// ReserveHeadForDeliveryIfAutoRunForSession retains any head entry as an
+	// identity-bound in-flight row until acknowledgement. Passthrough delivery
+	// uses this so archive/delete can cancel the claim before PTY acceptance.
+	ReserveHeadForDeliveryIfAutoRunForSession(
+		ctx context.Context,
+		identity QueueSessionIdentity,
+	) (*QueuedMessage, bool, error)
 
+	// AcknowledgeReserved removes only the exact lifecycle reservation carried
+	// by msg. A stale delivery attempt cannot remove a newer retry.
+	AcknowledgeReserved(ctx context.Context, msg *QueuedMessage) error
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
 	// entry regardless of its server-owned queued_by identity.
 	AcknowledgeByID(ctx context.Context, sessionID, entryID string) error
+	AcknowledgeByIDForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) error
+	// ReleaseDeliveryReservationForSession makes an unaccepted retained entry
+	// visible again without changing its FIFO position.
+	ReleaseDeliveryReservationForSession(
+		ctx context.Context,
+		identity QueueSessionIdentity,
+		entryID string,
+	) error
 
 	// TakeByID atomically returns and deletes the entry identified by entryID
 	// for sessionID, regardless of its FIFO position. Unlike DeleteByID, it has
@@ -113,6 +165,7 @@ type Repository interface {
 	// its own interrupt, not a user-driven "remove queued message" request.
 	// Returns nil, nil if no entry matches (already taken or never existed).
 	TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error)
+	TakeByIDForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) (*QueuedMessage, error)
 
 	// ClaimSendNow atomically claims the exact ordered source snapshot for an
 	// interrupt-and-replace dispatch. The repository compares every requested
@@ -121,6 +174,7 @@ type Repository interface {
 	// lifecycle rows are reserved until AcknowledgeSendNowClaim or
 	// RestoreSendNowClaim.
 	ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error)
+	ClaimSendNowForSession(ctx context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error)
 
 	// RestoreSendNowClaim puts every source back at its original position and
 	// clears durable lifecycle reservations. It must restore the complete claim
@@ -142,6 +196,7 @@ type Repository interface {
 	// applies metadata key updates. A nil update value removes that key while
 	// unrelated metadata remains unchanged.
 	UpdateContentAndMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
+	UpdateContentAndMetadataForSession(ctx context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 
 	// MergeIntoAbove folds the entry identified by sourceID into the entry
 	// immediately above it (greatest position strictly below the source) within
@@ -156,12 +211,14 @@ type Repository interface {
 	// or a reserved in-flight lifecycle target — returns ErrNoMergeTarget. A
 	// missing source returns ErrEntryNotFound.
 	MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error)
+	MergeIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, sourceID, queuedBy string) (*QueuedMessage, error)
 
 	// AutoMergeIntoAbove attempts to fold the exact source entry into its
 	// immediate predecessor. A compatible merge returns the surviving target
 	// and true. A missing source, missing predecessor, or incompatible pair is a
 	// successful skip and returns false without mutating either row.
 	AutoMergeIntoAbove(ctx context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error)
+	AutoMergeIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, sourceID string) (*QueuedMessage, bool, error)
 
 	// AutoMergeCandidateIntoAbove folds a not-yet-admitted candidate message
 	// into the session's tail entry when compatible, without inserting it. Used
@@ -170,7 +227,7 @@ type Repository interface {
 	// ErrQueueFull. A missing tail or incompatible pair is a successful skip
 	// and returns false without mutating any row.
 	AutoMergeCandidateIntoAbove(ctx context.Context, candidate *QueuedMessage) (*QueuedMessage, bool, error)
-
+	AutoMergeCandidateIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, candidate *QueuedMessage) (*QueuedMessage, bool, error)
 	// ReorderEntries atomically rewrites the FIFO positions of the session's
 	// pending entries to match orderedIDs. The submitted list must be an exact
 	// permutation of the currently visible pending (not reserved-in-flight)
@@ -180,6 +237,7 @@ type Repository interface {
 	// in-flight rows keep their place in the sequence; visible rows are
 	// interleaved in the submitted order and all positions are compacted to
 	// 1..N in one transaction.
+	ReorderEntriesForSession(ctx context.Context, identity QueueSessionIdentity, orderedIDs []string) error
 	ReorderEntries(ctx context.Context, sessionID string, orderedIDs []string) error
 
 	// DeleteByID removes a single entry. The session scope (`AND session_id = ?`)
@@ -194,21 +252,36 @@ type Repository interface {
 	// of provenance. Durable lifecycle entries already reserved in flight remain.
 	// Returns the exact count removed.
 	DeleteAllBySession(ctx context.Context, sessionID string) (int, error)
+	// DiscardLifecycleReservation removes a durable in-flight row only when its
+	// persisted reservation owner matches identity. It deliberately does not
+	// require identity to remain current: stale workers use it after replacement.
+	DiscardLifecycleReservation(ctx context.Context, identity QueueSessionIdentity, entryID string) error
+
+	// PurgeSession removes every queue row for a deleted session, including
+	// durable lifecycle rows reserved in flight, and its pending workflow move.
+	// Returns the exact number of queue rows removed.
+	PurgeSession(ctx context.Context, sessionID string) (int, error)
 
 	// TransferSession moves all entries (and any pending move) from oldSessionID
 	// to newSessionID. Used on workflow session switches.
 	TransferSession(ctx context.Context, oldSessionID, newSessionID string) error
+	// TransferSessionIdentities additionally requires both live incarnations to
+	// belong to the same task so queue ownership cannot cross task boundaries.
+	TransferSessionIdentities(ctx context.Context, source, destination QueueSessionIdentity) error
 
 	// ReplaceSession replaces a session's queued entries and pending move with
 	// the supplied snapshot, preserving queued-message identity fields.
 	ReplaceSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error
+	ReplaceSessionForIdentity(ctx context.Context, identity QueueSessionIdentity, entries []QueuedMessage, pendingMove *PendingMove) error
 
 	// SetPendingMove upserts the deferred workflow move for a session.
 	SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error
+	DeleteByIDForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) (*QueueRemovalResult, error)
 
 	// GetPendingMove returns the deferred move for a session without removing it.
 	// Returns nil, nil if absent.
 	GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error)
+	DeleteAllBySessionForIdentity(ctx context.Context, identity QueueSessionIdentity) (*QueueRemovalResult, error)
 
 	// TakePendingMove returns and removes the deferred move for a session.
 	// Returns nil, nil if absent.

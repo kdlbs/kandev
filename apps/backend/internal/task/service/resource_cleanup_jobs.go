@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -398,7 +399,9 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 			continue
 		}
 		if snapshot.WorktreeHeadOIDs != nil {
-			wt.CleanupHeadOID = snapshot.WorktreeHeadOIDs[wt.ID]
+			cleanupHeadOID, found := snapshot.WorktreeHeadOIDs[wt.ID]
+			wt.CleanupHeadOID = cleanupHeadOID
+			wt.CleanupHeadOIDUnavailable = !found || strings.TrimSpace(cleanupHeadOID) == ""
 		}
 		if snapshot.WorktreeTaskDirNames != nil {
 			wt.TaskDirName = snapshot.WorktreeTaskDirNames[wt.ID]

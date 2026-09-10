@@ -99,8 +99,7 @@ type Store interface {
 	// ListActiveWorktrees returns all active worktrees.
 	ListActiveWorktrees(ctx context.Context) ([]*Worktree, error)
 	// ListActiveWorktreePaths returns the worktree_path of every active,
-	// non-deleted worktree row that has a non-empty path. Used by the
-	// office GC to identify live worktrees that must not be swept.
+	// non-deleted worktree row that has a non-empty path.
 	ListActiveWorktreePaths(ctx context.Context) ([]string, error)
 	// CountActiveWorktreeReferences counts non-deleted session associations
 	// for a physical worktree, excluding associations owned by the caller.
@@ -175,8 +174,7 @@ func (m *Manager) SetScriptMessageHandler(handler ScriptMessageHandler) {
 }
 
 // ListActiveWorktreePaths returns the absolute on-disk paths of all
-// currently active, non-deleted worktrees. Used by the office GC as the
-// authoritative inventory of paths that must not be swept.
+// currently active, non-deleted worktrees.
 func (m *Manager) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
 	return m.store.ListActiveWorktreePaths(ctx)
 }

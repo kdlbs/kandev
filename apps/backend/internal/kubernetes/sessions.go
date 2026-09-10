@@ -19,15 +19,18 @@ import (
 
 // SessionRow is a sanitized projection of one Kubernetes-backed running executor.
 type SessionRow struct {
-	SessionID      string `json:"session_id"`
-	TaskID         string `json:"task_id"`
-	PodName        string `json:"pod_name,omitempty"`
-	PodPhase       string `json:"pod_phase,omitempty"`
-	ContainerState string `json:"container_state,omitempty"`
-	Restarts       int32  `json:"restarts"`
-	WorkspaceKind  string `json:"workspace_kind,omitempty"`
-	CreatedAt      string `json:"created_at,omitempty"`
-	FailureReason  string `json:"failure_reason,omitempty"`
+	SessionID             string                 `json:"session_id"`
+	TaskID                string                 `json:"task_id"`
+	PodName               string                 `json:"pod_name,omitempty"`
+	PodPhase              string                 `json:"pod_phase,omitempty"`
+	ContainerState        string                 `json:"container_state,omitempty"`
+	Restarts              int32                  `json:"restarts"`
+	WorkspaceKind         string                 `json:"workspace_kind,omitempty"`
+	CreatedAt             string                 `json:"created_at,omitempty"`
+	FailureReason         string                 `json:"failure_reason,omitempty"`
+	SessionState          string                 `json:"session_state,omitempty"`
+	RetentionState        string                 `json:"retention_state,omitempty"`
+	MainContainerRequests *MainContainerRequests `json:"main_container_requests,omitempty"`
 }
 
 // SessionImpact is the authoritative mutation impact of one Kubernetes executor.
@@ -186,6 +189,7 @@ func (h *Handler) sessionRow(
 		return SessionRow{}, false, err
 	}
 	row := newInventorySessionRow(run)
+	row.SessionState = projectedTaskSessionState(session.State)
 	if inventoryFailure := validateSessionInventory(run, executorID, row); inventoryFailure != "" {
 		row.FailureReason = inventoryFailure
 		return row, true, nil
@@ -194,22 +198,26 @@ func (h *Handler) sessionRow(
 	pod, err := client.CoreV1().Pods(namespace).Get(ctx, row.PodName, metav1.GetOptions{})
 	if err != nil {
 		row.FailureReason = podLookupFailure(err)
+		if apierrors.IsNotFound(err) {
+			row.RetentionState = kubernetesRetentionMissing
+		}
 		return row, true, nil
 	}
 	if !matchesSessionIdentity(pod, run) {
 		row.FailureReason = "Pod identity does not match runtime inventory"
 		return row, true, nil
 	}
-	populatePodStatus(&row, pod, metadataString(run.Metadata, metadataMainContainer))
+	populatePodStatus(&row, pod, metadataString(run.Metadata, metadataMainContainer), session.State)
 	return row, true, nil
 }
 
 func newInventorySessionRow(run *models.ExecutorRunning) SessionRow {
 	row := SessionRow{
-		SessionID:     run.SessionID,
-		TaskID:        run.TaskID,
-		PodName:       metadataString(run.Metadata, metadataPodName),
-		WorkspaceKind: metadataString(run.Metadata, metadataWorkspaceMode),
+		SessionID:      run.SessionID,
+		TaskID:         run.TaskID,
+		PodName:        metadataString(run.Metadata, metadataPodName),
+		WorkspaceKind:  metadataString(run.Metadata, metadataWorkspaceMode),
+		RetentionState: kubernetesRetentionUnknown,
 	}
 	if !run.CreatedAt.IsZero() {
 		row.CreatedAt = run.CreatedAt.UTC().Format(time.RFC3339)
@@ -277,30 +285,6 @@ func recordedResourceIdentity(metadata map[string]interface{}) (agentkubernetes.
 		return agentkubernetes.ResourceIdentity{}, false
 	}
 	return identity, true
-}
-
-func populatePodStatus(row *SessionRow, pod *corev1.Pod, mainContainer string) {
-	row.PodPhase = string(pod.Status.Phase)
-	row.ContainerState = "unknown"
-	failureReason := pod.Status.Reason
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name != mainContainer {
-			continue
-		}
-		row.Restarts = status.RestartCount
-		switch {
-		case status.State.Running != nil:
-			row.ContainerState = "running"
-		case status.State.Waiting != nil:
-			row.ContainerState = "waiting"
-			failureReason = status.State.Waiting.Reason
-		case status.State.Terminated != nil:
-			row.ContainerState = "terminated"
-			failureReason = status.State.Terminated.Reason
-		}
-		break
-	}
-	row.FailureReason = sanitizedPodReason(failureReason)
 }
 
 func metadataString(metadata map[string]interface{}, key string) string {

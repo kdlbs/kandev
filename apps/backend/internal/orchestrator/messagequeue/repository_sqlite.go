@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	internaldb "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // sqliteRepository persists queued messages and pending moves.
@@ -29,7 +30,8 @@ type sqliteRepository struct {
 	// OUTSIDE any transaction because a failed statement on PostgreSQL aborts
 	// the whole transaction — the guard must never issue its UPDATE against a
 	// missing table inside a tx.
-	tasksTablePresent bool
+	tasksTablePresent        bool
+	taskSessionsTablePresent bool
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
@@ -39,18 +41,80 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 	if err := r.initSchema(); err != nil {
 		return nil, fmt.Errorf("messagequeue: init schema: %w", err)
 	}
+	if err := r.ensureSessionTransferCompensationSchema(context.Background()); err != nil {
+		return nil, fmt.Errorf("messagequeue: init session transfer schema: %w", err)
+	}
+	if err := r.ensureEditLeaseSchema(context.Background()); err != nil {
+		return nil, fmt.Errorf("messagequeue: init edit lease schema: %w", err)
+	}
 	var present bool
 	var err error
 	if writer.DriverName() == "pgx" {
-		err = writer.Get(&present, `SELECT to_regclass('tasks') IS NOT NULL`)
+		err = writer.Get(&present, `SELECT to_regclass('tasks') IS NOT NULL AND to_regclass('task_sessions') IS NOT NULL`)
 	} else {
-		err = writer.Get(&present, `SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks')`)
+		err = writer.Get(&present, `SELECT
+			EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks')
+			AND EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'task_sessions')`)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("messagequeue: resolve tasks table presence: %w", err)
 	}
 	r.tasksTablePresent = present
+	if writer.DriverName() == "pgx" {
+		err = writer.Get(&present, `SELECT to_regclass('task_sessions') IS NOT NULL`)
+	} else {
+		err = writer.Get(&present, `SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'task_sessions')`)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("messagequeue: resolve task_sessions table presence: %w", err)
+	}
+	r.taskSessionsTablePresent = present
+	if present {
+		// Older isolated queue fixtures can provide a task_sessions table
+		// without the incarnation column. They still use the legacy queue API,
+		// so there is no identity to backfill until the owning schema migrates.
+		incarnationColumn, columnErr := internaldb.ColumnExists(writer, "task_sessions", "queue_incarnation_id")
+		if columnErr != nil {
+			return nil, fmt.Errorf("messagequeue: resolve task session incarnation column: %w", columnErr)
+		}
+		if incarnationColumn {
+			if err := r.migratePendingMoveIdentities(); err != nil {
+				return nil, fmt.Errorf("messagequeue: migrate pending move identities: %w", err)
+			}
+		}
+	}
 	return r, nil
+}
+
+func (r *sqliteRepository) sharedTablePresent(name string) (bool, error) {
+	present, err := internaldb.TableExists(r.db, name)
+	if err != nil {
+		return false, fmt.Errorf("resolve shared table %s presence: %w", name, err)
+	}
+	return present, nil
+}
+
+func (r *sqliteRepository) migratePendingMoveIdentities() error {
+	if _, err := r.db.Exec(r.db.Rebind(`
+		UPDATE pending_moves
+		   SET session_incarnation_id = (
+		       SELECT queue_incarnation_id FROM task_sessions
+		        WHERE task_sessions.id = pending_moves.session_id
+		          AND task_sessions.task_id = pending_moves.task_id
+		   )
+		 WHERE session_incarnation_id = ''
+		   AND EXISTS (
+		       SELECT 1 FROM task_sessions
+		        WHERE task_sessions.id = pending_moves.session_id
+		          AND task_sessions.task_id = pending_moves.task_id
+		   )
+	`)); err != nil {
+		return fmt.Errorf("backfill pending move session incarnations: %w", err)
+	}
+	if _, err := r.db.Exec(`DELETE FROM pending_moves WHERE session_incarnation_id = ''`); err != nil {
+		return fmt.Errorf("delete unmatched legacy pending moves: %w", err)
+	}
+	return nil
 }
 
 // withSessionLock serializes the queue mutations of one session so a concurrent
@@ -61,11 +125,72 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 // merge-wins/drain-wins ordering deterministic.
 //
 // lockSessionTx is the cross-process counterpart: every mutating method takes
-// the per-session queue_session_locks row inside its transaction, so tail
-// scans and tail changes cannot interleave between backend instances. It is a
-// no-op on SQLite (single writer; FOR UPDATE is ignored).
+// the per-session queue_session_locks row inside its transaction and rejects
+// mutations while a durable transfer owns that session. SQLite serializes
+// writers globally; PostgreSQL locks the session row with FOR UPDATE.
 func (r *sqliteRepository) lockSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
+	if err := r.lockSessionTxUnfenced(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	return guardSessionTransferTx(ctx, tx, r.db, sessionID)
+}
+
+func (r *sqliteRepository) lockSessionTxUnfenced(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
 	return lockSessionTxIn(ctx, tx, r.db, sessionID)
+}
+
+func (r *sqliteRepository) beginSessionMutationTx(
+	ctx context.Context,
+	sessionID, operation string,
+) (*sqlx.Tx, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin %s: %w", operation, err)
+	}
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	return tx, nil
+}
+
+func (r *sqliteRepository) withSessionTransferFence(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	tx, err := r.beginSessionMutationTx(ctx, sessionID, "session transfer fence")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(ctx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) validateSessionEntryForEditReplay(
+	ctx context.Context,
+	sessionID, entryID string,
+) error {
+	tx, err := r.beginSessionMutationTx(ctx, sessionID, "validate edit replay")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var present bool
+	if err := tx.GetContext(ctx, &present, r.db.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM queued_messages WHERE session_id = ? AND id = ?
+		)
+	`), sessionID, entryID); err != nil {
+		return fmt.Errorf("validate edit replay entry: %w", err)
+	}
+	if !present {
+		return ErrEntryNotFound
+	}
+	return tx.Commit()
 }
 
 // guardActiveTaskTx rejects queue admissions whose owning task is not live
@@ -98,6 +223,167 @@ func (r *sqliteRepository) guardActiveTaskTx(ctx context.Context, tx *sqlx.Tx, t
 	return nil
 }
 
+// guardSessionTx verifies that the owning task session still exists. The
+// session lock acquired before this call already rejects active transfers.
+func (r *sqliteRepository) guardSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
+	return r.guardSessionOwnerTx(ctx, tx, sessionID, taskID)
+}
+
+func (r *sqliteRepository) guardSessionOwnerTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
+	if !r.tasksTablePresent || !r.taskSessionsTablePresent {
+		return nil
+	}
+	query := `SELECT EXISTS (SELECT 1 FROM task_sessions WHERE id = ?`
+	args := []interface{}{sessionID}
+	if taskID != "" {
+		query += ` AND task_id = ?`
+		args = append(args, taskID)
+	}
+	query += `)`
+	var present bool
+	if err := tx.GetContext(ctx, &present, r.db.Rebind(query), args...); err != nil {
+		return fmt.Errorf("guard task session for queue write: %w", err)
+	}
+	if !present {
+		return ErrTaskInactive
+	}
+	return nil
+}
+func (r *sqliteRepository) captureReservationGenerationsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	msg *QueuedMessage,
+) error {
+	sessionGeneration, err := r.getSendNowGenerationTx(ctx, tx, msg.SessionID)
+	if err != nil {
+		return err
+	}
+	var lifecycleGeneration int64
+	if msg.TaskID != "" {
+		lifecycleGeneration, err = getLifecycleGenerationTx(ctx, tx, r.db, msg.TaskID)
+		if err != nil {
+			return err
+		}
+	}
+	msg.reservationSessionGeneration = sessionGeneration
+	msg.reservationLifecycleGeneration = lifecycleGeneration
+	msg.reservationGenerationsCaptured = true
+	return nil
+}
+
+// LockSessionInTransaction acquires the queue's cross-process session lock
+// inside an existing transaction and rejects mutations during an active
+// durable transfer.
+func LockSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, sessionID string) error {
+	if err := lockSessionTxIn(ctx, tx, db, sessionID); err != nil {
+		return err
+	}
+	return GuardSessionTransferInTransaction(ctx, tx, db, sessionID)
+}
+
+// LockSessionPairInTransaction acquires both transfer-session locks without
+// applying the mutation fence. It is reserved for the owned transfer itself,
+// which must mutate attachment claims while its compensation row is active.
+func LockSessionPairInTransaction(
+	ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, firstSessionID, secondSessionID string,
+) error {
+	first, second := firstSessionID, secondSessionID
+	if first > second {
+		first, second = second, first
+	}
+	if err := lockSessionTxIn(ctx, tx, db, first); err != nil {
+		return err
+	}
+	if first != second {
+		if err := lockSessionTxIn(ctx, tx, db, second); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) validateSessionIdentityTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity QueueSessionIdentity,
+) error {
+	if !r.tasksTablePresent {
+		return ErrSessionIdentityMismatch
+	}
+	var incarnationID string
+	query := `
+		SELECT queue_incarnation_id
+		  FROM task_sessions
+		 WHERE id = ? AND task_id = ?`
+	if r.db.DriverName() == "pgx" {
+		query += postgresForUpdateSuffix
+	}
+	err := tx.GetContext(
+		ctx,
+		&incarnationID,
+		r.db.Rebind(query),
+		identity.SessionID,
+		identity.TaskID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrSessionIdentityMismatch
+	}
+	if err != nil {
+		return fmt.Errorf("validate queue session identity: %w", err)
+	}
+	if incarnationID != identity.SessionIncarnationID {
+		return ErrSessionIdentityMismatch
+	}
+	return nil
+}
+
+func (r *sqliteRepository) guardOptionalActiveTaskTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+) error {
+	if identity == nil {
+		return nil
+	}
+	return r.guardActiveTaskTx(ctx, tx, identity.TaskID)
+}
+
+func (r *sqliteRepository) validateOptionalSessionIdentityTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+) error {
+	if identity == nil {
+		return nil
+	}
+	return r.validateSessionIdentityTx(ctx, tx, *identity)
+}
+
+func (r *sqliteRepository) ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (QueueSessionIdentity, error) {
+	if taskID == "" || sessionID == "" {
+		return QueueSessionIdentity{}, ErrSessionIdentityMismatch
+	}
+	if !r.tasksTablePresent {
+		return QueueSessionIdentity{}, ErrSessionIdentityMismatch
+	}
+	var incarnationID string
+	err := r.ro.GetContext(ctx, &incarnationID, r.db.Rebind(`
+		SELECT queue_incarnation_id FROM task_sessions WHERE id = ? AND task_id = ?
+	`), sessionID, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return QueueSessionIdentity{}, ErrSessionIdentityMismatch
+	}
+	if err != nil {
+		return QueueSessionIdentity{}, fmt.Errorf("resolve queue session identity: %w", err)
+	}
+	if incarnationID == "" {
+		return QueueSessionIdentity{}, ErrSessionIdentityMismatch
+	}
+	return QueueSessionIdentity{
+		TaskID: taskID, SessionID: sessionID, SessionIncarnationID: incarnationID,
+	}, nil
+}
+
 // lockSessionTxIn takes the per-session cross-process lock inside an existing
 // transaction (see lockSessionTx). It is the shared core used by the
 // repository methods and by PurgeTaskInTransaction, which runs inside the task
@@ -123,6 +409,7 @@ func lockSessionTxIn(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, sessionID st
 	}
 	return nil
 }
+
 func (r *sqliteRepository) withSessionLock(sessionID string) func() {
 	r.mu.Lock()
 	lock := r.sessionLocks[sessionID]
@@ -162,6 +449,7 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS pending_moves (
 		id               TEXT PRIMARY KEY,
 		move_id          TEXT NOT NULL DEFAULT '',
+		session_incarnation_id TEXT NOT NULL DEFAULT '',
 		session_id       TEXT NOT NULL UNIQUE,
 		task_id          TEXT NOT NULL DEFAULT '',
 		workflow_id      TEXT NOT NULL DEFAULT '',
@@ -182,8 +470,14 @@ func (r *sqliteRepository) initSchema() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS queue_session_state (
-		session_id TEXT PRIMARY KEY,
-		auto_run   INTEGER NOT NULL DEFAULT 1
+		session_id             TEXT PRIMARY KEY,
+		session_incarnation_id TEXT NOT NULL DEFAULT '',
+		auto_run              INTEGER NOT NULL DEFAULT 1,
+		auto_merge_override   INTEGER,
+		auto_merge_revision   BIGINT NOT NULL DEFAULT 0,
+		send_now_generation   BIGINT NOT NULL DEFAULT 0,
+		status_generation     BIGINT NOT NULL DEFAULT 0,
+		next_position         BIGINT NOT NULL DEFAULT 0
 	);
 	`)
 	if err != nil {
@@ -201,11 +495,108 @@ func (r *sqliteRepository) initSchema() error {
 	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN move_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	for _, migration := range []struct {
+		name string
+		sql  string
+	}{
+		{"session incarnation", `ALTER TABLE queue_session_state ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`},
+		{"Auto-merge override", `ALTER TABLE queue_session_state ADD COLUMN auto_merge_override INTEGER`},
+		{"Auto-merge revision", `ALTER TABLE queue_session_state ADD COLUMN auto_merge_revision BIGINT NOT NULL DEFAULT 0`},
+		{"Send Now generation", `ALTER TABLE queue_session_state ADD COLUMN send_now_generation BIGINT NOT NULL DEFAULT 0`},
+		{"Status generation", `ALTER TABLE queue_session_state ADD COLUMN status_generation BIGINT NOT NULL DEFAULT 0`},
+		{"Queue position", `ALTER TABLE queue_session_state ADD COLUMN next_position BIGINT NOT NULL DEFAULT 0`},
+	} {
+		if _, alterErr := r.db.Exec(migration.sql); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+			return fmt.Errorf("add queue state %s: %w", migration.name, alterErr)
+		}
+	}
+	return nil
+}
+func (r *sqliteRepository) nextQueuePositionTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
+	var maxPos sql.NullInt64
+	if err := tx.GetContext(ctx, &maxPos,
+		r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), sessionID,
+	); err != nil {
+		return 0, fmt.Errorf("max queue position: %w", err)
+	}
+	var nextPosition int64
+	err := tx.GetContext(ctx, &nextPosition, r.db.Rebind(`
+		SELECT next_position FROM queue_session_state WHERE session_id = ?
+	`), sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		nextPosition = 0
+	} else if err != nil {
+		return 0, fmt.Errorf("read next queue position: %w", err)
+	}
+	if maxPos.Valid && maxPos.Int64 > nextPosition {
+		nextPosition = maxPos.Int64
+	}
+	nextPosition++
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_state (session_id, next_position) VALUES (?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET next_position = excluded.next_position
+	`), sessionID, nextPosition); err != nil {
+		return 0, fmt.Errorf("advance next queue position: %w", err)
+	}
+	return nextPosition, nil
+}
+
+func (r *sqliteRepository) bumpQueuePositionTx(ctx context.Context, tx *sqlx.Tx, sessionID string, position int64) error {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_state (session_id, next_position) VALUES (?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET next_position =
+			CASE WHEN queue_session_state.next_position < excluded.next_position
+				THEN excluded.next_position ELSE queue_session_state.next_position END
+	`), sessionID, position); err != nil {
+		return fmt.Errorf("record queue position: %w", err)
+	}
 	return nil
 }
 
 // Insert appends a new entry at the tail of the session's FIFO queue.
 func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPerSession int) error {
+	return r.insert(ctx, nil, msg, nil, maxPerSession, nil)
+}
+
+func (r *sqliteRepository) InsertForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, maxPerSession int) error {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.insert(ctx, &identity, msg, nil, maxPerSession, nil)
+}
+
+func (r *sqliteRepository) InsertForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, claim QueueAttachmentClaim, maxPerSession int) error {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.insert(ctx, &identity, msg, &claim, maxPerSession, nil)
+}
+
+func (r *sqliteRepository) InsertForSessionWithPolicy(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy AutoMergePolicy,
+) error {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.insert(ctx, &identity, msg, claim, maxPerSession, &policy)
+}
+
+func (r *sqliteRepository) insert(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy *AutoMergePolicy,
+) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin insert tx: %w", err)
@@ -217,22 +608,28 @@ func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPe
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
 		return err
 	}
-
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
-			return fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return ErrQueueFull
-		}
+	if err := r.guardSessionTx(ctx, tx, msg.SessionID, msg.TaskID); err != nil {
+		return err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	if err := r.validateAutoMergePolicyTx(ctx, tx, identity, policy); err != nil {
+		return err
 	}
 
-	var maxPos sql.NullInt64
-	if err := tx.GetContext(ctx, &maxPos, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
-		return fmt.Errorf("max position: %w", err)
+	if err := r.ensureQueueCapacityTx(ctx, tx, msg.SessionID, maxPerSession); err != nil {
+		return err
 	}
-	msg.Position = maxPos.Int64 + 1
+	if err := claimOptionalMessageAttachmentsTx(ctx, tx, identity, claim, msg.TaskID, msg.SessionID); err != nil {
+		return err
+	}
+
+	position, err := r.nextQueuePositionTx(ctx, tx, msg.SessionID)
+	if err != nil {
+		return err
+	}
+	msg.Position = position
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
 	}
@@ -262,6 +659,192 @@ func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPe
 	return tx.Commit()
 }
 
+func (r *sqliteRepository) validateAutoMergePolicyTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+	policy *AutoMergePolicy,
+) error {
+	if identity == nil || policy == nil {
+		return nil
+	}
+	var enabled sql.NullInt64
+	var revision int64
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`
+		SELECT auto_merge_override, auto_merge_revision
+		FROM queue_session_state
+		WHERE session_id = ? AND session_incarnation_id = ?
+	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		if policy.Source == AutoMergeSourceGlobal {
+			return nil
+		}
+		return ErrAutoMergePolicyChanged
+	}
+	if err != nil {
+		return fmt.Errorf("validate queue Auto-merge policy: %w", err)
+	}
+	switch policy.Source {
+	case AutoMergeSourceGlobal:
+		if enabled.Valid {
+			return ErrAutoMergePolicyChanged
+		}
+	case AutoMergeSourceSession:
+		if !enabled.Valid || enabled.Int64 != int64(boolToInt(policy.Enabled)) || revision != policy.Revision {
+			return ErrAutoMergePolicyChanged
+		}
+	default:
+		return ErrAutoMergePolicyChanged
+	}
+	return nil
+}
+
+func claimStagedMessageAttachmentTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	claim QueueAttachmentClaim,
+	taskID, sessionID, attachmentID string,
+	attachment models.TaskMessageAttachment,
+	now time.Time,
+) (int64, error) {
+	if !attachment.ExpiresAt.IsZero() && !attachment.ExpiresAt.After(now) {
+		return 0, models.ErrAttachmentClaimConflict
+	}
+	if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+		return 0, models.ErrAttachmentTooLarge
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE task_message_attachments
+		SET task_id = ?, session_id = ?, state = ?, updated_at = ?
+		WHERE id = ? AND owner_id = ? AND workspace_id = ? AND state = ?
+	`), taskID, sessionID, models.AttachmentStateClaimed, now, attachmentID,
+		claim.OwnerID, claim.WorkspaceID, models.AttachmentStateStaged)
+	if err != nil {
+		return 0, fmt.Errorf("claim attachment for queued message: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		return 0, models.ErrAttachmentClaimConflict
+	}
+	return attachment.SizeBytes, nil
+}
+
+func validateClaimedMessageAttachment(
+	attachment models.TaskMessageAttachment,
+	taskID, sessionID string,
+) error {
+	if attachment.TaskID != taskID ||
+		(attachment.SessionID != "" && attachment.SessionID != sessionID) {
+		return models.ErrAttachmentClaimConflict
+	}
+	return nil
+}
+
+func claimMessageAttachmentTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	claim QueueAttachmentClaim,
+	taskID, sessionID, attachmentID string,
+	now time.Time,
+) (int64, error) {
+	var attachment models.TaskMessageAttachment
+	if err := tx.GetContext(ctx, &attachment, tx.Rebind(`
+		SELECT id, owner_id, workspace_id, task_id, session_id, state, size_bytes, expires_at
+		FROM task_message_attachments WHERE id = ?
+	`), attachmentID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, models.ErrAttachmentNotFound
+		}
+		return 0, fmt.Errorf("load attachment for queue claim: %w", err)
+	}
+	if attachment.OwnerID != claim.OwnerID || attachment.WorkspaceID != claim.WorkspaceID {
+		return 0, models.ErrAttachmentClaimConflict
+	}
+	switch attachment.State {
+	case models.AttachmentStateStaged:
+		return claimStagedMessageAttachmentTx(
+			ctx, tx, claim, taskID, sessionID, attachmentID, attachment, now,
+		)
+	case models.AttachmentStateClaimed:
+		return 0, validateClaimedMessageAttachment(attachment, taskID, sessionID)
+	default:
+		return 0, models.ErrAttachmentClaimConflict
+	}
+}
+
+func claimMessageAttachmentsTx(ctx context.Context, tx *sqlx.Tx, claim QueueAttachmentClaim, taskID, sessionID string) error {
+	if len(claim.IDs) == 0 {
+		return nil
+	}
+	if claim.OwnerID == "" || claim.WorkspaceID == "" || len(claim.IDs) > models.MaxMessageAttachmentCount {
+		return models.ErrAttachmentClaimConflict
+	}
+	seen := make(map[string]struct{}, len(claim.IDs))
+	var totalSize int64
+	now := time.Now().UTC()
+	for _, id := range claim.IDs {
+		if id == "" {
+			return models.ErrAttachmentClaimConflict
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return models.ErrAttachmentClaimConflict
+		}
+		seen[id] = struct{}{}
+		size, err := claimMessageAttachmentTx(ctx, tx, claim, taskID, sessionID, id, now)
+		if err != nil {
+			return err
+		}
+		totalSize += size
+		if totalSize > models.MaxMessageAttachmentBytes {
+			return models.ErrAttachmentTotalTooLarge
+		}
+	}
+	return nil
+}
+
+func claimOptionalMessageAttachmentsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+	claim *QueueAttachmentClaim,
+	taskID, sessionID string,
+) error {
+	if claim == nil || len(claim.IDs) == 0 {
+		return nil
+	}
+	if identity == nil {
+		return ErrSessionIdentityMismatch
+	}
+	if taskID == "" {
+		taskID = identity.TaskID
+	}
+	return claimMessageAttachmentsTx(ctx, tx, *claim, taskID, sessionID)
+}
+
+func (r *sqliteRepository) ensureQueueCapacityTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	maxPerSession int,
+) error {
+	if maxPerSession <= 0 {
+		return nil
+	}
+	var count int
+	if err := tx.GetContext(
+		ctx,
+		&count,
+		r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`),
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("count: %w", err)
+	}
+	if count >= maxPerSession {
+		return ErrQueueFull
+	}
+	return nil
+}
+
 // RequeuePreservingFIFO re-enqueues an entry, preserving both FIFO order
 // across the supersede→requeue cycle AND coalesce-replace semantics on
 // the original retry. Used by Service.requeueMessage when a queued
@@ -280,6 +863,28 @@ func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPe
 // insert. This keeps positions positive for TransferSession and future queue
 // mutations while preserving the current order.
 func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *QueuedMessage) error {
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return err
+	}
+	return r.requeuePreservingFIFO(ctx, nil, msg)
+}
+
+func (r *sqliteRepository) RequeuePreservingFIFOForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+) error {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.requeuePreservingFIFO(ctx, &identity, msg)
+}
+
+func (r *sqliteRepository) requeuePreservingFIFO(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin requeue-fifo tx: %w", err)
@@ -291,6 +896,27 @@ func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *Queue
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
 		return err
 	}
+	if msg.reservationGenerationsCaptured && !msg.IsDurableLifecycle() {
+		if err := r.validatePendingQueueDispatchTx(ctx, tx, msg); err != nil {
+			return err
+		}
+	}
+	if err := r.guardSessionTx(ctx, tx, msg.SessionID, msg.TaskID); err != nil {
+		return err
+	}
+	if msg.reservationGenerationsCaptured && !msg.IsDurableLifecycle() {
+		if err := r.deletePendingQueueDispatchTx(ctx, tx, msg); err != nil {
+			return err
+		}
+	}
+	if identity != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *identity); err != nil {
+			return err
+		}
+	}
+	if msg.IsReservedLifecycleDelivery() {
+		return r.releaseLifecycleReservationForRetryTx(ctx, tx, identity, msg)
+	}
 
 	// Coalesce-replace: only when caller supplied a coalesce key.
 	// Matches the original RequeueMessage's branching (coalesceKey !=
@@ -300,7 +926,7 @@ func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *Queue
 	coalesceKey := metadataString(msg.Metadata, MetadataCoalesceKey)
 	var existingID string
 	if coalesceKey != "" {
-		existing, findErr := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+		existing, _, findErr := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
 		if findErr != nil {
 			return findErr
 		}
@@ -313,12 +939,107 @@ func (r *sqliteRepository) RequeuePreservingFIFO(ctx context.Context, msg *Queue
 	}
 	return r.applyHeadInsertTx(ctx, tx, msg)
 }
+func (r *sqliteRepository) releaseLifecycleReservationForRetryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+) error {
+	var metadataJSON string
+	if err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+	`), msg.ID, msg.SessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEntryNotFound
+		}
+		return fmt.Errorf("read lifecycle reservation for retry: %w", err)
+	}
+	metadata := make(map[string]interface{})
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return fmt.Errorf("unmarshal lifecycle reservation for retry: %w", err)
+		}
+	}
+	reserved, _ := metadata[MetadataLifecycleReserved].(bool)
+	if !reserved {
+		return ErrEntryNotFound
+	}
+	if identity != nil &&
+		lifecycleReservationIncarnation(metadata) != identity.SessionIncarnationID {
+		return ErrEntryNotFound
+	}
+
+	successor, err := r.findPendingCoalescedSuccessor(
+		ctx,
+		tx,
+		msg.SessionID,
+		msg.QueuedBy,
+		metadata,
+	)
+	if err != nil {
+		return err
+	}
+	if err := r.releaseReservedQueueRowTx(
+		ctx,
+		tx,
+		msg.SessionID,
+		msg.ID,
+		metadataJSON,
+		metadata,
+		successor != nil,
+	); err != nil {
+		return fmt.Errorf("release lifecycle reservation for retry: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) releaseReservedQueueRowTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, entryID, metadataJSON string,
+	metadata map[string]interface{},
+	discard bool,
+) error {
+	var (
+		result sql.Result
+		err    error
+	)
+	if discard {
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
+			DELETE FROM queued_messages
+			WHERE id = ? AND session_id = ? AND metadata_json = ?
+		`), entryID, sessionID, metadataJSON)
+	} else {
+		releasedJSON, marshalErr := marshalMetadata(clearReservedMetadata(metadata))
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE queued_messages SET metadata_json = ?
+			WHERE id = ? AND session_id = ? AND metadata_json = ?
+		`), releasedJSON, entryID, sessionID, metadataJSON)
+	}
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrEntryNotFound
+	}
+	return nil
+}
 
 // applyCoalesceReplaceTx UPDATEs the existing entry in place,
 // preserving its position and ID. The retry stays at the most head-of-
 // queue position for this coalesce key — supersede→requeue of the same
 // content keeps FIFO at the same slot. Caller owns the tx.
 func (r *sqliteRepository) applyCoalesceReplaceTx(ctx context.Context, tx *sqlx.Tx, msg *QueuedMessage, existingID string) error {
+	if err := r.deleteEditLeaseForEntryTx(ctx, tx, msg.SessionID, existingID); err != nil {
+		return err
+	}
 	attachmentsJSON, err := marshalAttachments(msg.Attachments)
 	if err != nil {
 		return err
@@ -386,6 +1107,17 @@ func (r *sqliteRepository) applyHeadInsertTx(ctx context.Context, tx *sqlx.Tx, m
 	} else {
 		msg.Position = 1
 	}
+	var maxPosition sql.NullInt64
+	if err := tx.GetContext(ctx, &maxPosition, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
+		return fmt.Errorf("max position after requeue shift: %w", err)
+	}
+	if maxPosition.Valid {
+		if err := r.bumpQueuePositionTx(ctx, tx, msg.SessionID, maxPosition.Int64); err != nil {
+			return err
+		}
+	} else if err := r.bumpQueuePositionTx(ctx, tx, msg.SessionID, msg.Position); err != nil {
+		return err
+	}
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
 	}
@@ -416,6 +1148,33 @@ func (r *sqliteRepository) applyHeadInsertTx(ctx context.Context, tx *sqlx.Tx, m
 
 // Restore reinserts a previously dequeued entry at its original FIFO position.
 func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxPerSession int) error {
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return err
+	}
+	if err := r.ensureEditLeaseSchema(ctx); err != nil {
+		return err
+	}
+	return r.restore(ctx, nil, msg, maxPerSession)
+}
+
+func (r *sqliteRepository) RestoreForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	maxPerSession int,
+) error {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.restore(ctx, &identity, msg, maxPerSession)
+}
+
+func (r *sqliteRepository) restore(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+	maxPerSession int,
+) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin restore tx: %w", err)
@@ -427,6 +1186,27 @@ func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxP
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
 		return err
 	}
+	if msg.reservationGenerationsCaptured && !msg.IsDurableLifecycle() {
+		if err := r.validatePendingQueueDispatchTx(ctx, tx, msg); err != nil {
+			return err
+		}
+	}
+	if err := r.guardSessionTx(ctx, tx, msg.SessionID, msg.TaskID); err != nil {
+		return err
+	}
+	if err := r.deleteEditLeaseForEntryTx(ctx, tx, msg.SessionID, msg.ID); err != nil {
+		return err
+	}
+	if msg.reservationGenerationsCaptured && !msg.IsDurableLifecycle() {
+		if err := r.deletePendingQueueDispatchTx(ctx, tx, msg); err != nil {
+			return err
+		}
+	}
+	if identity != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *identity); err != nil {
+			return err
+		}
+	}
 
 	if maxPerSession > 0 {
 		var count int
@@ -436,6 +1216,9 @@ func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxP
 		if count >= maxPerSession {
 			return ErrQueueFull
 		}
+	}
+	if err := r.bumpQueuePositionTx(ctx, tx, msg.SessionID, msg.Position); err != nil {
+		return err
 	}
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
@@ -463,8 +1246,41 @@ func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxP
 	return tx.Commit()
 }
 
+func (r *sqliteRepository) appendMatchingTailTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	tail *QueuedMessage,
+	queuedBy, content string,
+) (bool, error) {
+	if tail == nil || tail.QueuedBy != queuedBy {
+		return false, nil
+	}
+	newContent := tail.Content + "\n\n---\n\n" + content
+	if _, err := tx.ExecContext(
+		ctx,
+		r.db.Rebind(`UPDATE queued_messages SET content = ? WHERE id = ?`),
+		newContent,
+		tail.ID,
+	); err != nil {
+		return false, fmt.Errorf("append update: %w", err)
+	}
+	tail.Content = newContent
+	return true, nil
+}
+
 // AppendOrInsertTail concatenates onto the tail entry when its owner matches, otherwise inserts a new entry.
 func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
+	if err := r.ensureEditLeaseSchema(ctx); err != nil {
+		return nil, false, err
+	}
+	return r.appendOrInsertTail(ctx, nil, sessionID, taskID, content, model, queuedBy, planMode, attachments, metadata, maxPerSession)
+}
+
+func (r *sqliteRepository) AppendOrInsertTailForSession(ctx context.Context, identity QueueSessionIdentity, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
+	return r.appendOrInsertTail(ctx, &identity, identity.SessionID, identity.TaskID, content, model, queuedBy, planMode, attachments, metadata, maxPerSession)
+}
+
+func (r *sqliteRepository) appendOrInsertTail(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("begin append tx: %w", err)
@@ -476,17 +1292,31 @@ func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, ta
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, false, err
 	}
+	if err := r.guardSessionTx(ctx, tx, sessionID, taskID); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, false, err
+	}
 
 	tail, err := r.scanTail(ctx, tx, sessionID)
 	if err != nil {
 		return nil, false, err
 	}
 	if tail != nil && tail.QueuedBy == queuedBy {
-		newContent := tail.Content + "\n\n---\n\n" + content
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE queued_messages SET content = ? WHERE id = ?`), newContent, tail.ID); err != nil {
-			return nil, false, fmt.Errorf("append update: %w", err)
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, tail.ID)
+		if err != nil {
+			return nil, false, err
 		}
-		tail.Content = newContent
+		if blocked {
+			return nil, false, ErrEditConflict
+		}
+	}
+	appended, err := r.appendMatchingTailTx(ctx, tx, tail, queuedBy, content)
+	if err != nil {
+		return nil, false, err
+	}
+	if appended {
 		if err := tx.Commit(); err != nil {
 			return nil, false, err
 		}
@@ -494,25 +1324,19 @@ func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, ta
 	}
 
 	// No matching tail — insert a fresh entry while still inside the same tx.
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-			return nil, false, fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return nil, false, ErrQueueFull
-		}
+	if err := r.ensureQueueCapacityTx(ctx, tx, sessionID, maxPerSession); err != nil {
+		return nil, false, err
 	}
-	var maxPos sql.NullInt64
-	if err := tx.GetContext(ctx, &maxPos, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-		return nil, false, fmt.Errorf("max position: %w", err)
+	position, err := r.nextQueuePositionTx(ctx, tx, sessionID)
+	if err != nil {
+		return nil, false, err
 	}
 
 	msg := &QueuedMessage{
 		ID:          uuid.New().String(),
 		SessionID:   sessionID,
 		TaskID:      taskID,
-		Position:    maxPos.Int64 + 1,
+		Position:    position,
 		Content:     content,
 		Model:       model,
 		PlanMode:    planMode,
@@ -547,6 +1371,34 @@ func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, ta
 
 // InsertOrReplaceByCoalesceKey replaces an entry with the same session/queued_by/coalesce key, or inserts when allowInsert is set.
 func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
+	if err := r.ensureEditLeaseSchema(ctx); err != nil {
+		return nil, false, err
+	}
+	return r.insertOrReplaceByCoalesceKey(ctx, nil, msg, coalesceKey, maxPerSession, allowInsert)
+}
+
+func (r *sqliteRepository) InsertOrReplaceByCoalesceKeyForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	return r.insertOrReplaceByCoalesceKey(ctx, &identity, msg, coalesceKey, maxPerSession, allowInsert)
+}
+
+func (r *sqliteRepository) insertOrReplaceByCoalesceKey(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("begin coalesce tx: %w", err)
@@ -558,12 +1410,21 @@ func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
 		return nil, false, err
 	}
+	if err := r.guardSessionTx(ctx, tx, msg.SessionID, msg.TaskID); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, false, err
+	}
 
-	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+	existing, reservedMatch, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
 	if err != nil {
 		return nil, false, err
 	}
 	if existing != nil {
+		if err := r.deleteEditLeaseForEntryTx(ctx, tx, msg.SessionID, existing.ID); err != nil {
+			return nil, false, err
+		}
 		updated, err := r.replaceCoalesced(ctx, tx, existing, msg)
 		if err != nil {
 			return nil, false, err
@@ -576,6 +1437,7 @@ func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg
 	if !allowInsert {
 		return nil, false, ErrEntryNotFound
 	}
+	maxPerSession = coalescedInsertCapacity(maxPerSession, reservedMatch)
 	if err := r.insertCoalesced(ctx, tx, msg, maxPerSession); err != nil {
 		return nil, false, err
 	}
@@ -585,12 +1447,44 @@ func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg
 	return msg, false, nil
 }
 
+func coalescedInsertCapacity(maxPerSession int, reservedMatch bool) int {
+	if reservedMatch {
+		return 0
+	}
+	return maxPerSession
+}
+
 // InsertOrReplaceLifecycleByCoalesceKey serializes lifecycle acceptance with
 // task archival. The no-op UPDATE takes SQLite's writer lock only when the
 // referenced task is still active; archive either commits first (this returns
 // ErrTaskInactive) or queues first (the archive then follows normal
 // cancellation semantics).
 func (r *sqliteRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
+	return r.insertOrReplaceLifecycleByCoalesceKey(ctx, nil, msg, coalesceKey, maxPerSession, allowInsert)
+}
+
+func (r *sqliteRepository) InsertOrReplaceLifecycleByCoalesceKeyForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	return r.insertOrReplaceLifecycleByCoalesceKey(ctx, &identity, msg, coalesceKey, maxPerSession, allowInsert)
+}
+
+func (r *sqliteRepository) insertOrReplaceLifecycleByCoalesceKey(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("begin lifecycle coalesce tx: %w", err)
@@ -619,19 +1513,17 @@ func (r *sqliteRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Con
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
 		return nil, false, err
 	}
-	expectedGeneration, ok := lifecycleGenerationFromMetadata(msg.Metadata)
-	if !ok {
-		return nil, false, ErrLifecycleCancelled
-	}
-	generation, err := lifecycleGenerationInTx(ctx, tx, r.db, msg.TaskID)
-	if err != nil {
+	if err := r.guardSessionTx(ctx, tx, msg.SessionID, msg.TaskID); err != nil {
 		return nil, false, err
 	}
-	if expectedGeneration != generation {
-		return nil, false, ErrLifecycleCancelled
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateLifecycleGenerationTx(ctx, tx, msg); err != nil {
+		return nil, false, err
 	}
 
-	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+	existing, reservedMatch, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
 	if err != nil {
 		return nil, false, err
 	}
@@ -648,6 +1540,7 @@ func (r *sqliteRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Con
 	if !allowInsert {
 		return nil, false, ErrEntryNotFound
 	}
+	maxPerSession = coalescedInsertCapacity(maxPerSession, reservedMatch)
 	if err := r.insertCoalesced(ctx, tx, msg, maxPerSession); err != nil {
 		return nil, false, err
 	}
@@ -655,6 +1548,25 @@ func (r *sqliteRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Con
 		return nil, false, err
 	}
 	return msg, false, nil
+}
+
+func (r *sqliteRepository) validateLifecycleGenerationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	msg *QueuedMessage,
+) error {
+	expected, ok := lifecycleGenerationFromMetadata(msg.Metadata)
+	if !ok {
+		return ErrLifecycleCancelled
+	}
+	generation, err := lifecycleGenerationInTx(ctx, tx, r.db, msg.TaskID)
+	if err != nil {
+		return err
+	}
+	if expected != generation {
+		return ErrLifecycleCancelled
+	}
+	return nil
 }
 
 // LifecycleGeneration returns the current archive/delete generation for a task.
@@ -668,6 +1580,39 @@ func (r *sqliteRepository) LifecycleGeneration(ctx context.Context, taskID strin
 	}
 	if err != nil {
 		return 0, fmt.Errorf("get lifecycle queue generation: %w", err)
+	}
+	return generation, nil
+}
+
+func getLifecycleGenerationTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string) (int64, error) {
+	var generation int64
+	err := tx.GetContext(ctx, &generation, db.Rebind(`
+		SELECT generation FROM lifecycle_queue_generations WHERE task_id = ?
+	`), taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get lifecycle queue generation in transaction: %w", err)
+	}
+	return generation, nil
+}
+
+// SessionGeneration returns the current destructive-mutation generation for a
+// session.
+func (r *sqliteRepository) SessionGeneration(ctx context.Context, sessionID string) (int64, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	var generation int64
+	err := r.ro.GetContext(ctx, &generation, r.ro.Rebind(`
+		SELECT send_now_generation FROM queue_session_state WHERE session_id = ?
+	`), sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get send-now session generation: %w", err)
 	}
 	return generation, nil
 }
@@ -732,16 +1677,109 @@ func purgeQueueRowSessions(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID
 	return sessions, nil
 }
 
+func ensureTaskPurgeRecoverySchemas(ctx context.Context, tx *sqlx.Tx) error {
+	if _, err := tx.ExecContext(ctx, queueDispatchRecoverySchema); err != nil {
+		return fmt.Errorf("ensure task purge dispatch recovery schema: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, sendNowClaimRecoverySchema); err != nil {
+		return fmt.Errorf("ensure task purge Send Now recovery schema: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, attachmentCleanupSchema); err != nil {
+		return fmt.Errorf("ensure task purge attachment cleanup schema: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, sessionTransferCompensationSchema); err != nil {
+		return fmt.Errorf("ensure task purge transfer compensation schema: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, editLeaseSchema); err != nil {
+		return fmt.Errorf("ensure task purge edit lease schema: %w", err)
+	}
+	return nil
+}
+
+// Attachment cleanup obligations intentionally survive task purge. Archive
+// preserves task attachment storage, while already-obsolete queue claims still
+// need the retry worker to release them; deletion removes attachment bytes
+// through the task attachment service after the database mutation.
+func deleteTaskRecoveryRowsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	dispatchEntryIDs []string,
+) error {
+	for _, entryID := range dispatchEntryIDs {
+		if _, err := tx.ExecContext(ctx, db.Rebind(`
+			DELETE FROM queue_dispatch_claims WHERE entry_id = ?
+		`), entryID); err != nil {
+			return fmt.Errorf("purge task dispatch claim: %w", err)
+		}
+	}
+	return nil
+}
+
 // PurgeTaskInTransaction lets the task repository make archive/delete and
 // durable queue invalidation one SQLite transaction. It is backend-internal:
 // user queue handlers must keep using ownership-checked deletion methods.
 //
 // taskSessions is the task's authoritative session set, discovered by the
+// caller from its own task_sessions schema. The queue repository never reaches
+// across schemas because a failed cross-schema query would abort the caller's
+// transaction on PostgreSQL. Standalone purges discover sessions from visible
+// queue rows and durable recovery records.
 // caller from its own task_sessions schema — the queue repository never
 // reaches across schemas, and a failed cross-schema query would abort the
 // caller's transaction on PostgreSQL. The standalone PurgeTask passes nil and
 // locks only the sessions that currently hold queue rows.
+// DeleteSessionInTransaction removes queue state only when the authoritative
+// task-session row still matches identity. The caller must lock the task row first.
+func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, identity QueueSessionIdentity) error {
+	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
+		return ErrSessionIdentityMismatch
+	}
+	if err := lockSessionTxIn(ctx, tx, db, identity.SessionID); err != nil {
+		return err
+	}
+	var incarnationID string
+	query := `SELECT queue_incarnation_id FROM task_sessions WHERE id = ? AND task_id = ?`
+	if db.DriverName() == "pgx" {
+		query += postgresForUpdateSuffix
+	}
+	err := tx.GetContext(ctx, &incarnationID, db.Rebind(query), identity.SessionID, identity.TaskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrSessionIdentityMismatch
+	}
+	if err != nil {
+		return fmt.Errorf("validate deleted queue session identity: %w", err)
+	}
+	if incarnationID != identity.SessionIncarnationID {
+		return ErrSessionIdentityMismatch
+	}
+	if _, err := PurgeSessionInTransaction(ctx, tx, db, identity.SessionID); err != nil {
+		return fmt.Errorf("delete queue session state: %w", err)
+	}
+	return nil
+}
+
 func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string, taskSessions []string) (int, error) {
+	// Task lifecycle operations can run before the optional queue repository has
+	// been initialized. PostgreSQL aborts a transaction on a missing-table
+	// statement, so inspect every queue table before issuing any queue query.
+	for _, table := range []string{
+		"queued_messages",
+		"lifecycle_queue_generations",
+		"queue_session_locks",
+	} {
+		present, err := internaldb.TableExists(tx, table)
+		if err != nil {
+			return 0, fmt.Errorf("check %s table: %w", table, err)
+		}
+		if !present {
+			return 0, nil
+		}
+	}
+
+	if err := ensureTaskPurgeRecoverySchemas(ctx, tx); err != nil {
+		return 0, err
+	}
 	// Serialize with per-session tail operations: a purge that races a fold
 	// or insert could otherwise delete a row an admission just accepted, or
 	// admit into a queue being purged. Lock the AUTHORITATIVE session set —
@@ -756,6 +1794,16 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 	if err != nil {
 		return 0, err
 	}
+	dispatchEntryIDs, dispatchSessions, err := pendingQueueDispatchesForTaskTx(ctx, tx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	sendNowSessions, err := pendingSendNowSessionsForTaskTx(ctx, tx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	rowSessions = append(rowSessions, sendNowSessions...)
+	rowSessions = append(rowSessions, dispatchSessions...)
 	seen := make(map[string]struct{}, len(rowSessions)+len(taskSessions))
 	for _, sessionID := range rowSessions {
 		seen[sessionID] = struct{}{}
@@ -773,6 +1821,14 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 			return 0, err
 		}
 	}
+	for _, sessionID := range ordered {
+		if err := guardSessionTransferTx(ctx, tx, db, sessionID); err != nil {
+			return 0, err
+		}
+	}
+	if err := deleteEditLeasesForSessionIDsTx(ctx, tx, db, ordered); err != nil {
+		return 0, err
+	}
 	result, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM queued_messages WHERE task_id = ?`), taskID)
 	if err != nil {
 		return 0, fmt.Errorf("purge queued task entries: %w", err)
@@ -781,11 +1837,89 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 	if err != nil {
 		return 0, fmt.Errorf("purge queued task entries rows affected: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM pending_moves WHERE task_id = ?`), taskID); err != nil {
+		return 0, fmt.Errorf("purge pending task moves: %w", err)
+	}
+	if err := deleteTaskRecoveryRowsTx(ctx, tx, db, dispatchEntryIDs); err != nil {
+		return 0, err
+	}
+	for _, sessionID := range ordered {
+		if _, err := tx.ExecContext(ctx, db.Rebind(`
+			DELETE FROM queue_send_now_claims WHERE session_id = ?
+		`), sessionID); err != nil {
+			return 0, fmt.Errorf("purge task Send Now claim: %w", err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO lifecycle_queue_generations (task_id, generation) VALUES (?, 1)
 		ON CONFLICT(task_id) DO UPDATE SET generation = lifecycle_queue_generations.generation + 1
 	`), taskID); err != nil {
 		return 0, fmt.Errorf("advance lifecycle queue generation: %w", err)
+	}
+	return int(removed), nil
+}
+
+// PurgeSessionInTransaction removes all durable queue state for a deleted
+// session while the owning task repository transaction is still open. The
+// caller must hold the session lock and must commit the surrounding
+// transaction after this function returns successfully.
+func PurgeSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, sessionID string) (int, error) {
+	for _, table := range []string{"queued_messages", "queue_session_locks"} {
+		present, err := internaldb.TableExists(tx, table)
+		if err != nil {
+			return 0, fmt.Errorf("check %s table: %w", table, err)
+		}
+		if !present {
+			return 0, nil
+		}
+	}
+
+	if err := ensureTaskPurgeRecoverySchemas(ctx, tx); err != nil {
+		return 0, err
+	}
+	if err := lockSessionTxIn(ctx, tx, db, sessionID); err != nil {
+		return 0, err
+	}
+	if err := guardSessionTransferTx(ctx, tx, db, sessionID); err != nil {
+		return 0, err
+	}
+	if err := deleteEditLeasesForSessionIDsTx(ctx, tx, db, []string{sessionID}); err != nil {
+		return 0, err
+	}
+
+	result, err := tx.ExecContext(ctx, db.Rebind(`
+		DELETE FROM queued_messages WHERE session_id = ?
+	`), sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("purge queued session entries: %w", err)
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("purge queued session entries rows affected: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		DELETE FROM pending_moves WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("purge session pending move: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		INSERT INTO queue_session_state (session_id, auto_run, send_now_generation)
+		VALUES (?, 1, 1)
+		ON CONFLICT(session_id) DO UPDATE SET
+			auto_run = 1,
+			send_now_generation = queue_session_state.send_now_generation + 1
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("advance deleted session queue generation: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		DELETE FROM queue_send_now_claims WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("purge session Send Now claim: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		DELETE FROM queue_dispatch_claims WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("purge session dispatch claims: %w", err)
 	}
 	return int(removed), nil
 }
@@ -838,11 +1972,11 @@ func (r *sqliteRepository) insertCoalesced(ctx context.Context, tx *sqlx.Tx, msg
 	if err := r.ensureQueueCapacity(ctx, tx, msg.SessionID, maxPerSession); err != nil {
 		return err
 	}
-	var maxPos sql.NullInt64
-	if err := tx.GetContext(ctx, &maxPos, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
-		return fmt.Errorf("max position: %w", err)
+	position, err := r.nextQueuePositionTx(ctx, tx, msg.SessionID)
+	if err != nil {
+		return err
 	}
-	msg.Position = maxPos.Int64 + 1
+	msg.Position = position
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
 	}
@@ -910,6 +2044,169 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 	return out, rows.Err()
 }
 
+func (r *sqliteRepository) Snapshot(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+) (RepositorySnapshot, error) {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return RepositorySnapshot{}, fmt.Errorf("begin queue snapshot tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.guardActiveTaskTx(ctx, tx, identity.TaskID); err != nil {
+		return RepositorySnapshot{}, err
+	}
+	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
+		return RepositorySnapshot{}, err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
+		return RepositorySnapshot{}, err
+	}
+
+	entries, err := r.listBySessionTx(ctx, tx, identity.SessionID)
+	if err != nil {
+		return RepositorySnapshot{}, err
+	}
+	pendingMove, err := r.getPendingMoveTx(ctx, tx, identity.SessionID)
+	if err != nil {
+		return RepositorySnapshot{}, err
+	}
+	snapshot := RepositorySnapshot{Entries: entries, PendingMove: pendingMove, AutoRun: true}
+	snapshot.AutoRun, err = r.getAutoRunTx(ctx, tx, &identity, identity.SessionID)
+	if err != nil {
+		return RepositorySnapshot{}, fmt.Errorf("get queue snapshot Auto-run: %w", err)
+	}
+	snapshot.StatusGeneration, err = r.nextStatusGenerationTx(ctx, tx, identity)
+	if err != nil {
+		return RepositorySnapshot{}, err
+	}
+
+	var (
+		enabled  sql.NullInt64
+		revision int64
+	)
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT auto_merge_override, auto_merge_revision
+		  FROM queue_session_state
+		 WHERE session_id = ? AND session_incarnation_id = ?
+	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		snapshot.AutoMergeError = fmt.Errorf("get queue snapshot Auto-merge override: %w", err)
+		if commitErr := tx.Commit(); commitErr != nil {
+			return RepositorySnapshot{}, commitErr
+		}
+		return snapshot, nil
+	}
+	if err == nil && enabled.Valid {
+		snapshot.AutoMergeOverride = &AutoMergeOverride{
+			Enabled: enabled.Int64 != 0, Revision: revision,
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return RepositorySnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (r *sqliteRepository) nextStatusGenerationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity QueueSessionIdentity,
+) (int64, error) {
+	var generation int64
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_state (
+			session_id, session_incarnation_id, status_generation
+		) VALUES (?, ?, 1)
+		ON CONFLICT(session_id) DO UPDATE SET
+			auto_run = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_run
+				ELSE 1
+			END,
+			auto_merge_override = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_merge_override
+				ELSE NULL
+			END,
+			auto_merge_revision = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_merge_revision
+				ELSE 0
+			END,
+			send_now_generation = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.send_now_generation
+				ELSE 0
+			END,
+			status_generation = queue_session_state.status_generation + 1,
+			session_incarnation_id = excluded.session_incarnation_id
+		RETURNING status_generation
+	`), identity.SessionID, identity.SessionIncarnationID).Scan(&generation)
+	if err != nil {
+		return 0, fmt.Errorf("advance queue status generation: %w", err)
+	}
+	return generation, nil
+}
+
+func (r *sqliteRepository) getPendingMoveTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (*PendingMove, error) {
+	var (
+		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		position                                                         int
+		queuedAt                                                         time.Time
+		actor, senderSessionID                                           string
+	)
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
+		       step_position, queued_at, actor, sender_session_id
+		FROM pending_moves WHERE session_id = ?
+	`), sessionID).Scan(
+		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
+		&position, &queuedAt, &actor, &senderSessionID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read pending move snapshot: %w", err)
+	}
+	return &PendingMove{
+		MoveID: moveID, SessionIncarnationID: sessionIncarnationID, TaskID: taskID,
+		WorkflowID: workflowID, WorkflowStepID: workflowStepID, Position: position,
+		QueuedAt: queuedAt, Actor: actor, SenderSessionID: senderSessionID,
+	}, nil
+}
+
+func (r *sqliteRepository) listBySessionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+) ([]QueuedMessage, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		  FROM queued_messages
+		 WHERE session_id = ?
+		 ORDER BY position ASC
+	`), sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list queued snapshot: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var entries []QueuedMessage
+	for rows.Next() {
+		message, scanErr := scanQueuedRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		entries = append(entries, *message)
+	}
+	return entries, rows.Err()
+}
+
 // ListDurableLifecycleEntries returns durable lifecycle rows in stable FIFO
 // order across sessions. Startup recovery uses this view to remove queue rows
 // left by a crash between queue admission and attempt persistence.
@@ -939,6 +2236,23 @@ func (r *sqliteRepository) ListDurableLifecycleEntries(ctx context.Context) ([]Q
 		return nil, fmt.Errorf("list durable lifecycle queued rows: %w", err)
 	}
 	return out, nil
+}
+
+func (r *sqliteRepository) FindByID(ctx context.Context, entryID string) (*QueuedMessage, error) {
+	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE id = ?
+	`), entryID)
+	message, err := scanQueuedRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrEntryNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find queued entry: %w", err)
+	}
+	return message, nil
 }
 
 // CountBySession returns the number of entries for a session.
@@ -997,6 +2311,9 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 	// the same queue are serialized in-process, not just at the DB layer.
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return nil, err
+	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -1022,12 +2339,27 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 		}
 		return nil, fmt.Errorf("take head: %w", err)
 	}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, msg.ID)
+	if err != nil {
+		return nil, err
+	}
+	if blocked {
+		return nil, nil
+	}
+	if err := r.captureReservationGenerationsTx(ctx, tx, msg); err != nil {
+		return nil, err
+	}
 	// Two concurrent TakeHead calls can both observe the same head row in
 	// their respective DEFERRED transactions; one wins the DELETE, the other
 	// finds RowsAffected()==0 after waiting on the writer lock. Returning the
 	// already-drained message in that case would let the orchestrator dispatch
 	// it twice. Treat the lost race as "queue empty for now" so the caller
 	// retries on the next agent.ready instead.
+	if !msg.IsDurableLifecycle() {
+		if err := r.persistQueueDispatchClaimTx(ctx, tx, msg); err != nil {
+			return nil, err
+		}
+	}
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), msg.ID)
 	if err != nil {
 		return nil, fmt.Errorf("delete head: %w", err)
@@ -1047,7 +2379,7 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 
 // ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
 func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
-	msg, _, err := r.reserveHead(ctx, sessionID, false)
+	msg, _, err := r.reserveHead(ctx, nil, sessionID, false, false)
 	return msg, err
 }
 
@@ -1068,6 +2400,14 @@ func (r *sqliteRepository) GetAutoRun(ctx context.Context, sessionID string) (bo
 
 // SetAutoRun persists policy while holding the queue's per-session lock.
 func (r *sqliteRepository) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
+	return r.setAutoRun(ctx, nil, sessionID, enabled)
+}
+
+func (r *sqliteRepository) SetAutoRunForSession(ctx context.Context, identity QueueSessionIdentity, enabled bool) error {
+	return r.setAutoRun(ctx, &identity, identity.SessionID, enabled)
+}
+
+func (r *sqliteRepository) setAutoRun(ctx context.Context, identity *QueueSessionIdentity, sessionID string, enabled bool) error {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
@@ -1076,17 +2416,127 @@ func (r *sqliteRepository) SetAutoRun(ctx context.Context, sessionID string, ena
 		return fmt.Errorf("begin set auto-run tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
-	if err := r.setAutoRunTx(ctx, tx, sessionID, enabled); err != nil {
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	if err := r.setAutoRunTx(ctx, tx, identity, sessionID, enabled); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+func (r *sqliteRepository) GetAutoMergeOverride(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+) (*AutoMergeOverride, error) {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin get Auto-merge override: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, err
+	}
+
+	var (
+		enabled  sql.NullInt64
+		revision int64
+	)
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT auto_merge_override, auto_merge_revision
+		  FROM queue_session_state
+		 WHERE session_id = ? AND session_incarnation_id = ?
+	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get queue Auto-merge override: %w", err)
+	}
+	if !enabled.Valid {
+		return nil, nil
+	}
+	return &AutoMergeOverride{Enabled: enabled.Int64 != 0, Revision: revision}, nil
+}
+
+func (r *sqliteRepository) SetAutoMergeOverride(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	enabled bool,
+) (AutoMergeOverride, error) {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return AutoMergeOverride{}, fmt.Errorf("begin set Auto-merge override: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.guardActiveTaskTx(ctx, tx, identity.TaskID); err != nil {
+		return AutoMergeOverride{}, err
+	}
+	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
+		return AutoMergeOverride{}, err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
+		return AutoMergeOverride{}, err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_state (
+			session_id, session_incarnation_id, auto_merge_override, auto_merge_revision
+		) VALUES (?, ?, ?, 1)
+		ON CONFLICT(session_id) DO UPDATE SET
+			session_incarnation_id = excluded.session_incarnation_id,
+			auto_merge_override = excluded.auto_merge_override,
+			auto_merge_revision = queue_session_state.auto_merge_revision + 1
+		WHERE queue_session_state.session_incarnation_id = ''
+		   OR queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+	`), identity.SessionID, identity.SessionIncarnationID, boolToInt(enabled)); err != nil {
+		return AutoMergeOverride{}, fmt.Errorf("set queue Auto-merge override: %w", err)
+	}
+	var result AutoMergeOverride
+	var storedEnabled int
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT auto_merge_override, auto_merge_revision
+		  FROM queue_session_state
+		 WHERE session_id = ? AND session_incarnation_id = ?
+	`), identity.SessionID, identity.SessionIncarnationID).Scan(&storedEnabled, &result.Revision); errors.Is(err, sql.ErrNoRows) {
+		return AutoMergeOverride{}, ErrSessionIdentityMismatch
+	} else if err != nil {
+		return AutoMergeOverride{}, fmt.Errorf("read written queue Auto-merge override: %w", err)
+	}
+	result.Enabled = storedEnabled != 0
+	if err := tx.Commit(); err != nil {
+		return AutoMergeOverride{}, err
+	}
+	return result, nil
+}
+
 // PauseAutoRunIfPending persists OFF only when a visible pending row exists.
 func (r *sqliteRepository) PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error) {
+	return r.pauseAutoRunIfPending(ctx, nil, sessionID)
+}
+
+func (r *sqliteRepository) PauseAutoRunIfPendingForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+) (bool, error) {
+	return r.pauseAutoRunIfPending(ctx, &identity, identity.SessionID)
+}
+
+func (r *sqliteRepository) pauseAutoRunIfPending(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	sessionID string,
+) (bool, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -1094,7 +2544,13 @@ func (r *sqliteRepository) PauseAutoRunIfPending(ctx context.Context, sessionID 
 		return false, fmt.Errorf("begin conditional auto-run pause tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return false, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
 		return false, err
 	}
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
@@ -1130,7 +2586,7 @@ func (r *sqliteRepository) PauseAutoRunIfPending(ctx context.Context, sessionID 
 	if !hasPending {
 		return false, nil
 	}
-	if err := r.setAutoRunTx(ctx, tx, sessionID, false); err != nil {
+	if err := r.setAutoRunTx(ctx, tx, identity, sessionID, false); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1139,49 +2595,170 @@ func (r *sqliteRepository) PauseAutoRunIfPending(ctx context.Context, sessionID 
 	return true, nil
 }
 
-func (r *sqliteRepository) setAutoRunTx(ctx context.Context, tx *sqlx.Tx, sessionID string, enabled bool) error {
+func (r *sqliteRepository) setAutoRunTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+	sessionID string,
+	enabled bool,
+) error {
+	if identity == nil {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO queue_session_state (session_id, auto_run) VALUES (?, ?)
+			ON CONFLICT(session_id) DO UPDATE SET auto_run = excluded.auto_run
+		`), sessionID, boolToInt(enabled)); err != nil {
+			return fmt.Errorf("set queue auto-run: %w", err)
+		}
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO queue_session_state (session_id, auto_run) VALUES (?, ?)
-		ON CONFLICT(session_id) DO UPDATE SET auto_run = excluded.auto_run
-	`), sessionID, boolToInt(enabled)); err != nil {
+		INSERT INTO queue_session_state (session_id, session_incarnation_id, auto_run)
+		VALUES (?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			auto_run = excluded.auto_run,
+			auto_merge_override = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_merge_override
+				ELSE NULL
+			END,
+			auto_merge_revision = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.auto_merge_revision
+				ELSE 0
+			END,
+			send_now_generation = CASE
+				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
+				THEN queue_session_state.send_now_generation
+				ELSE 0
+			END,
+			session_incarnation_id = excluded.session_incarnation_id
+	`), sessionID, identity.SessionIncarnationID, boolToInt(enabled)); err != nil {
 		return fmt.Errorf("set queue auto-run: %w", err)
 	}
 	return nil
 }
-
-func (r *sqliteRepository) getAutoRunTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (bool, error) {
-	var enabled int
-	err := tx.GetContext(ctx, &enabled, r.db.Rebind(`
-		SELECT auto_run FROM queue_session_state WHERE session_id = ?
+func (r *sqliteRepository) getSendNowGenerationTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
+	var generation int64
+	err := tx.GetContext(ctx, &generation, r.db.Rebind(`
+		SELECT send_now_generation FROM queue_session_state WHERE session_id = ?
 	`), sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get send-now generation: %w", err)
+	}
+	return generation, nil
+}
+
+func (r *sqliteRepository) bumpSendNowGenerationTx(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_state (session_id, send_now_generation)
+		VALUES (?, 1)
+		ON CONFLICT(session_id) DO UPDATE
+		SET send_now_generation = queue_session_state.send_now_generation + 1
+	`), sessionID); err != nil {
+		return fmt.Errorf("advance send-now generation: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) getAutoRunTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+	sessionID string,
+) (bool, error) {
+	if identity == nil {
+		var enabled int
+		err := tx.GetContext(ctx, &enabled, r.db.Rebind(`
+			SELECT auto_run FROM queue_session_state WHERE session_id = ?
+		`), sessionID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("get queue auto-run in transaction: %w", err)
+		}
+		return enabled != 0, nil
+	}
+
+	var (
+		enabled             int
+		storedIncarnationID string
+	)
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT auto_run, session_incarnation_id
+		FROM queue_session_state
+		WHERE session_id = ?
+	`), sessionID).Scan(&enabled, &storedIncarnationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("get queue auto-run in transaction: %w", err)
 	}
+	if storedIncarnationID == "" {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE queue_session_state
+			SET session_incarnation_id = ?
+			WHERE session_id = ? AND session_incarnation_id = ''
+		`), identity.SessionIncarnationID, sessionID); err != nil {
+			return false, fmt.Errorf("bind queue auto-run incarnation: %w", err)
+		}
+		return enabled != 0, nil
+	}
+	if storedIncarnationID != identity.SessionIncarnationID {
+		return true, nil
+	}
 	return enabled != 0, nil
 }
 
 // ReserveHeadIfAutoRun reads policy and reserves the FIFO head under one lock.
 func (r *sqliteRepository) ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error) {
-	return r.reserveHead(ctx, sessionID, true)
+	return r.reserveHead(ctx, nil, sessionID, true, false)
 }
 
-func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, requireAutoRun bool) (*QueuedMessage, bool, error) {
+func (r *sqliteRepository) ReserveHeadIfAutoRunForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error) {
+	return r.reserveHead(ctx, &identity, identity.SessionID, true, false)
+}
+
+func (r *sqliteRepository) ReserveHeadForDeliveryIfAutoRunForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+) (*QueuedMessage, bool, error) {
+	return r.reserveHead(ctx, &identity, identity.SessionID, true, true)
+}
+
+func (r *sqliteRepository) reserveHead(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	sessionID string,
+	requireAutoRun bool,
+	retainOrdinary bool,
+) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return nil, true, err
+	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, true, fmt.Errorf("begin reserve tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return nil, true, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, true, err
 	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, true, err
+	}
 	if requireAutoRun {
-		enabled, err := r.getAutoRunTx(ctx, tx, sessionID)
+		enabled, err := r.getAutoRunTx(ctx, tx, identity, sessionID)
 		if err != nil {
 			return nil, true, err
 		}
@@ -1190,40 +2767,126 @@ func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, re
 		}
 	}
 
-	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT id, session_id, task_id, position, content, model, plan_mode,
-		       attachments_json, metadata_json, queued_at, queued_by
-		FROM queued_messages
-		WHERE session_id = ?
-		ORDER BY position ASC
-		LIMIT 1
-	`), sessionID)
-	msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, true, nil
-	}
-	if err != nil {
-		return nil, true, fmt.Errorf("reserve head: %w", err)
-	}
-	if msg.IsDurableLifecycle() {
-		reserved, err := r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)
-		return reserved, true, err
-	}
-	reserved, err := r.reserveOrdinaryHead(ctx, tx, msg)
-	return reserved, true, err
+	return r.reserveHeadTx(ctx, tx, identity, sessionID, retainOrdinary)
 }
 
-func (r *sqliteRepository) reserveLifecycleHead(
+func (r *sqliteRepository) reserveHeadTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+	sessionID string,
+	retainOrdinary bool,
+) (*QueuedMessage, bool, error) {
+	discardedStaleReservation := false
+	for {
+		row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+			SELECT id, session_id, task_id, position, content, model, plan_mode,
+			       attachments_json, metadata_json, queued_at, queued_by
+			FROM queued_messages
+			WHERE session_id = ?
+			ORDER BY position ASC
+			LIMIT 1
+		`), sessionID)
+		msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
+		if errors.Is(err, sql.ErrNoRows) {
+			if discardedStaleReservation {
+				if err := tx.Commit(); err != nil {
+					return nil, true, err
+				}
+			}
+			return nil, true, nil
+		}
+		if err != nil {
+			return nil, true, fmt.Errorf("reserve head: %w", err)
+		}
+		discarded, err := r.discardStaleReservationHead(
+			ctx,
+			tx,
+			identity,
+			msg,
+			storedMetadataJSON,
+		)
+		if err != nil {
+			return nil, true, err
+		}
+		if discarded {
+			discardedStaleReservation = true
+			continue
+		}
+		retainedLifecycle := msg.IsDurableLifecycle()
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, msg.ID)
+		if err != nil {
+			return nil, true, err
+		}
+		if blocked {
+			return nil, true, nil
+		}
+		if err := r.captureReservationGenerationsTx(ctx, tx, msg); err != nil {
+			return nil, true, err
+		}
+		if retainedLifecycle || retainOrdinary {
+			reserved, err := r.reserveRetainedHead(
+				ctx, tx, identity, msg, storedMetadataJSON, retainedLifecycle,
+			)
+			return reserved, true, err
+		}
+		reserved, err := r.reserveOrdinaryHead(ctx, tx, msg)
+		return reserved, true, err
+	}
+}
+func (r *sqliteRepository) discardStaleReservationHead(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
 	msg *QueuedMessage,
 	storedMetadataJSON string,
+) (bool, error) {
+	if identity == nil || !msg.IsReservedInFlight() {
+		return false, nil
+	}
+	reservationIncarnation := lifecycleReservationIncarnation(msg.Metadata)
+	if reservationIncarnation == "" ||
+		reservationIncarnation == identity.SessionIncarnationID {
+		return false, nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), msg.ID, msg.SessionID, storedMetadataJSON)
+	if err != nil {
+		return false, fmt.Errorf("discard stale delivery reservation: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		return false, ErrQueueChanged
+	}
+	return true, nil
+}
+
+func (r *sqliteRepository) reserveRetainedHead(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
+	msg *QueuedMessage,
+	storedMetadataJSON string,
+	lifecycle bool,
 ) (*QueuedMessage, error) {
 	// Keep the row for crash recovery but stop reporting it as pending.
-	// Strip a marker persisted by an interrupted prior process from the
+	// Strip metadata persisted by an interrupted prior process from the
 	// returned copy so a failed retry becomes visible again.
 	msg.Metadata = clearReservedMetadata(msg.Metadata)
-	reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
+	msg.lifecycleReservationID = uuid.NewString()
+	reservedMetadata := markReservedMetadata(msg.Metadata, msg.lifecycleReservationID)
+	if identity != nil {
+		reservedMetadata = markReservedMetadataForIncarnation(
+			reservedMetadata,
+			identity.SessionIncarnationID,
+		)
+	}
+	reservedJSON, err := marshalMetadata(reservedMetadata)
 	if err != nil {
 		return nil, err
 	}
@@ -1232,11 +2895,11 @@ func (r *sqliteRepository) reserveLifecycleHead(
 		WHERE id = ? AND session_id = ? AND metadata_json = ?
 	`), reservedJSON, msg.ID, msg.SessionID, storedMetadataJSON)
 	if err != nil {
-		return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
+		return nil, fmt.Errorf("mark delivery reservation in flight: %w", err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return nil, fmt.Errorf("mark lifecycle reservation rows affected: %w", err)
+		return nil, fmt.Errorf("mark delivery reservation rows affected: %w", err)
 	}
 	if affected == 0 {
 		return nil, nil
@@ -1244,7 +2907,10 @@ func (r *sqliteRepository) reserveLifecycleHead(
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	msg.reservedLifecycleDelivery = true
+	msg.reservedLifecycleDelivery = lifecycle
+	if identity != nil {
+		msg.reservationIdentity = *identity
+	}
 	return msg, nil
 }
 
@@ -1253,6 +2919,9 @@ func (r *sqliteRepository) reserveOrdinaryHead(
 	tx *sqlx.Tx,
 	msg *QueuedMessage,
 ) (*QueuedMessage, error) {
+	if err := r.persistQueueDispatchClaimTx(ctx, tx, msg); err != nil {
+		return nil, err
+	}
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
 	`), msg.ID, msg.SessionID)
@@ -1272,39 +2941,264 @@ func (r *sqliteRepository) reserveOrdinaryHead(
 	return msg, nil
 }
 
-// AcknowledgeByID removes a reserved durable entry after executor acceptance.
-func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entryID string) error {
-	unlock := r.withSessionLock(sessionID)
+// AcknowledgeReserved removes only the exact lifecycle reservation accepted by
+// the executor. A newer retry with the same queue entry ID must survive.
+func (r *sqliteRepository) AcknowledgeReserved(ctx context.Context, msg *QueuedMessage) error {
+	unlock := r.withSessionLock(msg.SessionID)
 	defer unlock()
 
-	// The ack must serialize with restore/replace on the same session across
-	// processes: an autocommit DELETE could otherwise delete a row that a
-	// concurrent backend just restored/reinserted, losing durable retry state.
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin acknowledge tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
-	`), entryID, sessionID)
+	var storedMetadataJSON string
+	err = tx.GetContext(ctx, &storedMetadataJSON, r.db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+	`), msg.ID, msg.SessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read reserved lifecycle entry: %w", err)
+	}
+	storedMetadata := make(map[string]interface{})
+	if storedMetadataJSON != "" && storedMetadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(storedMetadataJSON), &storedMetadata); err != nil {
+			return fmt.Errorf("unmarshal reserved lifecycle metadata: %w", err)
+		}
+	}
+	storedReservationID, _ := storedMetadata[metadataLifecycleReservationID].(string)
+	if msg.lifecycleReservationID == "" || storedReservationID != msg.lifecycleReservationID {
+		return ErrLifecycleReservationChanged
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), msg.ID, msg.SessionID, storedMetadataJSON)
 	if err != nil {
 		return fmt.Errorf("acknowledge queued: %w", err)
 	}
-	affected, err := res.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrLifecycleReservationChanged
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entryID string) error {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin acknowledge-by-id tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	var metadataJSON string
+	err = tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+	`), entryID, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read acknowledge-by-id entry: %w", err)
+	}
+	reserved, err := isReservedMetadataJSON(metadataJSON)
+	if err != nil {
+		return err
+	}
+	if !reserved {
+		return ErrEntryNotFound
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), entryID, sessionID, metadataJSON)
+	if err != nil {
+		return fmt.Errorf("acknowledge-by-id: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrEntryNotFound
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) AcknowledgeByIDForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin identity-bound acknowledge tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
+		return err
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	var metadataJSON string
+	err = tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+	`), entryID, identity.SessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read identity-bound lifecycle reservation: %w", err)
+	}
+	reservationIncarnation, reserved, err := lifecycleReservationFromMetadataJSON(metadataJSON)
+	if err != nil {
+		return err
+	}
+	if !reserved || reservationIncarnation != identity.SessionIncarnationID {
+		return ErrEntryNotFound
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), entryID, identity.SessionID, metadataJSON)
+	if err != nil {
+		return fmt.Errorf("acknowledge identity-bound queued message: %w", err)
+	}
+	affected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
 	if affected == 0 {
 		return ErrEntryNotFound
 	}
-	if err := tx.Commit(); err != nil {
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) ReleaseDeliveryReservationForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin release delivery reservation tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
 		return err
 	}
-	return nil
+	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	var metadataJSON, queuedBy string
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT metadata_json, queued_by FROM queued_messages WHERE id = ? AND session_id = ?
+	`), entryID, identity.SessionID).Scan(&metadataJSON, &queuedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read delivery reservation: %w", err)
+	}
+	metadata := make(map[string]interface{})
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return fmt.Errorf("unmarshal delivery reservation metadata: %w", err)
+		}
+	}
+	if reserved, _ := metadata[MetadataLifecycleReserved].(bool); !reserved ||
+		lifecycleReservationIncarnation(metadata) != identity.SessionIncarnationID {
+		return ErrEntryNotFound
+	}
+	successor, err := r.findPendingCoalescedSuccessor(
+		ctx,
+		tx,
+		identity.SessionID,
+		queuedBy,
+		metadata,
+	)
+	if err != nil {
+		return err
+	}
+	if err := r.releaseReservedQueueRowTx(
+		ctx,
+		tx,
+		identity.SessionID,
+		entryID,
+		metadataJSON,
+		metadata,
+		successor != nil,
+	); err != nil {
+		return fmt.Errorf("release delivery reservation: %w", err)
+	}
+	return tx.Commit()
+}
+func (r *sqliteRepository) DiscardLifecycleReservation(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) error {
+	unlock := r.withSessionLock(identity.SessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin discard lifecycle reservation tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
+		return err
+	}
+	var metadataJSON string
+	err = tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+	`), entryID, identity.SessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read lifecycle reservation: %w", err)
+	}
+	reservationIncarnation, reserved, err := lifecycleReservationFromMetadataJSON(metadataJSON)
+	if err != nil {
+		return err
+	}
+	if !reserved || reservationIncarnation != identity.SessionIncarnationID {
+		return ErrEntryNotFound
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), entryID, identity.SessionID, metadataJSON)
+	if err != nil {
+		return fmt.Errorf("discard lifecycle reservation: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrEntryNotFound
+	}
+	return tx.Commit()
 }
 
 // TakeByID atomically returns and deletes the entry identified by entryID,
@@ -1317,8 +3211,27 @@ func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entry
 // the SELECT and DELETE can't have it removed out from under the new
 // session — same session-scope invariant DeleteByID/UpdateContent enforce.
 func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	return r.takeByID(ctx, nil, sessionID, entryID)
+}
+
+func (r *sqliteRepository) TakeByIDForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entryID string,
+) (*QueuedMessage, error) {
+	return r.takeByID(ctx, &identity, identity.SessionID, entryID)
+}
+
+func (r *sqliteRepository) takeByID(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	sessionID, entryID string,
+) (*QueuedMessage, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return nil, err
+	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -1326,6 +3239,9 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
 		return nil, err
 	}
 
@@ -1341,6 +3257,21 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 			return nil, nil
 		}
 		return nil, fmt.Errorf("take by id: %w", err)
+	}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
+	if err != nil {
+		return nil, err
+	}
+	if blocked {
+		return nil, ErrEditConflict
+	}
+	if err := r.captureReservationGenerationsTx(ctx, tx, msg); err != nil {
+		return nil, err
+	}
+	if !msg.IsDurableLifecycle() {
+		if err := r.persistQueueDispatchClaimTx(ctx, tx, msg); err != nil {
+			return nil, err
+		}
 	}
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), msg.ID, sessionID)
 	if err != nil {
@@ -1359,10 +3290,48 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 	return msg, nil
 }
 
+func lifecycleGenerationsForSourcesTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	sources []QueuedMessage,
+) (map[string]int64, error) {
+	generations := make(map[string]int64)
+	for _, source := range sources {
+		if source.TaskID == "" {
+			continue
+		}
+		generation, err := lifecycleGenerationInTx(ctx, tx, db, source.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		generations[source.TaskID] = generation
+	}
+	return generations, nil
+}
+
 // ClaimSendNow atomically claims the exact ordered source snapshot for a send-now dispatch.
 func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
+	return r.claimSendNow(ctx, nil, sessionID, expected)
+}
+
+func (r *sqliteRepository) ClaimSendNowForSession(ctx context.Context, identity QueueSessionIdentity, expected []QueuedMessage) (*SendNowClaim, error) {
+	return r.claimSendNow(ctx, &identity, identity.SessionID, expected)
+}
+
+func queueSessionIdentityValue(identity *QueueSessionIdentity) QueueSessionIdentity {
+	if identity == nil {
+		return QueueSessionIdentity{}
+	}
+	return *identity
+}
+
+func (r *sqliteRepository) claimSendNow(ctx context.Context, identity *QueueSessionIdentity, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
 	if len(expected) == 0 {
 		return nil, ErrSendNowEmpty
+	}
+	if err := r.ensureSendNowClaimRecoverySchema(ctx); err != nil {
+		return nil, err
 	}
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
@@ -1377,7 +3346,13 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 		return nil, fmt.Errorf("begin send-now claim tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return nil, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
 		return nil, err
 	}
 
@@ -1389,37 +3364,64 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 	if err != nil {
 		return nil, err
 	}
+	for _, source := range sources {
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, source.ID)
+		if err != nil {
+			return nil, err
+		}
+		if blocked {
+			return nil, ErrEditConflict
+		}
+	}
+	claimIdentity := queueSessionIdentityValue(identity)
+	bindSendNowLifecycleReservations(sources, claimIdentity)
 	envelope, err := BuildSendNowEnvelope(sources)
 	if err != nil {
 		return nil, err
 	}
-	generations := make(map[string]int64)
-	for _, source := range sources {
-		if source.TaskID == "" {
-			continue
-		}
-		generation, generationErr := lifecycleGenerationInTx(ctx, tx, r.db, source.TaskID)
-		if generationErr != nil {
-			return nil, generationErr
-		}
-		generations[source.TaskID] = generation
-	}
-
-	if err := r.applySQLiteSendNowClaim(ctx, tx, sessionID, sources, storedByID); err != nil {
+	sessionGeneration, err := r.getSendNowGenerationTx(ctx, tx, sessionID)
+	if err != nil {
 		return nil, err
 	}
-	if err := r.setAutoRunTx(ctx, tx, sessionID, true); err != nil {
+	generations, err := lifecycleGenerationsForSourcesTx(ctx, tx, r.db, sources)
+	if err != nil {
+		return nil, err
+	}
+	claim := &SendNowClaim{
+		ClaimID:           uuid.NewString(),
+		Identity:          claimIdentity,
+		Sources:           sources,
+		Dispatch:          *envelope,
+		SourceGenerations: generations,
+		SessionGeneration: sessionGeneration,
+	}
+
+	if err := r.applySQLiteSendNowClaim(ctx, tx, identity, sessionID, sources, storedByID); err != nil {
+		return nil, err
+	}
+	if err := r.setAutoRunTx(ctx, tx, identity, sessionID, true); err != nil {
+		return nil, err
+	}
+	operationGeneration, err := incrementSendNowGenerationTx(ctx, tx, r.db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	claim.OperationGeneration = operationGeneration
+	claim.SessionGeneration = operationGeneration
+	if err := r.persistSendNowClaimTx(ctx, tx, claim); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
+	return claim, nil
 }
+
+const sendNowRestoreAction = "restore"
 
 // RestoreSendNowClaim puts every claimed source back at its original position.
 func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
-	tx, sessionID, unlock, err := r.beginSendNowClaimTx(ctx, claim, "restore")
+	tx, sessionID, unlock, err := r.beginSendNowClaimTx(ctx, claim, sendNowRestoreAction)
 	if err != nil {
 		return err
 	}
@@ -1429,6 +3431,11 @@ func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 	if err != nil {
 		return err
 	}
+	sessionGeneration, err := r.getSendNowGenerationTx(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	sessionChanged := claim.SessionGeneration != sessionGeneration
 	generations := make(map[string]int64)
 	for _, source := range claim.Sources {
 		if source.TaskID == "" {
@@ -1439,6 +3446,9 @@ func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 			return generationErr
 		}
 		generations[source.TaskID] = generation
+	}
+	if sessionChanged && !sendNowClaimSourcesAllInvalidated(claim, generations) {
+		return ErrSendNowClaimChanged
 	}
 	if err := validateSQLiteSendNowRestore(claim, sessionID, stored, generations); err != nil {
 		return err
@@ -1452,11 +3462,19 @@ func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 			return err
 		}
 	}
+	if claim.ClaimID != "" {
+		if err := r.deleteSendNowClaimTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
 // AcknowledgeSendNowClaim removes every durable source after the replacement prompt is accepted.
 func (r *sqliteRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
+	if claim != nil && claim.ClaimID == "" {
+		return ErrSendNowClaimChanged
+	}
 	tx, sessionID, unlock, err := r.beginSendNowClaimTx(ctx, claim, "acknowledge")
 	if err != nil {
 		return err
@@ -1467,11 +3485,46 @@ func (r *sqliteRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 	if err != nil {
 		return err
 	}
-	if err := validateSQLiteSendNowAcknowledge(claim, sessionID, stored); err != nil {
+	sessionGeneration, err := r.getSendNowGenerationTx(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	sessionChanged := claim.SessionGeneration != sessionGeneration
+	generations := make(map[string]int64)
+	for _, source := range claim.Sources {
+		if source.TaskID == "" {
+			continue
+		}
+		generation, generationErr := lifecycleGenerationInTx(ctx, tx, r.db, source.TaskID)
+		if generationErr != nil {
+			return generationErr
+		}
+		generations[source.TaskID] = generation
+	}
+	if sessionChanged && !sendNowClaimSourcesAllInvalidated(claim, generations) {
+		if claim.ClaimID != "" {
+			if err := r.deleteExactSendNowClaimTx(ctx, tx, sessionID, claim.ClaimID); err != nil {
+				return err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return ErrSendNowClaimChanged
+	}
+	if err := validateSQLiteSendNowAcknowledge(claim, sessionID, stored, generations); err != nil {
 		return err
 	}
 	for _, source := range claim.Sources {
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
+		}
 		if err := r.acknowledgeSQLiteSendNowSource(ctx, tx, sessionID, source, stored); err != nil {
+			return err
+		}
+	}
+	if claim.ClaimID != "" {
+		if err := r.deleteExactSendNowClaimTx(ctx, tx, sessionID, claim.ClaimID); err != nil {
 			return err
 		}
 	}
@@ -1479,6 +3532,8 @@ func (r *sqliteRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 }
 
 // beginSendNowClaimTx starts the claim transaction and takes the per-session lock.
+//
+//nolint:nestif // Claim fencing must keep the transaction and unlock paths paired.
 func (r *sqliteRepository) beginSendNowClaimTx(
 	ctx context.Context,
 	claim *SendNowClaim,
@@ -1503,7 +3558,107 @@ func (r *sqliteRepository) beginSendNowClaimTx(
 		unlock()
 		return nil, "", nil, err
 	}
+	if claim.ClaimID != "" {
+		var currentClaimID string
+		err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+			SELECT claim_id FROM queue_send_now_claims WHERE session_id = ?
+		`), sessionID).Scan(&currentClaimID)
+		if errors.Is(err, sql.ErrNoRows) && action == sendNowRestoreAction {
+			var movedSessionID string
+			movedErr := tx.QueryRowxContext(ctx, r.db.Rebind(`
+				SELECT session_id FROM queue_send_now_claims WHERE claim_id = ?
+			`), claim.ClaimID).Scan(&movedSessionID)
+			if movedErr == nil || !errors.Is(movedErr, sql.ErrNoRows) {
+				_ = tx.Rollback()
+				unlock()
+				if movedErr != nil {
+					return nil, "", nil, fmt.Errorf("validate transferred send-now %s claim: %w", action, movedErr)
+				}
+				return nil, "", nil, ErrSendNowClaimChanged
+			}
+		}
+		if errors.Is(err, sql.ErrNoRows) && action != sendNowRestoreAction {
+			_ = tx.Rollback()
+			unlock()
+			return nil, "", nil, ErrSendNowClaimChanged
+		}
+		if err == nil && currentClaimID != claim.ClaimID {
+			_ = tx.Rollback()
+			unlock()
+			return nil, "", nil, ErrSendNowClaimChanged
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			_ = tx.Rollback()
+			unlock()
+			return nil, "", nil, fmt.Errorf("validate send-now %s claim: %w", action, err)
+		}
+	}
+	// A task purge deletes the durable claim row along with its source rows.
+	// Restore validates the session and task generations below, so it can
+	// distinguish that destructive invalidation from an unrelated claim race.
+	if claim.Identity.SessionIncarnationID != "" {
+		if err := r.validateSessionIdentityTx(ctx, tx, claim.Identity); err != nil {
+			_ = tx.Rollback()
+			unlock()
+			return nil, "", nil, err
+		}
+	}
+	if claim.OperationGeneration > 0 {
+		var operationGeneration int64
+		err = tx.GetContext(ctx, &operationGeneration, r.db.Rebind(`
+			SELECT send_now_generation
+			  FROM queue_session_state
+			 WHERE session_id = ?
+		`), sessionID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			_ = tx.Rollback()
+			unlock()
+			return nil, "", nil, fmt.Errorf("validate send-now generation: %w", err)
+		}
+		if errors.Is(err, sql.ErrNoRows) || operationGeneration != claim.OperationGeneration {
+			if err == nil {
+				if deleteErr := r.deleteExactSendNowClaimTx(ctx, tx, sessionID, claim.ClaimID); deleteErr != nil {
+					_ = tx.Rollback()
+					unlock()
+					return nil, "", nil, deleteErr
+				}
+				if commitErr := tx.Commit(); commitErr != nil {
+					unlock()
+					return nil, "", nil, commitErr
+				}
+				unlock()
+				return nil, "", nil, ErrSendNowClaimChanged
+			}
+			_ = tx.Rollback()
+			unlock()
+			return nil, "", nil, ErrSendNowClaimChanged
+		}
+	}
 	return tx, sessionID, unlock, nil
+}
+
+func incrementSendNowGenerationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	sessionID string,
+) (int64, error) {
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		UPDATE queue_session_state
+		   SET send_now_generation = send_now_generation + 1
+		 WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("advance send-now generation: %w", err)
+	}
+	var generation int64
+	if err := tx.GetContext(ctx, &generation, db.Rebind(`
+		SELECT send_now_generation
+		  FROM queue_session_state
+		 WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("read send-now generation: %w", err)
+	}
+	return generation, nil
 }
 
 type storedQueueEntry struct {
@@ -1589,6 +3744,7 @@ func selectSQLiteSendNowSources(
 func (r *sqliteRepository) applySQLiteSendNowClaim(
 	ctx context.Context,
 	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
 	sessionID string,
 	sources []QueuedMessage,
 	storedByID map[string]storedQueueEntry,
@@ -1596,7 +3752,7 @@ func (r *sqliteRepository) applySQLiteSendNowClaim(
 	for _, source := range sources {
 		storedEntry := storedByID[source.ID]
 		if source.IsDurableLifecycle() {
-			if err := r.reserveSQLiteSendNowSource(ctx, tx, sessionID, source, storedEntry); err != nil {
+			if err := r.reserveSQLiteSendNowSource(ctx, tx, identity, sessionID, source, storedEntry); err != nil {
 				return err
 			}
 			continue
@@ -1612,11 +3768,16 @@ func (r *sqliteRepository) applySQLiteSendNowClaim(
 func (r *sqliteRepository) reserveSQLiteSendNowSource(
 	ctx context.Context,
 	tx *sqlx.Tx,
+	identity *QueueSessionIdentity,
 	sessionID string,
 	source QueuedMessage,
 	stored storedQueueEntry,
 ) error {
-	metadataJSON, err := marshalMetadata(markReservedMetadata(source.Metadata))
+	metadata := markReservedMetadata(source.Metadata, uuid.NewString())
+	if identity != nil {
+		metadata = markReservedMetadataForIncarnation(metadata, identity.SessionIncarnationID)
+	}
+	metadataJSON, err := marshalMetadata(metadata)
 	if err != nil {
 		return err
 	}
@@ -1732,6 +3893,9 @@ func (r *sqliteRepository) insertSQLiteSendNowSource(ctx context.Context, tx *sq
 	if err != nil {
 		return err
 	}
+	if err := r.bumpQueuePositionTx(ctx, tx, source.SessionID, source.Position); err != nil {
+		return err
+	}
 	metadataJSON, err := marshalMetadata(clearReservedMetadata(source.Metadata))
 	if err != nil {
 		return err
@@ -1748,15 +3912,24 @@ func (r *sqliteRepository) insertSQLiteSendNowSource(ctx context.Context, tx *sq
 }
 
 // validateSQLiteSendNowAcknowledge verifies every durable source is still reserved before acknowledgement.
-func validateSQLiteSendNowAcknowledge(claim *SendNowClaim, sessionID string, stored map[string]storedQueueEntry) error {
+func validateSQLiteSendNowAcknowledge(
+	claim *SendNowClaim,
+	sessionID string,
+	stored map[string]storedQueueEntry,
+	generations map[string]int64,
+) error {
 	for _, source := range claim.Sources {
 		if source.SessionID != sessionID {
 			return ErrSendNowClaimChanged
 		}
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
+		}
 		if !source.IsDurableLifecycle() {
 			continue
 		}
-		if entry, ok := stored[source.ID]; ok && !entry.message.IsReservedInFlight() {
+		entry, ok := stored[source.ID]
+		if !ok || !entry.message.IsReservedInFlight() {
 			return ErrSendNowClaimChanged
 		}
 	}
@@ -1794,6 +3967,40 @@ func (r *sqliteRepository) acknowledgeSQLiteSendNowSource(
 	return nil
 }
 
+func updatedQueueMetadataJSON(raw string, updates map[string]interface{}) (string, error) {
+	var metadata map[string]interface{}
+	if raw != "" && raw != "{}" {
+		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+			return "", fmt.Errorf("unmarshal queued metadata: %w", err)
+		}
+	}
+	return marshalMetadata(applyMetadataUpdates(metadata, updates))
+}
+
+func (r *sqliteRepository) updateQueuedEntryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, entryID, content, attachmentsJSON, metadataJSON, queuedBy string,
+) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages
+		SET content = ?, attachments_json = ?, metadata_json = ?
+		WHERE id = ? AND session_id = ? AND queued_by = ? AND queued_by NOT IN (?, ?, ?)
+	`), content, attachmentsJSON, metadataJSON, entryID, sessionID, queuedBy,
+		QueuedByAgent, QueuedByWorkflow, QueuedByServer)
+	if err != nil {
+		return fmt.Errorf("update queued: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrEntryNotFound
+	}
+	return nil
+}
+
 // UpdateContent replaces the content of an entry owned by queuedBy.
 func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
 	return r.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, nil, queuedBy)
@@ -1801,6 +4008,18 @@ func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID
 
 // UpdateContentAndMetadata replaces content and applies metadata updates to an entry owned by queuedBy.
 func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	return r.updateContentAndMetadataWithLease(ctx, sessionID, entryID, "", content, attachments, metadataUpdates, queuedBy)
+}
+
+func (r *sqliteRepository) UpdateContentAndMetadataForSession(ctx context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	return r.updateContentAndMetadata(ctx, &identity, identity.SessionID, entryID, content, attachments, metadataUpdates, queuedBy, nil)
+}
+
+func (r *sqliteRepository) UpdateContentAndMetadataForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string, claim QueueAttachmentClaim) error {
+	return r.updateContentAndMetadata(ctx, &identity, identity.SessionID, entryID, content, attachments, metadataUpdates, queuedBy, &claim)
+}
+
+func (r *sqliteRepository) updateContentAndMetadata(ctx context.Context, identity *QueueSessionIdentity, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string, claim *QueueAttachmentClaim) error {
 	if queuedBy == "" || IsReservedQueuedBy(queuedBy) {
 		return ErrEntryNotFound
 	}
@@ -1813,6 +4032,9 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 		return fmt.Errorf("begin update queued tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return err
+	}
 	// Content edits serialize with merges/folds on the same session: without
 	// the cross-process session lock a merge's scan-to-write window could
 	// silently overwrite a concurrent edit (the merge's affected-row check
@@ -1820,7 +4042,74 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	var metadataJSON string
+	query := `SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ? AND queued_by = ? AND queued_by NOT IN (?, ?, ?)`
+	if err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(query), entryID, sessionID, queuedBy, QueuedByAgent, QueuedByWorkflow, QueuedByServer); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEntryNotFound
+		}
+		return fmt.Errorf("read queued metadata: %w", err)
+	}
+	reserved, err := isReservedMetadataJSON(metadataJSON)
+	if err != nil {
+		return err
+	}
+	if reserved {
+		return ErrEntryNotFound
+	}
+	if err := claimOptionalMessageAttachmentsTx(ctx, tx, identity, claim, "", sessionID); err != nil {
+		return err
+	}
+	metadataJSON, err = updatedQueueMetadataJSON(metadataJSON, metadataUpdates)
+	if err != nil {
+		return err
+	}
+	if err := r.updateQueuedEntryTx(ctx, tx, sessionID, entryID, content, attachmentsJSON, metadataJSON, queuedBy); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+func (r *sqliteRepository) authorizeQueueEditLeaseTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, entryID, leaseID string,
+) error {
+	if leaseID == "" {
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return ErrEditConflict
+		}
+		return nil
+	}
+	var authorized bool
+	if err := tx.GetContext(ctx, &authorized, tx.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM queue_edit_leases
+			WHERE session_id = ? AND entry_id = ? AND lease_id = ? AND expires_at > ?
+		)
+	`), sessionID, entryID, leaseID, time.Now().UTC()); err != nil {
+		return fmt.Errorf("authorize queue edit lease: %w", err)
+	}
+	if !authorized {
+		return ErrEditLeaseNotFound
+	}
+	return nil
+}
+
+func (r *sqliteRepository) updateContentAndMetadataTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, entryID, content, queuedBy string,
+	attachmentsJSON string,
+	metadataUpdates map[string]interface{},
+) error {
 	var metadataJSON string
 	query := `SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ? AND queued_by = ? AND queued_by NOT IN (?, ?, ?)`
 	if err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(query), entryID, sessionID, queuedBy, QueuedByAgent, QueuedByWorkflow, QueuedByServer); err != nil {
@@ -1835,7 +4124,7 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 			return fmt.Errorf("unmarshal queued metadata: %w", err)
 		}
 	}
-	metadataJSON, err = marshalMetadata(applyMetadataUpdates(metadata, metadataUpdates))
+	metadataJSON, err := marshalMetadata(applyMetadataUpdates(metadata, metadataUpdates))
 	if err != nil {
 		return err
 	}
@@ -1855,6 +4144,33 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 	return tx.Commit()
 }
 
+func (r *sqliteRepository) updateContentAndMetadataWithLease(ctx context.Context, sessionID, entryID, leaseID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	if queuedBy == "" || IsReservedQueuedBy(queuedBy) {
+		return ErrEntryNotFound
+	}
+	if err := r.ensureEditLeaseSchema(ctx); err != nil {
+		return err
+	}
+	attachmentsJSON, err := marshalAttachments(attachments)
+	if err != nil {
+		return err
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin update queued tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := r.authorizeQueueEditLeaseTx(ctx, tx, sessionID, entryID, leaseID); err != nil {
+		return err
+	}
+	return r.updateContentAndMetadataTx(
+		ctx, tx, sessionID, entryID, content, queuedBy, attachmentsJSON, metadataUpdates,
+	)
+}
+
 // MergeIntoAbove folds the source entry into the entry directly above it within
 // the same session, updating the target row and deleting the source row in one
 // transaction so a concurrent drain can never observe a half-merged queue.
@@ -1863,6 +4179,14 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 // ErrEntryNotFound rollback rather than a silent content loss. See
 // Repository.MergeIntoAbove for the merge rules and error mapping.
 func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
+	return r.mergeIntoAbove(ctx, nil, sessionID, sourceID, queuedBy)
+}
+
+func (r *sqliteRepository) MergeIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, sourceID, queuedBy string) (*QueuedMessage, error) {
+	return r.mergeIntoAbove(ctx, &identity, identity.SessionID, sourceID, queuedBy)
+}
+
+func (r *sqliteRepository) mergeIntoAbove(ctx context.Context, identity *QueueSessionIdentity, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
@@ -1871,7 +4195,13 @@ func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, source
 		return nil, fmt.Errorf("begin merge tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return nil, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
 		return nil, err
 	}
 
@@ -1887,6 +4217,15 @@ func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, source
 
 	if !mergeAllowed(source, target, queuedBy) {
 		return nil, ErrNoMergeTarget
+	}
+	for _, entryID := range []string{source.ID, target.ID} {
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
+		if err != nil {
+			return nil, err
+		}
+		if blocked {
+			return nil, ErrEditConflict
+		}
 	}
 
 	content, attachments, metadata, err := buildMergedEntry(target, source)
@@ -1912,6 +4251,31 @@ func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, source
 // predecessor in one transaction. Missing or incompatible candidates are
 // successful skips and leave storage unchanged.
 func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
+	if err := r.ensureEditLeaseSchema(ctx); err != nil {
+		return nil, false, err
+	}
+	return r.autoMergeIntoAbove(ctx, nil, sessionID, sourceID, nil)
+}
+
+func (r *sqliteRepository) AutoMergeIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, sourceID string) (*QueuedMessage, bool, error) {
+	return r.autoMergeIntoAbove(ctx, &identity, identity.SessionID, sourceID, nil)
+}
+
+func (r *sqliteRepository) AutoMergeIntoAboveForSessionWithPolicy(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	sourceID string,
+	policy AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	return r.autoMergeIntoAbove(ctx, &identity, identity.SessionID, sourceID, &policy)
+}
+
+func (r *sqliteRepository) autoMergeIntoAbove(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	sessionID, sourceID string,
+	policy *AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
@@ -1920,7 +4284,16 @@ func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, so
 		return nil, false, fmt.Errorf("begin automatic merge tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return nil, false, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateAutoMergePolicyTx(ctx, tx, identity, policy); err != nil {
 		return nil, false, err
 	}
 
@@ -1941,6 +4314,15 @@ func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, so
 	values, compatible := buildAutoMergedEntry(target, source)
 	if !compatible {
 		return source, false, nil
+	}
+	for _, entryID := range []string{source.ID, target.ID} {
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
+		if err != nil {
+			return nil, false, err
+		}
+		if blocked {
+			return nil, false, ErrEditConflict
+		}
 	}
 	if err := applyMergeWrites(ctx, r, tx, target, source, values.content, values.attachments, values.metadata, sessionID); err != nil {
 		if errors.Is(err, ErrEntryNotFound) {
@@ -1964,6 +4346,47 @@ func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, so
 // the fold is the admission. Missing or incompatible tails are successful
 // skips and leave storage unchanged.
 func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
+	if err := r.ensureEditLeaseSchema(ctx); err != nil {
+		return nil, false, err
+	}
+	return r.autoMergeCandidateIntoAbove(ctx, nil, candidate, nil, nil)
+}
+
+func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, nil, nil)
+}
+
+func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, candidate *QueuedMessage, claim QueueAttachmentClaim) (*QueuedMessage, bool, error) {
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, &claim, nil)
+}
+
+func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	candidate *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	policy AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, claim, &policy)
+}
+
+//nolint:cyclop,funlen // the transaction's guards intentionally surround the one durable fold.
+func (r *sqliteRepository) autoMergeCandidateIntoAbove(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	candidate *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	policy *AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(candidate.SessionID)
 	defer unlock()
 
@@ -1983,6 +4406,15 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 	if err := r.lockSessionTx(ctx, tx, candidate.SessionID); err != nil {
 		return nil, false, err
 	}
+	if err := r.guardSessionTx(ctx, tx, candidate.SessionID, candidate.TaskID); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateAutoMergePolicyTx(ctx, tx, identity, policy); err != nil {
+		return nil, false, err
+	}
 
 	target, storedContent, storedAttachmentsJSON, storedMetadataJSON, err := r.scanTailWithRawJSON(ctx, tx, candidate.SessionID)
 	if err != nil {
@@ -2000,6 +4432,18 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 	values, compatible := buildAutoMergedEntry(target, candidate)
 	if !compatible {
 		return nil, false, nil
+	}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, candidate.SessionID, target.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if blocked {
+		return nil, false, ErrEditConflict
+	}
+	if err := claimOptionalMessageAttachmentsTx(
+		ctx, tx, identity, claim, candidate.TaskID, candidate.SessionID,
+	); err != nil {
+		return nil, false, err
 	}
 	attachmentsJSON, err := marshalAttachments(values.attachments)
 	if err != nil {
@@ -2053,6 +4497,37 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 	return target, true, nil
 }
 
+// readReorderEntriesTx loads the ordered session snapshot under the caller's lock.
+func (r *sqliteRepository) readReorderEntriesTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+) ([]*QueuedMessage, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ?
+		ORDER BY position ASC
+	`), sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("read reorder rows: %w", err)
+	}
+	stored := make([]*QueuedMessage, 0, 4)
+	for rows.Next() {
+		msg, scanErr := scanQueuedRow(rows)
+		if scanErr != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan reorder row: %w", scanErr)
+		}
+		stored = append(stored, msg)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close reorder rows: %w", err)
+	}
+	return stored, nil
+}
+
 // ReorderEntries atomically rewrites the FIFO positions of the session's
 // visible pending entries to match orderedIDs. Reserved in-flight lifecycle
 // rows keep their place in the sequence; visible rows are interleaved in the
@@ -2067,6 +4542,14 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 // A row that vanished mid-transaction (a drain racing the lock) fails the same
 // precondition and rolls back.
 func (r *sqliteRepository) ReorderEntries(ctx context.Context, sessionID string, orderedIDs []string) error {
+	return r.reorderEntries(ctx, nil, sessionID, orderedIDs)
+}
+
+func (r *sqliteRepository) ReorderEntriesForSession(ctx context.Context, identity QueueSessionIdentity, orderedIDs []string) error {
+	return r.reorderEntries(ctx, &identity, identity.SessionID, orderedIDs)
+}
+
+func (r *sqliteRepository) reorderEntries(ctx context.Context, identity *QueueSessionIdentity, sessionID string, orderedIDs []string) error {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
@@ -2075,37 +4558,34 @@ func (r *sqliteRepository) ReorderEntries(ctx context.Context, sessionID string,
 		return fmt.Errorf("begin reorder tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
 
-	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
-		SELECT id, session_id, task_id, position, content, model, plan_mode,
-		       attachments_json, metadata_json, queued_at, queued_by
-		FROM queued_messages
-		WHERE session_id = ?
-		ORDER BY position ASC
-	`), sessionID)
+	stored, err := r.readReorderEntriesTx(ctx, tx, sessionID)
 	if err != nil {
-		return fmt.Errorf("read reorder rows: %w", err)
-	}
-	stored := make([]*QueuedMessage, 0, 4)
-	for rows.Next() {
-		msg, scanErr := scanQueuedRow(rows)
-		if scanErr != nil {
-			_ = rows.Close()
-			return fmt.Errorf("scan reorder row: %w", scanErr)
-		}
-		stored = append(stored, msg)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close reorder rows: %w", err)
+		return err
 	}
 
 	visible, _ := splitVisibleAndReserved(stored)
 	ordered, err := validateReorderSet(visible, orderedIDs)
 	if err != nil {
 		return err
+	}
+	for _, msg := range visible {
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, msg.ID)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return ErrEditConflict
+		}
 	}
 
 	// Interleave reserved rows at their current places; visible rows emit in
@@ -2254,34 +4734,59 @@ func applyMergeWrites(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, tar
 
 // DeleteByID removes a single pending entry scoped to its session.
 func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID string) error {
+	_, err := r.deleteByID(ctx, nil, sessionID, entryID)
+	return err
+}
+
+func (r *sqliteRepository) DeleteByIDForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) (*QueueRemovalResult, error) {
+	return r.deleteByID(ctx, &identity, identity.SessionID, entryID)
+}
+
+func (r *sqliteRepository) deleteByID(ctx context.Context, identity *QueueSessionIdentity, sessionID, entryID string) (*QueueRemovalResult, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin delete queued tx: %w", err)
+		return nil, fmt.Errorf("begin delete queued tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return nil, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
-		return err
+		return nil, err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return nil, err
 	}
 
-	var metadataJSON string
-	err = tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
-		SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE id = ? AND session_id = ?
 	`), entryID, sessionID)
+	removed, metadataJSON, err := scanQueuedRowWithMetadataJSON(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrEntryNotFound
+		return nil, ErrEntryNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("read queued cancellation candidate: %w", err)
+		return nil, fmt.Errorf("read queued cancellation candidate: %w", err)
 	}
 	reserved, err := isReservedMetadataJSON(metadataJSON)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if reserved {
-		return ErrEntryNotFound
+		return nil, ErrEntryNotFound
+	}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
+	if err != nil {
+		return nil, err
+	}
+	if blocked {
+		return nil, ErrEditConflict
 	}
 
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -2289,70 +4794,226 @@ func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID st
 		WHERE id = ? AND session_id = ? AND metadata_json = ?
 	`), entryID, sessionID, metadataJSON)
 	if err != nil {
-		return fmt.Errorf("delete queued: %w", err)
+		return nil, fmt.Errorf("delete queued: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if n == 0 {
-		return ErrEntryNotFound
+		return nil, ErrEntryNotFound
 	}
-	return tx.Commit()
+	retained, err := listQueuedMessagesBySessionTx(ctx, r, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &QueueRemovalResult{
+		Removed:  []QueuedMessage{*removed},
+		Retained: retained,
+	}, nil
+}
+
+func listQueuedMessagesBySessionTx(
+	ctx context.Context,
+	r *sqliteRepository,
+	tx *sqlx.Tx,
+	sessionID string,
+) ([]QueuedMessage, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ?
+		ORDER BY position ASC
+	`), sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list retained queue entries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	retained := make([]QueuedMessage, 0)
+	for rows.Next() {
+		message, scanErr := scanQueuedRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		retained = append(retained, *message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate retained queue entries: %w", err)
+	}
+	return retained, nil
 }
 
 // DeleteAllBySession removes every pending entry for a session, keeping reserved in-flight rows.
 func (r *sqliteRepository) DeleteAllBySession(ctx context.Context, sessionID string) (int, error) {
+	result, err := r.deleteAllBySession(ctx, nil, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return len(result.Removed), nil
+}
+
+func (r *sqliteRepository) DeleteAllBySessionForIdentity(ctx context.Context, identity QueueSessionIdentity) (*QueueRemovalResult, error) {
+	return r.deleteAllBySession(ctx, &identity, identity.SessionID)
+}
+
+func (r *sqliteRepository) deleteAllBySession(ctx context.Context, identity *QueueSessionIdentity, sessionID string) (*QueueRemovalResult, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return nil, err
+	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("begin delete all queued tx: %w", err)
+		return nil, fmt.Errorf("begin delete all queued tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if identity != nil {
+		if err := r.guardActiveTaskTx(ctx, tx, identity.TaskID); err != nil {
+			return nil, err
+		}
+	}
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if identity != nil {
+		if err := r.validateSessionIdentityTx(ctx, tx, *identity); err != nil {
+			return nil, err
+		}
+	}
+
+	candidates, err := cancellationCandidates(ctx, r, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range candidates {
+		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, candidate.message.ID)
+		if err != nil {
+			return nil, err
+		}
+		if blocked {
+			return nil, ErrEditConflict
+		}
+	}
+	result := &QueueRemovalResult{}
+	for _, candidate := range candidates {
+		if candidate.reserved {
+			result.Retained = append(result.Retained, candidate.message)
+			continue
+		}
+		res, err := tx.ExecContext(ctx, r.db.Rebind(`
+			DELETE FROM queued_messages
+			WHERE id = ? AND session_id = ? AND metadata_json = ?
+		`), candidate.message.ID, sessionID, candidate.metadataJSON)
+		if err != nil {
+			return nil, fmt.Errorf("delete queued candidate: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("delete queued candidate rows affected: %w", err)
+		}
+		if affected == 0 {
+			result.Retained = append(result.Retained, candidate.message)
+			continue
+		}
+		result.Removed = append(result.Removed, candidate.message)
+	}
+	if err := r.bumpSendNowGenerationTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := r.deletePendingQueueDispatchesBySessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// PurgeSession removes all queue rows for a deleted session, including
+// reserved lifecycle deliveries, and its pending workflow move.
+func (r *sqliteRepository) PurgeSession(ctx context.Context, sessionID string) (int, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return 0, err
+	}
+	if err := r.ensureSendNowClaimRecoverySchema(ctx); err != nil {
+		return 0, err
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin purge session queue tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return 0, err
 	}
-
-	candidates, err := cancellationCandidates(ctx, tx, sessionID)
-	if err != nil {
+	if err := r.deleteEditLeasesForSessionTx(ctx, tx, sessionID); err != nil {
 		return 0, err
 	}
-	removed := 0
-	for _, candidate := range candidates {
-		res, err := tx.ExecContext(ctx, r.db.Rebind(`
-			DELETE FROM queued_messages
-			WHERE id = ? AND session_id = ? AND metadata_json = ?
-		`), candidate.id, sessionID, candidate.metadataJSON)
-		if err != nil {
-			return 0, fmt.Errorf("delete queued candidate: %w", err)
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return 0, fmt.Errorf("delete queued candidate rows affected: %w", err)
-		}
-		removed += int(affected)
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages WHERE session_id = ?
+	`), sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("purge session queued messages: %w", err)
+	}
+	removed, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("purge session queue rows affected: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM pending_moves WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("purge session pending move: %w", err)
+	}
+	// A deleted session must not retain an explicit OFF policy if its queue
+	// state is later observed during cleanup or an ID is reused. Keep the
+	// generation row for send-now fencing, but reset the independent policy to
+	// its default ON value before advancing that generation.
+	if err := r.setAutoRunTx(ctx, tx, nil, sessionID, true); err != nil {
+		return 0, err
+	}
+	if err := r.bumpSendNowGenerationTx(ctx, tx, sessionID); err != nil {
+		return 0, err
+	}
+	if err := r.deleteSendNowClaimTx(ctx, tx, sessionID); err != nil {
+		return 0, err
+	}
+	if err := r.deletePendingQueueDispatchesBySessionTx(ctx, tx, sessionID); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-	return removed, nil
+	return int(removed), nil
 }
 
 type cancellationCandidate struct {
-	id           string
+	message      QueuedMessage
 	metadataJSON string
+	reserved     bool
 }
 
-// cancellationCandidates lists pending entries eligible for cancellation, excluding reserved in-flight rows.
+// cancellationCandidates lists every entry so cancellation can return both
+// removed pending work and retained in-flight work from one transaction.
 func cancellationCandidates(
 	ctx context.Context,
+	r *sqliteRepository,
 	tx *sqlx.Tx,
 	sessionID string,
 ) ([]cancellationCandidate, error) {
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-		SELECT id, metadata_json FROM queued_messages WHERE session_id = ?
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ?
+		ORDER BY position ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued cancellation candidates: %w", err)
@@ -2361,17 +5022,17 @@ func cancellationCandidates(
 
 	candidates := make([]cancellationCandidate, 0)
 	for rows.Next() {
-		var candidate cancellationCandidate
-		if err := rows.Scan(&candidate.id, &candidate.metadataJSON); err != nil {
-			return nil, fmt.Errorf("scan queued cancellation candidate: %w", err)
+		message, metadataJSON, scanErr := scanQueuedRowWithMetadataJSON(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan queued cancellation candidate: %w", scanErr)
 		}
-		reserved, err := isReservedMetadataJSON(candidate.metadataJSON)
+		reserved, err := isReservedMetadataJSON(metadataJSON)
 		if err != nil {
 			return nil, err
 		}
-		if !reserved {
-			candidates = append(candidates, candidate)
-		}
+		candidates = append(candidates, cancellationCandidate{
+			message: *message, metadataJSON: metadataJSON, reserved: reserved,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate queued cancellation candidates: %w", err)
@@ -2389,9 +5050,301 @@ func isReservedMetadataJSON(metadataJSON string) (bool, error) {
 	}
 	return (&QueuedMessage{Metadata: metadata}).IsReservedInFlight(), nil
 }
+func lifecycleReservationFromMetadataJSON(metadataJSON string) (string, bool, error) {
+	metadata := make(map[string]interface{})
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return "", false, fmt.Errorf("unmarshal lifecycle reservation metadata: %w", err)
+		}
+	}
+	message := &QueuedMessage{Metadata: metadata}
+	return lifecycleReservationIncarnation(metadata), message.IsReservedInFlight(), nil
+}
+
+func (r *sqliteRepository) transferSessionOwned(
+	ctx context.Context,
+	oldSessionID, newSessionID, operationID string,
+) error {
+	return r.transferSessionOwnedTx(ctx, oldSessionID, newSessionID, operationID)
+}
+
+func (r *sqliteRepository) beginAuthorizedSessionTransferTx(
+	ctx context.Context,
+	oldSessionID, newSessionID, operationID string,
+) (*sqlx.Tx, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin transfer tx: %w", err)
+	}
+	if _, _, err := r.lockSessionTransferPairTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := authorizeSessionTransferTx(
+		ctx, tx, r.db, oldSessionID, newSessionID, operationID,
+	); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := r.guardSessionOwnerTx(ctx, tx, oldSessionID, ""); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if oldSessionID != newSessionID {
+		if err := r.guardSessionOwnerTx(ctx, tx, newSessionID, ""); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+	}
+	return tx, nil
+}
+
+func (r *sqliteRepository) guardTransferTasksTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	source, destination *QueueSessionIdentity,
+) error {
+	if source == nil || destination == nil {
+		return nil
+	}
+	if source.TaskID != destination.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.guardActiveTaskTx(ctx, tx, source.TaskID)
+}
+
+func (r *sqliteRepository) lockAndValidateTransferSessionsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	source, destination *QueueSessionIdentity,
+	first, second string,
+) error {
+	if err := r.lockSessionTx(ctx, tx, first); err != nil {
+		return err
+	}
+	if first != second {
+		if err := r.lockSessionTx(ctx, tx, second); err != nil {
+			return err
+		}
+	}
+	if source == nil || destination == nil {
+		return nil
+	}
+	if err := r.validateSessionIdentityTx(ctx, tx, *source); err != nil {
+		return err
+	}
+	return r.validateSessionIdentityTx(ctx, tx, *destination)
+}
+
+func (r *sqliteRepository) lockTransferSessions(oldSessionID, newSessionID string) (
+	first string,
+	second string,
+	release func(),
+) {
+	first, second = oldSessionID, newSessionID
+	if first > second {
+		first, second = second, first
+	}
+	unlockFirst := r.withSessionLock(first)
+	if first == second {
+		return first, second, unlockFirst
+	}
+	unlockSecond := r.withSessionLock(second)
+	return first, second, func() {
+		unlockSecond()
+		unlockFirst()
+	}
+}
+
+func (r *sqliteRepository) transferSessionRecoveryRowsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	oldSessionID, newSessionID string,
+) error {
+	if err := r.transferPendingQueueDispatchesTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queue_attachment_cleanups
+		SET current_session_id = ?
+		WHERE current_session_id = ?
+	`), newSessionID, oldSessionID); err != nil {
+		return fmt.Errorf("transfer attachment cleanup session: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) transferSessionQueueRowsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	oldSessionID, newSessionID string,
+) error {
+	var destinationMax sql.NullInt64
+	if err := tx.GetContext(ctx, &destinationMax, r.db.Rebind(`
+		SELECT MAX(position) FROM queued_messages WHERE session_id = ?
+	`), newSessionID); err != nil {
+		return fmt.Errorf("transfer max: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages
+		SET session_id = ?, position = position + ?
+		WHERE session_id = ?
+	`), newSessionID, destinationMax.Int64, oldSessionID); err != nil {
+		return fmt.Errorf("transfer queued: %w", err)
+	}
+	var transferredMax sql.NullInt64
+	if err := tx.GetContext(ctx, &transferredMax, r.db.Rebind(`
+		SELECT MAX(position) FROM queued_messages WHERE session_id = ?
+	`), newSessionID); err != nil {
+		return fmt.Errorf("transfer destination max after move: %w", err)
+	}
+	if transferredMax.Valid {
+		return r.bumpQueuePositionTx(ctx, tx, newSessionID, transferredMax.Int64)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) transferSessionStateTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	oldSessionID, newSessionID string,
+) error {
+	sourceAutoRun, err := r.getAutoRunTx(ctx, tx, nil, oldSessionID)
+	if err != nil {
+		return err
+	}
+	destinationAutoRun, err := r.getAutoRunTx(ctx, tx, nil, newSessionID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM pending_moves WHERE session_id = ?
+	`), newSessionID); err != nil {
+		return fmt.Errorf("clear dest pending move: %w", err)
+	}
+	if err := r.transferPendingMoveTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if err := r.setAutoRunTx(ctx, tx, nil, newSessionID, sourceAutoRun && destinationAutoRun); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queue_session_state WHERE session_id = ?
+	`), oldSessionID); err != nil {
+		return fmt.Errorf("clear source queue auto-run: %w", err)
+	}
+	if err := r.bumpSendNowGenerationTx(ctx, tx, oldSessionID); err != nil {
+		return err
+	}
+	return r.bumpSendNowGenerationTx(ctx, tx, newSessionID)
+}
 
 // TransferSession moves all entries (and any pending move) from one session to another.
 func (r *sqliteRepository) TransferSession(ctx context.Context, oldSessionID, newSessionID string) error {
+	return r.transferSession(ctx, nil, nil, oldSessionID, newSessionID)
+}
+
+func (r *sqliteRepository) TransferSessionIdentities(ctx context.Context, source, destination QueueSessionIdentity) error {
+	return r.transferSession(ctx, &source, &destination, source.SessionID, destination.SessionID)
+}
+
+//nolint:cyclop,funlen // transfer preserves queue, policy, recovery, and attachment invariants atomically.
+func (r *sqliteRepository) transferSession(
+	ctx context.Context,
+	source, destination *QueueSessionIdentity,
+	oldSessionID, newSessionID string,
+) error {
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return err
+	}
+	if err := r.ensureSendNowClaimRecoverySchema(ctx); err != nil {
+		return err
+	}
+	if err := r.ensureAttachmentCleanupSchema(ctx); err != nil {
+		return err
+	}
+	first, second, release := r.lockTransferSessions(oldSessionID, newSessionID)
+	defer release()
+	attachmentsTablePresent, err := r.sharedTablePresent("task_message_attachments")
+	if err != nil {
+		return err
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transfer tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.guardTransferTasksTx(ctx, tx, source, destination); err != nil {
+		return err
+	}
+	if err := r.lockAndValidateTransferSessionsTx(ctx, tx, source, destination, first, second); err != nil {
+		return err
+	}
+	if oldSessionID == newSessionID {
+		return tx.Commit()
+	}
+	if err := rejectReservedLifecycleTransferTx(ctx, tx, oldSessionID); err != nil {
+		return err
+	}
+	sourceAutoRun, err := r.getAutoRunTx(ctx, tx, source, oldSessionID)
+	if err != nil {
+		return err
+	}
+	destinationAutoRun, err := r.getAutoRunTx(ctx, tx, destination, newSessionID)
+	if err != nil {
+		return err
+	}
+	if attachmentsTablePresent {
+		if err := r.transferQueuedAttachmentClaimsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+			return err
+		}
+	}
+	if err := r.transferSessionRecoveryRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if err := r.deleteEditLeasesForTransferTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ?`), newSessionID); err != nil {
+		return fmt.Errorf("clear dest pending move: %w", err)
+	}
+	if err := r.transferPendingMoveTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if err := r.setAutoRunTx(ctx, tx, destination, newSessionID, sourceAutoRun && destinationAutoRun); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queue_session_state WHERE session_id = ?`), oldSessionID); err != nil {
+		return fmt.Errorf("clear source queue auto-run: %w", err)
+	}
+	if err := r.bumpSendNowGenerationTx(ctx, tx, oldSessionID); err != nil {
+		return err
+	}
+	if err := r.bumpSendNowGenerationTx(ctx, tx, newSessionID); err != nil {
+		return err
+	}
+	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) transferSessionOwnedTx(
+	ctx context.Context,
+	oldSessionID, newSessionID, operationID string,
+) error {
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return err
+	}
+	if err := r.ensureSendNowClaimRecoverySchema(ctx); err != nil {
+		return err
+	}
+	if err := r.ensureAttachmentCleanupSchema(ctx); err != nil {
+		return err
+	}
 	// The transfer moves rows out of the source and into the destination, so
 	// it must hold BOTH sessions' locks: a concurrent source-side insert
 	// (holding the source lock) could otherwise commit a row the transfer's
@@ -2409,80 +5362,251 @@ func (r *sqliteRepository) TransferSession(ctx context.Context, oldSessionID, ne
 		defer unlockSecond()
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.beginAuthorizedSessionTransferTx(
+		ctx, oldSessionID, newSessionID, operationID,
+	)
 	if err != nil {
-		return fmt.Errorf("begin transfer tx: %w", err)
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.lockSessionTx(ctx, tx, first); err != nil {
+	if oldSessionID == newSessionID {
+		return commitAuthorizedSessionTransferTx(
+			ctx, tx, r.db, oldSessionID, newSessionID, operationID,
+		)
+	}
+	if err := r.transferSessionRecoveryRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
 		return err
 	}
-	if first != second {
-		if err := r.lockSessionTx(ctx, tx, second); err != nil {
-			return err
+	if err := r.deleteEditLeasesForTransferTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if err := r.transferSessionQueueRowsTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if err := r.transferSessionStateTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	if err := r.transferPendingSendNowClaimTx(ctx, tx, oldSessionID, newSessionID); err != nil {
+		return err
+	}
+	return commitAuthorizedSessionTransferTx(
+		ctx, tx, r.db, oldSessionID, newSessionID, operationID,
+	)
+}
+
+func queuedSnapshotTaskIDs(entries []QueuedMessage, pendingMove *PendingMove) []string {
+	taskIDs := make(map[string]struct{}, len(entries)+1)
+	for _, entry := range entries {
+		if entry.TaskID != "" {
+			taskIDs[entry.TaskID] = struct{}{}
 		}
 	}
-	if oldSessionID == newSessionID {
-		return tx.Commit()
+	if pendingMove != nil && pendingMove.TaskID != "" {
+		taskIDs[pendingMove.TaskID] = struct{}{}
 	}
-	sourceAutoRun, err := r.getAutoRunTx(ctx, tx, oldSessionID)
-	if err != nil {
-		return err
+	ids := make([]string, 0, len(taskIDs))
+	for taskID := range taskIDs {
+		ids = append(ids, taskID)
 	}
-	destinationAutoRun, err := r.getAutoRunTx(ctx, tx, newSessionID)
-	if err != nil {
-		return err
-	}
+	sort.Strings(ids)
+	return ids
+}
 
-	// Shift positions on the destination so transferred entries land at the tail
-	// without colliding on the (session_id, position) implicit ordering.
-	var destMax sql.NullInt64
-	if err := tx.GetContext(ctx, &destMax, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), newSessionID); err != nil {
-		return fmt.Errorf("transfer max: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE queued_messages
-		SET session_id = ?, position = position + ?
+//nolint:cyclop // every malformed or conflicting attachment reference must roll back transfer.
+func (r *sqliteRepository) transferQueuedAttachmentClaimsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	oldSessionID, newSessionID string,
+) error {
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT task_id, attachments_json
+		FROM queued_messages
 		WHERE session_id = ?
-	`), newSessionID, destMax.Int64, oldSessionID); err != nil {
-		return fmt.Errorf("transfer queued: %w", err)
+	`), oldSessionID)
+	if err != nil {
+		return fmt.Errorf("list queued attachment claims for transfer: %w", err)
 	}
+	attachmentTasks := make(map[string]string)
+	for rows.Next() {
+		var taskID, encoded string
+		if err := rows.Scan(&taskID, &encoded); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan queued attachment claims for transfer: %w", err)
+		}
+		var attachments []MessageAttachment
+		if err := json.Unmarshal([]byte(encoded), &attachments); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("decode queued attachment claims for transfer: %w", err)
+		}
+		for _, attachment := range attachments {
+			if attachment.AttachmentID == "" {
+				continue
+			}
+			if existingTaskID, ok := attachmentTasks[attachment.AttachmentID]; ok && existingTaskID != taskID {
+				_ = rows.Close()
+				return models.ErrAttachmentClaimConflict
+			}
+			attachmentTasks[attachment.AttachmentID] = taskID
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate queued attachment claims for transfer: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close queued attachment claims for transfer: %w", err)
+	}
+	for attachmentID, taskID := range attachmentTasks {
+		var storedTaskID, storedSessionID, state string
+		err := tx.QueryRowxContext(ctx, tx.Rebind(`
+			SELECT task_id, session_id, state
+			FROM task_message_attachments
+			WHERE id = ?
+		`), attachmentID).Scan(&storedTaskID, &storedSessionID, &state)
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrAttachmentClaimConflict
+		}
+		if err != nil {
+			return fmt.Errorf("load queued attachment claim for transfer: %w", err)
+		}
+		if storedTaskID != taskID || state != string(models.AttachmentStateClaimed) {
+			return models.ErrAttachmentClaimConflict
+		}
+		switch storedSessionID {
+		case "", newSessionID:
+			continue
+		case oldSessionID:
+			if _, err := tx.ExecContext(ctx, tx.Rebind(`
+				UPDATE task_message_attachments
+				SET session_id = ?, updated_at = ?
+				WHERE id = ? AND task_id = ? AND session_id = ? AND state = ?
+			`), newSessionID, time.Now().UTC(), attachmentID, taskID, oldSessionID, models.AttachmentStateClaimed); err != nil {
+				return fmt.Errorf("transfer queued attachment claim: %w", err)
+			}
+		default:
+			return models.ErrAttachmentClaimConflict
+		}
+	}
+	return nil
+}
+func rejectReservedLifecycleTransferTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+) error {
+	claimedIDs := make(map[string]struct{})
+	var claimJSON string
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`
+		SELECT claim_json FROM queue_send_now_claims WHERE session_id = ?
+	`), sessionID).Scan(&claimJSON)
+	if err == nil {
+		var claim SendNowClaim
+		if unmarshalErr := json.Unmarshal([]byte(claimJSON), &claim); unmarshalErr != nil {
+			return fmt.Errorf("unmarshal Send Now claim before transfer: %w", unmarshalErr)
+		}
+		for _, source := range claim.Sources {
+			claimedIDs[source.ID] = struct{}{}
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read Send Now claim before transfer: %w", err)
+	}
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT id, metadata_json FROM queued_messages WHERE session_id = ?
+	`), sessionID)
+	if err != nil {
+		return fmt.Errorf("list lifecycle reservations before transfer: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var entryID, metadataJSON string
+		if err := rows.Scan(&entryID, &metadataJSON); err != nil {
+			return fmt.Errorf("scan lifecycle reservation before transfer: %w", err)
+		}
+		reserved, err := isReservedMetadataJSON(metadataJSON)
+		if err != nil {
+			return err
+		}
+		if reserved {
+			if _, claimed := claimedIDs[entryID]; claimed {
+				continue
+			}
+			return ErrQueueChanged
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate lifecycle reservations before transfer: %w", err)
+	}
+	return nil
+}
 
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM pending_moves WHERE session_id = ?
+func (r *sqliteRepository) transferPendingMoveTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	oldSessionID, newSessionID string,
+) error {
+	if !r.tasksTablePresent {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE pending_moves SET session_id = ? WHERE session_id = ?
+		`), newSessionID, oldSessionID); err != nil {
+			return fmt.Errorf("transfer pending move: %w", err)
+		}
+		return nil
+	}
+	var destinationIncarnationID string
+	if err := tx.GetContext(ctx, &destinationIncarnationID, r.db.Rebind(`
+		SELECT queue_incarnation_id FROM task_sessions WHERE id = ?
 	`), newSessionID); err != nil {
-		return fmt.Errorf("clear dest pending move: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrSessionIdentityMismatch
+		}
+		return fmt.Errorf("load destination session incarnation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE pending_moves SET session_id = ? WHERE session_id = ?
-	`), newSessionID, oldSessionID); err != nil {
+		UPDATE pending_moves
+		SET session_id = ?, session_incarnation_id = ?
+		WHERE session_id = ?
+	`), newSessionID, destinationIncarnationID, oldSessionID); err != nil {
 		return fmt.Errorf("transfer pending move: %w", err)
 	}
-	if err := r.setAutoRunTx(ctx, tx, newSessionID, sourceAutoRun && destinationAutoRun); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM queue_session_state WHERE session_id = ?
-	`), oldSessionID); err != nil {
-		return fmt.Errorf("clear source queue auto-run: %w", err)
-	}
-	return tx.Commit()
+	return nil
 }
 
 // ReplaceSession replaces a session's queue with the supplied snapshot.
 func (r *sqliteRepository) ReplaceSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin replace session tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
-		return err
-	}
+	return r.replaceSession(ctx, nil, sessionID, entries, pendingMove)
+}
 
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-		return fmt.Errorf("clear queued messages: %w", err)
+func (r *sqliteRepository) ReplaceSessionForIdentity(ctx context.Context, identity QueueSessionIdentity, entries []QueuedMessage, pendingMove *PendingMove) error {
+	return r.replaceSession(ctx, &identity, identity.SessionID, entries, pendingMove)
+}
+
+func validateReplacementSnapshot(
+	identity *QueueSessionIdentity,
+	entries []QueuedMessage,
+	pendingMove *PendingMove,
+) error {
+	if identity == nil {
+		return nil
 	}
+	for index := range entries {
+		if entries[index].SessionID != identity.SessionID || entries[index].TaskID != identity.TaskID {
+			return ErrSessionIdentityMismatch
+		}
+	}
+	if pendingMove != nil &&
+		(pendingMove.TaskID != identity.TaskID ||
+			pendingMove.SessionIncarnationID != identity.SessionIncarnationID) {
+		return ErrSessionIdentityMismatch
+	}
+	return nil
+}
+
+func (r *sqliteRepository) restoreQueueEntriesTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	entries []QueuedMessage,
+) error {
 	for _, entry := range entries {
 		attachmentsJSON, err := marshalAttachments(entry.Attachments)
 		if err != nil {
@@ -2507,31 +5631,113 @@ func (r *sqliteRepository) ReplaceSession(ctx context.Context, sessionID string,
 			return fmt.Errorf("restore queued message: %w", err)
 		}
 	}
+	return nil
+}
 
+func (r *sqliteRepository) restorePendingMoveTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	pendingMove *PendingMove,
+) error {
+	if pendingMove == nil {
+		return nil
+	}
+	queuedAt := pendingMove.QueuedAt
+	if queuedAt.IsZero() {
+		queuedAt = time.Now().UTC()
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO pending_moves (
+			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
+			workflow_step_id, step_position, queued_at, actor, sender_session_id
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`),
+		uuid.New().String(), pendingMove.MoveID, pendingMove.SessionIncarnationID, sessionID,
+		pendingMove.TaskID, pendingMove.WorkflowID, pendingMove.WorkflowStepID,
+		pendingMove.Position, queuedAt, pendingMove.Actor, pendingMove.SenderSessionID,
+	); err != nil {
+		return fmt.Errorf("restore pending move: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) replaceSession(ctx context.Context, identity *QueueSessionIdentity, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return err
+	}
+	if err := r.ensureEditLeaseSchema(ctx); err != nil {
+		return err
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace session tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := validateReplacementSnapshot(identity, entries, pendingMove); err != nil {
+		return err
+	}
+	for _, taskID := range queuedSnapshotTaskIDs(entries, pendingMove) {
+		if err := r.guardActiveTaskTx(ctx, tx, taskID); err != nil {
+			return err
+		}
+	}
+	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := r.guardSessionTx(ctx, tx, sessionID, ""); err != nil {
+		return err
+	}
+	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
+		return err
+	}
+	if err := r.deleteEditLeasesForSessionTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := r.deletePendingQueueDispatchesBySessionTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
+		return fmt.Errorf("clear queued messages: %w", err)
+	}
+	var maxPosition int64
+	for _, entry := range entries {
+		if entry.Position > maxPosition {
+			maxPosition = entry.Position
+		}
+	}
+	if err := r.restoreQueueEntriesTx(ctx, tx, sessionID, entries); err != nil {
+		return err
+	}
+
+	if err := r.bumpQueuePositionTx(ctx, tx, sessionID, maxPosition); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ?`), sessionID); err != nil {
 		return fmt.Errorf("clear pending move: %w", err)
 	}
-	if pendingMove != nil {
-		queuedAt := pendingMove.QueuedAt
-		if queuedAt.IsZero() {
-			queuedAt = time.Now().UTC()
-		}
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			INSERT INTO pending_moves (id, move_id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at, actor, sender_session_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`),
-			uuid.New().String(), pendingMove.MoveID, sessionID, pendingMove.TaskID, pendingMove.WorkflowID,
-			pendingMove.WorkflowStepID, pendingMove.Position, queuedAt, pendingMove.Actor,
-			pendingMove.SenderSessionID,
-		); err != nil {
-			return fmt.Errorf("restore pending move: %w", err)
-		}
+	if err := r.restorePendingMoveTx(ctx, tx, sessionID, pendingMove); err != nil {
+		return err
+	}
+	if err := r.bumpSendNowGenerationTx(ctx, tx, sessionID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
 
 // SetPendingMove upserts the deferred workflow move for a session.
 func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error {
+	if move == nil || move.TaskID == "" || sessionID == "" {
+		return ErrSessionIdentityMismatch
+	}
+	if move.SessionIncarnationID == "" && !r.tasksTablePresent {
+		move.SessionIncarnationID = "legacy:" + sessionID
+	}
 	if move.QueuedAt.IsZero() {
 		move.QueuedAt = time.Now().UTC()
 	}
@@ -2544,14 +5750,45 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 		return fmt.Errorf("begin set pending move tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardActiveTaskTx(ctx, tx, move.TaskID); err != nil {
+		return err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := r.guardSessionTx(ctx, tx, sessionID, ""); err != nil {
+		return err
+	}
+	if r.tasksTablePresent {
+		if move.SessionIncarnationID == "" {
+			var incarnationID string
+			if err := tx.GetContext(ctx, &incarnationID, r.db.Rebind(`
+				SELECT queue_incarnation_id FROM task_sessions WHERE id = ? AND task_id = ?
+			`), sessionID, move.TaskID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return ErrTaskInactive
+				}
+				return fmt.Errorf("resolve pending move session identity: %w", err)
+			}
+			move.SessionIncarnationID = incarnationID
+		}
+		if err := r.validateSessionIdentityTx(ctx, tx, QueueSessionIdentity{
+			TaskID:               move.TaskID,
+			SessionID:            sessionID,
+			SessionIncarnationID: move.SessionIncarnationID,
+		}); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO pending_moves (id, move_id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at, actor, sender_session_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO pending_moves (
+			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
+			workflow_step_id, step_position, queued_at, actor, sender_session_id
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			task_id = excluded.task_id,
+			session_incarnation_id = excluded.session_incarnation_id,
 			workflow_id = excluded.workflow_id,
 			workflow_step_id = excluded.workflow_step_id,
 			step_position = excluded.step_position,
@@ -2560,7 +5797,9 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 			sender_session_id = excluded.sender_session_id,
 			move_id = excluded.move_id
 	`),
-		uuid.New().String(), move.MoveID, sessionID, move.TaskID, move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor, move.SenderSessionID,
+		uuid.New().String(), move.MoveID, move.SessionIncarnationID, sessionID, move.TaskID,
+		move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor,
+		move.SenderSessionID,
 	); err != nil {
 		return fmt.Errorf("upsert pending move: %w", err)
 	}
@@ -2570,29 +5809,34 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 // GetPendingMove returns the deferred workflow move for a session, or nil when absent.
 func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
 	var (
-		moveID, taskID, workflowID, workflowStepID string
-		position                                   int
-		queuedAt                                   time.Time
-		actor, senderSessionID                     string
+		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		position                                                         int
+		queuedAt                                                         time.Time
+		actor, senderSessionID                                           string
 	)
 	if err := r.ro.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT move_id, task_id, workflow_id, workflow_step_id, step_position, queued_at, actor, sender_session_id
+		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
+		       step_position, queued_at, actor, sender_session_id
 		FROM pending_moves WHERE session_id = ?
-	`), sessionID).Scan(&moveID, &taskID, &workflowID, &workflowStepID, &position, &queuedAt, &actor, &senderSessionID); err != nil {
+	`), sessionID).Scan(
+		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
+		&position, &queuedAt, &actor, &senderSessionID,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("read pending move: %w", err)
 	}
 	return &PendingMove{
-		MoveID:          moveID,
-		TaskID:          taskID,
-		WorkflowID:      workflowID,
-		WorkflowStepID:  workflowStepID,
-		Position:        position,
-		QueuedAt:        queuedAt,
-		Actor:           actor,
-		SenderSessionID: senderSessionID,
+		MoveID:               moveID,
+		SessionIncarnationID: sessionIncarnationID,
+		TaskID:               taskID,
+		WorkflowID:           workflowID,
+		WorkflowStepID:       workflowStepID,
+		Position:             position,
+		QueuedAt:             queuedAt,
+		Actor:                actor,
+		SenderSessionID:      senderSessionID,
 	}, nil
 }
 
@@ -2610,15 +5854,19 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 	}
 
 	var (
-		moveID, taskID, workflowID, workflowStepID string
-		position                                   int
-		queuedAt                                   time.Time
-		actor, senderSessionID                     string
+		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		position                                                         int
+		queuedAt                                                         time.Time
+		actor, senderSessionID                                           string
 	)
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT move_id, task_id, workflow_id, workflow_step_id, step_position, queued_at, actor, sender_session_id
+		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
+		       step_position, queued_at, actor, sender_session_id
 		FROM pending_moves WHERE session_id = ?
-	`), sessionID).Scan(&moveID, &taskID, &workflowID, &workflowStepID, &position, &queuedAt, &actor, &senderSessionID); err != nil {
+	`), sessionID).Scan(
+		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
+		&position, &queuedAt, &actor, &senderSessionID,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -2631,14 +5879,15 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 		return nil, err
 	}
 	return &PendingMove{
-		MoveID:          moveID,
-		TaskID:          taskID,
-		WorkflowID:      workflowID,
-		WorkflowStepID:  workflowStepID,
-		Position:        position,
-		QueuedAt:        queuedAt,
-		Actor:           actor,
-		SenderSessionID: senderSessionID,
+		MoveID:               moveID,
+		SessionIncarnationID: sessionIncarnationID,
+		TaskID:               taskID,
+		WorkflowID:           workflowID,
+		WorkflowStepID:       workflowStepID,
+		Position:             position,
+		QueuedAt:             queuedAt,
+		Actor:                actor,
+		SenderSessionID:      senderSessionID,
 	}, nil
 }
 
@@ -2688,8 +5937,27 @@ func (r *sqliteRepository) scanTailWithRawJSON(ctx context.Context, tx *sqlx.Tx,
 	return msg, rawContent, rawAttachments, rawMetadata, nil
 }
 
-// findCoalesced locates the entry matching the session, owner, and coalesce key inside a transaction.
-func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessionID, queuedBy, coalesceKey string) (*QueuedMessage, error) {
+func (r *sqliteRepository) findPendingCoalescedSuccessor(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, queuedBy string,
+	metadata map[string]interface{},
+) (*QueuedMessage, error) {
+	coalesceKey := metadataString(metadata, MetadataCoalesceKey)
+	if coalesceKey == "" {
+		return nil, nil
+	}
+	successor, _, err := r.findCoalesced(ctx, tx, sessionID, queuedBy, coalesceKey)
+	return successor, err
+}
+
+// findCoalesced locates the pending entry matching the session, owner, and
+// coalesce key and reports whether an in-flight match was skipped.
+func (r *sqliteRepository) findCoalesced(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, queuedBy, coalesceKey string,
+) (*QueuedMessage, bool, error) {
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
@@ -2698,22 +5966,28 @@ func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessi
 		ORDER BY position ASC
 	`), sessionID, queuedBy)
 	if err != nil {
-		return nil, fmt.Errorf("scan coalesced queued: %w", err)
+		return nil, false, fmt.Errorf("scan coalesced queued: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	reservedMatch := false
 	for rows.Next() {
 		msg, err := scanQueuedRow(rows)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		if metadataString(msg.Metadata, MetadataCoalesceKey) == coalesceKey {
-			return msg, nil
+		if metadataString(msg.Metadata, MetadataCoalesceKey) != coalesceKey {
+			continue
 		}
+		if msg.IsReservedInFlight() {
+			reservedMatch = true
+			continue
+		}
+		return msg, reservedMatch, nil
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return nil, nil
+	return nil, reservedMatch, nil
 }
 
 // scanQueuedRow scans a single queued_messages row from any sqlx-compatible row source.

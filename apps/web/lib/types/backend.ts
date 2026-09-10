@@ -62,6 +62,7 @@ export type KanbanUpdatePayload = {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
     show_in_command_panel?: boolean;
+    auto_advance_requires_signal?: boolean;
     wip_limit?: number;
     pull_from_step_id?: string | null;
   }>;
@@ -115,6 +116,12 @@ export type TaskEventPayload = {
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
   // absent/null when no session is running.
   foreground_activity?: ForegroundActivity | null;
+  // Task-level parked-on-background-work projection; always serialized
+  // (never omitted) so a settled/reset value clears stale client state
+  // (spec: docs/specs/disambiguate-waiting/spec.md).
+  parked_on_background_work?: boolean;
+  parked_revision?: number;
+  parked_epoch?: number;
   active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -146,6 +153,11 @@ export type AgentUpdatePayload = {
  */
 export type AgentSettingsUpdatedPayload = {
   agent: Agent;
+};
+
+export type AgentProfileMcpConfigUpdatedPayload = {
+  profile_id: string;
+  workspace_id?: string | null;
 };
 
 export type AgentAvailableUpdatedPayload = {
@@ -279,6 +291,7 @@ export type StepPayload = {
   is_start_step?: boolean;
   allow_manual_move?: boolean;
   show_in_command_panel?: boolean;
+  auto_advance_requires_signal?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
@@ -294,12 +307,6 @@ export type StepPayload = {
 export type WorkflowStepEventPayload = {
   step: StepPayload;
 };
-
-/**
- * Payload for `session.activity_changed` — the fine-grained busy signal
- * (see ADR-0049). Fires when foreground ownership or detached background
- * liveness changes, including after the foreground turn settles.
- */
 
 export type OfficeInboxItemNotificationPayload = {
   task_id?: string;
@@ -432,6 +439,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.plan.reverted": BackendMessage<"task.plan.reverted", TaskPlanRevisionEventPayload>;
     "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
     "agent.settings.updated": BackendMessage<"agent.settings.updated", AgentSettingsUpdatedPayload>;
+    "agent.profile.mcp_config.updated": BackendMessage<
+      "agent.profile.mcp_config.updated",
+      AgentProfileMcpConfigUpdatedPayload
+    >;
     "agent.available.updated": BackendMessage<
       "agent.available.updated",
       AgentAvailableUpdatedPayload

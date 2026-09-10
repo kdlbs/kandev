@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildSubmitMessage } from "./chat-input-area";
 import { resolveStatusRowTaskId, shouldRenderChatStatusBar } from "./chat-status-bar";
+import { hasPendingClarification, shouldShowProceed } from "./types";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 
 const messageComment: AgentMessageComment = {
@@ -48,6 +49,30 @@ describe("shouldRenderChatStatusBar", () => {
         showProceed: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowProceed", () => {
+  it.each([
+    ["not busy without a clarification", false, false, true],
+    ["busy without a clarification", true, false, false],
+    ["waiting for input with a pending clarification", false, true, false],
+  ])("%s", (_state, isAgentBusy, hasPendingClarification, expected) => {
+    expect(shouldShowProceed("Review", isAgentBusy, hasPendingClarification)).toBe(expected);
+  });
+});
+
+describe("hasPendingClarification", () => {
+  it("retains the message-derived fallback", () => {
+    expect(hasPendingClarification(true, null)).toBe(true);
+  });
+
+  it("uses the durable session projection while messages hydrate", () => {
+    expect(hasPendingClarification(false, "clarification")).toBe(true);
+  });
+
+  it("does not treat a durable permission request as a clarification", () => {
+    expect(hasPendingClarification(false, "permission")).toBe(false);
   });
 });
 

@@ -98,6 +98,18 @@ type executorStore interface {
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
+// sessionMetadataKeyStateSetter is an optional repository capability. Legacy
+// test stores can keep their existing metadata API, while the SQL repository
+// can guard recovery markers against a concurrent stop or archive.
+type sessionMetadataKeyStateSetter interface {
+	SetSessionMetadataKeyIfState(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+		expectedState models.TaskSessionState,
+	) (bool, error)
+}
+
 // officeTaskSessionCreator lets repositories make Office-session origin
 // selection part of the insert transaction. Test and legacy stores can omit
 // it; the executor keeps a per-task fallback lock for those implementations.
@@ -110,6 +122,26 @@ type officeTaskSessionCreator interface {
 // stores can omit it; the executor keeps its existing best-effort fallback.
 type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
+}
+
+// Workflow-route-aware creators keep a prepared destination record in the
+// same transaction as session insertion. Repositories that do not expose the
+// specialized workspace variants retain the legacy creation path for tests
+// and older adapters.
+type workflowSessionRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkflowSessionRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type initialRuntimeSeedWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithInitialRuntimeSeedAndWorkflowRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type workspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, *models.WorkflowSessionRoute) error
+}
+
+type sharedGroupWorkspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, string, *models.WorkflowSessionRoute) error
 }
 
 // taskEnvironmentMaterializationFinalizer publishes a successfully prepared
@@ -198,6 +230,18 @@ type PromptResult struct {
 	AgentMessage string // The agent's accumulated response message
 }
 
+// ProbeResult re-exports client.ProbeResult so callers above this package
+// (e.g. internal/orchestrator) can reference it without a direct import of
+// internal/agent/runtime/agentctl, which is restricted to this package and
+// internal/agent/runtime/ (see ARCH-RUNTIME-IMPORT).
+type ProbeResult = client.ProbeResult
+
+const (
+	ProbeResultLive    = client.ProbeResultLive
+	ProbeResultSettled = client.ProbeResultSettled
+	ProbeResultUnknown = client.ProbeResultUnknown
+)
+
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {
@@ -231,6 +275,11 @@ type AgentManagerClient interface {
 	ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error)
 	ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
 	CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
+
+	// ProbeBackgroundWorkloads samples a session's agent process for
+	// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+	// No timeout is applied here — the caller wraps ctx with the probe budget.
+	ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error)
 
 	// IsAgentRunningForSession checks if an agent is actually running for a session
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
@@ -414,6 +463,8 @@ type LaunchAgentRequest struct {
 	Priority             string
 	Metadata             map[string]interface{}
 	Env                  map[string]string
+	// AdditionalSkillSlugs are launch-scoped skills selected by Office.
+	AdditionalSkillSlugs []string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist. Values are
 	// still taken only from Env; the key list is the explicit repository grant.
@@ -577,6 +628,9 @@ type LaunchOptions struct {
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// durable profile selection.
+	AdditionalSkillSlugs []string
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. When nil, launch behavior is identical to today.
 	RouteOverride *RouteOverride
@@ -600,14 +654,15 @@ type RouteOverride struct {
 // preserve the Office-built prompt and configuration that the legacy
 // path receives via StartTaskWithEnv.
 type LaunchContext struct {
-	ExecutorID        string
-	ExecutorProfileID string
-	Priority          string
-	Prompt            string
-	WorkflowStepID    string
-	PlanMode          bool
-	Attachments       []v1.MessageAttachment
-	Env               map[string]string
+	ExecutorID           string
+	ExecutorProfileID    string
+	Priority             string
+	Prompt               string
+	WorkflowStepID       string
+	PlanMode             bool
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
+	AdditionalSkillSlugs []string
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -725,6 +780,19 @@ type SessionStartingFunc func(
 	session *models.TaskSession,
 	expectedState models.TaskSessionState,
 	promoteTask bool,
+) error
+
+// SessionStartingWithOptionsFunc is the extended STARTING callback used by
+// explicit completed-conversation recovery. It keeps the legacy callback
+// shape available to lightweight executors and tests while carrying the
+// narrow permission needed for the guarded completed-state transition.
+type SessionStartingWithOptionsFunc func(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+	allowCompletedResume bool,
 ) error
 
 // ExecutionCleanupClaimFunc atomically claims forced cleanup for one exact
@@ -847,6 +915,9 @@ type Executor struct {
 	// the orchestrator so launch/resume/model-switch transitions serialize with
 	// runtime task-state reconciliation.
 	onSessionStarting SessionStartingFunc
+	// Extended STARTING callback for explicit completed-session recovery. When
+	// present, it takes precedence over the legacy callback above.
+	onSessionStartingWithOptions SessionStartingWithOptionsFunc
 
 	// Callback for exact-execution forced cleanup arbitration. Set by the
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
@@ -1152,6 +1223,12 @@ func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
 	e.onSessionStarting = fn
 }
 
+// SetOnSessionStartingWithOptions sets the extended STARTING callback used by
+// explicit completed-session recovery.
+func (e *Executor) SetOnSessionStartingWithOptions(fn SessionStartingWithOptionsFunc) {
+	e.onSessionStartingWithOptions = fn
+}
+
 // SetOnExecutionCleanupClaim sets the exact-execution forced cleanup arbiter.
 func (e *Executor) SetOnExecutionCleanupClaim(fn ExecutionCleanupClaimFunc) {
 	e.onExecutionCleanupClaim = fn
@@ -1238,4 +1315,10 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (e *Executor) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return e.agentManager.ProbeBackgroundWorkloads(ctx, sessionID)
 }
