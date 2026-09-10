@@ -8,6 +8,7 @@ import { IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { RepositoryCard } from "@/components/settings/repository-card";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { WorkspaceRepositorySetsSection } from "./workspace-repository-sets-section";
 import { AddLocalRepositoryDialog } from "./workspace-add-local-repository-dialog";
 import { generateUUID } from "@/lib/utils";
@@ -538,7 +539,7 @@ export function WorkspaceRepositoriesClient({
         }
         action={
           isImproveWorkspace ? undefined : (
-            <Button size="sm" className="cursor-pointer" onClick={openDialog}>
+            <Button className={settingsActionClassName("cursor-pointer")} onClick={openDialog}>
               {t("workspaces:addLocalRepository")}
             </Button>
           )

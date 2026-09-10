@@ -29,10 +29,13 @@ export type Graph2StepNodeProps = {
   hasPrev: boolean;
   hasNext: boolean;
   onMoveTask: (task: Task, targetStepId: string) => void;
+  onOpenTask?: (task: Task) => void;
   prevStepId?: string;
   nextStepId?: string;
   prevStepTitle?: string;
   nextStepTitle?: string;
+  prevStepHidden?: boolean;
+  nextStepHidden?: boolean;
   isMoving?: boolean;
 };
 
@@ -103,11 +106,13 @@ function MoveButton({
   direction,
   isMoving,
   label,
+  showTooltip = true,
   onClick,
 }: {
   direction: "left" | "right";
   isMoving?: boolean;
   label: string;
+  showTooltip?: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const posClass = direction === "left" ? "-left-3" : "-right-3";
@@ -130,9 +135,10 @@ function MoveButton({
       <Icon className="h-3 w-3" />
     </button>
   );
-  // The tooltip always names the destination step, not only when that step is
-  // otherwise hidden from the run. Disabled buttons receive no pointer/focus
-  // events, so the trigger is a span that is focusable only while disabled.
+  // The tooltip names the destination step. Keep the trigger wrapper for the
+  // default card/pipeline behavior, while allowing visible destinations to
+  // opt out when the caller already renders that name in the run.
+  if (!showTooltip) return button;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -152,10 +158,13 @@ export function Graph2StepNode({
   hasPrev,
   hasNext,
   onMoveTask,
+  onOpenTask,
   prevStepId,
   nextStepId,
   prevStepTitle,
   nextStepTitle,
+  prevStepHidden,
+  nextStepHidden,
   isMoving,
 }: Graph2StepNodeProps) {
   const { t } = useTranslation();
@@ -194,6 +203,7 @@ export function Graph2StepNode({
           direction="left"
           isMoving={isMoving}
           label={t("kanban:moveToStep", { step: prevStepTitle ?? prevStepId })}
+          showTooltip={prevStepHidden}
           onClick={(e) => {
             e.stopPropagation();
             onMoveTask(task, prevStepId);
@@ -206,6 +216,7 @@ export function Graph2StepNode({
       <button
         type="button"
         title={step.title}
+        onClick={() => onOpenTask?.(task)}
         className={cn(
           NODE_CLASS,
           "cursor-pointer transition-colors bg-background hover:bg-accent/30",
@@ -220,6 +231,7 @@ export function Graph2StepNode({
               hasPendingPermission: pendingInput.permission,
               interrupted: task.interrupted,
               autoStartFailed: task.autoStartFailed,
+              workspaceOrphaned: task.workspaceOrphaned,
             })}
           </div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
@@ -231,6 +243,7 @@ export function Graph2StepNode({
           direction="right"
           isMoving={isMoving}
           label={t("kanban:moveToStep", { step: nextStepTitle ?? nextStepId })}
+          showTooltip={nextStepHidden}
           onClick={(e) => {
             e.stopPropagation();
             onMoveTask(task, nextStepId);

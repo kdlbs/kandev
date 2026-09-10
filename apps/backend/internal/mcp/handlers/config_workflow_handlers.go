@@ -151,23 +151,24 @@ func (h *Handlers) handleImportWorkflow(ctx context.Context, msg *ws.Message) (*
 
 func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		WorkflowID                 string               `json:"workflow_id"`
-		Name                       string               `json:"name"`
-		Position                   int                  `json:"position"`
-		Color                      string               `json:"color"`
-		Prompt                     string               `json:"prompt"`
-		AgentProfileID             *string              `json:"agent_profile_id"`
-		ProfileSessionStartPolicy  *string              `json:"profile_session_start_policy"`
-		ProfileSessionEndPolicy    *string              `json:"profile_session_end_policy"`
-		IsStartStep                *bool                `json:"is_start_step"`
-		AllowManualMove            *bool                `json:"allow_manual_move"`
-		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
-		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
-		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
-		CompleteTaskOnEnter        json.RawMessage      `json:"complete_task_on_enter"`
-		WIPLimit                   *int                 `json:"wip_limit"`
-		PullFromStepID             *string              `json:"pull_from_step_id"`
-		Events                     *wfmodels.StepEvents `json:"events"`
+		WorkflowID                 string                          `json:"workflow_id"`
+		Name                       string                          `json:"name"`
+		Position                   int                             `json:"position"`
+		Color                      string                          `json:"color"`
+		Prompt                     string                          `json:"prompt"`
+		AgentProfileID             *string                         `json:"agent_profile_id"`
+		ProfileSessionStartPolicy  *string                         `json:"profile_session_start_policy"`
+		ProfileSessionEndPolicy    *string                         `json:"profile_session_end_policy"`
+		IsStartStep                *bool                           `json:"is_start_step"`
+		AllowManualMove            *bool                           `json:"allow_manual_move"`
+		ShowInCommandPanel         *bool                           `json:"show_in_command_panel"`
+		AutoAdvanceRequiresSignal  *bool                           `json:"auto_advance_requires_signal"`
+		CancelTriggersTurnComplete *bool                           `json:"cancel_triggers_turn_complete"`
+		CompleteTaskOnEnter        json.RawMessage                 `json:"complete_task_on_enter"`
+		WIPLimit                   *int                            `json:"wip_limit"`
+		PullFromStepID             *string                         `json:"pull_from_step_id"`
+		SessionTarget              workflowctrl.SessionTargetPatch `json:"session_target"`
+		Events                     *wfmodels.StepEvents            `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -199,6 +200,7 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 		CompleteTaskOnEnter:        completeTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
+		SessionTarget:              req.SessionTarget,
 		Events:                     req.Events,
 	}
 	if req.AllowManualMove != nil {
@@ -231,23 +233,24 @@ func optionalCompleteTaskOnEnter(raw json.RawMessage) (*bool, error) {
 
 func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		StepID                     string               `json:"step_id"`
-		Name                       *string              `json:"name"`
-		Color                      *string              `json:"color"`
-		Prompt                     *string              `json:"prompt"`
-		AgentProfileID             *string              `json:"agent_profile_id"`
-		ProfileSessionStartPolicy  *string              `json:"profile_session_start_policy"`
-		ProfileSessionEndPolicy    *string              `json:"profile_session_end_policy"`
-		IsStartStep                *bool                `json:"is_start_step"`
-		AllowManualMove            *bool                `json:"allow_manual_move"`
-		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
-		AutoArchiveAfterHours      *int                 `json:"auto_archive_after_hours"`
-		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
-		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
-		CompleteTaskOnEnter        json.RawMessage      `json:"complete_task_on_enter"`
-		WIPLimit                   *int                 `json:"wip_limit"`
-		PullFromStepID             *string              `json:"pull_from_step_id"`
-		Events                     *wfmodels.StepEvents `json:"events"`
+		StepID                     string                          `json:"step_id"`
+		Name                       *string                         `json:"name"`
+		Color                      *string                         `json:"color"`
+		Prompt                     *string                         `json:"prompt"`
+		AgentProfileID             *string                         `json:"agent_profile_id"`
+		ProfileSessionStartPolicy  *string                         `json:"profile_session_start_policy"`
+		ProfileSessionEndPolicy    *string                         `json:"profile_session_end_policy"`
+		IsStartStep                *bool                           `json:"is_start_step"`
+		AllowManualMove            *bool                           `json:"allow_manual_move"`
+		ShowInCommandPanel         *bool                           `json:"show_in_command_panel"`
+		AutoArchiveAfterHours      *int                            `json:"auto_archive_after_hours"`
+		AutoAdvanceRequiresSignal  *bool                           `json:"auto_advance_requires_signal"`
+		CancelTriggersTurnComplete *bool                           `json:"cancel_triggers_turn_complete"`
+		CompleteTaskOnEnter        json.RawMessage                 `json:"complete_task_on_enter"`
+		WIPLimit                   *int                            `json:"wip_limit"`
+		PullFromStepID             *string                         `json:"pull_from_step_id"`
+		SessionTarget              workflowctrl.SessionTargetPatch `json:"session_target"`
+		Events                     *wfmodels.StepEvents            `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -277,6 +280,7 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 		CompleteTaskOnEnter:        completeTaskOnEnter,
 		WIPLimit:                   req.WIPLimit,
 		PullFromStepID:             req.PullFromStepID,
+		SessionTarget:              req.SessionTarget,
 		Events:                     req.Events,
 	}
 

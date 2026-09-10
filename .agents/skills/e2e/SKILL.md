@@ -169,7 +169,9 @@ expect(actionsBox).not.toBeNull();
 expect(metricsBox!.height).toBeCloseTo(actionsBox!.height, 1);
 ```
 
-Run the assertion in the relevant desktop and mobile projects when responsive layout can change the result. Do not rely on fixed pixels when the product contract is equality or alignment.
+Run the assertion in the relevant desktop and mobile projects when responsive
+layout can change the result. Do not rely on fixed pixels when the product
+contract is equality or alignment. For control-size regressions, read the mobile-parity [sizing contract](../mobile-parity/references/control-sizing.md).
 For computed colors, parse alpha/opacity semantically or assert a deliberate class/data contract; do not compare serialized `getComputedStyle` strings because browsers may return `rgba()`, `oklab()`, or `color()`.
 
 **Animation-aware geometry:** Before reading dialog or panel geometry, wait only for currently running Web Animations with finite `effect.getComputedTiming().iterations`; await `animation.finished.catch(() => undefined)` because Radix overlays can cancel animations during close or replacement. Never blanket-await infinite animations or use a fixed sleep; then read bounding boxes and assert the relationship.

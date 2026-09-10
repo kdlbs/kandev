@@ -111,6 +111,7 @@ function preserveMultiSnapshotFields(
   | "foregroundActivity"
   | "interrupted"
   | "autoStartFailed"
+  | "workspaceOrphaned"
   | "priority"
 > {
   return {
@@ -124,6 +125,7 @@ function preserveMultiSnapshotFields(
     foregroundActivity: preserveIfUndefined(t.foregroundActivity, fallback?.foregroundActivity),
     interrupted: preserveIfUndefined(t.interrupted, fallback?.interrupted),
     autoStartFailed: preserveIfUndefined(t.autoStartFailed, fallback?.autoStartFailed),
+    workspaceOrphaned: preserveIfUndefined(t.workspaceOrphaned, fallback?.workspaceOrphaned),
     priority: preserveIfUndefined(t.priority, fallback?.priority),
   };
 }
@@ -175,6 +177,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               taskPendingAction: existing?.taskPendingAction,
               interrupted: existing?.interrupted,
               autoStartFailed: existing?.autoStartFailed,
+              workspaceOrphaned: existing?.workspaceOrphaned,
               foregroundActivity: existing?.foregroundActivity,
               priority: preserveIfUndefined(task.priority, existing?.priority),
               ...queueFields(task, existing),

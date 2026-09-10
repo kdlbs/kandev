@@ -34,6 +34,7 @@ import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
+import { hasPendingClarification } from "./types";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -444,6 +445,10 @@ export function ChatInputArea({
     chatInputRef,
     placeholderOverride,
   );
+  const clarificationPending = hasPendingClarification(
+    Boolean(panelState.pendingClarification),
+    panelState.session?.pending_action,
+  );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
     panelState,
@@ -487,6 +492,7 @@ export function ChatInputArea({
             nextStepName={proceedStepName}
             onProceed={proceed}
             isAgentBusy={isAgentBusy}
+            hasPendingClarification={clarificationPending}
             isMoving={isMoving}
             queueChip={queueChip}
             showScrollToLastPrompt={showScrollToLastPrompt}

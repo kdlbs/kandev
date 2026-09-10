@@ -65,8 +65,9 @@ describe("SecretListItemRow", () => {
     const { onDelete } = renderRow();
     const deleteButton = screen.getByRole("button", { name: DELETE_BUTTON });
 
-    expect(deleteButton.className).toContain("min-h-11");
-    expect(deleteButton.className).toContain("min-w-11");
+    expect(deleteButton.className).toContain("size-7");
+    expect(deleteButton.className).toContain("max-md:size-11");
+    expect(deleteButton.className).toContain("[@media(pointer:coarse)]:size-11");
     fireEvent.click(deleteButton);
 
     expect(onDelete).toHaveBeenCalledWith(secret);

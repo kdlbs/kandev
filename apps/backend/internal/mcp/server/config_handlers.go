@@ -12,6 +12,26 @@ import (
 
 const mcpKeyCallerTaskID = "caller_task_id"
 
+func nullableSessionTargetOption() mcp.ToolOption {
+	return func(tool *mcp.Tool) {
+		tool.InputSchema.Properties["session_target"] = map[string]interface{}{
+			"type":        []string{"object", "null"},
+			"description": "Optional session recipient: {kind: 'initial'} or {kind: 'step', step_id: '<earlier direct-profile step>'}. Set null to clear it.",
+		}
+	}
+}
+
+func copyWorkflowStepArguments(payload map[string]interface{}, args map[string]interface{}, keys ...string) {
+	for _, key := range keys {
+		if value, present := args[key]; present && value != nil {
+			payload[key] = value
+		}
+	}
+	if value, present := args["session_target"]; present {
+		payload["session_target"] = value
+	}
+}
+
 // --- Workflow config tools ---
 
 func (s *Server) registerConfigWorkflowTools() {
@@ -71,7 +91,7 @@ func (s *Server) registerConfigWorkflowTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("export_workflow_kandev",
-			mcp.WithDescription("Export one workflow as a portable version 2 kandev_workflow JSON document. The result contains one workflow and its steps without instance IDs or timestamps. Pass the JSON text unchanged as document to import_workflow_kandev (the import document limit is 1 MiB)."),
+			mcp.WithDescription("Export one workflow as a portable kandev_workflow JSON document. Targeted workflows use version 2; target-free workflows use version 1. The result contains one workflow and its steps without instance IDs or timestamps. Pass the JSON text unchanged as document to import_workflow_kandev (the import document limit is 1 MiB)."),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithIdempotentHintAnnotation(true),
@@ -110,6 +130,7 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithBoolean("complete_task_on_enter", mcp.Description("Complete the task when it enters this final workflow step")),
 			mcp.WithNumber("wip_limit", mcp.Description("Work-in-progress limit for this step. 0 means unlimited.")),
 			mcp.WithString("pull_from_step_id", mcp.Description("Optional feeder workflow step ID to pull from when capacity opens.")),
+			nullableSessionTargetOption(),
 			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete. Each is an array of {type, config} objects.")),
 		),
 		s.wrapHandler("create_workflow_step_kandev", s.createWorkflowStepHandler()),
@@ -133,6 +154,7 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithBoolean("complete_task_on_enter", mcp.Description("Complete the task when it enters this final workflow step")),
 			mcp.WithNumber("wip_limit", mcp.Description("Work-in-progress limit for this step. 0 means unlimited.")),
 			mcp.WithString("pull_from_step_id", mcp.Description("Optional feeder workflow step ID to pull from when capacity opens.")),
+			nullableSessionTargetOption(),
 			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete.")),
 		),
 		s.wrapHandler("update_workflow_step_kandev", s.updateWorkflowStepHandler()),
@@ -498,11 +520,7 @@ func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"position", "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events"} {
-			if args[key] != nil {
-				payload[key] = args[key]
-			}
-		}
+		copyWorkflowStepArguments(payload, args, "position", "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events")
 		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkflowStep, payload)
 	}
 }
@@ -524,11 +542,7 @@ func (s *Server) updateWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events"} {
-			if args[key] != nil {
-				payload[key] = args[key]
-			}
-		}
+		copyWorkflowStepArguments(payload, args, "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events")
 		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkflowStep, payload)
 	}
 }

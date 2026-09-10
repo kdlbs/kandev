@@ -116,6 +116,47 @@ export function KanbanCardBody({
   );
 }
 
+// Status markers that mask the launch spinner and gate the resting no-affordance
+// case. Keep them together so the renderer stays easy to audit.
+type StatusMaskFlags = {
+  needsMe: boolean;
+  showInterrupted: boolean;
+  showAutoStartFailed: boolean;
+  parkedOnBackgroundWork: boolean;
+  showWorkspaceOrphaned: boolean;
+};
+
+function hasNoStatusAffordance(
+  showRunningSpinner: boolean,
+  hasActivity: boolean,
+  flags: StatusMaskFlags,
+): boolean {
+  return (
+    !showRunningSpinner &&
+    !flags.needsMe &&
+    !hasActivity &&
+    !flags.showInterrupted &&
+    !flags.showAutoStartFailed &&
+    !flags.parkedOnBackgroundWork &&
+    !flags.showWorkspaceOrphaned
+  );
+}
+
+function resolveForegroundActivity(
+  task: Task,
+  showRunningSpinner: boolean,
+  flags: StatusMaskFlags,
+): Task["foregroundActivity"] {
+  const shouldForceGenerating =
+    showRunningSpinner &&
+    !flags.needsMe &&
+    !flags.showAutoStartFailed &&
+    !flags.parkedOnBackgroundWork &&
+    !flags.showWorkspaceOrphaned &&
+    task.foregroundActivity !== "background";
+  return shouldForceGenerating ? "generating" : task.foregroundActivity;
+}
+
 // renderTaskStatusIcon resolves the card status icon, or null when the actions
 // cluster shows none (a resting done/todo task). The backend task-level
 // MOST-ACTIVE-WINS aggregate takes precedence: a
@@ -131,48 +172,27 @@ export function renderTaskStatusIcon(
   hasPendingClarification: boolean,
   hasPendingPermission: boolean,
 ) {
-  const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarification);
-  const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
-  const needsMe = showQuestionIcon || showPermissionIcon;
-  const showInterrupted = !!task.interrupted;
-  const showAutoStartFailed = !!task.autoStartFailed;
-  const parkedOnBackgroundWork = !!task.parkedOnBackgroundWork;
+  const flags: StatusMaskFlags = {
+    needsMe:
+      shouldUseQuestionTaskIcon(task.state, hasPendingClarification) ||
+      shouldUsePermissionTaskIcon(hasPendingPermission),
+    showInterrupted: !!task.interrupted,
+    showAutoStartFailed: !!task.autoStartFailed,
+    parkedOnBackgroundWork: !!task.parkedOnBackgroundWork,
+    showWorkspaceOrphaned: !!task.workspaceOrphaned,
+  };
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (
-    !showRunningSpinner &&
-    !needsMe &&
-    !hasActivity &&
-    !showInterrupted &&
-    !showAutoStartFailed &&
-    !parkedOnBackgroundWork
-  ) {
-    return null;
-  }
-  // A "needs me" prompt (pending clarification / permission) must not be masked
-  // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
-  // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon. A failed auto-start must not be masked either: startTask
-  // sets the task to SCHEDULING before the launch, so a launch failure before
-  // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
-  // reads as showRunningSpinner=true — the exact shape the failure marker exists
-  // to surface. The parked affordance (AC-58) is likewise never masked by the
-  // generic spinner — it renders through getTaskStateIcon below.
-  const foregroundActivity =
-    showRunningSpinner &&
-    !needsMe &&
-    !showAutoStartFailed &&
-    !parkedOnBackgroundWork &&
-    task.foregroundActivity !== "background"
-      ? "generating"
-      : task.foregroundActivity;
+  if (hasNoStatusAffordance(showRunningSpinner, hasActivity, flags)) return null;
+  const foregroundActivity = resolveForegroundActivity(task, showRunningSpinner, flags);
   return getTaskStateIcon(task.state, "h-4 w-4", {
     hasPendingClarification,
     foregroundActivity,
     hasPendingPermission,
-    interrupted: showInterrupted,
-    autoStartFailed: showAutoStartFailed,
-    parkedOnBackgroundWork,
+    interrupted: flags.showInterrupted,
+    autoStartFailed: flags.showAutoStartFailed,
+    parkedOnBackgroundWork: flags.parkedOnBackgroundWork,
+    workspaceOrphaned: flags.showWorkspaceOrphaned,
   });
 }
 

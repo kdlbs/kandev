@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import {
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
@@ -18,6 +18,7 @@ import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { useDetachTask } from "@/hooks/use-detach-task";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
+import { useTaskMenuDialogState } from "@/hooks/use-task-menu-dialog-state";
 import type { Repository, TaskPriority } from "@/lib/types/http";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import { usePluginRegistry } from "@/lib/plugins/registry";
@@ -114,7 +115,7 @@ function externalLinkHandlers(
 /** Link-dialog openers shared by both the dropdown and context menu builds. */
 function buildLinkDialogHandlers(
   externalLinkAvailability: KanbanExternalLinkAvailability,
-  dialogs: ReturnType<typeof useKanbanCardDialogState>,
+  dialogs: ReturnType<typeof useTaskMenuDialogState>,
 ) {
   return {
     onLinkPullRequest: () => dialogs.setShowPRDialog(true),
@@ -137,35 +138,6 @@ export function buildPluginMenuContext(
     taskTitle: task.title,
     workflowStepId: task.workflowStepId ?? null,
     presentation,
-  };
-}
-
-/** Every confirm/link-dialog open flag the card menus and their dialogs share. */
-function useKanbanCardDialogState() {
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
-  const [showDetachConfirm, setShowDetachConfirm] = useState(false);
-  const [showPRDialog, setShowPRDialog] = useState(false);
-  const [showIssueDialog, setShowIssueDialog] = useState(false);
-  const [showMRDialog, setShowMRDialog] = useState(false);
-  const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
-    null,
-  );
-  return {
-    showDeleteConfirm,
-    setShowDeleteConfirm,
-    showArchiveConfirm,
-    setShowArchiveConfirm,
-    showDetachConfirm,
-    setShowDetachConfirm,
-    showPRDialog,
-    setShowPRDialog,
-    showIssueDialog,
-    setShowIssueDialog,
-    showMRDialog,
-    setShowMRDialog,
-    externalLinkProvider,
-    setExternalLinkProvider,
   };
 }
 
@@ -192,7 +164,7 @@ export function useKanbanCardMenus({
   // just disabled doesn't linger as a stale entry.
   usePluginRegistry();
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
-  const dialogs = useKanbanCardDialogState();
+  const dialogs = useTaskMenuDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
   const updateTaskPriority = useUpdateTaskPriority();
   const detachAnchorRef = useRef<HTMLDivElement>(null);

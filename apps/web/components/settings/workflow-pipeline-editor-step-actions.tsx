@@ -21,6 +21,7 @@ import {
   hasDisablePlanMode,
 } from "./workflow-pipeline-editor-helpers";
 import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
+import { settingsControlClassName } from "./settings-control";
 
 // --- useStepActions hook ---
 
@@ -193,7 +194,7 @@ export function TurnStartSelect({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="w-full h-8"
+          className={settingsControlClassName("w-full")}
           data-settings-dirty={isWorkflowStepValueDirty(
             step,
             savedStep,
@@ -226,7 +227,7 @@ export function TurnStartSelect({
           disabled={readOnly}
         >
           <SelectTrigger
-            className="w-full h-8"
+            className={settingsControlClassName("w-full")}
             data-settings-dirty={isWorkflowStepValueDirty(
               step,
               savedStep,
@@ -292,7 +293,7 @@ function TurnCompleteTargetSelect({
       disabled={readOnly}
     >
       <SelectTrigger
-        className="w-full h-8"
+        className={settingsControlClassName("w-full")}
         data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTurnCompleteTargetStepId)}
       >
         <SelectValue placeholder={t("workflows:selectStep")} />
@@ -338,7 +339,7 @@ export function TurnCompleteSelect({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="w-full h-8"
+          className={settingsControlClassName("w-full")}
           data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTransitionType)}
         >
           <SelectValue placeholder={t("workflows:selectAction")} />
@@ -440,7 +441,7 @@ export function ChildrenCompletedSelect({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="w-full h-8"
+          className={settingsControlClassName("w-full")}
           data-testid={`${step.id}-children-completed-transition-select`}
           data-settings-dirty={isWorkflowStepValueDirty(
             step,
@@ -475,7 +476,7 @@ export function ChildrenCompletedSelect({
           disabled={readOnly}
         >
           <SelectTrigger
-            className="w-full h-8"
+            className={settingsControlClassName("w-full")}
             data-testid={`${step.id}-children-completed-step-select`}
             data-settings-dirty={isWorkflowStepValueDirty(
               step,

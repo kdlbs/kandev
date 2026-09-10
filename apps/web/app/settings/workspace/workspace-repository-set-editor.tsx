@@ -201,7 +201,7 @@ function MemberRow({
       {checked ? (
         <div className="flex shrink-0 gap-0.5">
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
             className="cursor-pointer"
             disabled={!canMoveUp}
@@ -212,7 +212,7 @@ function MemberRow({
             <IconArrowUp className="h-4 w-4" />
           </Button>
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
             className="cursor-pointer"
             disabled={!canMoveDown}

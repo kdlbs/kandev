@@ -46,7 +46,11 @@ describe("RemoteRepoChip — write paths", () => {
     const alert = screen.getByRole("alert");
     expect(alert.className).toContain("max-w-full");
     expect(alert.textContent).toContain("GitHub rate limit exceeded");
-    fireEvent.click(screen.getByRole("button", { name: /retry remote repository resolution/i }));
+    const retryButton = screen.getByRole("button", { name: /retry remote repository resolution/i });
+    expect(retryButton.getAttribute("data-size")).toBe("default");
+    expect(retryButton.className).toContain("h-7");
+    expect(retryButton.className).toContain("pointer:coarse");
+    fireEvent.click(retryButton);
     expect(onRetry).toHaveBeenCalledOnce();
   });
 });

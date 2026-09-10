@@ -125,7 +125,7 @@ function InlineCreateForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={t("executors:eGMyApiToken", { example: SECRET_NAME_EXAMPLE })}
-          className={settingsControlClassName("h-8 text-sm")}
+          className={settingsControlClassName("text-sm")}
         />
       </SettingsField>
       <SettingsField label={t("executors:value")}>

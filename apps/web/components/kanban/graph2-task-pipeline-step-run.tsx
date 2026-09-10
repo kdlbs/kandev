@@ -34,7 +34,9 @@ export type StepAdjacency = {
 
 export type StepMoveTargets = StepAdjacency & {
   prevStepTitle?: string;
+  prevStepHidden: boolean;
   nextStepTitle?: string;
+  nextStepHidden: boolean;
 };
 
 /**
@@ -76,16 +78,41 @@ export function excludeOrphanFromMoveMenu(moveTargetSteps: WorkflowStep[]): Work
 }
 
 export function getStepMoveTargets(
+  visibleSteps: WorkflowStep[],
   moveTargetSteps: WorkflowStep[],
   stepId: string,
+): StepMoveTargets;
+export function getStepMoveTargets(
+  moveTargetSteps: WorkflowStep[],
+  stepId: string,
+): StepMoveTargets;
+export function getStepMoveTargets(
+  visibleStepsOrMoveTargetSteps: WorkflowStep[],
+  moveTargetStepsOrStepId: WorkflowStep[] | string,
+  maybeStepId?: string,
 ): StepMoveTargets {
+  const legacySignature = typeof moveTargetStepsOrStepId === "string";
+  const visibleSteps = visibleStepsOrMoveTargetSteps;
+  const moveTargetSteps = legacySignature ? visibleStepsOrMoveTargetSteps : moveTargetStepsOrStepId;
+  const stepId = legacySignature ? moveTargetStepsOrStepId : maybeStepId;
+  if (typeof stepId !== "string" || typeof moveTargetSteps === "string") {
+    return {
+      hasPrev: false,
+      hasNext: false,
+      prevStepHidden: false,
+      nextStepHidden: false,
+    };
+  }
   const adjacency = getStepAdjacencyForStep(moveTargetSteps, stepId);
   const prevStep = moveTargetSteps.find((step) => step.id === adjacency.prevStepId);
   const nextStep = moveTargetSteps.find((step) => step.id === adjacency.nextStepId);
+  const visibleStepIds = new Set(visibleSteps.map((step) => step.id));
   return {
     ...adjacency,
     prevStepTitle: prevStep?.title,
+    prevStepHidden: !!adjacency.prevStepId && !visibleStepIds.has(adjacency.prevStepId),
     nextStepTitle: nextStep?.title,
+    nextStepHidden: !!adjacency.nextStepId && !visibleStepIds.has(adjacency.nextStepId),
   };
 }
 
@@ -183,7 +210,7 @@ export function PipelineStepNodes({
           ? getConnectorType(phase, getStepPhase(index + 1, currentStepIndex))
           : null;
 
-        const moveTargets = getStepMoveTargets(moveTargetSteps, step.id);
+        const moveTargets = getStepMoveTargets(steps, moveTargetSteps, step.id);
 
         return (
           <div
@@ -201,6 +228,8 @@ export function PipelineStepNodes({
               nextStepId={moveTargets.nextStepId}
               prevStepTitle={moveTargets.prevStepTitle}
               nextStepTitle={moveTargets.nextStepTitle}
+              prevStepHidden={moveTargets.prevStepHidden}
+              nextStepHidden={moveTargets.nextStepHidden}
               onMoveTask={onMoveTask}
               isMoving={isMoving}
             />

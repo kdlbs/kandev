@@ -497,7 +497,7 @@ func TestHandleExportWorkflow_ReturnsPortableWorkflow(t *testing.T) {
 
 	var exported wfmodels.WorkflowExport
 	require.NoError(t, json.Unmarshal(resp.Payload, &exported))
-	assert.Equal(t, wfmodels.ExportVersion, exported.Version)
+	assert.Equal(t, wfmodels.LegacyExportVersion, exported.Version)
 	assert.Equal(t, wfmodels.ExportType, exported.Type)
 	require.Len(t, exported.Workflows, 1)
 	assert.Equal(t, "Portable Board", exported.Workflows[0].Name)

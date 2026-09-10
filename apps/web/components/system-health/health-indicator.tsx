@@ -87,8 +87,7 @@ export function HealthIssuesDialog({ open, onOpenChange, issues }: HealthIssuesD
               <div className="text-muted-foreground text-xs">{issue.message}</div>
               <Button
                 variant="outline"
-                size="sm"
-                className="min-h-11 cursor-pointer h-7 text-xs sm:min-h-0"
+                className="cursor-pointer text-xs"
                 onClick={() => {
                   onOpenChange(false);
                   router.push(resolveUrl(issue.fix_url));

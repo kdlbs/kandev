@@ -170,6 +170,49 @@ func TestCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *te
 	}
 }
 
+func TestCreateTaskSessionPersistsImmutableWorkflowInitialSnapshot(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-workflow-initial-snapshot"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Initial snapshot"}))
+
+	first := &models.TaskSession{ID: "initial-snapshot-session", TaskID: taskID, AgentProfileID: "profile-original"}
+	require.NoError(t, repo.CreateTaskSession(ctx, first))
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.WorkflowInitialSessionSnapshot{
+		SessionID:      first.ID,
+		AgentProfileID: first.AgentProfileID,
+	}, snapshot)
+
+	second := &models.TaskSession{
+		ID:             "later-snapshot-session",
+		TaskID:         taskID,
+		AgentProfileID: "profile-later",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyOrigin: models.SessionOriginTaskInitial,
+		},
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, second))
+
+	task, err = repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok = models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, first.ID, snapshot.SessionID)
+	require.Equal(t, first.AgentProfileID, snapshot.AgentProfileID)
+
+	require.NoError(t, repo.DeleteTaskSession(ctx, first))
+	task, err = repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok = models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, first.ID, snapshot.SessionID)
+}
+
 func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndReplacementSessions(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
