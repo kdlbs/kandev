@@ -23,6 +23,7 @@ deployment, and pull request walkthrough generation.
 - Permissions and credential boundaries for review, preview, walkthrough, and
   publication jobs.
 - Workflow contract tests for these boundaries.
+- Pull request documentation coverage and explicit exceptions.
 
 ## Exclusions
 

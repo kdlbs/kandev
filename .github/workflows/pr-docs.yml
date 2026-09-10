@@ -1,0 +1,54 @@
+name: Pull request documentation coverage
+
+# This workflow reads untrusted pull-request metadata and files as data only.
+# The checked-out validator is always from a trusted workflow/base revision.
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] base-controlled metadata-only workflow
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to reevaluate
+        required: true
+        type: number
+
+concurrency:
+  group: pr-docs-${{ github.event_name == 'merge_group' && github.event.merge_group.head_sha || github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  coverage:
+    name: PR documentation coverage
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CHECKOUT_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.workflow_sha }}
+
+    steps:
+      - name: Checkout trusted coverage validator
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run documentation coverage evaluator
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+        run: node .github/scripts/pr-docs.cjs

@@ -34,3 +34,10 @@ Apply this guidance whenever editing `.github/**`.
 - For workflow security changes, run the relevant raw workflow-contract tests,
   `python3 .github/scripts/lint-action-pinning_test.py`, `zizmor .github/workflows`,
   and `git diff --check`.
+- The `pr-docs.yml` workflow is a base-controlled, metadata-only check. It reads
+  pull-request files through the bounded `.github/scripts/pr-docs.cjs` adapter;
+  it must never check out or execute a pull-request head.
+- Its `PR documentation coverage` status is revision-specific. The exact
+  `no-docs-allow` label is the only policy override, and merge-group evaluation
+  must resolve and validate every member independently against the group's
+  entry boundaries.
