@@ -38,6 +38,43 @@ beforeEach(() => {
 });
 
 describe("captured task flow", () => {
+  // @covers AC-TASKS-THREADS-ACTIONS-001.3
+  it.each([true, false])(
+    "uses hydrated active steps only when the multi-workflow snapshot is a placeholder (%s)",
+    (isPlaceholder) => {
+      const steps = [{ id: "next", title: "Next", position: 1, color: "" }];
+      store.setState((state) => ({
+        kanban: { ...state.kanban, workflowId: "workflow", steps },
+        kanbanMulti: {
+          ...state.kanbanMulti,
+          snapshots: {
+            workflow: { ...state.kanbanMulti.snapshots.workflow, isPlaceholder },
+          },
+        },
+      }));
+      const { result } = renderHook(() => useTaskManagementFlow());
+      act(() => result.current.open("A"));
+      expect(result.current.stepsByWorkflowId.workflow).toEqual(isPlaceholder ? steps : []);
+    },
+  );
+  it("does not borrow another workflow's steps for a placeholder", () => {
+    store.setState((state) => ({
+      kanban: {
+        ...state.kanban,
+        workflowId: "other",
+        steps: [{ id: "other-step", title: "Other", position: 0, color: "" }],
+      },
+      kanbanMulti: {
+        ...state.kanbanMulti,
+        snapshots: {
+          workflow: { ...state.kanbanMulti.snapshots.workflow, isPlaceholder: true },
+        },
+      },
+    }));
+    const { result } = renderHook(() => useTaskManagementFlow());
+    act(() => result.current.open("A"));
+    expect(result.current.stepsByWorkflowId.workflow).toEqual([]);
+  });
   it("does not revive a dismissed flow when the previous workspace becomes active again", () => {
     const { result } = renderHook(() => useTaskManagementFlow());
     act(() => result.current.open("A"));

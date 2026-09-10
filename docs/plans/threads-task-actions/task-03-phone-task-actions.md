@@ -253,3 +253,36 @@ pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads
 Nested long-label containment, Back/Escape, canceled deletion, backdrop focus
 return and native swiping still pass in the same regression. No copy or action
 logic changed.
+
+### PR feedback: drawer control cursor (2026-09-10)
+
+Greptile identified missing pointer cursors on the native Back and Close
+buttons. Both now follow the existing web interactivity rule. The shipped
+`MobilePickerSheet` remains the inset geometry/focus exemplar; no composition,
+44px hitbox, navigation, mutation, or localization contract changed.
+
+The existing rendered long-label regression now checks the computed cursor of
+both controls. Its RED run reported Close as `default` instead of `pointer`.
+After the two class changes and a fresh managed production build, all five
+phone task-action tests passed with one worker and no retries:
+
+```sh
+pnpm e2e:run --host --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts -- --retries=0
+pnpm exec vitest run --maxWorkers=2 components/task/task-management-drawer.test.tsx components/task/task-management-surface.test.tsx components/threads/thread-task-actions.test.tsx
+pnpm exec eslint --max-warnings 0 components/task/task-management-drawer.tsx e2e/tests/task/mobile-threads-task-actions.spec.ts
+pnpm run typecheck
+```
+
+The three focused component files passed five tests; ESLint and typecheck
+passed. The new 360px nested-drawer rendering was inspected, including fixed
+Back/Close controls, long labels, and the reachable last workflow step.
+
+The shared GitLab link option also regained its pre-existing phone-specific
+48px minimum after review found it missing from the options renderer. The
+existing GitLab browser regression now asserts computed `min-height: 48px`;
+RED measured 44px. A fresh build passed that test and all five Threads phone
+action tests together (six tests, one worker, no retries):
+
+```sh
+pnpm e2e:run --host --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/gitlab/mobile-gitlab-parity.spec.ts -- --grep 'Mobile GitLab parity.*links a GitLab MR from the visible task actions menu|^(?!.*Mobile GitLab parity)' --retries=0
+```

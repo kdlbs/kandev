@@ -112,8 +112,9 @@ changes. Canceling a confirmation leaves the task unchanged. See
 for confirmation preferences and cleanup consequences.
 
 If an action or view filter removes your current thread, Threads selects the
-next remaining thread, otherwise the previous one. When none remain, it shows
-the empty view. Your workspace and view settings stay in place.
+next remaining thread, otherwise the previous one. If neither survives from
+the previous view, it selects the first thread in the new view. The empty view
+appears only when no threads remain. Your workspace and view settings stay in place.
 
 <details>
 <summary>Let agents coordinate sessions</summary>

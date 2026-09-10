@@ -14,7 +14,7 @@ export function resolveTaskMenuTarget(
     state.kanbanMulti.snapshots,
     state.kanban.tasks,
   );
-  if (!task) return null;
+  if (!task || task.isArchived) return null;
   const workflow = state.workflows.items.find(
     (item) => item.id === task.workflowId && item.workspaceId === identity.workspaceId,
   );

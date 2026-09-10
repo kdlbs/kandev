@@ -88,13 +88,14 @@ export function useThreadSelectionRecovery(
     previous.current = { ...old, ids: orderedIds, taskId: next };
     record(next ?? undefined);
   }, [idsKey, orderedIds, boardRef, record]);
+  const isEmpty = orderedIds.length === 0;
   useEffect(() => {
     const board = boardRef.current;
     if (!board) return;
     const onScroll = () => record();
     board.addEventListener("scroll", onScroll, { passive: true });
     return () => board.removeEventListener("scroll", onScroll);
-  }, [boardRef, record, orderedIds.length === 0]);
+  }, [boardRef, record, isEmpty]);
   return (event: SyntheticEvent) => {
     const column = (event.target as Element).closest<HTMLElement>("[data-thread-column-id]");
     if (column) record(column.dataset.threadColumnId);

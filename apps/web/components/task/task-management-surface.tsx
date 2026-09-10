@@ -85,7 +85,7 @@ function useManagementMutations(flow: Flow) {
     try {
       await operation();
     } catch {
-      /* Shared operation owns error feedback. */
+      /* Priority and move hooks own their error toasts. */
     } finally {
       pending.current = false;
       setBusy(false);
@@ -104,7 +104,7 @@ function useManagementMutations(flow: Flow) {
       if (
         !task ||
         !destination ||
-        destination.hidden ||
+        (destination.hidden && destination.id !== task.workflowId) ||
         !flow.stepsByWorkflowId[workflowId]?.some((step) => step.id === stepId)
       )
         return;
@@ -283,34 +283,20 @@ function TaskManagementChoices({
     [flow.setStage],
   );
   const task = flow.task;
-  const props = useMemo(
-    () =>
-      task
-        ? {
-            task,
-            workflows: flow.workflows,
-            stepsByWorkflowId: flow.stepsByWorkflowId,
-            disabled: mutations.disabled,
-            onPriority: mutations.onPriority,
-            onMove: mutations.onMove,
-            onArchive: () => flow.setStage("archive"),
-            onDelete: () => flow.setStage("delete"),
-            closeMenu,
-            linkActions: links.linkActions,
-          }
-        : null,
-    [
-      task,
-      flow.workflows,
-      flow.stepsByWorkflowId,
-      flow.setStage,
-      mutations.disabled,
-      mutations.onPriority,
-      mutations.onMove,
-      closeMenu,
-      links.linkActions,
-    ],
-  );
+  const props = task
+    ? {
+        task,
+        workflows: flow.workflows,
+        stepsByWorkflowId: flow.stepsByWorkflowId,
+        disabled: mutations.disabled,
+        onPriority: mutations.onPriority,
+        onMove: mutations.onMove,
+        onArchive: () => flow.setStage("archive"),
+        onDelete: () => flow.setStage("delete"),
+        closeMenu,
+        linkActions: links.linkActions,
+      }
+    : null;
   return (
     <>
       {flow.stage === "menu" &&

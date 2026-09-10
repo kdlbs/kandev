@@ -159,3 +159,24 @@ Completed in the primary session after the user's implementation request.
   submit, preserved B, failure feedback, retained state and successful retry.
   Affected-file ESLint, typecheck and locale checks passed. Both browser suites
   verify six real persisted outcomes and rejected/cancelled requests.
+
+### PR feedback regression coverage (2026-09-10)
+
+New failing tests reproduced three gaps: moves within a hidden current workflow
+were silently rejected; an active workflow's loaded steps were masked by a
+placeholder multi-workflow snapshot; and the archived eligibility fixture did
+not actually contain an archived task. The shared surface now permits only the
+same-workflow hidden destination, step lookup falls back only for missing or
+placeholder snapshots of the matching workflow, and target lookup rejects the
+normalized `isArchived` flag. Authoritative empty snapshots remain empty.
+
+All 15 tests across these focused files pass after their RED failures:
+
+```sh
+pnpm exec vitest run --maxWorkers=2 hooks/use-task-management-flow.test.ts components/task/task-management-surface.test.tsx lib/tasks/task-menu-target.test.ts
+```
+
+The broader affected component, board, priority and move suite passed 64 tests
+in ten files. Existing error feedback, captured identity and fallback contracts
+are unchanged. The ineffective props memo and duplicate destination filter were
+removed; comments and the empty-board dependency were clarified.

@@ -20,7 +20,7 @@ function fixture(loss?: string) {
           workflowName: "Flow",
           steps: [],
           tasks:
-            loss === "missing" || loss === "archived"
+            loss === "missing"
               ? []
               : [
                   {
@@ -30,6 +30,7 @@ function fixture(loss?: string) {
                     workflowStepId: "step",
                     position: 0,
                     priority: "high",
+                    isArchived: loss === "archived",
                     primaryExecutorType: "worktree",
                   },
                 ],

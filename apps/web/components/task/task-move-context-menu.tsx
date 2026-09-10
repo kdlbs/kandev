@@ -173,21 +173,18 @@ function WorkflowTargetItem({
 }
 
 function SendToWorkflowSubmenu({
-  currentWorkflowId,
   workflows,
   stepsByWorkflowId,
   disabled,
   onSendToWorkflow,
 }: {
-  currentWorkflowId?: string | null;
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, TaskMoveStep[]>;
   disabled?: boolean;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 }) {
   const { t } = useTranslation();
-  const targets = workflows.filter((workflow) => workflow.id !== currentWorkflowId);
-  if (!onSendToWorkflow || !currentWorkflowId || targets.length === 0) return null;
+  if (!onSendToWorkflow || workflows.length === 0) return null;
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger data-testid="task-context-send-to-workflow" disabled={disabled}>
@@ -195,7 +192,7 @@ function SendToWorkflowSubmenu({
         {t("task:sendToWorkflow")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
-        {targets.map((workflow) => (
+        {workflows.map((workflow) => (
           <WorkflowTargetItem
             key={workflow.id}
             workflow={workflow}
@@ -239,7 +236,6 @@ export function TaskMoveContextMenuItems({
         onMoveToStep={onMoveToStep}
       />
       <SendToWorkflowSubmenu
-        currentWorkflowId={currentWorkflowId}
         workflows={targets}
         stepsByWorkflowId={stepsByWorkflowId}
         disabled={disabled}

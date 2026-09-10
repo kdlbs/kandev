@@ -69,8 +69,10 @@ test("contains nested choices with long labels and preserves native swiping afte
   await ui.open(firstId);
   const drawer = testPage.getByTestId("task-management-drawer");
   await ui.contained(drawer);
+  await expect(ui.choice("Close")).toHaveCSS("cursor", "pointer");
   await testPage.screenshot({ path: testInfo.outputPath("phone-root-360.png") });
   await ui.nested("Send to workflow");
+  await expect(ui.choice("Back")).toHaveCSS("cursor", "pointer");
   await ui.nested(destinationName);
   await ui.contained(drawer);
   await expect(testPage.getByRole("dialog")).toHaveCount(1);

@@ -358,6 +358,39 @@ pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads
 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts -- --retries=0
 ```
 
+## PR feedback correction (2026-09-10)
+
+The Back and Close drawer controls now use the repository-required pointer
+cursor. The existing mobile regression reproduced the prior `default` cursor
+before the two class changes. A fresh managed build passed all five mobile
+task-action cases; the focused drawer/surface/header component checks passed
+five tests, with ESLint and typecheck also passing. The 360px nested drawer
+was inspected. Task 03 records the exact commands and RED/GREEN evidence.
+
+Reviewer follow-up also reproduced and fixed same-workflow moves being rejected
+when that workflow is hidden, loaded active steps being shadowed by a placeholder
+snapshot, and archived targets remaining eligible in a stale snapshot. The
+GitLab link row again retains its pre-existing 48px phone minimum. Regression
+tests failed for each case before the scoped fixes. The focused suite passed
+64 tests in ten files; the fresh mobile build passed all five Threads action
+tests plus the GitLab linking regression (six tests, one worker, no retries).
+The six desktop action tests passed after the behavior-preserving cleanup.
+
+Claude's suggestions removed ineffective props memoization and redundant
+workflow filtering, named the empty-board dependency, and clarified the existing
+error-toast ownership. Cubic's postfix-important warning was not reproducible:
+the generated CSS includes important width/height for `size-11!`, and the phone
+regression checks real 44px targets through the 820px coarse-pointer viewport.
+CodeRabbit's documentation nit was valid; the how-to now describes the existing
+first-new-thread fallback before the genuinely empty state. These corrections
+implement the existing requirements and design, without a new contract or copy.
+
+Parent PR #3570 merged while review was in progress, retargeting this PR to
+`main`. Main-base conflict resolution and final integrated validation are the
+next delivery step; the earlier stacked-base results above are historical.
+Remote exact-head CI/review confirmation remains part of the ongoing fixup,
+not a completed claim in this local verification record.
+
 ## Risks
 
 - Parent files and archive-confirmation work can change before integration;

@@ -124,3 +124,14 @@ Completed after the desktop/mobile implementation and outcome checks.
   Specification linter tests passed (30), all specification files passed lint,
   and `git diff --check` passed. No public pages, navigation destinations,
   localization keys, default Home behavior, commit, push or PR were added.
+
+### PR feedback clarification (2026-09-10)
+
+CodeRabbit identified an omitted recovery case in the Threads how-to. The
+existing requirements and `resolveRemainingThreadId` already select the first
+thread in the new view when neither a prior successor nor predecessor survives.
+The public page now states this before the empty-state outcome. This is a
+documentation correction, not a behavior change or a new requirement.
+
+`node --test scripts/validate-public-docs.test.mjs` and
+`node scripts/validate-public-docs.mjs` both passed (46 published pages).

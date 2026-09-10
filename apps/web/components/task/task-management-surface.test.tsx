@@ -9,6 +9,7 @@ import { TaskManagementSurface } from "./task-management-surface";
 const api = vi.hoisted(() => ({
   linkTaskIssue: vi.fn(),
   archiveTask: vi.fn(),
+  bulkMoveSelectedTasks: vi.fn(),
   toast: vi.fn(),
   getSubtaskCount: vi.fn(),
 }));
@@ -32,6 +33,7 @@ vi.mock("@/lib/api", async (original) => ({
   ...(await original<typeof import("@/lib/api")>()),
   getSubtaskCount: api.getSubtaskCount,
   archiveTask: api.archiveTask,
+  bulkMoveSelectedTasks: api.bulkMoveSelectedTasks,
 }));
 afterEach(cleanup);
 beforeEach(() => {
@@ -39,6 +41,7 @@ beforeEach(() => {
   pointer.isMobile = true;
   pointer.isFinePointer = false;
   api.getSubtaskCount.mockResolvedValue({ count: 0 });
+  api.bulkMoveSelectedTasks.mockResolvedValue({ moved_count: 1 });
   store = createAppStore();
   store.setState((state) => ({
     workspaces: { ...state.workspaces, activeId: "workspace" },
@@ -159,4 +162,45 @@ it("keeps a pending archive for A when only its header is filtered out", async (
   await act(async () => release({ count: 0 }));
   expect(await screen.findByTestId("archive-task-confirm")).toBeTruthy();
   expect(flow.getTarget()?.id).toBe("A");
+});
+
+// @covers AC-TASKS-THREADS-ACTIONS-001.3, AC-TASKS-THREADS-ACTIONS-002.2
+it("allows moves within the current hidden workflow without offering other hidden workflows", async () => {
+  store.setState((state) => ({
+    workflows: {
+      ...state.workflows,
+      items: ["workflow", "other-hidden"].map((id) => ({
+        id,
+        name: id,
+        workspaceId: "workspace",
+        hidden: true,
+      })),
+    },
+    kanbanMulti: {
+      ...state.kanbanMulti,
+      snapshots: {
+        workflow: {
+          ...state.kanbanMulti.snapshots.workflow,
+          steps: ["step", "next"].map((id, position) => ({
+            id,
+            title: id,
+            position,
+            color: "",
+          })),
+        },
+      },
+    },
+  }));
+  render(<Harness />);
+  fireEvent.click(screen.getByText("Open A"));
+  expect(screen.queryByRole("button", { name: "Send to workflow" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Move to" }));
+  fireEvent.click(screen.getByRole("button", { name: "next" }));
+  await waitFor(() =>
+    expect(api.bulkMoveSelectedTasks).toHaveBeenCalledWith({
+      task_ids: ["A"],
+      target_workflow_id: "workflow",
+      target_step_id: "next",
+    }),
+  );
 });

@@ -167,7 +167,12 @@ function TaskLinkMenu({
           onLinkLinearIssue,
           onLinkSentryIssue,
         }).map(({ id, labelKey, Icon, onSelect }) => (
-          <ContextMenuItem key={id} disabled={disabled} onSelect={onSelect}>
+          <ContextMenuItem
+            key={id}
+            className={id === "merge-request" ? "min-h-12! sm:min-h-7!" : undefined}
+            disabled={disabled}
+            onSelect={onSelect}
+          >
             <Icon className="mr-2 h-4 w-4" />
             {t(labelKey)}
           </ContextMenuItem>

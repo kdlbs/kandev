@@ -41,10 +41,12 @@ export function useTaskManagementFlow() {
     (workflow) => workflow.workspaceId === identity?.workspaceId,
   );
   const stepsByWorkflowId = Object.fromEntries(
-    workflows.map((workflow) => [
-      workflow.id,
-      snapshots[workflow.id]?.steps ?? (kanban.workflowId === workflow.id ? kanban.steps : []),
-    ]),
+    workflows.map((workflow) => {
+      const snapshot = snapshots[workflow.id];
+      const activeSteps = kanban.workflowId === workflow.id ? kanban.steps : [];
+      const steps = snapshot && !snapshot.isPlaceholder ? snapshot.steps : activeSteps;
+      return [workflow.id, steps];
+    }),
   );
   return {
     identity,

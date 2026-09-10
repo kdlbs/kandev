@@ -90,7 +90,7 @@ export function TaskManagementSheet({
               {onBack && (
                 <button
                   type="button"
-                  className="flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent"
+                  className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-accent"
                   aria-label={t("common:back")}
                   onClick={onBack}
                 >
@@ -106,7 +106,7 @@ export function TaskManagementSheet({
               </DrawerTitle>
               <button
                 type="button"
-                className="flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent"
+                className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-accent"
                 aria-label={t("common:close")}
                 onClick={onClose}
               >
