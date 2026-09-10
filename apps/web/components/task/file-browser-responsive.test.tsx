@@ -78,8 +78,8 @@ vi.mock("./file-tree-editor-menu", () => ({
   FileTreeEditorProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("./file-context-menu", () => ({ useFileDeleteAction: () => null }));
-vi.mock("./file-browser-parts", async (importOriginal) => {
-  const actual = await importOriginal<typeof FileBrowserParts>();
+vi.mock("./file-browser-content-area", async () => {
+  const actual = await vi.importActual<typeof FileBrowserParts>("./file-browser-parts");
   return {
     ...actual,
     FileBrowserContentArea: ({

@@ -107,6 +107,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	defer func() {
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
+	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
 	if err != nil {
 		return err

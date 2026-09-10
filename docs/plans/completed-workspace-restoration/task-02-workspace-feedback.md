@@ -1,7 +1,7 @@
 ---
 id: "02-workspace-feedback"
 title: "Scope workspace failure feedback"
-status: pending
+status: complete
 wave: 2
 depends_on:
   - 01-workspace-admission
@@ -126,4 +126,18 @@ workspace terminal permissions are unchanged; do not label access read-only.
 
 ## Results
 
-Pending.
+Implemented environment-scoped workspace restoration state and shared it across
+Files, Changes, and workspace terminals. Failures now settle the affected
+surface, expose bounded technical details, and provide a mobile-safe Retry
+without replacing Chat or genuine agent recovery feedback.
+
+Verification passed:
+
+- Primary frontend block: 6 files and 58 tests passed.
+- State and panel block: 6 files and 63 tests passed.
+- Additional extracted file-browser coverage: 3 files and 8 tests passed.
+- `rtk pnpm run typecheck` passed.
+- `rtk pnpm run lint` passed with zero warnings.
+- `rtk pnpm run i18n:check` and `rtk pnpm run i18n:ratchet` passed. The i18n
+  check reported the existing 140 orphaned catalog entries.
+- Targeted E2E-sleep lint passed for all four changed session specs.

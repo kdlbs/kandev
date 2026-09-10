@@ -174,6 +174,20 @@ describe("EnsureSessionErrorBanner", () => {
     expect(screen.getByText("Resume attempt")).toBeTruthy();
     expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
   });
+
+  it("renders no page-wide feedback when only workspace restoration failed", () => {
+    render(
+      <SessionRecoveryFeedback
+        error={null}
+        notice={null}
+        onRetry={() => {}}
+        recoveryFailure={null}
+      />,
+    );
+
+    expect(screen.queryByTestId("session-recovery-error")).toBeNull();
+    expect(screen.queryByTestId("session-recovery-notice")).toBeNull();
+  });
 });
 
 describe("EnsureSessionErrorEmptyState", () => {

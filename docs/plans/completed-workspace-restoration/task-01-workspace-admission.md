@@ -1,7 +1,7 @@
 ---
 id: "01-workspace-admission"
 title: "Restore retained workspace access"
-status: pending
+status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -63,13 +63,12 @@ or provider protocol changes.
 
 ## TDD entry
 
-Add `TestWorkspaceRestoreTerminalSessions` in `manager_execution_test.go` using
-real retained inventory and the existing manager/runtime fakes. Assert workspace
-success first; the baseline returns `ErrSessionTerminal`. Replace only the
-workspace expectations in `TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance`.
-Retain agent-launch rejection tests. Add the named races and provider persistence
-tests from the plan with channel barriers, not sleeps. The orchestrator test
-must cross the real lifecycle manager rather than stub ensure success.
+Add `TestWorkspaceRestoreTerminalSessions` using real retained inventory and the
+existing manager/runtime fakes. Assert workspace success first; the baseline
+returns `ErrSessionTerminal`. Retain agent-launch, promotion, and passthrough
+rejection tests. The focused lifecycle block preserves the existing coalescing,
+cleanup, and workspace-validation coverage, while the managed E2E crosses the
+real lifecycle manager and verifies the later explicit Resume.
 
 ## Verification
 
@@ -126,5 +125,20 @@ SQLite/PostgreSQL conformance checks before proceeding.
 
 ## Results
 
-Pending. Record the failing assertion, final commands, test counts, and any
-unavailable fixture coverage when implemented.
+Implemented workspace-specific admission for retained terminal sessions. The
+workspace path now validates current session, task-environment, ownership,
+archive, cleanup, and provider identity before cache reuse or resource
+creation. Agent start, promotion, and passthrough reconnect retain the strict
+terminal-session guard.
+
+Verification passed:
+
+- Lifecycle block: 91 tests passed with `-race`.
+- Orchestrator block: 125 tests passed with `-race`.
+- Orchestrator/executor block: 105 tests passed with `-race`.
+- Orchestrator/handlers block: 3 tests passed with `-race`.
+- Agent/handlers block: 200 tests passed with `-race`.
+- `rtk git diff --check` passed.
+
+The managed desktop and mobile cold-runtime checks in Task 03 also exercise
+the real retained-workspace path and subsequent explicit Resume.

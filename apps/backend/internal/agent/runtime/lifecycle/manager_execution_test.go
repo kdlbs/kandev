@@ -370,9 +370,15 @@ func TestCreateExecutionRollsBackWhenRegistrationCannotPersist(t *testing.T) {
 			},
 		},
 	})
-	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
-		ID: sessionID, TaskID: "task-create-persist-failure", State: models.TaskSessionStateStarting,
-	}})
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{
+		session: &models.TaskSession{
+			ID: sessionID, TaskID: "task-create-persist-failure", State: models.TaskSessionStateStarting,
+		},
+		env: &models.TaskEnvironment{
+			ID: "env-create-persist-failure", TaskID: "task-create-persist-failure",
+			Status: models.TaskEnvironmentStatusStopped,
+		},
+	})
 	writer := &launchRegistrationWriter{
 		upserted:  make(chan struct{}),
 		upsertErr: errors.New("database is locked"),
@@ -410,6 +416,9 @@ func newTerminalSessionManager(t *testing.T, state models.TaskSessionState) (*Ma
 	})
 	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
 		ID: terminalSessionID, TaskID: terminalTaskID, State: state,
+	}, env: &models.TaskEnvironment{
+		ID: terminalEnvironmentID, TaskID: terminalTaskID,
+		Status: models.TaskEnvironmentStatusStopped,
 	}})
 	return mgr, backend
 }

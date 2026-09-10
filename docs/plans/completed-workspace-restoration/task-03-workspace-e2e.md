@@ -1,7 +1,7 @@
 ---
 id: "03-workspace-e2e"
 title: "Prove completed workspace recovery"
-status: pending
+status: complete
 wave: 3
 depends_on:
   - 02-workspace-feedback
@@ -131,5 +131,18 @@ passing evidence.
 
 ## Results
 
-Pending. Record commands, discovered/passed counts, screenshot inspection, and
-fixture cleanup; distinguish any blocked checks from passed results.
+Implemented cold-runtime desktop and mobile coverage, shared the retained
+worktree fixture setup with the existing completed-session Resume specs, and
+added public recovery guidance.
+
+Verification passed:
+
+- Chromium block discovered and passed 2/2 tests.
+- Mobile Chromium block discovered and passed 2/2 tests.
+- The mobile capture was inspected. Terminal output was readable, touch
+  controls were contained, and the page had no horizontal overflow.
+- Public docs validation passed 62 tests and 46 pages.
+- Specification validation passed 36 tests and all specification files.
+- `rtk git diff --check` passed.
+- Temporary `.pr-assets` capture output was removed after inspection. No live
+  task or persistent runtime state was changed.

@@ -54,6 +54,18 @@ export function buildGuardedSetters(
     setRecoveryFailure: (failure) => {
       if (guard()) setters.setRecoveryFailure?.(failure);
     },
+    workspaceRestoration: setters.workspaceRestoration
+      ? {
+          begin: (taskId, sessionId) =>
+            guard() ? (setters.workspaceRestoration?.begin(taskId, sessionId) ?? null) : null,
+          complete: (attempt) =>
+            guard() ? (setters.workspaceRestoration?.complete(attempt) ?? false) : false,
+          fail: (attempt, error) =>
+            guard() ? (setters.workspaceRestoration?.fail(attempt, error) ?? false) : false,
+          clear: (attempt) =>
+            guard() ? (setters.workspaceRestoration?.clear(attempt) ?? false) : false,
+        }
+      : undefined,
     onTaskArchiveConflict: () => {
       if (guard()) setters.onTaskArchiveConflict?.();
     },

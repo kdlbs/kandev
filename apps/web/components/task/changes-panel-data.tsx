@@ -55,6 +55,8 @@ import {
 } from "./use-remote-contribution-resolution";
 import { useRemoteContributionResolution } from "./use-remote-contribution-resolution";
 import { useTranslation } from "react-i18next";
+import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
+import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 
 function useChangesPanelStoreData() {
   const { t } = useTranslation();
@@ -156,6 +158,9 @@ export type ChangesPanelBodyProps = {
     pullBehind: number;
   }>;
   prByRepo?: Record<string, string | undefined>;
+  workspaceRestoration?: WorkspaceRestorationAttempt | null;
+  onRestoreWorkspace?: () => void;
+  restoreWorkspaceDisabled?: boolean;
 };
 
 function usePerRepoCallbacks(
@@ -368,6 +373,7 @@ export function useChangesPanelData() {
   const { t } = useTranslation();
   const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
+  const workspaceRestoration = useWorkspaceRestoration(activeTaskId, activeSessionId);
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
@@ -453,6 +459,7 @@ export function useChangesPanelData() {
     walkthroughRequestReady,
     resolution,
     resolutionTarget,
+    workspaceRestoration,
     pushDisabled: remoteActionPolicy.pushDisabled,
     pullDisabled: remoteActionPolicy.pullDisabled,
     pullDisabledReason,
@@ -532,5 +539,8 @@ export function buildChangesPanelBodyProps(
     repoDisplayName: data.repoDisplayName,
     perRepoStatus: git.perRepoStatus,
     prByRepo: data.prByRepo,
+    workspaceRestoration: data.workspaceRestoration.attempt,
+    onRestoreWorkspace: () => void data.workspaceRestoration.restore(),
+    restoreWorkspaceDisabled: data.workspaceRestoration.status === "pending",
   };
 }

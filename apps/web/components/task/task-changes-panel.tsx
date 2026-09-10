@@ -34,6 +34,11 @@ import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 import { useTranslation } from "react-i18next";
 import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
+import {
+  useWorkspaceRestoration,
+  type WorkspaceRestorationResult,
+} from "@/hooks/domains/session/use-workspace-restoration";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 type TaskChangesPanelProps = {
   mode?: "all" | "file";
@@ -328,6 +333,49 @@ function useChangesActions(
   };
 }
 
+function useTaskChangesWorkspaceRestoration(
+  activeSessionId: string | null | undefined,
+): WorkspaceRestorationResult {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  return useWorkspaceRestoration(activeTaskId, activeSessionId);
+}
+
+function ChangesPanelHeader({
+  mode,
+  view,
+  actions,
+  visible,
+  onRequestWalkthrough,
+}: {
+  mode: "all" | "file";
+  view: ReturnType<typeof useChangesView>;
+  actions: ReturnType<typeof useChangesActions>;
+  visible: ReturnType<typeof useVisibleDiffState>;
+  onRequestWalkthrough: ReturnType<typeof useWalkthroughRequest>;
+}) {
+  return (
+    <ChangesTopBar
+      autoMarkOnScroll={actions.autoMarkOnScroll}
+      splitView={actions.splitView}
+      wordWrap={actions.wordWrap}
+      totalCommentCount={view.totalCommentCount}
+      reviewedCount={visible.reviewedCount}
+      totalCount={visible.totalCount}
+      progressPercent={visible.progressPercent}
+      setWordWrap={actions.setWordWrap}
+      handleToggleSplitView={actions.handleToggleSplitView}
+      handleToggleAutoMark={actions.handleToggleAutoMark}
+      handleFixComments={actions.handleFixComments}
+      handleRequestWalkthrough={onRequestWalkthrough}
+      requestWalkthroughDisabled={view.allFiles.length === 0}
+      prs={mode === "all" ? view.prs : []}
+      selectedPR={mode === "all" ? view.selectedPR : null}
+      prDiffLoading={view.prDiffLoading}
+      onSelectPR={view.selectPR}
+    />
+  );
+}
+
 const TaskChangesPanel = memo(function TaskChangesPanel({
   mode = "all",
   filePath,
@@ -346,6 +394,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const handleOpenFile = onOpenFileProp ?? panelOpenFile;
 
   const view = useChangesView(selectedDiff, onClearSelected, sourceFilter, prKey);
+  const workspaceRestoration = useTaskChangesWorkspaceRestoration(view.activeSessionId);
   const usesPRDiff = sourceFilter === "all" || sourceFilter === "pr";
   const relevantPRLoading = usesPRDiff && view.prDiffLoading;
   const actions = useChangesActions(view.activeSessionId, view.allFiles, wordWrapProp);
@@ -384,24 +433,12 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
 
   return (
     <PanelRoot>
-      <ChangesTopBar
-        autoMarkOnScroll={actions.autoMarkOnScroll}
-        splitView={actions.splitView}
-        wordWrap={actions.wordWrap}
-        totalCommentCount={view.totalCommentCount}
-        reviewedCount={visible.reviewedCount}
-        totalCount={visible.totalCount}
-        progressPercent={visible.progressPercent}
-        setWordWrap={actions.setWordWrap}
-        handleToggleSplitView={actions.handleToggleSplitView}
-        handleToggleAutoMark={actions.handleToggleAutoMark}
-        handleFixComments={actions.handleFixComments}
-        handleRequestWalkthrough={handleRequestWalkthrough}
-        requestWalkthroughDisabled={view.allFiles.length === 0}
-        prs={mode === "all" ? view.prs : []}
-        selectedPR={mode === "all" ? view.selectedPR : null}
-        prDiffLoading={view.prDiffLoading}
-        onSelectPR={view.selectPR}
+      <ChangesPanelHeader
+        mode={mode}
+        view={view}
+        actions={actions}
+        visible={visible}
+        onRequestWalkthrough={handleRequestWalkthrough}
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
         <TruncatedFilesBanner count={view.truncatedFilesCount} />
@@ -425,6 +462,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
             onOpenFile={handleOpenFile}
             onPreviewMarkdown={openFileInMarkdownPreview}
             fileRefs={visible.visibleFileRefs}
+            workspaceRestoration={workspaceRestoration}
           />
         </ReviewPRDiffBoundary>
       </PanelBody>
@@ -446,6 +484,7 @@ function ChangesPanelContent({
   onOpenFile,
   onPreviewMarkdown,
   fileRefs,
+  workspaceRestoration,
 }: {
   isLoading: boolean;
   files: ReviewFile[];
@@ -460,8 +499,19 @@ function ChangesPanelContent({
   onOpenFile: (path: string, repo?: string) => void;
   onPreviewMarkdown?: (path: string, repo?: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
+  workspaceRestoration: WorkspaceRestorationResult;
 }) {
   const { t } = useTranslation();
+  const workspaceBlocked = workspaceRestoration.status && workspaceRestoration.status !== "ready";
+  if (workspaceBlocked && files.length === 0) {
+    return (
+      <WorkspaceUnavailable
+        restoration={workspaceRestoration.attempt}
+        onRetry={() => void workspaceRestoration.restore()}
+        retryDisabled={workspaceRestoration.status === "pending"}
+      />
+    );
+  }
   if (isLoading && files.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -478,21 +528,31 @@ function ChangesPanelContent({
   }
   if (!activeSessionId) return null;
   return (
-    <ReviewDiffList
-      files={files}
-      reviewedFiles={reviewedFiles}
-      staleFiles={staleFiles}
-      sessionId={activeSessionId}
-      autoMarkOnScroll={autoMarkOnScroll}
-      wordWrap={wordWrap}
-      enableWalkthroughAnnotations
-      selectedFile={selectedFile}
-      onToggleReviewed={onToggleReviewed}
-      onDiscard={onDiscard}
-      onOpenFile={onOpenFile}
-      onPreviewMarkdown={onPreviewMarkdown}
-      fileRefs={fileRefs}
-    />
+    <>
+      {workspaceBlocked && (
+        <WorkspaceUnavailable
+          restoration={workspaceRestoration.attempt}
+          onRetry={() => void workspaceRestoration.restore()}
+          retryDisabled={workspaceRestoration.status === "pending"}
+          compact
+        />
+      )}
+      <ReviewDiffList
+        files={files}
+        reviewedFiles={reviewedFiles}
+        staleFiles={staleFiles}
+        sessionId={activeSessionId}
+        autoMarkOnScroll={autoMarkOnScroll}
+        wordWrap={wordWrap}
+        enableWalkthroughAnnotations
+        selectedFile={selectedFile}
+        onToggleReviewed={onToggleReviewed}
+        onDiscard={onDiscard}
+        onOpenFile={onOpenFile}
+        onPreviewMarkdown={onPreviewMarkdown}
+        fileRefs={fileRefs}
+      />
+    </>
   );
 }
 

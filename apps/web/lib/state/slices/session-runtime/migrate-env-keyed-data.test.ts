@@ -142,6 +142,22 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     expect(state.sessionCommits.byEnvironmentId["env-3"]).toBeUndefined();
     expect(state.sessionCommits.byEnvironmentId["sess-3"]).toBeUndefined();
   });
+
+  it("migrates workspace restoration feedback with the environment mapping", () => {
+    const store = makeStore();
+    const attempt = store.getState().beginWorkspaceRestoration("task-3", "sess-3", "sess-3");
+    expect(attempt).not.toBeNull();
+
+    store.getState().registerSessionEnvironment("sess-3", "env-3");
+
+    const state = store.getState();
+    expect(state.workspaceRestoration.byEnvironmentId["env-3"]).toMatchObject({
+      taskId: "task-3",
+      sessionId: "sess-3",
+      status: "pending",
+    });
+    expect(state.workspaceRestoration.byEnvironmentId["sess-3"]).toBeUndefined();
+  });
 });
 
 describe("setGitStatus", () => {

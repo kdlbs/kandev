@@ -1,46 +1,30 @@
 import { test, expect } from "../../fixtures/test-base";
-import type { SeedData } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
-
-async function seedCompletedConversation(apiClient: ApiClient, seedData: SeedData) {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    `Completed conversation ${Date.now()}`,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-  await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for initial conversation");
-  await apiClient.seedTaskSession(task.id, {
-    state: "COMPLETED",
-    sessionId: task.session_id,
-    agentProfileId: seedData.agentProfileId,
-    repositoryId: seedData.repositoryId,
-    completedAt: new Date().toISOString(),
-  });
-  await apiClient.updateTaskState(task.id, "COMPLETED");
-  return task;
-}
+import {
+  restartAndAssertColdWorkspace,
+  RETAINED_WORKSPACE_FILE,
+  seedCompletedConversation,
+} from "./completed-workspace-restoration-helpers";
 
 test.describe("Completed conversation resume", () => {
   test("resumes the selected completed conversation and sends a follow-up in place", async ({
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(180_000);
-    const task = await seedCompletedConversation(apiClient, seedData);
+    const task = await seedCompletedConversation(
+      apiClient,
+      seedData,
+      `Completed conversation ${Date.now()}`,
+    );
+    if (!task.session_id) throw new Error("completed task has no session_id");
     const before = await apiClient.listTaskSessions(task.id);
     const primary = before.sessions.find((session) => session.is_primary);
     expect(primary?.id).toBe(task.session_id);
+    await restartAndAssertColdWorkspace(backend, apiClient, task.id, task.session_id);
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -50,14 +34,31 @@ test.describe("Completed conversation resume", () => {
     await expect(session.completedSessionResumeButton()).toBeVisible();
     await expect(session.completedSessionNewAgentButton()).toBeVisible();
 
+    await session.clickTab("Files");
+    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.clickSessionChatTab();
+
     // Opening historical work is passive. Reloading must not launch a new
     // execution or replace the selected session.
     await testPage.reload();
-    await session.waitForLoad();
+    await session.showSessionContext();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
+    await session.clickTab("Files");
+    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.clickSessionChatTab();
     const afterReload = await apiClient.listTaskSessions(task.id);
     expect(afterReload.sessions).toHaveLength(before.sessions.length);
     expect(afterReload.sessions.find((item) => item.is_primary)?.id).toBe(task.session_id);
+
+    // Recreate the cold runtime after workspace restoration. The next open
+    // must persist provider identity before explicit Resume uses it.
+    await backend.restart();
+    await testPage.reload();
+    await session.showSessionContext();
+    await session.clickTab("Files");
+    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.clickSessionChatTab();
+    await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 
     await session.completedSessionResumeButton().click();
     await expect(session.completedSessionBanner()).toHaveCount(0, { timeout: 60_000 });

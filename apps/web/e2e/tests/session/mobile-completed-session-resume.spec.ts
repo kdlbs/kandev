@@ -1,47 +1,37 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import {
+  restartAndAssertColdWorkspace,
+  RETAINED_WORKSPACE_FILE,
+  seedCompletedConversation,
+} from "./completed-workspace-restoration-helpers";
 
 test.describe("Completed conversation resume on mobile", () => {
   test("resumes in place with touch-sized actions and no overflow", async ({
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(180_000);
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      `Mobile completed conversation ${Date.now()}`,
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-    await waitForSessionDone(
+    const task = await seedCompletedConversation(
       apiClient,
-      task.id,
-      task.session_id,
-      "Waiting for initial conversation",
+      seedData,
+      `Mobile completed conversation ${Date.now()}`,
     );
-    await apiClient.seedTaskSession(task.id, {
-      state: "COMPLETED",
-      sessionId: task.session_id,
-      agentProfileId: seedData.agentProfileId,
-      repositoryId: seedData.repositoryId,
-      completedAt: new Date().toISOString(),
-    });
-    await apiClient.updateTaskState(task.id, "COMPLETED");
+    if (!task.session_id) throw new Error("completed task has no session_id");
 
     const before = await apiClient.listTaskSessions(task.id);
+    await restartAndAssertColdWorkspace(backend, apiClient, task.id, task.session_id);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await testPage.getByRole("button", { name: "Chat" }).tap();
 
     const resume = session.completedSessionResumeButton();
     const newAgent = session.completedSessionNewAgentButton();

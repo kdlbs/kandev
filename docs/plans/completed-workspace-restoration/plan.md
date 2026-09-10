@@ -1,6 +1,6 @@
 ---
 created: 2026-09-10
-status: draft
+status: complete
 requirements:
   - REQ-TASKS-COMPLETION-002
   - REQ-TASKS-COMPLETION-003
@@ -57,9 +57,10 @@ system design. Preserve all `002` explicit-resume criteria and its prior package
 
 Smallest deterministic regression: a real canonical retained workspace,
 COMPLETED session, and empty execution store; call
-`EnsureWorkspaceExecutionForSession`. Expect usable workspace infrastructure and
-unchanged session state. Before the fix it returns `ErrSessionTerminal`.
-The first permanent test is proposed below; it has not been written or run.
+`EnsureWorkspaceExecutionForSession`. The implementation now admits the
+workspace without returning `ErrSessionTerminal`, while the agent-start paths
+still reject terminal sessions. The permanent regression covers all three
+workspace ensure entry points and FAILED, CANCELLED, and COMPLETED states.
 
 ## Scope
 
@@ -103,18 +104,18 @@ failure feedback sections of the [system design](../../specs/tasks/system-design
 
 ## Tests
 
-All names below are implementation targets unless identified as existing.
-Criterion suffixes in this table use `AC-TASKS-COMPLETION-`.
+The following evidence was run for the implementation. Criterion suffixes in
+this table use `AC-TASKS-COMPLETION-`.
 
 | Criteria | Regression evidence |
 | --- | --- |
-| `003.1`, `003.2`, `003.4` | lifecycle `manager_execution_test.go`: `TestWorkspaceRestoreTerminalSessions` covers COMPLETED/FAILED/CANCELLED and all three ensure entry points; no agent start or lifecycle mutation |
-| `003.3`, `002.2`, `002.3`, `002.4`, `002.8`, `002.13` | orchestrator `completed_workspace_restore_test.go`: `TestCompletedWorkspaceRestoreThenResume`; lifecycle `persistence_test.go`: `TestWorkspaceRestorePreservesResumeIdentity`; reload persisted provider metadata after registration |
-| `003.5`, `003.6` | lifecycle `manager_execution_test.go`: `TestWorkspaceRestoreAdmissionRaces`, `TestWorkspaceRestoreSharesLiveEnvironment`, `TestWorkspaceRestoreConcurrentResume`; barrier-controlled cleanup and replacement, including cache hits |
-| `003.7` | lifecycle `manager_execution_test.go`: `TestWorkspaceRestoreRejectsInvalidInventory`; valid plus missing/unsafe required repositories, all-invalid inventory, historical deleted rows under existing policy |
-| `003.1`, `003.5`, `003.8` | orchestrator `session_launch_test.go`: `TestLaunchRestoreWorkspace`; agent `git_handlers_test.go`: existing `TestWsGit*` cases plus retained terminal-session workspace access |
-| `003.8`, `003.9` | new frontend `hooks/domains/session/use-workspace-restoration.test.ts`; existing `file-browser-load-state.test.tsx`, `ensure-session-error.test.tsx`, and resumption/recovery hook tests |
-| `003.10`, `002.1`, `002.3` | desktop/mobile E2E below; rendered phone controls, disclosure geometry, and passive state preservation |
+| `003.1`, `003.2`, `003.4` | lifecycle `manager_workspace_restore_test.go`: `TestWorkspaceRestoreTerminalSessions` covers COMPLETED/FAILED/CANCELLED and all three ensure entry points; `TestAgentStartsStillRejectTerminalSessions`, `TestWorkspacePromotionStillRejectsTerminalSessions`, and `TestPassthroughReconnectStillRejectsTerminalSessions` preserve agent-only rejection |
+| `003.3`, `002.2`, `002.3`, `002.4`, `002.8`, `002.13` | desktop `completed-workspace-restoration.spec.ts` and `completed-session-resume.spec.ts` restore the workspace, restart the backend, and then resume the same conversation without changing task/session identity |
+| `003.5`, `003.6` | lifecycle `manager_workspace_restore_test.go`: `TestWorkspaceRestoreRejectsActiveCleanupWithoutMutation`, `TestWorkspaceRestoreRejectsAdmissionChangesWithoutMutation`, and `TestCachedWorkspaceRestoreRechecksProviderAdmission`; existing coalescing and deduplication tests remain in the focused lifecycle block |
+| `003.7` | existing lifecycle workspace-validation and materialization tests plus `TestWorkspaceRestoreRejectsAdmissionChangesWithoutMutation`; the cold E2E uses an existing retained worktree and does not create a replacement |
+| `003.1`, `003.5`, `003.8` | orchestrator `session_launch_test.go`: `TestLaunchRestoreWorkspace*`; existing Git/files/shell/terminal handler tests; the desktop and mobile E2E failure/retry path |
+| `003.8`, `003.9` | `use-workspace-restoration.test.ts`, `file-browser-load-state.test.tsx`, `ensure-session-error.test.tsx`, `workspace-unavailable.test.tsx`, and resumption/recovery hook tests |
+| `003.10`, `002.1`, `002.3` | desktop/mobile E2E; rendered phone controls, disclosure geometry, passive state preservation, and no horizontal overflow |
 
 ## E2E tests
 
@@ -142,23 +143,39 @@ recovery-clicking page helper as evidence of passive restoration.
 
 ## Work orders
 
-- [ ] [Task 01: Restore retained workspace access](task-01-workspace-admission.md) (pending)
-- [ ] [Task 02: Scope workspace failure feedback](task-02-workspace-feedback.md) (pending)
-- [ ] [Task 03: Prove completed workspace recovery](task-03-workspace-e2e.md) (pending)
+- [x] [Task 01: Restore retained workspace access](task-01-workspace-admission.md) (complete)
+- [x] [Task 02: Scope workspace failure feedback](task-02-workspace-feedback.md) (complete)
+- [x] [Task 03: Prove completed workspace recovery](task-03-workspace-e2e.md) (complete)
 
 ## Verification results
 
-Implementation and permanent regression tests: pending explicit implementation.
+Implementation and regression tests completed on 2026-09-10:
 
-Design validation on 2026-09-10:
+- Task 01 backend block: lifecycle 91 tests, orchestrator 125 tests,
+  orchestrator/executor 105 tests, orchestrator/handlers 3 tests, and
+  agent/handlers 200 tests passed with `-race`.
+- Task 02 frontend blocks: 58 and 63 tests passed; the extracted file-browser
+  tests added 8 more passing tests. Web typecheck and full web lint passed.
+- `rtk pnpm run i18n:check` and `rtk pnpm run i18n:ratchet` passed. The i18n
+  check reported the existing 140 orphaned catalog entries.
+- Task 03 managed E2E: desktop 2/2 and mobile 2/2 passed after cold backend
+  restart. The mobile capture was inspected for terminal output, touch
+  controls, containment, and overflow; the temporary capture directory was
+  removed.
+- Public docs validation passed: 62 tests and 46 pages. Specification
+  validation passed: 36 tests and all specification files.
+- `rtk git diff --check` passed. Targeted E2E-sleep lint passed for all four
+  changed session specs. The repository-wide E2E-sleep lint still reports its
+  pre-existing unrelated baseline and is not used as a task gate.
+
+Design validation before implementation on 2026-09-10:
 
 - `rtk python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
 - `rtk python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - `rtk git diff --check`: passed.
 - Work-order references, source paths, and pending status checked. New test/helper
   files are explicitly marked as implementation targets, not existing evidence.
-- Public docs are unchanged in this design turn. Task 03 owns the user-facing
-  explanation after implementation; runtime and browser tests have not run.
+- The historical design-package commit remains `ad695e1d797c7d81d348618bcfa77bcc523faea0`.
 
 ## Risks
 

@@ -1021,6 +1021,9 @@ func (m *Manager) passthroughProcessMatches(execution *AgentExecution, processID
 // delayed exit recovery. expectedProcessID is set by exit recovery so an old
 // callback cannot replace a process installed by a workflow reset.
 func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expectedProcessID string) error {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)

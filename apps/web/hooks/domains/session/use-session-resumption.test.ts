@@ -2,6 +2,7 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
 
 const mockRequest = vi.fn();
 const mockSetTaskSession = vi.fn();
@@ -43,12 +44,14 @@ const RESUME_TRANSPORT_ERROR = "Resume transport failed";
 const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
 
 import {
+  decideResumeAction,
   resumeWithSilentFallback,
   useSessionResumption,
   type ResumeStateSetter,
   type ResumptionState,
   type SessionRecoveryFailure,
 } from "./use-session-resumption";
+import { resumeViaLaunch } from "./use-session-resumption-operations";
 
 type SetterCalls = {
   resumptionStates: ResumptionState[];
@@ -349,6 +352,46 @@ describe("resumeWithSilentFallback", () => {
 
     expect(setAgentctlReady).toHaveBeenCalledTimes(1);
     expect(setAgentctlReady).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("keeps workspace-only restore failures out of global recovery feedback", async () => {
+    mockRequest.mockResolvedValueOnce({
+      success: false,
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      state: FAILED_STATE,
+      error: WORKSPACE_RESTORE_ERROR,
+    });
+    const { setters, calls } = createSetters();
+    const attempt = {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      environmentId: "environment-1",
+      revision: 1,
+      status: "pending" as const,
+    };
+    const fail = vi.fn(() => true);
+    const complete = vi.fn(() => true);
+    setters.workspaceRestoration = {
+      begin: () => attempt,
+      complete,
+      fail,
+      clear: vi.fn(() => true),
+    };
+
+    const restored = await resumeViaLaunch(buildRestoreWorkspaceRequest, {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      session: null,
+      setters,
+      canContinue: () => true,
+    });
+
+    expect(restored).toBe(false);
+    expect(fail).toHaveBeenCalledWith(attempt, expect.any(Error));
+    expect(complete).not.toHaveBeenCalled();
+    expect(calls.errors.at(-1)).toBeNull();
+    expect(calls.recoveryFailures.at(-1)).toBeNull();
   });
 
   it("does not seed agentctl ready when resume succeeds (new execution will emit its own events)", async () => {
@@ -710,6 +753,23 @@ describe("useSessionResumption monotonic terminal hydration", () => {
 });
 
 describe("useSessionResumption completed-session admission", () => {
+  it("selects workspace restoration for a completed session without selecting agent resume", () => {
+    const action = decideResumeAction(
+      {
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "COMPLETED",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        needs_workspace_restore: true,
+      },
+      false,
+    );
+
+    expect(action).toBe("restore");
+  });
+
   it.each([false, true])(
     "does not auto-resume a completed session when preventAutoStart is %s",
     async (preventAutoStart) => {

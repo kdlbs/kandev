@@ -1467,6 +1467,9 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if err != nil {
 			return nil, err
 		}
+		if err := m.ensureLaunchSessionStillActive(sharedCtx, req.SessionID, executionAdmissionAgent); err != nil {
+			return nil, err
+		}
 		execution.AgentCommand = cmds.initial
 		execution.ContinueCommand = cmds.continue_
 		execution.AgentArgs = cmds.args

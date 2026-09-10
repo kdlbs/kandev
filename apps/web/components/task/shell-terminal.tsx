@@ -25,6 +25,7 @@ import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { useTranslation } from "react-i18next";
+import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
 import { t } from "@/lib/i18n";
 
 type ShellTerminalProps = {
@@ -388,13 +389,20 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   );
   const agentctlStatus = useSessionAgentctl(isReadOnlyMode ? null : sessionId);
   const taskId = session?.task_id ?? null;
+  const workspaceRestoration = useWorkspaceRestoration(taskId, isReadOnlyMode ? null : sessionId);
   const isSessionFailed = !isReadOnlyMode && isFailed;
   const shellOutput = useAppStore((state) => {
     if (!sessionId || isReadOnlyMode) return "";
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
     return state.shell.outputs[envKey] || "";
   });
-  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode && !agentctlStatus.isError);
+  const canSubscribe = Boolean(
+    sessionId &&
+    isActive &&
+    !isReadOnlyMode &&
+    !agentctlStatus.isError &&
+    (!workspaceRestoration.status || workspaceRestoration.status === "ready"),
+  );
   return {
     sessionId,
     taskId,
@@ -403,6 +411,7 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
     shellOutput,
     canSubscribe,
     agentctlStatusKey: agentctlStatus.status,
+    workspaceRestoration,
   };
 }
 
@@ -433,6 +442,7 @@ export function ShellTerminal({
     shellOutput,
     canSubscribe,
     agentctlStatusKey,
+    workspaceRestoration,
   } = useShellSessionState(propSessionId, isReadOnlyMode);
   useReadOnlyOutputSync({
     xtermRef,
@@ -502,6 +512,18 @@ export function ShellTerminal({
     send,
     storeApi,
   });
+
+  if (!isReadOnlyMode && workspaceRestoration.status && workspaceRestoration.status !== "ready") {
+    return (
+      <div className="h-full w-full min-w-0">
+        <WorkspaceUnavailable
+          restoration={workspaceRestoration.attempt}
+          onRetry={() => void workspaceRestoration.restore()}
+          retryDisabled={workspaceRestoration.status === "pending"}
+        />
+      </div>
+    );
+  }
 
   const searchBar = <TerminalSearchBar search={search} />;
   if (isReadOnlyMode) {

@@ -16,6 +16,7 @@ import {
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 function ComparisonTargetNotice({
   comparisonTargets,
@@ -348,6 +349,8 @@ function ChangesPanelTimeline(props: TimelineProps) {
 }
 
 export function ChangesPanelBody(props: ChangesPanelBodyProps) {
+  const workspaceBlocked =
+    props.workspaceRestoration && props.workspaceRestoration.status !== "ready";
   return (
     <PanelBody className="flex flex-col">
       <ComparisonTargetNotice
@@ -355,7 +358,28 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
         comparisonUnavailable={props.comparisonUnavailable}
       />
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-        <ChangesPanelTimeline {...props} />
+        {workspaceBlocked && !props.hasAnything ? (
+          <WorkspaceUnavailable
+            restoration={props.workspaceRestoration}
+            onRetry={props.onRestoreWorkspace}
+            retryDisabled={props.restoreWorkspaceDisabled}
+          />
+        ) : (
+          <>
+            {workspaceBlocked && (
+              <WorkspaceUnavailable
+                restoration={props.workspaceRestoration}
+                onRetry={props.onRestoreWorkspace}
+                retryDisabled={props.restoreWorkspaceDisabled}
+                compact
+              />
+            )}
+            <ChangesPanelTimeline
+              {...props}
+              isLoading={workspaceBlocked ? false : props.isLoading}
+            />
+          </>
+        )}
       </div>
       <ReviewProgressBar
         reviewedCount={props.reviewedCount}
