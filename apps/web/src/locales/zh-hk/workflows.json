@@ -288,6 +288,7 @@
   "workflowDescription": "描述",
   "workflowDescriptionPlaceholder": "可選描述",
   "workflowDetails": "工作流程詳情",
+  "reorderWorkflow": "重新排序「{{name}}」",
   "workflowName": "工作流程名稱",
   "workflowsReadOnlyImprove": "此工作區中的工作流程由 Improve Kandev 管理，無法更改。",
   "workflowNameIsRequired": "工作流程名稱為必填項",

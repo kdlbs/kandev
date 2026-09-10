@@ -288,6 +288,7 @@
   "workflowDescription": "Description",
   "workflowDescriptionPlaceholder": "Optional description",
   "workflowDetails": "Workflow details",
+  "reorderWorkflow": "Reorder {{name}}",
   "workflowName": "Workflow Name",
   "workflowsReadOnlyImprove": "Workflows in this workspace are managed by Improve Kandev and cannot be changed.",
   "workflowNameIsRequired": "Workflow name is required",

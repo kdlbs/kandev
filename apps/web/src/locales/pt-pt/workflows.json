@@ -283,6 +283,7 @@
   "workflowCycleReplayPathFor": "Percurso de repetição de {{stepName}}",
   "workflowCycleWarningBody": "Este percurso pode voltar a entrar em \"{{stepName}}\" e iniciar novamente o agente após uma ação do utilizador.",
   "workflowDetails": "Detalhes do fluxo de trabalho",
+  "reorderWorkflow": "Reordenar {{name}}",
   "workflowName": "Nome do fluxo de trabalho",
   "workflowsReadOnlyImprove": "Os fluxos de trabalho desta área de trabalho são geridos pelo Melhorar o Kandev e não podem ser alterados.",
   "workflowNameIsRequired": "O nome do fluxo de trabalho é obrigatório",
