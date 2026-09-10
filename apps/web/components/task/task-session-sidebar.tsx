@@ -23,7 +23,7 @@ import {
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import {
@@ -217,7 +217,7 @@ function useArchiveActions(store: StoreApi) {
 
 function useDeleteActions(
   store: StoreApi,
-  removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
+  runTaskRemoval: ReturnType<typeof useTaskRemoval>["runTaskRemoval"],
 ) {
   const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
@@ -246,11 +246,12 @@ function useDeleteActions(
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
       try {
-        await deleteTaskById(taskId, opts);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+        await runTaskRemoval(
+          "delete",
+          { taskId, mutate: () => deleteTaskById(taskId, opts) },
+          { cascade: opts.cascade },
+        );
       } catch (error) {
         console.error("Failed to delete task:", error);
       } finally {
@@ -258,7 +259,7 @@ function useDeleteActions(
         setDeletingTask(null);
       }
     },
-    [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store],
+    [deletingTask, isDeleting, deleteTaskById, runTaskRemoval],
   );
 
   const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
@@ -354,11 +355,13 @@ export function useSidebarActions(store: StoreApi) {
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
   const { renameTaskById } = useTaskActions();
+  const notifySuccess = useTaskRemovalSuccessNotifier();
   const router = useRouter();
   const pathname = usePathname();
-  const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
+  const { runTaskRemoval, loadTaskSessionsForTask } = useTaskRemoval({
     store,
     useLayoutSwitch: true,
+    notifySuccess,
   });
 
   const handleSelectTask = useSidebarTaskSelection({
@@ -372,7 +375,7 @@ export function useSidebarActions(store: StoreApi) {
   });
 
   const archiveActions = useArchiveActions(store);
-  const deleteActions = useDeleteActions(store, removeTaskFromBoard);
+  const deleteActions = useDeleteActions(store, runTaskRemoval);
   const detachActions = useTaskDetachDialog(store);
   const handleNestTask = useNestTaskByDrag();
   const linkActions = useSidebarLinkActions(store);

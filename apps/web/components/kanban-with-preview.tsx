@@ -22,6 +22,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { taskRemovalCoversTask } from "@/lib/state/task-removal";
 import {
   usePreviewWorkflowStepMove,
   type PreviewStepMove,
@@ -265,6 +266,39 @@ function useCloseMissingSelectedTask(params: {
   ]);
 }
 
+function usePreviewRemovalState(
+  selectedTaskId: string | null | undefined,
+  isOpen: boolean,
+  close: () => void,
+): { previewIsOpen: boolean; previewTaskId: string | null | undefined } {
+  const isRemovingSelectedTask = useAppStore((state) =>
+    selectedTaskId ? taskRemovalCoversTask(state.taskRemoval, selectedTaskId) : false,
+  );
+  const previewIsOpen = isOpen && !isRemovingSelectedTask;
+  const previewTaskId = isRemovingSelectedTask ? null : selectedTaskId;
+
+  useEffect(() => {
+    if (isRemovingSelectedTask) close();
+  }, [close, isRemovingSelectedTask]);
+
+  return { previewIsOpen, previewTaskId };
+}
+
+function usePreviewTaskToggle(
+  previewIsOpen: boolean,
+  previewTaskId: string | null | undefined,
+  open: (taskId: string) => void,
+  close: () => void,
+): (task: Task) => void {
+  return useCallback(
+    (task: Task) => {
+      if (previewIsOpen && previewTaskId === task.id) close();
+      else open(task.id);
+    },
+    [previewIsOpen, previewTaskId, open, close],
+  );
+}
+
 function useSyncSelectedTaskActivity(params: {
   isOpen: boolean;
   selectedTaskId: string | null | undefined;
@@ -309,20 +343,21 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       },
     });
 
-  useMirrorPreviewedTaskId(isOpen, selectedTaskId, setKanbanPreviewedTaskId);
+  const { previewIsOpen, previewTaskId } = usePreviewRemovalState(selectedTaskId, isOpen, close);
+
+  useMirrorPreviewedTaskId(previewIsOpen, previewTaskId, setKanbanPreviewedTaskId);
 
   // Use custom hooks for layout and session management
-  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(isOpen, previewWidthPx);
-  const { sessionId: selectedTaskSessionId } = useTaskSession(selectedTaskId ?? null);
+  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(previewIsOpen, previewWidthPx);
+  const { sessionId: selectedTaskSessionId } = useTaskSession(previewTaskId ?? null);
 
   // User-selected tab overrides the default primary session pick.
   // Reset when the selected task changes.
   const [userSelectedSessionId, setUserSelectedSessionId] = useSessionSelectionReset(
-    selectedTaskId,
+    previewTaskId,
     initialSessionId ?? null,
   );
 
-  // Track resize state
   const isResizingRef = useRef(false);
 
   const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks, kanbanMultiSnapshots);
@@ -344,7 +379,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // also used by launch flows that intentionally create a specific session
   // after the page is open.
   const ensureSession = useEnsureTaskSession(selectedTask, {
-    enabled: isOpen && selectedTaskId !== initialTaskId,
+    enabled: previewIsOpen && previewTaskId !== initialTaskId,
   });
 
   const handleNavigateToTask = useCallback(
@@ -354,32 +389,23 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     [router],
   );
 
-  const activeSessionId = selectedTaskId
+  const activeSessionId = previewTaskId
     ? (userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId)
     : null;
 
   useSyncSelectedTaskActivity({
-    isOpen,
-    selectedTaskId,
+    isOpen: previewIsOpen,
+    selectedTaskId: previewTaskId,
     activeSessionId,
     setActiveSession,
     setActiveTask,
   });
 
-  useUrlSync(selectedTaskId ?? null, activeSessionId ?? null);
+  useUrlSync(previewTaskId ?? null, previewIsOpen ? (activeSessionId ?? null) : null);
 
-  const handlePreviewTaskWithData = useCallback(
-    (task: Task) => {
-      if (isOpen && selectedTaskId === task.id) {
-        close();
-      } else {
-        open(task.id);
-      }
-    },
-    [isOpen, selectedTaskId, open, close],
-  );
+  const handlePreviewTaskWithData = usePreviewTaskToggle(previewIsOpen, previewTaskId, open, close);
 
-  useEscapeKey(isOpen, close, previewStepMove.isDisclosureOpen);
+  useEscapeKey(previewIsOpen, close, previewStepMove.isDisclosureOpen);
 
   const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
 
@@ -398,9 +424,9 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       shouldFloat={shouldFloat}
       kanbanWidth={kanbanWidth}
       previewWidthPx={previewWidthPx}
-      isOpen={isOpen}
-      selectedTask={selectedTask}
-      activeSessionId={activeSessionId}
+      isOpen={previewIsOpen}
+      selectedTask={previewIsOpen ? selectedTask : null}
+      activeSessionId={previewIsOpen ? activeSessionId : null}
       ensureSession={ensureSession}
       stepMove={previewStepMove}
       onPreviewTask={handlePreviewTaskWithData}
@@ -443,6 +469,7 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => v
 type PreviewLayoutProps = {
   kanbanWidth: number;
   previewWidthPx: number;
+  isOpen: boolean;
   selectedTask: Task | null;
   activeSessionId: string | null;
   ensureSession: UseEnsureTaskSessionResult;
@@ -470,6 +497,7 @@ function previewPanelStepProps(stepMove: PreviewStepMove) {
 function FloatingPreviewLayout({
   kanbanWidth,
   previewWidthPx,
+  isOpen,
   selectedTask,
   activeSessionId,
   ensureSession,
@@ -490,31 +518,35 @@ function FloatingPreviewLayout({
           onBeforeEdit={onClose}
         />
       </div>
-      <div
-        className="fixed inset-0 bg-black/30 z-30"
-        onClick={onClose}
-        aria-label={t("kanban:closePreview")}
-      />
-      <div
-        className="fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl"
-        style={{
-          width: `${previewWidthPx}px`,
-          maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw`,
-        }}
-      >
-        <ResizeHandle onMouseDown={onResizeMouseDown} />
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <TaskPreviewPanel
-            task={selectedTask}
-            sessionId={activeSessionId}
-            ensureSession={ensureSession}
-            onClose={onClose}
-            onMaximize={(task) => onNavigateToTask(task)}
-            onSessionChange={onSessionChange}
-            {...previewPanelStepProps(stepMove)}
+      {isOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/30 z-30"
+            onClick={onClose}
+            aria-label={t("kanban:closePreview")}
           />
-        </div>
-      </div>
+          <div
+            className="fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl"
+            style={{
+              width: `${previewWidthPx}px`,
+              maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw`,
+            }}
+          >
+            <ResizeHandle onMouseDown={onResizeMouseDown} />
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <TaskPreviewPanel
+                task={selectedTask}
+                sessionId={activeSessionId}
+                ensureSession={ensureSession}
+                onClose={onClose}
+                onMaximize={(task) => onNavigateToTask(task)}
+                onSessionChange={onSessionChange}
+                {...previewPanelStepProps(stepMove)}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -532,7 +564,7 @@ function InlinePreviewLayout({
   onClose,
   onSessionChange,
   onResizeMouseDown,
-}: PreviewLayoutProps & { isOpen: boolean }) {
+}: PreviewLayoutProps) {
   return (
     <div className="flex-1 flex overflow-hidden">
       <div className="overflow-hidden" style={{ width: `${kanbanWidth}px` }}>

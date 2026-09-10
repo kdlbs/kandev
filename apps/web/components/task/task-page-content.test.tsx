@@ -1,7 +1,9 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { TaskLoadErrorState } from "./task-page-content";
+import { TaskRemovalBoundary } from "./task-removal-boundary";
 
 afterEach(cleanup);
 
@@ -28,5 +30,35 @@ describe("TaskLoadErrorState", () => {
     expect(screen.getByTestId("task-unavailable-overview-link").getAttribute("href")).toBe(
       "/?home=overview",
     );
+  });
+});
+
+function StartRemoval() {
+  const store = useAppStoreApi();
+  useEffect(() => {
+    store.getState().beginTaskRemoval({
+      action: "delete",
+      workspaceId: "ws-1",
+      taskIds: ["task-1"],
+      requestIds: ["task-1"],
+      departure: null,
+    });
+  }, [store]);
+  return null;
+}
+
+describe("TaskRemovalBoundary", () => {
+  it("unmounts outgoing content while a removal operation is pending", async () => {
+    render(
+      <StateProvider>
+        <StartRemoval />
+        <TaskRemovalBoundary taskId="task-1">
+          <div data-testid="outgoing-task-content">Outgoing task</div>
+        </TaskRemovalBoundary>
+      </StateProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("task-removal-status")).toBeTruthy());
+    expect(screen.queryByTestId("outgoing-task-content")).toBeNull();
   });
 });

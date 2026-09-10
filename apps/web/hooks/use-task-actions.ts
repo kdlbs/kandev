@@ -2,10 +2,9 @@ import { useCallback } from "react";
 import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
 import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
-import { replaceTaskUrl } from "@/lib/links";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { useTranslation } from "react-i18next";
 
 type MovePayload = { workflow_id: string; workflow_step_id: string; position: number };
@@ -59,50 +58,23 @@ export function useTaskActions() {
 export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
   const store = useAppStoreApi();
   const { archiveTaskById } = useTaskActions();
-  const { removeTaskFromBoard } = useTaskRemoval({
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemoval } = useTaskRemoval({
     store,
     useLayoutSwitch: opts?.useLayoutSwitch,
+    notifySuccess,
   });
 
   return useCallback(
-    async (taskId: string, opts?: TaskActionOptions) => {
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
-      const removalOptions = opts?.cascade ? { excludeTaskTree: true } : {};
-
-      const initialSwitch = await removeTaskFromBoard(taskId, {
-        wasActiveTaskId,
-        wasActiveSessionId,
-        switchOnly: true,
-        ...removalOptions,
-      });
-
-      try {
-        await archiveTaskById(taskId, opts);
-        await removeTaskFromBoard(taskId, {
-          wasActiveTaskId,
-          wasActiveSessionId,
-          ...removalOptions,
-          ...(initialSwitch.excludedTaskIds
-            ? { excludedTaskIds: initialSwitch.excludedTaskIds }
-            : {}),
-        });
-      } catch (error) {
-        if (
-          wasActiveTaskId &&
-          initialSwitch.switchedTaskId !== null &&
-          store.getState().tasks.activeTaskId === initialSwitch.switchedTaskId
-        ) {
-          if (wasActiveSessionId) {
-            store.getState().setActiveSession(wasActiveTaskId, wasActiveSessionId);
-          } else {
-            store.getState().setActiveTask(wasActiveTaskId);
-          }
-          replaceTaskUrl(wasActiveTaskId);
-        }
-        throw error;
-      }
-    },
-    [archiveTaskById, removeTaskFromBoard, store],
+    (taskId: string, opts?: TaskActionOptions) =>
+      runTaskRemoval(
+        "archive",
+        {
+          taskId,
+          mutate: () => archiveTaskById(taskId, opts),
+        },
+        { cascade: opts?.cascade },
+      ).then(() => undefined),
+    [archiveTaskById, runTaskRemoval],
   );
 }

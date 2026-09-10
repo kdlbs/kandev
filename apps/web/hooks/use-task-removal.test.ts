@@ -2,15 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { StoreApi } from "zustand";
 
-const replaceTaskUrlMock = vi.fn();
 const performLayoutSwitchMock = vi.fn();
 const listTaskSessionsMock = vi.fn();
 const fetchTaskMock = vi.fn();
+const softNavigateMock = vi.fn();
 const OVERVIEW_URL = "/?home=overview";
 
 vi.mock("@/lib/links", () => ({
+  linkToTask: (taskId: string) => `/t/${taskId}`,
   linkToTaskOverview: () => "/?home=overview",
-  replaceTaskUrl: (...args: unknown[]) => replaceTaskUrlMock(...args),
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -20,6 +20,10 @@ vi.mock("@/lib/state/dockview-store", () => ({
 vi.mock("@/lib/api", () => ({
   listTaskSessions: (...args: unknown[]) => listTaskSessionsMock(...args),
   fetchTask: (...args: unknown[]) => fetchTaskMock(...args),
+}));
+
+vi.mock("@/lib/routing/client-router", () => ({
+  softNavigate: (...args: unknown[]) => softNavigateMock(...args),
 }));
 
 import { useTaskRemoval, selectNextTaskAfterRemoval } from "./use-task-removal";
@@ -110,30 +114,6 @@ function makeStore(init: {
   };
 }
 
-function mockLocation() {
-  const hrefSetter = vi.fn();
-  const originalLocation = window.location;
-  Object.defineProperty(window, "location", {
-    configurable: true,
-    value: {
-      get href() {
-        return "";
-      },
-      set href(value: string) {
-        hrefSetter(value);
-      },
-    },
-  });
-  return {
-    hrefSetter,
-    restore: () =>
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        value: originalLocation,
-      }),
-  };
-}
-
 const nextTask: TaskRow = { id: "task-next", primarySessionId: "sess-next" };
 const recentTaskId = "task-recent";
 const recentSessionId = "sess-recent";
@@ -217,7 +197,7 @@ describe("useTaskRemoval — switch guard (current store wins)", () => {
     });
 
     expect(store.getRecorded().setActiveSession).toHaveBeenCalledWith("task-next", "sess-next");
-    expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-next");
+    expect(softNavigateMock).toHaveBeenCalledWith("/t/task-next", "replace");
   });
 
   it("does NOT switch when user manually moved to a different task during in-flight archive", async () => {
@@ -237,7 +217,7 @@ describe("useTaskRemoval — switch guard (current store wins)", () => {
 
     expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
     expect(store.getRecorded().setActiveTask).not.toHaveBeenCalled();
-    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+    expect(softNavigateMock).not.toHaveBeenCalled();
   });
 });
 
@@ -258,7 +238,7 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
     });
 
     expect(store.getRecorded().setActiveSession).toHaveBeenCalledWith("task-next", "sess-next");
-    expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-next");
+    expect(softNavigateMock).toHaveBeenCalledWith("/t/task-next", "replace");
   });
 
   it("does NOT switch when no opts provided and WS already cleared activeTaskId", async () => {
@@ -275,7 +255,7 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
 
     expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
     expect(store.getRecorded().setActiveTask).not.toHaveBeenCalled();
-    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+    expect(softNavigateMock).not.toHaveBeenCalled();
   });
 
   it("does NOT switch when activeTaskId is null AND wasActiveTaskId does not match removed task", async () => {
@@ -295,7 +275,7 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
 
     expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
     expect(store.getRecorded().setActiveTask).not.toHaveBeenCalled();
-    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+    expect(softNavigateMock).not.toHaveBeenCalled();
   });
 
   it("redirects to the explicit overview when no remaining tasks AND user is still on removed task", async () => {
@@ -304,36 +284,15 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
       activeSessionId: "sess-A",
       remainingTasks: [{ id: "task-A", primarySessionId: "sess-A" }],
     });
-    const hrefSetter = vi.fn();
-    const originalLocation = window.location;
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        get href() {
-          return "";
-        },
-        set href(value: string) {
-          hrefSetter(value);
-        },
-      },
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+    const removeResult = await result.current.removeTaskFromBoard("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
     });
-
-    try {
-      const { result } = renderHook(() =>
-        useTaskRemoval({ store: store as unknown as StoreApi<never> }),
-      );
-      const removeResult = await result.current.removeTaskFromBoard("task-A", {
-        wasActiveTaskId: "task-A",
-        wasActiveSessionId: "sess-A",
-      });
-      expect(removeResult.switchedTaskId).toBeNull();
-      expect(hrefSetter).toHaveBeenCalledWith(OVERVIEW_URL);
-    } finally {
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        value: originalLocation,
-      });
-    }
+    expect(removeResult.switchedTaskId).toBeNull();
+    expect(softNavigateMock).toHaveBeenCalledWith(OVERVIEW_URL, "replace");
   });
 });
 
@@ -347,40 +306,18 @@ describe("useTaskRemoval — next task selection", () => {
       canonicalTasks: [],
     });
     fetchTaskMock.mockRejectedValueOnce(new Error("task not found"));
-    const hrefSetter = vi.fn();
-    const originalLocation = window.location;
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        get href() {
-          return "";
-        },
-        set href(value: string) {
-          hrefSetter(value);
-        },
-      },
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+
+    const removal = await result.current.removeTaskFromBoard("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
     });
 
-    try {
-      const { result } = renderHook(() =>
-        useTaskRemoval({ store: store as unknown as StoreApi<never> }),
-      );
-
-      const removal = await result.current.removeTaskFromBoard("task-A", {
-        wasActiveTaskId: "task-A",
-        wasActiveSessionId: "sess-A",
-      });
-
-      expect(removal.switchedTaskId).toBeNull();
-      expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
-      expect(replaceTaskUrlMock).not.toHaveBeenCalled();
-      expect(hrefSetter).toHaveBeenCalledWith(OVERVIEW_URL);
-    } finally {
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        value: originalLocation,
-      });
-    }
+    expect(removal.switchedTaskId).toBeNull();
+    expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
+    expect(softNavigateMock).toHaveBeenCalledWith(OVERVIEW_URL, "replace");
   });
 
   it("switches to the most recent remaining task instead of the first snapshot task", async () => {
@@ -400,7 +337,7 @@ describe("useTaskRemoval — next task selection", () => {
       recentTaskId,
       recentSessionId,
     );
-    expect(replaceTaskUrlMock).toHaveBeenCalledWith(recentTaskId);
+    expect(softNavigateMock).toHaveBeenCalledWith(`/t/${recentTaskId}`, "replace");
   });
 
   it("skips the removed active task when it is first in recent history", async () => {
@@ -420,7 +357,7 @@ describe("useTaskRemoval — next task selection", () => {
       recentTaskId,
       recentSessionId,
     );
-    expect(replaceTaskUrlMock).toHaveBeenCalledWith(recentTaskId);
+    expect(softNavigateMock).toHaveBeenCalledWith(`/t/${recentTaskId}`, "replace");
   });
 
   it("can switch before removing the task from board state", async () => {
@@ -442,7 +379,7 @@ describe("useTaskRemoval — next task selection", () => {
       recentTaskId,
       recentSessionId,
     );
-    expect(replaceTaskUrlMock).toHaveBeenCalledWith(recentTaskId);
+    expect(softNavigateMock).toHaveBeenCalledWith(`/t/${recentTaskId}`, "replace");
   });
 });
 
@@ -550,26 +487,20 @@ describe("useTaskRemoval — cascade no-candidate transition", () => {
       activeSessionId: CASCADE_PARENT.primarySessionId,
       remainingTasks: [CASCADE_PARENT, CASCADE_CHILD],
     });
-    const location = mockLocation();
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
 
-    try {
-      const { result } = renderHook(() =>
-        useTaskRemoval({ store: store as unknown as StoreApi<never> }),
-      );
+    const removal = await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
+      wasActiveTaskId: CASCADE_PARENT.id,
+      wasActiveSessionId: CASCADE_PARENT.primarySessionId,
+      switchOnly: true,
+      excludeTaskTree: true,
+    } as never);
 
-      const removal = await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
-        wasActiveTaskId: CASCADE_PARENT.id,
-        wasActiveSessionId: CASCADE_PARENT.primarySessionId,
-        switchOnly: true,
-        excludeTaskTree: true,
-      } as never);
-
-      expect(removal.switchedTaskId).toBeNull();
-      expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
-      expect(location.hrefSetter).not.toHaveBeenCalled();
-    } finally {
-      location.restore();
-    }
+    expect(removal.switchedTaskId).toBeNull();
+    expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
+    expect(softNavigateMock).not.toHaveBeenCalled();
   });
 
   it("opens the overview after final cascade cleanup when no safe task remains", async () => {
@@ -578,24 +509,18 @@ describe("useTaskRemoval — cascade no-candidate transition", () => {
       activeSessionId: CASCADE_PARENT.primarySessionId,
       remainingTasks: [CASCADE_PARENT, CASCADE_CHILD],
     });
-    const location = mockLocation();
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
 
-    try {
-      const { result } = renderHook(() =>
-        useTaskRemoval({ store: store as unknown as StoreApi<never> }),
-      );
+    const removal = await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
+      wasActiveTaskId: CASCADE_PARENT.id,
+      wasActiveSessionId: CASCADE_PARENT.primarySessionId,
+      excludeTaskTree: true,
+    } as never);
 
-      const removal = await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
-        wasActiveTaskId: CASCADE_PARENT.id,
-        wasActiveSessionId: CASCADE_PARENT.primarySessionId,
-        excludeTaskTree: true,
-      } as never);
-
-      expect(removal.switchedTaskId).toBeNull();
-      expect(location.hrefSetter).toHaveBeenCalledWith(OVERVIEW_URL);
-    } finally {
-      location.restore();
-    }
+    expect(removal.switchedTaskId).toBeNull();
+    expect(softNavigateMock).toHaveBeenCalledWith(OVERVIEW_URL, "replace");
   });
 
   it("retains the original cascade tree for cleanup after cache pruning", async () => {
@@ -604,39 +529,31 @@ describe("useTaskRemoval — cascade no-candidate transition", () => {
       activeSessionId: CASCADE_PARENT.primarySessionId,
       remainingTasks: [CASCADE_PARENT, CASCADE_CHILD],
     });
-    const location = mockLocation();
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+    const initialRemoval = await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
+      wasActiveTaskId: CASCADE_PARENT.id,
+      wasActiveSessionId: CASCADE_PARENT.primarySessionId,
+      switchOnly: true,
+      excludeTaskTree: true,
+    } as never);
 
-    try {
-      const { result } = renderHook(() =>
-        useTaskRemoval({ store: store as unknown as StoreApi<never> }),
-      );
-      const initialRemoval = await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
-        wasActiveTaskId: CASCADE_PARENT.id,
-        wasActiveSessionId: CASCADE_PARENT.primarySessionId,
-        switchOnly: true,
-        excludeTaskTree: true,
-      } as never);
+    expect(initialRemoval.excludedTaskIds).toEqual(new Set([CASCADE_PARENT.id, CASCADE_CHILD.id]));
+    store.getRecorded().kanbanMulti.snapshots["wf-1"].tasks = [
+      { ...CASCADE_CHILD, parentTaskId: null },
+    ];
+    store.getRecorded().kanban.tasks = [];
 
-      expect(initialRemoval.excludedTaskIds).toEqual(
-        new Set([CASCADE_PARENT.id, CASCADE_CHILD.id]),
-      );
-      store.getRecorded().kanbanMulti.snapshots["wf-1"].tasks = [
-        { ...CASCADE_CHILD, parentTaskId: null },
-      ];
-      store.getRecorded().kanban.tasks = [];
+    await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
+      wasActiveTaskId: CASCADE_PARENT.id,
+      wasActiveSessionId: CASCADE_PARENT.primarySessionId,
+      excludeTaskTree: true,
+      excludedTaskIds: initialRemoval.excludedTaskIds,
+    } as never);
 
-      await result.current.removeTaskFromBoard(CASCADE_PARENT.id, {
-        wasActiveTaskId: CASCADE_PARENT.id,
-        wasActiveSessionId: CASCADE_PARENT.primarySessionId,
-        excludeTaskTree: true,
-        excludedTaskIds: initialRemoval.excludedTaskIds,
-      } as never);
-
-      expect(store.getRecorded().kanbanMulti.snapshots["wf-1"].tasks).toEqual([]);
-      expect(location.hrefSetter).toHaveBeenCalledWith(OVERVIEW_URL);
-    } finally {
-      location.restore();
-    }
+    expect(store.getRecorded().kanbanMulti.snapshots["wf-1"].tasks).toEqual([]);
+    expect(softNavigateMock).toHaveBeenCalledWith(OVERVIEW_URL, "replace");
   });
 });
 
@@ -645,7 +562,7 @@ describe("selectNextTaskAfterRemoval — stale-candidate rejection", () => {
     remaining: TaskRow[],
     removedTaskId: string,
     isLive: (taskId: string) => Promise<boolean>,
-    excludedTaskIds?: ReadonlySet<string>,
+    options?: { excludedTaskIds?: ReadonlySet<string> },
   ) => Promise<TaskRow | null>;
 
   it("skips every excluded descendant while preserving recent-task order", async () => {
@@ -659,12 +576,9 @@ describe("selectNextTaskAfterRemoval — stale-candidate rejection", () => {
     ]);
 
     await expect(
-      select(
-        [child, deepChild, unrelated],
-        CASCADE_PARENT.id,
-        async () => true,
-        new Set([CASCADE_PARENT.id, child.id, deepChild.id]),
-      ),
+      select([child, deepChild, unrelated], CASCADE_PARENT.id, async () => true, {
+        excludedTaskIds: new Set([CASCADE_PARENT.id, child.id, deepChild.id]),
+      }),
     ).resolves.toBe(unrelated);
   });
 

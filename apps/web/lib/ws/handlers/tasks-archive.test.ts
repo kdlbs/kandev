@@ -266,6 +266,38 @@ it.each(["/t/t1", "/tasks/t1"])("redirects away when archived on %s", (path) => 
   expect(window.location.search).toBe("?home=overview");
 });
 
+it("leaves local removal navigation to the coordinator", () => {
+  window.history.replaceState({}, "", "/t/t1");
+  const store = makeStoreWithTask({
+    tasks: {
+      activeTaskId: TASK_ID,
+      activeSessionId: SESSION_ID,
+      pinnedSessionId: null,
+      lastSessionByTaskId: {},
+    },
+    taskRemoval: {
+      navigationRevision: 0,
+      operationsByToken: {
+        "removal-1": {
+          token: "removal-1",
+          action: "archive",
+          workspaceId: "ws-1",
+          taskIds: [TASK_ID],
+          requestIds: [TASK_ID],
+          outcomesByTaskId: { [TASK_ID]: "pending" },
+          departure: { taskId: TASK_ID, sessionId: SESSION_ID, navigationRevision: 0 },
+        },
+      },
+      pendingTokenByTaskId: { [TASK_ID]: "removal-1" },
+    },
+  } as unknown as Partial<AppState>);
+
+  archiveTask(store);
+
+  expect(window.location.pathname).toBe("/t/t1");
+  expect(window.location.search).toBe("");
+});
+
 it("does not redirect when a different task is archived", () => {
   window.history.replaceState({}, "", "/t/other");
   const store = makeStoreWithTask();
