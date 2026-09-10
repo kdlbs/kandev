@@ -38,6 +38,8 @@ const participantTypeAgent = "agent"
 // by tests and a couple of internal callers; the dashboard's
 // permissioned variant is SetTaskAssigneeAsAgent.
 func (s *Service) SetTaskAssignee(ctx context.Context, taskID, assigneeID string) error {
+	// generation discarded — this caller does not carry it to the event bus;
+	// queueTaskAssignedRun falls through to keyless enqueue (AC-OFFICE-RUN-DEDUP-003).
 	_, err := s.repo.UpdateTaskAssignee(ctx, taskID, assigneeID)
 	return err
 }
@@ -56,6 +58,8 @@ func (s *Service) SetTaskAssigneeAsAgent(ctx context.Context, callerAgentID, tas
 			return shared.ErrForbidden
 		}
 	}
+	// generation discarded — this caller does not carry it to the event bus;
+	// queueTaskAssignedRun falls through to keyless enqueue (AC-OFFICE-RUN-DEDUP-003).
 	_, err := s.repo.UpdateTaskAssignee(ctx, taskID, assigneeID)
 	return err
 }

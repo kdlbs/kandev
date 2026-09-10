@@ -86,7 +86,7 @@ varying-segment one, which a producer with no key cannot satisfy.
 | `office/onboarding/service.go` `maybeCreateOnboardingTask` | `task_assigned` | `""` | stays keyless, `cause=unresolved` |
 | `office/service/scheduler_recovery.go` recovery sweep | `task_assigned` | `""` | stays keyless, `cause=by_design` |
 | `office/service/retry.go` CEO error escalation | `agent_error` | `""` | **becomes generational** on the failed run id |
-| `office/service/failure.go` `requeueRunForTask` | `manual_resume_after_failure` | `""` | stays keyless, `cause=by_design` |
+| `office/service/failure.go` `requeueRunForTask` | `manual_resume_after_failure` | `""` | **becomes generational** on the failed run id (task id if empty) |
 
 `office/onboarding` also declares its own `runReasonTaskAssigned` constant, a
 third copy of the same string. Consolidating it is out of scope for the same
@@ -112,7 +112,6 @@ each producer is assigned a side deliberately, so each is assigned one here.
 | --- | --- | --- | --- |
 | reactivity status wakes | `task_unblocked`, `task_reopened`, `task_review_requested` | `by_design` | a status transition has no redelivery path; see Part 1 |
 | `office/service/scheduler_recovery.go` | `task_assigned` | `by_design` | see [The recovery sweep](#the-recovery-sweep-must-not-borrow-the-assignment-generation) |
-| `office/service/failure.go` | `manual_resume_after_failure` | `by_design` | an operator resume; the call site holds only a task id, and no row records the resume |
 | `office/onboarding/service.go` | `task_assigned` | `unresolved` | the occurrence **does** have a generation; this producer simply is not handed it |
 | `handleTaskCreated` with `fallbackToStoredRunner` | `task_assigned` | `unresolved` | Part 1 |
 | `officeAutoStartIdempotencyKey`, zero `stepTransitionID` | `task_assigned` | `unresolved` | Part 1 |

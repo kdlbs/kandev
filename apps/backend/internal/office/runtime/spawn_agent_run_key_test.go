@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"strings"
 	"testing"
@@ -176,5 +177,37 @@ func TestActionsSpawnAgentRun_NoCallerRunID_EnqueuesKeylessUnresolved(t *testing
 	}
 	if !spawnAgentRunKeylessCounterHasLabel(t, "test_spawn_no_caller_run", "unresolved") {
 		t.Fatal("expected office_run_dedup_keyless_total to carry an unresolved entry")
+	}
+}
+
+// TestActionsSpawnAgentRun_ReasonTooLong_Rejected proves Reason is bounded
+// before it can reach office_run_dedup_total /
+// office_run_dedup_keyless_total as an expvar.Map label: those maps never
+// evict entries, so an unvalidated agent-supplied Reason would let a caller
+// grow them without limit. An over-length Reason is rejected with
+// ErrReasonTooLong and never reaches the run spawner.
+func TestActionsSpawnAgentRun_ReasonTooLong_Rejected(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-2": {ID: "agent-2", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		WorkspaceID:  "ws-1",
+		RunID:        "run-caller-3",
+		Capabilities: Capabilities{CanSpawnAgentRun: true},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-2",
+		Reason:  strings.Repeat("a", maxSpawnAgentRunReasonLength+1),
+	})
+	if !errors.Is(err, ErrReasonTooLong) {
+		t.Fatalf("SpawnAgentRun error = %v, want ErrReasonTooLong", err)
+	}
+	if len(runs.calls) != 0 {
+		t.Fatalf("run spawner calls = %d, want 0 (rejected before enqueue)", len(runs.calls))
 	}
 }

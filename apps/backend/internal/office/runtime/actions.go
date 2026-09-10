@@ -566,6 +566,12 @@ type SpawnAgentRunInput struct {
 	IdempotencyKey string                 `json:"idempotency_key"`
 }
 
+// maxSpawnAgentRunReasonLength bounds SpawnAgentRunInput.Reason. Reason is
+// agent-supplied and reaches office_run_dedup_total /
+// office_run_dedup_keyless_total as an expvar.Map label; those maps never
+// evict, so an unbounded Reason would let a caller grow them without limit.
+const maxSpawnAgentRunReasonLength = 100
+
 // SpawnAgentRun queues a run for an agent in the same workspace.
 //
 // A non-empty agent-supplied key is prefixed with the calling run's id
@@ -586,6 +592,9 @@ func (a *Actions) SpawnAgentRun(
 	}
 	if a.deps.Runs == nil || a.deps.AgentModifier == nil {
 		return fmt.Errorf("%w: runs", ErrRuntimeDependencyMissing)
+	}
+	if len(input.Reason) > maxSpawnAgentRunReasonLength {
+		return ErrReasonTooLong
 	}
 	target, err := a.deps.AgentModifier.GetAgentInstance(ctx, input.AgentID)
 	if err != nil {

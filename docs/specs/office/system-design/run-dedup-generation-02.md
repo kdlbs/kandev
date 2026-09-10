@@ -318,17 +318,19 @@ Backend `*_test.go` beside each source. Behaviours with no equivalent test today
   sentinel as a failure. Nothing else in this plan exercises that file, so
   without this the label can be unwired or wired to the wrong `queue` value with
   the suite green.
-- **The four direct keyless producers each report their assigned cause** — the
+- **The three direct keyless producers each report their assigned cause** — the
   onboarding wake and `handleTaskCreated`'s fallback as `unresolved`, the
-  recovery sweep and `requeueRunForTask` as `by_design` — per
+  recovery sweep as `by_design` — per
   [Part 3](run-dedup-generation-03.md#keyless-causes-per-producer). The recovery
   sweep additionally asserts it does **not** mint the assignment key: drive a
   sweep over a task whose assignment run already persisted
   `task_assigned:<task>:<agent>:<generation>` and assert the sweep still queues,
   rather than being suppressed by the durable index.
-- **`agent_error` is generational on the failed run id.** Two distinct run
-  failures for one agent mint different keys and both queue; a redelivery of one
-  failure escalation is suppressed. There is no two-CEO case to assert: a
+- **`agent_error` and `manual_resume_after_failure` are generational** on the
+  failed run id (`manual_resume_after_failure` falls back to the task id when
+  the failed run id is empty). Two distinct run failures for one agent mint
+  different keys and both queue; a redelivery of one failure escalation is
+  suppressed. There is no two-CEO case to assert for `agent_error`: a
   workspace admits at most one CEO (`ErrAgentCEOAlreadyExists`) and
   `queueCEOAgentError` escalates to `ceos[0]` alone.
 - **Both blocker producers derive a byte-identical digest** for one blocker set,
