@@ -737,12 +737,31 @@ fetch_base_ref_json() {
     }'
 }
 
+fetch_legacy_required_status_checks_json() {
+  local response status body succeeded=false
+  if response="$(gh_json api "$1" --include)"; then
+    succeeded=true
+  fi
+  status="$(awk '/^HTTP\// {code=$2} END {print code}' <<<"$response")"
+  body="$(awk 'body {print} !body && /^\r?$/ {body=1}' <<<"$response")"
+  # A generic 404 can hide inaccessible policy. Only the explicit absence
+  # response establishes that this branch has no legacy status requirements.
+  if [[ "$status" == '404' ]] && jq -e '.message == "Branch not protected"' >/dev/null 2>&1 <<<"$body"; then
+    printf '[]\n'
+  elif [[ "$succeeded" == true && "$status" == '200' ]]; then
+    jq -ce 'select(type == "object" and (.contexts | type) == "array" and (.checks | type) == "array")
+      | [.checks[]?.context, .contexts[]?] | map(select(type == "string" and length > 0)) | unique' <<<"$body"
+  else
+    return 1
+  fi
+}
+
 fetch_required_status_checks_json() {
   local owner=$1
   local repo=$2
   local base_ref=$3
   local default_ref=$4
-  local rulesets_pages rulesets_json details='[]' ruleset_id detail protected_json
+  local rulesets_pages rulesets_json details='[]' ruleset_id detail
   local ruleset_required='[]' legacy_required='[]'
 
   [[ -n "$owner" && -n "$repo" && -n "$base_ref" ]] || return 1
@@ -798,16 +817,9 @@ fetch_required_status_checks_json() {
       end
     ' <<<"$details" 2>/dev/null)" || return 1
 
-    if protected_json="$(gh_json api "repos/$owner/$repo/branches/$base_ref/protection/required_status_checks")"; then
-      legacy_required="$(jq -c '[.checks[]?.context, .contexts[]?] | map(select(type == "string" and length > 0)) | unique' <<<"$protected_json")" || return 1
-    fi
+    legacy_required="$(fetch_legacy_required_status_checks_json "repos/$owner/$repo/branches/$base_ref/protection/required_status_checks")" || return 1
 
     jq -cn --argjson ruleset "$ruleset_required" --argjson legacy "$legacy_required" '$ruleset + $legacy | unique'
-    return
-  fi
-
-  if protected_json="$(gh_json api "repos/$owner/$repo/branches/$base_ref/protection/required_status_checks")"; then
-    jq -c '[.checks[]?.context, .contexts[]?] | map(select(type == "string" and length > 0)) | unique' <<<"$protected_json"
     return
   fi
 

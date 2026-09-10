@@ -80,6 +80,9 @@ if [[ "$1" == "repo" && "$2" == "view" ]]; then
 fi
 
 if [[ "$*" == *"repos/kdlbs/kandev/rulesets?per_page=100"* ]]; then
+  if [[ "${GH_FAIL_RULESETS:-0}" == "1" ]]; then
+    exit 1
+  fi
   if [[ "${GH_REQUIRED_RULESET:-0}" == "1" ]]; then
     printf '%s\n' '[{"id":7,"target":"branch","enforcement":"active"}]'
   else
@@ -102,10 +105,20 @@ if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/rulesets/7" ]]; then
 fi
 
 if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/branches/main/protection/required_status_checks" ]]; then
+  case "${GH_LEGACY_FAILURE:-}" in
+    forbidden) printf 'HTTP/2.0 403 Forbidden\r\n\r\n{"message":"Forbidden"}\n'; exit 1 ;;
+    unavailable) printf 'HTTP/2.0 503 Unavailable\r\n\r\n{"message":"Unavailable"}\n'; exit 1 ;;
+    hidden) printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}\n'; exit 1 ;;
+    network) exit 1 ;;
+  esac
   if [[ "${GH_LEGACY_REQUIRED:-0}" == "1" ]]; then
+    if [[ "$*" == *"--include"* ]]; then
+      printf 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n'
+    fi
     printf '%s\n' '{"contexts":["Legacy required check"],"checks":[{"context":"Legacy checked required"}]}'
     exit 0
   fi
+  printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Branch not protected"}\n'
   exit 1
 fi
 
@@ -1339,6 +1352,26 @@ test_summary_mode_returns_compact_fixup_state() {
   pass "--summary returns compact fixup state"
 }
 
+test_summary_keeps_failed_policy_sources_unknown() {
+  local tmp json failure
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  for failure in forbidden unavailable hidden network; do
+    GH_LEGACY_FAILURE="$failure" PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+    json="$(<"$tmp/out.json")"
+    assert_jq "legacy $failure keeps policy unknown" '.required_status_checks_known == false' "$json"
+    assert_jq "legacy $failure records missing evidence" 'any(.errors[]; .source == "required_status_checks")' "$json"
+  done
+
+  GH_FAIL_RULESETS=1 GH_LEGACY_REQUIRED=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  assert_jq "legacy success cannot hide failed rulesets" '.required_status_checks_known == false' "$(<"$tmp/out.json")"
+
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  assert_jq "explicitly absent legacy protection is known" '.required_status_checks_known == true and .required_status_checks == []' "$(<"$tmp/out.json")"
+  pass "policy discovery distinguishes absent protection from unavailable evidence"
+}
+
 test_summary_reports_required_status_contexts_from_rulesets() {
   local tmp
   make_tmp_dir tmp
@@ -1774,6 +1807,7 @@ test_graphql_failure_records_error_but_keeps_other_data
 test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
+test_summary_keeps_failed_policy_sources_unknown
 test_summary_reports_required_status_contexts_from_rulesets
 test_summary_unions_legacy_and_ruleset_required_status_contexts
 test_summary_ignores_excluded_ruleset_branch

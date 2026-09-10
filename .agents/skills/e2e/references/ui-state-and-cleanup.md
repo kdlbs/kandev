@@ -29,6 +29,17 @@ REST `expect.poll`, then correlate each post-action event by an active-to-settle
 transition, revision, or timestamp; `watchWs` does not buffer frames, so never
 attach a wait after a spinner or visibility assertion.
 
+## Automatic lifecycle evidence
+
+When a test proves automatic start, resume, or recovery, seed and assert the
+exact precondition before the stimulus. For archive recovery, that means an
+active `WAITING_FOR_INPUT` session whose archive cancellation records the archive
+reason. Reset transport capture immediately before the stimulus, then require
+the automatic request or event and passive backend-state polling before any
+retry or manual recovery action. Do not call `SessionPage.waitForChatIdle()` or
+another helper that reloads/clicks recovery as the first proof, because it can
+mask a missing automatic request. Verify the full spec with `--retries=0`.
+
 ## Terminal and Dockview helpers
 
 - Scope terminal/mobile helpers to the active `data-testid="terminal-panel"`;

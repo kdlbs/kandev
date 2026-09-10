@@ -32,187 +32,54 @@ Create a visible checklist:
 
 ## 1. Gather PR State
 
-Before the first GitHub helper call, request any runtime network approval that
-the environment requires. If access is denied, cancelled, or interrupted, stop
-the workflow permanently; retry only transient fetch failures after access is
-approved.
+Before the first GitHub call, obtain any network approval required by the
+runtime. If the runtime denies access, stop until the user authorizes access.
 
-Run `scripts/pr-state --summary <PR>` once. Record the current-head check,
-review, and PR-delivery fields described in
-`references/review-evidence.md`. For a cross-repository PR, use only the
-reported delivery fields as the push target; do not infer it from a local
-`fork` or `contributor` remote. Load that reference for exact-head review
-classification, authentication fallbacks, and hidden-thread handling. Inspect
-mergeability separately through `references/merge-conflicts.md`.
+Run `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`.
+Load [review-evidence.md](references/review-evidence.md) for snapshot fields,
+review classification, hidden threads, and access fallbacks.
+For cross-repository PRs, use the snapshot's delivery fields as the push target.
 
-Immediately after the snapshot, sequentially run `gh pr view <PR> --json baseRefName,headRefOid,mergeable,mergeStateStatus`;
-require matching `headRefOid` and re-query before CI or review triage if it disagrees.
-Compare the PR base SHA with the current base-ref tip (branches API or `git ls-remote`);
-stale base metadata is a blocker for CI triage.
+Then run `gh pr view <PR> --json state,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision`.
+Require matching head SHAs before triage. Verify the base SHA against the
+current base-ref tip. Refresh mismatched metadata before attributing failures.
+If the PR is merged or closed, stop. For a merge, report
+`mergedAt` and `mergeCommit.oid`.
 
-Treat coordinator or agent alerts as advisory until their reported SHA matches
-a fresh `pr.headRefOid`. If it differs, mark the alert stale and do not rerun
-checks or edit the branch for it; refresh state and act only on evidence for the
-current head.
+Treat peer alerts as advisory until their SHA matches the current head.
+If captured output is empty, truncated, or invalid, rerun through `rtk proxy`.
+Capture stdout and stderr separately and preserve the exit code.
+An empty capture cannot prove that the PR is clean.
 
-If `scripts/pr-state --summary` or `scripts/pr-resolve list/show` produces
-empty, truncated, or unparseable output under RTK or a nested command runner,
-rerun the same command through `rtk proxy`, capturing stdout and stderr in an
-explicit temporary file. Preserve the command's exit code, parse the raw file
-with `jq` or Python, and keep it until the evidence is recorded. Never infer a
-clean PR from an empty capture.
+If GitHub reports a conflict, load
+[merge-conflicts.md](references/merge-conflicts.md) before CI or review triage.
+An explicit fixup request authorizes conflict resolution within that request.
+Otherwise, report the conflict without changing the branch.
 
-If the fresh mergeability query reports `mergeable=CONFLICTING` or
-`mergeStateStatus=DIRTY`, stop CI and review triage. This is an actionable PR
-blocker, not a clean or report-only terminal state. Load
-`references/merge-conflicts.md`. If the user has explicitly authorized PR
-fixup or conflict resolution, resolve the conflict now (prefer a merge of the
-fresh base unless the user requests a rebase), verify the result, push it, and
-restart this section with a new PR-state snapshot. If authorization is absent,
-report the conflict and ask for it before mutating the branch. Do not triage
-comments or checks against a conflicted head.
+If the base advanced without conflicts, use that reference's advanced-base
+procedure. Base advancement alone does not require a branch update.
+Record the head, base, synthetic merge, and focused test results.
+If either input SHA changes, repeat the relevant validation.
+Keep the helper's exit code unchanged and report any separately verified base drift.
 
-If `pr-state --summary` reports `base_advanced_since_head=true`, handle base
-drift before waiting on CI. With authorization, reconcile the branch with the
-authoritative PR base; without it, report the drift and do not classify
-base-dependent failures as PR regressions or rewrite the branch. After
-reconciling, invalidate prior head evidence and rerun the exact failed command
-plus affected package gates.
+For related or stacked PRs, use the semantic-conflict procedure in the same
+reference. Reconcile changed contracts and stable IDs before delivery.
 
-If `pr-await` exits 1 only because `base_advanced_since_head=true`, validate the
-merge result before treating the report as a CI failure or declaring the PR
-ready. Load `references/merge-conflicts.md` and use its conflict-free
-advanced-base procedure. Fetch the authoritative base, verify
-`git merge-tree --write-tree HEAD <base-remote>/<base-ref>`, confirm
-`gh pr view <PR> --json mergeable,mergeStateStatus`, and use `/code-review`'s
-temporary-worktree merged-tree procedure with focused gates. Checks that passed
-Checks against the older base are stale evidence. `git merge-tree --write-tree`
-is only a conflict preflight; run focused gates in a temporary worktree with
-`git merge --no-commit --no-ff <head-sha>`; rebase only when needed and authorized.
+For pending checks, load [waiting.md](references/waiting.md).
+Use `scripts/pr-await` and its final exit code.
+For queue membership or enqueue/dequeue requests, load
+[merge-queue.md](references/merge-queue.md).
+For queue removals or failed synthetic checks, also load
+[ci-troubleshooting.md](references/ci-troubleshooting.md).
+Ordinary PR-head checks do not validate a merge-group commit.
 
-When sequencing related PRs, first query the current head and merged state of
-each dependent, sibling, or stacked PR named by the plan, review, or PR. Compare
-their current diffs and externally visible contracts before treating them as
-independent. Overlapping stable `REQ-*`/`AC-*` IDs, conflicting design
-statements, and changed API or interface contracts are semantic conflicts even
-when GitHub reports `MERGEABLE`; load `references/merge-conflicts.md` and
-reconcile them before continuing. Preserve IDs and meanings already landed,
-allocate the next unused IDs for distinct behavior, update the requirements,
-design, plan, work-order, and test annotations together, then rerun spec lint
-and affected tests. Merge the contract owner first when possible, update the
-consumer, and refresh exact-head evidence after every integration push.
+Directly supplied review findings need current-source validation even without
+a GitHub thread. Apply valid fixes within the user's authorization.
+Do not invent comment IDs or resolutions for findings without a thread.
+External replies and thread resolution still require user authorization.
 
-If the PR was removed from the merge queue, or queue validation failed while
-ordinary head checks are green, load the **Merge queue removals** subsection in
-`references/ci-troubleshooting.md`. A green PR-head snapshot does not cover the
-synthetic merge-group gate.
-
-When a merge-group failure affects an otherwise green exact head, inspect the
-synthetic `gh-readonly-queue/<base>/pr-<number>-<sha>` run, its concrete failed
-job or shard, and the queue merge SHA before changing the branch. Compare that
-SHA with the PR head and authoritative base: a newer mainline commit may have
-caused the failure outside the PR diff. If the defect is already fixed on the
-current base, verify the upstream regression test and requeue the unchanged PR
-with authorization.
-
-If the user requests enqueue/dequeue coordination, or authoritative PR data
-contains a non-null `mergeQueueEntry`, also load `references/merge-queue.md`.
-Enqueue and dequeue are external writes and require explicit user
-authorization; `pr-await` does not monitor the synthetic merge-group commit.
-
-For pending CI, wait with `scripts/pr-await <PR>`. It blocks below the
-conversation and prints one text report when every check is terminal. Keep
-interactive output in this default format; redirect JSON to a file and project
-only the fields needed for triage. Do not re-run `scripts/pr-state
---summary` on a timer instead: each snapshot is a separate model turn.
-
-Default `--mode all-terminal` returns only when no check is pending, so it
-reports the complete failure set after parent workflows finish. Use
-`--mode first-failure` only when the user wants the first failure interactively;
-it costs an extra CI cycle. The helper defaults to a 45-minute deadline. For a
-user-stated wait
-limit, run `scripts/pr-await <PR> --deadline-min <N>` after converting the
-duration to minutes; the canonical bounded form is
-`scripts/pr-await <PR> --mode all-terminal --deadline-min <N>`. Never rely on
-the default deadline for a user-stated limit. Exit 2
-means that the waiter reached its deadline, not that CI passed or failed. If no
-user limit was reached, rerun with a larger deadline. Report "CI in progress"
-only when the user's limit or the workflow's own timeout prevents further
-waiting, and name the pending checks or unconfirmed terminal rollup. This is an
-upper deadline, not a minimum hold time: `pr-await` may return early when all checks are terminal, so do not claim it waited for the full duration. If a fresh PR query reports `MERGED` or `CLOSED` while it runs or after a deadline snapshot, refresh once only if needed; for `MERGED`, report `mergedAt`/`mergeCommit.oid` and stop. Never re-enqueue, rebase, push, or recreate the stale branch. Peer or poller notices remain advisory until revalidated against current PR state.
-
-Read the final tool result's `exit_code`, including when the command runs in a
-PTY or session, rather than re-deriving state from stdout: 0 clean, 1 terminal
-with findings, 2 waiter deadline with checks still pending or a terminal rollup
-not yet confirmed, 3 blocked. A report can print `outcome: terminal` and still
-exit 1 when `base_advanced_since_head=true`; use `/code-review`'s actual
-merge-result validation or report the PR as not ready. Exit 3 covers every
-case where a clean answer cannot be trusted: the PR merged or closed, a workflow
-needs approval, access was lost, the merge-state query failed, the snapshot
-reported `errors` or a null unresolved-thread count, or the host toolchain
-cannot run `pr-state` correctly. Never downgrade an exit 3 to "probably clean."
-
-Exit 1 counts blocking reviews, not only threads: a current-head
-`CHANGES_REQUESTED` review can exist with no unresolved thread attached.
-
-Every report records the jq and bash versions it ran under. That is provenance,
-not a gate: `pr-state` used to fail silently on jq 1.6 and on the bash 3.2 that
-macOS ships as `/bin/bash`, both of which made a dirty PR look clean, and both
-are fixed at the source. What guards against a degraded `pr-state` now is the
-snapshot itself, which is stronger than any version check: a summary reporting
-`errors`, one whose unresolved-thread count is null, and one that does not parse
-are all treated as unknown rather than clean. A blocked report on an old
-toolchain adds a note naming it as a possible cause. A push during the wait
-restarts the gate against the new head and is reported.
-
-Do not use interactive `gh pr checks --watch` in the primary conversation: its
-TTY redraws make captured output unusable. Use the read-only `pr-poller` only
-when the user explicitly asked to wait or monitor and `pr-await` is unavailable.
-Treat a poller's unresolved/pending snapshot as provisional: it can predate a primary-session push or thread resolution. Run `scripts/pr-state --summary <PR>` and
-`scripts/pr-resolve list <PR>` immediately after every `scripts/pr-await` report
-before acting or declaring completion; if delayed checks appear, re-enter it for the same head.
-Immediately after a new head is pushed, GitHub may briefly expose a
-current-head rollup with `checks_snapshot_complete=true`, no failed or pending
-checks, and only a sparse subset of workflows materialized. Use
-`scripts/pr-await <PR>` and require its terminal-rollup confirmation; do not
-declare the PR clean from one sparse snapshot. If its waiter deadline expires before the rollup is confirmed, including when its
-internal `pr-state` 180-second bound is hit, treat exit 2 as CI in progress;
-rerun with a larger explicit `--deadline-min` (and optionally `--interval-sec`) against the current head, never switch to timer-driven snapshots; after a rerun or push, restart the waiter against the current head and require `checks_head_sha` to equal `headRefOid` with zero pending, failed, and unresolved counts before calling it clean. If a new head has an empty current-head review list but an earlier snapshot had aggregate or top-level bot comments, run one `scripts/pr-state --summary --all` audit and revalidate those bodies against the current source before declaring review clean.
-If a job remains pending beyond the workflow's configured timeout, or its status
-conflicts with the GitHub UI/API, query the exact job with
-`gh api repos/<owner>/<repo>/actions/jobs/<job_id>` (or inspect the run with
-`gh run view <run_id>`) before calling CI hung or changing code. Treat the direct
-result as current-head evidence only after its `head_sha` matches
-`checks_head_sha`; otherwise report the result as stale or unknown.
-
-For a cross-repository PR whose current-head snapshot is unexpectedly sparse,
-inspect `approval_required_runs`. A current-head workflow with
-`conclusion=action_required` is blocked verification, not green or skipped CI.
-Only after the user authorizes PR fixup, approve the exact run with
-`gh api --method POST repos/<base-owner>/<base-repo>/actions/runs/<run-id>/approve`,
-then re-run the summary and require jobs to materialize before polling. `gh run
-approve` is not a valid command.
-
-Treat the state as clean only when the current head has no failed or pending
-checks, no merge conflict, no blocking review (an active `CHANGES_REQUESTED`
-or a review blocked at the exact current head), no unresolved review thread, no
-actionable issue comment (the known `kandev-docs-cloudflare-preview` marker is
-non-actionable in `pr-state`), and qualifying exact-head semantic evidence where PR delivery requires it.
-
-Review findings supplied directly in a user or peer message are actionable
-scope even when `scripts/pr-resolve list` is empty. Validate them against the
-current head and add focused regression coverage where appropriate; do not wait
-for a GitHub thread. If the message has no current GitHub thread or comment ID,
-apply a valid fix only when authorized, but never fabricate a PR reply or
-resolution. After pushing, refresh `pr-state` and `pr-resolve`, and report that
-no GitHub thread existed. External replies or thread resolution still require
-user authorization.
-
-Green checks and clean review evidence do not bypass GitHub's approval gate. If
-`reviewDecision=REVIEW_REQUIRED` and `mergeStateStatus=BLOCKED`, report that
-checks and reviews are clean but human approval is still required. Treat this
-as a merge gate, not a code failure, and never self-approve or merge without
-explicit user instruction.
+If `reviewDecision=REVIEW_REQUIRED` and `mergeStateStatus=BLOCKED`, report the
+human approval gate. Green checks do not authorize self-approval or merging.
 
 ## 2. Fix CI Failures
 
@@ -424,8 +291,11 @@ exact-current-head review classification reports no unaddressed findings,
 `checks_snapshot_complete=true`, `failed_checks=[]`, `pending_checks=[]`,
 `approval_required_runs=[]`, `actionable_issue_comment_count=0`,
 `unresolved_review_thread_count=0`, `hidden_unresolved_threads=[]`,
-`base_advanced_since_head=false`, there is no merge conflict, and
-`scripts/pr-resolve list <PR>` is empty. Within
+there is no merge conflict, and `scripts/pr-resolve list <PR>` is empty.
+Require either `base_advanced_since_head=false` or recorded merge-result
+validation for the current head and current base, as defined in
+`references/merge-conflicts.md`. An unknown base relationship is not sufficient.
+Within
 the user's monitoring limit, continue checking after resolutions until automated
 review jobs are terminal; otherwise report the exact pending check names.
 

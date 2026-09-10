@@ -134,8 +134,10 @@ git diff --name-only <old-merge-base>..HEAD > /tmp/head-paths
 comm -12 <(sort /tmp/base-paths) <(sort /tmp/head-paths)
 ```
 
-If paths overlap, build the exact conflict-free synthetic merge without
-mutating the PR branch. `git merge-tree --write-tree` returns a tree object;
+Build the exact conflict-free synthetic merge without changing the PR branch.
+Use the overlapping paths and shared contracts to select focused checks.
+Disjoint paths can still interact through imports, schemas, or configuration.
+`git merge-tree --write-tree` returns a tree object;
 turn it into an unreachable merge commit and inspect it in a detached
 worktree:
 
@@ -144,7 +146,7 @@ SYNTHETIC_TREE="$(git merge-tree --write-tree <authoritative-base> HEAD)"
 SYNTHETIC_COMMIT="$(printf 'review synthetic merge\n' | \
   git commit-tree "$SYNTHETIC_TREE" -p <authoritative-base> -p HEAD)"
 git worktree add --detach /tmp/pr-merge-review-<number> "$SYNTHETIC_COMMIT"
-# Run focused tests for the overlapping paths in that worktree.
+# Run focused checks for affected paths and shared contracts in that worktree.
 git worktree remove --force /tmp/pr-merge-review-<number>
 ```
 
@@ -153,6 +155,12 @@ the detached worktree's own `apps/node_modules` installation; do not assume a
 sibling worktree's dependencies are available. Verify the synthetic merge,
 focused tests, clean normal worktree, local `HEAD` equal to its upstream and PR
 head, and a fresh GitHub query still reporting `MERGEABLE`/`CLEAN`.
+
+Record the immutable PR head, authoritative base, synthetic commit, commands,
+and results. This evidence satisfies the base-drift completion gate only while
+both input SHAs remain current. `base_advanced_since_head` remains true because
+the PR branch did not change. Preserve the helper's exit code and report the
+separate merge-result validation. Human approval and merge-queue gates still apply.
 
 ### When related PRs conflict semantically without file conflicts
 

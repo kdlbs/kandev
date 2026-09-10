@@ -49,16 +49,18 @@ mirror unless the user explicitly requests a policy reversal.
    - Put deterministic logic in `scripts/` when agents keep retyping fragile shell/API sequences.
    - Avoid creating multiple aliases for the same behavior.
 
-   - **Separate product and harness scope:** When a product PR surfaces a
-     request to change `.agents/**`, `.github/**`, `AGENTS.md`, `CLAUDE.md`, or
-     other harness policy, create a separate specified/reviewed harness
-     initiative and PR by default. Include the harness change in the product
-     PR only when the user explicitly requests the same PR for both changes.
+   - **Separate independent policy changes:** Keep factual instruction updates
+     and CI changes required by a feature in that feature's PR.
+     Use a separate initiative for independent workflow-policy changes unless
+     the user requests a combined PR. Classify changes by purpose, not path.
 
 4. **Preserve progressive disclosure**
    - Keep `SKILL.md` concise.
    - Move platform tables, long examples, templates, and edge-case notes to `references/`.
    - Reference each supporting file explicitly from the main skill so future agents know when to load it.
+   - Review word and byte counts as well as line counts. Do not join paragraphs
+     to satisfy a line limit. Move specialized procedures into references with
+     explicit loading conditions. Keep each rule in one authoritative location.
 
 5. **Edit and validate**
    - Use `apply_patch` for file edits.

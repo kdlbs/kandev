@@ -43,6 +43,8 @@ For UI rendering bugs, prefer extracting or using a pure helper and testing that
   ```
 - **Web E2E** (`apps/web/e2e/`): follow `/e2e` when the current task needs Playwright tests.
 
+For Go test fixtures, load [backend-tests.md](references/backend-tests.md).
+
 Choose the right level:
 - **Unit:** pure logic or isolated service behavior.
 - **Integration:** handler/service/repository boundaries, SQLite-backed flows, filesystem behavior, or process boundaries.

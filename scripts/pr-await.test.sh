@@ -100,7 +100,7 @@ snapshot() {
 run_await() {
   local dir=$1; shift
   FAKE_DIR="$dir" PR_AWAIT_PR_STATE="$dir/pr-state" PR_AWAIT_GH="$dir/gh" \
-    PR_AWAIT_SLEEP="$dir/sleep" \
+    PR_AWAIT_SLEEP="${PR_AWAIT_SLEEP_OVERRIDE:-$dir/sleep}" \
     PR_AWAIT_JQ="${PROBE_JQ:-$dir/jq-ok}" PR_AWAIT_PROBE_BASH="${PROBE_BASH:-$dir/bash-ok}" \
     "$SCRIPT" "$@"
 }
@@ -188,6 +188,50 @@ out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)"
 grep -q 'STILL PENDING' <<<"$out" || fail "deadline should name pending checks" "$out"
 grep -q 'Pending 0' <<<"$out" || fail "deadline should list check names" "$out"
 pass "deadline exits 2 and names the pending checks"
+
+# --- strict-deadline holds a fixed-duration request after terminal CI --------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat >"$d/slow-sleep" <<'SLOWSLEEP'
+#!/usr/bin/env bash
+printf 'slept %s\n' "$1" >> "$FAKE_DIR/sleeps"
+/usr/bin/sleep "$1"
+SLOWSLEEP
+chmod +x "$d/slow-sleep"
+out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \
+  run_await "$d" 12 --mode strict-deadline --interval-sec 1 --quiet --format json 2>/dev/null)" \
+  && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "strict-deadline clean terminal should exit 0, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'strict-terminal' ]] \
+  || fail "strict-deadline should report its fixed-duration terminal outcome" "$out"
+[[ "$(jq -r '.mode' <<<"$out")" == 'strict-deadline' ]] \
+  || fail "strict-deadline mode should be recorded" "$out"
+[[ "$(wc -l < "$d/sleeps" | tr -d ' ')" -ge 1 ]] \
+  || fail "strict-deadline should wait after terminal evidence" "$out"
+pass "strict-deadline holds a terminal-clean wait through its requested duration"
+
+# --- strict-deadline returns findings or pending work with distinct statuses -
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 1 0
+cat >"$d/slow-sleep" <<'SLOWSLEEP'
+#!/usr/bin/env bash
+/usr/bin/sleep "$1"
+SLOWSLEEP
+chmod +x "$d/slow-sleep"
+out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \
+  run_await "$d" 12 --mode strict-deadline \
+  --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "strict-deadline terminal findings should exit 1, got $rc" "$out"
+[[ "$(jq -r '.summary.failed_checks | length' <<<"$out")" == '1' ]] \
+  || fail "strict-deadline should preserve terminal findings" "$out"
+pass "strict-deadline reports terminal findings as exit 1"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 0 1
+out="$(PR_AWAIT_DEADLINE_SEC=0 run_await "$d" 12 --mode strict-deadline \
+  --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "strict-deadline pending work should exit 2, got $rc" "$out"
+pass "strict-deadline reports pending work as exit 2"
 
 # --- approval-required is blocked, not green --------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
