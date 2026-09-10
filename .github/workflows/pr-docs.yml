@@ -15,8 +15,15 @@ on:
         type: number
 
 concurrency:
-  group: pr-docs-${{ github.event_name == 'merge_group' && github.event.merge_group.head_sha || github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+  # Use the target branch as the shared lock. Label events have only PR
+  # metadata, while merge-group events have the synthetic group SHA; the
+  # branch lock prevents either event from publishing over the other.
+  group: >-
+    pr-docs-${{
+      github.event_name == 'merge_group' && github.event.merge_group.base_ref ||
+      format('refs/heads/{0}', github.event.pull_request.base.ref || github.event.repository.default_branch)
+    }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -25,7 +32,7 @@ permissions:
 
 jobs:
   coverage:
-    name: PR documentation coverage
+    name: Publish PR documentation coverage status
     if: >-
       github.event_name != 'workflow_dispatch' ||
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)

@@ -40,4 +40,5 @@ Apply this guidance whenever editing `.github/**`.
 - Its `PR documentation coverage` status is revision-specific. The exact
   `no-docs-allow` label is the only policy override, and merge-group evaluation
   must resolve and validate every member independently against the group's
-  entry boundaries.
+  entry boundaries. All event types share a non-cancelling target-branch lock
+  so queued label reevaluations cannot race with merge-group status writes.

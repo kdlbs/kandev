@@ -88,7 +88,10 @@ Set pending before evaluation; publish success, failure for missing coverage, or
 The status target URL points to the run summary, which lists reasons, paths, references, and remediation.
 Also fail the workflow job on policy failure or infrastructure error. Do not post PR comments.
 
-Serialize runs by PR number with `cancel-in-progress: false`. Every surviving run reads current state.
+Serialize all events by the normalized target branch with `cancel-in-progress: false`.
+This shared lock is intentionally broader than a PR-number or group-SHA lock so
+queued label reevaluations cannot race with a merge-group evaluation for the
+same target branch. Every surviving run reads current state.
 Before publishing, reread the head, base, and label set. If changed, reevaluate with a bounded retry, then fail if state remains unstable.
 Do not report stale successes for a new head. Metadata publication is eventually consistent; GitHub does not provide an atomic label-read/status-write transaction.
 
@@ -105,7 +108,9 @@ Resolve members using the paginated GraphQL merge queue entries, including each 
 Find the entry for the event head and trace the entry commit boundaries back to the event base.
 Require a complete, unambiguous chain; unknown membership produces an error, not success.
 Evaluate each member's own current PR diff, artifact chain, and labels. Confirm queue identities and member heads again before publication.
-Use a group-SHA concurrency key and never cancel active group evaluation.
+Use the target-branch concurrency key shared with queued label reevaluation and
+never cancel active group evaluation. The group status itself remains on the
+synthetic group SHA.
 
 Integration must validate the entry-boundary mapping against real GitHub merge-group payloads before requiring this status.
 If GitHub cannot supply the expected chain for a supported queue mode, revise the mapping and fixtures before rollout.

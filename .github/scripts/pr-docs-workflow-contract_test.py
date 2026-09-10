@@ -40,14 +40,10 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
 
     # @covers AC-CI-PR-DOCS-003.1, AC-CI-PR-DOCS-003.4
     def test_serializes_prs_without_cancelling_merge_group_runs(self) -> None:
-        self.assertRegex(
-            self.workflow,
-            r"group: pr-docs-\$\{\{ .*github\.event\.merge_group\.head_sha",
-        )
-        self.assertIn(
-            "cancel-in-progress: ${{ github.event_name != 'merge_group' }}",
-            self.workflow,
-        )
+        self.assertIn("group: >-", self.workflow)
+        self.assertIn("github.event.merge_group.base_ref", self.workflow)
+        self.assertIn("github.event.pull_request.base.ref", self.workflow)
+        self.assertIn("cancel-in-progress: false", self.workflow)
 
     # @covers AC-CI-PR-DOCS-003.3
     def test_uses_trusted_least_privilege_checkout(self) -> None:
@@ -68,6 +64,8 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("pnpm install", self.workflow)
         self.assertNotIn("npm install", self.workflow)
         self.assertIn("node .github/scripts/pr-docs.cjs", self.workflow)
+        self.assertIn("name: Publish PR documentation coverage status", self.workflow)
+        self.assertNotIn("name: PR documentation coverage\n", self.workflow)
 
     # @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-002.1, AC-CI-PR-DOCS-003.2
     def test_dispatch_is_restricted_to_the_default_branch_and_script_owns_statuses(self) -> None:
@@ -88,6 +86,13 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
             r"(?m)^      - name: Test pull request documentation workflow contract$\n"
             r"^        run: python3 .github/scripts/pr-docs-workflow-contract_test.py$",
         )
+        self.assertRegex(
+            lint_workflow,
+            r"(?m)^      - name: Test pull request documentation validator$\n"
+            r"^        run: node --test .github/scripts/pr-docs.test.cjs$",
+        )
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("@node --test .github/scripts/pr-docs.test.cjs", makefile)
 
 
 if __name__ == "__main__":

@@ -136,6 +136,11 @@ system_design:
   assert.deepEqual(parsed.data.requirements, ['REQ-CI-PR-DOCS-001']);
   assert.equal(parsed.data.wave, 1);
 
+  const singleQuotedBackslash = validator.parseFrontmatter(
+    `---\nrequirements: ['a${String.fromCharCode(92)}']\n---\n`,
+  );
+  assert.deepEqual(singleQuotedBackslash.data.requirements, [`a${String.fromCharCode(92)}`]);
+
   for (const source of [
     '---\nunknown: value\n---\n',
     '---\nid: first\nid: second\n---\n',
@@ -219,6 +224,46 @@ function runtimeAndWorkOrderDiff(overrides = []) {
   ];
 }
 
+function uiFixtureContents() {
+  const contents = fixtureContents();
+  contents['docs/plans/recovery/plan.md'] = contents['docs/plans/recovery/plan.md']
+    .replaceAll('REQ-CI-PR-DOCS-001', 'REQ-UI-COVERAGE-001')
+    .replaceAll(
+      '../../specs/ci/system-design/pull-request-documentation-coverage.md',
+      '../../specs/ui/system-design/ui-coverage.md',
+    );
+  contents['docs/plans/recovery/task-01-recovery.md'] = contents[
+    'docs/plans/recovery/task-01-recovery.md'
+  ]
+    .replaceAll('REQ-CI-PR-DOCS-001', 'REQ-UI-COVERAGE-001')
+    .replaceAll('AC-CI-PR-DOCS-001.3', 'AC-UI-COVERAGE-001.3')
+    .replaceAll(
+      '../../specs/ci/system-design/pull-request-documentation-coverage.md',
+      '../../specs/ui/system-design/ui-coverage.md',
+    );
+  delete contents['docs/specs/ci/system-design/pull-request-documentation-coverage.md'];
+  delete contents['docs/specs/ci/requirements/pull-request-documentation-coverage.md'];
+  contents['docs/specs/ui/system-design/ui-coverage.md'] = `---
+status: current
+system: ui
+requirements:
+  - REQ-UI-COVERAGE-001
+---
+
+# UI coverage design
+`;
+  contents['docs/specs/ui/requirements/ui-coverage.md'] = `---
+status: current
+system: ui
+---
+
+### REQ-UI-COVERAGE-001
+
+- **AC-UI-COVERAGE-001.3:** Runtime changes have a work order.
+`;
+  return contents;
+}
+
 // @covers AC-CI-PR-DOCS-001.3, AC-CI-PR-DOCS-001.4
 test('valid linked work order covers a runtime change without editing existing contracts', () => {
   const result = validator.validateCoverage({
@@ -256,6 +301,28 @@ test('multi-requirement work orders map acceptance criteria to their owning requ
 
 - **AC-CI-PR-DOCS-002.1:** The exact exception label passes coverage.
 `;
+
+  const result = validator.validateCoverage({
+    changedFiles: runtimeAndWorkOrderDiff(),
+    fileContents: contents,
+  });
+
+  assert.equal(result.ok, true, result.errors.join('; '));
+  assert.deepEqual(result.errors, []);
+});
+
+test('linked plans and designs accept existing update metadata', () => {
+  const contents = fixtureContents();
+  contents['docs/plans/recovery/plan.md'] = contents['docs/plans/recovery/plan.md'].replace(
+    'status: draft',
+    'status: draft\nupdated: 2026-09-09',
+  );
+  contents['docs/specs/ci/system-design/pull-request-documentation-coverage.md'] = contents[
+    'docs/specs/ci/system-design/pull-request-documentation-coverage.md'
+  ].replace(
+    'status: draft',
+    'status: draft\nlast_updated: 2026-09-09',
+  );
 
   const result = validator.validateCoverage({
     changedFiles: runtimeAndWorkOrderDiff(),
@@ -314,6 +381,16 @@ test('missing, empty, deleted, escaping, and mismatched references fail precisel
       },
       expected: 'REQ-CI-PR-DOCS-001',
     },
+    {
+      name: 'work-order basename without a Markdown link',
+      overrides: {
+        'docs/plans/recovery/plan.md': baseContents['docs/plans/recovery/plan.md'].replace(
+          '- [ ] [Task 01: Recover worktrees](task-01-recovery.md)',
+          'The task-01-recovery.md file is tracked here.',
+        ),
+      },
+      expected: 'does not link back',
+    },
   ];
 
   for (const { name, overrides, expected } of cases) {
@@ -353,13 +430,15 @@ test('ambiguous requirement definitions and missing work orders fail closed', ()
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
 const SHA_C = 'c'.repeat(40);
+const SHA_D = 'd'.repeat(40);
+const SHA_E = 'e'.repeat(40);
 
-function pullRequest(number, headSha, labels = []) {
+function pullRequest(number, headSha, labels = [], changedFiles = 1) {
   return {
     number,
     state: 'open',
     draft: false,
-    changed_files: 1,
+    changed_files: changedFiles,
     head: { sha: headSha },
     base: { sha: SHA_A, ref: 'main' },
     labels: labels.map(name => ({ name })),
@@ -524,6 +603,127 @@ test('GitHub client rejects malformed changed-file entries and mismatched conten
   await assert.rejects(client.getFile('docs/plan.md', SHA_B), /returned path/);
 });
 
+test('GitHub client scopes merge-queue lookup to the target branch', async () => {
+  const requests = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            data: {
+              repository: {
+                mergeQueue: {
+                  entries: {
+                    nodes: [],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
+                },
+              },
+            },
+          });
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(await client.listMergeQueueEntries('release/next'), []);
+  const request = JSON.parse(requests[0].options.body);
+  assert.match(request.query, /mergeQueue\(branch: \$branch\)/);
+  assert.equal(request.variables.branch, 'release/next');
+});
+
+test('GitHub client converts a request timeout into a bounded error', async () => {
+  let signal;
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    fetchImpl: async (_url, options) => {
+      signal = options.signal;
+      const error = new Error('request timed out');
+      error.name = 'TimeoutError';
+      throw error;
+    },
+  });
+
+  await assert.rejects(client.getPullRequest(42), /timed out/i);
+  assert.equal(typeof signal?.aborted, 'boolean');
+});
+
+test('coverage loading searches only the referenced requirement files', async () => {
+  const contents = uiFixtureContents();
+  const loaded = [];
+  const searches = [];
+  const workOrderPath = 'docs/plans/recovery/task-01-recovery.md';
+  const changed = [
+    { filename: 'apps/web/lib/runtime.ts', status: 'modified' },
+    { filename: workOrderPath, status: 'modified', additions: 1, changes: 1 },
+  ];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, [], changed.length);
+    },
+    async listFiles() {
+      return changed;
+    },
+    async getFile(pathname) {
+      loaded.push(pathname);
+      if (!Object.hasOwn(contents, pathname)) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname];
+    },
+    async searchCode(requirementId, directory) {
+      searches.push({ requirementId, directory });
+      return ['docs/specs/ui/requirements/ui-coverage.md'];
+    },
+  };
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+  assert.equal(result.ok, true, result.errors.join('; '));
+  assert.deepEqual(searches, [{
+    requirementId: 'REQ-UI-COVERAGE-001',
+    directory: 'docs/specs/ui/requirements',
+  }]);
+  assert.deepEqual(loaded, [
+    workOrderPath,
+    'docs/plans/recovery/plan.md',
+    'docs/specs/ui/system-design/ui-coverage.md',
+    'docs/specs/ui/requirements/ui-coverage.md',
+  ]);
+});
+
+test('missing referenced artifacts become invalid coverage through the API adapter', async () => {
+  const contents = fixtureContents();
+  const workOrderPath = 'docs/plans/recovery/task-01-recovery.md';
+  const changed = runtimeAndWorkOrderDiff();
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, [], changed.length);
+    },
+    async listFiles() {
+      return changed;
+    },
+    async getFile(pathname) {
+      if (pathname === workOrderPath) {
+        return contents[pathname];
+      }
+      throw new Error('GitHub API request failed with HTTP 404: Not Found');
+    },
+  };
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'invalid');
+  assert.equal(result.errors.some(error => error.includes('plan.md')), true);
+});
+
 test('GitHub client rejects a changed-file count at the API cap', async () => {
   const client = new validator.GitHubClient({
     owner: 'kdlbs',
@@ -609,19 +809,19 @@ test('merge-group evaluation keeps each member policy independent', async () => 
     {
       baseCommit: { oid: SHA_A },
       headCommit: { oid: SHA_B },
-      pullRequest: { number: 1, headRefOid: SHA_B },
+      pullRequest: { number: 1, headRefOid: SHA_D },
     },
     {
       baseCommit: { oid: SHA_B },
       headCommit: { oid: SHA_C },
-      pullRequest: { number: 2, headRefOid: SHA_C },
+      pullRequest: { number: 2, headRefOid: SHA_E },
     },
   ];
   const client = {
     async getPullRequest(number) {
       return number === 1
-        ? pullRequest(1, SHA_B, ['no-docs-allow'])
-        : pullRequest(2, SHA_C);
+        ? pullRequest(1, SHA_D, ['no-docs-allow'])
+        : pullRequest(2, SHA_E);
     },
     async listFiles(number) {
       return [{
@@ -639,6 +839,10 @@ test('merge-group evaluation keeps each member policy independent', async () => 
   });
   assert.equal(result.ok, false);
   assert.deepEqual(result.memberResults.map(member => member.status), ['override', 'missing']);
+  assert.deepEqual(
+    result.memberResults.map(member => member.expectedHeadSha),
+    [SHA_D, SHA_E],
+  );
 });
 
 test('affected merge groups can be found for label-triggered reevaluation', () => {
@@ -701,6 +905,40 @@ test('run publishes pending and final status for the stable current pull-request
   assert.match(summaries[0], /docs\/guide\.md/);
 });
 
+test('workflow dispatch reads the pull-request number from its input', async () => {
+  const statuses = [];
+  const client = {
+    async getPullRequest(number) {
+      assert.equal(number, 99);
+      return pullRequest(99, SHA_B);
+    },
+    async listFiles() {
+      return [{ filename: 'docs/guide.md', status: 'modified' }];
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, state: status.state });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {
+      GITHUB_REPOSITORY: 'kdlbs/kandev',
+      GITHUB_RUN_ID: '100',
+      GITHUB_SERVER_URL: 'https://github.com',
+    },
+    event: { inputs: { pr_number: '99' } },
+    eventName: 'workflow_dispatch',
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(statuses, [
+    { sha: SHA_B, state: 'pending' },
+    { sha: SHA_B, state: 'success' },
+  ]);
+});
+
 test('merge-group runs publish one status on the synthetic group head', async () => {
   const statuses = [];
   const client = {
@@ -725,7 +963,13 @@ test('merge-group runs publish one status on the synthetic group head', async ()
   const result = await validator.run({
     client,
     env: {},
-    event: { merge_group: { base_sha: SHA_A, head_sha: SHA_C } },
+    event: {
+      merge_group: {
+        base_ref: 'refs/heads/main',
+        base_sha: SHA_A,
+        head_sha: SHA_C,
+      },
+    },
     eventName: 'merge_group',
     writeSummary: () => {},
   });
@@ -733,6 +977,7 @@ test('merge-group runs publish one status on the synthetic group head', async ()
   assert.equal(result.exitCode, 0);
   assert.deepEqual(statuses.map(status => status.state), ['pending', 'success']);
   assert.deepEqual(statuses.map(status => status.sha), [SHA_C, SHA_C]);
+  assert.equal(statuses[1].description, 'Every merge-group member satisfies documentation coverage');
 });
 
 // @covers AC-CI-PR-DOCS-002.2, AC-CI-PR-DOCS-003.4

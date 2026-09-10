@@ -78,7 +78,7 @@ activation remain deployment steps and are not claimed by this change.
 
 Implementation verification on 2026-09-10:
 
-- `node --test .github/scripts/pr-docs.test.cjs`: 25 tests passed.
+- `node --test .github/scripts/pr-docs.test.cjs`: 31 tests passed.
 - `python3 .github/scripts/pr-docs-workflow-contract_test.py`: 5 tests passed.
 - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
 - `python3 .github/scripts/lint-action-pinning.py`: 24 workflows passed.

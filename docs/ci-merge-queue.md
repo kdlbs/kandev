@@ -230,6 +230,11 @@ the queue entry boundaries back to the event base and evaluates every included
 pull request with its own changed files, work-order references, and labels. A
 member's `no-docs-allow` label cannot exempt another member.
 
+All PR and merge-group events use the target branch as one non-cancelling
+concurrency key. This keeps a queued label reevaluation from racing with a
+merge-group status write while the published coverage status remains attached to
+the evaluated PR or synthetic group revision.
+
 The status is not in the active required-check list above until live merge-group
 evidence is collected. Roll out the requirement in two stages:
 

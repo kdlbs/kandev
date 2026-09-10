@@ -37,6 +37,9 @@ const FRONTMATTER_FIELDS = new Set([
   'system',
   'system_design',
   'title',
+  'updated',
+  'last_updated',
+  'specification_version',
   'wave',
 ]);
 const ARRAY_FIELDS = new Set([
@@ -63,6 +66,7 @@ const MAX_DOCUMENTS = 100;
 const MAX_TOTAL_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_CHANGED_FILES = 3000;
+const REQUEST_TIMEOUT_MS = 30_000;
 const NO_DOCS_LABEL = 'no-docs-allow';
 const STATUS_CONTEXT = 'PR documentation coverage';
 const GITHUB_API = 'https://api.github.com';
@@ -265,7 +269,7 @@ function parseInlineArray(value, field) {
       current += character;
       if (escaped) {
         escaped = false;
-      } else if (character === '\\') {
+      } else if (character === '\\' && quote === '"') {
         escaped = true;
       } else if (character === quote) {
         quote = null;
@@ -380,6 +384,24 @@ function resolveReference(basePath, reference) {
   }
   const resolved = normalizeRepoPath(POSIX_PATH.join(POSIX_PATH.dirname(basePath), reference));
   return resolved;
+}
+
+function hasMarkdownLinkTo(planPath, body, targetPath) {
+  const linkPattern = /\[[^\]]+\]\(\s*(?:<([^>]+)>|([^\s)]+))/g;
+  for (const match of body.matchAll(linkPattern)) {
+    const destination = (match[1] ?? match[2]).split(/[?#]/, 1)[0];
+    if (destination.length === 0) {
+      continue;
+    }
+    try {
+      if (resolveReference(planPath, destination) === targetPath) {
+        return true;
+      }
+    } catch {
+      // Invalid links are not links to the selected work order.
+    }
+  }
+  return false;
 }
 
 function asNonEmptyString(value, field, pathname) {
@@ -547,7 +569,7 @@ function validateWorkOrder(workOrderPath, fileContents, deletedPaths) {
     } else {
       try {
         const plan = parseFrontmatter(planContent);
-        if (!plan.body.includes(POSIX_PATH.basename(workOrderPath))) {
+        if (!hasMarkdownLinkTo(planPath, plan.body, workOrderPath)) {
           errors.push(`${planPath} does not link back to ${workOrderPath}`);
         }
         const planRequirements = Array.isArray(plan.data.requirements)
@@ -709,6 +731,22 @@ function requireCommitSha(value, description) {
   return value;
 }
 
+function requireBranchName(value, description) {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${description} is missing or invalid`);
+  }
+  const branch = value.startsWith('refs/heads/') ? value.slice('refs/heads/'.length) : value;
+  if (
+    branch.length === 0
+    || branch.includes('\0')
+    || /[\r\n]/.test(branch)
+    || branch.startsWith('refs/')
+  ) {
+    throw new Error(`${description} is missing or invalid`);
+  }
+  return branch;
+}
+
 function requirePullRequestNumber(value) {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error('pull-request number is missing or invalid');
@@ -745,11 +783,24 @@ class GitHubClient {
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
-    const response = await this.fetchImpl(`${GITHUB_API}${endpoint}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const timeoutSignal = typeof AbortSignal === 'function'
+      && typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      : undefined;
+    let response;
+    try {
+      response = await this.fetchImpl(`${GITHUB_API}${endpoint}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        ...(timeoutSignal ? { signal: timeoutSignal } : {}),
+      });
+    } catch (error) {
+      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+        throw new Error(`GitHub API request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+      }
+      throw error;
+    }
     if (!response || typeof response.text !== 'function') {
       throw new Error('GitHub API returned an invalid response');
     }
@@ -894,6 +945,40 @@ class GitHubClient {
     });
   }
 
+  async searchCode(text, directory) {
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      throw new Error('GitHub code-search text is missing');
+    }
+    const normalizedDirectory = normalizeRepoPath(directory);
+    const query = `"${text}" repo:${this.owner}/${this.repo} path:${normalizedDirectory}`;
+    const response = await this.request(
+      `/search/code?q=${encodeURIComponent(query)}&per_page=100`,
+    );
+    if (
+      !response
+      || !Array.isArray(response.items)
+      || response.incomplete_results === true
+      || !Number.isInteger(response.total_count)
+      || response.total_count < response.items.length
+      || response.total_count > 100
+    ) {
+      throw new Error('GitHub code-search response is incomplete or exceeds the supported limit');
+    }
+    const prefix = `${normalizedDirectory}/`;
+    const paths = new Set();
+    for (const item of response.items) {
+      if (typeof item?.path !== 'string') {
+        throw new Error('GitHub code-search entry has no path');
+      }
+      const itemPath = normalizeRepoPath(item.path);
+      if (!itemPath.startsWith(prefix) || !itemPath.endsWith('.md')) {
+        throw new Error(`GitHub code-search returned an unsupported path: ${itemPath}`);
+      }
+      paths.add(itemPath);
+    }
+    return [...paths];
+  }
+
   async createCommitStatus(sha, status) {
     requireCommitSha(sha, 'status revision');
     if (!status || !['pending', 'success', 'failure', 'error'].includes(status.state)) {
@@ -924,11 +1009,12 @@ class GitHubClient {
     return response?.data;
   }
 
-  async listMergeQueueEntries() {
+  async listMergeQueueEntries(branch) {
+    const targetBranch = requireBranchName(branch, 'merge-queue target branch');
     const query = `
-      query($owner: String!, $repo: String!, $after: String) {
+      query($owner: String!, $repo: String!, $branch: String!, $after: String) {
         repository(owner: $owner, name: $repo) {
-          mergeQueue {
+          mergeQueue(branch: $branch) {
             entries(first: 100, after: $after) {
               nodes {
                 baseCommit { oid }
@@ -945,6 +1031,7 @@ class GitHubClient {
     let after = null;
     for (let page = 0; page < 10; page += 1) {
       const data = await this.graphql(query, {
+        branch: targetBranch,
         owner: this.owner,
         repo: this.repo,
         after,
@@ -974,6 +1061,7 @@ function isNoDocsOverride(pullRequest) {
 function resultMetadata(pullRequest) {
   return {
     baseSha: pullRequest.base.sha,
+    baseRef: pullRequest.base.ref,
     headSha: pullRequest.head.sha,
     labels: pullRequest.labels.map(label => label?.name).filter(name => typeof name === 'string').sort(),
   };
@@ -983,6 +1071,7 @@ function sameMetadata(left, right) {
   return (
     left.headSha === right.headSha &&
     left.baseSha === right.baseSha &&
+    left.baseRef === right.baseRef &&
     JSON.stringify(left.labels) === JSON.stringify(right.labels)
   );
 }
@@ -993,6 +1082,7 @@ function errorCoverageResult(message, metadata = {}) {
     changedPaths: [],
     errors: [message],
     exemptPaths: [],
+    baseRef: metadata.baseRef,
     headSha: metadata.headSha,
     ok: false,
     remediation: ['Retry the workflow after GitHub returns complete, stable revision and label data.'],
@@ -1001,6 +1091,10 @@ function errorCoverageResult(message, metadata = {}) {
     triggeringPaths: [],
     workOrders: [],
   };
+}
+
+function isMissingResourceError(error) {
+  return /\bHTTP 404\b/.test(String(error?.message ?? error));
 }
 
 async function loadCoverageContents({ client, changedFiles, headSha }) {
@@ -1019,9 +1113,19 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
     if (documentCount >= MAX_DOCUMENTS) {
       throw new Error(`Referenced documents exceed the ${MAX_DOCUMENTS}-document limit`);
     }
-    const content = await client.getFile(normalized, headSha);
+    let content;
+    try {
+      content = await client.getFile(normalized, headSha);
+    } catch (error) {
+      if (!isMissingResourceError(error)) {
+        throw error;
+      }
+    }
+    loaded.add(normalized);
+    documentCount += 1;
     if (typeof content !== 'string' || content.trim().length === 0) {
-      throw new Error(`${normalized} is missing or empty`);
+      contents[normalized] = undefined;
+      return undefined;
     }
     const size = Buffer.byteLength(content, 'utf8');
     if (size > MAX_DOCUMENT_BYTES) {
@@ -1031,14 +1135,15 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
     if (totalBytes > MAX_TOTAL_DOCUMENT_BYTES) {
       throw new Error(`Referenced documents exceed the ${MAX_TOTAL_DOCUMENT_BYTES}-byte total limit`);
     }
-    loaded.add(normalized);
     contents[normalized] = content;
-    documentCount += 1;
     return content;
   }
 
   for (const workOrderPath of selectChangedWorkOrders(changedFiles)) {
     const workOrderContent = await load(workOrderPath);
+    if (workOrderContent === undefined) {
+      continue;
+    }
     let workOrder;
     try {
       workOrder = parseFrontmatter(workOrderContent).data;
@@ -1052,6 +1157,9 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
       continue;
     }
     const planContent = await load(planPath);
+    if (planContent === undefined) {
+      continue;
+    }
     let plan;
     try {
       plan = parseFrontmatter(planContent).data;
@@ -1072,6 +1180,9 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
     }
     for (const designPath of designPaths) {
       const designContent = await load(designPath);
+      if (designContent === undefined) {
+        continue;
+      }
       let system;
       try {
         parseFrontmatter(designContent);
@@ -1084,10 +1195,50 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
         continue;
       }
       const requirementDirectory = `docs/specs/${system}/requirements`;
-      const entries = await client.listDirectory(requirementDirectory, headSha);
-      for (const entry of entries) {
-        if (entry.type === 'file' && entry.path.endsWith('.md')) {
-          await load(entry.path);
+      const requirementPaths = new Set();
+      const changedRepositoryPaths = changedPaths(changedFiles).paths;
+      for (const pathname of changedRepositoryPaths) {
+        if (pathname.startsWith(`${requirementDirectory}/`) && pathname.endsWith('.md')) {
+          requirementPaths.add(pathname);
+        }
+      }
+      const unresolvedRequirementIds = [];
+      if (typeof client.searchCode === 'function') {
+        for (const requirementId of workOrder.requirements ?? []) {
+          const matches = await client.searchCode(requirementId, requirementDirectory);
+          if (matches.length === 0) {
+            unresolvedRequirementIds.push(requirementId);
+          }
+          for (const pathname of matches) {
+            requirementPaths.add(pathname);
+          }
+        }
+      } else {
+        unresolvedRequirementIds.push(...(workOrder.requirements ?? []));
+      }
+      if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
+        let entries = [];
+        try {
+          entries = await client.listDirectory(requirementDirectory, headSha);
+        } catch (error) {
+          if (!isMissingResourceError(error)) {
+            throw error;
+          }
+        }
+        const candidateNames = new Set(unresolvedRequirementIds.map(requirementId => {
+          const parts = requirementId.split('-');
+          return `${parts.slice(2).join('-').replace(/-\d+$/, '').toLowerCase()}.md`;
+        }));
+        for (const entry of entries) {
+          if (entry.type === 'file' && candidateNames.has(POSIX_PATH.basename(entry.path))) {
+            requirementPaths.add(entry.path);
+          }
+        }
+      }
+      for (const pathname of requirementPaths) {
+        const requirementContent = await load(pathname);
+        if (requirementContent === undefined) {
+          continue;
         }
       }
     }
@@ -1104,6 +1255,7 @@ async function evaluatePullRequestSnapshot({ client, pullRequest, expectedHeadSh
   }
   const metadata = {
     baseSha: pullRequest.base.sha,
+    baseRef: pullRequest.base.ref,
     headSha: pullRequest.head.sha,
     pullRequestNumber: pullRequest.number,
   };
@@ -1234,16 +1386,20 @@ async function evaluateMergeGroup({ client, baseSha, headSha, entries, maxAttemp
   const group = resolveMergeGroupMembers({ baseSha, entries, headSha });
   const memberResults = [];
   for (const member of group.members) {
+    const expectedHeadSha = requireCommitSha(
+      member.pullRequest?.headRefOid,
+      `merge-queue member ${member.number} pull-request head`,
+    );
     const result = await evaluatePullRequest({
       client,
-      expectedHeadSha: member.headSha,
+      expectedHeadSha,
       maxAttempts,
       pullNumber: member.number,
     });
     memberResults.push({
       ...result,
       baseSha: member.baseSha,
-      expectedHeadSha: member.headSha,
+      expectedHeadSha,
       number: member.number,
     });
   }
@@ -1286,7 +1442,10 @@ function findAffectedMergeGroups({ entries, pullRequestNumber } = {}) {
     let current = terminal.headSha;
     while (true) {
       const candidates = normalizedEntries.filter(entry => entry.headSha === current);
-      if (candidates.length !== 1) {
+      if (candidates.length === 0) {
+        throw new Error(`merge-group boundary ${current} is not connected to any queue entry`);
+      }
+      if (candidates.length > 1) {
         throw new Error(`merge-group boundary ${current} has ambiguous membership`);
       }
       const entry = candidates[0];
@@ -1401,6 +1560,12 @@ function statusDescription(result) {
   if (result.status === 'invalid') {
     return 'Linked delivery package is incomplete';
   }
+  if (result.status === 'success') {
+    return 'Every merge-group member satisfies documentation coverage';
+  }
+  if (result.status === 'failure') {
+    return 'A merge-group member does not satisfy documentation coverage';
+  }
   return 'Coverage evaluation failed';
 }
 
@@ -1487,6 +1652,10 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
   let result;
   try {
     if (effectiveEventName === 'merge_group') {
+      const targetBranch = requireBranchName(
+        effectiveEvent.merge_group?.base_ref,
+        'merge-group target branch',
+      );
       const baseSha = requireCommitSha(
         effectiveEvent.merge_group?.base_sha,
         'merge-group base revision',
@@ -1501,7 +1670,7 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
         state: 'pending',
         targetUrl,
       });
-      const entries = await apiClient.listMergeQueueEntries();
+      const entries = await apiClient.listMergeQueueEntries(targetBranch);
       result = await evaluateMergeGroup({
         baseSha,
         client: apiClient,
@@ -1527,7 +1696,11 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
       if (effectiveEventName !== 'workflow_dispatch') {
         const action = effectiveEvent.action;
         if (action === 'labeled' || action === 'unlabeled') {
-          const entries = await apiClient.listMergeQueueEntries();
+          const targetBranch = requireBranchName(
+            result.baseRef ?? current.base?.ref,
+            'pull-request target branch',
+          );
+          const entries = await apiClient.listMergeQueueEntries(targetBranch);
           const groupResults = await evaluateAffectedGroups({
             client: apiClient,
             entries,
