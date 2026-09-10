@@ -62,8 +62,13 @@ pnpm e2e:run --project chromium tests/settings/toast-theme.spec.ts -- --retries=
 pnpm e2e:run --project mobile-chrome tests/settings/mobile-toast-theme.spec.ts tests/kanban/mobile-menu-theme-toggle.spec.ts -- --retries=0
 pnpm run typecheck
 pnpm exec eslint components/theme/sonner-theme.test.tsx e2e/helpers/toast-theme.ts e2e/tests/settings/toast-theme.spec.ts e2e/tests/settings/mobile-toast-theme.spec.ts
+pnpm --dir .. exec node web/node_modules/eslint/bin/eslint.js --config web/eslint.config.mjs --max-warnings 0 packages/ui/src/sonner.tsx
 pnpm exec prettier --check ../packages/ui/src/sonner.tsx components/theme/sonner-theme.test.tsx e2e/helpers/toast-theme.ts e2e/tests/settings/toast-theme.spec.ts e2e/tests/settings/mobile-toast-theme.spec.ts
 ```
+
+The shared UI package has no separate lint script. Its ESLint command runs
+from `apps/` with the web configuration explicitly selected so the production
+file is inside ESLint's base directory and is not silently ignored.
 
 Use the managed runner's build and cleanup. Confirm test discovery in both
 projects and inspect the captured mobile notification. Use installed Sonner's
@@ -127,10 +132,15 @@ is one state synchronization call and its ordering comment.
 - Final web typecheck, targeted ESLint, targeted Prettier, and diff checks
   passed. No new public copy or localization changes were needed.
 
-### Commands used
+### Historical browser executions (2026-09-09)
 
-The component, typecheck, ESLint, and Prettier commands in Verification were
-run as written. Browser runs used these commands from `apps/web`:
+The component, typecheck, web-test ESLint, and Prettier commands in Verification
+were run as written. The shared UI ESLint command was added and passed during
+PR review on 2026-09-10. The following historical browser commands used a
+temporary configuration that has since been removed. For a normal fresh
+checkout, use the browser commands in Verification above with the checked-in
+Playwright configuration. For a checkout path containing `mobile-`, recreate
+the temporary override below before rerunning these historical commands.
 
 ```bash
 pnpm e2e:run --project chromium tests/settings/toast-theme.spec.ts -- --config e2e/toast-theme-check.config.ts --retries=0
@@ -152,6 +162,33 @@ settings, fixtures, and strict WebSocket checks, and discovered the intended
 three desktop and five mobile tests. The temporary file was removed after
 verification; the shared repository runner configuration was not changed.
 
+To reproduce that workaround, save this as `apps/web/e2e/toast-theme-check.config.ts`,
+run the historical browser commands above, then remove the temporary file:
+
+```typescript
+import { defineConfig } from "@playwright/test";
+import base from "./playwright.config";
+
+const mobileFilename = /[/\\]mobile-[^/\\]*\.spec\.ts$/;
+
+export default defineConfig({
+  ...base,
+  projects: base.projects?.map((project) => ({
+    ...project,
+    ...(project.name === "mobile-chrome" ? { testMatch: mobileFilename } : {}),
+    ...(Array.isArray(project.testIgnore)
+      ? {
+          testIgnore: project.testIgnore.map((pattern) =>
+            String(pattern) === String(/mobile-.*\.spec\.ts/)
+              ? mobileFilename
+              : pattern,
+          ),
+        }
+      : {}),
+  })),
+});
+```
+
 The first browser setup attempt also corrected its expected fixture title to
 the manifest's `Kandev E2E Fixture Plugin` before collecting valid RED evidence.
 
@@ -159,5 +196,5 @@ the manifest's `Kandev E2E Fixture Plugin` before collecting valid RED evidence.
 
 The managed runner tore down its test backends and browsers. The temporary
 Playwright override was removed, and screenshots were retained in
-`/tmp/kandev-toast-evidence.Eb9wFU/` for this session. No commit or PR was
-requested or created.
+`/tmp/kandev-toast-evidence.Eb9wFU/` for this session. Publication was a later,
+separately requested step after the implementation checkpoint.

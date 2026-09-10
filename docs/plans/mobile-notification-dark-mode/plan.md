@@ -114,6 +114,9 @@ fixture state with the existing uninstall helper in `afterEach`.
 - Web typecheck, targeted ESLint, targeted Prettier, and `git diff --check`
   passed. Specification linter tests passed all 30 tests during planning;
   full specification lint also passed.
+- PR review added and passed an explicit shared-UI ESLint invocation and
+  clarified the historical browser commands, including the temporary
+  configuration needed to reproduce this checkout's filename-filter workaround.
 - The temporary test configuration was removed. The managed runner completed
   teardown of its isolated test backends and browsers.
 - Public docs: no change needed. This correction changes notification colors;
