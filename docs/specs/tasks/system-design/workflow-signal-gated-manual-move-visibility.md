@@ -16,8 +16,8 @@ The task system owns whether a workflow transition is automatic, signal-gated,
 or manually recoverable. The web application presents that state in the normal
 chat and passthrough composer controls. This design changes only the visibility
 policy for the existing next-step action. It does not change transition
-execution, completion-signal persistence, clarification handling, or the future
-ADR 0015 `manual_fallback` signal path.
+execution, completion-signal persistence, clarification lifecycle handling, or
+the future ADR 0015 `manual_fallback` signal path.
 
 ## Requirement mapping
 
@@ -39,8 +39,9 @@ ADR 0015 `manual_fallback` signal path.
   as do signal-gated `move_to_previous` and `move_to_step` actions, because the
   existing `moveTask` operation submits the adjacent next step rather than a
   configured arbitrary destination.
-- `ChatStatusBar` and `PassthroughToolbar` retain their existing busy-state gate
-  and consume the shared next-step projection.
+- `ChatStatusBar` and `PassthroughToolbar` consume the shared next-step
+  projection and shared eligibility policy. Both retain the busy-state gate
+  and suppress the action while `pendingClarification` is present.
 - The phone task drawer remains the alternate manual step-move surface. This
   correction adds no phone-only layout or interaction.
 
@@ -68,7 +69,8 @@ visibility rule treats only the literal value `true` as signal-gated.
    `move_to_previous` and `move_to_step` actions remain suppressed because the
    adjacent-next-step control would submit the wrong destination.
 5. The standard and passthrough composer surfaces show the existing action only
-   when the shared projection returns a next-step name and the agent is idle.
+   when the shared projection returns a next-step name, the agent is idle, and
+   the current session has no pending clarification.
 6. Selecting the action uses the existing manual task-move request and its
    existing error handling.
 
@@ -78,6 +80,9 @@ visibility rule treats only the literal value `true` as signal-gated.
 - An omitted signal-gated field preserves the legacy ungated behavior.
 - A busy agent keeps the action hidden. Returning to idle recomputes the surface
   without a reload.
+- A pending clarification keeps the action hidden while the session waits for
+  the user's answer. Clearing the clarification recomputes the surface and
+  restores eligibility when the agent is idle.
 - A rejected manual move keeps the task on the current step and uses the current
   localized error toast.
 - No completion signal is synthesized, so this path cannot increment the future
@@ -96,18 +101,18 @@ task-move API and backend policy checks.
 ## Observability
 
 No new production metric is required for visibility. Unit tests cover all
-client projection paths, the gated versus ungated decision, and the unsupported
-gated move destinations. The boot mapper has a regression test for direct
-task-page hydration. A browser test proves the user-visible action after an
-idle signal-gated turn and waits for the causal backend move before asserting
-the stepper.
+client projection paths, the gated versus ungated decision, the unsupported
+gated move destinations, and the clarification barrier. The boot mapper has a
+regression test for direct task-page hydration. A browser test proves the
+user-visible action after an idle signal-gated turn and waits for the causal
+backend move before asserting the stepper.
 
 ## Responsive behavior
 
-The standard and passthrough composer surfaces share the state policy. The
-phone task drawer continues to expose its existing step-move control, so no new
-compressed desktop control, touch target, breakpoint, or scroll behavior is
-introduced.
+The standard and passthrough composer surfaces share the state policy, including
+the clarification barrier. The phone task drawer continues to expose its
+existing step-move control, so no new compressed desktop control, touch target,
+breakpoint, or scroll behavior is introduced.
 
 ## Related decisions
 

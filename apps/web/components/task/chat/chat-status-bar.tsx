@@ -53,6 +53,14 @@ export function resolveStatusRowTaskId(
   return sessionTaskId ?? statusTaskId;
 }
 
+export function shouldShowProceed(
+  nextStepName: string | null,
+  isAgentBusy: boolean,
+  hasPendingClarification: boolean,
+): boolean {
+  return !!nextStepName && !isAgentBusy && !hasPendingClarification;
+}
+
 export function shouldRenderChatStatusBar({
   hasTask,
   hasTodos,
@@ -109,6 +117,7 @@ export type ChatStatusBarProps = {
   nextStepName: string | null;
   onProceed: () => void;
   isAgentBusy: boolean;
+  hasPendingClarification: boolean;
   isMoving: boolean;
   queueChip?: ReactNode;
   showScrollToLastPrompt?: boolean;
@@ -126,6 +135,7 @@ export function ChatStatusBar({
   nextStepName,
   onProceed,
   isAgentBusy,
+  hasPendingClarification,
   isMoving,
   queueChip,
   showScrollToLastPrompt,
@@ -136,7 +146,7 @@ export function ChatStatusBar({
 }: ChatStatusBarProps) {
   const { t } = useTranslation();
   const showTodos = todoItems.length > 0;
-  const showProceed = !!nextStepName && !isAgentBusy;
+  const showProceed = shouldShowProceed(nextStepName, isAgentBusy, hasPendingClarification);
   const autopilot = useTaskAutopilot(taskId);
   const showAutoScrollControl = useAppStore(
     (state) => state.userSettings.showTranscriptAutoScrollControl,

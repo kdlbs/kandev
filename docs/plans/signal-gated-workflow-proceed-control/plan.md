@@ -17,7 +17,8 @@ by the task UI. Then refine the shared next-step derivation so a signal-gated
 `on_turn_complete` `move_to_next` action remains available while ungated moves
 and gated moves to another configured destination suppress the adjacent-step
 composer action. Standard chat and passthrough composers retain their existing
-busy-state gate and manual task-move behavior.
+busy-state gate and manual task-move behavior, and suppress the action while a
+clarification barrier is pending.
 
 ## Scope
 
@@ -30,6 +31,9 @@ busy-state gate and manual task-move behavior.
 - Continue suppressing the action for ungated turn-complete moves and for
   signal-gated `move_to_previous` or `move_to_step` actions whose destinations
   the adjacent-step control cannot represent.
+- Hide the action in both composer surfaces while the current session has a
+  pending clarification, including `WAITING_FOR_INPUT`, and reevaluate after
+  the barrier clears.
 - Preserve the existing busy-state guard, click behavior, error handling, and
   mobile task-drawer path.
 - Add focused unit and production-build browser regression coverage.
@@ -63,8 +67,9 @@ busy-state gate and manual task-move behavior.
   Only a signal-gated `move_to_next` action is an exception.
 - Preserve the Go boot-state mapper field so direct task-page hydration has the
   same signal-gated policy input as subsequent client refreshes.
-- Leave `ChatStatusBar` and `PassthroughToolbar` unchanged; both already hide
-  the shared next-step action while the agent is busy.
+- Use one shared proceed-eligibility policy in `ChatStatusBar` and
+  `PassthroughToolbar` so the busy-state and pending-clarification gates cannot
+  drift between surfaces.
 - Leave `proceed()` unchanged so the action continues to use the normal task
   move API and existing error handling.
 
@@ -77,8 +82,9 @@ busy-state gate and manual task-move behavior.
   refresh, mobile workspace switching, workflow-step WebSocket updates, and
   live Kanban updates. A Go boot-state mapper test covers direct task-page
   hydration.
-- Existing composer and passthrough tests continue to cover the busy-state
-  display gate because their input contract does not change.
+- Shared composer eligibility tests prove a pending clarification suppresses
+  the action while `WAITING_FOR_INPUT`, and passthrough rendering remains hidden
+  until that barrier is absent.
 
 ## E2E test
 
@@ -92,6 +98,11 @@ type to seed the existing workflow-step field.
 
 The existing mobile task-drawer move test remains the parity check for the
 phone-specific path. No new responsive markup is introduced.
+
+The pending-clarification correction is covered at the shared eligibility and
+passthrough rendering boundaries because the clarification overlay lifecycle is
+already owned by the session panel state. The desktop browser scenario remains
+the end-to-end proof for the eligible signal-gated move path.
 
 ## Work orders
 
@@ -108,6 +119,7 @@ go test ./internal/backendapp
 Run focused tests from `apps/web`:
 
 ```bash
+pnpm exec vitest run components/task/chat/chat-input-area.test.ts components/task/passthrough-toolbar.test.tsx
 pnpm exec vitest run hooks/domains/kanban/use-plan-actions.test.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.test.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts
 pnpm run typecheck
 pnpm exec eslint hooks/domains/kanban/use-plan-actions.ts hooks/domains/kanban/use-plan-actions.test.ts lib/state/slices/kanban/types.ts lib/ssr/mapper.ts lib/ssr/mapper.test.ts lib/ws/handlers/workflows.ts lib/ws/handlers/workflows.test.ts lib/ws/handlers/kanban.ts lib/ws/handlers/kanban.test.ts hooks/domains/kanban/use-all-workflow-snapshots.ts hooks/domains/kanban/use-all-workflow-snapshots.signal-gated.test.ts components/task/mobile/session-task-switcher-sheet-helpers.ts components/task/mobile/session-task-switcher-sheet-helpers.test.ts e2e/helpers/api-client.ts e2e/tests/workflow/workflow-step-proceed.spec.ts

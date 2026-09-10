@@ -487,6 +487,7 @@ export function ChatInputArea({
             nextStepName={proceedStepName}
             onProceed={proceed}
             isAgentBusy={isAgentBusy}
+            hasPendingClarification={Boolean(panelState.pendingClarification)}
             isMoving={isMoving}
             queueChip={queueChip}
             showScrollToLastPrompt={showScrollToLastPrompt}

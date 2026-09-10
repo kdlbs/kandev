@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildSubmitMessage } from "./chat-input-area";
-import { resolveStatusRowTaskId, shouldRenderChatStatusBar } from "./chat-status-bar";
+import {
+  resolveStatusRowTaskId,
+  shouldRenderChatStatusBar,
+  shouldShowProceed,
+} from "./chat-status-bar";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 
 const messageComment: AgentMessageComment = {
@@ -48,6 +52,17 @@ describe("shouldRenderChatStatusBar", () => {
         showProceed: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowProceed", () => {
+  it.each([
+    ["idle without a clarification", false, false, true],
+    ["waiting for input without a clarification", false, false, true],
+    ["busy without a clarification", true, false, false],
+    ["waiting for input with a pending clarification", false, true, false],
+  ])("%s", (_state, isAgentBusy, hasPendingClarification, expected) => {
+    expect(shouldShowProceed("Review", isAgentBusy, hasPendingClarification)).toBe(expected);
   });
 });
 

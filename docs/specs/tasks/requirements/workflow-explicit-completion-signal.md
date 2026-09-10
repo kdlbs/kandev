@@ -49,6 +49,11 @@ when the agent did not emit its completion signal.
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.4:** The signal-gated
   setting shall produce the same next-step visibility after initial hydration,
   workflow snapshot refresh, and live workflow-step updates.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.5:** While the current
+  session has a pending durable clarification, task composer surfaces shall
+  hide the next-step action even when the session is waiting for input. After
+  the clarification barrier clears, the surfaces shall reevaluate visibility
+  and show the action when the signal-gated idle conditions are satisfied.
 
 ## Migrated source detail
 
@@ -132,6 +137,13 @@ The pending completion signal continues to use `TaskSession.Metadata` as specifi
 - **GIVEN** a signal-gated workflow step with a configured `move_to_next` move,
   **WHEN** its agent is busy, **THEN** the next-step action remains hidden until
   the agent returns to an idle state.
+- **GIVEN** a signal-gated workflow step with a configured `move_to_next` move
+  and a pending clarification, **WHEN** its session is waiting for input,
+  **THEN** the standard and passthrough next-step actions remain hidden until
+  the clarification is answered or otherwise cleared.
+- **GIVEN** the same signal-gated workflow step after its clarification barrier
+  clears, **WHEN** its session is idle, **THEN** the standard and passthrough
+  next-step actions become eligible again.
 - **GIVEN** a signal-gated workflow step with a configured `move_to_previous` or
   `move_to_step` move, **WHEN** its composer is rendered, **THEN** the existing
   adjacent-next-step action remains hidden because it cannot submit the

@@ -31,6 +31,7 @@ const TID_SEND_COMMENTS = "passthrough-send-comments";
 
 // --- Mutable state for per-test overrides ---
 let mockSessionState: string | null = null;
+let mockPendingClarification: object | null = null;
 let mockKeyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }> =
   {};
 const responsiveMock = vi.hoisted(() => ({
@@ -209,6 +210,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     pendingPRFeedback: [],
     walkthroughComments: [],
     messageComments: [],
+    pendingClarification: mockPendingClarification,
     handleClearMessageComments: vi.fn(),
     pendingCommentsByFile: mockPendingByFile,
   }),
@@ -299,6 +301,7 @@ async function openComposer() {
 
 function resetMocks() {
   mockSessionState = null;
+  mockPendingClarification = null;
   mockKeyboardShortcuts = {};
   responsiveMock.breakpoint = "desktop";
   mockPendingByFile = {};
@@ -358,6 +361,16 @@ describe("PassthroughToolbar – default state", () => {
     const row = screen.getByTestId("passthrough-status-row");
     expect(row.className).toContain("flex-wrap");
     expect(row.lastElementChild?.className).toContain("flex-wrap");
+  });
+
+  it("hides proceed while a clarification barrier is pending", () => {
+    mockSessionState = "WAITING_FOR_INPUT";
+    mockPendingClarification = { id: "clarification-1" };
+    mockNextStep = { proceedStepName: "Review", proceed: vi.fn(), isMoving: false };
+
+    renderToolbar();
+
+    expect(screen.queryByTestId(TID_PROCEED)).toBeNull();
   });
 });
 
