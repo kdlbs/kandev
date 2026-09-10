@@ -171,6 +171,7 @@ export function TaskListRowPrimaryContent({
   const pendingInput = useTaskPendingInput(task.primary_session_id, {
     taskId: task.id,
     taskPendingAction: task.task_pending_action,
+    statusSummary: task.status_summary,
     primarySessionState: task.primary_session_state,
     primarySessionPendingAction: task.primary_session_pending_action,
   });

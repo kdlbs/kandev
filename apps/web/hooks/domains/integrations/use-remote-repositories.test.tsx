@@ -33,6 +33,7 @@ import { useRemoteRepositories } from "./use-remote-repositories";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
 const WORKSPACE_ID = "workspace-1";
+const NEXT_WORKSPACE_ID = "workspace-2";
 const PLUGIN_ID = "test-bitbucket-provider";
 const GITLAB_UNAVAILABLE = "GitLab unavailable";
 
@@ -83,6 +84,14 @@ function expectWorkspaceScopedGitHubRequest() {
     limit: 100,
   });
 }
+
+const githubRepo = (name: string) => ({
+  owner: "acme",
+  name,
+  full_name: `acme/${name}`,
+  default_branch: "main",
+  private: false,
+});
 
 describe("useRemoteRepositories registered providers", () => {
   it("isolates a provider URL matcher failure", async () => {
@@ -412,13 +421,15 @@ describe("useRemoteRepositories provider eligibility changes", () => {
     expect(result.current.repos[0]?.provider).toBe("github");
     expect(mocks.listUserProjects).not.toHaveBeenCalled();
 
-    rerender({ workspaceId: "workspace-2" });
+    rerender({ workspaceId: NEXT_WORKSPACE_ID });
 
     await waitFor(() => expect(result.current.repos[0]?.provider).toBe("gitlab"));
     expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(1);
     expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("useRemoteRepositories provider refreshes", () => {
   it("re-evaluates provider eligibility before a manual refresh", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([]);
     mocks.listUserProjects.mockResolvedValue({ projects: [] });
@@ -437,6 +448,54 @@ describe("useRemoteRepositories provider eligibility changes", () => {
     expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
     expect(mocks.listAzureDevOpsProjects).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(result.current.availableProviders).toEqual(["github"]));
+  });
+
+  it("keeps currently eligible providers available while a refresh is loading", async () => {
+    mocks.fetchAccessibleRepos.mockResolvedValue([]);
+    mocks.listUserProjects.mockResolvedValue({ projects: [] });
+    mocks.listAzureDevOpsProjects.mockResolvedValue({ projects: [] });
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let resolveRefresh: ((repos: never[]) => void) | undefined;
+    mocks.fetchAccessibleRepos.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveRefresh = resolve)),
+    );
+    setBuiltInAvailability({ azureDevOps: false, gitlab: false });
+
+    act(() => result.current.refresh?.());
+
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
+    expect(result.current.availableProviders).toEqual(["github"]);
+    expect(result.current.repos).toEqual([]);
+
+    act(() => resolveRefresh?.([]));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it("clears a provider error while its refresh retry is loading", async () => {
+    setBuiltInAvailability({ gitlab: false, azureDevOps: false });
+    mocks.fetchAccessibleRepos.mockRejectedValueOnce(new Error("GitHub unavailable"));
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sourceErrors).toEqual([
+      { provider: "github", error: new Error("GitHub unavailable") },
+    ]);
+
+    let resolveRetry: ((repos: never[]) => void) | undefined;
+    mocks.fetchAccessibleRepos.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveRetry = resolve)),
+    );
+
+    act(() => result.current.refresh?.());
+
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
+    expect(result.current.loading).toBe(true);
+    expect(result.current.sourceErrors).toEqual([]);
+
+    act(() => resolveRetry?.([]));
+    await waitFor(() => expect(result.current.loading).toBe(false));
   });
 });
 
@@ -486,11 +545,56 @@ describe("useRemoteRepositories workspace scope", () => {
     );
     await waitFor(() => expect(result.current.repos).toHaveLength(1));
 
-    rerender({ workspaceId: "workspace-2" });
+    rerender({ workspaceId: NEXT_WORKSPACE_ID });
     await waitFor(() => expect(result.current.loading).toBe(true));
     expect(result.current.repos).toEqual([]);
 
     act(() => resolveNext?.({ projects: [] }));
     await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it("does not publish a stale repository result after a workspace change", async () => {
+    setBuiltInAvailability({ gitlab: false, azureDevOps: false });
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    let resolveSecond: ((value: unknown) => void) | undefined;
+    mocks.fetchAccessibleRepos
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveFirst = resolve)))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveSecond = resolve)));
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useRemoteRepositories(workspaceId),
+      { initialProps: { workspaceId: WORKSPACE_ID } },
+    );
+
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(1));
+    rerender({ workspaceId: NEXT_WORKSPACE_ID });
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
+
+    await act(async () => resolveFirst?.([githubRepo("stale")]));
+    expect(result.current.repos).toEqual([]);
+
+    await act(async () => resolveSecond?.([githubRepo("current")]));
+    await waitFor(() =>
+      expect(result.current.repos.map((repo) => repo.fullName)).toEqual(["acme/current"]),
+    );
+  });
+
+  it("ignores a result resolved before the next workspace request starts", async () => {
+    setBuiltInAvailability({ gitlab: false, azureDevOps: false });
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    mocks.fetchAccessibleRepos
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveFirst = resolve)))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useRemoteRepositories(workspaceId),
+      { initialProps: { workspaceId: WORKSPACE_ID } },
+    );
+
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      resolveFirst?.([githubRepo("stale")]);
+      rerender({ workspaceId: NEXT_WORKSPACE_ID });
+    });
+    expect(result.current.repos).toEqual([]);
+    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
   });
 });

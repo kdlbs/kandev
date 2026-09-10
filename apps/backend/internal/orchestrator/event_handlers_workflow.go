@@ -4160,6 +4160,16 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmission(
 	ctx context.Context,
 	taskID, sessionID string,
 ) queueDrainOutcome {
+	return s.drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIdentity(
+		ctx, taskID, sessionID, nil,
+	)
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) queueDrainOutcome {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -4176,6 +4186,12 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmission(
 	if session == nil {
 		return queueDrainSkipped
 	}
+	if session.TaskID != taskID {
+		return queueDrainSkipped
+	}
+	if identity != nil && session.QueueIncarnationID != identity.SessionIncarnationID {
+		return queueDrainSkipped
+	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		return queueDrainSkipped
 	}
@@ -4187,7 +4203,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmission(
 	if s.sessionHasLiveClarification(ctx, sessionID) {
 		return queueDrainSkipped
 	}
-	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(ctx, taskID, sessionID)
+	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
+		ctx, taskID, sessionID, identity,
+	)
 }
 
 // drainQueuedMessageForPromptableSessionLocked takes the next queued
@@ -4213,16 +4231,52 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 	ctx context.Context,
 	taskID, sessionID string,
 ) queueDrainOutcome {
+	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
+		ctx, taskID, sessionID, nil,
+	)
+}
+
+func (s *Service) resolveQueueDrainIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) (messagequeue.QueueSessionIdentity, bool) {
+	if identity != nil {
+		if identity.TaskID != taskID || identity.SessionID != sessionID {
+			return messagequeue.QueueSessionIdentity{}, false
+		}
+		return *identity, true
+	}
+	queueIdentity, err := s.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
+	return queueIdentity, err == nil
+}
+
+func (s *Service) resolveQueueDrainTaskID(
+	ctx context.Context,
+	taskID, sessionID string,
+) (string, bool) {
+	if taskID != "" {
+		return taskID, true
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return "", false
+	}
+	return session.TaskID, true
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return queueDrainSkipped
 	}
-	if taskID == "" {
-		session, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil || session == nil {
-			return queueDrainSkipped
-		}
-		taskID = session.TaskID
+	var ok bool
+	if taskID, ok = s.resolveQueueDrainTaskID(ctx, taskID, sessionID); !ok {
+		return queueDrainSkipped
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -4233,18 +4287,18 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 	if task == nil || (!task.WIPAdmitted && task.QueuedForStepID != "") {
 		return queueDrainSkipped
 	}
-	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
-	if err != nil {
+	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
+	if !ok {
 		return queueDrainSkipped
 	}
-	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, queueIdentity)
 	if err != nil {
 		return queueDrainSkipped
 	}
 	if !autoRun {
 		return queueDrainPaused
 	}
-	if s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok) {
+	if s.dispatchTakenQueuedMessageForSession(ctx, queueIdentity, queuedMsg, ok) {
 		return queueDrainDispatched
 	}
 	return queueDrainSkipped

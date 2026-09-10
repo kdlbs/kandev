@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listNotificationProviders } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
 
@@ -14,6 +14,19 @@ export function useNotificationProviders() {
   const setNotificationProvidersLoading = useAppStore(
     (state) => state.setNotificationProvidersLoading,
   );
+  const setAppriseAvailable = useAppStore((state) => state.setAppriseAvailable);
+  const [appriseRescanPending, setAppriseRescanPending] = useState(false);
+  const [appriseRescanError, setAppriseRescanError] = useState(false);
+  const [appriseRescanResult, setAppriseRescanResult] = useState<boolean | null>(null);
+  const appriseRescanInFlight = useRef(false);
+  const appriseRescanRequestId = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      // A delayed response must not publish into a later settings-page instance.
+      appriseRescanRequestId.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     if (loaded || loading) return;
@@ -42,11 +55,37 @@ export function useNotificationProviders() {
       });
   }, [loaded, loading, setNotificationProviders, setNotificationProvidersLoading]);
 
+  const rescanApprise = useCallback(async () => {
+    if (loading || appriseRescanInFlight.current) return;
+    const requestId = ++appriseRescanRequestId.current;
+    appriseRescanInFlight.current = true;
+    setAppriseRescanPending(true);
+    setAppriseRescanError(false);
+    try {
+      const response = await listNotificationProviders({ cache: "no-store" });
+      if (requestId !== appriseRescanRequestId.current) return;
+      const available = response.apprise_available ?? false;
+      setAppriseAvailable(available);
+      setAppriseRescanResult(available);
+    } catch {
+      if (requestId !== appriseRescanRequestId.current) return;
+      setAppriseRescanError(true);
+    } finally {
+      if (requestId !== appriseRescanRequestId.current) return;
+      appriseRescanInFlight.current = false;
+      setAppriseRescanPending(false);
+    }
+  }, [loading, setAppriseAvailable]);
+
   return {
     providers,
     events,
     appriseAvailable,
     loaded,
     loading,
+    rescanApprise,
+    appriseRescanPending,
+    appriseRescanError,
+    appriseRescanResult,
   };
 }

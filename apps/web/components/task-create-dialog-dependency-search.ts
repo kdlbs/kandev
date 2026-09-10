@@ -1,23 +1,7 @@
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import type { TaskMR } from "@/lib/types/gitlab";
-import type { TaskPR } from "@/lib/types/github";
-import { taskPRInfoFromSummary } from "@/components/task/task-pr-info";
+export { changeRequestNumbers } from "@/lib/kanban/task-search-index";
 
 type Task = KanbanState["tasks"][number];
-
-/** GitHub PR + GitLab MR numbers linked to a task, de-duplicated and ascending. */
-export function changeRequestNumbers(
-  task: Task,
-  mrsForTask: TaskMR[],
-  prsForTask: TaskPR[] = [],
-): number[] {
-  const numbers = new Set<number>();
-  const prNumber = taskPRInfoFromSummary(task.statusSummary)?.number;
-  if (prNumber) numbers.add(prNumber);
-  for (const pr of prsForTask) numbers.add(pr.pr_number);
-  for (const mr of mrsForTask) numbers.add(mr.mr_iid);
-  return [...numbers].sort((a, b) => a - b);
-}
 
 /** cmdk search key: title, id, and both '#N' and bare 'N' for each change-request number. */
 export function dependencyOptionValue(task: Pick<Task, "id" | "title">, numbers: number[]): string {

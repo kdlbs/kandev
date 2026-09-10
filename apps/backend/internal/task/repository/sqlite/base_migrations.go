@@ -295,6 +295,13 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureRunnerProjectionTables(); err != nil {
 		return err
 	}
+	// Keep the projection table compatible with existing task-only stores.
+	// The workflow repository owns this table in production, but task queries
+	// can run before that repository initializes its schema in isolated stores.
+	_ = r.migrate.Apply("workflow_step_participants.created_at", `
+		ALTER TABLE workflow_step_participants
+		ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+	`)
 	// Keep the projection table compatible with databases whose workflow
 	// repository has not replayed its own migrations yet. These additive
 	// migrations are idempotent and preserve the false default for legacy rows.
