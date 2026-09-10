@@ -420,7 +420,7 @@ func TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime(t *testing
 
 	var warnings []observer.LoggedEntry
 	for _, entry := range logs.All() {
-		if entry.Message == "ssh session transport lost" {
+		if entry.Message == sshTransportLostMessage {
 			warnings = append(warnings, entry)
 		}
 	}
@@ -476,7 +476,7 @@ func TestSSHKeepaliveTeardownNamesAForwarderCloseError(t *testing.T) {
 
 	var warnings []observer.LoggedEntry
 	for _, entry := range logs.All() {
-		if entry.Message == "ssh session transport lost" {
+		if entry.Message == sshTransportLostMessage {
 			warnings = append(warnings, entry)
 		}
 	}
@@ -557,7 +557,7 @@ func TestSSHKeepaliveStopInstanceAfterInternalTeardownIsANoOp(t *testing.T) {
 
 	var warnings int
 	for _, entry := range logs.All() {
-		if entry.Message == "ssh session transport lost" {
+		if entry.Message == sshTransportLostMessage {
 			warnings++
 		}
 	}
@@ -601,7 +601,7 @@ func TestSSHKeepaliveProbeErrorTearsDownTrackedSessionWithinBoundedTime(t *testi
 	}
 	found := false
 	for _, entry := range logs.All() {
-		if entry.Message == "ssh session transport lost" && entry.ContextMap()["reason"] == sshTransportLostReasonProbeError {
+		if entry.Message == sshTransportLostMessage && entry.ContextMap()["reason"] == sshTransportLostReasonProbeError {
 			found = true
 		}
 	}

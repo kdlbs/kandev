@@ -371,7 +371,7 @@ func (r *SSHExecutor) logTransportLoss(instanceID string, state *sshSessionState
 	if clientErr != nil {
 		fields = append(fields, zap.NamedError("client_close_error", clientErr))
 	}
-	r.logger.Warn("ssh session transport lost", fields...)
+	r.logger.Warn(sshTransportLostMessage, fields...)
 }
 
 // startWatchdogLocked starts a watchdog for state's session SSH client, in

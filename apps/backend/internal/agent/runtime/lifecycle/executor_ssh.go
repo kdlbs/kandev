@@ -31,6 +31,8 @@ const (
 	sshStatusUnknown      = "unknown"
 	sshStatusDisconnected = "disconnected"
 	sshStatusAgentctlDown = "agentctl-down"
+
+	sshTransportLostMessage = "ssh session transport lost"
 )
 
 // sshAgentctlCleanupTimeout bounds the remote controller stop a disposal
@@ -1168,7 +1170,7 @@ func (r *SSHExecutor) GetRemoteStatus(ctx context.Context, instance *ExecutorIns
 
 	if transportLost {
 		status.State = sshStatusDisconnected
-		status.ErrorMessage = "ssh session transport lost"
+		status.ErrorMessage = sshTransportLostMessage
 		return status, nil
 	}
 	if client == nil {
@@ -1184,7 +1186,7 @@ func (r *SSHExecutor) GetRemoteStatus(ctx context.Context, instance *ExecutorIns
 		// (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.7). Recheck the marker.
 		if r.isTransportLost(state) {
 			status.State = sshStatusDisconnected
-			status.ErrorMessage = "ssh session transport lost"
+			status.ErrorMessage = sshTransportLostMessage
 			return status, nil
 		}
 		status.State = sshStatusAgentctlDown

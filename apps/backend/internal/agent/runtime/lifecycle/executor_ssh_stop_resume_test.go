@@ -125,7 +125,7 @@ func TestSSHExecutorGetRemoteStatus(t *testing.T) {
 		if status.State != sshStatusDisconnected {
 			t.Fatalf("State = %q, want %q", status.State, sshStatusDisconnected)
 		}
-		if status.ErrorMessage != "ssh session transport lost" {
+		if status.ErrorMessage != sshTransportLostMessage {
 			t.Fatalf("ErrorMessage = %q", status.ErrorMessage)
 		}
 	})
