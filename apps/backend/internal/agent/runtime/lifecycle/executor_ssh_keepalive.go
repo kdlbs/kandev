@@ -259,7 +259,9 @@ func (w *sshKeepaliveWatchdog) declareLost(reason string, silence time.Duration)
 // loop — not the prober — to exit. Bounded: the loop is either parked in its
 // select, already returned, or performing a teardown (two local handle
 // closes and one log line), so this never touches the network. Idempotent
-// and safe on a nil-free zero watchdog that never started.
+// and safe on a nil-free zero watchdog that never started. Callers must not
+// hold the executor mutex while waiting here: a mid-teardown loop acquires
+// that mutex before closing loopDone, so holding it would deadlock.
 func (w *sshKeepaliveWatchdog) stopAndAwaitLoop() {
 	w.stopOnce.Do(func() { close(w.stopCh) })
 	<-w.loopDone

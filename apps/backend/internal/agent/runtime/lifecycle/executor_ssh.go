@@ -373,6 +373,25 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 			agentctl.WithExecutionID(req.InstanceID),
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(existing.authToken))
 	}
+	metadata := map[string]interface{}{
+		MetadataKeySSHHost:               existing.target.Host,
+		MetadataKeySSHPort:               strconv.Itoa(existing.target.Port),
+		MetadataKeySSHUser:               existing.target.User,
+		MetadataKeySSHHostFingerprint:    existing.target.PinnedFingerprint,
+		MetadataKeySSHRemoteTaskDir:      existing.remoteTaskDir,
+		MetadataKeySSHRemoteSessionDir:   existing.remoteDir,
+		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(existing.port),
+		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(existing.pid),
+		MetadataKeySSHLocalForwardPort:   strconv.Itoa(existing.forwarder.LocalPort()),
+		MetadataKeySSHWorkdirRoot:        existing.workdirRoot,
+		MetadataKeyIsRemote:              true,
+		MetadataKeyReuseExistingProcess:  existing.reusingProcess,
+	}
+	// existing.metadata is the winning session's own cloned request metadata
+	// (cloneSSHMetadata(req.Metadata), captured after openSSHRuntimeAPITunnelForRequest
+	// ran for the winner), so it carries the winner's still-open tunnel's keys —
+	// never this caller's own, since this caller's tunnel was just closed above.
+	copySSHRuntimeAPIMetadata(metadata, existing.metadata)
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
 		TaskID:        req.TaskID,
@@ -381,20 +400,7 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 		Client:        client,
 		WorkspacePath: existing.remoteTaskDir,
 		AuthToken:     existing.authToken,
-		Metadata: map[string]interface{}{
-			MetadataKeySSHHost:               existing.target.Host,
-			MetadataKeySSHPort:               strconv.Itoa(existing.target.Port),
-			MetadataKeySSHUser:               existing.target.User,
-			MetadataKeySSHHostFingerprint:    existing.target.PinnedFingerprint,
-			MetadataKeySSHRemoteTaskDir:      existing.remoteTaskDir,
-			MetadataKeySSHRemoteSessionDir:   existing.remoteDir,
-			MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(existing.port),
-			MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(existing.pid),
-			MetadataKeySSHLocalForwardPort:   strconv.Itoa(existing.forwarder.LocalPort()),
-			MetadataKeySSHWorkdirRoot:        existing.workdirRoot,
-			MetadataKeyIsRemote:              true,
-			MetadataKeyReuseExistingProcess:  existing.reusingProcess,
-		},
+		Metadata:      metadata,
 	}
 }
 

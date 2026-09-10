@@ -700,6 +700,14 @@ func TestSSHExecutorBuildInstanceForLostRaceReturnsCompleteResumeMetadata(t *tes
 		authToken:     "winner-token",
 		port:          41234,
 		workdirRoot:   "/custom/workdir",
+		// The winner's own cloned request metadata, as set by
+		// openSSHRuntimeAPITunnelForRequest when runtime API tunneling is
+		// enabled — must survive into the loser's returned instance rather
+		// than the loser's own (by-then-closed) tunnel's values.
+		metadata: map[string]interface{}{
+			MetadataKeySSHRuntimeAPILocalURL:   "http://127.0.0.1:9000",
+			MetadataKeySSHRuntimeAPIRemotePort: "50000",
+		},
 	}
 	req := &ExecutorCreateRequest{InstanceID: "instance-1", TaskID: "task-1", SessionID: "session-1"}
 
@@ -711,18 +719,20 @@ func TestSSHExecutorBuildInstanceForLostRaceReturnsCompleteResumeMetadata(t *tes
 	// being non-empty) treats it as "not a resume" and orphans the still-
 	// running remote agentctl this race was meant to preserve.
 	want := map[string]interface{}{
-		MetadataKeySSHHost:               "build.example",
-		MetadataKeySSHPort:               "22",
-		MetadataKeySSHUser:               "deploy",
-		MetadataKeySSHHostFingerprint:    "SHA256:x",
-		MetadataKeySSHRemoteTaskDir:      "/remote/task",
-		MetadataKeySSHRemoteSessionDir:   "/remote/session",
-		MetadataKeySSHRemoteAgentctlPort: "41234",
-		MetadataKeySSHRemoteAgentctlPID:  "4242",
-		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
-		MetadataKeySSHWorkdirRoot:        "/custom/workdir",
-		MetadataKeyIsRemote:              true,
-		MetadataKeyReuseExistingProcess:  false,
+		MetadataKeySSHHost:                 "build.example",
+		MetadataKeySSHPort:                 "22",
+		MetadataKeySSHUser:                 "deploy",
+		MetadataKeySSHHostFingerprint:      "SHA256:x",
+		MetadataKeySSHRemoteTaskDir:        "/remote/task",
+		MetadataKeySSHRemoteSessionDir:     "/remote/session",
+		MetadataKeySSHRemoteAgentctlPort:   "41234",
+		MetadataKeySSHRemoteAgentctlPID:    "4242",
+		MetadataKeySSHLocalForwardPort:     strconv.Itoa(fwd.LocalPort()),
+		MetadataKeySSHWorkdirRoot:          "/custom/workdir",
+		MetadataKeyIsRemote:                true,
+		MetadataKeyReuseExistingProcess:    false,
+		MetadataKeySSHRuntimeAPILocalURL:   "http://127.0.0.1:9000",
+		MetadataKeySSHRuntimeAPIRemotePort: "50000",
 	}
 	for key, wantVal := range want {
 		if got := instance.Metadata[key]; got != wantVal {
