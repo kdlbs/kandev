@@ -5,6 +5,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/kandev/kandev/internal/db"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 )
 
 // fakeAfter is a deterministic stand-in for time.After, keyed by duration:
@@ -245,6 +252,52 @@ func TestScheduler_StartTwiceIsNoop(t *testing.T) {
 	case d := <-fake.armed:
 		t.Fatalf("second Start armed another timer at %v", d)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestScheduler_StartsOnDefaultsWhenStoredSettingsUnparseable proves
+// AC-OFFICE-RUN-HISTORY-RETENTION-004.4: an unreadable stored settings
+// document must not disable retention silently. GetSettings already falls
+// back to DefaultSettings on such a document (see settings_store_test.go);
+// this proves Start actually uses that fallback and runs the loop instead
+// of aborting before the goroutine ever spawns.
+func TestScheduler_StartsOnDefaultsWhenStoredSettingsUnparseable(t *testing.T) {
+	fake := newFakeAfter()
+	conn, err := sqlx.Open("sqlite3", ":memory:?_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := officesqlite.NewWithDB(conn, conn, nil); err != nil {
+		t.Fatalf("init office schema: %v", err)
+	}
+	pool := db.NewPool(conn, conn)
+	settingsRaw, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("init settings schema: %v", err)
+	}
+	if err := settingsRaw.Save(context.Background(), settingsKey, []byte("not json")); err != nil {
+		t.Fatalf("seed unparseable settings: %v", err)
+	}
+
+	settingsStore := NewSettingsStore(settingsRaw)
+	sweeper := NewSweeper(pool, NewStore(pool), settingsStore, NewPreviewMarkerStore(settingsRaw))
+	scheduler := NewScheduler(settingsStore, sweeper, SchedulerOptions{After: fake.after})
+
+	if err := scheduler.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer scheduler.Stop()
+
+	// DefaultSettings().Enabled is true, so both timers must arm off the
+	// fallback defaults rather than the loop never starting at all.
+	fake.waitArmed(t, sweepInterval(DefaultSettings()))
+	fake.waitArmed(t, firstSweepDelay)
+
+	counts := sweeper.CensusSnapshot()
+	if counts.OfficeRoutineRuns.State != CensusFresh {
+		t.Fatalf("office_routine_runs census state = %v, want fresh (Start must run the census off defaults)", counts.OfficeRoutineRuns.State)
 	}
 }
 

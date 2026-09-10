@@ -218,6 +218,58 @@ func TestDeleteRoutineRunsBatch_FloorReassertedAtDeleteTime(t *testing.T) {
 	}
 }
 
+// TestDeleteRoutineRunsBatch_FloorHeldIndependentlyPerRoutine proves
+// AC-OFFICE-RUN-HISTORY-RETENTION-001.4's floor is per-owner: every seed
+// helper elsewhere in this suite uses a single routine, so a regression
+// that dropped routineRunEligibleSubquery's PARTITION BY routine_id
+// (turning a per-owner floor into one shared across every routine) would
+// otherwise leave the whole suite green.
+func TestDeleteRoutineRunsBatch_FloorHeldIndependentlyPerRoutine(t *testing.T) {
+	conn := testDB(t)
+	store := NewStore(db.NewPool(conn, conn))
+	ctx := context.Background()
+
+	routineA, routineB := newID(), newID()
+	seedRoutine(t, conn, routineA)
+	seedRoutine(t, conn, routineB)
+
+	cutoff := daysAgo(30)
+	var newestA, newestB string
+	for i := 0; i < 5; i++ {
+		completed := daysAgo(90 - i) // i=0 oldest (day 90) .. i=4 newest (day 86)
+		idA, idB := newID(), newID()
+		seedRoutineRun(t, conn, idA, routineA, "done", &completed, completed)
+		seedRoutineRun(t, conn, idB, routineB, "done", &completed, completed)
+		if i == 4 {
+			newestA, newestB = idA, idB
+		}
+	}
+
+	// Floor 3 per routine: each routine has 5 history rows, so 2 are
+	// eligible per routine, 4 total. A floor shared across both routines
+	// (10 rows, floor 3) would instead delete 7 and could delete either
+	// routine's newest row.
+	deleted, err := store.DeleteRoutineRunsBatch(ctx, conn, cutoff, 3, 100)
+	if err != nil {
+		t.Fatalf("DeleteRoutineRunsBatch: %v", err)
+	}
+	if deleted != 4 {
+		t.Fatalf("deleted = %d, want 4 (2 eligible per routine, floor 3 held independently)", deleted)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_routine_runs WHERE routine_id = ?`, routineA); n != 3 {
+		t.Fatalf("routineA remaining = %d, want 3 (its own floor)", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_routine_runs WHERE routine_id = ?`, routineB); n != 3 {
+		t.Fatalf("routineB remaining = %d, want 3 (its own floor)", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_routine_runs WHERE id = ?`, newestA); n != 1 {
+		t.Fatalf("routineA's newest row was deleted; its floor should have protected it")
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_routine_runs WHERE id = ?`, newestB); n != 1 {
+		t.Fatalf("routineB's newest row was deleted; its floor should have protected it")
+	}
+}
+
 func TestDeleteRunBatch_DeletesSatellitesAtomicallyWithRun(t *testing.T) {
 	conn := testDB(t)
 	store := NewStore(db.NewPool(conn, conn))
@@ -277,13 +329,15 @@ func TestDeleteRunBatch_SurvivingRunKeepsEveryEvent(t *testing.T) {
 	}
 }
 
-// TestDeleteRunBatch_ResurrectedRunSurvivesAndKeepsSatellites drives the
-// AC-OFFICE-RUN-HISTORY-RETENTION-002.4 race directly: a run selected as
-// eligible is resurrected to "queued" (as ScheduleRetry does, clearing
-// finished_at) after selection but before the delete statement runs. The
-// re-assertion inside DeleteRunBatch's delete step must catch this,
-// rolling back and leaving the run and its satellites intact.
-func TestDeleteRunBatch_ResurrectedRunSurvivesAndKeepsSatellites(t *testing.T) {
+// TestDeleteRunBatch_RunResurrectedBeforeSelectionIsNeverSelected proves a
+// run resurrected to "queued" (as ScheduleRetry does, clearing finished_at)
+// before DeleteRunBatch runs at all is excluded by the eligibility
+// selection itself, leaving it and its satellites untouched. This is the
+// simple case; the delete-time re-assertion this package's AC-002.4
+// re-assertion actually catches — a resurrection landing between
+// selection and the delete statement, inside one attempt — is covered by
+// TestDeleteRunBatch_MidTransactionResurrectionRetriesThenSurvives below.
+func TestDeleteRunBatch_RunResurrectedBeforeSelectionIsNeverSelected(t *testing.T) {
 	conn := testDB(t)
 	store := NewStore(db.NewPool(conn, conn))
 	ctx := context.Background()
@@ -432,6 +486,51 @@ func TestDeleteRunBatch_AbandonsAfterTwoConsecutiveMismatches(t *testing.T) {
 	}
 	if beforeCalls != 2 || afterCalls != 2 {
 		t.Fatalf("before/after hooks invoked %d/%d times, want exactly 2/2 (one per attempt)", beforeCalls, afterCalls)
+	}
+}
+
+// TestDeleteRunBatch_FloorHeldIndependentlyPerAgentProfile is the runs-table
+// equivalent of TestDeleteRoutineRunsBatch_FloorHeldIndependentlyPerRoutine:
+// every other DeleteRunBatch test in this file uses a single
+// "agent-1" owner, so a regression that dropped runEligibleSubquery's
+// PARTITION BY agent_profile_id would otherwise leave the whole suite green.
+func TestDeleteRunBatch_FloorHeldIndependentlyPerAgentProfile(t *testing.T) {
+	conn := testDB(t)
+	store := NewStore(db.NewPool(conn, conn))
+	ctx := context.Background()
+
+	cutoff := daysAgo(30)
+	var newestA, newestB string
+	for i := 0; i < 5; i++ {
+		finished := daysAgo(90 - i) // i=0 oldest (day 90) .. i=4 newest (day 86)
+		idA, idB := newID(), newID()
+		seedRun(t, conn, idA, "agent-a", "finished", &finished, finished)
+		seedRun(t, conn, idB, "agent-b", "finished", &finished, finished)
+		if i == 4 {
+			newestA, newestB = idA, idB
+		}
+	}
+
+	// Floor 3 per agent profile: each owns 5 history rows, so 2 are
+	// eligible per owner, 4 total.
+	result, err := store.DeleteRunBatch(ctx, conn, cutoff, 3, 100)
+	if err != nil {
+		t.Fatalf("DeleteRunBatch: %v", err)
+	}
+	if result.RunsDeleted != 4 || result.Abandoned {
+		t.Fatalf("result = %+v, want 4 deleted (2 eligible per agent profile, floor 3 held independently)", result)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE agent_profile_id = ?`, "agent-a"); n != 3 {
+		t.Fatalf("agent-a remaining = %d, want 3 (its own floor)", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE agent_profile_id = ?`, "agent-b"); n != 3 {
+		t.Fatalf("agent-b remaining = %d, want 3 (its own floor)", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE id = ?`, newestA); n != 1 {
+		t.Fatalf("agent-a's newest run was deleted; its floor should have protected it")
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE id = ?`, newestB); n != 1 {
+		t.Fatalf("agent-b's newest run was deleted; its floor should have protected it")
 	}
 }
 

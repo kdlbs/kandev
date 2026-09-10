@@ -3,6 +3,7 @@ package retention
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -296,30 +297,45 @@ func (s *Store) CountRunEvents(ctx context.Context, q queryer) (int64, error) {
 }
 
 // CensusRoutineRuns issues office_routine_runs' status census
-// (AC-OFFICE-RUN-HISTORY-RETENTION-001.10, -003.5, -003.11): one
-// GROUP BY status scan yields both the retained count (the sum across
-// every status) and the unknown-status detector, since the sweep's own
-// predicate selects only history statuses and therefore cannot observe a
-// status outside it. AC-003.5's top-routine attribution needs a
-// routine_id dimension the status census does not have, so it is a
-// second aggregation rather than reusing the first result set.
+// (AC-OFFICE-RUN-HISTORY-RETENTION-001.10, -003.5, -003.11). The
+// unknown-status detector needs every distinct status value, which the
+// top-routine attribution's aggregation does not carry, so it stays a
+// separate GROUP BY status scan. The retained total and the top-routine
+// attribution, by contrast, must agree with each other by construction —
+// AC-003.5's share is defined as one routine's retained rows as a
+// proportion of the table's retained count — so routineRunCensusTotals
+// reads both from one statement rather than two, which a concurrent write
+// between them could otherwise make disagree.
 func (s *Store) CensusRoutineRuns(ctx context.Context, q queryer, now time.Time) (TableCensus, error) {
 	statusCounts, err := statusCensus(ctx, q, "office_routine_runs")
 	if err != nil {
 		return TableCensus{}, err
 	}
-	retained, unknown := summarizeStatusCensus(statusCounts, RoutineRunHistoryStatuses, RoutineRunLiveStatuses)
+	_, unknown := summarizeStatusCensus(statusCounts, RoutineRunHistoryStatuses, RoutineRunLiveStatuses)
+
+	if testBetweenRoutineRunCensusReads != nil {
+		testBetweenRoutineRunCensusReads(q)
+	}
+
+	retained, topID, topCount, err := routineRunCensusTotals(ctx, q)
+	if err != nil {
+		return TableCensus{}, err
+	}
 	census := TableCensus{RetainedCount: retained, UnknownStatuses: unknown, AsOf: now}
 	if retained > 0 {
-		topID, topCount, err := topRoutineByRetainedRows(ctx, q)
-		if err != nil {
-			return TableCensus{}, err
-		}
 		census.TopRoutineID = topID
 		census.TopRoutineShare = float64(topCount) / float64(retained)
 	}
 	return census, nil
 }
+
+// testBetweenRoutineRunCensusReads, when set, runs right after the
+// unknown-status scan and right before routineRunCensusTotals' single-
+// statement read — a deterministic seam for proving a concurrent write
+// landing there cannot desynchronize the retained total from the
+// top-routine attribution, since both now come from that one statement.
+// Never set outside tests.
+var testBetweenRoutineRunCensusReads func(q queryer)
 
 // CensusRuns issues runs' status census, the runs-table equivalent of
 // CensusRoutineRuns without the routine attribution AC-003.5 is specific
@@ -362,19 +378,30 @@ func statusCensus(ctx context.Context, q queryer, table string) (map[string]int6
 	return counts, rows.Err()
 }
 
-func topRoutineByRetainedRows(ctx context.Context, q queryer) (string, int64, error) {
+// routineRunCensusTotals reads office_routine_runs' table-wide retained
+// total and the routine holding the largest share of it from one
+// statement: a single GROUP BY routine_id pass, with the table total taken
+// as a window sum over that same grouping, so the two numbers reflect
+// exactly one snapshot and a share computed from them can never exceed 1.0.
+// An empty table produces no groups at all; that is the legitimate zero
+// state, not a failure, so sql.ErrNoRows is not propagated.
+func routineRunCensusTotals(ctx context.Context, q queryer) (retained int64, topRoutineID string, topRoutineCount int64, err error) {
 	var row struct {
 		RoutineID string `db:"routine_id"`
 		Retained  int64  `db:"retained"`
+		Total     int64  `db:"total"`
 	}
 	query := `
-		SELECT routine_id, COUNT(*) AS retained
+		SELECT routine_id, COUNT(*) AS retained, SUM(COUNT(*)) OVER () AS total
 		FROM office_routine_runs
 		GROUP BY routine_id
 		ORDER BY retained DESC, routine_id ASC
 		LIMIT 1`
 	if err := q.GetContext(ctx, &row, query); err != nil {
-		return "", 0, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, "", 0, nil
+		}
+		return 0, "", 0, err
 	}
-	return row.RoutineID, row.Retained, nil
+	return row.Total, row.RoutineID, row.Retained, nil
 }

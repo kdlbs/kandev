@@ -70,10 +70,11 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return nil
 	}
 
-	settings, err := s.settingsStore.GetSettings(ctx)
-	if err != nil {
-		return err
-	}
+	// GetSettings never fails outright: an unreadable or unparseable stored
+	// document still yields DefaultSettings, so the scheduler starts on
+	// those defaults rather than never starting at all. The wrapped error
+	// is reported separately through Checker.Check.
+	settings, _ := s.settingsStore.GetSettings(ctx)
 
 	s.mu.Lock()
 	workerCtx, cancel := context.WithCancel(ctx)
