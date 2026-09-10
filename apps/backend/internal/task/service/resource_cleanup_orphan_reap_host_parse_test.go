@@ -70,6 +70,34 @@ func TestParseLsofCwdEntriesDropsRecordWithControlByteInCommand(t *testing.T) {
 	}
 }
 
+func TestParseLsofVerifyCwdLineReturnsCwd(t *testing.T) {
+	got, err := parseLsofVerifyCwdLine([]byte("n/tasks/task-a\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "/tasks/task-a" {
+		t.Fatalf("expected /tasks/task-a, got %q", got)
+	}
+}
+
+func TestParseLsofVerifyCwdLineErrorsWhenNoCwdLine(t *testing.T) {
+	if _, err := parseLsofVerifyCwdLine([]byte("psome-other-line\n")); err == nil {
+		t.Fatal("expected an error when no cwd line is present")
+	}
+}
+
+// AC-TASKS-ORPHAN-REAP-003.7: this is the pre-signal re-verification read,
+// the last check before an irreversible SIGTERM/SIGKILL. A raw control byte
+// in the cwd line means the record is corrupted or desynchronized, exactly
+// as parseLsofCwdEntries already treats it for the whole-host snapshot; this
+// gate must reject it too rather than hand an unfiltered string to the
+// containment check that gates the signal.
+func TestParseLsofVerifyCwdLineRejectsControlByte(t *testing.T) {
+	if _, err := parseLsofVerifyCwdLine([]byte("n/tasks/task-a\x01evil\n")); err == nil {
+		t.Fatal("expected an error for a cwd line containing a raw control byte")
+	}
+}
+
 func TestParsePSAncestry(t *testing.T) {
 	input := "  1   0\n  222   1\n"
 	got := parsePSAncestry([]byte(input))
