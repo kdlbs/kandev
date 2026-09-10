@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -219,6 +220,7 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 	})
 
 	t.Run("re-attaches to a live remote agentctl", func(t *testing.T) {
+		withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 		harness := newSSHLaunchHarness(t, "4242")
 		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
 		t.Cleanup(func() { _ = exec.Close() })
@@ -254,6 +256,9 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 		if forwardPort != strconv.Itoa(state.forwarder.LocalPort()) {
 			t.Fatalf("metadata forward port = %v, want the new local port %d",
 				forwardPort, state.forwarder.LocalPort())
+		}
+		if state.watchdog == nil {
+			t.Fatal("ResumeRemoteInstance must start a transport-liveness watchdog for the session (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.1)")
 		}
 	})
 

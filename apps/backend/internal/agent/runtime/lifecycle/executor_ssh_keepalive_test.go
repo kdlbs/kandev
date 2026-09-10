@@ -7,9 +7,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -212,6 +214,60 @@ func TestSSHKeepaliveWatchdogDeclaresLossOnProbeError(t *testing.T) {
 	w.awaitProbeExit()
 }
 
+// TestSSHKeepaliveWatchdogStopSignalBeatsACoincidingProbeError drives
+// runLoop's stop-vs-event select directly, forcing a genuine tie between its
+// stopCh case and its errs case rather than an arbitrary real-time race
+// between them. With GOMAXPROCS pinned to 1, runLoop is deterministically
+// parked in its blocking select (nothing runnable to preempt it) by the time
+// this test closes stopCh and sends the probe error back to back with no
+// intervening scheduling point — so runLoop resumes to find both cases
+// simultaneously ready, and Go's select picks between them at random.
+// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10 forbids declaring loss for a
+// session stopped while its transport is still alive, so even on the
+// iterations where the random pick lands on the errs case, runLoop's recheck
+// of the already-closed stopCh must still stop it from declaring loss.
+// Repeated so the random pick lands on the errs case many times, not just
+// once.
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10
+func TestSSHKeepaliveWatchdogStopSignalBeatsACoincidingProbeError(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+
+	const iterations = 300
+	for i := 0; i < iterations; i++ {
+		w := &sshKeepaliveWatchdog{
+			interval: time.Hour,
+			deadline: time.Hour, // never fires on its own; isolates stop vs. errs
+			stopCh:   make(chan struct{}),
+			loopDone: make(chan struct{}),
+		}
+		var lostCalled atomic.Bool
+		w.onLost = func(string, time.Duration) { lostCalled.Store(true) }
+
+		replies := make(chan time.Time, 1)
+		errs := make(chan error, 1)
+		go w.runLoop(replies, errs, time.Now())
+		// With GOMAXPROCS(1) this test goroutine keeps running until it
+		// blocks or explicitly yields, so runLoop cannot have reached its
+		// select yet — Gosched hands off to it, and since nothing else is
+		// ready it parks there, definitely blocked, before control returns
+		// here.
+		runtime.Gosched()
+
+		errs <- errors.New("probe error")
+		close(w.stopCh)
+
+		select {
+		case <-w.loopDone:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iteration %d: runLoop did not exit after a coinciding stop+probe-error", i)
+		}
+		if lostCalled.Load() {
+			t.Fatalf("iteration %d: a stop signal coinciding with a probe error still declared transport loss", i)
+		}
+	}
+}
+
 // TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime is the
 // capability this card exists for: a session whose transport falls silent is
 // torn down automatically, within a bounded time, with no disposal call
@@ -234,6 +290,7 @@ func TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime(t *testing
 	if err != nil {
 		t.Fatalf("StartPortForward: %v", err)
 	}
+	t.Cleanup(func() { _ = fwd.Close() })
 	state := newTrackedSSHSessionWithForwarder(exec, "instance-1", client, fwd)
 
 	if !dialForwarder(fwd) {
@@ -297,6 +354,7 @@ func TestSSHKeepaliveProbeErrorTearsDownTrackedSessionWithinBoundedTime(t *testi
 	if err != nil {
 		t.Fatalf("StartPortForward: %v", err)
 	}
+	t.Cleanup(func() { _ = fwd.Close() })
 	state := newTrackedSSHSessionWithForwarder(exec, "instance-1", client, fwd)
 
 	time.Sleep(15 * time.Millisecond) // let at least one probe complete normally
@@ -389,7 +447,61 @@ func TestSSHExecutorCreateInstanceRefusesATransportLostSession(t *testing.T) {
 }
 
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.1
+func TestSSHExecutorBuildInstanceForLostRaceReturnsCompleteResumeMetadata(t *testing.T) {
+	server := newFakeSSHServer(t, nil)
+	fwd, err := StartPortForward(server.dial(t), 41234, newTestLogger())
+	if err != nil {
+		t.Fatalf("StartPortForward: %v", err)
+	}
+	t.Cleanup(func() { _ = fwd.Close() })
+
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	existing := &sshSessionState{
+		target:        &SSHTarget{Host: "build.example", Port: 22, User: "deploy", PinnedFingerprint: "SHA256:x"},
+		forwarder:     fwd,
+		pid:           4242,
+		remoteDir:     "/remote/session",
+		remoteTaskDir: "/remote/task",
+		authToken:     "winner-token",
+		port:          41234,
+		workdirRoot:   "/custom/workdir",
+	}
+	req := &ExecutorCreateRequest{InstanceID: "instance-1", TaskID: "task-1", SessionID: "session-1"}
+
+	instance := exec.buildInstanceForLostRace(req, existing)
+
+	// A losing caller never created this session — its returned metadata
+	// must be exactly as complete as the winner's, or a later
+	// ResumeRemoteInstance (which keys off MetadataKeySSHRemoteAgentctlPort
+	// being non-empty) treats it as "not a resume" and orphans the still-
+	// running remote agentctl this race was meant to preserve.
+	want := map[string]interface{}{
+		MetadataKeySSHHost:               "build.example",
+		MetadataKeySSHPort:               "22",
+		MetadataKeySSHUser:               "deploy",
+		MetadataKeySSHHostFingerprint:    "SHA256:x",
+		MetadataKeySSHRemoteTaskDir:      "/remote/task",
+		MetadataKeySSHRemoteSessionDir:   "/remote/session",
+		MetadataKeySSHRemoteAgentctlPort: "41234",
+		MetadataKeySSHRemoteAgentctlPID:  "4242",
+		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
+		MetadataKeySSHWorkdirRoot:        "/custom/workdir",
+		MetadataKeyIsRemote:              true,
+	}
+	for key, wantVal := range want {
+		if got := instance.Metadata[key]; got != wantVal {
+			t.Fatalf("Metadata[%q] = %v, want %v", key, got, wantVal)
+		}
+	}
+	if len(instance.Metadata) != len(want) {
+		t.Fatalf("Metadata = %+v, want exactly %d keys matching %+v", instance.Metadata, len(want), want)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.1
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.1
 func TestSSHExecutorResumeRemoteInstanceInsertIfAbsentUnderRace(t *testing.T) {
+	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			_, _ = io.WriteString(w, "ok")
@@ -438,9 +550,13 @@ func TestSSHExecutorResumeRemoteInstanceInsertIfAbsentUnderRace(t *testing.T) {
 
 	exec.mu.Lock()
 	count := len(exec.sessions)
+	survivor := exec.sessions["instance-1"]
 	exec.mu.Unlock()
 	if count != 1 {
 		t.Fatalf("tracked sessions = %d, want exactly one to survive the race", count)
+	}
+	if survivor != nil && survivor.watchdog == nil {
+		t.Fatal("the surviving session must have a transport-liveness watchdog started, even when reached via the race path")
 	}
 	// goleak's TestMain verifies the losing caller's dialed client and
 	// forwarder were actually closed rather than orphaned.

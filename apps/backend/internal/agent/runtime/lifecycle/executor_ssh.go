@@ -349,6 +349,8 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
 		platform:         platform,
 		runtimeAPITunnel: runtimeAPITunnel,
+		port:             port,
+		workdirRoot:      workdir,
 	}
 	r.sessions[req.InstanceID] = state
 	r.startWatchdogLocked(req.InstanceID, state)
@@ -376,15 +378,17 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 		WorkspacePath: existing.remoteTaskDir,
 		AuthToken:     existing.authToken,
 		Metadata: map[string]interface{}{
-			MetadataKeySSHHost:              existing.target.Host,
-			MetadataKeySSHPort:              strconv.Itoa(existing.target.Port),
-			MetadataKeySSHUser:              existing.target.User,
-			MetadataKeySSHHostFingerprint:   existing.target.PinnedFingerprint,
-			MetadataKeySSHRemoteTaskDir:     existing.remoteTaskDir,
-			MetadataKeySSHRemoteSessionDir:  existing.remoteDir,
-			MetadataKeySSHRemoteAgentctlPID: strconv.Itoa(existing.pid),
-			MetadataKeySSHLocalForwardPort:  strconv.Itoa(existing.forwarder.LocalPort()),
-			MetadataKeyIsRemote:             true,
+			MetadataKeySSHHost:               existing.target.Host,
+			MetadataKeySSHPort:               strconv.Itoa(existing.target.Port),
+			MetadataKeySSHUser:               existing.target.User,
+			MetadataKeySSHHostFingerprint:    existing.target.PinnedFingerprint,
+			MetadataKeySSHRemoteTaskDir:      existing.remoteTaskDir,
+			MetadataKeySSHRemoteSessionDir:   existing.remoteDir,
+			MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(existing.port),
+			MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(existing.pid),
+			MetadataKeySSHLocalForwardPort:   strconv.Itoa(existing.forwarder.LocalPort()),
+			MetadataKeySSHWorkdirRoot:        existing.workdirRoot,
+			MetadataKeyIsRemote:              true,
 		},
 	}
 }
@@ -928,6 +932,8 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		metadata:         cloneSSHMetadata(req.Metadata),
 		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
 		runtimeAPITunnel: runtimeAPITunnel,
+		port:             remotePort,
+		workdirRoot:      r.workdirRoot(req.Metadata),
 	}
 	r.sessions[req.InstanceID] = state
 	r.startWatchdogLocked(req.InstanceID, state)

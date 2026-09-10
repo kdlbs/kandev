@@ -147,9 +147,12 @@ func (w *sshKeepaliveWatchdog) runProber(replies chan<- time.Time, errs chan<- e
 // because a select with several ready cases picks at random: a pending
 // completed reply or probe error beats an expired deadline timer (handled by
 // the non-blocking re-check inside the timer.C case below), and the stop
-// signal beats both (handled by the non-blocking check at the top of every
-// iteration, so a stop already signaled is acted on before either of the
-// others is considered).
+// signal beats both. The top-of-loop non-blocking check only catches a stop
+// already signaled before that iteration's blocking select begins — it
+// cannot catch a stop delivered concurrently with a probe error or an
+// expired deadline, since the blocking select itself picks at random among
+// whichever cases are ready together. So every path that is about to
+// declare loss re-checks the stop signal immediately first and yields to it.
 func (w *sshKeepaliveWatchdog) runLoop(replies <-chan time.Time, errs <-chan error, startedAt time.Time) {
 	defer close(w.loopDone)
 	lastReply := startedAt
@@ -167,6 +170,9 @@ func (w *sshKeepaliveWatchdog) runLoop(replies <-chan time.Time, errs <-chan err
 		case at := <-replies:
 			w.handleReply(at, &lastReply, timer)
 		case <-errs:
+			if w.stopRequested() {
+				return
+			}
 			w.declareLost(sshTransportLostReasonProbeError, time.Since(lastReply))
 			return
 		case <-timer.C:
@@ -177,15 +183,34 @@ func (w *sshKeepaliveWatchdog) runLoop(replies <-chan time.Time, errs <-chan err
 			case at := <-replies:
 				w.handleReply(at, &lastReply, timer)
 			case err := <-errs:
-				w.declareLost(sshTransportLostReasonProbeError, time.Since(lastReply))
 				_ = err
+				if w.stopRequested() {
+					return
+				}
+				w.declareLost(sshTransportLostReasonProbeError, time.Since(lastReply))
 				return
 			default:
+				if w.stopRequested() {
+					return
+				}
 				if w.handleDeadline(lastReply, timer) {
 					return
 				}
 			}
 		}
+	}
+}
+
+// stopRequested reports whether the stop signal has been raised, without
+// blocking. Used immediately before every action that would declare
+// transport loss, so a stop delivered in the same instant as a probe error
+// or an expired deadline always wins.
+func (w *sshKeepaliveWatchdog) stopRequested() bool {
+	select {
+	case <-w.stopCh:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -404,6 +429,15 @@ func (r *SSHExecutor) runWithTransportBackstop(state *sshSessionState, timeout t
 	case err := <-done:
 		return err
 	case <-timer.C:
+		// fn may have completed in the same instant the timer fired — a
+		// select with both cases ready picks at random. Recheck done
+		// before treating this as a timeout, so a command that actually
+		// finished is never reported as abandoned.
+		select {
+		case err := <-done:
+			return err
+		default:
+		}
 		r.markTransportLost(state)
 		_ = r.closeClientOnce(state)
 		if err := <-done; err != nil {
