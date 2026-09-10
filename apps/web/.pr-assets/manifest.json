@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-09-10T15:06:17.941Z",
+  "assets": [
+    {
+      "name": "pending-clarification",
+      "type": "screenshot",
+      "format": "png",
+      "file": "pr-clarification-proceed-capture--pending-clarification.png",
+      "test": "pr-clarification-proceed-capture.spec.ts",
+      "caption": "The pending clarification blocks the manual workflow move."
+    },
+    {
+      "name": "clarification-cleared",
+      "type": "screenshot",
+      "format": "png",
+      "file": "pr-clarification-proceed-capture--clarification-cleared.png",
+      "test": "pr-clarification-proceed-capture.spec.ts",
+      "caption": "After the clarification is answered, the manual workflow move is eligible."
+    },
+    {
+      "name": "pending-clarification",
+      "type": "screenshot",
+      "format": "png",
+      "file": "mobile-pr-clarification-proceed-capture--pending-clarification.png",
+      "test": "mobile-pr-clarification-proceed-capture.spec.ts",
+      "caption": "The pending clarification blocks the manual workflow move on mobile."
+    },
+    {
+      "name": "clarification-cleared",
+      "type": "screenshot",
+      "format": "png",
+      "file": "mobile-pr-clarification-proceed-capture--clarification-cleared.png",
+      "test": "mobile-pr-clarification-proceed-capture.spec.ts",
+      "caption": "After the clarification is answered, the mobile move is eligible."
+    }
+  ]
+}
