@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -22,12 +30,14 @@ export type CanvasTaskCreateLauncherTriggerProps = {
 export type CanvasTaskCreateLauncherProps = {
   workspaceId: string | null;
   presentation?: CanvasTaskCreateLauncherPresentation;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   children?: (props: CanvasTaskCreateLauncherTriggerProps) => ReactNode;
 };
 
 export function CanvasTaskCreateLauncher({
   workspaceId,
   presentation = "settings",
+  focusReturnRef,
   children,
 }: CanvasTaskCreateLauncherProps) {
   const { t } = useTranslation();
@@ -36,6 +46,14 @@ export function CanvasTaskCreateLauncher({
   const [open, setOpen] = useState(false);
   const [dialogWorkspaceId, setDialogWorkspaceId] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const focusReturnTargetRef = useMemo<RefObject<HTMLElement | null>>(
+    () => ({
+      get current() {
+        return triggerRef.current ?? focusReturnRef?.current ?? null;
+      },
+    }),
+    [focusReturnRef],
+  );
 
   const handleOpen = useCallback(() => {
     if (!enabled || !workspaceId) return;
@@ -111,7 +129,7 @@ export function CanvasTaskCreateLauncher({
           noRepository: true,
           preferLocalExecutor: true,
         }}
-        focusReturnRef={triggerRef}
+        focusReturnRef={focusReturnTargetRef}
         onSuccess={handleSuccess}
       />
     </>

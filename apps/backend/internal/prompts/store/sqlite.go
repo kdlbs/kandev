@@ -275,9 +275,10 @@ func (r *sqliteRepository) seedBuiltinPrompts() error {
 	for _, prompt := range r.getBuiltinPrompts() {
 		_, err := r.db.Exec(r.db.Rebind(`
 			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
-			VALUES (?, ?, ?, 1, ?, ?)
+			SELECT ?, ?, ?, 1, ?, ?
+			WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
 			ON CONFLICT DO NOTHING
-		`), prompt.ID, prompt.Name, prompt.Content, prompt.CreatedAt, prompt.UpdatedAt)
+		`), prompt.ID, prompt.Name, prompt.Content, prompt.CreatedAt, prompt.UpdatedAt, maxPromptListItems)
 		if err != nil {
 			return fmt.Errorf("failed to upsert built-in prompt %s: %w", prompt.ID, err)
 		}

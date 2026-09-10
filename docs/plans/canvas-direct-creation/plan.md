@@ -146,7 +146,7 @@ criterion `AC-CANVASES-AGENT-WEB-APPS-001.7`.
 | Criteria | Targeted evidence |
 | --- | --- |
 | `.6`, `.8`, `.10` | `store/sqlite_test.go`: new `TestCreateCanvasBuiltin` cases for seed, restart, edits, collision, and required tool instructions. |
-| `.9`, `.10` | `orchestrator/prompt_launch_fallback_test.go`: new `TestCreateCanvasPromptLaunch` cases using the real prompt service, workflow/no-step start, prepared start, changed saved content, absent reference, and exactly one expansion. |
+| `.9`, `.10` | `orchestrator/create_canvas_prompt_launch_test.go`: new `TestCreateCanvasPromptLaunch` cases using the real prompt service, workflow/no-step start, prepared start, changed saved content, absent reference, and exactly one expansion. |
 | `.1`–`.4`, `.11` | `canvases-section.test.tsx`, `canvas-task-create-launcher.test.tsx`: direct opening, unchanged route, defaults, feature-off, missing/changing workspace, list refresh, cancel/focus, submission failure, and single success navigation. |
 | `.6`, `.7` | `canvas-task-prompt.test.ts`: every localized goal plus exact assembled reference, no long instructions. |
 | `.5`, `.7`, `.9`, `.11` | Desktop and phone Playwright scenarios below. |
@@ -183,7 +183,7 @@ desktop and mobile sequentially with retries disabled.
 - [x] [Task 01: Seed the canvas saved prompt](task-01-canvas-saved-prompt.md)
 - [x] [Task 02: Open the canvas task dialog directly](task-02-direct-canvas-dialog.md)
 
-Dependency order: 01, then 02. Both are pending and sequential.
+Dependency order: 01, then 02. Both are complete and sequential.
 
 ## Companion plans
 
@@ -203,7 +203,7 @@ Planning validation on 2026-09-10:
 - `rtk python3 scripts/lint-spec-files.py --all`: passed after splitting guided
   launch into its own Canvases design to meet the 32 KiB design-file limit.
 - `rtk git diff --check`: passed.
-- Work-order status inspection: both files present, pending, and linked.
+- Work-order status inspection: both files present, complete, and linked.
 
 Implementation and rendered verification completed on 2026-09-10. Exact
 results are recorded in Task 02. The implementation preserves the existing
@@ -219,7 +219,8 @@ changing the phone settings path.
   override workflow prompt composition or promise expansion in that case.
 - The default coordinator lists only authorized data. Broader workspace data
   can require user promotion or permission review.
-- A dialog mounted only in the empty row can disappear during list refresh.
+- The launcher prefers the setup trigger for focus restoration and falls back to
+  the always-mounted section header if a list refresh removes that trigger.
 - Tests proving prompt delivery cannot guarantee external model compliance.
 
 ## Documentation impact

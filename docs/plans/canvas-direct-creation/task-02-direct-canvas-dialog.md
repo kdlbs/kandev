@@ -99,7 +99,7 @@ Then run these commands sequentially:
 (cd apps/web && rtk pnpm run typecheck)
 (cd apps/web && rtk pnpm run i18n:check)
 (cd apps/web && rtk pnpm run i18n:ratchet)
-(cd apps/web && rtk pnpm exec eslint components/canvas/canvas-task-create-launcher.tsx components/app-sidebar/sections/canvases-section.tsx)
+(cd apps/web && rtk pnpm exec eslint components/canvas/canvas-task-create-launcher.tsx components/app-sidebar/sections/canvases-section.tsx components/app-sidebar/app-sidebar-section.tsx)
 (cd apps/web && rtk pnpm e2e:run --project chromium tests/canvas/plugin-canvas.spec.ts -- --grep 'canvas setup|canvas creation prompt' --retries=0)
 (cd apps/web && rtk pnpm e2e:run --project mobile-chrome tests/canvas/mobile-plugin-canvas.spec.ts -- --grep 'creates a scratch canvas task' --retries=0)
 rtk node --test scripts/validate-public-docs.test.mjs
@@ -115,6 +115,7 @@ inspect its phone screenshot for structure as well as geometry assertions.
 ## Files likely touched
 
 - `apps/web/components/canvas/canvas-task-create-launcher.tsx` and its test
+- `apps/web/components/app-sidebar/app-sidebar-section.tsx`
 - `apps/web/components/app-sidebar/sections/canvases-section.tsx` and its test
 - `apps/web/components/canvas/canvas-task-prompt.test.ts`
 - `apps/web/components/settings/workspace-canvases-page.test.tsx`
@@ -151,18 +152,20 @@ entire preset cannot prove saved-prompt delivery.
   the literal `@create-canvas` reference. The dialog resets on workspace or
   feature changes, restores focus on cancellation, and preserves the editor on
   failed submission.
+- Added regression coverage for delayed sidebar list readiness and focus
+  restoration that prefers the opener but survives opener unmounts.
 - Updated desktop and phone canvas scenarios, including direct sidebar launch,
   settings launch, edited prompt retention, cancellation, and controlled
   creation failure/retry. Generated Traditional Chinese and pseudo catalogs.
 - Added public guidance to `docs/public/canvases.md` and
   `docs/public/developer-tools.md`.
-- Focused component/catalog/settings tests: 19 passed in 4 files.
+- Focused component/catalog/settings tests: 21 passed in 4 files.
 - `cd apps/web && rtk pnpm run typecheck`: passed.
 - `cd apps/web && rtk pnpm run i18n:check`: passed.
 - `cd apps/web && rtk pnpm run i18n:ratchet`: passed.
-- `cd apps/web && rtk pnpm exec eslint components/canvas/canvas-task-create-launcher.tsx components/app-sidebar/sections/canvases-section.tsx`: passed.
-- Chromium canvas E2E: 2 passed.
-- Mobile canvas E2E: 1 passed.
+- `cd apps/web && rtk pnpm exec eslint components/canvas/canvas-task-create-launcher.tsx components/app-sidebar/sections/canvases-section.tsx components/app-sidebar/app-sidebar-section.tsx`: passed.
+- Chromium canvas E2E after focus hardening: 2 passed.
+- Mobile canvas E2E after focus hardening: 1 passed.
 - Fresh desktop and Pixel 5 dialog captures passed fixture assertions, were
   inspected for layout and content, and were compressed for PR publication.
 - `rtk node --test scripts/validate-public-docs.test.mjs`: 62 passed.

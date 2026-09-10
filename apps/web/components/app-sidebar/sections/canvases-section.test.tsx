@@ -59,6 +59,7 @@ const ACTIVE_CANVAS: Canvas = {
 };
 const CANVASES_LABEL = "Canvases";
 const ACTIVE_CANVAS_TEST_ID = "sidebar-canvas-canvas-1";
+const EMPTY_CANVAS_TEST_ID = "sidebar-canvases-empty";
 
 beforeEach(() => {
   mocks.enabled = true;
@@ -114,7 +115,7 @@ describe("CanvasesSection", () => {
     expect(screen.getByTestId("sidebar-canvases-settings").getAttribute("href")).toBe(
       "/settings/workspaces/workspace-1/canvases",
     );
-    expect(screen.queryByTestId("sidebar-canvases-empty")).toBeNull();
+    expect(screen.queryByTestId(EMPTY_CANVAS_TEST_ID)).toBeNull();
   });
 
   it("shows setup guidance only after expanding an empty canvas section", async () => {
@@ -128,7 +129,7 @@ describe("CanvasesSection", () => {
     );
 
     await waitFor(() => expect(screen.getByText(CANVASES_LABEL)).toBeTruthy());
-    expect(screen.queryByTestId("sidebar-canvases-empty")).toBeNull();
+    expect(screen.queryByTestId(EMPTY_CANVAS_TEST_ID)).toBeNull();
 
     state.appSidebar.sectionExpanded.canvases = true;
     rerender(
@@ -137,10 +138,31 @@ describe("CanvasesSection", () => {
       </TooltipProvider>,
     );
 
-    const setup = await screen.findByTestId("sidebar-canvases-empty");
+    const setup = await screen.findByTestId(EMPTY_CANVAS_TEST_ID);
     expect(setup.textContent).toContain("Set up a canvas");
     expect(setup.tagName).toBe("BUTTON");
     expect(setup.getAttribute("href")).toBeNull();
+  });
+
+  it("waits for the initial canvas list before showing setup guidance", async () => {
+    let resolveList: ((value: { canvases: Canvas[] }) => void) | undefined;
+    mocks.listWorkspaceCanvases.mockReturnValueOnce(
+      new Promise<{ canvases: Canvas[] }>((resolve) => {
+        resolveList = resolve;
+      }),
+    );
+
+    render(
+      <TooltipProvider>
+        <CanvasesSection collapsed={false} />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText(CANVASES_LABEL)).toBeTruthy());
+    expect(screen.queryByTestId(EMPTY_CANVAS_TEST_ID)).toBeNull();
+
+    resolveList?.({ canvases: [] });
+    expect(await screen.findByTestId(EMPTY_CANVAS_TEST_ID)).toBeTruthy();
   });
 
   it("starts folded while preserving the active workspace count", async () => {

@@ -50,8 +50,8 @@ backend service while retaining the visible reference.
 Run from the repository root, following `/tdd` and backend scoped guidance:
 
 ```bash
-(cd apps/backend && rtk go test ./internal/prompts/store ./internal/prompts/service)
-(cd apps/backend && rtk go test ./internal/orchestrator -run 'TestCreateCanvasPromptLaunch|PromptReference|PromptLaunch|WorkflowPrompt' -count=1)
+(cd apps/backend && rtk go test -tags fts5 ./internal/prompts/store ./internal/prompts/service)
+(cd apps/backend && rtk go test -tags fts5 ./internal/orchestrator -run 'TestCreateCanvasPromptLaunch|PromptReference|PromptLaunch|WorkflowPrompt' -count=1)
 rtk git diff --check
 ```
 
@@ -65,7 +65,7 @@ repair only if a regression test proves the existing launch path is incomplete.
 - `apps/backend/config/prompts/create-canvas.md` (new)
 - `apps/backend/internal/prompts/store/sqlite.go`
 - `apps/backend/internal/prompts/store/sqlite_test.go`
-- `apps/backend/internal/orchestrator/prompt_launch_fallback_test.go`
+- `apps/backend/internal/orchestrator/create_canvas_prompt_launch_test.go`
 - `apps/backend/internal/orchestrator/workflow_prompt_test.go`
 
 ## Dependencies
@@ -95,11 +95,13 @@ differ from the shipped workflow.
   `builtin-create-canvas` seed without changing saved-prompt resolution.
 - Added store coverage for the complete authoring workflow, same-name user
   collisions, and user edits across repository reopen.
+- Added a startup-cap regression so built-in seeding cannot make a full prompt
+  table exceed `maxPromptListItems`.
 - Added orchestrator coverage for new-task, prepared-session, workflow-step,
   current-definition, exactly-once expansion, and removed-reference launches.
-- `cd apps/backend && rtk go test ./internal/prompts/store ./internal/prompts/service`:
-  55 passed.
-- `cd apps/backend && rtk go test ./internal/orchestrator -run
+- `cd apps/backend && rtk go test -tags fts5 ./internal/prompts/store
+  ./internal/prompts/service`: 56 passed.
+- `cd apps/backend && rtk go test -tags fts5 ./internal/orchestrator -run
   'TestCreateCanvasPromptLaunch|PromptReference|PromptLaunch|WorkflowPrompt' -count=1`:
   26 passed.
 - `rtk git diff --check`: passed.

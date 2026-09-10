@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,31 @@ func TestCreateCanvasBuiltin(t *testing.T) {
 		}
 		if got.Content != "user-edited canvas workflow" {
 			t.Fatalf("user edit was replaced with %q", got.Content)
+		}
+	})
+
+	t.Run("does not overflow the prompt cap during startup seeding", func(t *testing.T) {
+		db := createUnseededPromptDB(t)
+		now := time.Now().UTC()
+		for i := range maxPromptListItems {
+			if _, err := db.Exec(
+				`INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`,
+				"full-"+strconv.Itoa(i), "full-"+strconv.Itoa(i), "user prompt", now, now,
+			); err != nil {
+				t.Fatalf("fill prompt table at %d: %v", i, err)
+			}
+		}
+
+		repo, err := newSQLiteRepositoryWithDB(db, db)
+		if err != nil {
+			t.Fatalf("initialize repository: %v", err)
+		}
+		prompts, err := repo.ListPrompts(context.Background())
+		if err != nil {
+			t.Fatalf("list capped prompts: %v", err)
+		}
+		if len(prompts) != maxPromptListItems {
+			t.Fatalf("prompt count changed from the cap: got %d", len(prompts))
 		}
 	})
 }

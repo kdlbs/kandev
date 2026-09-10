@@ -119,8 +119,8 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
-When canvases are enabled, Kandev seeds an editable built-in prompt named
-`create-canvas`. The workspace canvas setup form references it as
+Kandev always seeds an editable built-in prompt named `create-canvas`. When
+canvases are enabled, the workspace canvas setup form references it as
 `@create-canvas`, so the task description stays short while the agent receives
 the canvas authoring workflow at launch. Editing the prompt changes later
 canvas tasks; a user prompt with the same name keeps its own content.
@@ -131,6 +131,7 @@ The Settings prompt editor also offers the same `@name` completion when you edit
 
 Kandev seeds these built-ins:
 
+- `create-canvas`
 - `code-review`
 - `open-pr`
 - `merge-base`

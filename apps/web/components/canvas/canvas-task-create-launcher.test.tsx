@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 type DialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  focusReturnRef?: { current: HTMLElement | null };
   initialValues?: {
     title?: string;
     description?: string;
@@ -61,6 +62,68 @@ vi.mock("react-i18next", () => ({
 
 import { CanvasTaskCreateLauncher } from "./canvas-task-create-launcher";
 
+function testOpenerFocusFallback() {
+  const focusReturnRef = { current: null as HTMLElement | null };
+  const trigger = ({
+    onOpen,
+    triggerRef,
+  }: {
+    onOpen: () => void;
+    triggerRef: { current: HTMLButtonElement | null };
+  }) => (
+    <button ref={triggerRef} type="button" onClick={onOpen}>
+      open
+    </button>
+  );
+  const { rerender } = render(
+    <>
+      <button
+        ref={(element) => {
+          focusReturnRef.current = element;
+        }}
+      >
+        fallback
+      </button>
+      <CanvasTaskCreateLauncher
+        workspaceId="workspace-1"
+        presentation="sidebar"
+        focusReturnRef={focusReturnRef}
+      >
+        {trigger}
+      </CanvasTaskCreateLauncher>
+    </>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "open" }));
+
+  expect(mocks.dialogProps?.focusReturnRef?.current).toBe(
+    screen.getByRole("button", { name: "open" }),
+  );
+
+  rerender(
+    <>
+      <button
+        ref={(element) => {
+          focusReturnRef.current = element;
+        }}
+      >
+        fallback
+      </button>
+      <CanvasTaskCreateLauncher
+        workspaceId="workspace-1"
+        presentation="sidebar"
+        focusReturnRef={focusReturnRef}
+      >
+        {() => null}
+      </CanvasTaskCreateLauncher>
+    </>,
+  );
+
+  expect(mocks.dialogProps?.focusReturnRef?.current).toBe(
+    screen.getByRole("button", { name: "fallback" }),
+  );
+}
+
 beforeEach(() => {
   mocks.featureEnabled = true;
   mocks.push.mockReset();
@@ -104,6 +167,8 @@ describe("CanvasTaskCreateLauncher", () => {
       preferLocalExecutor: true,
     });
   });
+
+  it("prefers the opener and falls back when the sidebar opener unmounts", testOpenerFocusFallback);
 
   it("closes the draft when its workspace or feature availability changes", () => {
     const { rerender } = render(<CanvasTaskCreateLauncher workspaceId="workspace-1" />);

@@ -27,6 +27,12 @@ import { CanvasTaskCreateLauncher } from "@/components/canvas/canvas-task-create
 
 const EMPTY_CANVASES: Canvas[] = [];
 
+type WorkspaceCanvasesState = {
+  workspaceId: string | null;
+  canvases: Canvas[];
+  status: "loading" | "ready" | "error";
+};
+
 export function isActiveWorkspaceCanvas(canvas: Canvas): boolean {
   return (
     canvas.scope_kind === "workspace" &&
@@ -35,13 +41,14 @@ export function isActiveWorkspaceCanvas(canvas: Canvas): boolean {
   );
 }
 
-export function useWorkspaceCanvases(
+function useWorkspaceCanvasesState(
   workspaceId: string | null,
   includeArchived = false,
-): Canvas[] {
-  const [loaded, setLoaded] = useState<{ workspaceId: string | null; canvases: Canvas[] }>({
+): { canvases: Canvas[]; ready: boolean } {
+  const [loaded, setLoaded] = useState<WorkspaceCanvasesState>({
     workspaceId: null,
     canvases: EMPTY_CANVASES,
+    status: "loading",
   });
   const requestRef = useRef(0);
   const lifecycleRevision = useCanvasLifecycleRevision();
@@ -49,25 +56,43 @@ export function useWorkspaceCanvases(
   useEffect(() => {
     const requestId = ++requestRef.current;
     if (!workspaceId) {
-      setLoaded({ workspaceId: null, canvases: EMPTY_CANVASES });
+      setLoaded({ workspaceId: null, canvases: EMPTY_CANVASES, status: "ready" });
       return;
     }
 
     setLoaded((current) => ({
       workspaceId,
       canvases: current.workspaceId === workspaceId ? current.canvases : EMPTY_CANVASES,
+      status: "loading",
     }));
     listWorkspaceCanvases(workspaceId, { includeArchived })
       .then((response) => {
         if (requestRef.current !== requestId) return;
-        setLoaded({ workspaceId, canvases: response?.canvases ?? EMPTY_CANVASES });
+        setLoaded({
+          workspaceId,
+          canvases: response?.canvases ?? EMPTY_CANVASES,
+          status: "ready",
+        });
       })
       .catch(() => {
-        if (requestRef.current === requestId) setLoaded({ workspaceId, canvases: EMPTY_CANVASES });
+        if (requestRef.current === requestId) {
+          setLoaded({ workspaceId, canvases: EMPTY_CANVASES, status: "error" });
+        }
       });
   }, [includeArchived, lifecycleRevision, workspaceId]);
 
-  return loaded.workspaceId === workspaceId ? loaded.canvases : EMPTY_CANVASES;
+  const sameWorkspace = loaded.workspaceId === workspaceId;
+  return {
+    canvases: sameWorkspace ? loaded.canvases : EMPTY_CANVASES,
+    ready: sameWorkspace && loaded.status === "ready",
+  };
+}
+
+export function useWorkspaceCanvases(
+  workspaceId: string | null,
+  includeArchived = false,
+): Canvas[] {
+  return useWorkspaceCanvasesState(workspaceId, includeArchived).canvases;
 }
 
 function OpenCanvasSettingsShortcut({ workspaceId }: { workspaceId: string }) {
@@ -132,13 +157,18 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
   const enabled = useFeature("canvases");
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const workspaceId = enabled ? activeWorkspaceId : null;
-  const canvases = useWorkspaceCanvases(workspaceId);
+  const { canvases, ready } = useWorkspaceCanvasesState(workspaceId);
   const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
+  const sectionHeaderRef = useRef<HTMLButtonElement>(null);
 
   if (!enabled || !activeWorkspaceId) return null;
 
   return (
-    <CanvasTaskCreateLauncher workspaceId={activeWorkspaceId} presentation="sidebar">
+    <CanvasTaskCreateLauncher
+      workspaceId={activeWorkspaceId}
+      presentation="sidebar"
+      focusReturnRef={sectionHeaderRef}
+    >
       {({ onOpen, triggerRef }) => (
         <AppSidebarSection
           id={APP_SIDEBAR_SECTION_IDS.canvases}
@@ -149,8 +179,9 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
           headerActionVisibility="always"
           collapsedSummary={activeCanvases.length > 0 ? activeCanvases.length : undefined}
           defaultExpanded={false}
+          headerRef={sectionHeaderRef}
         >
-          {activeCanvases.length === 0 ? (
+          {ready && activeCanvases.length === 0 ? (
             <EmptyCanvasRow onOpen={onOpen} triggerRef={triggerRef} />
           ) : (
             activeCanvases.map((canvas) => (
