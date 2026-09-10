@@ -98,6 +98,18 @@ type executorStore interface {
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
+// sessionMetadataKeyStateSetter is an optional repository capability. Legacy
+// test stores can keep their existing metadata API, while the SQL repository
+// can guard recovery markers against a concurrent stop or archive.
+type sessionMetadataKeyStateSetter interface {
+	SetSessionMetadataKeyIfState(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+		expectedState models.TaskSessionState,
+	) (bool, error)
+}
+
 // officeTaskSessionCreator lets repositories make Office-session origin
 // selection part of the insert transaction. Test and legacy stores can omit
 // it; the executor keeps a per-task fallback lock for those implementations.
@@ -110,6 +122,26 @@ type officeTaskSessionCreator interface {
 // stores can omit it; the executor keeps its existing best-effort fallback.
 type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
+}
+
+// Workflow-route-aware creators keep a prepared destination record in the
+// same transaction as session insertion. Repositories that do not expose the
+// specialized workspace variants retain the legacy creation path for tests
+// and older adapters.
+type workflowSessionRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkflowSessionRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type initialRuntimeSeedWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithInitialRuntimeSeedAndWorkflowRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type workspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, *models.WorkflowSessionRoute) error
+}
+
+type sharedGroupWorkspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, string, *models.WorkflowSessionRoute) error
 }
 
 // taskEnvironmentMaterializationFinalizer publishes a successfully prepared
@@ -750,6 +782,19 @@ type SessionStartingFunc func(
 	promoteTask bool,
 ) error
 
+// SessionStartingWithOptionsFunc is the extended STARTING callback used by
+// explicit completed-conversation recovery. It keeps the legacy callback
+// shape available to lightweight executors and tests while carrying the
+// narrow permission needed for the guarded completed-state transition.
+type SessionStartingWithOptionsFunc func(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+	allowCompletedResume bool,
+) error
+
 // ExecutionCleanupClaimFunc atomically claims forced cleanup for one exact
 // session execution. It returns true when the executor owns cleanup and false
 // when another teardown path already owns that execution.
@@ -874,6 +919,9 @@ type Executor struct {
 	// the orchestrator so launch/resume/model-switch transitions serialize with
 	// runtime task-state reconciliation.
 	onSessionStarting SessionStartingFunc
+	// Extended STARTING callback for explicit completed-session recovery. When
+	// present, it takes precedence over the legacy callback above.
+	onSessionStartingWithOptions SessionStartingWithOptionsFunc
 
 	// Callback for exact-execution forced cleanup arbitration. Set by the
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
@@ -1167,6 +1215,12 @@ func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.
 func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
 	e.onSessionStarting = fn
+}
+
+// SetOnSessionStartingWithOptions sets the extended STARTING callback used by
+// explicit completed-session recovery.
+func (e *Executor) SetOnSessionStartingWithOptions(fn SessionStartingWithOptionsFunc) {
+	e.onSessionStartingWithOptions = fn
 }
 
 // SetOnExecutionCleanupClaim sets the exact-execution forced cleanup arbiter.

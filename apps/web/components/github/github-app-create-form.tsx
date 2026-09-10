@@ -120,13 +120,13 @@ function ManifestHandoff({
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button
-          className="h-11 cursor-pointer"
+          className="cursor-pointer"
           onClick={() => submitManifestToGitHub(handoff.registration_url, handoff.manifest)}
         >
           {t("github:continueOnGithub")}
           <IconExternalLink className="ml-2 h-4 w-4" />
         </Button>
-        <Button variant="outline" className="h-11 cursor-pointer" onClick={onEdit}>
+        <Button variant="outline" className="cursor-pointer" onClick={onEdit}>
           {t("github:editDetails")}
         </Button>
       </div>
@@ -163,14 +163,12 @@ function CreateAppFields(props: CreateFieldsProps) {
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={t("github:nameInKandev")} error={props.errors.displayName}>
           <Input
-            className="h-11"
             value={props.displayName}
             onChange={(event) => props.onDisplayName(event.target.value)}
           />
         </Field>
         <Field label={t("github:githubOwnerLogin")} error={props.errors.ownerLogin}>
           <Input
-            className="h-11"
             value={props.ownerLogin}
             onChange={(event) => props.onOwnerLogin(event.target.value)}
           />
@@ -190,7 +188,6 @@ function CreateAppFields(props: CreateFieldsProps) {
       </RadioGroup>
       <Field label={t("github:publicKandevUrl")} error={props.errors.publicBaseUrl}>
         <Input
-          className="h-11"
           type="url"
           placeholder="https://kandev.example.com"
           value={props.publicBaseUrl}
@@ -200,7 +197,7 @@ function CreateAppFields(props: CreateFieldsProps) {
       <p className="text-xs text-muted-foreground">{t("github:githubMustReachThisHttpsOrigin")}</p>
       <GitHubAppVisibilityField value={props.visibility} onChange={props.onVisibility} />
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="submit" disabled={props.mutating} className="h-11 cursor-pointer">
+        <Button type="submit" disabled={props.mutating} className="cursor-pointer">
           {props.mutating && <Spinner className="mr-2 h-4 w-4" />}
           {t("github:prepareAppOnGithub")}
           <IconExternalLink className="ml-2 h-4 w-4" />

@@ -10,6 +10,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
@@ -337,7 +338,7 @@ export function CanvasHostStatePanel({
         {state !== "loading_metadata" && state !== "loading_runtime" && (
           <Button
             variant="outline"
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={controlSizingClassName("standard", "cursor-pointer")}
             onClick={onRetry}
           >
             {t("canvases:retry")}

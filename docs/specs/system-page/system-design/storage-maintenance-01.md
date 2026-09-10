@@ -16,6 +16,10 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 
 ## Requirement mapping
 
+The proposed database and backup additions are specified in
+[Database storage analysis](storage-database-footprint.md). Its draft extension
+adds two measurements to the existing category list when implemented.
+
 | Requirement | Design section |
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |

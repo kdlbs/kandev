@@ -18,12 +18,14 @@ type AppSidebarPrimaryNavProps = {
 export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
   const inboxCount = useAppStore(selectOfficeInboxCount);
   const mode = useOfficeModeState();
   const inOffice = mode === "office";
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
-  const homeHref = mode === "unknown" ? undefined : homeDestinationHref({ workspaceId, inOffice });
+  const homeHref =
+    mode === "unknown" ? undefined : homeDestinationHref({ workspaceId, inOffice, startupPage });
 
   return (
     <div className="flex flex-col gap-0.5">

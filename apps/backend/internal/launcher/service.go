@@ -480,7 +480,7 @@ type nativeServiceUnitInput struct {
 }
 
 const (
-	systemdServicePath = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin"
+	systemdServicePath = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:%h/.npm-global/bin"
 	launchdServicePath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 )
 

@@ -62,6 +62,12 @@ describe("resolveTaskListingNavigation", () => {
 });
 
 describe("linkToThreads", () => {
+  it("preserves a focused session only alongside its task", () => {
+    expect(linkToThreads(WORKSPACE_ID, "task-1", "session-1")).toBe(
+      `${WORKSPACE_QUERY}&taskId=task-1&sessionId=session-1`,
+    );
+    expect(linkToThreads(WORKSPACE_ID, undefined, "session-1")).toBe(WORKSPACE_QUERY);
+  });
   it("keeps the deck link plain when no task is focused", () => {
     expect(linkToThreads()).toBe("/threads");
     expect(linkToThreads(WORKSPACE_ID)).toBe(WORKSPACE_QUERY);

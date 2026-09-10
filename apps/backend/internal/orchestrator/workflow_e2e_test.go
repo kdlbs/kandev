@@ -280,6 +280,9 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 	if err := json.Unmarshal([]byte(jsonStr), &export); err != nil {
 		t.Fatalf("failed to unmarshal workflow JSON: %v", err)
 	}
+	if err := export.NormalizeCompletionPolicy(); err != nil {
+		t.Fatalf("failed to normalize workflow completion policy: %v", err)
+	}
 	if len(export.Workflows) == 0 {
 		t.Fatal("workflow JSON contains no workflows")
 	}
@@ -297,7 +300,7 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 		events := wfmodels.ConvertPositionToStepID(sp.Events, posToID)
 		sg.steps[id] = &wfmodels.WorkflowStep{
 			ID: id, WorkflowID: "wf1", Name: sp.Name, Position: sp.Position,
-			Prompt: sp.Prompt, Events: events,
+			Prompt: sp.Prompt, Events: events, CompleteTaskOnEnter: sp.CompleteTaskOnEnter,
 		}
 		nameToID[sp.Name] = id
 	}

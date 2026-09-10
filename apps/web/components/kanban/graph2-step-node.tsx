@@ -185,6 +185,7 @@ export function Graph2StepNode({
               hasPendingPermission: pendingInput.permission,
               interrupted: task.interrupted,
               autoStartFailed: task.autoStartFailed,
+              workspaceOrphaned: task.workspaceOrphaned,
             })}
           </div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>

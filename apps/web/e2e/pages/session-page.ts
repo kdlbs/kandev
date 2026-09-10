@@ -699,6 +699,11 @@ export class SessionPage {
     return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
   }
 
+  /** "Resume" action shown for an explicitly completed conversation. */
+  completedSessionResumeButton(): Locator {
+    return this.completedSessionBanner().getByTestId("recovery-resume-button");
+  }
+
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
   recoveryCancelRetryButton(): Locator {
     return this.page.getByTestId("recovery-cancel-retry-button");
@@ -719,7 +724,10 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Delete",
    * and confirms the delete dialog.
    */
-  async deleteTaskInSidebar(title: string): Promise<void> {
+  async deleteTaskInSidebar(
+    title: string,
+    options: { waitForCompletion?: boolean } = {},
+  ): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
     const dialog = this.page.getByRole("alertdialog");
     const discard = dialog.getByTestId("delete-discard-worktree-checkbox");
@@ -728,6 +736,11 @@ export class SessionPage {
     }
     const confirmButton = dialog.getByRole("button", { name: "Delete" });
     await confirmButton.click();
+    if (options.waitForCompletion !== false) {
+      await expect(
+        this.page.getByTestId("toast-message").filter({ hasText: "Deleted 1 task." }),
+      ).toBeVisible({ timeout: 15_000 });
+    }
   }
 
   /**
@@ -1312,7 +1325,7 @@ export class SessionPage {
    * than a real bug.
    */
   async togglePlanMode() {
-    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    const btn = this.activeChat().getByTestId("plan-mode-toggle-button");
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await expect(btn).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
     await btn.click();

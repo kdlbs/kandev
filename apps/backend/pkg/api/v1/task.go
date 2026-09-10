@@ -157,11 +157,17 @@ type Task struct {
 	// action failed to launch a run for this task. Derived from the
 	// auto_start_failed metadata key at DTO conversion time; the orchestrator
 	// clears it when a session of the task next enters STARTING/RUNNING.
-	AutoStartFailed bool   `json:"auto_start_failed,omitempty"`
-	IsEphemeral     bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID        string `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Autopilot       bool   `json:"autopilot"`
-	Identifier      string `json:"identifier,omitempty"`
+	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
+	// WorkspaceOrphaned reports that this task's materialized workspace was
+	// removed when its parent was archived (metadata.workspace.orphaned),
+	// while workspace.mode is still inherit_parent, so the task cannot start.
+	// Derived at DTO conversion time; a re-parent, detach or unarchive that
+	// resolves the state clears it without touching the underlying keys.
+	WorkspaceOrphaned bool   `json:"workspace_orphaned,omitempty"`
+	IsEphemeral       bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID          string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot         bool   `json:"autopilot"`
+	Identifier        string `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories

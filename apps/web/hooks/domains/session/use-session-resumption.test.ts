@@ -709,6 +709,47 @@ describe("useSessionResumption monotonic terminal hydration", () => {
   });
 });
 
+describe("useSessionResumption completed-session admission", () => {
+  it.each([false, true])(
+    "does not auto-resume a completed session when preventAutoStart is %s",
+    async (preventAutoStart) => {
+      vi.clearAllMocks();
+      mockConnectionStatus = "connected";
+      mockPreventAutoStart = preventAutoStart;
+      mockSessionItems = {
+        s1: {
+          started_at: STARTED_AT,
+          updated_at: LATER_AT,
+          state: "COMPLETED",
+        },
+      };
+      mockRequest.mockResolvedValueOnce({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "COMPLETED",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        updated_at: LATER_AT,
+      });
+
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
+          task_id: TASK_ID,
+          session_id: SESSION_ID,
+        });
+      });
+      expect(mockRequest).not.toHaveBeenCalledWith(
+        LAUNCH_ACTION,
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
+});
+
 describe("useSessionResumption resume-skipped clearing on running status", () => {
   beforeEach(() => {
     vi.clearAllMocks();

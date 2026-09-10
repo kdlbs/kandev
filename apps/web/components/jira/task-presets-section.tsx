@@ -20,6 +20,11 @@ import { SettingsPromptEditor } from "@/components/settings/settings-prompt-edit
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 
 // A function rather than a const because `description` is copy — it is shown in
 // the editor's completion list — and a module-scope `t()` would freeze it at the
@@ -76,7 +81,10 @@ function IconSelect({ value, onChange }: { value: string; onChange: (v: string) 
   const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="!h-8 py-0.5 text-sm cursor-pointer" aria-label={t("jira:icon")}>
+      <SelectTrigger
+        className={settingsControlClassName("py-0.5 text-sm cursor-pointer")}
+        aria-label={t("jira:icon")}
+      >
         <SelectValue>
           {createElement(iconForPresetKey(value), { className: "h-4 w-4" })}
         </SelectValue>
@@ -137,7 +145,7 @@ function PresetRow({
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">{t("jira:label")}</span>
           <Input
-            className="h-8 w-40"
+            className={settingsControlClassName("w-40")}
             value={preset.label}
             data-settings-dirty={fieldIsDirty("label")}
             placeholder={t("jira:label")}
@@ -147,7 +155,7 @@ function PresetRow({
         <div className="flex flex-col gap-0.5 flex-1">
           <span className="text-[10px] text-muted-foreground">{t("jira:hint")}</span>
           <Input
-            className="h-8"
+            className={settingsControlClassName()}
             value={preset.hint}
             data-settings-dirty={fieldIsDirty("hint")}
             placeholder={t("jira:hintOptional")}
@@ -156,8 +164,7 @@ function PresetRow({
         </div>
         <Button
           variant="outline"
-          size="sm"
-          className="h-8 cursor-pointer text-xs"
+          className={settingsActionClassName("cursor-pointer")}
           onClick={onToggle}
         >
           {expanded ? t("jira:hidePrompt") : t("jira:editPrompt")}
@@ -165,7 +172,7 @@ function PresetRow({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer text-destructive"
+          className={controlSizingClassName("icon", "cursor-pointer text-destructive")}
           onClick={onRemove}
           aria-label={t("jira:remove")}
         >
@@ -320,11 +327,10 @@ export function TaskPresetsSection() {
       action={
         <div className="flex gap-2">
           <Button
-            size="sm"
             variant="outline"
             onClick={reset}
             disabled={!loaded}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             {t("common:reset")}
@@ -344,7 +350,11 @@ export function TaskPresetsSection() {
             onRemove={() => remove(index)}
           />
         ))}
-        <Button size="sm" variant="outline" onClick={add} className="cursor-pointer">
+        <Button
+          variant="outline"
+          onClick={add}
+          className={settingsActionClassName("cursor-pointer")}
+        >
           <IconPlus className="h-3.5 w-3.5 mr-1" />
           {t("jira:addPreset")}
         </Button>

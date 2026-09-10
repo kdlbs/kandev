@@ -196,6 +196,14 @@ type TaskDetacher interface {
 	DetachTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
 }
 
+// TaskLifecyclePublisher reloads and publishes the canonical task.updated
+// event for a task row Office has just mutated. The implementation owns task
+// publication ordering so concurrent status writes cannot publish stale
+// snapshots. Office's own status-change events only reach the Office board.
+type TaskLifecyclePublisher interface {
+	PublishTaskUpdatedByID(ctx context.Context, id string)
+}
+
 // SessionTerminator flips the (task, agent) office session row to a terminal
 // state. Used when an agent stops being a participant on a task — reassignment,
 // reviewer/approver removal, or agent instance deletion. Idempotent: skipping
@@ -383,6 +391,7 @@ type DashboardService struct {
 	retryCanceller   RetryCanceller                  // optional; nil means retries are not cancelled on reassign
 	taskCanceller    TaskCanceller                   // optional; used to hard-cancel sessions on status→cancelled
 	taskDetacher     TaskDetacher                    // optional; canonical empty-parent mutation
+	taskLifecycle    TaskLifecyclePublisher          // optional; nil means status changes don't publish canonical task.updated
 	sessionTerm      SessionTerminator               // optional; flips office session rows to COMPLETED on participation removal
 	reactivity       ReactivityApplier               // optional; runs the office reactivity pipeline on mutations
 	engineDispatcher shared.WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
@@ -597,6 +606,12 @@ func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
 // Office parent picker selects "No parent".
 func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 	s.taskDetacher = d
+}
+
+// SetTaskLifecyclePublisher wires the canonical task.updated publisher used
+// after a status change persists a task row mutation.
+func (s *DashboardService) SetTaskLifecyclePublisher(p TaskLifecyclePublisher) {
+	s.taskLifecycle = p
 }
 
 // SetSessionTerminator wires the office session terminator. Optional; when

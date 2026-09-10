@@ -540,6 +540,67 @@ func TestDeferMoveTask_RollsBackHandoffWhenPendingMovePersistenceFails(t *testin
 	assert.Equal(t, "preexisting", queue.calls[0].ID)
 }
 
+type rollbackContextMessageQueuer struct {
+	recordingMessageQueuer
+	queued       *messagequeue.QueuedMessage
+	rollbackCtx  context.Context
+	removedEntry string
+	takeCalled   bool
+}
+
+func (r *rollbackContextMessageQueuer) QueueMessageWithMetadata(
+	ctx context.Context,
+	sessionID, taskID, content, model, userID string,
+	planMode bool,
+	attachments []messagequeue.MessageAttachment,
+	metadata map[string]interface{},
+) (*messagequeue.QueuedMessage, error) {
+	msg, err := r.recordingMessageQueuer.QueueMessageWithMetadata(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
+	)
+	if err == nil {
+		msg.ID = "queued-handoff"
+		r.queued = msg
+	}
+	return msg, err
+}
+
+func (r *rollbackContextMessageQueuer) TakeQueued(ctx context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
+	r.rollbackCtx = ctx
+	r.takeCalled = true
+	if r.queued == nil {
+		return nil, false
+	}
+	msg := r.queued
+	r.queued = nil
+	return msg, true
+}
+
+func (r *rollbackContextMessageQueuer) RemoveEntry(ctx context.Context, _ string, entryID string) error {
+	r.rollbackCtx = ctx
+	r.removedEntry = entryID
+	if r.queued != nil && r.queued.ID == entryID {
+		r.queued = nil
+	}
+	return nil
+}
+
+func (r *rollbackContextMessageQueuer) RemoveEntryForSession(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	entryID string,
+) (*messagequeue.QueueRemovalResult, error) {
+	r.rollbackCtx = ctx
+	r.removedEntry = entryID
+	if r.queued == nil || r.queued.ID != entryID ||
+		r.queued.SessionID != identity.SessionID || r.queued.TaskID != identity.TaskID {
+		return nil, messagequeue.ErrEntryNotFound
+	}
+	removed := *r.queued
+	r.queued = nil
+	return &messagequeue.QueueRemovalResult{Removed: []messagequeue.QueuedMessage{removed}}, nil
+}
+
 // TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)
 // and surfaces a descriptive error so callers can fail fast instead of silently
 // dropping the user-supplied prompt.
@@ -596,6 +657,41 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 	assert.Equal(t, "", got.Model)
 }
 
+func TestApplyMoveTaskImmediateRollsBackQueueWithDetachedContext(t *testing.T) {
+	taskSvc, _ := newTestTaskService(t)
+	queue := &rollbackContextMessageQueuer{}
+	h := &Handlers{
+		taskSvc:      taskSvc,
+		messageQueue: queue,
+		logger:       testLogger(t).WithFields(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, nil)
+	req := struct {
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
+	}{
+		TaskID:         "missing-task",
+		WorkflowID:     "missing-workflow",
+		WorkflowStepID: "missing-step",
+		Prompt:         "handoff",
+	}
+	session := &models.TaskSession{ID: "session-rollback", TaskID: req.TaskID}
+
+	resp, err := h.applyMoveTaskImmediate(ctx, msg, req, session)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	require.NotNil(t, queue.rollbackCtx)
+	assert.NoError(t, queue.rollbackCtx.Err())
+	assert.Equal(t, "queued-handoff", queue.removedEntry)
+	assert.False(t, queue.takeCalled)
+	assert.Nil(t, queue.queued)
+}
 func TestHandleDeleteTask_MissingTaskID(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPDeleteTask, map[string]string{})

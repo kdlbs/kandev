@@ -1,7 +1,7 @@
 import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { Message, TaskPlanCommentRef } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
-
 // i18n-exempt: precondition diagnostic for a programmer error; callers branch
 // on the error type, never render this message.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
@@ -26,6 +26,16 @@ export class QueueEntryNotFoundError extends Error {
   constructor() {
     super("Queue entry was already drained or no longer exists.");
     this.name = "QueueEntryNotFoundError";
+  }
+}
+
+/** Error thrown when a queued edit lost its lease or expected revision. */
+export class QueueEditConflictError extends Error {
+  readonly code = "edit_conflict" as const;
+
+  constructor() {
+    super("The queued entry changed before the edit could be saved.");
+    this.name = "QueueEditConflictError";
   }
 }
 
@@ -116,6 +126,9 @@ function knownQueueError(wsErr: WSError): Error | undefined {
     }
     case "entry_not_found":
       return new QueueEntryNotFoundError();
+    case "edit_conflict":
+    case "queue_conflict":
+      return new QueueEditConflictError();
     case "merge_reference_overflow":
       return new MergeReferenceOverflowError();
     default:
@@ -161,7 +174,121 @@ export type QueueMessageParams = {
   context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entity_references?: EntityReference[];
   user_id?: string;
+  client_queue_id?: string;
+  plan_comment_refs?: TaskPlanCommentRef[];
+  require_primary_session?: boolean;
 };
+
+function isUncertainQueueTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("websocket request timed out") || message === "websocket connection closed"
+  );
+}
+
+function hasQueueAdmissionMetadata(metadata: Message["metadata"], clientQueueId: string): boolean {
+  if (metadata?.client_queue_id === clientQueueId) return true;
+  const sources = metadata?.send_now_sources;
+  if (!Array.isArray(sources)) return false;
+  return sources.some((source) => {
+    if (!source || typeof source !== "object") return false;
+    const sourceMetadata = (source as { metadata?: unknown }).metadata;
+    return (
+      !!sourceMetadata &&
+      typeof sourceMetadata === "object" &&
+      (sourceMetadata as { client_queue_id?: unknown }).client_queue_id === clientQueueId
+    );
+  });
+}
+
+async function findAcceptedQueueAdmission(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  params: QueueMessageParams & { client_queue_id: string },
+): Promise<QueuedMessage | undefined> {
+  try {
+    const status = await client.request<QueueStatus>("message.queue.get", {
+      task_id: params.task_id,
+      session_id: params.session_id,
+      session_incarnation_id: params.session_incarnation_id,
+    });
+    const queued = status.entries?.find((entry) => entry.id === params.client_queue_id);
+    if (queued) return queued;
+  } catch {
+    // Continue to transcript reconciliation in case the queue already drained.
+  }
+  try {
+    let before: string | undefined;
+    const seenCursors = new Set<string>();
+    do {
+      const response = await client.request<{
+        messages?: Message[];
+        has_more?: boolean;
+        cursor?: string;
+      }>(
+        "message.list",
+        {
+          session_id: params.session_id,
+          limit: 100,
+          sort: "desc",
+          ...(before ? { before } : {}),
+        },
+        5000,
+      );
+      const recorded = response.messages?.find((message) =>
+        hasQueueAdmissionMetadata(message.metadata, params.client_queue_id),
+      );
+      if (recorded) {
+        return {
+          id: params.client_queue_id,
+          session_id: params.session_id,
+          task_id: params.task_id,
+          content: recorded.content,
+          model: params.model,
+          plan_mode: params.plan_mode ?? false,
+          attachments: params.attachments,
+          metadata: recorded.metadata,
+          queued_at: recorded.created_at,
+        };
+      }
+      const cursor = response.cursor;
+      if (!response.has_more || !cursor || seenCursors.has(cursor)) return undefined;
+      seenCursors.add(cursor);
+      before = cursor;
+    } while (before);
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function waitForQueueConnection(client: NonNullable<ReturnType<typeof getWebSocketClient>>) {
+  const getStatus = client.getStatus?.bind(client);
+  if (!getStatus || getStatus() === "connected") return true;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (getStatus() === "connected") return true;
+  }
+  return false;
+}
+
+async function reconcileUncertainQueueAdmission(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  params: QueueMessageParams & { client_queue_id: string },
+  originalError: unknown,
+) {
+  const accepted = await findAcceptedQueueAdmission(client, params);
+  if (accepted) return accepted;
+  if (!(await waitForQueueConnection(client))) throw originalError;
+  try {
+    return await client.request<QueuedMessage>("message.queue.add", params);
+  } catch (retryError) {
+    const acceptedAfterRetry = await findAcceptedQueueAdmission(client, params);
+    if (acceptedAfterRetry) return acceptedAfterRetry;
+    throw retryError;
+  }
+}
 
 /** Append a new entry to the session's FIFO queue. Throws QueueFullError on overflow. */
 export async function queueMessage(params: QueueMessageParams): Promise<QueuedMessage> {
@@ -172,6 +299,17 @@ export async function queueMessage(params: QueueMessageParams): Promise<QueuedMe
   try {
     return await client.request<QueuedMessage>("message.queue.add", params);
   } catch (err) {
+    if (params.client_queue_id && isUncertainQueueTransportError(err)) {
+      try {
+        return await reconcileUncertainQueueAdmission(
+          client,
+          params as QueueMessageParams & { client_queue_id: string },
+          err,
+        );
+      } catch (reconcileError) {
+        rethrowQueueError(reconcileError);
+      }
+    }
     rethrowQueueError(err);
   }
 }
@@ -286,11 +424,66 @@ export async function appendToQueue(
     rethrowQueueError(err);
   }
 }
+export type QueueEditLease = {
+  session_id: string;
+  entry_id: string;
+  lease_id: string;
+  target_revision: number;
+  lease_generation?: number;
+  expires_at?: string;
+};
 
-/** Replace the content/attachments of a queued entry. Throws QueueEntryNotFoundError if drained. */
+export async function beginQueuedMessageEdit(
+  sessionId: string,
+  entryId: string,
+): Promise<QueueEditLease> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
+  try {
+    return await client.request<QueueEditLease>("message.queue.edit.begin", {
+      session_id: sessionId,
+      entry_id: entryId,
+    });
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+export async function renewQueuedMessageEdit(
+  lease: Pick<QueueEditLease, "session_id" | "entry_id" | "lease_id">,
+): Promise<QueueEditLease> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
+  try {
+    return await client.request<QueueEditLease>("message.queue.edit.renew", lease);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+export async function endQueuedMessageEdit(
+  lease: Pick<QueueEditLease, "session_id" | "entry_id" | "lease_id">,
+  dispatchIfAutoRun = false,
+): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
+  try {
+    await client.request("message.queue.edit.end", {
+      ...lease,
+      ...(dispatchIfAutoRun ? { dispatch_if_auto_run: true } : {}),
+    });
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+/** Replace a queued entry through its live target-bound edit lease. */
 export async function updateQueuedMessage(
   params: QueueSessionIdentity & {
     entry_id: string;
+    lease_id?: string;
+    operation_id?: string;
+    expected_target_revision?: number;
     content: string;
     attachments?: Array<{
       type: string;
@@ -304,13 +497,11 @@ export async function updateQueuedMessage(
     entity_references?: EntityReference[];
     user_id?: string;
   },
-): Promise<{ entry_id: string }> {
+): Promise<{ entry_id: string; operation_id?: string; target_revision?: number }> {
   const client = getWebSocketClient();
-  if (!client) {
-    throw new Error(WS_CLIENT_UNAVAILABLE);
-  }
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
   try {
-    return await client.request<{ entry_id: string }>("message.queue.update", {
+    return await client.request("message.queue.update", {
       ...params,
       entity_references: params.entity_references ?? [],
     });

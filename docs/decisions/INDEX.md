@@ -53,6 +53,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | superseded by 2026-08-13-dynamic-agent-profile-routing | backend, frontend | 2026-07-15 |
 | 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
 | 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-22) | backend, frontend, infra | 2026-07-14 |
+| 2026-09-10-storage-overlap-attribution | [Attribute storage by measured files](2026-09-10-storage-overlap-attribution.md) | accepted | backend, frontend | 2026-09-10 |
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted (amended 2026-08-09) | frontend                    | 2026-07-14 |
 | 0047 | [Plugins read conversation content via a capability-gated Host RPC](0047-plugin-host-conversation-reads.md)                          | accepted   | backend, protocol           | 2026-07-21 |
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |
@@ -243,6 +244,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |
 | 2026-09-01-passthrough-initial-prompt-turn-boundary | [Keep Passthrough Initial Prompt State in Lifecycle](2026-09-01-passthrough-initial-prompt-turn-boundary.md) | accepted | backend, workflow | 2026-09-01 |
 | 2026-09-02-automation-self-archive | [Permit Automation Self-Archive as Terminal Completion](2026-09-02-automation-self-archive.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-09-02 |
+| 2026-09-02-task-owned-plan-comments | [Persist Pending Plan Comments with the Task Plan](2026-09-02-task-owned-plan-comments.md) | accepted (amended 2026-09-09) | backend, frontend, protocol, persistence | 2026-09-02 |
 | 2026-09-02-separate-mcp-startup-and-tool-budgets | [Separate MCP Startup and Tool-Call Budgets](2026-09-02-separate-mcp-startup-and-tool-budgets.md) | proposed | backend, agents | 2026-09-02 |
 | 2026-09-03-separate-system-data-storage-pages | [Separate System Data and Storage Pages](2026-09-03-separate-system-data-storage-pages.md) | accepted | frontend | 2026-09-03 |
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
@@ -259,4 +261,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-05-script-capable-html-preview-isolation | [Capability-Free Runtime for Script-Capable HTML Preview](2026-09-05-script-capable-html-preview-isolation.md) | proposed | frontend, desktop, security | 2026-09-05 |
 | 2026-09-05-trusted-browser-html-preview | [Treat HTML Preview as Trusted Workspace Code](2026-09-05-trusted-browser-html-preview.md) | accepted | frontend, backend, agentctl, security | 2026-09-05 |
 | 2026-09-07-activate-managed-runtime-defaults | [Activate Shipped Managed Runtime Defaults](2026-09-07-activate-managed-runtime-defaults.md) | accepted | backend, frontend, protocol | 2026-09-07 |
+| 2026-09-08-domain-owned-settings-catalog | [Discover settings through domain-owned contracts](2026-09-08-domain-owned-settings-catalog.md) | accepted | backend, frontend, protocol | 2026-09-08 |
+| 2026-09-09-task-completion-conversation-availability | [Separate task completion from conversation availability](2026-09-09-task-completion-conversation-availability.md) | accepted | workflow | 2026-09-09 |
 | 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |

@@ -342,6 +342,53 @@ func TestUpdateAgentStatus_OmitsModelFieldForOfficeAgent(t *testing.T) {
 	}
 }
 
+func TestUpdateAgentStatus_GuardedRecoveryRefusesLiveWorkingAgent(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	ctx := context.Background()
+	agent := &models.AgentInstance{WorkspaceID: "ws-1", Name: "Working", Role: models.AgentRoleWorker}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	changed, err := repo.MarkAgentWorking(ctx, agent.ID, "live-run")
+	if err != nil {
+		t.Fatalf("mark agent working: %v", err)
+	}
+	if !changed {
+		t.Fatal("mark agent working = false, want true")
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	group := r.Group("/api/v1")
+	RegisterRoutes(group, svc, logger.Default())
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/agents/"+agent.ID+"/status",
+		bytes.NewBufferString(`{"status":"idle","expected_status":"paused"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	current, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if current.Status != models.AgentStatusWorking {
+		t.Fatalf("status = %q, want working", current.Status)
+	}
+	cleared, err := repo.ClearAgentWorking(ctx, agent.ID, "live-run")
+	if err != nil {
+		t.Fatalf("clear working owner: %v", err)
+	}
+	if !cleared {
+		t.Fatal("working owner was cleared by guarded recovery")
+	}
+}
+
 // AC-13b: a routine field-only PATCH also omits "model" from the response.
 func TestUpdateAgent_OmitsModelFieldForOfficeAgent(t *testing.T) {
 	svc, _ := newTestAgentService(t)
