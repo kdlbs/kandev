@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { fetchRetentionStatus, saveRetentionSettings } from "@/lib/api/domains/system-api";
 import type { RetentionSettings } from "@/lib/types/system";
 
 export function useRetentionSettings() {
   const status = useAppStore((s) => s.system.retention);
   const setStatus = useAppStore((s) => s.setSystemRetention);
+  const storeApi = useAppStoreApi();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -34,7 +35,24 @@ export function useRetentionSettings() {
       setSaveError(null);
       try {
         const saved = await saveRetentionSettings(settings);
-        await reload();
+        // Apply the PUT's own normalized response synchronously, rather
+        // than relying solely on the reload() below: if that GET fails,
+        // its error is recorded but never surfaces once status is already
+        // loaded (see the isLoading/error-gated branches in
+        // RetentionSettingsCard), which would otherwise leave the store
+        // holding pre-save settings while the save coordinator believes
+        // the save already succeeded.
+        storeApi.setState((state) =>
+          state.system.retention
+            ? {
+                system: {
+                  ...state.system,
+                  retention: { ...state.system.retention, settings: saved },
+                },
+              }
+            : state,
+        );
+        void reload();
         return saved;
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
@@ -42,7 +60,7 @@ export function useRetentionSettings() {
         throw e;
       }
     },
-    [reload],
+    [reload, storeApi],
   );
 
   return { status, isLoading, error, saveError, reload, save };

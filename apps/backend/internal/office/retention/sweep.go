@@ -49,11 +49,10 @@ type satelliteResults struct {
 }
 
 // Sweeper runs one sweep or one census pass at a time; the scheduler
-// (scheduler.go) owns when to call each. Findings resolved here, as
-// documented Build decisions:
+// (scheduler.go) owns when to call each.
 //
-//   - F28 (lost-exclusivity outcome): a lock lost between tables abandons
-//     the whole sweep attempt as a skip — the same outcome as a local
+//   - Lost-exclusivity outcome: a lock lost between tables abandons the
+//     whole sweep attempt as a skip — the same outcome as a local
 //     concurrent-sweep collision — rather than inventing a per-table
 //     "skipped" state the design's eight-id health catalogue has nowhere
 //     to report. Batches already committed on PostgreSQL stay committed
@@ -152,10 +151,10 @@ func (s *Sweeper) RunSweep(ctx context.Context) {
 		testBetweenTablesSweep(q)
 	}
 	if session != nil && !session.alive(ctx) {
-		// F25/F28: exclusivity was lost after the first table's work. Do
-		// not start the second table, and do not publish a partial
-		// result — this whole attempt is a skip, exactly as if the lock
-		// had never been acquired.
+		// Exclusivity was lost after the first table's work. Do not
+		// start the second table, and do not publish a partial result —
+		// this whole attempt is a skip, exactly as if the lock had
+		// never been acquired.
 		s.recordSkip()
 		return
 	}
@@ -182,7 +181,7 @@ func (s *Sweeper) RunSweep(ctx context.Context) {
 // testBetweenTablesSweep, when set, runs right after office_routine_runs'
 // table work and right before the alive() liveness check and the runs
 // table — a deterministic seam for exercising AC-OFFICE-RUN-HISTORY-RETENTION-002.12's
-// "verifies the lock connection is still alive between tables" path (F25)
+// "verifies the lock connection is still alive between tables" path
 // without depending on real cross-process timing. It receives the sweep's
 // own queryer so a test can run diagnostics (or a second sweep attempt)
 // against the exact connection in use. Never set outside tests.
@@ -190,7 +189,7 @@ var testBetweenTablesSweep func(q queryer)
 
 // RunCensus evaluates the retained-count census for every thresholded
 // table. Read-only, so it needs no advisory lock: every backend computes
-// and serves its own local view (F35).
+// and serves its own local view.
 func (s *Sweeper) RunCensus(ctx context.Context) {
 	q := s.pool.Reader()
 	now := time.Now().UTC()
@@ -244,7 +243,7 @@ func (s *Sweeper) acquireQueryer(ctx context.Context) (queryer, *sweepSession, b
 }
 
 // isPreviewed reads the preview marker through q, the sweep's own
-// connection, rather than the shared settings pool (F27 — see the
+// connection, rather than the shared settings pool (see the
 // PreviewMarkerStore.GetWith doc comment).
 func (s *Sweeper) isPreviewed(ctx context.Context, q queryer, table TableName) bool {
 	marker, _ := s.previewMarker.GetWith(ctx, q)
