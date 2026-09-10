@@ -427,9 +427,13 @@ test.describe("property pickers", () => {
       },
     );
 
+    const settleOrder: string[] = [];
     const trigger = testPage.getByTestId("status-picker-trigger");
     const olderFailure = waitForHttp(testPage, "PATCH", new RegExp(`^${patchPathname}$`), {
       predicate: (response) => response.status() === 500,
+    }).then((response) => {
+      settleOrder.push("older");
+      return response;
     });
     await trigger.click();
     await testPage.getByTestId("status-picker-option-in_progress").click();
@@ -437,6 +441,9 @@ test.describe("property pickers", () => {
 
     const newerSuccess = waitForHttp(testPage, "PATCH", new RegExp(`^${patchPathname}$`), {
       predicate: (response) => response.ok(),
+    }).then((response) => {
+      settleOrder.push("newer");
+      return response;
     });
     await trigger.click();
     await testPage.getByTestId("status-picker-option-blocked").click();
@@ -447,6 +454,7 @@ test.describe("property pickers", () => {
     // wrong reason (the stale failure hasn't been processed yet).
     await newerSuccess;
     await olderFailure;
+    expect(settleOrder).toEqual(["newer", "older"]);
 
     // Read the backend's settled value before asserting the UI. This HTTP
     // round trip gives the older failure's own catch handler — a same-tick

@@ -108,10 +108,9 @@ describe("applyStatusDrop", () => {
     expect(d.onError).not.toHaveBeenCalled();
   });
 
-  it("rolls the card back to its whole prior snapshot when the mutation fails", async () => {
+  it("rolls the card back to its prior status when the mutation fails", async () => {
     const before = task("t1", "in_review");
-    // rawStatus is set by the store on ingestion and must survive a rollback,
-    // which is why the snapshot goes back whole rather than status-only.
+    // rawStatus is set by the store on ingestion and must survive a rollback.
     before.rawStatus = "REVIEW";
     const d = deps(before, async () => {
       throw new Error("boom");
@@ -120,7 +119,10 @@ describe("applyStatusDrop", () => {
     await applyStatusDrop("t1", "done", d);
 
     expect(d.patchTask).toHaveBeenNthCalledWith(1, "t1", { status: "done" });
-    expect(d.patchTask).toHaveBeenNthCalledWith(2, "t1", before);
+    expect(d.patchTask).toHaveBeenNthCalledWith(2, "t1", {
+      status: before.status,
+      rawStatus: before.rawStatus,
+    });
     expect(d.onError).toHaveBeenCalledWith("boom");
   });
 
@@ -168,7 +170,10 @@ describe("applyStatusDrop", () => {
 
     await applyStatusDrop("t1", "blocked", d);
 
-    expect(d.patchTask).toHaveBeenNthCalledWith(2, "t1", before);
+    expect(d.patchTask).toHaveBeenNthCalledWith(2, "t1", {
+      status: before.status,
+      rawStatus: before.rawStatus,
+    });
     expect(d.onError).toHaveBeenCalledTimes(1);
   });
 });
@@ -250,6 +255,7 @@ describe("applyStatusDrop generation guard — overlapping status mutations", ()
     await p1;
 
     expect(getCurrent().status).toBe("in_review");
+    expect(getCurrent().rawStatus).toBe("in_review");
     expect(d.onError).toHaveBeenCalledTimes(2);
   });
 
@@ -292,6 +298,7 @@ describe("applyStatusDrop generation guard — overlapping status mutations", ()
     await p2;
 
     expect(getCurrent().status).toBe("in_review");
+    expect(getCurrent().rawStatus).toBe("in_review");
     expect(d.onError).toHaveBeenCalledTimes(2);
   });
 });

@@ -106,7 +106,10 @@ export async function applyStatusDrop(
         // the card would re-normalize back to the old column.
         deps.patchTask(taskId, { status: err.redirectedStatus });
       } else {
-        deps.patchTask(taskId, snapshot);
+        deps.patchTask(taskId, {
+          status: snapshot.status,
+          rawStatus: snapshot.rawStatus,
+        });
       }
     }
     // The approver gate arrives here already translated into a sentence
