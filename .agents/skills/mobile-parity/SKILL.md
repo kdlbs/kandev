@@ -13,6 +13,10 @@ Use this skill before planning or changing UI. Goal: desktop and mobile deliver 
 
 Before proposing a mobile design, read [Kandev Mobile UI Language](references/kandev-mobile-ui-language.md) and inspect the closest shipped mobile surface. Responsive CSS alone does not establish mobile parity.
 
+For buttons, single-line inputs, selectors, or control-size audits, also read
+[Control sizing](references/control-sizing.md). It defines desktop sizes,
+touch exceptions, and the sweep procedure.
+
 ## When It Applies
 
 Apply when task changes user-facing UI:
@@ -46,6 +50,12 @@ When a task changes composition, navigation, overlays, touch behavior, scrolling
 - shared state, view-model, filtering/selection, and business logic versus mobile-specific presentation
 - mobile Playwright scenario proving the same user value
 
+For a feature or fix design package, record the desktop and phone composition
+as ASCII previews in the plan and relevant UI work orders. Follow
+`docs/specs/guide/plans-and-work-orders.md#ascii-ui-previews`; include a compact
+preview in the final conversation handoff. During implementation, compare the
+rendered phone surface with the assigned preview's structure and annotations.
+
 ## Workflow
 
 1. Map affected surfaces.
@@ -64,7 +74,12 @@ When a task changes composition, navigation, overlays, touch behavior, scrolling
 3. Implement responsive UI.
    - Reuse domain hooks, state, view-model derivation, filtering/selection, and action handlers across viewports; keep responsive wrappers focused on presentation. Branch composition when the desktop interaction model depends on width or a fine pointer. Do not mount a heavyweight desktop workbench and merely hide or squeeze it on phones.
    - Use `useResponsiveBreakpoint` and existing `@kandev/ui` or mobile primitives. Reuse current Dropdown/ContextMenu primitives for contextual actions; use `Drawer` or an existing picker shell for structured phone navigation and choices. Use `useTouchDrawer` when a hover disclosure needs a coarse-pointer alternative.
+   - Use 28px for ordinary desktop buttons, single-line inputs, select triggers, and combobox triggers. Use 24px only for deliberate compact inline controls. Match the desktop Start Task dialog and shared default primitives.
+   - Keep phone and coarse-pointer action targets at least 44px. Scope touch dimensions to those conditions. A desktop-visible action must not inherit an unconditional `h-11` or `min-h-11`. Check both height and minimum height: changing `h-*` does not remove an oversized `min-h-*`.
+   - A Radix Tooltip that happens to open after Playwright `.tap()` is not a coarse-pointer alternative. Use `useTouchDrawer` with a Drawer branch and assert the drawer surface in mobile E2E.
    - Keep coarse-pointer and mobile touch targets large enough for touch use, generally at least 44px in the active dimension. This is an active hit-area rule, not a universal desktop visual-size rule: fine-pointer desktop controls should retain the surrounding design-system density, and touch-sized classes such as `h-11` must not become the shared desktop button size.
+   - When one component serves both pointer modes, keep its fine-pointer size as the base class and add the 44px size only behind a coarse-pointer or phone variant. An unqualified `h-11` or `min-h-11` on a desktop-visible shared action is a sizing bug.
+   - For a primary mobile dialog action whose contract requires an actual hit target of at least 44px, prefer 48px nominal sizing when browser scaling can produce fractional bounds. Assert the rendered `boundingBox().height` (or width for a horizontal target) is at least 44px; a utility class alone does not prove the physical target.
    - Use dynamic viewport units and an explicit internal scroll region for viewport-bound/full-height or potentially overflowing surfaces. Ensure bottom-fixed controls and tall drawers clear safe-area insets; short drawers can retain the shared primitive's intrinsic sizing. Keep document-level horizontal overflow at zero.
    - If mobile substitutes an unsupported desktop view, derive an effective mobile view without overwriting the user's saved desktop preference.
    - Use semantic controls, visible labels or accessible names, focus return, and existing design-system components.
@@ -76,6 +91,9 @@ When a task changes composition, navigation, overlays, touch behavior, scrolling
    - In this repo, name mobile test files `mobile-*.spec.ts` so the `mobile-chrome` Playwright project picks them up automatically.
    - Cover the actual mobile composition: drawer or full-height surface, visible overflow action, focused navigation, direct route, or bottom control.
    - For overlay and dense-navigation changes, assert viewport containment, internal scrolling, and the absence of document horizontal overflow where those properties are part of the regression.
+   - For responsive visual or utility changes, define the base phone behavior and assert computed styles at the canonical phone viewport and just below and above the relevant breakpoint; geometry or overflow checks alone can miss a desktop style leaking into a full-screen mobile surface.
+   - When responsive CSS changes an overlay or absolute child to normal flow (for example, `position: static`), re-check the parent's allocated width and height; a fixed-size desktop wrapper can under-report combined in-flow mobile content.
+   - For containment regressions, compare the interactive control's bounding box with its row, drawer, or viewport bounds. An intrinsic 44px hitbox plus a document-overflow check does not prove that an ancestor is not clipping the control.
    - When a touch-only control is replaced or hidden, run `rg` across mobile E2E tests for the removed control. Replace every affected interaction with the intended gesture or alternate control, then run those tests together.
 
 5. Verify visually and behaviorally.

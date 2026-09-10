@@ -120,6 +120,7 @@ func provideGateway(
 	referenceValidator entityrefs.SubmissionValidator,
 	authSvc *auth.Service,
 	dataDir string,
+	registerCleanup func(func() error),
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
@@ -165,7 +166,19 @@ func provideGateway(
 		referenceValidator,
 	)
 	queueHandlers.SetAttachmentClaimer(taskSvc)
+	queueHandlers.Start(ctx)
+	if registerCleanup != nil {
+		registerCleanup(func() error {
+			queueHandlers.Stop()
+			return nil
+		})
+	}
 	queueHandlers.RegisterHandlers(gateway.Dispatcher)
+	if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+		gateway.Hub.SetClientDisconnectListener(func(connectionID string) {
+			queue.ReleaseEditLeasesForConnection(connectionID)
+		})
+	}
 
 	if lifecycleMgr != nil && agentRegistry != nil {
 		agentCtrl := agentcontroller.NewController(lifecycleMgr, agentRegistry)
@@ -586,19 +599,33 @@ func loadTaskGitObservations(
 	if err != nil {
 		return nil, err
 	}
-	sessionIDs := make([]string, 0, len(sessions))
+	environmentIDs := make([]string, 0, len(sessions)+1)
+	seenEnvironmentIDs := make(map[string]struct{}, len(sessions)+1)
 	for _, session := range sessions {
-		if session != nil && session.ID != "" {
-			sessionIDs = append(sessionIDs, session.ID)
+		if session == nil || session.TaskEnvironmentID == "" {
+			continue
+		}
+		if _, seen := seenEnvironmentIDs[session.TaskEnvironmentID]; seen {
+			continue
+		}
+		seenEnvironmentIDs[session.TaskEnvironmentID] = struct{}{}
+		environmentIDs = append(environmentIDs, session.TaskEnvironmentID)
+	}
+	if environment, err := taskRepo.GetTaskEnvironmentByTaskID(ctx, taskID); err != nil {
+		return nil, err
+	} else if environment != nil && environment.ID != "" {
+		if _, seen := seenEnvironmentIDs[environment.ID]; !seen {
+			seenEnvironmentIDs[environment.ID] = struct{}{}
+			environmentIDs = append(environmentIDs, environment.ID)
 		}
 	}
-	snapshots, err := taskRepo.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, environmentIDs)
 	if err != nil {
 		return nil, err
 	}
 	observations := make([]statussummary.GitObservation, 0, len(snapshots))
-	for _, session := range sessions {
-		observation, ok := taskGitObservation(session, snapshots[session.ID])
+	for _, snapshot := range snapshots {
+		observation, ok := taskGitObservation(nil, snapshot)
 		if ok {
 			observations = append(observations, observation)
 		}
@@ -610,10 +637,13 @@ func taskGitObservation(
 	session *models.TaskSession,
 	snapshot *models.GitSnapshot,
 ) (statussummary.GitObservation, bool) {
-	if session == nil || snapshot == nil {
+	if snapshot == nil {
 		return statussummary.GitObservation{}, false
 	}
-	repository := session.ID
+	repository := statussummary.RootRepositoryKey
+	if session != nil {
+		repository = session.ID
+	}
 	if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
 		repository = name
 	}

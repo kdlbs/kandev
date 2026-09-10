@@ -113,7 +113,7 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	result, ok := s.evaluateChildrenCompleted(ctx, parent, session, rows)
+	result, ok := s.evaluateChildrenCompleted(ctx, parent, session, rows, operationID)
 	if !ok {
 		return false
 	}
@@ -123,14 +123,14 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	appliedTransition := s.applyEngineTransition(
+	appliedTransition := s.applyEngineTransitionWithMode(
 		ctx,
 		parentID,
 		session,
 		result,
 		engine.TriggerOnChildrenCompleted,
 		parent.Description,
-		true,
+		transitionLifecycleWithOnEnter,
 	)
 	if !appliedTransition {
 		return false
@@ -147,7 +147,6 @@ func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string)
 			zap.Error(err))
 		return nil, false
 	}
-	s.annotateTerminalChildSteps(ctx, rows)
 	if len(rows) == 0 || !allChildrenTerminal(rows) {
 		return nil, false
 	}
@@ -223,15 +222,20 @@ func (s *Service) evaluateChildrenCompleted(
 	parent *models.Task,
 	session *models.TaskSession,
 	rows []models.ChildCompletionRow,
+	operationID string,
 ) (engine.HandleResult, bool) {
 	state := s.buildMachineState(ctx, parent, session)
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
-		TaskID:         parent.ID,
-		SessionID:      session.ID,
-		Trigger:        engine.TriggerOnChildrenCompleted,
-		EvaluateOnly:   true,
-		PreloadedState: &state,
-		Payload:        childCompletionPayload(rows),
+		TaskID:       parent.ID,
+		SessionID:    session.ID,
+		Trigger:      engine.TriggerOnChildrenCompleted,
+		OperationID:  operationID,
+		EvaluateOnly: true,
+		// The outer handler owns the final idempotency mark because it must
+		// commit the transition lifecycle before accepting this operation.
+		DeferOperationMark: true,
+		PreloadedState:     &state,
+		Payload:            childCompletionPayload(rows),
 	})
 	if err != nil {
 		s.logger.Warn("on_children_completed: workflow engine error",
@@ -255,29 +259,11 @@ func (s *Service) markChildCompletionApplied(ctx context.Context, parentID, oper
 
 func allChildrenTerminal(rows []models.ChildCompletionRow) bool {
 	for _, row := range rows {
-		if !models.IsTerminalTaskState(row.State) && !row.TerminalWorkflowStep {
+		if !models.IsTerminalTaskState(row.State) {
 			return false
 		}
 	}
 	return true
-}
-
-func (s *Service) annotateTerminalChildSteps(ctx context.Context, rows []models.ChildCompletionRow) {
-	if s.workflowStepGetter == nil {
-		return
-	}
-	cache := make(map[string]bool)
-	for i := range rows {
-		if models.IsTerminalTaskState(rows[i].State) || rows[i].WorkflowStepID == "" {
-			continue
-		}
-		terminal, ok := cache[rows[i].WorkflowStepID]
-		if !ok {
-			terminal = s.workflowStepIsTerminal(ctx, rows[i].WorkflowStepID)
-			cache[rows[i].WorkflowStepID] = terminal
-		}
-		rows[i].TerminalWorkflowStep = terminal
-	}
 }
 
 func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID string) bool {
@@ -311,9 +297,6 @@ func childCompletionPayload(rows []models.ChildCompletionRow) engine.OnChildrenC
 }
 
 func childCompletionStatus(row models.ChildCompletionRow) string {
-	if row.TerminalWorkflowStep && !models.IsTerminalTaskState(row.State) {
-		return string(v1.TaskStateCompleted)
-	}
 	return string(row.State)
 }
 
@@ -327,12 +310,6 @@ func childCompletionOperationID(parentID string, rows []models.ChildCompletionRo
 		b.WriteString(string(row.State))
 		b.WriteString(":")
 		b.WriteString(row.WorkflowStepID)
-		b.WriteString(":")
-		if row.TerminalWorkflowStep {
-			b.WriteString("terminal")
-		} else {
-			b.WriteString("active")
-		}
 		b.WriteString(":")
 		b.WriteString(row.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	}

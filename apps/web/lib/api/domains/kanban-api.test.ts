@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachTaskWorkspaceSources,
   detachTask,
+  deleteTask,
   listTasksByWorkspace,
+  updateTask,
   updateTaskPortForwarding,
 } from "./kanban-api";
 
@@ -15,6 +17,25 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("deleteTask", () => {
+  it("sends cascade and discard consent independently", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await deleteTask(
+      "task-1",
+      { cascade: true, discardWorktreeChanges: true },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(
+      `${API_BASE_URL}/api/v1/tasks/task-1?cascade=true&discard_worktree_changes=true`,
+    );
+    expect(init?.method).toBe("DELETE");
+  });
+});
 
 describe("detachTask", () => {
   it("posts without a body to the canonical detach endpoint", async () => {
@@ -32,6 +53,27 @@ describe("detachTask", () => {
     expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/child-1/detach`);
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
+  });
+});
+
+describe("updateTask", () => {
+  it("carries priority as a partial-update field", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "task-1", priority: "critical" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await updateTask("task-1", { priority: "critical" }, { baseUrl: API_BASE_URL });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1`);
+    expect(init).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ priority: "critical" }),
+    });
   });
 });
 

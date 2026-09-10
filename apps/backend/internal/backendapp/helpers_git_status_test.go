@@ -82,10 +82,10 @@ func newGitStatusEnvironmentFixture(t *testing.T) gitStatusEnvironmentFixture {
 			"mismatched.go": map[string]interface{}{"status": "modified"},
 		},
 		Metadata: map[string]interface{}{
-			"timestamp": "2026-08-30T12:05:00Z",
+			"timestamp": "2026-08-30T12:01:00Z",
 			"modified":  []string{"mismatched.go"},
 		},
-		CreatedAt: now.Add(5 * time.Minute),
+		CreatedAt: now.Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("CreateGitSnapshot(mismatched): %v", err)
 	}
@@ -312,6 +312,38 @@ func TestAppendLiveGitStatusMessageRejectsMismatchedLiveExecutionWorkspace(t *te
 	}
 	if _, ok := files["mismatched-live.go"]; ok {
 		t.Fatalf("mismatched runtime status was selected: files = %#v", files)
+	}
+}
+
+func TestAppendLiveGitStatusMessageDoesNotFallbackAfterLiveQueryFailure(t *testing.T) {
+	fixture := newGitStatusEnvironmentFixture(t)
+	log := newTestLogger()
+	agentClient, closeServer := newGitStatusClientWithHandler(t, log, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "agentctl unavailable", http.StatusServiceUnavailable)
+	}))
+	defer closeServer()
+
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID:                "git-status-live-failure-execution",
+		TaskID:            fixture.requested.TaskID,
+		SessionID:         "git-status-canonical",
+		TaskEnvironmentID: fixture.env.ID,
+		WorkspacePath:     fixture.env.WorkspacePath,
+	}); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	execution, ok := mgr.GetExecutionBySessionID("git-status-canonical")
+	if !ok {
+		t.Fatal("canonical execution was not registered")
+	}
+	execution.SetAgentCtlClientForTesting(agentClient)
+
+	msgs := appendLiveGitStatusMessage(
+		context.Background(), fixture.repo, mgr, fixture.requested.ID, fixture.requested, nil, log,
+	)
+	if len(msgs) != 0 {
+		t.Fatalf("got %d status messages after live query failure, want no persisted fallback", len(msgs))
 	}
 }
 

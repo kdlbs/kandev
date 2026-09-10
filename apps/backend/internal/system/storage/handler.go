@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,6 +13,10 @@ import (
 type SettingsManager interface {
 	GetSettings(context.Context) (StorageMaintenanceSettings, error)
 	SaveSettingsWithConfirmations(context.Context, StorageMaintenanceSettings, SaveConfirmations) (StorageMaintenanceSettings, error)
+}
+
+type SettingsPatcher interface {
+	PatchSettingsWithConfirmations(context.Context, map[string]json.RawMessage, SaveConfirmations) (StorageMaintenanceSettings, error)
 }
 
 type RunLister interface {
@@ -46,6 +51,8 @@ type Summary struct {
 	Quarantine         any `json:"quarantine"`
 	TemporaryArtifacts any `json:"temporary_artifacts"`
 	Docker             any `json:"docker"`
+	Database           any `json:"database"`
+	DatabaseBackups    any `json:"database_backups"`
 }
 
 type DiskCapacity struct {
@@ -81,6 +88,10 @@ type OverviewReader interface {
 	SettingsCapabilities(context.Context, StorageMaintenanceSettings) Capabilities
 }
 
+type OverviewStateReader interface {
+	Read(context.Context) (OverviewRead, error)
+}
+
 type HandlerConfig struct {
 	Settings          SettingsManager
 	Runs              RunLister
@@ -99,6 +110,39 @@ type Handler struct {
 
 func NewHandler(config HandlerConfig) *Handler {
 	return &Handler{config: config}
+}
+
+func (h *Handler) GetSettings(ctx context.Context) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	return h.config.Settings.GetSettings(ctx)
+}
+
+func (h *Handler) SaveSettingsWithConfirmations(ctx context.Context, settings StorageMaintenanceSettings, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	updated, err := h.config.Settings.SaveSettingsWithConfirmations(ctx, settings, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
+}
+
+func (h *Handler) PatchSettingsWithConfirmations(ctx context.Context, changes map[string]json.RawMessage, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	patcher, ok := h.config.Settings.(SettingsPatcher)
+	if !ok {
+		return StorageMaintenanceSettings{}, errors.New("atomic storage settings patch is unavailable")
+	}
+	updated, err := patcher.PatchSettingsWithConfirmations(ctx, changes, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
 }
 
 func (h *Handler) logError(message string, err error) {
@@ -287,10 +331,25 @@ func (h *Handler) getStorage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load storage settings"})
 		return
 	}
-	snapshot, err := h.config.Overview.Get(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	var (
+		snapshot *OverviewSnapshot
+		analysis StorageAnalysisState
+	)
+	if stateReader, ok := h.config.Overview.(OverviewStateReader); ok {
+		read, readErr := stateReader.Read(c.Request.Context())
+		if readErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": readErr.Error()})
+			return
+		}
+		snapshot, analysis = read.Snapshot, read.Analysis
+	} else {
+		legacy, readErr := h.config.Overview.Get(c.Request.Context())
+		if readErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": readErr.Error()})
+			return
+		}
+		snapshot = &legacy
+		analysis = readyAnalysisState(0, defaultOverviewCacheTTL, legacy.AnalyzedAt, legacy.AnalyzedAt, legacy.AnalyzedAt)
 	}
 	runs, err := h.config.Runs.ListRuns(c.Request.Context(), 1)
 	if err != nil {
@@ -301,9 +360,14 @@ func (h *Handler) getStorage(c *gin.Context) {
 	if len(runs) > 0 {
 		lastRun = &runs[0]
 	}
+	var summary any
+	var analyzedAt any
+	if snapshot != nil {
+		summary, analyzedAt = snapshot.Summary, snapshot.AnalyzedAt
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"settings": settings, "capabilities": h.config.Overview.Capabilities(c.Request.Context(), settings),
-		"summary": snapshot.Summary, "analyzed_at": snapshot.AnalyzedAt, "last_run": lastRun,
+		"summary": summary, "analyzed_at": analyzedAt, "analysis": analysis, "last_run": lastRun,
 	})
 }
 

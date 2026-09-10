@@ -2,11 +2,11 @@
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
-import type { SessionSlice, SessionSliceState } from "./types";
+import type { QueueMeta, QueueOperationToken, SessionSlice, SessionSliceState } from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
 import {
   buildTaskSessionProjectionActions,
-  mergePendingActionProjection,
+  mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import {
@@ -15,20 +15,19 @@ import {
   removePromptMessage,
   updatePromptMessage,
 } from "./prompt-message-actions";
-import {
-  migrateEnvKeyedData,
-  purgeSessionRuntimeState,
-} from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { mergeTaskSession } from "./session-merge";
+import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
-import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
-import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import {
+  readMcpAttachmentHistory,
+  shouldReplaceMcpAttachmentHistory,
+} from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
 import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
 } from "@/lib/walkthrough-notification-storage";
-
-const debugEnv = createDebugLogger("session:env-mapping");
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -97,118 +96,45 @@ function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
 
-/** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
- *  `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
-  if (!environmentId) return;
-  const previous = draft.environmentIdBySessionId[sessionId];
-  if (isDebug()) {
-    debugEnv("syncEnvironmentMapping", {
-      sessionId,
-      environmentId,
-      previous: previous ?? null,
-      changed: previous !== environmentId,
-      fallbackGitStatusFileCount: Object.keys(
-        draft.gitStatus?.byEnvironmentId?.[sessionId]?.files ?? {},
-      ).length,
-      targetGitStatusFileCount: Object.keys(
-        draft.gitStatus?.byEnvironmentId?.[environmentId]?.files ?? {},
-      ).length,
-    });
-  }
-  draft.environmentIdBySessionId[sessionId] = environmentId;
-  migrateEnvKeyedData(draft, sessionId, environmentId);
-}
-
-/**
- * Backfill the prepare-progress slice from a session's `metadata.prepare_result`
- * when sessions are loaded from the API (e.g. switching tasks client-side).
- *
- * Without this, prepare progress only ever arrives via SSR hydration or live WS
- * events, so switching to a task whose prepare already completed (common for
- * remote executors) showed an empty "Environment prepared" row until a full
- * page reload re-ran SSR. Only populates when no entry exists yet so we never
- * clobber live WS progress for an in-flight prepare.
- *
- * `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice).
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function syncPrepareProgress(draft: any, session: TaskSession) {
-  if (draft.prepareProgress.bySessionId[session.id]) return;
-  const prepareState = prepareResultToSessionState(session.id, session.metadata);
-  if (prepareState) draft.prepareProgress.bySessionId[session.id] = prepareState;
-}
-
-/** Merge the runtime cancellation projection using its process-local revision. */
-function mergeCancellationProjection(
-  existing: TaskSession,
+/** Normalize and merge a complete session record without erasing a newer live activity event. */
+function mergeTaskSessionSnapshot(
+  existing: TaskSession | undefined,
   incoming: TaskSession,
-): Pick<TaskSession, "cancellation_pending" | "cancellation_revision"> {
-  const incomingRevision = incoming.cancellation_revision;
-  const existingRevision = existing.cancellation_revision;
-  const incomingIsCurrent =
-    incomingRevision !== undefined &&
-    (existingRevision === undefined || incomingRevision >= existingRevision);
+  currentActivityEpoch: number,
+  requestActivityEpoch: number | undefined,
+): TaskSession {
+  const snapshot = {
+    ...incoming,
+    foreground_activity: incoming.foreground_activity ?? null,
+    active_subagent_count: incoming.active_subagent_count ?? 0,
+    supports_steering: incoming.supports_steering ?? false,
+  };
+  if (!existing) return snapshot;
 
-  if (incomingIsCurrent) {
-    return {
-      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
-      cancellation_revision: incomingRevision,
-    };
-  }
-
-  if (incomingRevision === undefined && existingRevision === undefined) {
-    return {
-      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
-      cancellation_revision: existingRevision,
-    };
-  }
+  const merged = mergeTaskSession(existing, snapshot);
+  const activityChangedDuringRequest =
+    requestActivityEpoch === undefined
+      ? currentActivityEpoch > 0
+      : currentActivityEpoch > requestActivityEpoch;
+  if (!activityChangedDuringRequest) return merged;
 
   return {
-    cancellation_pending: existing.cancellation_pending,
-    cancellation_revision: existingRevision,
+    ...merged,
+    foreground_activity: existing.foreground_activity,
+    active_subagent_count: existing.active_subagent_count,
+    supports_steering: existing.supports_steering,
   };
 }
 
-/** Merge an incoming session update with an existing session, preserving nullable fields. */
-function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
-  const cancellation = mergeCancellationProjection(existing, incoming);
-  const incomingRouteGeneration = incoming.route_generation;
-  const existingRouteGeneration = existing.route_generation;
-  const routeIsStale =
-    existingRouteGeneration !== undefined &&
-    (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
-  const pendingAction = mergePendingActionProjection(existing, incoming);
-  return {
-    ...existing,
-    ...incoming,
-    ...cancellation,
-    ...(routeIsStale
-      ? {
-          execution_profile_id: existing.execution_profile_id,
-          route_generation: existing.route_generation,
-          route_state: existing.route_state,
-          route_reason: existing.route_reason,
-          route_error_code: existing.route_error_code,
-          route_error_class: existing.route_error_class,
-          route_catalogue_version: existing.route_catalogue_version,
-          route_retry_ordinal: existing.route_retry_ordinal,
-          route_deadline: existing.route_deadline,
-          route_pending_outcome: existing.route_pending_outcome,
-          downstream_acp_session_id: existing.downstream_acp_session_id,
-        }
-      : {}),
-    ...pendingAction,
-    agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
-    worktree_id: incoming.worktree_id ?? existing.worktree_id,
-    worktree_path: incoming.worktree_path ?? existing.worktree_path,
-    worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
-    workspace_path: incoming.workspace_path ?? existing.workspace_path,
-    repository_id: incoming.repository_id ?? existing.repository_id,
-    base_branch: incoming.base_branch ?? existing.base_branch,
-    task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
-  };
+function reconcileMcpAttachmentHistory(
+  draft: SessionSliceState & SessionRuntimeSliceState,
+  session: TaskSession,
+): void {
+  const incoming = readMcpAttachmentHistory(session.metadata?.mcp_attachment_state);
+  if (!incoming) return;
+  const existing = draft.sessionMcpStatus.bySessionId[session.id];
+  if (!shouldReplaceMcpAttachmentHistory(existing, incoming)) return;
+  draft.sessionMcpStatus.bySessionId[session.id] = incoming;
 }
 
 // Settled states are defined once in turn-actions (SETTLED_SESSION_STATES /
@@ -259,7 +185,12 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
-  messagePrompts: { bySession: {}, metaBySession: {}, generationBySession: {} },
+  messagePrompts: {
+    bySession: {},
+    metaBySession: {},
+    generationBySession: {},
+    refreshGenerationBySession: {},
+  },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -267,8 +198,14 @@ export const defaultSessionState: SessionSliceState = {
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
-  taskSessions: { items: {} },
-  taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
+  taskSessions: { items: {}, activityEpochBySession: {} },
+  taskSessionsByTask: {
+    itemsByTaskId: {},
+    loadingByTaskId: {},
+    loadedByTaskId: {},
+    errorByTaskId: {},
+  },
+  pendingActionProjectionsBySessionId: {},
   sessionAgentctl: { itemsBySessionId: {} },
   worktrees: { items: {} },
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
@@ -279,6 +216,11 @@ export const defaultSessionState: SessionSliceState = {
     loadingByTaskId: {},
     loadedByTaskId: {},
     savingByTaskId: {},
+    commentsByTaskId: {},
+    commentsLoadingByTaskId: {},
+    commentsLoadedByTaskId: {},
+    commentsErrorByTaskId: {},
+    commentsMigrationStatusByTaskId: {},
     revisionsByTaskId: {},
     revisionsLoadingByTaskId: {},
     revisionsLoadedByTaskId: {},
@@ -292,7 +234,12 @@ export const defaultSessionState: SessionSliceState = {
     activeStepByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
-  queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
+  queue: {
+    bySessionId: {},
+    metaBySessionId: {},
+    activeOperationBySessionId: {},
+    nextOperationGeneration: 0,
+  },
 };
 
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
@@ -421,6 +368,62 @@ function buildMessageActions(set: ImmerSet) {
     setMessagesLoading: buildSetMessagesLoading(set),
   };
 }
+
+function reconcilePlanCommentIdentity(
+  taskPlans: SessionSlice["taskPlans"],
+  taskId: string,
+  nextPlanId: string | null,
+) {
+  const previousPlan = taskPlans.byTaskId[taskId];
+  const previousPlanId = previousPlan?.id ?? null;
+  if (previousPlan !== undefined && previousPlanId === nextPlanId) return;
+  if (previousPlanId !== nextPlanId) {
+    taskPlans.commentsMigrationStatusByTaskId[taskId] = "idle";
+  }
+  const snapshot = taskPlans.commentsByTaskId[taskId];
+  if (nextPlanId !== null && snapshot?.plan_id === nextPlanId) return;
+  delete taskPlans.commentsByTaskId[taskId];
+  taskPlans.commentsLoadingByTaskId[taskId] = false;
+  taskPlans.commentsLoadedByTaskId[taskId] = nextPlanId === null;
+  delete taskPlans.commentsErrorByTaskId[taskId];
+}
+
+function buildTaskPlanCommentActions(set: ImmerSet) {
+  return {
+    setTaskPlanComments: (
+      taskId: string,
+      snapshot: Parameters<SessionSlice["setTaskPlanComments"]>[1],
+    ) =>
+      set((draft) => {
+        if (snapshot.task_id !== taskId) return;
+        const currentPlan = draft.taskPlans.byTaskId[taskId];
+        if (currentPlan !== undefined && currentPlan?.id !== snapshot.plan_id) return;
+        const current = draft.taskPlans.commentsByTaskId[taskId];
+        if (current?.plan_id === snapshot.plan_id && current.revision > snapshot.revision) return;
+        draft.taskPlans.commentsByTaskId[taskId] = snapshot;
+        draft.taskPlans.commentsLoadingByTaskId[taskId] = false;
+        draft.taskPlans.commentsLoadedByTaskId[taskId] = true;
+        delete draft.taskPlans.commentsErrorByTaskId[taskId];
+      }),
+    setTaskPlanCommentsLoading: (taskId: string, loading: boolean) =>
+      set((draft) => {
+        draft.taskPlans.commentsLoadingByTaskId[taskId] = loading;
+      }),
+    setTaskPlanCommentsError: (taskId: string, error?: string) =>
+      set((draft) => {
+        if (error) draft.taskPlans.commentsErrorByTaskId[taskId] = error;
+        else delete draft.taskPlans.commentsErrorByTaskId[taskId];
+      }),
+    setTaskPlanCommentMigrationStatus: (
+      taskId: string,
+      status: Parameters<SessionSlice["setTaskPlanCommentMigrationStatus"]>[1],
+    ) =>
+      set((draft) => {
+        draft.taskPlans.commentsMigrationStatusByTaskId[taskId] = status;
+      }),
+  };
+}
+
 /** Create the task-plan store actions (set, loading, saving, clear, seen, revisions, preview, compare) backed by the given Immer setter and getter. */
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
@@ -428,6 +431,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
       const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
       const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
       set((draft) => {
+        reconcilePlanCommentIdentity(draft.taskPlans, taskId, plan?.id ?? null);
         draft.taskPlans.byTaskId[taskId] = plan;
         draft.taskPlans.loadingByTaskId[taskId] = false;
         draft.taskPlans.loadedByTaskId[taskId] = true;
@@ -444,6 +448,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
       set((draft) => {
         draft.taskPlans.savingByTaskId[taskId] = saving;
       }),
+    ...buildTaskPlanCommentActions(set),
     clearTaskPlan: (taskId: string) => {
       setPlanLastSeen(taskId, null);
       set((draft) => {
@@ -459,6 +464,11 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
         delete draft.taskPlans.loadingByTaskId[taskId];
         delete draft.taskPlans.loadedByTaskId[taskId];
         delete draft.taskPlans.savingByTaskId[taskId];
+        delete draft.taskPlans.commentsByTaskId[taskId];
+        delete draft.taskPlans.commentsLoadingByTaskId[taskId];
+        delete draft.taskPlans.commentsLoadedByTaskId[taskId];
+        delete draft.taskPlans.commentsErrorByTaskId[taskId];
+        delete draft.taskPlans.commentsMigrationStatusByTaskId[taskId];
         delete draft.taskPlans.revisionsByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
@@ -598,15 +608,143 @@ function nextPair(
   return [current[1], revisionId];
 }
 
-/** Create the task-session store actions (set, read cursor, remove, list, upsert from event, loading) backed by the given Immer setter. */
+function buildRemoveTaskSessionAction(set: ImmerSet) {
+  return (taskId: string, sessionId: string) =>
+    set((draft) => {
+      delete draft.taskSessions.items[sessionId];
+      if (draft.taskSessions.activityEpochBySession) {
+        delete draft.taskSessions.activityEpochBySession[sessionId];
+      }
+      const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
+      if (sessionsByTask) {
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
+          (s) => s.id !== sessionId,
+        );
+      }
+      delete draft.pendingActionProjectionsBySessionId[sessionId];
+      delete draft.queue.bySessionId[sessionId];
+      delete draft.queue.metaBySessionId[sessionId];
+      delete draft.queue.activeOperationBySessionId[sessionId];
+      // Drop the conversation history owned by this session.
+      delete draft.messages.bySession[sessionId];
+      delete draft.messages.metaBySession[sessionId];
+      delete draft.messagePrompts.bySession[sessionId];
+      delete draft.messagePrompts.metaBySession[sessionId];
+      const generations = (draft.messagePrompts.generationBySession ??= {});
+      generations[sessionId] = (generations[sessionId] ?? 0) + 1;
+      delete draft.turns.bySession[sessionId];
+      delete draft.turns.activeBySession[sessionId];
+      delete draft.turns.loadedBySession[sessionId];
+      delete draft.turns.reconcileEpochBySession[sessionId];
+      delete draft.turns.settledBoundaryBySession[sessionId];
+      // Cascade into the runtime slice (shell/process/git buffers + per-session
+      // maps); this also removes the environmentIdBySessionId mapping.
+      purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
+    });
+}
+
+function resetQueueStateForReincarnation(
+  draft: Pick<SessionSliceState, "queue">,
+  existing: TaskSession | undefined,
+  incoming: Pick<TaskSession, "id" | "queue_incarnation_id">,
+): void {
+  if (
+    !existing ||
+    incoming.queue_incarnation_id === undefined ||
+    existing.queue_incarnation_id === incoming.queue_incarnation_id
+  ) {
+    return;
+  }
+  delete draft.queue.bySessionId[incoming.id];
+  delete draft.queue.metaBySessionId[incoming.id];
+  delete draft.queue.activeOperationBySessionId[incoming.id];
+}
+
+/** Build actions that reconcile complete session snapshots with partial live events. */
+function buildTaskSessionReconciliationActions(set: ImmerSet) {
+  return {
+    setTaskSessionsForTask: (
+      taskId: string,
+      sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
+      activityEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
+    ) =>
+      set((draft) => {
+        const merged = sessions.map((session) => {
+          const existing = draft.taskSessions.items[session.id];
+          resetQueueStateForReincarnation(draft, existing, session);
+          const snapshot = mergeTaskSessionSnapshot(
+            existing,
+            session,
+            draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+            activityEpochsAtRequestStart[session.id],
+          );
+          return mergeOrphanPendingActionProjection(
+            draft.pendingActionProjectionsBySessionId,
+            snapshot,
+          );
+        });
+        draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
+        draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
+        draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
+        (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = null;
+        for (const session of merged) {
+          draft.taskSessions.items[session.id] = session;
+          syncEnvironmentMapping(draft, session.id, session.task_environment_id);
+          syncPrepareProgress(draft, session);
+          reconcileMcpAttachmentHistory(
+            draft as unknown as SessionSliceState & SessionRuntimeSliceState,
+            session,
+          );
+          reconcileActiveTurnForIdleSession(draft, session);
+        }
+      }),
+    upsertTaskSessionFromEvent: (
+      taskId: string,
+      session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
+    ) =>
+      set((draft) => {
+        if (Object.prototype.hasOwnProperty.call(session, "foreground_activity")) {
+          const epochs = (draft.taskSessions.activityEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
+        const existing = draft.taskSessions.items[session.id];
+        resetQueueStateForReincarnation(draft, existing, session);
+        if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
+          // State events intentionally carry partial session rows. When one
+          // introduces a new session, let useTaskSessions hydrate fields such
+          // as repository_id instead of treating the old list as authoritative.
+          draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
+        }
+        const merged = mergeOrphanPendingActionProjection(
+          draft.pendingActionProjectionsBySessionId,
+          existing ? mergeTaskSession(existing, session) : session,
+        );
+        draft.taskSessions.items[session.id] = merged;
+        const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
+        if (list) {
+          const idx = list.findIndex((s) => s.id === session.id);
+          if (idx >= 0) list[idx] = merged;
+          else list.push(merged);
+        } else {
+          draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
+        }
+        syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
+        reconcileActiveTurnForIdleSession(draft, merged);
+      }),
+  };
+}
+
+/** Create the basic task-session set, read-cursor, removal, and loading actions. */
 function buildTaskSessionActions(set: ImmerSet) {
   return {
     setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
       set((draft) => {
         const existingSession = draft.taskSessions.items[session.id];
-        const mergedSession = existingSession
-          ? mergeTaskSession(existingSession, session)
-          : session;
+        resetQueueStateForReincarnation(draft, existingSession, session);
+        const mergedSession = mergeOrphanPendingActionProjection(
+          draft.pendingActionProjectionsBySessionId,
+          existingSession ? mergeTaskSession(existingSession, session) : session,
+        );
         draft.taskSessions.items[session.id] = mergedSession;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -628,83 +766,166 @@ function buildTaskSessionActions(set: ImmerSet) {
           if (match) match.last_read_message_id = lastReadMessageId;
         }
       }),
-    /**
-     * Removes a session and all its per-session state: task session rows,
-     * messages, turns, reconciliation maps (loaded/epoch/boundary), and the
-     * cascaded runtime buffers.
-     */
-    removeTaskSession: (taskId: string, sessionId: string) =>
-      set((draft) => {
-        delete draft.taskSessions.items[sessionId];
-        const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
-        if (sessionsByTask) {
-          draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
-            (s) => s.id !== sessionId,
-          );
-        }
-        // Drop the conversation history owned by this session.
-        delete draft.messages.bySession[sessionId];
-        delete draft.messages.metaBySession[sessionId];
-        delete draft.messagePrompts.bySession[sessionId];
-        delete draft.messagePrompts.metaBySession[sessionId];
-        const generations = (draft.messagePrompts.generationBySession ??= {});
-        generations[sessionId] = (generations[sessionId] ?? 0) + 1;
-        delete draft.turns.bySession[sessionId];
-        delete draft.turns.activeBySession[sessionId];
-        delete draft.turns.loadedBySession[sessionId];
-        delete draft.turns.reconcileEpochBySession[sessionId];
-        delete draft.turns.settledBoundaryBySession[sessionId];
-        // Cascade into the runtime slice (shell/process/git buffers + per-session
-        // maps); this also removes the environmentIdBySessionId mapping.
-        purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
-      }),
-    setTaskSessionsForTask: (
-      taskId: string,
-      sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-    ) =>
-      set((draft) => {
-        const merged = sessions.map((session) => {
-          const existing = draft.taskSessions.items[session.id];
-          return existing ? mergeTaskSession(existing, session) : session;
-        });
-        draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
-        draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
-        draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
-        for (const session of merged) {
-          draft.taskSessions.items[session.id] = session;
-          syncEnvironmentMapping(draft, session.id, session.task_environment_id);
-          syncPrepareProgress(draft, session);
-          reconcileActiveTurnForIdleSession(draft, session);
-        }
-      }),
-    upsertTaskSessionFromEvent: (
-      taskId: string,
-      session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
-    ) =>
-      set((draft) => {
-        const existing = draft.taskSessions.items[session.id];
-        if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
-          // State events intentionally carry partial session rows. When one
-          // introduces a new session, let useTaskSessions hydrate fields such
-          // as repository_id instead of treating the old list as authoritative.
-          draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
-        }
-        const merged = existing ? mergeTaskSession(existing, session) : session;
-        draft.taskSessions.items[session.id] = merged;
-        const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
-        if (list) {
-          const idx = list.findIndex((s) => s.id === session.id);
-          if (idx >= 0) list[idx] = merged;
-          else list.push(merged);
-        } else {
-          draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
-        }
-        syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
-        reconcileActiveTurnForIdleSession(draft, merged);
-      }),
+    /** Removes a session and all its per-session state. */
+    removeTaskSession: buildRemoveTaskSessionAction(set),
     setTaskSessionsLoading: (taskId: string, loading: boolean) =>
       set((draft) => {
         draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
+      }),
+    setTaskSessionsError: (taskId: string, error: string | null) =>
+      set((draft) => {
+        (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = error;
+      }),
+  };
+}
+
+type QueueMetaInput = Parameters<SessionSlice["setQueueEntries"]>[2];
+
+function queueMetaIdentityMatches(currentIncarnationId: string | undefined, meta: QueueMetaInput) {
+  return !meta.sessionIncarnationId || currentIncarnationId === meta.sessionIncarnationId;
+}
+
+function canCarryPreviousQueueMeta(
+  previous: QueueMeta | undefined,
+  currentIncarnationId: string | undefined,
+  meta: QueueMetaInput,
+) {
+  return (
+    previous !== undefined &&
+    previous.sessionIncarnationId === currentIncarnationId &&
+    (!meta.sessionIncarnationId || meta.sessionIncarnationId === previous.sessionIncarnationId)
+  );
+}
+
+function isStaleQueueSnapshot(
+  previous: QueueMeta | undefined,
+  meta: QueueMetaInput,
+  establishStatusEpoch: boolean,
+) {
+  if (
+    meta.statusEpoch !== undefined &&
+    previous?.statusEpoch !== undefined &&
+    meta.statusEpoch !== previous.statusEpoch
+  ) {
+    return !establishStatusEpoch;
+  }
+  return (
+    meta.statusEpoch !== undefined &&
+    meta.statusEpoch === previous?.statusEpoch &&
+    meta.statusGeneration !== undefined &&
+    previous.statusGeneration !== undefined &&
+    meta.statusGeneration <= previous.statusGeneration
+  );
+}
+
+function shouldPreserveSessionPolicy(previous: QueueMeta | undefined, meta: QueueMetaInput) {
+  return (
+    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
+    previous?.autoMergeSource === "session" &&
+    meta.autoMergeSource === "global"
+  );
+}
+
+function shouldPreservePolicyRevision(previous: QueueMeta | undefined, meta: QueueMetaInput) {
+  return (
+    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
+    previous?.autoMergeSource === meta.autoMergeSource &&
+    previous?.autoMergeRevision !== undefined &&
+    meta.autoMergeRevision !== undefined &&
+    meta.autoMergeRevision < previous.autoMergeRevision
+  );
+}
+
+function copyAutoMergePolicy(target: QueueMetaInput, source: QueueMeta) {
+  target.autoMergeAvailable = source.autoMergeAvailable;
+  target.autoMergeEnabled = source.autoMergeEnabled;
+  target.autoMergeSource = source.autoMergeSource;
+  target.autoMergeRevision = source.autoMergeRevision;
+}
+
+function resolveQueueMeta(
+  currentIncarnationId: string | undefined,
+  previous: QueueMeta | undefined,
+  meta: QueueMetaInput,
+  establishStatusEpoch: boolean,
+): QueueMetaInput | null {
+  if (!queueMetaIdentityMatches(currentIncarnationId, meta)) return null;
+  const nextMeta = { ...meta };
+  if (canCarryPreviousQueueMeta(previous, currentIncarnationId, meta)) {
+    Object.assign(nextMeta, previous, meta);
+  }
+  if (isStaleQueueSnapshot(previous, meta, establishStatusEpoch)) return null;
+  if (
+    previous &&
+    (shouldPreserveSessionPolicy(previous, meta) || shouldPreservePolicyRevision(previous, meta))
+  ) {
+    copyAutoMergePolicy(nextMeta, previous);
+  }
+  return nextMeta;
+}
+
+function buildQueueActions(set: ImmerSet) {
+  return {
+    setQueueEntries: (
+      sessionId: Parameters<SessionSlice["setQueueEntries"]>[0],
+      entries: Parameters<SessionSlice["setQueueEntries"]>[1],
+      meta: QueueMetaInput,
+      options?: Parameters<SessionSlice["setQueueEntries"]>[3],
+    ) =>
+      set((draft) => {
+        const nextMeta = resolveQueueMeta(
+          draft.taskSessions.items[sessionId]?.queue_incarnation_id,
+          draft.queue.metaBySessionId[sessionId],
+          meta,
+          options?.establishStatusEpoch === true,
+        );
+        if (!nextMeta) return;
+        draft.queue.bySessionId[sessionId] = entries;
+        draft.queue.metaBySessionId[sessionId] = nextMeta;
+      }),
+    removeQueueEntry: (sessionId: string, entryId: string) =>
+      set((draft) => {
+        const list = draft.queue.bySessionId[sessionId];
+        if (!list) return;
+        draft.queue.bySessionId[sessionId] = list.filter((entry) => entry.id !== entryId);
+        const meta = draft.queue.metaBySessionId[sessionId];
+        if (meta) meta.count = draft.queue.bySessionId[sessionId].length;
+      }),
+    beginQueueOperation: (sessionId: string, sessionIncarnationId: string) => {
+      let token: QueueOperationToken | null = null;
+      set((draft) => {
+        const session = draft.taskSessions.items[sessionId];
+        if (
+          session?.queue_incarnation_id !== sessionIncarnationId ||
+          draft.queue.activeOperationBySessionId[sessionId]
+        ) {
+          return;
+        }
+        token = {
+          sessionIncarnationId,
+          generation: ++draft.queue.nextOperationGeneration,
+        };
+        draft.queue.activeOperationBySessionId[sessionId] = token;
+      });
+      return token;
+    },
+    finishQueueOperation: (sessionId: string, token: QueueOperationToken) =>
+      set((draft) => {
+        const current = draft.queue.activeOperationBySessionId[sessionId];
+        const session = draft.taskSessions.items[sessionId];
+        if (
+          current?.generation === token.generation &&
+          current.sessionIncarnationId === token.sessionIncarnationId &&
+          session?.queue_incarnation_id === token.sessionIncarnationId
+        ) {
+          delete draft.queue.activeOperationBySessionId[sessionId];
+        }
+      }),
+    clearQueueStatus: (sessionId: string) =>
+      set((draft) => {
+        delete draft.queue.bySessionId[sessionId];
+        delete draft.queue.metaBySessionId[sessionId];
+        delete draft.queue.activeOperationBySessionId[sessionId];
       }),
   };
 }
@@ -721,6 +942,7 @@ export const createSessionSlice: StateCreator<
   ...buildPromptMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
+  ...buildTaskSessionReconciliationActions(set),
   ...buildTaskSessionProjectionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
@@ -748,29 +970,5 @@ export const createSessionSlice: StateCreator<
     }),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),
-  setQueueEntries: (sessionId, entries, meta) =>
-    set((draft) => {
-      draft.queue.bySessionId[sessionId] = entries;
-      draft.queue.metaBySessionId[sessionId] = meta;
-    }),
-  removeQueueEntry: (sessionId, entryId) =>
-    set((draft) => {
-      const list = draft.queue.bySessionId[sessionId];
-      if (!list) return;
-      draft.queue.bySessionId[sessionId] = list.filter((entry) => entry.id !== entryId);
-      const meta = draft.queue.metaBySessionId[sessionId];
-      if (meta) {
-        meta.count = draft.queue.bySessionId[sessionId].length;
-      }
-    }),
-  setQueueLoading: (sessionId, loading) =>
-    set((draft) => {
-      draft.queue.isLoading[sessionId] = loading;
-    }),
-  clearQueueStatus: (sessionId) =>
-    set((draft) => {
-      delete draft.queue.bySessionId[sessionId];
-      delete draft.queue.metaBySessionId[sessionId];
-      delete draft.queue.isLoading[sessionId];
-    }),
+  ...buildQueueActions(set),
 });

@@ -52,7 +52,7 @@ The copy includes these settings:
 - workflow description, prompt, and default agent profile
 - step prompts, colors, positions, transitions, and start-step state
 - command-panel visibility, manual-move policy, and auto-archive policy
-- step agent profiles, completion-signal policy, cancellation policy, WIP limits, and pull-from relationships
+- step agent profiles, session start and end policies, completion-signal policy, cancellation policy, WIP limits, and pull-from relationships
 
 The copy does not include tasks, task sessions, execution history, workflow history, template identity, or sync ownership. A copy of a sync-managed workflow becomes an independent manual workflow. The source remains unchanged.
 
@@ -120,21 +120,22 @@ reviews must wait for approval instead of advancing automatically.
 
 Choose **Add Workflow**, give it a name, select **Custom**, and save it. Expand each step to edit its behavior. Reorder steps by dragging them; transition actions that say “next” or “previous” follow the saved position order.
 
-Workflow-level settings include the name and default agent profile. A step can override that profile; switching profiles creates a different session with fresh context. A step also has these controls:
+Workflow-level settings include the name and default agent profile. Each step can override that profile and configure two independent session settings when the effective profile changes: whether the step reuses an available session or starts a new conversation, and whether the session from the step being left is completed or parked. Steps with the same effective profile keep the current session. A step also has these controls:
 
 | Control | Behavior |
 |---------|----------|
 | Name and color | Board label and presentation. Color is stored as a CSS utility class. |
 | Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. Type `@` to reference a saved prompt by name. |
-| Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, so a Start step with no entry actions is a genuine parking column. |
+| Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, including in plan mode. Thus, a Start step with no entry actions is a genuine parking column. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
-| Reset agent context | Starts the step with fresh conversation context. It is redundant when the step changes agent profile. |
+| Reset agent context | Starts the step with fresh conversation context. It is disabled when the step changes agent profile because the destination step's session start setting controls whether that switch reuses or creates a conversation. |
 | Allow manual move | Allows board drag/drop into the step. It is a product-UI rule, not a security boundary for API clients. |
 | Show in command panel | Includes tasks in this step in the command panel. |
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
 | Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
 | Run completion actions when a turn is cancelled | Also runs the step's `on_turn_complete` actions after an explicit user cancellation settles. A pending clarification, silent interruption, parent/task stop, provider failure, crash, or runtime teardown does not qualify. If the destination has `on_enter: auto_start_agent`, another agent turn can begin immediately. Default is off for custom steps; the built-in Kanban workflow enables it on Backlog and In Progress for newly created workflows; existing workflows are not backfilled. |
+| Complete task on entry | On the final step only, marks the task complete when it enters that step. The setting is saved per step, so moving a step changes which saved value is active. A value on a non-final step is retained but inactive. Default is off. |
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
@@ -143,6 +144,19 @@ section when overflow exists. The task sidebar shows a queue icon for each
 queued task; hover or focus gives its position in the destination queue.
 Queued tasks do not start destination entry actions or consume WIP until
 promotion.
+
+For a profile change, the destination step's **Reuse an available session**
+setting continues the newest eligible conversation for that profile, or starts
+a new session when none is available. **Start a new session** always creates a
+fresh conversation. The source step's **Complete the session** setting closes
+the conversation, while **Park the session** stops the agent and keeps the
+conversation available for reuse or manual follow-up. These settings default
+to reuse on start and park on end. An explicitly selected completion policy is
+preserved.
+
+### Continue a completed conversation
+
+Opening or reloading a completed task does not start its agent. If the task has a completed conversation, select **Resume** to continue that same conversation. The previous messages and provider context remain available, and the task keeps its completed state and workflow step. Select **New Agent** when you want a separate conversation. A follow-up does not run the completed step's workflow actions again.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 

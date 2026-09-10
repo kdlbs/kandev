@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
@@ -60,6 +61,32 @@ func TestLoadTemplates_CancelTriggersTurnCompleteDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadTemplates_CompletionPolicyUsesExplicitFinalStepSetting(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+	for _, template := range templates {
+		for _, step := range template.Steps {
+			want := template.ID != "improve-kandev" && template.ID != "report-kandev-issue" &&
+				step.Position == lastTemplatePosition(template.Steps)
+			if step.CompleteTaskOnEnter != want {
+				t.Errorf("template %q step %q completion policy = %t, want %t", template.ID, step.Name, step.CompleteTaskOnEnter, want)
+			}
+		}
+	}
+}
+
+func lastTemplatePosition(steps []models.StepDefinition) int {
+	last := 0
+	for i, step := range steps {
+		if i == 0 || step.Position > last {
+			last = step.Position
+		}
+	}
+	return last
+}
+
 func TestLoadTemplates_AllValid(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -78,6 +105,35 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 		if len(tmpl.Steps) == 0 {
 			t.Errorf("template %q has no steps", tmpl.ID)
 		}
+	}
+}
+
+func TestConvertStep_PreservesAgentProfileAndSessionPolicies(t *testing.T) {
+	var raw templateYAML
+	if err := yaml.Unmarshal([]byte(`
+id: test
+name: Test
+steps:
+  - id: review
+    name: Review
+    agent_profile_id: profile-review
+    profile_session_start_policy: new
+    profile_session_end_policy: park
+`), &raw); err != nil {
+		t.Fatalf("unmarshal template: %v", err)
+	}
+	step, err := convertStep(raw.Steps[0])
+	if err != nil {
+		t.Fatalf("convertStep returned error: %v", err)
+	}
+	if step.AgentProfileID != "profile-review" {
+		t.Fatalf("agent profile ID = %q, want profile-review", step.AgentProfileID)
+	}
+	if step.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyNew {
+		t.Fatalf("profile session start policy = %q, want new", step.ProfileSessionStartPolicy)
+	}
+	if step.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("profile session end policy = %q, want park", step.ProfileSessionEndPolicy)
 	}
 }
 

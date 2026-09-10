@@ -377,6 +377,21 @@ type BudgetPolicy struct {
 	UpdatedAt         time.Time            `json:"updated_at" db:"updated_at"`
 }
 
+// SpendWindow reports one scope's priced spend and degradation state for a
+// single [start, before) window, in one query round-trip. Shared between
+// internal/office/repository/sqlite (the query implementations) and
+// internal/office/costs (the Repository interface and EvaluatePreLaunch),
+// so neither package needs to import the other's package for this one
+// return type. AC-OFFICE-BUDGET-002.10/.15, REQ-OFFICE-BUDGET-004.
+type SpendWindow struct {
+	// PricedSubcents excludes any event whose cost_source is 'unpriced'
+	// (AC-OFFICE-BUDGET-004.1); a NULL cost_source is treated as priced.
+	PricedSubcents int64
+	// Degraded is true when the window contains at least one unpriced
+	// event, determined from cost_source, never from estimated.
+	Degraded bool
+}
+
 // Run represents a run queue entry.
 type Run struct {
 	ID               string     `json:"id" db:"id"`
@@ -675,6 +690,11 @@ const (
 const (
 	DecisionApproved         = "approved"
 	DecisionChangesRequested = "changes_requested"
+	// DecisionRejected is the agent-path verdict literal
+	// (engine.DecisionRejected) for the same semantic as
+	// DecisionChangesRequested — the quorum engine already treats them as
+	// synonyms (isRejectionVerdict in internal/workflow/engine/quorum.go).
+	DecisionRejected = "rejected"
 
 	DeciderTypeUser  = "user"
 	DeciderTypeAgent = "agent"

@@ -30,16 +30,16 @@ const AGENTCTL_BIN = path.join(BACKEND_DIR, "bin", "agentctl");
 test.describe("Office agent launch context", () => {
   test("bundled system skills materialise on the agent's worktree at launch", async ({
     apiClient,
-    seedData,
+    officeApi,
+    officeSeed,
   }) => {
     test.setTimeout(60_000);
 
-    // 1. Prime the bundled system-skill sync for the seedData workspace
-    //    (the lazy sync runs on the first /skills list). The kanban
-    //    seed workspace shares the same lazy-sync path as office.
+    // 1. Prime the bundled system-skill sync for the Office workspace
+    //    (the lazy sync runs on the first /skills list).
     const primingRes = await apiClient.rawRequest(
       "GET",
-      `/api/v1/office/workspaces/${seedData.workspaceId}/skills`,
+      `/api/v1/office/workspaces/${officeSeed.workspaceId}/skills`,
     );
     expect(primingRes.ok).toBe(true);
     const primed = (await primingRes.json()) as { skills?: Array<{ slug: string }> };
@@ -49,21 +49,21 @@ test.describe("Office agent launch context", () => {
     // 2. Attach the bundled slug to the seed agent's desired_skills.
     //    The runtime materializer resolves slugs against the
     //    workspace skill registry at session start.
-    await apiClient.setProfileDesiredSkills(seedData.agentProfileId, ["kandev-protocol"]);
+    await apiClient.setProfileDesiredSkills(officeSeed.agentId, ["kandev-protocol"]);
 
     try {
-      // 3. Launch a real session.
-      const task = await apiClient.createTaskWithAgent(
-        seedData.workspaceId,
+      // 3. Create and assign a real Office task. Office ownership determines
+      // the MCP mode and causes the scheduler to inject the Office runtime
+      // context used by the system-skill deployer.
+      const task = await officeApi.createTask(
+        officeSeed.workspaceId,
         "Launch context — bundled skills",
-        seedData.agentProfileId,
         {
           description: "/e2e:simple-message",
-          workflow_id: seedData.workflowId,
-          workflow_step_id: seedData.startStepId,
-          repository_ids: [seedData.repositoryId],
+          workflow_id: officeSeed.workflowId,
         },
       );
+      await officeApi.assignTask(task.id as string, officeSeed.agentId);
 
       // 4. Wait for the task's worktree path to settle.
       let worktreePath = "";
@@ -81,13 +81,7 @@ test.describe("Office agent launch context", () => {
       // 5. The bundled SKILL.md landed at the agent-type-specific
       //    skill dir. mock-agent doesn't declare a custom
       //    ProjectSkillDir, so the default ".agents/skills" applies.
-      const skillFile = path.join(
-        worktreePath,
-        ".agents",
-        "skills",
-        "kandev-kandev-protocol",
-        "SKILL.md",
-      );
+      const skillFile = path.join(worktreePath, ".agents", "skills", "kandev-protocol", "SKILL.md");
       await expect
         .poll(() => fs.existsSync(skillFile), {
           timeout: 15_000,
@@ -101,7 +95,7 @@ test.describe("Office agent launch context", () => {
       expect(content).toMatch(/kandev/i);
     } finally {
       // Tidy up so the worker's next test doesn't inherit the attach.
-      await apiClient.setProfileDesiredSkills(seedData.agentProfileId, []);
+      await apiClient.setProfileDesiredSkills(officeSeed.agentId, []);
     }
   });
 

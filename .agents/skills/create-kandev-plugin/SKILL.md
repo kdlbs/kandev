@@ -118,6 +118,12 @@ Read these sources before designing the plugin:
 4. The current `kdlbs/kandev-plugin-template` repository, including its
    `README.md`, `Makefile`, tests, and release workflow.
 
+**Marketplace attribution:** The manifest `author` is independent from GitHub
+repository ownership or organization. Never infer author `kandev` from a
+`kdlbs/kandev-plugin-*` repository. Read and preserve the manifest author,
+verify `repo_url` separately, and require an explicit contributor identity when
+an externally maintained plugin is released.
+
 Prefer the public authoring docs and current template over old examples. The
 frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
 `apps/web/lib/plugins/types.ts`; concrete UI exports are in
@@ -162,6 +168,10 @@ for later. In the same change:
    update `docs/public/plugins.md`, `docs/plugins-example.md`, or the relevant
    ADR when their claims or links change. Keep the public guide as a summary;
    never create a second schema or type definition in prose.
+   When a public plugin page benefits from an architecture, lifecycle, data-flow,
+   or trust-boundary visual, use `/diagram-design` and its
+   `references/kandev-public-docs.md` integration guide. Publish a reviewed
+   local image with precise alt text and nearby explanatory prose.
 5. Recheck the root/backend/web `AGENTS.md` authority pointers and this skill if
    the source-of-truth locations or author workflow changed.
 6. Run the focused implementation tests plus

@@ -31,6 +31,27 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
+func TestMapKanbanStepStateIncludesProfileSessionPolicies(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:                        "step-policy",
+		ProfileSessionStartPolicy: "new",
+		ProfileSessionEndPolicy:   "park",
+	})
+	if step["profile_session_start_policy"] != "new" || step["profile_session_end_policy"] != "park" {
+		t.Fatalf("profile session policies = %#v/%#v, want new/park", step["profile_session_start_policy"], step["profile_session_end_policy"])
+	}
+}
+
+func TestMapKanbanStepStateIncludesAutoAdvanceRequiresSignal(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:                        "step-signal-gated",
+		AutoAdvanceRequiresSignal: true,
+	})
+	if step["auto_advance_requires_signal"] != true {
+		t.Fatalf("auto_advance_requires_signal = %#v, want true", step["auto_advance_requires_signal"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
 // 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
 // auto_start_failed, so a task whose auto-start already failed rendered with
@@ -53,6 +74,54 @@ func TestMapKanbanTaskStateIncludesAutoStartFailed(t *testing.T) {
 	})
 	if cleared["autoStartFailed"] != false {
 		t.Fatalf("kanban task autoStartFailed = %#v, want false for a task without the marker", cleared["autoStartFailed"])
+	}
+}
+
+// TestMapKanbanTaskStateIncludesParkedProjection regression-tests the same
+// whitelist-omission shape as TestMapKanbanTaskStateIncludesAutoStartFailed
+// above, this time for parked_on_background_work/parked_revision/parked_epoch:
+// EnrichTaskParkedProjection stamps these onto the TaskDTO before this mapper
+// runs, but the mapper dropped them, so a task already parked at the moment a
+// browser loaded /t/:id rendered with no affordance until the next live
+// task.updated WS event.
+func TestMapKanbanTaskStateIncludesParkedProjection(t *testing.T) {
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:                     "task-parked",
+		WorkflowStepID:         "step-review",
+		ParkedOnBackgroundWork: true,
+		ParkedRevision:         3,
+		ParkedEpoch:            99,
+	})
+	if task["parkedOnBackgroundWork"] != true {
+		t.Fatalf("kanban task parkedOnBackgroundWork = %#v, want true", task["parkedOnBackgroundWork"])
+	}
+	if task["parkedRevision"] != uint64(3) {
+		t.Fatalf("kanban task parkedRevision = %#v, want 3", task["parkedRevision"])
+	}
+	if task["parkedEpoch"] != uint64(99) {
+		t.Fatalf("kanban task parkedEpoch = %#v, want 99", task["parkedEpoch"])
+	}
+
+	unparked := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:             "task-unparked",
+		WorkflowStepID: "step-review",
+	})
+	if unparked["parkedOnBackgroundWork"] != false {
+		t.Fatalf("kanban task parkedOnBackgroundWork = %#v, want false for an unparked task", unparked["parkedOnBackgroundWork"])
+	}
+}
+
+// TestMapKanbanTaskStateIncludesPriority regression-tests that
+// mapKanbanTaskState is a camelCase whitelist: a DTO field with no entry here
+// is invisible on the board's first paint, before any WS event arrives.
+func TestMapKanbanTaskStateIncludesPriority(t *testing.T) {
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:             "task-critical",
+		WorkflowStepID: "step-review",
+		Priority:       "critical",
+	})
+	if task["priority"] != "critical" {
+		t.Fatalf("kanban task priority = %#v, want critical", task["priority"])
 	}
 }
 
@@ -90,6 +159,7 @@ func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) 
 }
 
 func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T) {
+	maxColumns := 3
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{
 			SidebarViews: []usermodels.SidebarView{{
@@ -113,6 +183,21 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 					Trailing:       "none",
 				},
 			},
+			ThreadViews: []usermodels.ThreadView{{
+				ID:         "thread-view-1",
+				Name:       "Thread view",
+				TaskScope:  usermodels.ThreadTaskScope{Mode: usermodels.ThreadTaskScopeSelected, TaskIDs: []string{"task-1"}},
+				Filters:    []usermodels.ThreadViewClause{},
+				Sort:       usermodels.ThreadViewSort{Key: "attention", Direction: "asc"},
+				MaxColumns: &maxColumns,
+			}},
+			ThreadActiveViewID: "thread-view-1",
+			ThreadViewDraft: &usermodels.ThreadViewDraft{
+				BaseViewID: "thread-view-1",
+				TaskScope:  usermodels.ThreadTaskScope{Mode: usermodels.ThreadTaskScopeAll, TaskIDs: []string{}},
+				Filters:    []usermodels.ThreadViewClause{},
+				Sort:       usermodels.ThreadViewSort{Key: "attention", Direction: "asc"},
+			},
 			SidebarTaskPrefs: usermodels.SidebarTaskPrefs{
 				PinnedTaskIDs:          []string{"task-1"},
 				OrderedTaskIDs:         []string{"task-2"},
@@ -130,6 +215,21 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 
 	if state["sidebarActiveViewId"] != "view-1" {
 		t.Fatalf("sidebarActiveViewId = %#v, want view-1", state["sidebarActiveViewId"])
+	}
+	if state["threadActiveViewId"] != "thread-view-1" {
+		t.Fatalf("threadActiveViewId = %#v, want thread-view-1", state["threadActiveViewId"])
+	}
+	threadViews, ok := state["threadViews"].([]map[string]any)
+	if !ok || len(threadViews) != 1 {
+		t.Fatalf("threadViews = %#v, want one mapped view", state["threadViews"])
+	}
+	threadScope, ok := threadViews[0]["taskScope"].(map[string]any)
+	if !ok || threadScope["mode"] != "selected" {
+		t.Fatalf("thread taskScope = %#v, want selected scope", threadViews[0]["taskScope"])
+	}
+	threadDraft, ok := state["threadViewDraft"].(map[string]any)
+	if !ok || threadDraft["baseViewId"] != "thread-view-1" {
+		t.Fatalf("threadViewDraft = %#v, want mapped draft", state["threadViewDraft"])
 	}
 	draft, ok := state["sidebarDraft"].(map[string]any)
 	if !ok || draft["baseViewId"] != "view-1" || draft["group"] != "repository" {

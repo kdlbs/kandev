@@ -25,7 +25,14 @@ func TestPostgresGitStatusSnapshotsRankEachRepositoryIndependently(t *testing.T)
 		sessionID = "session-snapshot-repository-ranking-pg"
 	)
 	seedPostgresTask(t, repo, taskID)
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-" + taskID, TaskID: taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, TaskEnvironmentID: "env-" + taskID}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 

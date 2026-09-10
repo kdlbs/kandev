@@ -131,6 +131,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
+		TaskEnvironmentID:  execution.TaskEnvironmentID,
 		TurnID:             turnID,
 		AgentID:            execution.AgentID,
 		AgentProfileID:     execution.officeProfileID(),
@@ -273,13 +274,14 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 	// session_id is the task session ID (execution.SessionID)
 	// acp_session_id in eventData is the internal agent protocol session
 	payload := AgentStreamEventPayload{
-		Type:        "agent/event",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:     execution.ID,
-		ExecutionID: execution.ID,
-		TaskID:      execution.TaskID,
-		SessionID:   execution.SessionID,
-		Data:        eventData,
+		Type:           "agent/event",
+		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:        execution.ID,
+		ExecutionID:    execution.ID,
+		AgentProfileID: execution.officeProfileID(),
+		TaskID:         execution.TaskID,
+		SessionID:      execution.SessionID,
+		Data:           eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
@@ -336,11 +338,12 @@ func (p *EventPublisher) PublishGitEvent(payload *GitEventPayload) {
 // PublishGitStatus publishes a git status update event.
 func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
 	p.PublishGitEvent(&GitEventPayload{
-		Type:      GitEventTypeStatusUpdate,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		AgentID:   execution.ID,
-		Timestamp: update.Timestamp.Format(time.RFC3339Nano),
+		Type:              GitEventTypeStatusUpdate,
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		AgentID:           execution.ID,
+		Timestamp:         update.Timestamp.Format(time.RFC3339Nano),
 		Status: &GitStatusData{
 			Branch:              update.Branch,
 			RemoteBranch:        update.RemoteBranch,

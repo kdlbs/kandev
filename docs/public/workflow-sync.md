@@ -18,6 +18,14 @@ A workspace has at most one sync configuration, pointed at exactly one provider 
 3. Pick the provider, then fill in the repository (or project path), branch, and directory in **Workflows > Sync**.
 4. Run a sync and review created, updated, skipped, and removed definitions.
 
+![Workflow sync flow from repository files through fetch, per-file validation, safe reconciliation, and a result with counts and warnings.](../screenshots/workflow-sync.svg)
+
+[Open full-size SVG diagram][workflow-sync-diagram]
+
+[workflow-sync-diagram]: ../../docs/screenshots/workflow-sync.svg
+
+One invalid file freezes the workflows last synced from that file, while valid files continue through reconciliation. This protects existing definitions from a bad edit.
+
 ## Prerequisites and credentials
 
 You need a repository and a branch containing valid portable workflow files. The Kandev backend, not the browser and not a task executor, reads the repository. The repository must be inside the workspace's effective scope.
@@ -70,10 +78,10 @@ The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_war
 
 Sync reads only immediate files in the configured directory. It does not recurse. Extensions are case-insensitive: `.yml` and `.yaml` use YAML decoding, while `.json` uses JSON decoding; other files and directory entries are ignored. Paths are processed in sorted order.
 
-Every file must use the version 1 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
+Every file must use the version 1 or version 2 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). New exports use version 2, which carries explicit completion booleans and supports explicit session targets; version 1 remains accepted for compatibility. A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
 
 ```yaml
-version: 1
+version: 2
 type: kandev_workflow
 workflows:
   - name: Delivery
@@ -85,6 +93,7 @@ workflows:
         is_start_step: true
         show_in_command_panel: true
         allow_manual_move: true
+        complete_task_on_enter: false
         auto_advance_requires_signal: false
         cancel_triggers_turn_complete: false
       - name: Done
@@ -94,6 +103,7 @@ workflows:
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true
+        complete_task_on_enter: true
         auto_advance_requires_signal: false
         cancel_triggers_turn_complete: false
 ```
@@ -113,7 +123,13 @@ These rules matter when editing definitions:
 - Manual workflows are never matched, updated, or removed by sync, even when their name is identical.
 - Synced workflows are read-only in normal workflow mutation paths. Edit the repository and sync again. Every run performs a full reconciliation, so it also repairs drift; the stored content hash is for status/observability, not a skip condition.
 
-The portable format does not carry every internal or Office field. Sync reconciles the portable Kanban fields, including `cancel_triggers_turn_complete`, and preserves non-portable internal stage type. Changing that field in the repository changes whether an explicit user cancellation can run the step's normal completion actions on the next sync. Pending clarifications and non-user interruption/failure paths remain ineligible. Do not use this facility as an Office-workflow backup.
+The portable format does not carry every internal or Office field. Sync reconciles the portable Kanban fields, including `complete_task_on_enter` and `cancel_triggers_turn_complete`, and preserves non-portable internal stage type. Completion is active only for the final step; a retained value on a non-final step becomes active if that step is later moved to the final position. Pending clarifications and non-user interruption/failure paths remain ineligible for cancellation completion. Do not use this facility as an Office-workflow backup.
+
+Version 2 can also select an explicit session recipient. Use `session_target:
+{kind: initial}` for the task's launch conversation. Use `session_target: {kind:
+step, step_position: N}` for an earlier direct-profile step. Sync remaps the
+position to the new step ID. It rejects missing, later, indirect, and inherited
+sources. Fix the source file and sync again when a target becomes invalid.
 
 ### Invalid and empty sources
 
@@ -123,7 +139,7 @@ A valid fetch that returns no supported files is different: it is an empty desir
 
 Repository listing or file-download failures fail the run before apply. Per-workspace locking serializes sync, configuration changes, and removal, so two requests cannot interleave their changes.
 
-> **Network security:** The HTTP API is unauthenticated and can read or change sync configuration with the backend's stored credentials. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing it.
+> **Network security:** With authentication disabled, the HTTP API is open and can read or change sync configuration with the backend's stored credentials. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing it.
 
 <details>
 <summary>HTTP API, reconciliation, and cleanup details</summary>

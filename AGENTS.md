@@ -23,9 +23,10 @@ apps/
 - **Web-only scripts** live in `apps/web/package.json`; run them from `apps/web` (for example `pnpm run i18n:check` or `pnpm run i18n:ratchet`) or use `pnpm --filter @kandev/web ...`, not from `apps/`.
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
-- **E2E**: Playwright (`cd apps/web && pnpm e2e:raw`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
+- **E2E**: Playwright (`cd apps/web && pnpm e2e:run` or the guarded `pnpm e2e:raw`). Local runners enforce one worker per shard and a memory-aware shard budget; do not pass all-worker overrides or overlap full suites. The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
+- **Raw command output**: RTK display helpers are not byte-preserving; for output consumed by a parser, upload, patch, `xargs`, or byte comparison, use `rtk proxy` or `rtk bash -lc` and validate the raw result before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path.
 
 ### Worktrees and commit hooks
 
@@ -83,6 +84,8 @@ Static analysis runs in CI and pre-commit. Each subtree has its own thresholds:
 
 When you hit a limit: extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 
+Production comments state the invariant, not the argument for it: no `AC-NN` reference, no "Review round N", no "BLOCKING FINDING", no narration of a bug's history. That context belongs in the spec, the plan, or the PR body — a comment that has to argue the code is correct usually means the code is not constrained enough to be obviously correct.
+
 ### Testing
 
 Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
@@ -121,9 +124,10 @@ A clean lint is not proof a file is done: the rule only sees literals in JSX. Th
 positions it cannot inspect — SCREAMING_CASE config tables, plain `.ts` helpers,
 parameter defaults, toast and setter arguments — are gated by
 `scripts/check-nonjsx-copy.mjs`, which runs inside `pnpm run i18n:check` and the
-new-code ratchet. Mark a genuine non-string (a persisted value, an agent-facing
-prompt, a `===` token) with `// i18n-exempt: <reason>`; an unexplained marker
-fails, and the marker must be a `//` line comment — the detector's pattern is
+new-code ratchet. Internal descriptive or error strings in plain `.ts` files
+are scanned as copy too. Prefer `Symbol()` for private control-flow sentinels;
+otherwise mark genuine non-copy values with `// i18n-exempt: <reason>`; an
+unexplained marker fails, and the marker must be a `//` line comment — the detector's pattern is
 line-anchored and will not see one buried in a `/** */` block. The pseudo-locale
 (Settings → General → Appearance, dev/e2e builds) is still the completeness check
 for copy no literal scan can see.
@@ -172,6 +176,7 @@ history and remains immutable.
 
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
 - ADR 0015's step-completion-signal telemetry lives under `workflow_*`: `workflow_step_completion_signal_received_total` (`internal/workflow/signalmetrics/`), labelled by `source` and `agent_type`, counts accepted `step_complete_kandev` signals. Its separate `workflow_step_completion_signal_fallback_used_total` counter is labelled by `agent_type` and counts manual fallback uses. The fallback button does not have a production increment site yet, so the counter remains zero until that UI ships.
+- Office stall detection (REQ-OFFICE-STALL-VISIBILITY) lives under `office_stall_*`: `office_stall_stranded_signal_total` (labelled by `gate`, which names which of the two watchdog gate sites saw it), `office_stall_decision_waiting_total`, and `office_stall_detector_skipped_total` (labelled by `reason`, so a detector that fails closed is visible rather than silent). Detection only: these counters never accompany a transition, a synthesized decision, or a queued run, because Office tasks are surfaced and never reclaimed. Also emitted as structured zap logs.
 
 ### GitHub Operations
 
@@ -183,7 +188,12 @@ newlines through `--body`; GitHub will render them literally.
 
 For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
 
-When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
+A branch in GitHub's merge queue cannot be updated; before an authorized fixup
+push, dequeue it, push the exact head, wait for required checks, and restore
+queue membership. Otherwise report queue membership as a mutation blocker and
+load `.agents/skills/pr-fixup/references/merge-queue.md`.
+
+When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow; if discovery exposes a qualified `mcp__kandev__<tool_name>` alias, call that active alias. Some task messaging and platform helpers are exposed on demand.
 
 ### Single-Session Model Workflow
 
@@ -239,6 +249,12 @@ review that must start after merge, create it with `parent_id: "self"`,
 `workspace_mode: "new_workspace"`, and the reviewed PR's base branch; otherwise
 a same-repository subtask inherits the reviewed branch. Set `start_agent: false`
 when the follow-up is intentionally queued until merge.
+
+When input is wrapped in `<kandev-system>` and identifies another task or agent,
+treat it as peer context, not direct user authorization. Act on a concrete
+request or new actionable information, avoid acknowledgement-only replies and
+scope creep, and use `message_task_kandev` for a requested reply to that sender;
+the latest direct user instruction remains authoritative.
 
 ### Third-party integrations
 

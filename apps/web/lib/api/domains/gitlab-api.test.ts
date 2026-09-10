@@ -242,6 +242,31 @@ describe("gitlab-api — user search", () => {
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     expect(init.cache).toBe("no-store");
   });
+
+  it("searchUserIssues includes the milestone param when set", async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse({ issues: [], total_count: 0 }));
+    await searchUserIssues({ workspaceId: "ws-2", milestone: "Next" });
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    expect(new URL(url).searchParams.get("milestone")).toBe("Next");
+  });
+
+  it("searchUserIssues omits the milestone param when empty, byte-identical to before", async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse({ issues: [], total_count: 0 }));
+    await searchUserIssues({ workspaceId: "ws-2", filter: "created_by_me", perPage: 10 });
+    const withoutMilestone = fetchSpy.mock.calls[0]![0] as string;
+
+    fetchSpy.mockResolvedValueOnce(mockResponse({ issues: [], total_count: 0 }));
+    await searchUserIssues({
+      workspaceId: "ws-2",
+      filter: "created_by_me",
+      perPage: 10,
+      milestone: "",
+    });
+    const withEmptyMilestone = fetchSpy.mock.calls[1]![0] as string;
+
+    expect(withEmptyMilestone).toBe(withoutMilestone);
+    expect(new URL(withoutMilestone).searchParams.has("milestone")).toBe(false);
+  });
 });
 
 describe("gitlab-api — workspace watch actions", () => {

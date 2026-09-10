@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -73,7 +74,7 @@ func (s *Service) syncWatchesBatchedWithClient(
 		return nil, err
 	}
 	numbered, searching := splitPRWatches(watches)
-	statuses, err := s.fetchBatchedWatchStatuses(ctx, exec, cacheScope, numbered, searching)
+	statuses, err := s.fetchBatchedWatchStatuses(ctx, client, exec, cacheScope, numbered, searching)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +91,158 @@ func (s *Service) syncWatchesBatchedWithClient(
 		results = append(results, s.applyBatchedSearchingWatch(ctx, client, cacheScope, w, statuses, now))
 	}
 	return results, nil
+}
+
+const (
+	workflowAttentionBatchConcurrency = 4
+	workflowAttentionBatchBudget      = 5 * time.Second
+)
+
+type workflowAttentionStatusGroup struct {
+	owner, repo, headSHA string
+	statuses             []*PRStatus
+}
+
+// enrichBatchedWorkflowAttention adds Actions evidence to GraphQL statuses.
+// Workflow runs are fetched once per credential scope, target repository, and
+// head SHA; job reads are shared within that group. The enrichment is best
+// effort so missing Actions permission never discards review or check data.
+func (s *Service) enrichBatchedWorkflowAttention(
+	ctx context.Context, client Client, cacheScope string, statuses map[string]*PRStatus,
+) {
+	groups := groupBatchedWorkflowAttentionStatuses(cacheScope, statuses)
+	if len(groups) == 0 {
+		return
+	}
+
+	baseCtx, cancelBase := derivedFetchContext(ctx)
+	defer cancelBase()
+	fetchCtx, cancel := context.WithTimeout(baseCtx, workflowAttentionBatchBudget)
+	defer cancel()
+	sem := make(chan struct{}, workflowAttentionBatchConcurrency)
+	var wg sync.WaitGroup
+	for _, group := range groups {
+		group := group
+		wg.Add(1)
+		go s.enrichBatchedWorkflowAttentionGroup(fetchCtx, client, cacheScope, group, sem, &wg)
+	}
+	wg.Wait()
+}
+
+func groupBatchedWorkflowAttentionStatuses(
+	cacheScope string, statuses map[string]*PRStatus,
+) map[string]*workflowAttentionStatusGroup {
+	groups := make(map[string]*workflowAttentionStatusGroup)
+	for _, status := range statuses {
+		if status == nil || status.PR == nil {
+			continue
+		}
+		if isTerminalPR(status.PR) {
+			status.WorkflowAttention = workflowAttentionNone(status.PR.HeadSHA)
+			status.WorkflowAttentionPopulated = true
+			continue
+		}
+		if status.PR.HeadSHA == "" {
+			status.WorkflowAttention = workflowAttentionUnknown("")
+			status.WorkflowAttentionPopulated = true
+			continue
+		}
+		key := workflowAttentionBatchKey(cacheScope, status.PR.RepoOwner, status.PR.RepoName, status.PR.HeadSHA)
+		group := groups[key]
+		if group == nil {
+			group = &workflowAttentionStatusGroup{
+				owner: status.PR.RepoOwner, repo: status.PR.RepoName, headSHA: status.PR.HeadSHA,
+			}
+			groups[key] = group
+		}
+		group.statuses = append(group.statuses, status)
+	}
+	return groups
+}
+
+func acquireWorkflowAttentionBatchSlot(ctx context.Context, sem chan struct{}) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func markBatchedWorkflowAttentionUnknown(group *workflowAttentionStatusGroup) {
+	for _, status := range group.statuses {
+		status.WorkflowAttention = workflowAttentionUnknown(group.headSHA)
+		status.WorkflowAttentionPopulated = true
+	}
+}
+
+func (s *Service) enrichBatchedWorkflowAttentionGroup(
+	ctx context.Context,
+	client Client,
+	cacheScope string,
+	group *workflowAttentionStatusGroup,
+	sem chan struct{},
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+	if !acquireWorkflowAttentionBatchSlot(ctx, sem) {
+		markBatchedWorkflowAttentionUnknown(group)
+		return
+	}
+	defer func() { <-sem }()
+
+	key := workflowAttentionBatchKey(cacheScope, group.owner, group.repo, group.headSHA)
+	value, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
+		return client.ListWorkflowRuns(ctx, group.owner, group.repo, group.headSHA)
+	})
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Debug("workflow attention read unavailable",
+				zap.String("owner", group.owner), zap.String("repo", group.repo), zap.Error(err))
+		}
+		markBatchedWorkflowAttentionUnknown(group)
+		return
+	}
+	runs, ok := value.([]WorkflowRun)
+	if !ok {
+		markBatchedWorkflowAttentionUnknown(group)
+		return
+	}
+	s.applyBatchedWorkflowAttention(ctx, client, group, runs)
+}
+
+func (s *Service) applyBatchedWorkflowAttention(
+	ctx context.Context, client Client, group *workflowAttentionStatusGroup, runs []WorkflowRun,
+) {
+	jobs := make(map[workflowJobKey]struct {
+		value []WorkflowJob
+		err   error
+	})
+	readJobs := func(jobCtx context.Context, runID int64, attempt int) ([]WorkflowJob, error) {
+		jobKey := workflowJobKey{Owner: group.owner, Repo: group.repo, RunID: runID, Attempt: attempt}
+		if cached, found := jobs[jobKey]; found {
+			return cached.value, cached.err
+		}
+		value, readErr := client.ListWorkflowRunJobs(jobCtx, group.owner, group.repo, runID, attempt)
+		jobs[jobKey] = struct {
+			value []WorkflowJob
+			err   error
+		}{value: value, err: readErr}
+		return value, readErr
+	}
+	for _, status := range group.statuses {
+		if status == nil || status.PR == nil {
+			continue
+		}
+		status.WorkflowAttention = classifyWorkflowAttentionWithJobs(
+			ctx, group.owner, group.repo, status.PR, runs, readJobs,
+		)
+		status.WorkflowAttentionPopulated = true
+	}
+}
+
+func workflowAttentionBatchKey(cacheScope, owner, repo, headSHA string) string {
+	return scopedCacheKey(cacheScope, fmt.Sprintf("workflow-attention:%s/%s@%s", strings.ToLower(owner), strings.ToLower(repo), headSHA))
 }
 
 // batchedWatchStatuses is the shared, read-only result of one batched fetch.
@@ -125,7 +278,7 @@ type batchedWatchStatuses struct {
 // GetPRFeedback / GetPRStatus. The leader's deadline is preserved so
 // the fetch can't outlive the request budget.
 func (s *Service) fetchBatchedWatchStatuses(
-	ctx context.Context, exec GraphQLExecutor, cacheScope string, numbered, searching []*PRWatch,
+	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string, numbered, searching []*PRWatch,
 ) (*batchedWatchStatuses, error) {
 	key := scopedCacheKey(cacheScope, batchedFetchSingleflightKey(numbered, searching))
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
@@ -146,6 +299,7 @@ func (s *Service) fetchBatchedWatchStatuses(
 		if err := s.fetchBatchedBranchStatuses(fetchCtx, exec, cacheScope, searching, combined, repoErrGen); err != nil {
 			return nil, err
 		}
+		s.enrichBatchedWorkflowAttention(fetchCtx, client, cacheScope, combined.byKey)
 		return combined, nil
 	})
 	if err != nil {
@@ -300,6 +454,15 @@ func (s *Service) applyBatchedNumberedWatch(
 	if err := s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
 		s.logger.Error("failed to update PR watch timestamps", zap.String("id", w.ID), zap.Error(err))
 	}
+	// A numbered watch found its PR before this fix existed (or before the
+	// discovering session's own group redirect took effect) keeps the
+	// observing member's task_id forever — watches are never re-pointed once
+	// they have a PR (see apps/backend/CLAUDE.md's "PR status sync coverage").
+	// Resolve the effective owner here, the same way associatePRWithTask does
+	// for the association write, so this loop keeps syncing the owner's
+	// github_task_prs row instead of silently updating nothing.
+	effectiveTaskID := s.reconcileTaskPROwnership(ctx, w.SessionID, w.TaskID, w.RepositoryID, w.PRNumber)
+
 	// Gap-fill: a numbered watch can exist even when its exact task_pr row was
 	// never created. This targeted read is unconditional because the common
 	// existing-row path is cheap, and the missing-row path must repair before
@@ -307,20 +470,23 @@ func (s *Service) applyBatchedNumberedWatch(
 	// creation event; the following SyncTaskPR may publish a second event when
 	// status fields changed. That double event is harmless because clients
 	// re-fetch the task PR state.
-	if existing, err := s.store.GetTaskPRByRepoAndNumber(ctx, w.TaskID, w.RepositoryID, w.PRNumber); err != nil {
+	if existing, err := s.store.GetTaskPRByRepoAndNumber(ctx, effectiveTaskID, w.RepositoryID, w.PRNumber); err != nil {
 		s.logger.Error("failed to load exact task PR",
-			zap.String("task_id", w.TaskID), zap.String("repository_id", w.RepositoryID),
+			zap.String("task_id", effectiveTaskID), zap.String("repository_id", w.RepositoryID),
 			zap.Int("pr_number", w.PRNumber), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 	} else if existing == nil && status.PR != nil {
-		if _, assocErr := s.AssociatePRWithTaskForWorkspace(ctx, w.WorkspaceID, w.TaskID, w.RepositoryID, status.PR); assocErr != nil {
+		if _, assocErr := s.associatePRWithTaskForSession(
+			ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
+			false, false, TaskPRSourceWatch,
+		); assocErr != nil {
 			s.logger.Error("failed to associate numbered PR with task",
 				zap.String("task_id", w.TaskID), zap.Int("pr_number", w.PRNumber), zap.Error(assocErr))
 			return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 		}
 	}
-	if syncErr := s.SyncTaskPR(ctx, w.TaskID, status); syncErr != nil {
-		s.logger.Error("failed to sync task PR", zap.String("task_id", w.TaskID), zap.Error(syncErr))
+	if syncErr := s.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
+		s.logger.Error("failed to sync task PR", zap.String("task_id", effectiveTaskID), zap.Error(syncErr))
 		// SyncFailed=true so poller skips publishing PR feedback while the
 		// task_pr row is still stale — old applyPRStatus path early-returned
 		// on this error for the same reason.
@@ -330,7 +496,7 @@ func (s *Service) applyBatchedNumberedWatch(
 	// same branch can be detected without manual intervention.
 	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
 		hold, holdErr := s.ShouldHoldTerminalPRWatch(
-			ctx, w.TaskID, w.RepositoryID, w.PRNumber, status.PR.State,
+			ctx, effectiveTaskID, w.RepositoryID, w.PRNumber, status.PR.State,
 		)
 		if holdErr != nil {
 			s.logger.Error("failed to check terminal PR automation", zap.String("id", w.ID), zap.Error(holdErr))
@@ -426,7 +592,10 @@ func (s *Service) applyBatchedSearchingWatch(
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true}
 	}
-	if _, err := s.AssociatePRWithTaskForWorkspace(ctx, w.WorkspaceID, w.TaskID, w.RepositoryID, status.PR); err != nil {
+	if _, err := s.associatePRWithTaskForSession(
+		ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
+		false, false, TaskPRSourceWatch,
+	); err != nil {
 		s.logger.Error("failed to associate detected PR with task",
 			zap.String("task_id", w.TaskID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true}

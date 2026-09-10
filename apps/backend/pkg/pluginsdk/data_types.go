@@ -93,12 +93,13 @@ func taskRepositoryFromProto(p *pluginv1.TaskRepository) TaskRepository {
 
 // Task is the Go-native mirror of kandev.plugin.v1.Task.
 type Task struct {
-	ID           string
-	WorkspaceID  string
-	WorkflowID   string
-	Title        string
-	Description  string
-	State        string
+	ID          string
+	WorkspaceID string
+	WorkflowID  string
+	Title       string
+	Description string
+	State       string
+	// Priority is one of critical, high, medium, or low.
 	Priority     string
 	CreatedBy    string
 	CreatedAt    string
@@ -122,13 +123,15 @@ type Task struct {
 	WorkflowStepID         string
 	Position               int32
 	AssigneeAgentProfileID string
-	Labels                 []string
-	Autopilot              bool
-	WIPAdmitted            bool
-	QueuedForStepID        string
-	QueuedAt               *string
-	ProjectID              string
-	ExternalID             string
+	// Deprecated: provider-specific labels belong in plugin-owned task state
+	// and UI slot data. Retained for API v1 source and wire compatibility.
+	Labels          []string
+	Autopilot       bool
+	WIPAdmitted     bool
+	QueuedForStepID string
+	QueuedAt        *string
+	ProjectID       string
+	ExternalID      string
 }
 
 // TaskPullRequest is one change opened for a task. Provider-neutral by design:
@@ -509,11 +512,8 @@ type WorkflowStep struct {
 	WIPLimit       int32 // 0 means unlimited
 	AgentProfileID string
 	// OnEnterActionTypes lists the on_enter action types configured on this
-	// step, as authored. This lists what is configured, not a guarantee that
-	// every listed type executes on every transition path. The ordinary move
-	// path handles auto_start_agent, configure_session, enable_plan_mode,
-	// set_session_mode and reset_agent_context. Other action types can run only
-	// on applicable workflow-engine paths. Config maps are deliberately not
+	// step, as authored. A type appearing here means it is configured, not a
+	// guarantee of when or whether it fires. Config maps are deliberately not
 	// exposed. Nil when the step has no on_enter actions, never an empty
 	// non-nil slice. Callers must ignore action types they do not recognize.
 	OnEnterActionTypes []string
@@ -1044,7 +1044,9 @@ type CreateTaskInput struct {
 	// StartAgent asks the host to auto-launch an agent on the created task,
 	// mirroring the REST/MCP create_task start_agent flag. Best-effort: a
 	// launch failure does not fail task creation.
-	StartAgent   bool
+	StartAgent bool
+	// Priority accepts critical, high, medium, or low. Empty defaults to medium.
+	Priority     string
 	Repositories []PluginTaskRepository
 	Launch       *PluginTaskLaunchOptions
 	Metadata     map[string]any
@@ -1066,6 +1068,7 @@ func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
 		Repositories:   pluginTaskRepositoriesToProto(in.Repositories),
 		Launch:         in.Launch.toProto(),
 		Metadata:       metadata,
+		Priority:       in.Priority,
 	}, nil
 }
 
@@ -1088,6 +1091,7 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 		Repositories:   pluginTaskRepositoriesFromProto(p.GetRepositories()),
 		Launch:         pluginTaskLaunchOptionsFromProto(p.GetLaunch()),
 		Metadata:       metadata,
+		Priority:       p.GetPriority(),
 	}, nil
 }
 
@@ -1198,7 +1202,7 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
 // pointer leaves that field untouched, a non-nil pointer overwrites it. The
-// conservative field surface (title/description/state) is the documented
+// conservative field surface (title/description/state/priority) is the documented
 // plugin-writable mask. WorkflowStepID is rejected when non-nil — it exists
 // on this struct only for wire-shape symmetry with UpdateTaskRequest; use
 // TaskReader.Move (see host.go) to transition a task between workflow steps,
@@ -1211,6 +1215,8 @@ type UpdateTaskInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	// Priority, when set, must be critical, high, medium, or low.
+	Priority *string
 }
 
 func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
@@ -1220,6 +1226,7 @@ func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepId: in.WorkflowStepID,
+		Priority:       in.Priority,
 	}
 }
 
@@ -1233,6 +1240,7 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 		Description:    p.Description,
 		State:          p.State,
 		WorkflowStepID: p.WorkflowStepId,
+		Priority:       p.Priority,
 	}
 }
 

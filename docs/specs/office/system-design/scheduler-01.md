@@ -47,7 +47,7 @@ Office supplies autonomous run producers and Office-specific maintenance. The pe
 A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event-driven, and reactive trigger flows through this queue before becoming an agent run. Each request:
 
 - Has a `source` discriminator (see table below) plus a typed payload.
-- Carries an `idempotency_key` for source-level dedup within a 24-hour window.
+- Carries an `idempotency_key` for source-level dedup. The queue checks recent rows within 24 hours and the persisted key remains unique for its lifetime.
 - Is coalesced into an in-flight run when one exists for the same agent (claim-time merge).
 - Produces exactly one `runs` row on successful claim; the run is the execution record, the wakeup-request is the dispatch record.
 
@@ -57,7 +57,7 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 |--------|---------|---------|
 | `routine` | A routine's cron / webhook / manual trigger fires | `{routine_id, variables, missed_ticks?}` |
 | `comment` | Comment posted on a task assigned to this agent (non-self). Also the channel pathway: inbound Telegram/Slack messages become comments on a channel task. | `{task_id, comment_id}` |
-| `agent_error` | A sub-agent's session failed (escalation to coordinator) | `{agent_profile_id, run_id, error}` |
+| `agent_error` | A sub-agent's session failed (escalation to coordinator) | `{failed_agent_id, failed_session_id?, run_id?, error}` |
 | `self` | Agent self-wake via tool call | `{reason, payload?}` |
 | `user` | User mention / explicit wake from the UI | `{user_id, context?}` |
 | `task_assigned` | An authoritative Office task's `assignee_agent_instance_id` is set or changed, including a newly-created task/subtask that already has a runner | `{task_id}` |
@@ -67,6 +67,11 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 | `budget_alert` | Budget threshold crossed for a sub-agent (coordinator only) | `{agent_instance_id, budget_pct}` |
 
 The task-event sources are dispatched by office event subscribers when the corresponding task event fires. The legacy `heartbeat` source is **retired**: all periodic wakes flow through the `routine` source - each coordinator agent gets a pre-installed routine at onboarding (see *Routines*), and that routine's cron tick is what wakes the coordinator.
+
+An `agent_error` payload uses `failed_agent_id` to identify the failed agent.
+It includes `failed_session_id` when the failed session is known. Retry
+exhaustion also includes `run_id` for the failed run. The `error` field carries
+the failure details.
 
 ### Manual status changes (kanban drag-drop)
 
@@ -85,11 +90,14 @@ Coalescing happens entirely at the wakeup-request layer; the runs table is the e
 
 1. **Source-level dedup via `idempotency_key`** (UNIQUE column). Format:
    - `routine:<routine_id>:<trigger_id>:<unix_minute>` for cron routines.
+   - `routine:<routine_id>:webhook:<request_key>` for webhook retries that provide an `Idempotency-Key` header.
+   - `routine:<routine_id>:webhook:<run_id>` for webhook deliveries without an explicit request key.
+   - `routine:<routine_id>:manual:<run_id>` for manual fires.
    - `comment:<comment_id>` for comments.
    - `task_assigned:<task_id>:<agent_instance_id>` for task creation/assignment events.
-   Duplicate inserts in the same window are rejected silently. Handles webhook re-delivery, event-bus replay, and restart recovery.
+   Duplicate inserts with the same source identity are rejected silently. Webhook callers use `Idempotency-Key` for redelivery. Manual and unkeyed webhook fires remain distinct.
 
-2. **Claim-time merge.** When the dispatcher processes a wakeup-request, it looks for an in-flight run for the same agent (`queued` -> `scheduled-retry` -> `running`, in that order). If one exists: insert the new request with `status="coalesced"`, `run_id=<existing>`, merge the new request's payload into the existing run's `context_snapshot`, and increment `coalesced_count` on the in-flight wakeup-request. The agent sees the merged context when it actually runs. If none exists: insert the wakeup-request with `status="queued"` and create the corresponding `runs` row.
+2. **Claim-time merge.** The source first persists the wakeup-request with `status="queued"`. The dispatcher then looks for an in-flight run for the same agent (`queued` or `claimed`). If one exists **and it is still `queued`**: mark the persisted request with `status="coalesced"` and `run_id=<existing>`, merge its payload into the existing run's `context_snapshot`, increment the run's `coalesced_count`, and — if the existing run is periodic-classified (see "Idle wakeup skip" below) while the new request is event-classified — promote the run's `reason` to the new request's classification (monotonic: periodic -> event only, never the reverse). The promotion, request transition, count update, and payload merge use one transaction, so the scheduler cannot claim a partially updated run. The agent sees the merged context and the promoted reason when it actually runs. If the in-flight run is already **`claimed`** *and the promotion above would otherwise be required* (the run is periodic-classified and the new request is event-classified): it is not promoted or merged into — the scheduler has already read its `reason` into memory for the idle-skip decision and never re-reads the row, so mutating it afterward would race a decision already in flight. The new request instead creates its own fresh `runs` row and is marked `claimed` against it, exactly as if no in-flight run existed. A `claimed` run that needs no promotion (the existing run is already event-classified, or the new request is itself periodic-classified) is coalesced into exactly as before. If no in-flight run exists at all: create the corresponding `runs` row and mark the persisted request as `claimed` against it.
 
 3. **`runs.idempotency_key`** is kept as a defensive secondary key. Rarely tripped now (the wakeup-request layer handles the common case), but useful for the rare "two cron processes fired the same tick from different leaders" scenario during a leadership change.
 
@@ -118,7 +126,7 @@ Variables use `{{name}}` syntax in title/description with types `text`, `number`
 
 #### Routine runs
 
-Each trigger firing creates a routine run record (`office_routine_runs`) with `routine_id`, `trigger_id`, `source` (`cron` | `webhook` | `manual`), `status` (`received` -> `task_created` | `skipped` | `coalesced` | `failed`), `trigger_payload` (resolved variable values), `linked_task_id` (heavy only), `coalesced_into_run_id`, `dispatch_fingerprint` (hash of resolved template + assignee), and lifecycle timestamps.
+Each trigger firing creates a routine run record (`office_routine_runs`) with `routine_id`, `trigger_id`, `source` (`cron` | `webhook` | `manual`), `status` (`received` -> `task_created` | `done` | `skipped` | `coalesced` | `failed`, with heavy `task_created` runs later ending as `done`, `cancelled`, or `failed`), `trigger_payload` (resolved variable values), `linked_task_id` (heavy only), `coalesced_into_run_id`, `dispatch_fingerprint` (hash of resolved template + assignee), and lifecycle timestamps.
 
 #### Heavy vs lightweight routines
 
@@ -132,7 +140,7 @@ Evaluated at dispatch by querying for an in-flight run for the same routine fing
 - `coalesce_if_active` (default): merge into the existing run. Mark `coalesced`.
 - `always_enqueue` / `always_create`: always proceed.
 
-"Active" means the linked task / run is not in a terminal state.
+"Active" means the linked task / run is not in a terminal state. A linked task is also inactive when it is archived or missing. The gate checks task state directly and does not release a live task because of its age.
 
 #### Catch-up policy
 
@@ -189,7 +197,8 @@ Coordinator agents default to `false` because their heartbeat purpose is self-di
 
 | Source | Skippable? |
 |--------|-----------|
-| `routine` (lightweight, heartbeat-style) | Yes |
+| `routine`, cron-triggered (lightweight, heartbeat-style) | Yes |
+| `routine`, manual "Fire now" or webhook-triggered | No |
 | `task_assigned`, `comment`, `task_blockers_resolved`, `task_children_completed`, `approval_resolved`, `agent_error`, `budget_alert`, `self`, `user` | No |
 
 Skipped wakeups are not silently discarded:
@@ -252,7 +261,7 @@ A 30-second buffer is added to any parsed time. If no pattern matches or the par
 
 Log fields gain `source: "rate_limit_parsed"` vs `source: "backoff"`, plus `parsed_reset_at` (UTC).
 
-**Default backoff for non-rate-limit retries**: 4 attempts at `[2m, 10m, 30m, 2h]` with 25% jitter. After `MaxRetryCount` (4) failures, `escalateFailure` is called - the wakeup is marked `failed`, an `agent.error` inbox item is created, and the coordinator receives an `agent_error` wakeup.
+**Default backoff for non-rate-limit retries**: 4 attempts at `[2m, 10m, 30m, 2h]` with 25% jitter. After `MaxRetryCount` (4) failures, `escalateFailure` is called - the wakeup is marked `failed`, an `agent.error` inbox item is created, and the coordinator receives an `agent_error` wakeup. When the failing run's agent IS the coordinator itself, the `agent_error` wakeup is not escalated to it (no self-targeted run is queued) - the `agent.error` inbox item is still created.
 
 ### Recovery sweep (unstarted Office tasks)
 

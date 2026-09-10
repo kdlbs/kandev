@@ -1,7 +1,13 @@
+/* eslint-disable max-lines -- Workspace and workflow actions share one server-action boundary. */
+
 "use server";
 
 import { getBackendConfig } from "@/lib/config";
 import { workflowId as toWorkflowId } from "@/lib/types/ids";
+import {
+  normalizeWorkflowProfileSessionStartPolicy,
+  normalizeWorkflowProfileSessionEndPolicy,
+} from "@/lib/types/http";
 import type {
   ApproveSessionResponse,
   Workflow,
@@ -169,7 +175,12 @@ export async function createWorkflowAction(payload: {
 
 export async function updateWorkflowAction(
   id: string,
-  payload: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+  payload: {
+    name?: string;
+    description?: string;
+    prompt?: string;
+    agent_profile_id?: string;
+  },
 ) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows/${id}`, {
     method: "PATCH",
@@ -223,6 +234,15 @@ export async function discoverRepositoriesAction(
     `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/discover${params}`,
   );
 }
+
+export {
+  getRepositoryDiscoveryAction,
+  refreshRepositoryDiscoveryAction,
+  listDesktopDiscoveryRootsAction,
+  addDesktopDiscoveryRootAction,
+  reconnectDesktopDiscoveryRootAction,
+  removeDesktopDiscoveryRootAction,
+} from "./repository-discovery";
 
 export async function validateRepositoryPathAction(
   workspaceId: string,
@@ -338,6 +358,11 @@ type BackendTemplateStep = {
   events?: StepEvents;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
+  agent_profile_id?: StepDefinition["agent_profile_id"];
+  session_target?: StepDefinition["session_target"];
+  profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
+  profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -352,16 +377,13 @@ type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
 const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
   const steps = template.default_steps ?? template.steps ?? [];
   const default_steps: StepDefinition[] = steps.map((step) => ({
-    name: step.name,
-    position: step.position,
-    color: step.color,
-    prompt: step.prompt,
-    events: step.events,
-    is_start_step: step.is_start_step,
-    show_in_command_panel: step.show_in_command_panel,
-    auto_advance_requires_signal: step.auto_advance_requires_signal,
-    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
-    wip_limit: step.wip_limit,
+    ...step,
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      step.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      step.profile_session_end_policy,
+    ),
     pull_from_step_id: step.pull_from_step_id ?? null,
   }));
   return {
@@ -396,6 +418,10 @@ type BackendWorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  session_target?: WorkflowStep["session_target"];
+  profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
+  profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -418,6 +444,14 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
   agent_profile_id: step.agent_profile_id,
+  session_target: step.session_target ?? null,
+  profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+    step.profile_session_start_policy,
+  ),
+  profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+    step.profile_session_end_policy,
+  ),
+  complete_task_on_enter: step.complete_task_on_enter,
   auto_advance_requires_signal: step.auto_advance_requires_signal,
   cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
   wip_limit: step.wip_limit ?? 0,
@@ -460,12 +494,19 @@ export async function createWorkflowStepAction(payload: {
   color: string;
   prompt?: string;
   events?: StepEvents;
+  complete_task_on_enter?: boolean;
   is_start_step?: boolean;
+  show_in_command_panel?: boolean;
+  agent_profile_id?: string;
+  session_target?: WorkflowStep["session_target"];
   allow_manual_move?: boolean;
+  auto_advance_requires_signal?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   stage_type?: WorkflowStep["stage_type"];
   cancel_triggers_turn_complete?: boolean;
+  profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
+  profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
 }): Promise<WorkflowStep> {
   const body = {
     workflow_id: payload.workflow_id,
@@ -476,10 +517,17 @@ export async function createWorkflowStepAction(payload: {
     events: payload.events,
     allow_manual_move: payload.allow_manual_move ?? true,
     is_start_step: payload.is_start_step ?? false,
+    show_in_command_panel: payload.show_in_command_panel ?? true,
+    agent_profile_id: payload.agent_profile_id,
+    session_target: payload.session_target,
     wip_limit: payload.wip_limit ?? 0,
     pull_from_step_id: payload.pull_from_step_id ?? "",
     stage_type: payload.stage_type,
+    complete_task_on_enter: payload.complete_task_on_enter ?? false,
     cancel_triggers_turn_complete: payload.cancel_triggers_turn_complete ?? false,
+    profile_session_start_policy: payload.profile_session_start_policy,
+    profile_session_end_policy: payload.profile_session_end_policy,
+    auto_advance_requires_signal: payload.auto_advance_requires_signal ?? false,
   };
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
     method: "POST",
@@ -503,34 +551,29 @@ export async function updateWorkflowStepAction(
       | "show_in_command_panel"
       | "auto_archive_after_hours"
       | "agent_profile_id"
+      | "session_target"
       | "auto_advance_requires_signal"
       | "cancel_triggers_turn_complete"
       | "wip_limit"
       | "pull_from_step_id"
       | "stage_type"
+      | "profile_session_start_policy"
+      | "profile_session_end_policy"
+      | "complete_task_on_enter"
     >
   >,
 ): Promise<WorkflowStep> {
-  const body: Record<string, unknown> = {};
-  if (payload.name !== undefined) body.name = payload.name;
-  if (payload.position !== undefined) body.position = payload.position;
-  if (payload.color !== undefined) body.color = payload.color;
-  if (payload.prompt !== undefined) body.prompt = payload.prompt;
-  if (payload.events !== undefined) body.events = payload.events;
-  if (payload.allow_manual_move !== undefined) body.allow_manual_move = payload.allow_manual_move;
-  if (payload.is_start_step !== undefined) body.is_start_step = payload.is_start_step;
-  if (payload.show_in_command_panel !== undefined)
-    body.show_in_command_panel = payload.show_in_command_panel;
-  if (payload.auto_archive_after_hours !== undefined)
-    body.auto_archive_after_hours = payload.auto_archive_after_hours;
-  if (payload.agent_profile_id !== undefined) body.agent_profile_id = payload.agent_profile_id;
-  if (payload.auto_advance_requires_signal !== undefined)
-    body.auto_advance_requires_signal = payload.auto_advance_requires_signal;
-  if (payload.cancel_triggers_turn_complete !== undefined)
-    body.cancel_triggers_turn_complete = payload.cancel_triggers_turn_complete;
-  if (payload.wip_limit !== undefined) body.wip_limit = payload.wip_limit;
-  if (payload.pull_from_step_id !== undefined) body.pull_from_step_id = payload.pull_from_step_id;
-  body.stage_type = payload.stage_type;
+  const body = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  ) as Record<string, unknown>;
+  if (body.profile_session_start_policy !== undefined)
+    body.profile_session_start_policy = normalizeWorkflowProfileSessionStartPolicy(
+      body.profile_session_start_policy,
+    );
+  if (body.profile_session_end_policy !== undefined)
+    body.profile_session_end_policy = normalizeWorkflowProfileSessionEndPolicy(
+      body.profile_session_end_policy,
+    );
   const response = await fetchJson<BackendWorkflowStep>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}`,
     {
@@ -540,7 +583,6 @@ export async function updateWorkflowStepAction(
   );
   return transformWorkflowStep(response);
 }
-
 export async function deleteWorkflowStepAction(stepId: string) {
   await fetchJson<void>(`${apiBaseUrl}/api/v1/workflow/steps/${stepId}`, { method: "DELETE" });
 }

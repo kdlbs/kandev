@@ -40,6 +40,17 @@ func revisionWithNumber(t *testing.T, revisions []*models.TaskPlanRevision, numb
 	return nil
 }
 
+func TestPlanTruncationWarningUnknownRevisionDoesNotClaimPreservation(t *testing.T) {
+	warning := planTruncationWarning(40000, 10000, 0)
+	lower := strings.ToLower(warning)
+	if strings.Contains(lower, "preserved") || strings.Contains(lower, "recoverable") {
+		t.Fatalf("warning claims unverified recovery when no prior revision was established: %q", warning)
+	}
+	if !strings.Contains(lower, "could not verify") {
+		t.Errorf("warning does not explain that prior-content preservation is unverified: %q", warning)
+	}
+}
+
 // TestMCPPlanTruncationGuard_WarnsAndPreservesHistory pins the defect this
 // card fixes: a write that drops the majority of a substantial plan today
 // returns plain success with no signal that anything shrank (WO-38, task
@@ -257,15 +268,16 @@ func TestMCPPlanTruncationGuard_CreateOverExistingPlanWarns(t *testing.T) {
 }
 
 // failingRevisionsRepo wraps the real sqlite repository but forces
-// ListTaskPlanRevisions to always fail, simulating a transient lookup
-// failure (e.g. SQLITE_BUSY) that happens after GetPlan has already
-// succeeded.
+// GetLatestTaskPlanRevision to always fail, simulating a transient lookup
+// failure (e.g. SQLITE_BUSY). PlanService reads the latest revision through
+// this method both to decide coalesce-vs-append and to compute the prior
+// revision number named in a truncation warning.
 type failingRevisionsRepo struct {
 	*sqlite.Repository
 	failGetPlan bool
 }
 
-func (r *failingRevisionsRepo) ListTaskPlanRevisions(context.Context, string, int) ([]*models.TaskPlanRevision, error) {
+func (r *failingRevisionsRepo) GetLatestTaskPlanRevision(context.Context, string) (*models.TaskPlanRevision, error) {
 	return nil, errors.New("simulated revision lookup failure")
 }
 
@@ -278,8 +290,8 @@ func (r *failingRevisionsRepo) GetTaskPlan(ctx context.Context, taskID string) (
 }
 
 // newMCPPlanTestHandlersWithFailingRevisionLookup builds Handlers like
-// newMCPPlanTestHandlers, but backed by a plan service whose ListRevisions
-// call always fails.
+// newMCPPlanTestHandlers, but backed by a plan service whose
+// GetLatestTaskPlanRevision call always fails.
 func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *failingRevisionsRepo) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
@@ -338,12 +350,10 @@ func newMCPPlanTestHandlersWithFailingRevisionLookup(t *testing.T) (*Handlers, *
 // TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber pins
 // Review round 2 Finding 3: revision numbering starts at 1
 // (NextTaskPlanRevisionNumber), so "plan revision 0" can never be a real
-// revision. When ListRevisions fails after GetPlan has already detected a
-// truncating write, evaluatePlanWriteGuard must still force a new revision
-// and still warn — silently returning an empty guard here would let the
-// coalescing path overwrite the only surviving copy of the pre-truncation
-// content — but the rendered warning must not claim the content lives in
-// revision 0.
+// revision. When the latest-revision lookup fails on a truncating write, the
+// plan service must still force a new revision and still warn — coalescing
+// here would overwrite the only surviving copy of the pre-truncation content
+// — but the rendered warning must not claim the content lives in revision 0.
 func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *testing.T) {
 	h, _ := newMCPPlanTestHandlersWithFailingRevisionLookup(t)
 	ctx := context.Background()
@@ -358,20 +368,6 @@ func TestMCPPlanTruncationGuard_RevisionLookupFailureOmitsRevisionNumber(t *test
 		})))
 	if err != nil {
 		t.Fatalf("handleCreateTaskPlan: %v", err)
-	}
-
-	// Check the guard directly before the write mutates the stored plan, so
-	// "existing" below is still the large content.
-	guard := h.evaluatePlanWriteGuard(ctx, mcpPlanTaskID, small)
-	if !guard.forceNewRevision {
-		t.Error("forceNewRevision must stay true even when the revision lookup fails, " +
-			"otherwise a truncating write can coalesce into the only surviving revision")
-	}
-	if guard.warning == "" {
-		t.Fatal("expected a truncation warning even when the revision lookup fails, got none")
-	}
-	if strings.Contains(guard.warning, "revision 0") {
-		t.Errorf("warning names a nonexistent revision 0 (revision numbering starts at 1): %q", guard.warning)
 	}
 
 	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,

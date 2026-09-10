@@ -103,6 +103,7 @@ func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason strin
 	if err := s.repo.CancelRun(ctx, run.ID, reason); err != nil {
 		return err
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	s.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	return nil
 }
@@ -115,6 +116,7 @@ func (s *Service) escalateFailure(
 	if err := s.FailRun(ctx, run.ID); err != nil {
 		return fmt.Errorf("fail run: %w", err)
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 
 	agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID)
 	if err != nil {
@@ -146,8 +148,42 @@ func (s *Service) escalateFailure(
 	return nil
 }
 
-// queueCEOAgentError finds the CEO agent in the workspace and queues
-// an agent_error run for it.
+// failRunNoEscalation performs escalateFailure's non-escalating half for a
+// budget-admission fault (AC-OFFICE-BUDGET-001.17/-006.4): it marks the run
+// permanently failed and records one operator-visible activity entry
+// naming cause, but does not re-fetch the agent and does not call
+// queueCEOAgentError. A run failed by a budget-admission fault must not
+// queue any new run, by any path.
+func (s *Service) failRunNoEscalation(
+	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	cause budgetDeferralCause, policyID string,
+) error {
+	if err := s.FailRun(ctx, run.ID); err != nil {
+		return fmt.Errorf("fail run: %w", err)
+	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+
+	fields := map[string]string{activityFieldCeiling: ceilingNotDetermined}
+	if policyID != "" {
+		fields["policy_id"] = policyID
+	}
+	s.LogActivityWithRun(ctx, agent.WorkspaceID, "system", "scheduler",
+		cause.failedAction(), "agent", run.AgentProfileID,
+		mustJSON(fields), run.ID, "")
+
+	s.logger.Warn("run permanently failed by budget admission fault",
+		zap.String("run_id", run.ID),
+		zap.String("agent", agent.Name),
+		zap.Int("retry_count", run.RetryCount))
+	return nil
+}
+
+// queueCEOAgentError finds the CEO agent in the workspace and queues an
+// agent_error run for it. When the failing run's agent IS the CEO, the
+// escalation is skipped rather than re-queuing the CEO to handle its own
+// failure — the run failure and inbox activity are already recorded by the
+// caller, so skipping here loses no visibility, only the self-escalation
+// loop.
 func (s *Service) queueCEOAgentError(
 	ctx context.Context, agent *models.AgentInstance,
 	run *models.Run, errMsg string,
@@ -157,10 +193,17 @@ func (s *Service) queueCEOAgentError(
 	if err != nil || len(ceos) == 0 {
 		return
 	}
+	if run.AgentProfileID == ceos[0].ID {
+		s.logger.Warn("skipped agent_error self-escalation for CEO's own failure",
+			zap.String("run_id", run.ID),
+			zap.String("ceo_agent_id", ceos[0].ID))
+		return
+	}
 	payload := mustJSON(map[string]string{
-		"agent_profile_id": run.AgentProfileID,
-		"run_id":           run.ID,
-		"error":            errMsg,
+		"failed_agent_id":   run.AgentProfileID,
+		"failed_session_id": run.SessionID,
+		"run_id":            run.ID,
+		"error":             errMsg,
 	})
 	_ = s.QueueRun(ctx, ceos[0].ID, RunReasonAgentError, payload, "")
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "@/lib/routing/client-router";
 import {
   IconCheck,
   IconCircleDashed,
@@ -10,7 +9,6 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
-import { linkToTask } from "@/lib/links";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -30,7 +28,7 @@ export type Graph2StepNodeProps = {
   hasPrev: boolean;
   hasNext: boolean;
   onMoveTask: (task: Task, targetStepId: string) => void;
-  onPreviewTask: (task: Task) => void;
+  onOpenTask: (task: Task) => void;
   prevStepId?: string;
   nextStepId?: string;
   prevStepTitle?: string;
@@ -113,6 +111,7 @@ export function Graph2StepNode({
   hasPrev,
   hasNext,
   onMoveTask,
+  onOpenTask,
   prevStepId,
   nextStepId,
   prevStepTitle,
@@ -122,12 +121,12 @@ export function Graph2StepNode({
   isMoving,
 }: Graph2StepNodeProps) {
   const { t } = useTranslation();
-  const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
+    statusSummary: task.statusSummary,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
@@ -139,7 +138,7 @@ export function Graph2StepNode({
   const running = isRunningState(task.state);
 
   const handleClick = () => {
-    router.push(linkToTask(task.id));
+    onOpenTask(task);
   };
 
   const showMoveControls = isHovered || isFocused;
@@ -186,6 +185,7 @@ export function Graph2StepNode({
               hasPendingPermission: pendingInput.permission,
               interrupted: task.interrupted,
               autoStartFailed: task.autoStartFailed,
+              workspaceOrphaned: task.workspaceOrphaned,
             })}
           </div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>

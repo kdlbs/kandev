@@ -5,7 +5,7 @@ description: "Move Kanban workflows between workspaces with Kandev's portable YA
 
 # Workflow Import / Export
 
-Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and the explicit-cancellation completion policy. It deliberately omits database IDs and workspace ownership.
+Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. New exports use version 2; version 1 documents remain accepted and receive compatibility defaults at import.
 
 Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md) when a GitHub repository should remain the source of truth.
 
@@ -26,7 +26,7 @@ Open **Settings → Workspaces → select a workspace → Workflows**.
 
 Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
 
-> **Network security:** The HTTP routes are unauthenticated. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing them to a network.
+> **Network security:** With authentication disabled, these HTTP routes are open. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing them to a network.
 
 <details>
 <summary>HTTP format, fields, and reconciliation details</summary>
@@ -66,7 +66,7 @@ If Kandev is behind a reverse proxy, use its externally protected base URL rathe
 Every document uses this envelope:
 
 ```yaml
-version: 1
+version: 2
 type: kandev_workflow
 workflows:
   - name: My Workflow
@@ -75,7 +75,7 @@ workflows:
 
 | Field | Type | Validation |
 |-------|------|------------|
-| `version` | integer | Must be exactly `1`. |
+| `version` | integer | Must be `1` or `2`. New exports use `2`; version 1 is accepted for compatibility. |
 | `type` | string | Must be exactly `kandev_workflow`. |
 | `workflows` | list | Must contain at least one item. |
 
@@ -128,6 +128,12 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
   pull_from_step_position: 0
   agent_profile:
     agent_name: Claude Code
+  profile_session_start_policy: reuse
+  profile_session_end_policy: park
+  session_target:
+    kind: initial
+    # A source-step target uses: kind: step and step_position: 1
+  complete_task_on_enter: false
 ```
 
 | Field | Type | Exact behavior |
@@ -142,10 +148,24 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `allow_manual_move` | boolean | Always exported. Missing input decodes as `false`. |
 | `auto_archive_after_hours` | integer | Omitted when `0`; `0` disables auto-archive. The portable validator currently does not reject negative values, so use only `0` or a positive value. |
 | `agent_profile` | object | Omitted when unset; exact-match behavior is below. |
+| `profile_session_start_policy` | enum | `reuse` or `new`; controls whether this destination step reuses the newest eligible nonterminal session for its profile or always starts a fresh conversation. Missing or unknown values use `reuse`. |
+| `profile_session_end_policy` | enum | `complete` or `park`; controls whether this source step's session is closed or kept available when the workflow leaves it for a different profile. Missing or unknown values use `complete`. |
+| `session_target` | object | Optional explicit recipient. Use `{kind: initial}` for the task's launch conversation. Use `{kind: step, step_position: N}` for an earlier direct-profile step. Source-step references use positions so import can remap step IDs. |
+| `complete_task_on_enter` | boolean | Always exported in version 2. On the final workflow step, `true` marks the task `COMPLETED` when it enters that step. On non-final steps the value is retained but inactive. Version 1 derives the legacy name-based behavior only when this field is absent. |
 | `auto_advance_requires_signal` | boolean | Always exported. `true` makes `on_turn_complete` transitions wait for `step_complete_kandev`; missing input is `false`. |
 | `cancel_triggers_turn_complete` | boolean | Always exported. `true` lets an explicit user cancellation run the step's normal `on_turn_complete` actions after the cancelled turn settles; missing input is `false`. Pending clarification and non-user interruption/failure paths are not eligible. |
 | `wip_limit` | integer | Omitted when `0`. Must be non-negative; `0` is unlimited. |
 | `pull_from_step_position` | integer | Optional feeder reference using another step's `position`. It must exist, cannot point to itself, and cannot form a pull cycle. |
+
+Version 1 is the legacy format. It remains valid for workflows without an
+explicit session target. Version 2 adds `session_target` and explicit
+completion booleans. An initial target has only `kind: initial`. A source-step
+target has `kind: step` and an earlier `step_position`. The source step must
+select a profile directly and must not target another session.
+
+If a source step is missing, later than its target, or invalid after a sync
+edit, import and sync report a validation error. Kandev does not silently pick
+another conversation.
 
 `stage_type`, Office participants, recorded decisions, task data, and step history are not portable. Imported steps receive new UUIDs and the default internal stage type.
 
@@ -221,7 +241,7 @@ The validator currently does **not** require a step, contiguous or non-negative 
 This file creates a three-step queue. Work has a capacity of two and pulls from Backlog whenever a slot opens. Its turn-complete transition only runs after the agent emits the explicit completion signal.
 
 ```yaml
-version: 1
+version: 2
 type: kandev_workflow
 workflows:
   - name: Review Queue
@@ -234,6 +254,7 @@ workflows:
         is_start_step: false
         show_in_command_panel: false
         allow_manual_move: true
+        complete_task_on_enter: false
         auto_advance_requires_signal: false
         cancel_triggers_turn_complete: false
 
@@ -254,6 +275,7 @@ workflows:
         is_start_step: true
         show_in_command_panel: true
         allow_manual_move: true
+        complete_task_on_enter: false
         auto_advance_requires_signal: true
         cancel_triggers_turn_complete: true
         wip_limit: 2
@@ -270,17 +292,18 @@ workflows:
         is_start_step: false
         show_in_command_panel: true
         allow_manual_move: true
+        complete_task_on_enter: true
         auto_advance_requires_signal: false
         cancel_triggers_turn_complete: false
 ```
 
-After import, assign a workflow-level or Work-step agent profile if the destination did not produce an exact portable profile match. Create a disposable task, verify Backlog → Work pulling, the WIP rejection at capacity, explicit completion, and Review feedback before adopting it.
+After import, assign a workflow default or affected step agent profile if the destination did not produce an exact portable profile match. Create a disposable task, verify Backlog → Work pulling, the WIP rejection at capacity, explicit completion, and Review feedback before adopting it.
 
 </details>
 
 ## Troubleshooting
 
-- **`unsupported export version/type`:** keep `version: 1` and `type: kandev_workflow` exactly.
+- **`unsupported export version/type`:** use `version: 2` and `type: kandev_workflow` for new documents. Version 1 remains accepted for compatibility.
 - **Duplicate step position:** give every step in that workflow a unique integer and update every position reference.
 - **Missing `step_position`:** portable `move_to_step` never accepts a database or template `step_id`.
 - **Pull reference error:** ensure the target position exists, is not the same step, and does not participate in a cycle.

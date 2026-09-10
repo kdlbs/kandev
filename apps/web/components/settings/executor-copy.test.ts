@@ -33,6 +33,7 @@ import { getExecutorDescription } from "./executor-description";
  */
 const SPRITES_DEV = "Sprites.dev";
 const SSH = "SSH";
+const KUBERNETES = "Kubernetes";
 
 const HUB_CARD_COPY: Array<{ type: string; label: string; description: string }> = [
   { type: "local", label: "Local", description: "Run agents directly in the repository folder." },
@@ -56,6 +57,11 @@ const HUB_CARD_COPY: Array<{ type: string; label: string; description: string }>
     label: SSH,
     description: "Connect to a remote host over SSH and run agentctl there.",
   },
+  {
+    type: "k8s",
+    label: KUBERNETES,
+    description: "Run agents in administrator-configured Kubernetes Pods.",
+  },
 ];
 
 const HUB_CARD_KEYS: Record<string, { labelKey?: string; brand?: string; descriptionKey: string }> =
@@ -68,6 +74,10 @@ const HUB_CARD_KEYS: Record<string, { labelKey?: string; brand?: string; descrip
     local_docker: { brand: "Docker", descriptionKey: "executors:hubDescriptionDocker" },
     sprites: { brand: SPRITES_DEV, descriptionKey: "executors:hubDescriptionSprites" },
     ssh: { brand: SSH, descriptionKey: "executors:hubDescriptionSsh" },
+    k8s: {
+      labelKey: "executors:typeKubernetes",
+      descriptionKey: "executors:hubDescriptionKubernetes",
+    },
   };
 
 describe("executors hub card copy", () => {
@@ -110,6 +120,11 @@ describe("create-page executor type registry", () => {
       label: SSH,
       description: "Connects to a remote host over SSH and runs agentctl there.",
     },
+    {
+      type: "k8s",
+      label: KUBERNETES,
+      description: "Runs agents in administrator-configured Kubernetes Pods.",
+    },
   ];
 
   it.each(CREATE_COPY)("renders $type unchanged", ({ type, label, description }) => {
@@ -120,6 +135,7 @@ describe("create-page executor type registry", () => {
 
   it("keeps the persisted executor enum and backend ids out of the catalog", () => {
     expect(Object.keys(EXECUTOR_TYPE_MAP).sort()).toEqual([
+      "k8s",
       "local",
       "local_docker",
       "remote_docker",
@@ -128,6 +144,7 @@ describe("create-page executor type registry", () => {
       "worktree",
     ]);
     expect(EXECUTOR_TYPE_MAP.ssh.executorId).toBe("exec-ssh");
+    expect(EXECUTOR_TYPE_MAP.k8s.executorId).toBe("exec-k8s");
     expect(EXECUTOR_TYPE_MAP.local_docker.executorId).toBe("exec-local-docker");
   });
 });
@@ -144,6 +161,7 @@ describe("getExecutorDescription", () => {
     ["remote_docker", "Connects to a remote Docker host."],
     ["sprites", "Runs agents in Sprites.dev cloud sandboxes."],
     ["ssh", "Runs agents on a trusted Linux amd64 or macOS host over SSH."],
+    ["k8s", "Runs agents in administrator-configured Kubernetes Pods."],
   ] as const)("renders %s unchanged", (type, expected) => {
     expect(getExecutorDescription(type)).toBe(expected);
   });
@@ -168,6 +186,7 @@ describe("getExecutorLabel", () => {
     expect(getExecutorLabel("worktree")).toBe("Worktree");
     expect(getExecutorLabel("local_docker")).toBe("Local Docker");
     expect(getExecutorLabel("remote_docker")).toBe("Remote Docker");
+    expect(getExecutorLabel("k8s")).toBe(KUBERNETES);
   });
 
   it("echoes an unmapped wire value", () => {

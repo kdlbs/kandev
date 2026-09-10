@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -27,6 +28,19 @@ func (r *blockingQueueRepository) Insert(ctx context.Context, msg *messagequeue.
 		<-r.releaseInsert
 	})
 	return r.Repository.Insert(ctx, msg, maxPerSession)
+}
+
+func (r *blockingQueueRepository) InsertForSession(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	msg *messagequeue.QueuedMessage,
+	maxPerSession int,
+) error {
+	r.insertOnce.Do(func() {
+		close(r.insertStarted)
+		<-r.releaseInsert
+	})
+	return r.Repository.InsertForSession(ctx, identity, msg, maxPerSession)
 }
 
 // TestSteerEligible_GatedByFlagCapabilityAndState covers every condition the
@@ -147,7 +161,7 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 		t.Fatalf("pause queue auto-run: %v", err)
 	}
 
-	result, err := svc.SteerTask(ctx, taskID, sessionID, "steer second", "", false, nil)
+	result, err := svc.SteerRecordedMessage(ctx, taskID, sessionID, "steer second", "", false, nil)
 	if err != nil {
 		t.Fatalf("SteerTask with a queued message errored: %v", err)
 	}
@@ -162,6 +176,9 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	if status.Entries[0].Content != "queued first" || status.Entries[1].Content != "steer second" {
 		t.Fatalf("queue order = [%q, %q], want [queued first, steer second]",
 			status.Entries[0].Content, status.Entries[1].Content)
+	}
+	if recorded, _ := status.Entries[1].Metadata["user_message_recorded"].(bool); !recorded {
+		t.Fatalf("queued steer metadata = %#v, want user_message_recorded", status.Entries[1].Metadata)
 	}
 	if len(eventBus.events) != 1 {
 		t.Fatalf("queue status event count = %d, want 1", len(eventBus.events))
@@ -333,6 +350,97 @@ func TestSteerTask_DispatchesAndReleasesInFlightSlot(t *testing.T) {
 			t.Fatal("in-flight slot was not released after a dispatch error")
 		}
 	})
+
+	t.Run("maps a lifecycle no-dispatch result to ordinary admission", func(t *testing.T) {
+		svc, agentMgr := steerDispatchService(t, taskID, sessionID)
+		agentMgr.steerErr = executor.ErrSteerNotDispatched
+
+		if _, err := svc.SteerTask(ctx, taskID, sessionID, "steer", "", false, nil); !errors.Is(err, ErrSteerNotEligible) {
+			t.Fatalf("SteerTask error = %v, want ErrSteerNotEligible", err)
+		}
+		if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
+			t.Fatal("lifecycle no-dispatch left an in-flight slot claimed")
+		}
+	})
+}
+
+// TestSteerTask_PreDispatchFailureDrainsSuccessor proves that a queued message
+// cannot remain stranded when the admitted steer fails before agentctl accepts
+// it. A completion can observe steerInFlight during the materialization or
+// dispatch window and skip its drain, so the failed owner must trigger a new
+// drain after it releases the slot.
+func TestSteerTask_PreDispatchFailureDrainsSuccessor(t *testing.T) {
+	ctx := context.Background()
+	const taskID = "task-steer-pre-dispatch-failure"
+	const sessionID = "session-steer-pre-dispatch-failure"
+
+	steerStarted := make(chan struct{})
+	steerRelease := make(chan struct{})
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		steerErr:       executor.ErrSteerAttachmentMaterialization,
+		steerStarted:   steerStarted,
+		steerRelease:   steerRelease,
+		promptDone:     promptDone,
+	}
+	repo := setupTestRepo(t)
+	agentMgr.repoForExecutionLookup = repo
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-steer-pre-dispatch-failure")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.config.ClaudeMidTurnSteering = true
+	advertisePromptQueueingForTest(t, svc, sessionID)
+	svc.registerBackgroundTask(sessionID, "bg-1")
+	svc.markForegroundIdle(sessionID)
+	svc.completeBackgroundTask(sessionID, "bg-1")
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := svc.SteerTask(ctx, taskID, sessionID, "first steer", "", false, nil)
+		firstDone <- err
+	}()
+	<-steerStarted
+
+	result, err := svc.SteerTask(ctx, taskID, sessionID, "successor", "", false, nil)
+	if err != nil {
+		t.Fatalf("successor steer errored: %v", err)
+	}
+	if result == nil || result.StopReason != steerQueuedStopReason {
+		t.Fatalf("successor result = %+v, want queued steer", result)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, sessionID); status == nil || status.Count != 1 {
+		t.Fatalf("queue before predecessor failure = %+v, want one successor", status)
+	}
+
+	// The predecessor turn ends while the steer still owns the admission slot.
+	if err := repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("set session promptable: %v", err)
+	}
+	if svc.drainQueuedMessageForPromptableSession(ctx, sessionID) {
+		t.Fatal("completion drain dispatched while the steer was still in flight")
+	}
+
+	close(steerRelease)
+	if err := <-firstDone; err == nil {
+		t.Fatal("predecessor steer failure was not returned")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if status := svc.messageQueue.GetStatus(ctx, sessionID); status != nil && status.Count == 0 {
+			select {
+			case <-promptDone:
+				return
+			case <-time.After(2 * time.Second):
+				t.Fatal("queued successor was removed but its prompt did not dispatch")
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if status := svc.messageQueue.GetStatus(ctx, sessionID); status == nil || status.Count != 0 {
+		t.Fatalf("successor remained queued after pre-dispatch failure: %+v", status)
+	}
 }
 
 // TestSteerTask_NotEligibleReturnsSentinel pins that an ineligible session yields
@@ -419,6 +527,10 @@ func TestDrainPaths_DeferToInFlightSteer(t *testing.T) {
 		t.Fatalf("seed queued message: %v", err)
 	}
 	entryID := svc.messageQueue.GetStatus(ctx, sessionID).Entries[0].ID
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
+	if err != nil {
+		t.Fatalf("resolve queue identity: %v", err)
+	}
 
 	// Simulate the race window directly, the same way TestSteerTask_SingleInFlight
 	// does: a steer has claimed the in-flight slot but not yet dispatched.
@@ -434,7 +546,7 @@ func TestDrainPaths_DeferToInFlightSteer(t *testing.T) {
 	})
 
 	t.Run("takeIfPromptableLocked backs off", func(t *testing.T) {
-		dispatched, err := svc.takeIfPromptableLocked(ctx, taskID, sessionID, entryID)
+		dispatched, err := svc.takeIfPromptableLocked(ctx, identity, entryID)
 		if err != nil {
 			t.Fatalf("takeIfPromptableLocked: %v", err)
 		}

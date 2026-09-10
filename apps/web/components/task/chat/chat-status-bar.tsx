@@ -23,10 +23,13 @@ import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
+import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
+import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
 import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
+import { shouldShowProceed } from "./types";
 
 type TodoDisplayItem = {
   text: string;
@@ -74,6 +77,7 @@ function getRightControlVisibility({
   showAutoScrollControl,
   showScrollToLastPrompt,
   showScrollToStart,
+  showThreadsLink,
 }: {
   taskId: string | null;
   sessionId: string | null;
@@ -81,11 +85,13 @@ function getRightControlVisibility({
   showAutoScrollControl: boolean;
   showScrollToLastPrompt: boolean | undefined;
   showScrollToStart: boolean | undefined;
+  showThreadsLink: boolean;
 }) {
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   const showRightControls =
     (showAutoScrollControl && !!sessionId) ||
     canShare ||
+    showThreadsLink ||
     !!showScrollToLastPrompt ||
     !!showScrollToStart;
   return { canShare, showRightControls };
@@ -104,6 +110,7 @@ export type ChatStatusBarProps = {
   nextStepName: string | null;
   onProceed: () => void;
   isAgentBusy: boolean;
+  hasPendingClarification: boolean;
   isMoving: boolean;
   queueChip?: ReactNode;
   showScrollToLastPrompt?: boolean;
@@ -121,6 +128,7 @@ export function ChatStatusBar({
   nextStepName,
   onProceed,
   isAgentBusy,
+  hasPendingClarification,
   isMoving,
   queueChip,
   showScrollToLastPrompt,
@@ -131,11 +139,14 @@ export function ChatStatusBar({
 }: ChatStatusBarProps) {
   const { t } = useTranslation();
   const showTodos = todoItems.length > 0;
-  const showProceed = !!nextStepName && !isAgentBusy;
+  const showProceed = shouldShowProceed(nextStepName, isAgentBusy, hasPendingClarification);
   const autopilot = useTaskAutopilot(taskId);
   const showAutoScrollControl = useAppStore(
     (state) => state.userSettings.showTranscriptAutoScrollControl,
   );
+  // Asked here rather than inside the button so the cluster still renders when
+  // the Threads jump is the only right-hand control this session qualifies for.
+  const showThreadsLink = useIsDeckThread(taskId, sessionId);
   const { canShare, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
@@ -143,6 +154,7 @@ export function ChatStatusBar({
     showAutoScrollControl,
     showScrollToLastPrompt,
     showScrollToStart,
+    showThreadsLink,
   });
   if (
     !shouldRenderChatStatusBar({
@@ -176,6 +188,7 @@ export function ChatStatusBar({
       {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
       {showRightControls && (
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />
           {sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
           <TranscriptNavGroup
             canShare={canShare}

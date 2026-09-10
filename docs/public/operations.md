@@ -18,12 +18,12 @@ Kandev does not currently provide a user-login boundary for the web application,
 
 ## Choose an operating model
 
-| Mode | Start and stop | Durable state | Update path |
-| --- | --- | --- | --- |
-| Desktop | Launch or quit Kandev | `~/.kandev` by default | **Settings > System > Updates** uses the signed desktop updater when supported |
-| Interactive CLI | `kandev`, then `Ctrl-C` | `~/.kandev` by default | Upgrade the Homebrew or npm package, then restart |
-| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | A verified npm/npx user service can select and apply Stable or Nightly; other services use Stable and may require a package upgrade, reinstall, and restart |
-| Docker or Kubernetes | Container or workload manager | Mounted Kandev home plus any external database/provider state | Replace the image and recreate the container or pod |
+| Mode                 | Start and stop                               | Durable state                                                                                            | Update path                                                                                                                                                 |
+| -------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop              | Launch or quit Kandev                        | `~/.kandev` by default                                                                                   | **Settings > System > Updates** uses the signed desktop updater when supported                                                                              |
+| Interactive CLI      | `kandev`, then `Ctrl-C`                      | `~/.kandev` by default                                                                                   | Upgrade the Homebrew or npm package, then restart                                                                                                           |
+| Managed service      | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | A verified npm/npx user service can select and apply Stable or Nightly; other services use Stable and may require a package upgrade, reinstall, and restart |
+| Docker or Kubernetes | Container or workload manager                | Mounted Kandev home plus any external database/provider state                                            | Replace the image and recreate the container or pod                                                                                                         |
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
 
@@ -69,7 +69,12 @@ curl -fsS http://127.0.0.1:38429/health
 It returns HTTP 200 as soon as the listener accepts connections, with:
 
 ```json
-{"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
+{
+  "status": "ok",
+  "service": "kandev",
+  "mode": "websocket+http",
+  "version": "1.2.3"
+}
 ```
 
 `/health` never returns a non-2xx status while the process is alive, even mid-startup: it confirms the process is up, not that it can serve real traffic. Use the readiness endpoint instead when you need to know the backend can actually serve requests:
@@ -88,6 +93,25 @@ curl -fsS http://127.0.0.1:38429/api/v1/system/health
 
 This diagnostic checks the Git executable, GitHub authentication/rate limits, agent discovery, and Linux inotify pressure. It returns a JSON `healthy` field and issue list, but normally uses HTTP 200 even when `healthy` is false; do not substitute it for `/health` in a status-only probe.
 
+Required local persistence has a separate authenticated diagnostic endpoint:
+
+```bash
+curl -fsS http://127.0.0.1:38429/api/v1/system/diagnostics/persistence
+```
+
+It reports the database driver, aggregate state, and one sanitized row for
+each required store. The rows include stable store IDs, state, last check
+time, and a safe error description. They never include credentials, DSNs,
+SQL, database paths, or row data.
+
+After startup, a failed required-store probe makes `/ready` return HTTP 503
+with `reason: "persistence"` and the affected `store_ids`. Stateful API and
+WebSocket requests return HTTP 503 with the stable code
+`persistence_unavailable` and an action to check the database and persistence
+diagnostics. A later successful probe restores readiness and stateful traffic
+without a process restart. `/health` remains a pure liveness check and stays
+HTTP 200 while the process is alive.
+
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
 For a managed service, also check its process manager:
@@ -101,13 +125,13 @@ Add `--system` to both commands for a system service.
 
 ## Message queue settings
 
-Open **Settings > Task Behavior > Message Queue** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
+Open **Settings > Task Behavior > Message Queue** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting. At or above the new limit, only an eligible direct automatic fold into the existing tail can still succeed; other work is rejected until messages run or are removed. Staged attachments are rejected before a fold or claim. Delivery retries for work accepted before the change are not discarded by the lower cap.
 
 `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved capacity. A valid environment value makes only that field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
 
-**Automatically merge consecutive messages** is on by default. Capacity is checked before any fold, so a full queue still rejects a compatible message. After admission, a new row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, mode, metadata, attachments, and references. Any mismatch or combined limit leaves the new row separate. The earlier row survives and its ID is returned. Turning the switch on does not compact existing rows. This setting is independent from **Enable queued message merging**, which controls the manual queue action.
+**Automatically merge consecutive messages** is on by default. It is the fallback for every session that has not changed its compact **Auto-merge** queue pill. Untouched sessions follow later global changes. The first per-session change creates an explicit override that survives empty queues and restarts and remains independent for that session's lifetime. An eligible direct admission may fold into the immediate pending predecessor even at capacity because it does not create another row; staged-attachment admissions cannot use this path. Both rows must have the same strict source and compatible task, model, mode, metadata, attachments, and references. Any mismatch or combined limit leaves the new row separate when capacity permits. The earlier row survives and its ID is returned. Turning either setting on does not compact existing rows. This behavior is independent from **Enable queued message merging**, which controls the manual queue action.
 
-To recover capacity in one session, expand its queue chip in the task workbench. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
+To recover capacity in one session, expand its queue chip in the task workbench. The compact header contains **Auto-run** and **Auto-merge** pills beside the count. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
 
 ## State and storage
 
@@ -125,10 +149,34 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | `logs/` | Service and optional ACP debug logs |
 | `service/` | Owner-only managed-service install metadata plus update intents and helper files |
 | `lsp-servers/`, `runtime/`, `workspaces/` | Installed tools and feature-specific materialized state |
+| `plugins/webapps/` | Immutable static web-app release artifacts, required with the database for canvas recovery |
 
 Database snapshots do not contain Git worktrees, clones, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
 
 The System Database and Backups pages use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
+
+### Canvas artifacts and recovery
+
+Canvas release metadata, grants, and app state live in the configured database.
+Validated web-app files live separately under `<home>/plugins/webapps/`. The
+artifact directory is part of the Kandev-home recovery boundary.
+
+SQLite snapshots do not contain canvas release artifacts. PostgreSQL backups
+also need a copy of `<home>/plugins/webapps/`. A complete Kandev recovery copy
+includes the configured database, its matching `<home>/data/master.key`, and
+the matching artifact directory. A cold copy of the complete Kandev home
+includes all three.
+
+If a database restore has no matching artifact, Kandev marks the retained
+release unavailable during startup. It checks the stored digest and path before
+it serves or runs the app. It does not execute a missing or changed artifact
+and does not remove it silently. Restore the matching artifact directory. Use
+the canvas recovery action to reload, roll back, or remove the canvas.
+
+Canvas removal creates an artifact cleanup job before release ownership is
+deleted. The worker runs after the database transaction and retries after a
+restart. Do not delete `<home>/plugins/webapps/` files while their release rows
+or cleanup jobs still exist.
 
 ## Storage maintenance
 
@@ -137,24 +185,47 @@ The System Database and Backups pages use the configured SQLite file path. They 
 <details>
 <summary>Storage maintenance details</summary>
 
-Open **Settings > System > Data & Logs**, then use the **Storage** section to
-inspect Kandev-managed disk usage and configure cleanup.
+Open **Settings > System > Storage** to inspect Kandev-managed disk usage and
+configure cleanup.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while another maintenance run owns the cleanup gate. If task resources are active, the page names
 the active work and offers **Run anyway** after an explicit disruption warning. Use that override
 only when the active task work can tolerate cleanup running alongside it.
 
-![Settings > System > Data & Logs, Storage section showing disk capacity, storage analysis, and cleanup controls.](../screenshots/system-storage.png)
+![Settings > System > Storage showing disk capacity, storage analysis, and cleanup controls.](../screenshots/system-storage.png)
 
 Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
 policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that
-snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting the backend also
-clears the in-memory snapshot.
+snapshot was last analyzed. The first read can return before the scan finishes. The card then shows
+which sources are complete and labels the total as **Counted so far**. When an older snapshot
+expires, Kandev keeps it visible while the replacement scan runs. A failed replacement also keeps
+the last successful snapshot and shows the failure state.
+
+Select **Analyze** to force a fresh read-only scan. The timing information beside the completed
+snapshot shows the scan duration, the 15-minute cache lifetime, and the next refresh time. A page
+that remains open requests a new overview at that time. Restarting the backend clears the
+in-memory snapshot, so the next Storage-page read starts a new scan.
 
 The page also shows the current percentage used on the filesystem containing Kandev's storage,
 along with used, available, and total capacity. This is host-volume capacity, not just the bytes
 that Kandev can classify. The card warns at 80% full and uses a critical style at 90%; these
 thresholds do not trigger cleanup.
+
+The storage analysis total is a classified Kandev total. It does not represent all host filesystem
+usage. In addition to workspaces, caches, quarantine, temporary artifacts, and Docker resources,
+the card can show these database resources:
+
+- **Database** includes the configured SQLite file and existing `-wal`, `-shm`, and `-journal`
+  sidecars.
+- **Database backups** includes regular files in the `backups/` directory beside the configured
+  database file. Symlinks are not followed.
+
+The card shows the measured path for each database resource. A measured resource contributes its
+non-overlapping bytes to the classified total. If another category covers the complete footprint,
+the row says it is already counted. If categories overlap only in a subtree, the row keeps its full
+measured size and explains that only the distinct bytes contribute. An unavailable resource is not
+added to the total and is marked as unavailable. Database rows are not applicable for non-SQLite
+drivers. During a first scan, pending or active rows show their measurement progress.
 
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
 period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
@@ -163,7 +234,7 @@ permanent deletion. Each entry shows its `delete_after` retention deadline: **De
 time, not an exact promise, the first successful scheduled or full manual maintenance run after the
 deadline performs the purge, subject to the idle gate and any preemption.
 
-![Settings > System > Data & Logs showing the maintenance policy, schedule, workspace cleanup, and folder allowlist.](../screenshots/system-maintenance-policy.png)
+![Settings > System > Storage showing the maintenance policy, schedule, workspace cleanup, and folder allowlist.](../screenshots/system-maintenance-policy.png)
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
 entries that remain. **Force clear all** requires typing `DELETE ALL NOW` and attempts to permanently
@@ -172,7 +243,7 @@ deleted. Safety-validation or deletion failures may leave entries visible and re
 override bypasses only the retention timestamp; path, ownership, state, and filesystem safety
 checks still apply.
 
-![Settings > System > Data & Logs showing quarantined resources with restore, delete, and force-clear controls.](../screenshots/system-quarantine.png)
+![Settings > System > Storage showing quarantined resources with restore, delete, and force-clear controls.](../screenshots/system-quarantine.png)
 
 Kandev keeps at most one restorable Go-cache generation for each original cache path. If that
 generation is still active when the replacement cache exceeds its limit, the next rotation is
@@ -205,7 +276,7 @@ Host-wide Docker build-cache and unused-image cleanup remain disabled until you 
 owns a dedicated Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
 
-![Settings > System > Data & Logs showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
+![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
 The Storage page also reports **Kandev temporary artifacts** created by services that need a
 short-lived directory under the host temporary root. Each current artifact is registered in the
@@ -320,8 +391,9 @@ Open **Settings > System > Backups**.
 2. Wait for the manual row to appear. The browser waits up to 15 seconds; on a large database the backend job can continue after that UI timeout, so reload before retrying.
 3. Download the snapshot and copy it off the host.
 4. Back up `<home>/data/master.key` with owner-only access if you need encrypted secrets to remain usable.
-5. Separately preserve unpushed Git work, executor/provider state, service configuration, and required CLI login files.
-6. Restore into an isolated instance and verify tasks, workflows, secrets, and repository references before calling the backup tested.
+5. If canvases are enabled, copy the matching `<home>/plugins/webapps/` artifact directory.
+6. Separately preserve unpushed Git work, executor/provider state, service configuration, and required CLI login files.
+7. Restore into an isolated instance and verify tasks, workflows, secrets, repository references, and canvas releases before calling the backup tested.
 
 Manual snapshots are never automatically pruned. When the recorded Kandev application version changes, or when a legacy database has user tables but no stored application-version metadata, Kandev takes a pre-migration `kandev-<stored-version-or-pre-meta>-<timestamp>.db` before repository schema initialization. Snapshot failure aborts SQLite startup, so keep the backup directory writable and leave enough free space. Kandev then attempts to retain the two newest `kandev-*.db` files, but pruning is best-effort and a failed delete does not abort startup. That two-file retention applies to automatic files, including older `kandev-pre-reset-*` snapshots; it does not apply to `manual-*` files. Monitor and delete obsolete manual files yourself.
 
@@ -417,7 +489,7 @@ When reporting an incident, record timestamp/timezone, Kandev version and commit
 
 **Settings > System > Status** walks `data`, worktrees, repositories, sessions, tasks, quick chat, and the default `data/backups` directory. Results are cached for two hours; **Refresh** forces a new single-flight walk. Permission failures appear as warnings. Backup files outside the resolved home are not included in the total. The displayed total intentionally counts `data/backups` both inside the `data` row and again as the separate `backups` row, so use filesystem or volume metrics for quota enforcement.
 
-Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive can remove a managed worktree directory, but it keeps the local task branch and environment identity. Delete can also remove the local task branch. Other cleanup can remove a container, destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory remains for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
+Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive can remove a managed worktree directory, but it keeps the local task branch and environment identity. Delete can also remove the local task branch. Other cleanup can remove a container, delete the exact Kubernetes Pod and Kandev-managed PVC while retaining an existing claim, destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
 
 **Reset Environment** uses a separate teardown path. For Sprites, the current reset request can lose the profile credential context and report success while leaving the provider sandbox behind. After a Sprites reset, inspect **Settings > Executors > Sprites.dev** and explicitly destroy the old sandbox there if it remains. See [Executors](executors.md#spritesdev) for the executor-specific lifecycle.
 
@@ -478,7 +550,7 @@ After restart, verify `/ready`, **System > About**, **System > Status**, the dat
 
 Configure sampling at **Settings > Preferences > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar, fallback top bar, or phone Status drawer, without the Host marker or percentage progress bars.
 
-Collection starts only while at least one connected client displays metrics in the status bar, fallback top bar, or an open phone Status drawer. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
+Collection starts only while at least one connected client displays metrics in the status bar, fallback top bar, or an open phone Status drawer. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, Kubernetes, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 
 These metrics are lightweight UI observability. Set alerts, retention, CPU/memory limits, and disk quotas in the host, container platform, or external monitoring stack.
 
@@ -499,6 +571,7 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode**: experimental, medium risk, and off in the production profile by default.
+- **Office session identity**: experimental, high risk, and on in every profile by default. The live `(task_id, agent_profile_id)` pair is guarded in-transaction on the Office session creation path, not by a table-level index; pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. It gives each Office participant a separate task conversation and requires a restart. Disabling the toggle restores the pre-graduation runner-seat binding and task-active-session decision re-evaluation.
 - **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
 - **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
 - **Unread divider**: a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
@@ -513,29 +586,29 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 
 ## Troubleshooting
 
-| Symptom | Check | Action |
-| --- | --- | --- |
-| `/health` cannot connect | Process-manager and launcher output | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once |
-| `/ready` stays at 503 while `/health` is 200 | Backend startup logs | Process is alive but still wiring routes, seeding the agent registry, or mounting test-harness routes; give it more time before restarting |
-| Status page says unhealthy while `/ready` is 200 | `/api/v1/system/health` issue IDs | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings |
-| Backups page reports a 15-second create timeout | Reload the backup list and inspect the `backup-create` job/log | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk |
-| Backup/maintenance fails on PostgreSQL | Active driver on Database page | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only |
-| Restored data looks stale | Whether the backend was restarted immediately | Quit/restart; do not keep using the old open database connections |
-| Diagnostic bundle is partial | `manifest.json` warnings, source status, and loss counters | Keep a Kandev browser open for frontend capture; use backend-only when browser evidence is unnecessary |
-| Update check returns HTTP 429 | Time since last **Check now** | Wait at least 30 seconds; background checks retry every six hours |
-| **Apply update** is absent | Install mode/method and `<home>/service/install.json` | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
-| **Nightly** is disabled | Install mode/method and `<home>/service/install.json` | Expected unless this is a verified managed npm/npx user service. Homebrew, Desktop, system-service, unmanaged, local-checkout, invalid-metadata, and unknown installs are Stable-only. |
-| Nightly check or save fails | npm access and cached checked time | Verify access to `https://registry.npmjs.org/kandev`, retry after connectivity returns, or keep/select Stable. A malformed or missing npm `nightly` tag fails closed. |
-| Metrics show unavailable | OS support, disk path, executor connectivity | Select supported metrics and verify permissions/network; the collector reports errors per sample |
-| Disk total exceeds filesystem expectation | Separate `data` and `backups` rows | Backups are counted twice in the UI total; use volume metrics for capacity decisions |
-| Legacy `/tmp/kandev-agent/*` uses disk | Process inventory and open-file references for the exact directory | This is data from older Kandev versions, not a current Storage resource. Stop Kandev, confirm no live process references the target, then remove only the confirmed-inactive legacy directory through host administration. |
-| Archived task's remote resource remains | Backend, Docker/SSH/Sprites, and provider logs | Cleanup is asynchronous and bounded. SSH task directories are retained by design; for other leftovers, verify work is preserved, then remove the exact resource manually |
-| Sprites reset removed the environment but not the sandbox | **Settings > Executors > Sprites.dev** | Current reset can omit the provider credential during destroy; find the old Kandev-named sandbox and destroy it explicitly |
+| Symptom                                                   | Check                                                              | Action                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/health` cannot connect                                  | Process-manager and launcher output                                | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once                                                                                                                                              |
+| `/ready` stays at 503 while `/health` is 200              | Backend startup logs                                               | Process is alive but still wiring routes, seeding the agent registry, or mounting test-harness routes; give it more time before restarting                                                                                                                    |
+| Status page says unhealthy while `/ready` is 200          | `/api/v1/system/health` issue IDs                                  | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings                                                                                                                                     |
+| Backups page reports a 15-second create timeout           | Reload the backup list and inspect the `backup-create` job/log     | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk                                                                                                                                                                         |
+| Backup/maintenance fails on PostgreSQL                    | Active driver on Database page                                     | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only                                                                                                                                                      |
+| Restored data looks stale                                 | Whether the backend was restarted immediately                      | Quit/restart; do not keep using the old open database connections                                                                                                                                                                                             |
+| Diagnostic bundle is partial                              | `manifest.json` warnings, source status, and loss counters         | Keep a Kandev browser open for frontend capture; use backend-only when browser evidence is unnecessary                                                                                                                                                        |
+| Update check returns HTTP 429                             | Time since last **Check now**                                      | Wait at least 30 seconds; background checks retry every six hours                                                                                                                                                                                             |
+| **Apply update** is absent                                | Install mode/method and `<home>/service/install.json`              | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
+| **Nightly** is disabled                                   | Install mode/method and `<home>/service/install.json`              | Expected unless this is a verified managed npm/npx user service. Homebrew, Desktop, system-service, unmanaged, local-checkout, invalid-metadata, and unknown installs are Stable-only.                                                                        |
+| Nightly check or save fails                               | npm access and cached checked time                                 | Verify access to `https://registry.npmjs.org/kandev`, retry after connectivity returns, or keep/select Stable. A malformed or missing npm `nightly` tag fails closed.                                                                                         |
+| Metrics show unavailable                                  | OS support, disk path, executor connectivity                       | Select supported metrics and verify permissions/network; the collector reports errors per sample                                                                                                                                                              |
+| Disk total exceeds filesystem expectation                 | Separate `data` and `backups` rows                                 | Backups are counted twice in the UI total; use volume metrics for capacity decisions                                                                                                                                                                          |
+| Legacy `/tmp/kandev-agent/*` uses disk                    | Process inventory and open-file references for the exact directory | This is data from older Kandev versions, not a current Storage resource. Stop Kandev, confirm no live process references the target, then remove only the confirmed-inactive legacy directory through host administration.                                    |
+| Archived task's remote resource remains                   | Backend, Docker/Kubernetes/SSH/Sprites, and provider logs          | Cleanup is asynchronous and bounded. SSH task directories and existing Kubernetes claims are retained by design; for other leftovers, verify work is preserved, then remove the exact resource manually                                                       |
+| Sprites reset removed the environment but not the sandbox | **Settings > Executors > Sprites.dev**                             | Current reset can omit the provider credential during destroy; find the old Kandev-named sandbox and destroy it explicitly                                                                                                                                    |
 
 ## Related pages
 
 - [Configuration](configuration.md); paths, database, logging, NATS, Docker, and security-sensitive environment variables
 - [Executors](executors.md); runtime lifecycle, credentials, cleanup, and isolation boundaries
 - [Git operations](git-operations.md); branches, worktrees, push, and pull-request behavior
-- [Automation and MCP](automation-and-mcp.md); external MCP routes and their current unauthenticated trust boundary
+- [Automation and MCP](automation-and-mcp.md); external MCP authentication and deployment trust boundaries
 - [Windows support](windows-support.md); Windows-native limitations and supported alternatives

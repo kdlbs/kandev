@@ -35,7 +35,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useBranches } from "@/hooks/domains/workspace/use-repository-branches";
 import { useRepositoryBranchPolicies } from "@/hooks/domains/workspace/use-repository-branch-policies";
 import type { Repository, RepositoryBranchPolicy } from "@/lib/types/http";
-import { branchToOption, sortBranches } from "@/components/task-create-dialog-branch-options";
+import { branchToOption, sortBranches } from "@/components/branch-picker-options";
 import {
   BranchPolicyBranchField,
   PolicyFields,
@@ -43,7 +43,7 @@ import {
   type PolicyDraft,
 } from "@/components/settings/repository-branch-policy-fields";
 
-const TOUCH_TARGET_CLASS = "min-h-11";
+const TOUCH_TARGET_CLASS = "max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
 const CANCEL_LABEL_KEY = "common:cancel";
 
 function PolicySurface({
@@ -431,7 +431,6 @@ export function RepositoryBranchPolicies({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-11 w-11"
                   onClick={() => openEdit(policy)}
                   aria-label={t("workspaces:branchPolicyEdit", { name: policy.name })}
                 >
@@ -441,7 +440,6 @@ export function RepositoryBranchPolicies({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-11 w-11"
                   onClick={() => setDeletePolicy(policy)}
                   aria-label={t("workspaces:branchPolicyDelete", { name: policy.name })}
                 >

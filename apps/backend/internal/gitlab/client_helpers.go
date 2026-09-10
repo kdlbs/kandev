@@ -70,22 +70,29 @@ type rawProject struct {
 }
 
 type rawIssue struct {
-	ID          int64     `json:"id"`
-	IID         int       `json:"iid"`
-	ProjectID   int64     `json:"project_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	State       string    `json:"state"`
-	WebURL      string    `json:"web_url"`
-	Author      rawUser   `json:"author"`
-	Labels      []string  `json:"labels"`
-	Assignees   []rawUser `json:"assignees"`
+	ID          int64         `json:"id"`
+	IID         int           `json:"iid"`
+	ProjectID   int64         `json:"project_id"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	State       string        `json:"state"`
+	WebURL      string        `json:"web_url"`
+	Author      rawUser       `json:"author"`
+	Labels      []string      `json:"labels"`
+	Assignees   []rawUser     `json:"assignees"`
+	Milestone   *rawMilestone `json:"milestone"`
 	References  struct {
 		Full string `json:"full"`
 	} `json:"references"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	ClosedAt  *time.Time `json:"closed_at"`
+}
+
+// rawMilestone is GitLab's milestone sub-object on an issue. GitLab returns
+// milestone: null for an issue with no milestone.
+type rawMilestone struct {
+	Title string `json:"title"`
 }
 
 type rawDiscussion struct {
@@ -226,6 +233,10 @@ func convertRawIssue(raw *rawIssue) *Issue {
 			assignees = append(assignees, a.Username)
 		}
 	}
+	milestone := ""
+	if raw.Milestone != nil {
+		milestone = raw.Milestone.Title
+	}
 	return &Issue{
 		ID:               raw.ID,
 		IID:              raw.IID,
@@ -240,6 +251,7 @@ func convertRawIssue(raw *rawIssue) *Issue {
 		ProjectPath:      projectPath,
 		Labels:           append([]string(nil), raw.Labels...),
 		Assignees:        assignees,
+		Milestone:        milestone,
 		CreatedAt:        raw.CreatedAt,
 		UpdatedAt:        raw.UpdatedAt,
 		ClosedAt:         raw.ClosedAt,
@@ -485,9 +497,12 @@ func buildMRSearchQuery(filter, customQuery string) string {
 	return values.Encode()
 }
 
-func buildIssueSearchQuery(filter, customQuery string) string {
+func buildIssueSearchQuery(filter, customQuery, milestone string) string {
 	if customQuery != "" {
-		return customQuery
+		if milestone == "" {
+			return customQuery
+		}
+		return foldMilestoneIntoQuery(customQuery, milestone)
 	}
 	values := url.Values{}
 	values.Set("state", gitlabStateOpened)
@@ -495,7 +510,41 @@ func buildIssueSearchQuery(filter, customQuery string) string {
 	if filter != "" {
 		appendFilter(values, filter)
 	}
+	if milestone != "" {
+		values.Set("milestone", milestone)
+	}
 	return values.Encode()
+}
+
+// appendQueryParam adds an escaped key/value pair to a raw query unless that
+// key already exists. URL fragments are kept at the end, outside the query.
+// This also preserves malformed-query behavior for callers that do not validate
+// their input at the HTTP boundary.
+func appendQueryParam(customQuery, key, value string) string {
+	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has(key) {
+		return customQuery
+	}
+	fragment := ""
+	if index := strings.IndexByte(customQuery, '#'); index >= 0 {
+		fragment = customQuery[index:]
+		customQuery = customQuery[:index]
+	}
+	encoded := url.QueryEscape(value)
+	if customQuery == "" {
+		return key + "=" + encoded + fragment
+	}
+	return customQuery + "&" + key + "=" + encoded + fragment
+}
+
+// foldMilestoneIntoQuery merges a milestone into an existing, non-empty
+// customQuery string, mirroring appendLabelsToQuery's precedent: a custom
+// query that already names the `milestone` key wins (even if the value is
+// empty), and an unparseable custom query still gets the milestone appended
+// rather than silently dropping the user's filter selection. The only caller,
+// buildIssueSearchQuery, guards both arguments non-empty before calling this,
+// so there is no empty-customQuery case to handle here.
+func foldMilestoneIntoQuery(customQuery, milestone string) string {
+	return appendQueryParam(customQuery, "milestone", milestone)
 }
 
 // filterTokenReviewRequested is the /gitlab page tab value that maps to

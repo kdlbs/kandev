@@ -245,9 +245,12 @@ func (e *Engine) requiredSeatsForWorkflowRecording(
 // every other optional Engine dependency's nil-safe default.
 //
 // collapseByRoleAgent already guarantees at most one seat per (role, agent
-// profile id) pair here, and this function is scoped to one role and called
-// once per guard evaluation, so at most one record is emitted per role and
-// unresolved agent per evaluation (AC-004.10) without extra dedup state.
+// profile id) pair here, and this function is scoped to one role, so at most
+// one record is emitted per role and unresolved agent per call, without
+// extra dedup state, as long as the caller passes record=true only for an
+// actual guard evaluation or decision write. A read-only observation
+// (ResolveParticipantRoleReadOnly) passes record=false precisely so it does
+// not multiply this emission at its own, unrelated cadence.
 //
 // A resolver error is not the same condition as a confirmed deletion — it
 // means the resolver could not answer, not that it answered "gone" — so it
@@ -902,12 +905,43 @@ func (e *Engine) evaluateGuardStateReadOnly(
 // slate construction the quorum evaluator itself uses — so role
 // resolution and slate membership can never disagree about who
 // participates, per AC-57's "exactly once, in the engine" mandate.
-// Approver is checked before reviewer, matching the existing
-// approver-wins precedence in office/dashboard/decisions.go's
-// resolveDeciderRole (AC-4). Returns ErrParticipantNotFound when the
-// agent occupies neither seat.
+// When the caller holds both seats, the seat whose StepID equals stepID
+// wins, since that is the seat the current step's guard actually reads
+// decisions against. When neither seat sits at stepID, the role named by
+// stepID's own wait_for_quorum guard wins, so a decision is never filed
+// under a role no guard at that step is counting. Approver wins as the
+// final tiebreak — when the step names both roles, names neither, or the
+// step cannot be loaded — matching the precedence in
+// office/dashboard/decisions.go's resolveDeciderRole (AC-4). Returns
+// ErrParticipantNotFound when the agent occupies neither seat.
+//
+// This is the recording variant: an unresolved-agent seat dropped from the
+// slate emits a counter and warning log scoped to guard evaluations.
+// Reserve it for callers that ARE a guard evaluation or a real decision
+// write (RecordAgentDecision's authorization check). A caller that merely
+// observes seat occupancy — without evaluating a guard or recording a
+// decision — must use ResolveParticipantRoleReadOnly instead, or every such
+// observation double-counts the same drop.
 func (e *Engine) ResolveParticipantRole(
 	ctx context.Context, taskID, stepID, agentProfileID string,
+) (role, participantID string, err error) {
+	return e.resolveParticipantRole(ctx, taskID, stepID, agentProfileID, true)
+}
+
+// ResolveParticipantRoleReadOnly is ResolveParticipantRole without the
+// unresolved-agent counter/log side effect, mirroring
+// evaluateGuardStateReadOnly's use of requiredSeatsForWorkflowRecording(...,
+// false) for the same reason: the caller is observing seat occupancy, not
+// evaluating a guard or recording a decision, so the emission stays scoped
+// to actual guard evaluations rather than firing on every observation.
+func (e *Engine) ResolveParticipantRoleReadOnly(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) (role, participantID string, err error) {
+	return e.resolveParticipantRole(ctx, taskID, stepID, agentProfileID, false)
+}
+
+func (e *Engine) resolveParticipantRole(
+	ctx context.Context, taskID, stepID, agentProfileID string, record bool,
 ) (role, participantID string, err error) {
 	if agentProfileID == "" {
 		return "", "", ErrParticipantNotFound
@@ -916,28 +950,82 @@ func (e *Engine) ResolveParticipantRole(
 	if state, stateErr := e.store.LoadState(ctx, taskID, ""); stateErr == nil {
 		workflowID = state.WorkflowID
 	}
+
+	var matches []roleSeat
+	var firstSeatsErr error
 	for _, r := range []wfmodels.ParticipantRole{
 		wfmodels.ParticipantRoleApprover,
 		wfmodels.ParticipantRoleReviewer,
 	} {
-		seats, seatsErr := e.requiredSeatsForWorkflow(ctx, stepID, taskID, workflowID, string(r))
+		seats, seatsErr := e.requiredSeatsForWorkflowRecording(ctx, stepID, taskID, workflowID, string(r), record)
 		if seatsErr != nil {
-			return "", "", fmt.Errorf("resolve participant role: %w", seatsErr)
+			if firstSeatsErr == nil {
+				firstSeatsErr = seatsErr
+			}
+			continue
 		}
-		if id, ok := seatIDFor(seats, agentProfileID); ok {
-			return string(r), id, nil
+		if seat, ok := seatFor(seats, agentProfileID); ok {
+			if seat.StepID == stepID {
+				return string(r), seat.ID, nil
+			}
+			matches = append(matches, roleSeat{role: string(r), seat: seat})
 		}
 	}
-	return "", "", ErrParticipantNotFound
+	if firstSeatsErr != nil {
+		return "", "", fmt.Errorf("resolve participant role: %w", firstSeatsErr)
+	}
+	if len(matches) == 0 {
+		return "", "", ErrParticipantNotFound
+	}
+	if guardRoles := e.guardRolesAtStep(ctx, workflowID, stepID); len(guardRoles) == 1 {
+		for _, m := range matches {
+			if guardRoles[m.role] {
+				return m.role, m.seat.ID, nil
+			}
+		}
+	}
+	return matches[0].role, matches[0].seat.ID, nil
 }
 
-// seatIDFor scans seats for one occupied by agentProfileID, returning its
-// AC-50 canonical seat id.
-func seatIDFor(seats []ParticipantInfo, agentProfileID string) (string, bool) {
+// guardRolesAtStep returns the set of roles named by wait_for_quorum guards
+// on stepID's eligible on_turn_complete transitions, used to break a
+// cross-step role resolution tie in favor of the role the step is waiting on.
+// Returns an empty set when the step names no such guard or cannot be
+// loaded, so callers fall back to approver-wins rather than treating a load
+// failure as a role match.
+func (e *Engine) guardRolesAtStep(ctx context.Context, workflowID, stepID string) map[string]bool {
+	if workflowID == "" {
+		return nil
+	}
+	step, err := e.store.LoadStep(ctx, workflowID, stepID)
+	if err != nil {
+		return nil
+	}
+	roles := make(map[string]bool)
+	for _, action := range step.Events[TriggerOnTurnComplete] {
+		if !isTransitionAction(action.Kind) || action.RequiresApproval {
+			continue
+		}
+		if action.Guard == nil || action.Guard.WaitForQuorum == nil || action.Guard.WaitForQuorum.Role == "" {
+			continue
+		}
+		roles[action.Guard.WaitForQuorum.Role] = true
+	}
+	return roles
+}
+
+// roleSeat pairs a resolved role with the seat matched under it.
+type roleSeat struct {
+	role string
+	seat ParticipantInfo
+}
+
+// seatFor scans seats for one occupied by agentProfileID.
+func seatFor(seats []ParticipantInfo, agentProfileID string) (ParticipantInfo, bool) {
 	for _, s := range seats {
 		if s.AgentProfileID == agentProfileID {
-			return s.ID, true
+			return s, true
 		}
 	}
-	return "", false
+	return ParticipantInfo{}, false
 }

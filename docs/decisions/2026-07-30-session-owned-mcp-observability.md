@@ -1,6 +1,6 @@
 # ADR-2026-07-30-session-owned-mcp-observability: Keep MCP Attachment Evidence Session Owned
 
-**Status:** accepted
+**Status:** accepted (amended by 2026-08-30-dual-era-mcp-protocol)
 **Date:** 2026-07-30
 **Area:** backend, frontend, protocol, security
 
@@ -38,8 +38,10 @@ MCP attachment observability is owned by the Kandev session and execution:
 - Agentctl's instance identity is the authoritative execution generation for
   local MCP observations. The server injects task and session ownership from
   that instance; agent-supplied IDs never select the report.
-- Each MCP transport client gets an opaque connection ID. Shared connections
-  remain shared; Kandev does not infer internal subagent identity.
+- Each legacy MCP transport client gets an opaque connection ID. Shared
+  connections remain shared; Kandev does not infer internal subagent identity.
+  Modern stateless requests instead attach evidence to the current attachment
+  attempt without a fabricated connection ID or per-request disconnect.
 - Configuration resolution, filtering, delivery, session acceptance,
   initialize, `tools/list`, tool use, explicit errors, disconnect, and
   supersession are separate evidence events. The UI displays the strongest

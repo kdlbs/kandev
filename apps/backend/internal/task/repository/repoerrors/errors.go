@@ -22,6 +22,21 @@ var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")
 // ErrTaskPlanNotFound reports that no task plan row matched the supplied task id.
 var ErrTaskPlanNotFound = errors.New("task plan not found")
 
+// ErrTaskPlanCommentsChanged reports that a comment mutation was based on a
+// stale plan identity, row version, or caller-generated comment identity.
+var ErrTaskPlanCommentsChanged = errors.New("task plan comments changed")
+
+// ErrPrimarySessionChanged reports that a guarded delivery no longer targets
+// the task's current primary session.
+var ErrPrimarySessionChanged = errors.New("primary session changed")
+
+// ErrTaskSessionMismatch reports that a delivery target does not belong to its task.
+var ErrTaskSessionMismatch = errors.New("session does not belong to task")
+
+// ErrTaskSessionUnavailable reports that a message or queue target became
+// terminal or otherwise changed state before final prompt admission.
+var ErrTaskSessionUnavailable = errors.New("session is unavailable for prompt admission")
+
 // ErrRepositoryNotFound reports that no live repository row matched the supplied id.
 var ErrRepositoryNotFound = errors.New("repository not found")
 
@@ -37,6 +52,10 @@ var ErrRepositoryBranchPoliciesExist = errors.New("repository branch policies al
 
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
+
+// ErrTaskEnvironmentOwnershipChanged reports that an ownership transfer's
+// expected owner or generation is no longer current.
+var ErrTaskEnvironmentOwnershipChanged = errors.New("task environment ownership changed")
 
 // ErrExternalIDConflict reports that a task insert lost the uniqueness race
 // on uniq_tasks_external_id — the TOCTOU backstop for the create sequence's

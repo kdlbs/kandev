@@ -167,7 +167,7 @@ func TestBuildSSHEnvInitScript(t *testing.T) {
 			t.Fatalf("buildSSHEnvInitScript: %v", err)
 		}
 		// Each line is a POSIX shell assignment; the line break separates
-		// entries so `. /dev/stdin` under `set -a` exports each one.
+		// entries so evaluating stdin under `set -a` exports each one.
 		if got != "FOO='bar baz'\n" {
 			t.Errorf("buildSSHEnvInitScript = %q, want \"FOO='bar baz'\\n\"", got)
 		}
@@ -270,9 +270,10 @@ func TestRemoteAgentctlStopCommandWaitsAndEscalatesBeforeCleanup(t *testing.T) {
 	command := remoteAgentctlStopCommand("/tmp/session with space", 1234)
 
 	wantOrder := []string{
-		"kill 1234 2>/dev/null || true",
+		"if kill 1234 2>/dev/null; then",
 		"while kill -0 1234",
 		"kill -9 1234",
+		"remote agentctl pid 1234 is still running",
 		"rm -rf '/tmp/session with space'",
 	}
 	previous := -1
@@ -282,6 +283,9 @@ func TestRemoteAgentctlStopCommandWaitsAndEscalatesBeforeCleanup(t *testing.T) {
 			t.Fatalf("command fragment %q is missing or out of order:\n%s", fragment, command)
 		}
 		previous = index
+	}
+	if strings.Contains(command, "kill 1234 2>/dev/null || true") || strings.Contains(command, "kill -9 1234 2>/dev/null || true") {
+		t.Fatalf("stop command must not suppress kill failures:\n%s", command)
 	}
 }
 

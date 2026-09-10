@@ -75,6 +75,7 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	writeCtx = withWorkflowProfileSwitchGuardHeld(writeCtx, data.SessionID, "")
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("ignoring stale clarification dismissal while cancellation is in progress",
 			zap.String("task_id", data.TaskID),
@@ -583,14 +584,21 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 		// silently the way a bare false return did.
 		return fmt.Errorf("cannot resume clarification: message queue is not configured")
 	}
-	queued, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx, data.SessionID, data.TaskID, prompt, "", messagequeue.QueuedByAgent, false, nil,
+	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, data.TaskID, data.SessionID)
+	if err != nil {
+		return fmt.Errorf("resolve clarification resume session: %w", err)
+	}
+	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil,
 		map[string]interface{}{metaKeyUserMessageRecorded: true},
 	)
 	if err != nil {
 		return fmt.Errorf("queue clarification resume prompt: %w", err)
 	}
-	dispatched, err := s.takeAndDispatchEntryLocked(ctx, data.SessionID, queued.ID)
+	// Queue insertion is observable even when a concurrent drain prevents the
+	// targeted take, so publish before attempting dispatch.
+	s.publishQueueStatusEvent(ctx, data.SessionID)
+	dispatched, err := s.takeAndDispatchEntryLocked(ctx, identity, queued.ID)
 	if err != nil {
 		return fmt.Errorf("dispatch clarification resume prompt: %w", err)
 	}

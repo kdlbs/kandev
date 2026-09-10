@@ -354,6 +354,30 @@ func TestStopTaskRuntimeTargets_TerminalStopFailureBlocksCleanup(t *testing.T) {
 	}
 }
 
+func TestStopTaskRuntimeTargets_KubernetesTerminalCleanupFailurePreservesRow(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	executors := &stubExecutors{}
+	svc.executors = executors
+	svc.executionStopper = &stubStopper{stopExecutionErr: errors.New("exact Kubernetes cleanup failed")}
+	targets := []taskStopTarget{{
+		sessionID: "sess-k8s", executionID: "exec-k8s", terminal: true,
+		runtime: agentruntime.RuntimeKubernetes,
+	}}
+
+	outcome := svc.stopTaskRuntimeTargets(context.Background(), "task-k8s", targets, "delete", "stop failed")
+	svc.performTaskCleanup(
+		context.Background(), "task-k8s", nil, nil, targets, taskEnvironmentCleanup{},
+		taskCleanupPreserveRows(outcome),
+	)
+
+	if _, ok := outcome.failed["sess-k8s"]; !ok {
+		t.Fatalf("Kubernetes cleanup failure must remain retryable: %#v", outcome.failed)
+	}
+	if len(executors.deletedSessions) != 0 {
+		t.Fatalf("failed Kubernetes cleanup deleted authoritative row: %v", executors.deletedSessions)
+	}
+}
+
 func TestStopTaskRuntimeTargets_ExactRuntimeAbsenceIsIdempotent(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	svc.executors = &stubExecutors{}

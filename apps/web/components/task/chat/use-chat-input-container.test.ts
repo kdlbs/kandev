@@ -9,12 +9,13 @@ const callerPlaceholder = "Continue working on the task...";
 
 function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
   return renderHook(
-    () =>
+    (currentOverrides: Partial<Parameters<typeof useChatInputContainer>[0]>) =>
       useChatInputContainer({
         ref: createRef<ChatInputContainerHandle>(),
         sessionId: "session-1",
         isSending: false,
         isStarting: false,
+        canQueueWhileStarting: false,
         isPreparingEnvironment: false,
         isMoving: false,
         isFailed: false,
@@ -32,26 +33,43 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
         showRequestChangesTooltip: false,
         onRequestChangesTooltipDismiss: undefined,
         onSubmit: vi.fn(),
-        ...overrides,
+        ...currentOverrides,
       }),
     {
+      initialProps: overrides,
       wrapper: ({ children }) => React.createElement(ToastProvider, null, children),
     },
   );
 }
 
 describe("useChatInputContainer", () => {
-  it("disables the editor while the session is still STARTING", () => {
-    // The editor must stay uneditable until the agent reaches RUNNING — if
-    // the user can press Cmd+Enter mid-startup, the backend rejects with
-    // "Failed to send message to agent" because the agent process isn't
-    // ready yet. This is the regression from earlier rounds where the e2e
-    // quick-chat suite kept failing on race conditions.
+  it("@covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1 keeps editing available while startup blocks submission", () => {
     const { result } = renderInputState({ isStarting: true });
 
-    expect(result.current.isDisabled).toBe(true);
+    expect(result.current.isDisabled).toBe(false);
     expect(result.current.submitDisabled).toBe(true);
     expect(result.current.submitDisabledReason).toBeUndefined();
+  });
+
+  it("enables startup submission only when the selected session can queue", () => {
+    const { result } = renderInputState({ isStarting: true, canQueueWhileStarting: true });
+
+    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.submitDisabled).toBe(false);
+  });
+
+  it("preserves draft text when startup transitions to failed recovery", () => {
+    const { result, rerender } = renderInputState({ isStarting: true });
+
+    act(() => {
+      result.current.handleChange("my draft");
+    });
+
+    rerender({ isStarting: false, isFailed: true });
+
+    expect(result.current.value).toBe("my draft");
+    expect(result.current.isDisabled).toBe(true);
+    expect(result.current.submitDisabled).toBe(true);
   });
 
   it("surfaces the setup tooltip only while a container/sandbox is preparing", () => {

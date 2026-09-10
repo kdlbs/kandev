@@ -106,17 +106,21 @@ Each agent type defines `ProjectSkillDir` in its `RuntimeConfig`:
 | `grok-acp` (Grok) | `.grok/skills` |
 | `codex-acp`, `opencode-acp`, `gemini`, `copilot-acp`, `auggie`, `amp-acp` | `.agents/skills` |
 
-Default (if unset): `.agents/skills`. Skills are written to `<worktree>/<ProjectSkillDir>/kandev-<slug>/SKILL.md`. The `kandev-` prefix distinguishes injected skills from team-committed skills already in the repo.
+Default (if unset): `.agents/skills`. Skills are written to `<worktree>/<ProjectSkillDir>/<DirName(slug)>/SKILL.md`, where `DirName` prefixes the slug with `kandev-` unless it already carries that prefix (so a bundled system skill slugged `kandev-protocol` lands at `kandev-protocol/`, not `kandev-kandev-protocol/`). The `kandev-` prefix distinguishes injected skills from team-committed skills already in the repo.
 
 Before writing skills, all existing `kandev-*` directories in the target path are deleted (clean-slate). Removed skills don't linger; updated skills get fresh content.
 
-`kandev-*` patterns are added to `<worktree>/.git/info/exclude` so injected skills never appear as dirty files:
+`kandev-*` patterns are added to the repository's **common** git dir (`$GIT_COMMON_DIR/info/exclude`, i.e. `<repo>/.git/info/exclude`) so injected skills never appear as dirty files. Git has no per-worktree exclude file — it always reads `info/exclude` from the common dir, so a linked worktree's own `.git/worktrees/<name>/info/exclude` is never consulted, and this file is shared across every worktree of the repo.
+
+The written pattern is `<ProjectSkillDir>` **as resolved through symlinks, relative to the worktree root** — not the literal `ProjectSkillDir` string. For a target repo where none of these dirs are symlinked, that's the same value shown in the table above:
 
 ```
 .claude/skills/kandev-*
 .grok/skills/kandev-*
 .agents/skills/kandev-*
 ```
+
+But when `ProjectSkillDir` is itself a symlink — as with this repo's own `.claude/skills -> ../.agents/skills` — the pattern resolves to the symlink's target instead, e.g. `.agents/skills/kandev-*` rather than `.claude/skills/kandev-*`. Writing the literal, unresolved `ProjectSkillDir` would silently fail to match, since injected files land at the resolved path.
 
 **Per-agent isolation:** each agent session gets its own worktree (CWD), so skill directories are fully isolated between concurrent agents. No shared HOME directories, no symlink management, no shutdown cleanup hooks.
 
@@ -138,7 +142,7 @@ When the scheduler processes a wakeup:
 2. Check guard conditions (status, cooldown, checkout, budget).
 3. Export agent instructions from DB to `~/.kandev/runtime/<ws>/instructions/<agentId>/`.
 4. Create or reuse session worktree (CWD for the agent process).
-5. Clean `kandev-*` from the skill dir; write desired skills to `<worktree>/<ProjectSkillDir>/kandev-<slug>/SKILL.md`; ensure `.git/info/exclude` has `kandev-*` patterns.
+5. Clean `kandev-*` from the skill dir; write desired skills to `<worktree>/<ProjectSkillDir>/<DirName(slug)>/SKILL.md`; ensure the common git dir's `info/exclude` has the resolved `kandev-*` pattern.
 6. Build prompt: read `AGENTS.md` content, append path directive, prepend to user-turn prompt, add wake context. For CEO heartbeat: add workspace status section.
 7. Set env vars (`KANDEV_API_KEY`, `KANDEV_TASK_ID`, `KANDEV_CLI`, etc.).
 8. Set `KANDEV_WAKE_PAYLOAD_JSON` with pre-computed task context, or `KANDEV_WAKE_PAYLOAD_PATH` when the payload is too large for inline env.
@@ -242,7 +246,7 @@ Three MCP modes coexist:
 |---|---|---|---|
 | `ModeTask` | 27 (kanban + plans + walkthroughs + coordination + completion) | ~3-5K | Interactive kanban sessions |
 | `ModeConfig` | 29 (workflows + agents + executors) | ~8-10K | Config setup sessions |
-| `ModeOffice` | 12 (plans + tasks + rich output + decisions + completion) | ~1-2K | Office agent sessions |
+| `ModeOffice` | 11 (plans + tasks + rich output + completion) | ~1-2K, without the decision schema | Office agent sessions |
 
 Agent routing and Office ownership are independent. Workflow-level defaults, per-step agent profiles, and `runner` participants select the execution identity only; they never make a Kanban task Office-owned. A task is Office-owned only when it is linked to an Office project or its workflow matches the workspace's Office workflow.
 
@@ -251,13 +255,17 @@ Agent routing and Office ownership are independent. Workflow-level defaults, per
 - `ask_user_question_kandev` (only meaningful when the user opens the task in advanced mode).
 - `list_related_tasks_kandev`.
 - 3 task-document tools (`list_task_documents_kandev`, `get_task_document_kandev`, `write_task_document_kandev`).
-- `show_rich_output_kandev`, `record_step_decision_kandev`, and gated `step_complete_kandev`.
+- `show_rich_output_kandev` and gated `step_complete_kandev`.
 
-`ModeOffice` excludes kanban/config tools and workspace/workflow listing tools. Its first-turn context lists only registered tools, and Office mutations use `$KANDEV_CLI`.
+`ModeOffice` excludes kanban/config tools, workspace/workflow listing tools, and
+the workflow-step decision action. Its first-turn context lists only registered
+tools. Reviewer and approver runs receive an injected Kandev skill for
+`$KANDEV_CLI kandev task decision`; other Office mutations also use
+`$KANDEV_CLI`.
 
 ### Skills are preferred over MCP tools
 
-Skills are the preferred pattern for teaching agents office capabilities. A skill provides instructions in `SKILL.md` and the agent calls API endpoints via `$KANDEV_CLI`. This is cheaper than MCP tools: instructions read once per session, shell calls thereafter; MCP tool definitions add per-call overhead (tool schemas in context, structured I/O parsing on every invocation). The `kandev-protocol` system skill teaches CLI usage and replaces the earlier curl-based version. New office capabilities expose API endpoints, ship a skill that teaches the agent how to call them, and assign the skill to agents that need it.
+Skills are the preferred pattern for teaching agents office capabilities. A skill provides instructions in `SKILL.md` and the agent calls API endpoints via `$KANDEV_CLI`. This is cheaper than MCP tools: instructions read once per session, shell calls thereafter; MCP tool definitions add per-turn schema cost and structured I/O parsing on every invocation. The `kandev-protocol` system skill teaches general CLI usage and replaces the earlier curl-based version. The narrow `kandev-step-decision` system skill is injected when the launch-time seat lookup finds a reviewer or approver seat; the runtime endpoint still authorizes the seat live on every call. New office capabilities expose API endpoints, ship a skill that teaches the agent how to call them, and assign or inject the skill only where it is useful.
 
 ## UI
 

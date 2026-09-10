@@ -79,6 +79,20 @@ type Config struct {
 	// The nonce is burned after a single successful handshake.
 	BootstrapNonce string
 
+	// bootstrapNonceConfigured records whether AGENTCTL_BOOTSTRAP_NONCE was set
+	// at startup. Unlike BootstrapNonce, it stays true after the nonce is
+	// burned, so handshake-failure diagnostics can tell "bootstrap nonce mode
+	// was never on" apart from "the configured nonce was already consumed" —
+	// both otherwise look identical once BootstrapNonce reads empty.
+	bootstrapNonceConfigured bool
+
+	// bootstrapNonceFingerprint is the diagnostic fingerprint (see
+	// commonconfig.NonceFingerprint) of whichever nonce was configured at
+	// startup. Survives the nonce being burned so a later rejected handshake
+	// can still be attributed to a mismatch against this value, an
+	// already-burned nonce, or bootstrap mode never having been configured.
+	bootstrapNonceFingerprint string
+
 	// IdleTimeout is the duration after which an instance with no in-flight
 	// requests and no recent HTTP activity is reaped by the instance
 	// manager. Sourced from KANDEV_ACP_IDLE_TIMEOUT (default 1h).
@@ -245,7 +259,8 @@ type InstanceConfig struct {
 	AssumeMcpHttp bool
 
 	// McpMode controls which MCP tools are registered for this instance.
-	// "task" (default), "config", and "office" select distinct tool surfaces.
+	// "task" (default), "task-title-pending", "config", "office", and
+	// "automation" select distinct tool surfaces.
 	McpMode string
 
 	// McpProviders limits task-mode review automation tools to attached providers.
@@ -384,9 +399,29 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	if nonce := os.Getenv("AGENTCTL_BOOTSTRAP_NONCE"); nonce != "" {
 		cfg.BootstrapNonce = nonce
 		cfg.AuthToken = generateSelfToken()
+		cfg.bootstrapNonceConfigured = true
+		cfg.bootstrapNonceFingerprint = commonconfig.NonceFingerprint(nonce)
 	}
 
 	return cfg
+}
+
+// BootstrapNonceConfigured reports whether AGENTCTL_BOOTSTRAP_NONCE was set at
+// startup, independent of whether the nonce has since been burned by a
+// successful handshake.
+func (c *Config) BootstrapNonceConfigured() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bootstrapNonceConfigured
+}
+
+// BootstrapNonceFingerprint returns the diagnostic fingerprint of the nonce
+// configured at startup, or empty if bootstrap nonce mode was never
+// configured. Unlike BootstrapNonce, it survives the nonce being burned.
+func (c *Config) BootstrapNonceFingerprint() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bootstrapNonceFingerprint
 }
 
 // ListenHost returns the interface agentctl should bind its HTTP listeners to.

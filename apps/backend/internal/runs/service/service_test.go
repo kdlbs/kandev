@@ -115,6 +115,32 @@ func TestQueueRun_DoesNotCoalesceTaskAssignedAcrossTasks(t *testing.T) {
 	}
 }
 
+func TestQueueRun_DoesNotCoalesceManualRecoveryAcrossTasks(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	for _, taskID := range []string{"task-a", "task-b"} {
+		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			AgentProfileID: "agent-primary",
+			TaskID:         taskID,
+			Reason:         "manual_resume_after_failure",
+			IdempotencyKey: "manual_resume_after_failure:" + taskID,
+		}); err != nil {
+			t.Fatalf("queue %s: %v", taskID, err)
+		}
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE agent_profile_id = ?`,
+		"agent-primary"); err != nil {
+		t.Fatalf("count queued runs: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("manual recovery runs = %d, want 2", count)
+	}
+}
+
 func TestQueueRun_UsesRequestAgentProfileIDAndAddsEnvelopePayload(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()
@@ -562,6 +588,69 @@ func TestQueueRun_DistinctIdempotencyKeyStillQueuesAfterDedup(t *testing.T) {
 	}
 	if secondEntry != runsservice.QueueOutcomeQueued {
 		t.Errorf("second entry outcome = %q, want %q (a key with no per-entry component would dedupe this and silently drop the run)", secondEntry, runsservice.QueueOutcomeQueued)
+	}
+}
+
+// TestQueueRun_DedupesOnIdempotencyIndexRace pins the fix for the duplicate
+// on_children_completed wake race: idx_run_idempotency (unique on
+// idempotency_key with no time bound) can reject an insert even when
+// CheckIdempotencyKey's 24h-windowed lookup found no duplicate — for
+// example when two independent producers derive the same operation id and
+// race the insert, or (as reproduced deterministically here) when the
+// colliding row is older than the window. Before the fix insertRun wrapped
+// that unique-constraint violation in a generic "enqueue run" error, which
+// aborted the losing producer's step actions and logged a spurious ERROR
+// instead of being treated as an idempotent no-op.
+func TestQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	const key = "task_children_completed:parent-1:0541818c598576d27d09bff86195037f87910dbf34f0420f6a99dc468aa1dfc7"
+
+	outcome, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		IdempotencyKey: key,
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue first run: %v", err)
+	}
+	if outcome != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first outcome = %q, want %q", outcome, runsservice.QueueOutcomeQueued)
+	}
+
+	var firstRunID string
+	if err := repo.Reader().GetContext(ctx, &firstRunID,
+		`SELECT id FROM runs WHERE idempotency_key = ?`, key); err != nil {
+		t.Fatalf("look up first run id: %v", err)
+	}
+	// Push the first row outside CheckIdempotencyKey's 24h window so the
+	// racing insert reaches idx_run_idempotency instead of being caught
+	// by the earlier check — the exact gap a true concurrent race falls
+	// into (both producers pass the check before either commits).
+	if err := repo.SetRunRequestedAtForTest(ctx, firstRunID, time.Now().UTC().Add(-25*time.Hour)); err != nil {
+		t.Fatalf("age first run past the idempotency window: %v", err)
+	}
+
+	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		Reason:         "task_children_completed",
+		IdempotencyKey: key,
+		Payload:        agentInPayload("a1"),
+	})
+	if err != nil {
+		t.Fatalf("queue racing run: %v", err)
+	}
+	if second != runsservice.QueueOutcomeDeduped {
+		t.Fatalf("racing outcome = %q, want %q", second, runsservice.QueueOutcomeDeduped)
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE idempotency_key = ?`, key); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("runs with idempotency_key %q = %d, want 1", key, count)
 	}
 }
 

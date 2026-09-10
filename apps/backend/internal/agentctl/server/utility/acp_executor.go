@@ -18,12 +18,14 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/internal/common/npmresolution"
 	"go.uber.org/zap"
 )
 
@@ -202,8 +204,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	client := acpclient.NewClient(clientOptions...)
 
 	// Create ACP connection
-	conn := acp.NewClientSideConnection(client, stdin, stdout)
-	conn.SetLogger(slog.Default().With("component", "acp-inference"))
+	conn := acpclient.NewClientSideConnectionWithLogger(
+		client,
+		stdin,
+		stdout,
+		slog.Default().With("component", "acp-inference"),
+	)
 
 	// Initialize ACP handshake
 	// Same client capabilities the session adapter and the probe send. This
@@ -521,12 +527,18 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
 			zap.Error(err))
 	}
-	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() { cleanupACPCommand(ctx, cmd, lifecycle, e.logger) })
+	}
+	defer cleanup()
 
 	resp, err := e.probeACPSessionWithContext(
 		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth,
 	)
 	if err != nil {
+		cleanup()
+		stderrTail := stderr.tail()
 		// The tail goes to the log rather than into the response: handlers
 		// deliberately keep subprocess diagnostics and tmp paths out of client
 		// payloads. An empty tail is itself a result — the child produced no
@@ -534,11 +546,12 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		e.logger.Error("ACP probe failed",
 			zap.String("agent_id", req.AgentID),
 			zap.Error(err),
-			zap.String("stderr", stderr.tail()))
+			zap.String("stderr", stderrTail))
 		return &ProbeResponse{
-			Success:    false,
-			Error:      withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail()),
-			DurationMs: int(time.Since(startTime).Milliseconds()),
+			Success:     false,
+			Error:       withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail),
+			FailureCode: managedRuntimeProbeFailureCode(cfg.Command, stderrTail),
+			DurationMs:  int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
 	if len(resp.Models) == 0 && isOpenCode {
@@ -551,6 +564,25 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
 	return resp, nil
+}
+
+func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailureCode {
+	packageSpec, ok := managedRuntimeProbePackageSpec(command)
+	if !ok || !npmresolution.MatchesExactPackage(stderr, packageSpec) {
+		return ""
+	}
+	return ProbeFailureManagedRuntimeNPMResolution
+}
+
+func managedRuntimeProbePackageSpec(command []string) (string, bool) {
+	if len(command) < 4 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" {
+		return "", false
+	}
+	packageSpec := command[3]
+	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+		return "", false
+	}
+	return packageSpec, true
 }
 
 // isOpenCodeACPCommand reports whether the configured ACP probe command is
@@ -871,8 +903,12 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 		acpclient.WithUpdateHandler(updates.handle),
 	)
 
-	conn := acp.NewClientSideConnection(client, stdin, stdout)
-	conn.SetLogger(slog.Default().With("component", "acp-probe"))
+	conn := acpclient.NewClientSideConnectionWithLogger(
+		client,
+		stdin,
+		stdout,
+		slog.Default().With("component", "acp-probe"),
+	)
 
 	// Advertise the same model-picker capability the live session adapter sends.
 	// cursor-agent picks its model picker mode from this handshake, so a probe
@@ -1188,19 +1224,22 @@ func derefString(p *string) string {
 // is not derived from untrusted input — even though the value is
 // semantically the same as the base name taken from InferenceConfig.Command.
 var allowedProbeCommands = map[string]string{
-	"auggie":        "auggie",
-	"cursor-agent":  "cursor-agent",
-	"devin":         "devin",
-	"grok":          "grok",
-	"hermes":        "hermes",
-	"kimi":          "kimi",
-	"kiro-cli-chat": "kiro-cli-chat",
-	"mock-agent":    "mock-agent",
-	"npx":           "npx",
-	"omp":           "omp",
-	openCodeCommand: openCodeCommand,
-	"qodercli":      "qodercli",
-	"traecli":       "traecli",
+	"agy_acp_server.par": "agy_acp_server.par",
+	"agy_acp_server.exe": "agy_acp_server.exe",
+	"auggie":             "auggie",
+	"cursor-agent":       "cursor-agent",
+	"devin":              "devin",
+	"goose":              "goose",
+	"grok":               "grok",
+	"hermes":             "hermes",
+	"kimi":               "kimi",
+	"kiro-cli-chat":      "kiro-cli-chat",
+	"mock-agent":         "mock-agent",
+	"npx":                "npx",
+	"omp":                "omp",
+	openCodeCommand:      openCodeCommand,
+	"qodercli":           "qodercli",
+	"traecli":            "traecli",
 }
 
 // resolveProbeCommand validates and returns a hard-coded executable name for

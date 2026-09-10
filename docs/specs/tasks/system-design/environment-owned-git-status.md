@@ -1,158 +1,221 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001
+  - REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001
+created: 2026-08-30
+updated: 2026-08-31
+owners:
+  - cfl
 ---
 
 # Environment-Owned Git Status System Design
 
 ## Purpose and boundaries
 
-The task environment owns the current workspace. It also owns the current Git
-status that desktop and mobile workspace views show. A task session is a
-transport handle for status requests and events. It is not a separate owner of
-workspace state.
+A `TaskEnvironment` owns one current workspace. The environment also owns the
+current Git status that workspace views show.
 
-This design covers status hydration, WebSocket delivery, frontend cache
-ordering, and the Changes surfaces. It does not change Git polling inside
-agentctl, Git operations, commit history, or workspace materialization.
+A `TaskSession` is capture provenance and a transport route. It is not a scope
+for current Git status.
 
-The workspace-path repair in PR #3167 prevents a resumed session from keeping
-an incorrect workspace path. This design adds a separate boundary. It prevents
-historical or delayed sibling-session data from becoming authoritative after a
-task environment already has a canonical workspace.
+This design covers snapshot persistence, selection, capture, hydration,
+WebSocket delivery, task summaries, and frontend storage. It does not change
+Git polling inside agentctl or workspace materialization.
 
 ## Requirement mapping
 
-| Requirement                                         | Design section                                                                                                                      |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.5` | [Backend status authority](#backend-status-authority), [Frontend ordering](#frontend-ordering), [Workspace views](#workspace-views) |
+| Requirement | Design sections |
+| --- | --- |
+| `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.5` | [Persistence ownership](#persistence-ownership), [Delivery identity](#delivery-identity), [Workspace views](#workspace-views) |
+| `AC-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001.9` | [Persistence ownership](#persistence-ownership), [Source precedence](#source-precedence), [Workspace views](#workspace-views) |
 
-## Backend status authority
+## Persistence ownership
 
-`buildSessionDataProvider` and `buildSessionGitDataProvider` in
-`apps/backend/internal/backendapp/helpers.go` accept a session ID because the
-WebSocket protocol subscribes to sessions. Before either provider reads live
-or persisted Git status, it resolves the session's `TaskEnvironment` and the
-all sessions bound to that environment. This includes inherited or shared
-sessions whose task differs from the environment owner's task.
+`task_session_git_snapshots` keeps its table name for compatibility with
+historical analytics and delivery queries. Its scoping key changes to
+`task_environment_id`.
 
-The provider selects a source session with these rules:
+The final table has these ownership columns:
 
-1. If the requested session has no task environment, keep the legacy
-   session-scoped behavior.
-2. Read the canonical workspace path from
-   `task_environments.workspace_path`.
-3. Keep only sessions that reference the same task environment and whose raw
-   recorded workspace path is present and exactly matches the canonical path.
-   The projected environment path cannot prove that a historical session was
-   recorded against the canonical workspace.
-4. Prefer a matching live execution. Its workspace path must match the
-   canonical environment. A recovered execution with an empty task-environment
-   ID is accepted only after the session binding and workspace checks pass. A
-   non-empty mismatched ID is rejected before the provider asks agentctl for
-   status.
-5. If no live query succeeds, load the latest ranked snapshot for each
-   matching source session and repository, then select the newest observation
-   for each repository.
-6. Publish the selected status with the requested subscription session ID so
-   existing WebSocket routing and environment mapping remain compatible. A
-   multi-repository workspace publishes one event per repository.
+- `task_environment_id TEXT NOT NULL` references `task_environments(id)` with
+  `ON DELETE CASCADE`.
+- `session_id TEXT` is nullable capture provenance. It references
+  `task_sessions(id)` with `ON DELETE SET NULL`.
 
-The provider does not use a clean status, a non-empty file list, or a primary
-session flag as authority. A clean canonical workspace is valid. Session
-selection uses workspace identity, and snapshot selection uses observation
-time only after the workspace identity matches.
+Session deletion cannot remove the current environment status. Environment
+deletion removes all snapshots for that environment.
 
-The implementation uses environment-bound session queries,
-`GetTaskEnvironment`, and a per-session/per-repository snapshot query. It does
-not add a database table or copy Git status onto the task-environment row.
+Repository identity remains in snapshot metadata. A missing or empty
+`repository_name` identifies the root repository.
 
-## Frontend ordering
+Current-status reads partition rows by `task_environment_id` and normalized
+repository name. Historical session reads can still filter by the nullable
+`session_id` provenance field.
 
-`session.git.event` continues to carry a session ID. The session-runtime store
-continues to map that ID through `environmentIdBySessionId` and to cache status
-under `gitStatus.byEnvironmentId` and `gitStatus.byEnvironmentRepo`.
+## Authoritative selection
 
-For each environment and repository key, `setGitStatus` keeps the newest valid
-status timestamp it has observed. It rejects an incoming entry with an older
-valid timestamp. If an entry has the same Git content and a newer timestamp,
-the store advances the timestamp watermark without invalidating the cumulative
-diff cache. This prevents an older hydration response from winning only because
-it arrived later.
+The repository selects one current observation for each environment and
+repository pair. It orders observations by `created_at DESC`.
 
-An entry with no valid timestamp cannot replace an entry that already has a
-valid timestamp. This rule keeps a legacy snapshot with unknown age from
-replacing a dated live observation. Existing undated state can still accept a
-new entry, which preserves compatibility during initial hydration.
+Snapshot type does not outrank observation time. A newer `live_monitor` row
+therefore outranks an older `agent_completed` row from any sibling session.
 
-Timestamp ordering is a safeguard, not the source-authority rule. The backend
-must first exclude data from a different workspace.
+The newest observation defines the current state. For equal timestamps, the
+selector prefers file details and then orders by `id DESC`.
+
+The selector never searches before the newest observation for file details.
+A sparse live row therefore cannot reuse stale files from an older detailed
+row.
+
+Archive rows use the same time rule. An archive row remains current until a
+newer non-archive observation exists after a resume.
+
+## Capture and supersession
+
+Each write resolves the capture session to a non-empty task environment before
+the repository changes data. A missing environment causes the write to stop.
+
+`UpsertLatestLiveGitSnapshot` keeps one `live_monitor` row for each environment
+and repository pair. SQLite uses its serialized writer transaction. Postgres
+locks the environment row before the delete and insert steps.
+
+An `agent_completed` capture uses the same environment lock. In one
+transaction, it removes earlier `live_monitor` and `agent_completed` rows for
+the environment and repository. Then it inserts the detailed completion row.
+
+An archive capture keeps earlier archive history. Current selection still
+uses observation time, so an old archive cannot replace a newer workspace
+observation.
+
+The live-write throttle uses environment and repository identity. A sibling
+session cannot create a second throttle scope for the same workspace state.
+
+## Source precedence
+
+Boot hydration and explicit refresh first resolve the requested session to its
+task environment. They then inspect all live executions for that environment.
+
+If any execution is live, a fresh agentctl result is authoritative. If the
+live query fails, the backend sends no persisted replacement for that request.
+
+If no execution is live, the backend reads the authoritative persisted rows
+for the environment. It emits one status update for each repository.
+
+The requested session remains the WebSocket route. It does not select the
+snapshot and does not define the frontend storage key.
+
+## Delivery identity
+
+Every `status_update` payload carries `task_environment_id`. The nested status
+object carries `repository_name` for non-root repositories.
+
+The lifecycle publisher copies the environment ID from `AgentExecution`. The
+orchestrator resolves the ID from the session when an older recovered execution
+does not contain it.
+
+Boot hydration copies the environment ID from the requested session binding.
+It does not send a session-only status payload.
+
+Other Git events remain session-routed. Commit history and branch actions still
+use session provenance where their contracts require it.
+
+## Frontend storage
+
+The Git-status handler reads `task_environment_id` from each status payload.
+It passes that ID directly to the session-runtime store.
+
+The store writes `gitStatus.byEnvironmentRepo[task_environment_id][repository]`.
+It does not derive this key from `environmentIdBySessionId`.
+
+The handler ignores a status payload that has no environment ID. This rule
+prevents a session ID from becoming an accidental environment key.
+
+Timestamp ordering remains a response-order safeguard. An older payload cannot
+replace a newer payload for the same environment and repository.
+
+A sparse live snapshot normalizes `files` to an empty object. It clears stale
+file details while it preserves current totals and file-name lists.
+
+## Task summaries and direct consumers
+
+Task-card and status-summary rebuilds collect unique environment IDs from task
+sessions. They load one authoritative observation for each environment and
+repository pair.
+
+The loaders do not count one shared environment once for every sibling
+session. Shared and inherited tasks can read the same environment observation.
+
+Delivery ancestry queries join snapshots through environment ownership and
+task environment bindings. They do not require the capture session to remain.
+
+Session code statistics continue to use `session_id` as capture provenance.
+Rows with null provenance do not contribute to a deleted session.
+
+## Migration
+
+Fresh databases create the final environment-scoped table directly. Existing
+databases use one transactional cutover.
+
+The cutover does these steps:
+
+1. Lock the legacy table and its environment ownership inputs.
+2. Join each snapshot to `task_sessions.task_environment_id`.
+3. Remove rows that have no resolvable environment.
+4. Partition the remaining rows by environment and normalized repository.
+5. Keep the authoritative row from each partition with the new time rule.
+6. Copy each winner to a final-shape shadow table.
+7. Replace the legacy table and create the final indexes.
+
+The winner keeps its session ID as nullable provenance. The migration does not
+copy a session ID into the scoping key.
+
+The cutover returns all unexpected errors. It does not use the best-effort
+migration logger.
+
+If any cutover step fails, the transaction keeps the complete legacy table.
+The migration is a no-op when the final shape already exists.
+
+SQLite and Postgres tests cover fresh creation, legacy cutover, rollback, and
+same-database replay. Postgres uses the repository migration lock convention.
 
 ## Workspace views
 
-Desktop and mobile Changes surfaces use the same environment-keyed store and
-Git-status hooks. This change does not add controls, change layout, or alter
-touch behavior. Both surfaces receive the same corrected state without separate
-presentation logic.
+Desktop and mobile Changes surfaces use the same environment-keyed store. This
+change does not alter layout, navigation, touch behavior, or user copy.
 
-The desktop end-to-end regression uses two sessions in one environment. It
-creates an uncommitted file, reloads the task, and proves that the file stays
-visible after both session hydrations and a sibling-session switch. A focused
-store test proves that an older sibling event cannot replace newer environment
-state. No separate mobile end-to-end test is required because this design does
-not change mobile composition or interaction, and the mobile surface reads the
-same store contract.
+The user regression uses two sessions in one environment. An older completion
+contains files that a newer live observation no longer contains.
+
+After reload and both sibling hydrations, Changes must not restore the removed
+files. A focused store test covers the same message order.
+
+No separate mobile browser test is necessary. The mobile surface uses the same
+store and has no presentation change.
 
 ## Failure and recovery
 
-If environment or sibling-session lookup fails, the provider logs the failure
-and does not publish an unverified session snapshot. The next Git poll, focus
-refresh, reconnect, or explicit refresh can retry. The provider keeps legacy
-session behavior only when the session has no task-environment identity.
+A status write without a resolvable environment stops and records a bounded
+log entry. The log does not contain a workspace path.
 
-If a live status request times out, the provider can use only a snapshot whose
-source session matches the canonical environment workspace. If none exists, it
-returns no status rather than clearing the current frontend state with suspect
-data. The live probe has one deadline for all eligible sources, so a stuck
-sibling cannot extend hydration once per source.
+A live-query error does not permit a persisted fallback while any environment
+execution is live. A later poll, focus refresh, or reconnect can retry.
 
-A corrected session path from PR #3167 makes that session eligible on its next
-hydration. No database migration or historical snapshot rewrite is required.
-
-## Persistence
-
-Git snapshots remain session-attributed history in
-`task_session_git_snapshots`. The source session preserves the audit trail.
-Environment authority is resolved when current status is projected. This keeps
-historical records intact and avoids a second status ownership model. Live
-monitor snapshots are retained one per session and repository so fallback can
-rebuild a multi-repository status.
+A migrated row without session provenance remains valid until its environment
+is removed. Provenance loss does not change current-status authority.
 
 ## Observability
 
-Backend logs for live-query and snapshot fallback include the requested session
-ID, selected source session ID, task-environment ID, and a bounded reason when a
-candidate is rejected. Logs must not include workspace paths.
+Backend logs include the task environment ID, repository name, source type,
+capture session ID when present, and selection reason.
 
-Frontend debug logs include the environment key, repository name, incoming and
-stored timestamps, and whether ordering rejected the event. Existing file-count
-and cache-invalidation fields remain.
+Frontend debug logs include the delivered environment ID and repository name.
+They also record timestamp rejection and cache invalidation results.
 
-## Verification
-
-- Backend tests seed same-environment sessions, including an inherited session
-  from another task, with different workspace paths. They prove that live and
-  snapshot hydration select only canonical sources, preserve one event per
-  repository, and route results to the requested subscription.
-- Frontend tests deliver a newer dirty status and then an older clean status
-  from a sibling session. They prove that the environment cache stays dirty and
-  the cumulative diff cache is not invalidated by the rejected event.
-- The desktop end-to-end test proves that uncommitted files remain visible
-  through reload and sibling-session hydration.
+Logs must not contain workspace paths or file content.
 
 ## Related decisions
 
 - [Keep Worktree Ownership at the Task Lifecycle](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
-- [Project Current Git Status From the Task Environment](../../../decisions/2026-08-30-environment-owned-git-status.md)
+- [Persist Current Git Status with the Task Environment](../../../decisions/2026-08-30-environment-owned-git-status.md)

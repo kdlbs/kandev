@@ -9,9 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -360,6 +364,164 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 
 	require.True(t, stopTracker.forced, "force must be forwarded to StopInstance")
 	require.Equal(t, StopReasonBackendShutdown, stopTracker.stopReason)
+}
+
+func TestStopAgentWithReasonRetainsExecutionWhenBackendCleanupFails(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	cleanupErr := errors.New("exact Kubernetes cleanup failed")
+	stopTracker := &mockStopTracker{name: executor.NameKubernetes, stopErr: cleanupErr}
+	execRegistry.Register(stopTracker)
+	bus := &MockEventBus{}
+	mgr := NewManager(newTestRegistry(), bus, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	runtimeSecrets := newInMemorySecretStore()
+	for id := range map[string]struct{}{"legacy-auth-ref": {}, "legacy-nonce-ref": {}} {
+		require.NoError(t, runtimeSecrets.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: "secret",
+		}))
+	}
+	mgr.SetSecretStore(runtimeSecrets)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-k8s", TaskID: "task-k8s", SessionID: "session-k8s",
+		RuntimeName: executor.NameKubernetes, Status: v1.AgentStatusRunning,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "legacy-auth-ref",
+			MetadataKeyBootstrapNonceSecret: "legacy-nonce-ref",
+		},
+	}))
+
+	err := mgr.StopAgentWithReason(context.Background(), "exec-k8s", StopReasonTaskDeleted, true)
+
+	require.ErrorIs(t, err, cleanupErr)
+	require.Equal(t, "session-k8s", stopTracker.stoppedSessionID)
+	execution, exists := mgr.GetExecution("exec-k8s")
+	require.True(t, exists, "failed exact cleanup must remain retryable")
+	require.Equal(t, v1.AgentStatusRunning, execution.Status)
+	require.Len(t, runtimeSecrets.store, 2, "runtime cleanup failure must preserve recovery secrets")
+	for _, event := range bus.PublishedEvents {
+		require.NotEqual(t, events.AgentStopped, event.Type)
+	}
+}
+
+func TestStopAgentWithReasonCleansPersistedKubernetesInventoryAfterRestart(t *testing.T) {
+	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true)
+}
+
+func TestForceStopAgentCleansPersistedKubernetesInventoryAfterRestartWithoutTerminalReason(t *testing.T) {
+	testPersistedKubernetesCleanupAfterRestart(t, "", true)
+}
+
+func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, force bool) {
+	t.Helper()
+	controlPort := startKubernetesAgentctlServer(t, true, 41001)
+	instancePort := startKubernetesAgentctlServer(t, false, 0)
+	resources := &fakeKubernetesResources{}
+	initial := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	})
+	req := validKubernetesCreateRequest()
+	setManagedKubernetesWorkspace(req)
+	instance, err := initial.CreateInstance(context.Background(), req)
+	require.NoError(t, err)
+	metadata := cloneKubernetesMetadata(req.Metadata)
+	for key, value := range instance.Metadata {
+		metadata[key] = value
+	}
+	metadata[MetadataKeyKubernetesAuthMode] = "kubeconfig"
+	metadata[MetadataKeyKubernetesKubeconfigPath] = "/stale/kubeconfig"
+	metadata[MetadataKeyKubernetesKubeContext] = "stale-context"
+	metadata[MetadataKeyKubernetesRequestTimeoutSeconds] = "10"
+	runtimeSecrets := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"legacy-auth-ref": "agentctl-token", "legacy-nonce-ref": "bootstrap-nonce",
+	} {
+		require.NoError(t, runtimeSecrets.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	metadata[MetadataKeyAuthTokenSecret] = "legacy-auth-ref"
+	metadata[MetadataKeyBootstrapNonceSecret] = "legacy-nonce-ref"
+	row := &models.ExecutorRunning{
+		ID: instance.SessionID, SessionID: instance.SessionID, TaskID: instance.TaskID,
+		ExecutorID: "executor-1", ExecutionProfileID: "agent-profile-1", AgentExecutionID: instance.InstanceID,
+		Runtime: agentruntime.RuntimeKubernetes, Metadata: metadata,
+	}
+	store := &restartKubernetesInventoryStore{
+		captureExecutorRunningWriter: captureExecutorRunningWriter{prior: row},
+		rows:                         []*models.ExecutorRunning{row},
+		executors: map[string]*models.Executor{"executor-1": {
+			ID: "executor-1", Type: models.ExecutorTypeKubernetes,
+			Config: map[string]string{
+				MetadataKeyKubernetesAuthMode:              "in_cluster",
+				MetadataKeyKubernetesConfigNamespace:       "new-agents",
+				MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+			},
+		}},
+	}
+	restarted := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, nil)
+	originalFactory := restarted.clientFactory
+	var cleanupConfig kubeexecutor.ExecutorConfig
+	restarted.clientFactory = func(config kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error) {
+		cleanupConfig = config
+		return originalFactory(config)
+	}
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(restarted)
+	mgr := NewManager(nil, &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorRunningWriter(store)
+	mgr.SetSecretStore(runtimeSecrets)
+
+	err = mgr.StopAgentWithReason(context.Background(), instance.InstanceID, reason, force)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"pod", "pvc"}, resources.deletionOrder)
+	require.Equal(t, kubeexecutor.AuthModeInCluster, cleanupConfig.AuthMode)
+	require.Empty(t, cleanupConfig.KubeconfigPath)
+	require.Empty(t, cleanupConfig.KubeContext)
+	require.Equal(t, 45, cleanupConfig.RequestTimeoutSeconds)
+	require.Equal(t, "new-agents", cleanupConfig.Namespace)
+	require.Nil(t, store.running, "service cleanup owns row deletion after successful remote teardown")
+	require.Empty(t, runtimeSecrets.store, "destructive restart cleanup must remove recorded runtime secret refs")
+}
+
+func TestStopAgentWithReasonPreservesPersistedKubernetesInventoryForBackendShutdown(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	stopTracker := &mockStopTracker{name: executor.NameKubernetes}
+	registry.Register(stopTracker)
+	store := &restartKubernetesInventoryStore{rows: []*models.ExecutorRunning{{
+		AgentExecutionID: "instance-1", Runtime: agentruntime.RuntimeKubernetes,
+	}}}
+	mgr := NewManager(nil, &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorRunningWriter(store)
+
+	err := mgr.StopAgentWithReason(context.Background(), "instance-1", StopReasonBackendShutdown, false)
+
+	require.ErrorIs(t, err, ErrExecutionNotFound)
+	require.False(t, stopTracker.stopCalled)
+}
+
+type restartKubernetesInventoryStore struct {
+	captureExecutorRunningWriter
+	rows      []*models.ExecutorRunning
+	executors map[string]*models.Executor
+}
+
+func (s *restartKubernetesInventoryStore) ListExecutorsRunning(context.Context) ([]*models.ExecutorRunning, error) {
+	return s.rows, nil
+}
+
+func (s *restartKubernetesInventoryStore) GetExecutor(_ context.Context, id string) (*models.Executor, error) {
+	executor := s.executors[id]
+	if executor == nil {
+		return nil, models.ErrExecutorNotFound
+	}
+	return executor, nil
 }
 
 func TestStopAgentWithReason_BackendFailureKeepsExecutionRetryable(t *testing.T) {

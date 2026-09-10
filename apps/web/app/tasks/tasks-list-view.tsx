@@ -43,7 +43,10 @@ export type TasksListViewProps = {
   deletingTaskId: string | null;
   handleArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   handleUnarchive: (taskId: string) => Promise<void>;
-  handleDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  handleDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRefresh?: () => void | Promise<void>;
 };
 
@@ -153,7 +156,10 @@ function TaskRows({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRowClick: (task: Task) => void;
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
 }) {
@@ -356,7 +362,10 @@ function TaskListRow({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -426,7 +435,10 @@ function TaskListSectionView({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const rows = flattenTaskTree(section.nodes);
@@ -483,7 +495,7 @@ function UnarchiveRowAction({
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 cursor-pointer"
+            className="cursor-pointer"
             data-testid="tasks-list-unarchive"
             disabled={isPending}
             onClick={async () => {
@@ -530,7 +542,10 @@ function TaskRowActions({
   onArchiveOpenChange: (open: boolean) => void;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    taskId: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const archiveAnchorRef = useRef<HTMLButtonElement>(null);
@@ -547,7 +562,7 @@ function TaskRowActions({
               ref={archiveAnchorRef}
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               onClick={() => onArchiveOpenChange(true)}
             >
               <IconArchive className="h-4 w-4 text-muted-foreground" />
@@ -564,7 +579,7 @@ function TaskRowActions({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               disabled={isDeleting}
               onClick={() => onDeleteOpenChange(true)}
             >
@@ -587,7 +602,9 @@ function TaskRowActions({
         isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete(task.id, { cascade })}
+        onConfirm={({ cascade, discardWorktreeChanges }) =>
+          onDelete(task.id, { cascade, discardWorktreeChanges })
+        }
       />
       <TaskArchiveConfirmation
         open={showArchiveConfirm}

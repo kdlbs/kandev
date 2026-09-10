@@ -29,6 +29,62 @@ function preserveLiveAutoStartFailed(
   });
 }
 
+function preserveLiveWorkspaceOrphaned(
+  snapshotTasks: KanbanTask[],
+  fetchStartTasks: KanbanTask[],
+  currentTasks: KanbanTask[],
+) {
+  const fetchStartByID = new Map(fetchStartTasks.map((task) => [task.id, task]));
+  const currentByID = new Map(currentTasks.map((task) => [task.id, task]));
+  return snapshotTasks.map((task) => {
+    const current = currentByID.get(task.id);
+    if (!current) return task;
+    const fetchStart = fetchStartByID.get(task.id);
+    if (
+      task.workspaceOrphaned === undefined ||
+      fetchStart === undefined ||
+      current.workspaceOrphaned !== fetchStart.workspaceOrphaned
+    ) {
+      return { ...task, workspaceOrphaned: current.workspaceOrphaned };
+    }
+    return task;
+  });
+}
+
+/**
+ * A REST workflow-snapshot fetch can resolve after a live parked-projection
+ * transition (task.updated) has already moved the store ahead, and the two
+ * requests race independently of any "fetch start" bookkeeping. Apply the
+ * same (parked_epoch, parked_revision) lexicographic discard rule as
+ * mergeTaskParkedFields (spec D1) so a REST response can never roll a fresher
+ * live reading back to a stale one.
+ */
+function preserveLiveParkedFields(snapshotTasks: KanbanTask[], currentTasks: KanbanTask[]) {
+  const currentByID = new Map(currentTasks.map((task) => [task.id, task]));
+  return snapshotTasks.map((task) => {
+    const current = currentByID.get(task.id);
+    if (!current) return task;
+    const snapshotEpoch = task.parkedEpoch;
+    const currentEpoch = current.parkedEpoch;
+    const snapshotRevision = task.parkedRevision;
+    const currentRevision = current.parkedRevision;
+    const snapshotIsCurrent =
+      snapshotEpoch !== undefined &&
+      snapshotRevision !== undefined &&
+      (currentEpoch === undefined ||
+        currentRevision === undefined ||
+        snapshotEpoch > currentEpoch ||
+        (snapshotEpoch === currentEpoch && snapshotRevision >= currentRevision));
+    if (snapshotIsCurrent) return task;
+    return {
+      ...task,
+      parkedOnBackgroundWork: current.parkedOnBackgroundWork,
+      parkedRevision: currentRevision,
+      parkedEpoch: currentEpoch,
+    };
+  });
+}
+
 export function useWorkflowSnapshot(workflowId: string | null) {
   const store = useAppStoreApi();
   const connectionStatus = useAppStore((state) => state.connection.status);
@@ -65,9 +121,16 @@ export function useWorkflowSnapshot(workflowId: string | null) {
         if (nextState.kanban) {
           const currentTasks = store.getState().kanban.tasks;
           const fetchedAtStartTasks = existing.tasks;
-          nextState.kanban.tasks = preserveLiveAutoStartFailed(
-            nextState.kanban.tasks,
-            fetchedAtStartTasks,
+          nextState.kanban.tasks = preserveLiveParkedFields(
+            preserveLiveWorkspaceOrphaned(
+              preserveLiveAutoStartFailed(
+                nextState.kanban.tasks,
+                fetchedAtStartTasks,
+                currentTasks,
+              ),
+              fetchedAtStartTasks,
+              currentTasks,
+            ),
             currentTasks,
           );
         }

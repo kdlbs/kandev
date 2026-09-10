@@ -2,10 +2,13 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment is a regression
@@ -27,6 +30,7 @@ func TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment(t *testing.T) {
 		ExecutorType: string(models.ExecutorTypeLocal),
 		Status:       models.TaskEnvironmentStatusReady,
 	}
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent"}
 	session := &models.TaskSession{
 		ID:                "sess-child",
 		TaskID:            "task-child",
@@ -50,6 +54,43 @@ func TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment(t *testing.T) {
 	}
 	if session.TaskEnvironmentID != "env-parent" {
 		t.Fatalf("session.TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
+	}
+}
+
+func TestPrepareResumeRepositorySettings_RejectsInheritedExecutorMismatch(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent"}
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "task-parent",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	task := &v1.Task{
+		ID:          "task-child",
+		WorkspaceID: "ws-1",
+		Metadata: map[string]interface{}{
+			"workspace": map[string]interface{}{"mode": "shared_group"},
+		},
+	}
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            task.ID,
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-parent",
+	}
+	req := &LaunchAgentRequest{
+		TaskID:       task.ID,
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+	}
+
+	_, _, _, err := exec.prepareResumeRepositorySettings(context.Background(), task, session, req)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("prepareResumeRepositorySettings() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if session.TaskEnvironmentID != "env-parent" {
+		t.Fatalf("session TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
 	}
 }
 
@@ -80,6 +121,95 @@ func TestResolveResumeTaskEnvironment_MissingReferenceFallsThroughToCreate(t *te
 	}
 	if env != nil {
 		t.Fatalf("resolved env = %+v, want nil so the create path runs", env)
+	}
+}
+
+func TestResolveResumeTaskEnvironment_InheritedMissingReferenceFailsClosed(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.getTaskEnvironmentFunc = func(_ context.Context, _ string) (*models.TaskEnvironment, error) {
+		return nil, repoerrors.ErrTaskEnvironmentNotFound
+	}
+
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            "task-child",
+		TaskEnvironmentID: "env-missing",
+	}
+	repo.tasks[session.TaskID] = &models.Task{
+		ID:       session.TaskID,
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}
+
+	env, err := exec.resolveResumeTaskEnvironment(context.Background(), session.TaskID, session)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("resolveResumeTaskEnvironmentForTask() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if env != nil {
+		t.Fatalf("resolved env = %+v, want nil", env)
+	}
+}
+
+func TestResolveResumeTaskEnvironment_RejectsArchivedInheritedOwner(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	archivedAt := time.Now()
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent", ArchivedAt: &archivedAt}
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID:     "env-parent",
+		TaskID: "task-parent",
+		Status: models.TaskEnvironmentStatusReady,
+	}
+
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            "task-child",
+		TaskEnvironmentID: "env-parent",
+	}
+	repo.tasks[session.TaskID] = &models.Task{
+		ID:       session.TaskID,
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}
+
+	env, err := exec.resolveResumeTaskEnvironment(context.Background(), session.TaskID, session)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("resolveResumeTaskEnvironmentForTask() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if env != nil {
+		t.Fatalf("resolved env = %+v, want nil", env)
+	}
+}
+
+func TestResolveResumeTaskEnvironment_RejectsUnverifiableInheritedOwner(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID:     "env-parent",
+		TaskID: "task-parent",
+		Status: models.TaskEnvironmentStatusReady,
+	}
+	repo.getTaskFunc = func(_ context.Context, id string) (*models.Task, error) {
+		if id == "task-child" {
+			return &models.Task{
+				ID:       id,
+				Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+			}, nil
+		}
+		return nil, errors.New("owner lookup failed")
+	}
+
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            "task-child",
+		TaskEnvironmentID: "env-parent",
+	}
+
+	env, err := exec.resolveResumeTaskEnvironment(context.Background(), session.TaskID, session)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("resolveResumeTaskEnvironment() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if env != nil {
+		t.Fatalf("resolved env = %+v, want nil", env)
 	}
 }
 
@@ -170,6 +300,72 @@ func TestPersistTaskEnvironment_GuestDoesNotMutateOwnerEnvironment(t *testing.T)
 	}
 	if session.TaskEnvironmentID != "env-parent" {
 		t.Fatalf("session.TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
+	}
+}
+
+// TestPersistTaskEnvironment_GuestWorktreeStampsSharedTaskDirName covers a
+// sessionless inherited subtask that materializes the first physical worktree
+// in an environment created by its parent. The environment row is shared, but
+// its stable task directory name is still needed for ownership validation when
+// the parent is later reset.
+func TestPersistTaskEnvironment_GuestWorktreeStampsSharedTaskDirName(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	owner := &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "task-parent",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			TaskEnvironmentID: "env-parent",
+			RepositoryID:      "repo-a",
+			WorktreeID:        "wt-parent",
+		}},
+	}
+	repo.taskEnvironments[owner.ID] = owner
+	session := &models.TaskSession{ID: "sess-child", TaskID: "task-child", TaskEnvironmentID: owner.ID}
+	req := &LaunchAgentRequest{
+		TaskID:       "task-child",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		UseWorktree:  true,
+		TaskDirName:  "sessionless-child_abc",
+		RepositoryID: "repo-a",
+	}
+	resp := &LaunchAgentResponse{
+		WorktreeID:     "wt-child",
+		WorktreePath:   "/tasks/sessionless-child_abc/repo-a",
+		WorktreeBranch: "feature/sessionless-child",
+	}
+
+	if err := exec.persistTaskEnvironment(context.Background(), "task-child", session, owner, req, resp, executorConfig{}); err != nil {
+		t.Fatalf("persistTaskEnvironment (guest worktree): %v", err)
+	}
+	if owner.TaskDirName != "sessionless-child_abc" {
+		t.Fatalf("owner TaskDirName = %q, want sessionless-child_abc", owner.TaskDirName)
+	}
+	if len(repo.updateTaskEnvironmentCalls) != 0 {
+		t.Fatalf("guest worktree must not rewrite the shared env, got %d UpdateTaskEnvironment calls", len(repo.updateTaskEnvironmentCalls))
+	}
+	if len(repo.writeCallLog) != 1 || repo.writeCallLog[0] != "stamp_task_dir" {
+		t.Fatalf("guest worktree writes = %v, want only the environment stamp", repo.writeCallLog)
+	}
+}
+
+func TestClaimSharedTaskEnvironmentTaskDirNameRejectsConflictingWinner(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "task-parent", TaskDirName: "winner-root_abc",
+	}
+
+	env := *repo.taskEnvironments["env-parent"]
+	env.TaskDirName = ""
+	err := exec.claimSharedTaskEnvironmentTaskDirName(context.Background(), &env, &LaunchAgentRequest{
+		TaskID: "task-child", UseWorktree: true, TaskDirName: "loser-root_def",
+	})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("claimSharedTaskEnvironmentTaskDirName error = %v, want ErrWorkspaceReuseUnsafe", err)
 	}
 }
 

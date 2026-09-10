@@ -174,9 +174,10 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		ProjectSkillDir: DefaultProjectSkillDir,
 		UserSkillDir:    ".mock-agent/skills",
 		SessionConfig: SessionConfig{
-			CanRecover:         &canRecover,
-			SessionDirTemplate: "{home}/.mock-agent",
-			SessionDirTarget:   "/root/.mock-agent",
+			NativeSessionResume: true,
+			CanRecover:          &canRecover,
+			SessionDirTemplate:  "{home}/.mock-agent",
+			SessionDirTarget:    "/root/.mock-agent",
 		},
 	}
 }
@@ -190,8 +191,8 @@ func (a *MockAgent) RemoteAuth() *RemoteAuth {
 	}
 	return &RemoteAuth{Methods: []RemoteAuthMethod{
 		{
-			Type:  "files",
-			Label: "Copy auth files",
+			Type:  remoteAuthMethodTypeFiles,
+			Label: remoteAuthLabelCopyFiles,
 			SourceFiles: map[string][]string{
 				"darwin": {".codex/auth.json"},
 				"linux":  {".codex/auth.json"},

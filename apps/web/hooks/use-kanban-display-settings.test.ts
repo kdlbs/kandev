@@ -96,6 +96,21 @@ describe("useKanbanDisplaySettings", () => {
   });
 });
 
+describe("useKanbanDisplaySettings — view mode", () => {
+  it("stores each listing view under its own name", () => {
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    act(() => result.current.onViewModeChange("threads"));
+    expect(mocks.setView).toHaveBeenCalledWith("threads");
+
+    act(() => result.current.onViewModeChange("graph2"));
+    expect(mocks.setView).toHaveBeenCalledWith("pipeline");
+
+    act(() => result.current.onViewModeChange("list"));
+    expect(mocks.setView).toHaveBeenCalledWith("list");
+  });
+});
+
 describe("useKanbanDisplaySettings — step visibility", () => {
   it("derives eligibleWorkflows from selectWorkflowSwimlanes' eligible set, not the post-filter board", () => {
     mocks.snapshots = { [mocks.workflowId]: { steps: [], tasks: [] } };

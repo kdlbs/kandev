@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -20,11 +21,15 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		ShowInCommandPanel:         step.ShowInCommandPanel,
 		AutoArchiveAfterHours:      step.AutoArchiveAfterHours,
 		AgentProfileID:             step.AgentProfileID,
+		ProfileSessionStartPolicy:  models.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)),
+		ProfileSessionEndPolicy:    models.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)),
+		SessionTarget:              wfmodels.CloneWorkflowSessionTarget(step.SessionTarget),
 		WIPLimit:                   step.WIPLimit,
 		PullFromStepID:             step.PullFromStepID,
 		StageType:                  string(step.StageType),
 		AutoAdvanceRequiresSignal:  step.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: step.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        step.CompleteTaskOnEnter,
 	}
 	if hasStepEvents(step.Events) {
 		events := &StepEventsDTO{}

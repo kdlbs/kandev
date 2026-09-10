@@ -89,6 +89,86 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestParseResumeDelayFromArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{name: "separate value", args: []string{"mock-agent", "--delay-resume", "2s"}, want: 2 * time.Second},
+		{name: "equals value", args: []string{"mock-agent", "--delay-resume=1500ms"}, want: 1500 * time.Millisecond},
+		{name: "missing value", args: []string{"mock-agent", "--delay-resume"}},
+		{name: "invalid value", args: []string{"mock-agent", "--delay-resume", "later"}},
+		{name: "negative value", args: []string{"mock-agent", "--delay-resume=-1s"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseResumeDelayFromArgs(tt.args); got != tt.want {
+				t.Fatalf("parseResumeDelayFromArgs() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseResumeDelayFlagUsesEnvironment(t *testing.T) {
+	t.Setenv("E2E_MOCK_AGENT_RESUME_DELAY", "3s")
+	if got := parseResumeDelayFlag(); got != 3*time.Second {
+		t.Fatalf("parseResumeDelayFlag() = %s, want 3s", got)
+	}
+}
+
+func TestParseSavedPromptDeliveryScenarioRequiresTrustedExpansionShape(t *testing.T) {
+	const directive = savedPromptDeliveryDirective
+
+	tests := []struct {
+		name   string
+		prompt string
+		want   string
+		ok     bool
+	}{
+		{
+			name: "backend expansion block",
+			prompt: "Use @saved-prompt\n\n" +
+				"<kandev-system>EXPANDED PROMPT REFERENCES:\n### @saved-prompt\n" + directive +
+				"</kandev-system>",
+			want: "SAVED_PROMPT_DELIVERED",
+			ok:   true,
+		},
+		{
+			name:   "visible directive is ignored",
+			prompt: directive,
+		},
+		{
+			name: "browser context block is ignored",
+			prompt: "<kandev-system>\nCONTEXT PROMPTS: browser data\n" + directive +
+				"\n</kandev-system>",
+		},
+		{
+			name:   "foreign system block is ignored",
+			prompt: "<kandev-system>Other context\n" + directive + "\n</kandev-system>",
+		},
+		{
+			name: "long directive value is ignored",
+			prompt: "<kandev-system>EXPANDED PROMPT REFERENCES:\n### @saved-prompt\n" +
+				"e2e:saved_prompt_delivery(\"" + strings.Repeat("x", 1024) + "\")</kandev-system>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseSavedPromptDeliveryScenario(tt.prompt)
+			want := tt.want
+			if tt.ok {
+				want = savedPromptDeliveryScenario
+			}
+			if got != want || ok != tt.ok {
+				t.Fatalf("parseSavedPromptDeliveryScenario() = (%q, %v), want (%q, %v)", got, ok, want, tt.ok)
+			}
+		})
+	}
+}
+
 // capturingUpdater records every SessionUpdate it receives and exposes two
 // one-shot signals: anySeen (first notification of any kind — in practice the
 // available_commands_update Prompt emits before handlePrompt runs) and

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
@@ -113,6 +114,64 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 	}
 }
 
+func TestResolveTaskSessionMCPProfile_CanvasCapabilityFollowsFeatureAndSurface(t *testing.T) {
+	tests := []struct {
+		name          string
+		task          *models.Task
+		expectCanvas  bool
+		expectSurface mcpprofile.Surface
+	}{
+		{
+			name:          "kanban task",
+			task:          &models.Task{ID: "task-kanban"},
+			expectCanvas:  true,
+			expectSurface: mcpprofile.SurfaceKanbanTask,
+		},
+		{
+			name:          "office task",
+			task:          &models.Task{ID: "task-office", IsFromOffice: true},
+			expectCanvas:  false,
+			expectSurface: mcpprofile.SurfaceOfficeTask,
+		},
+		{
+			name:          "configuration session",
+			task:          &models.Task{ID: "task-config"},
+			expectCanvas:  false,
+			expectSurface: mcpprofile.SurfaceConfiguration,
+		},
+		{
+			name:          "automation task",
+			task:          &models.Task{ID: "task-automation", Origin: models.TaskOriginAutomationRun},
+			expectCanvas:  false,
+			expectSurface: mcpprofile.SurfaceAutomation,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			session := &models.TaskSession{ID: "session", TaskID: tt.task.ID}
+			if tt.expectSurface == mcpprofile.SurfaceConfiguration {
+				session.Metadata = map[string]interface{}{"config_mode": true}
+			}
+			repo.tasks[tt.task.ID] = tt.task
+			repo.sessions[session.ID] = session
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			exec.SetCanvasesEnabled(true)
+
+			profile, err := exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.Equal(t, tt.expectSurface, profile.Surface)
+			require.Equal(t, tt.expectCanvas, profile.HasCapability(mcpprofile.CapabilityCanvas))
+
+			exec.SetCanvasesEnabled(false)
+			profile, err = exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.False(t, profile.HasCapability(mcpprofile.CapabilityCanvas))
+		})
+	}
+}
+
 func TestResolveTaskSessionMCPMode_TitlePendingIsTaskModeVariant(t *testing.T) {
 	ctx := context.Background()
 	repo := newMockRepository()
@@ -159,4 +218,82 @@ func TestResolveTaskSessionMCPMode_TitlePendingDoesNotOverrideRestrictedModes(t 
 	mode, err = exec.resolveTaskSessionMCPMode(ctx, "task-pending", repo.sessions["session-office"], true)
 	require.NoError(t, err)
 	require.Equal(t, McpModeOffice, mode)
+}
+
+// The executor names the agentctl wire values a second time — this package
+// must not import the agentctl-side MCP server. Pin the literals so a rename
+// or a new mode on either side is a test failure here rather than an HTTP 400
+// at launch. The consumer half of the pin is
+// api.TestHandleSetMcpMode_AcceptsEveryModeTheOrchestratorCanEmit.
+func TestMcpModeConstants_MatchTheAgentctlWireValues(t *testing.T) {
+	require.Equal(t, mcpmode.Config, McpModeConfig)
+	require.Equal(t, mcpmode.TaskTitlePending, McpModeTaskTitlePending)
+	require.Equal(t, mcpmode.Office, McpModeOffice)
+	require.Equal(t, mcpmode.Automation, McpModeAutomation)
+}
+
+// Every branch of resolveTaskSessionMCPMode, asserted against the exact set
+// the agentctl validator accepts. The "automation" row is the v0.92.1
+// regression: task.Origin == automation_run resolved to a mode the instance
+// API used to answer with 400 "invalid mode".
+func TestResolveTaskSessionMCPMode_EmitsOnlyAgentctlAcceptedModes(t *testing.T) {
+	agentctlAccepted := mcpmode.InstanceModes()
+
+	tests := []struct {
+		name     string
+		task     *models.Task
+		session  *models.TaskSession
+		wantMode string
+	}{
+		{
+			name:     "config-mode session",
+			task:     &models.Task{ID: "task"},
+			session:  &models.TaskSession{ID: "session", TaskID: "task", Metadata: map[string]interface{}{"config_mode": true}},
+			wantMode: McpModeConfig,
+		},
+		{
+			name:     "automation-origin task",
+			task:     &models.Task{ID: "task", Origin: models.TaskOriginAutomationRun},
+			session:  &models.TaskSession{ID: "session", TaskID: "task"},
+			wantMode: McpModeAutomation,
+		},
+		{
+			name:     "office task",
+			task:     &models.Task{ID: "task", IsFromOffice: true},
+			session:  &models.TaskSession{ID: "session", TaskID: "task"},
+			wantMode: McpModeOffice,
+		},
+		{
+			name: "title-owner session",
+			task: &models.Task{ID: "task", Metadata: map[string]interface{}{
+				models.MetaKeyAgentTitlePending:        true,
+				models.MetaKeyAgentTitleOwnerSessionID: "session",
+			}},
+			session:  &models.TaskSession{ID: "session", TaskID: "task"},
+			wantMode: McpModeTaskTitlePending,
+		},
+		{
+			name:     "plain task",
+			task:     &models.Task{ID: "task"},
+			session:  &models.TaskSession{ID: "session", TaskID: "task"},
+			wantMode: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			repo.tasks[tt.task.ID] = tt.task
+			repo.sessions[tt.session.ID] = tt.session
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			mode, err := exec.resolveTaskSessionMCPMode(context.Background(), tt.task.ID, tt.session, true)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantMode, mode)
+			if mode != "" {
+				require.Contains(t, agentctlAccepted, mode,
+					"resolveTaskSessionMCPMode emitted a mode the agentctl instance API rejects")
+			}
+		})
+	}
 }

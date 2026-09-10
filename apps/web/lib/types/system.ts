@@ -361,12 +361,80 @@ export interface StorageTemporaryArtifactsSummary {
   warning?: string;
 }
 
+export type StorageFootprintMeasurementStatus = "measured" | "unavailable" | "not_applicable";
+
+export type StorageFootprintMeasurement =
+  | {
+      status: "measured";
+      size_bytes?: number;
+      counted_size_bytes?: number;
+      path?: string;
+      included_in_total: boolean;
+      reason?: string;
+      warning?: string;
+    }
+  | {
+      status: "unavailable" | "not_applicable";
+      path?: string;
+      included_in_total: false;
+      reason?: string;
+      warning?: string;
+    };
+
 export interface StorageSummary {
   workspaces: StorageWorkspaceSummary;
   go_cache: StorageGoCacheSummary;
   quarantine: StorageQuarantineSummary;
   temporary_artifacts: StorageTemporaryArtifactsSummary;
   docker: StorageDockerSummary;
+  database?: StorageFootprintMeasurement;
+  database_backups?: StorageFootprintMeasurement;
+}
+
+export type StorageSummaryPartial = {
+  workspaces?: StorageWorkspaceSummary | null;
+  go_cache?: StorageGoCacheSummary | null;
+  quarantine?: StorageQuarantineSummary | null;
+  temporary_artifacts?: StorageTemporaryArtifactsSummary | null;
+  docker?: StorageDockerSummary | null;
+  database?: StorageFootprintMeasurement | null;
+  database_backups?: StorageFootprintMeasurement | null;
+};
+
+export type StorageAnalysisStateName = "scanning" | "ready" | "failed";
+export type StorageSourceStateName = "pending" | "scanning" | "ready" | "failed";
+
+export interface StorageSourceProgress {
+  state: StorageSourceStateName;
+  completed_items: number;
+  total_items?: number;
+  bytes_scanned: number;
+  error?: string;
+}
+
+export interface StorageAnalysisProgress {
+  completed_sources: number;
+  total_sources: number;
+  sources: Record<string, StorageSourceProgress>;
+}
+
+export interface StorageAnalysisState {
+  generation: number;
+  state: StorageAnalysisStateName;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  cache_ttl_seconds: number;
+  refresh_due_at: string | null;
+  stale: boolean;
+  error: string | null;
+  progress: StorageAnalysisProgress;
+  partial_summary: StorageSummaryPartial | null;
+}
+
+export interface StorageAnalysisUpdatedPayload {
+  generation: number;
+  state: StorageAnalysisStateName;
 }
 
 export type StorageRunState =
@@ -438,8 +506,9 @@ export interface StorageQuarantinePurgeResult {
 export interface StorageOverviewResponse {
   settings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;
-  summary: StorageSummary;
-  analyzed_at: string;
+  summary: StorageSummary | null;
+  analyzed_at: string | null;
+  analysis: StorageAnalysisState;
   last_run: StorageMaintenanceRun | null;
 }
 

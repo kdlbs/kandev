@@ -12,6 +12,10 @@ import {
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
 const requestMock = vi.fn().mockResolvedValue({});
 const getWebSocketClientMock = vi.fn<() => { request: typeof requestMock } | null>(() => ({
   request: requestMock,
@@ -370,7 +374,8 @@ describe("ActionMessage — running stall notice", () => {
     expect(notice.className).not.toContain("text-red");
     expect(notice.querySelector("svg")).toBeNull();
     const button = screen.getByTestId(STALL_CANCEL_TEST_ID);
-    expect(button.className).toContain("min-h-11");
+    expect(button.className).toContain("h-6");
+    expect(button.className).toContain("max-md:min-h-11");
     expect(button.className).not.toContain("w-full");
   });
 
@@ -449,8 +454,8 @@ describe("ActionMessage — missing PR branch", () => {
     expect(screen.getByText("codex/enhance-prompt-result-delivery")).toBeTruthy();
     const technicalDetails = screen.getByText(TECHNICAL_DETAILS).closest("details");
     expect(technicalDetails?.open).toBe(false);
-    expect(screen.getByTestId("missing-branch-archive-button").className).toContain("min-h-11");
-    expect(screen.getByTestId("missing-branch-delete-button").className).toContain("min-h-11");
+    expect(screen.getByTestId("missing-branch-archive-button").className).toContain("h-7");
+    expect(screen.getByTestId("missing-branch-delete-button").className).toContain("h-7");
 
     fireEvent.click(screen.getByText(TECHNICAL_DETAILS));
     expect(technicalDetails?.open).toBe(true);
@@ -517,7 +522,8 @@ describe("ActionMessage — provider quota recovery", () => {
     expect(screen.getByText(/kimi-k3/i)).toBeTruthy();
     const details = screen.getByText(TECHNICAL_DETAILS).closest("details");
     expect(details?.open).toBe(false);
-    expect(screen.getByTestId(RESUME_TEST_ID).className).toContain("min-h-11");
+    expect(screen.getByTestId(RESUME_TEST_ID).className).toContain("h-7");
+    expect(screen.getByTestId(RESUME_TEST_ID).className).toContain("max-md:h-11");
 
     fireEvent.click(screen.getByText(TECHNICAL_DETAILS));
     expect(details?.open).toBe(true);
@@ -636,7 +642,8 @@ describe("ActionMessage — remediation link", () => {
     expect(link.href).toBe(REMEDIATION_URL);
     expect(link.target).toBe("_blank");
     expect(link.rel).toBe("noopener noreferrer");
-    expect(link.className).toContain("min-h-11");
+    expect(link.className).toContain("h-7");
+    expect(link.className).toContain("max-md:h-11");
     // The sanitized message and collapsed details stay URL-free.
     expect(screen.queryByText(/opencode\.ai\/workspace/i)).toBeNull();
     expect(screen.getByTestId("provider-quota-recovery").textContent).toContain(QUOTA_OUTPUT);

@@ -13,7 +13,7 @@ Stable is the default release channel. A verified Kandev-managed npm/npx user se
 the npm Nightly channel from **Settings → System → Updates**. Desktop, Homebrew, and system services
 remain Stable-only.
 
-> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy; authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
+> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. For one trusted user, use the narrow private-network boundary in [Mobile Remote Access](mobile-remote-access.md). For shared access, enable [opt-in authentication](authentication.md) and terminate TLS in a protected proxy. Authentication does not replace HTTPS. A non-loopback server without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
 ## Quick path
 
@@ -118,7 +118,7 @@ To access a loopback-only instance remotely, use SSH port forwarding:
 ssh -L 38429:127.0.0.1:38429 user@server
 ```
 
-Then open `http://127.0.0.1:38429` locally. For shared access, terminate TLS and enforce authentication in a reverse proxy or private access layer.
+Then open `http://127.0.0.1:38429` locally. For private phone access, follow [Mobile Remote Access](mobile-remote-access.md). For shared access, terminate TLS and enforce authentication in a proxy or private access layer.
 
 ## Commands and flags
 
@@ -340,3 +340,16 @@ Reinstall using the upgraded `kandev` binary, preserve the original `--system` a
 ### Service starts but agents fail
 
 Read service logs first. A service has a smaller `PATH` and no interactive shell environment, so tools or credentials visible in a terminal may be absent. Configure executor credentials through Kandev's profile/settings paths, use stable executable paths, and verify Docker/SSH/Sprites connectivity as described in [Executors](executors.md#troubleshooting).
+
+Linux user services include `~/.npm-global/bin` in their generated `PATH` for
+agent CLIs installed with that npm prefix. After upgrading an existing user
+service, regenerate its unit and restart it to apply the updated `PATH`:
+
+```bash
+# Repeat your original install-time flags when used.
+kandev service install
+kandev service restart
+```
+
+Restarting alone does not update an older unit's `PATH`. Other custom npm
+prefixes are not automatically added to the service environment.

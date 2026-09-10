@@ -8,6 +8,7 @@ import (
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -242,15 +243,17 @@ func (f *fakeBlockerRepo) ListDependentsForTasks(_ context.Context, blockerTaskI
 // fakeTaskRepo provides the minimal TaskRepository surface AttachWorkspacePolicy
 // uses. It supports GetTask + ListChildren so sibling lookup works.
 type fakeTaskRepo struct {
-	mu       sync.Mutex
-	tasks    map[string]*models.Task
-	children map[string][]string // parentID -> ordered child IDs
+	mu               sync.Mutex
+	tasks            map[string]*models.Task
+	children         map[string][]string // parentID -> ordered child IDs
+	taskEnvironments map[string]*models.TaskEnvironment
 }
 
 func newFakeTaskRepo() *fakeTaskRepo {
 	return &fakeTaskRepo{
-		tasks:    map[string]*models.Task{},
-		children: map[string][]string{},
+		tasks:            map[string]*models.Task{},
+		children:         map[string][]string{},
+		taskEnvironments: map[string]*models.TaskEnvironment{},
 	}
 }
 
@@ -281,13 +284,42 @@ func (f *fakeTaskRepo) GetTasksByIDs(_ context.Context, ids []string) ([]*models
 	return out, nil
 }
 
+// cloneTaskForRead returns a copy of t whose Metadata (and its "workspace"
+// sub-map) are independent maps, mirroring a real repository read: sqlite
+// unmarshals a fresh map from the stored JSON on every scan, so a caller
+// mutating the returned task's metadata in place (as the orphan mark/clear
+// paths do, before calling a guarded write) never aliases this fake's
+// "persisted" state — matching production, where the guard's CAS clauses
+// compare against the DB row, not the caller's in-memory copy.
+func cloneTaskForRead(t *models.Task) *models.Task {
+	if t == nil {
+		return nil
+	}
+	clone := *t
+	if t.Metadata != nil {
+		clone.Metadata = make(map[string]interface{}, len(t.Metadata))
+		for k, v := range t.Metadata {
+			if nested, ok := v.(map[string]interface{}); ok {
+				nestedClone := make(map[string]interface{}, len(nested))
+				for nk, nv := range nested {
+					nestedClone[nk] = nv
+				}
+				clone.Metadata[k] = nestedClone
+				continue
+			}
+			clone.Metadata[k] = v
+		}
+	}
+	return &clone
+}
+
 func (f *fakeTaskRepo) ListChildren(_ context.Context, parentID string) ([]*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []*models.Task{}
 	for _, id := range f.children[parentID] {
 		if t, ok := f.tasks[id]; ok && t.ArchivedAt == nil {
-			out = append(out, t)
+			out = append(out, cloneTaskForRead(t))
 		}
 	}
 	return out, nil
@@ -313,13 +345,114 @@ func (f *fakeTaskRepo) ReparentDirectChildren(_ context.Context, oldParentID, ne
 	return nil
 }
 
+func (f *fakeTaskRepo) SetTaskMetadataKey(_ context.Context, taskID, key string, value interface{}) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	task := f.tasks[taskID]
+	if task == nil {
+		return nil
+	}
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	task.Metadata[key] = value
+	return nil
+}
+
+// SetTaskWorkspaceMetadataIfUnchanged is a best-effort in-memory mirror of
+// the sqlite guard: it evaluates the same clauses against fake state so
+// cascade/delete tests still exercise the guard rather than always
+// succeeding. It does not model the CAS's type-aware string coercion since
+// no test here stores a non-string claim.
+func (f *fakeTaskRepo) SetTaskWorkspaceMetadataIfUnchanged(
+	_ context.Context, taskID string, guard models.OrphanWriteGuard, value map[string]interface{},
+) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	task := f.tasks[taskID]
+	if task == nil {
+		return false, nil
+	}
+	existing, _ := task.Metadata["workspace"].(map[string]interface{})
+	claim, _ := existing["orphaned_parent_id"].(string)
+	mode, _ := existing["mode"].(string)
+	if claim != guard.ExpectedOrphanedParentID || mode != guard.ExpectedMode {
+		return false, nil
+	}
+	if guard.RequireParentID != "" && task.ParentID != guard.RequireParentID {
+		return false, nil
+	}
+	if guard.RequireParentArchivedID != "" {
+		p := f.tasks[guard.RequireParentArchivedID]
+		if p == nil || p.ArchivedAt == nil {
+			return false, nil
+		}
+	}
+	if guard.RequireParentUnarchivedID != "" {
+		p := f.tasks[guard.RequireParentUnarchivedID]
+		if p == nil || p.ArchivedAt != nil {
+			return false, nil
+		}
+	}
+	if guard.RequireNoOwnEnvironment {
+		if _, ok := f.taskEnvironments[taskID]; ok {
+			return false, nil
+		}
+	}
+	if guard.RequireTaskNotArchived && task.ArchivedAt != nil {
+		return false, nil
+	}
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	task.Metadata["workspace"] = value
+	return true, nil
+}
+
+func (f *fakeTaskRepo) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.taskEnvironments[id], nil
+}
+
+func (f *fakeTaskRepo) GetTaskEnvironmentByTaskID(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, env := range f.taskEnvironments {
+		if env != nil && env.TaskID == taskID {
+			return env, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeTaskRepo) TransferTaskEnvironmentOwnership(
+	_ context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	env := f.taskEnvironments[envID]
+	if env == nil {
+		return nil
+	}
+	if env.TaskID != expectedTaskID || env.OwnershipGeneration != expectedGeneration {
+		return taskrepo.ErrTaskEnvironmentOwnershipChanged
+	}
+	env.TaskID = taskID
+	env.OwnershipGeneration++
+	return nil
+}
+
 func (f *fakeTaskRepo) ListChildrenIncludingArchived(_ context.Context, parentID string) ([]*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []*models.Task{}
 	for _, id := range f.children[parentID] {
 		if t, ok := f.tasks[id]; ok {
-			out = append(out, t)
+			out = append(out, cloneTaskForRead(t))
 		}
 	}
 	return out, nil
@@ -358,6 +491,28 @@ func (r *phase4TaskRepo) ListChildrenIncludingArchived(ctx context.Context, pare
 }
 func (r *phase4TaskRepo) ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error {
 	return r.base.ReparentDirectChildren(ctx, oldParentID, newParentID)
+}
+func (r *phase4TaskRepo) SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error {
+	return r.base.SetTaskMetadataKey(ctx, taskID, key, value)
+}
+func (r *phase4TaskRepo) SetTaskWorkspaceMetadataIfUnchanged(
+	ctx context.Context, taskID string, guard models.OrphanWriteGuard, value map[string]interface{},
+) (bool, error) {
+	return r.base.SetTaskWorkspaceMetadataIfUnchanged(ctx, taskID, guard, value)
+}
+func (r *phase4TaskRepo) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+	return r.base.GetTaskEnvironment(ctx, id)
+}
+func (r *phase4TaskRepo) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	return r.base.GetTaskEnvironmentByTaskID(ctx, taskID)
+}
+func (r *phase4TaskRepo) TransferTaskEnvironmentOwnership(
+	ctx context.Context,
+	envID, expectedTaskID string,
+	expectedGeneration int64,
+	taskID string,
+) error {
+	return r.base.TransferTaskEnvironmentOwnership(ctx, envID, expectedTaskID, expectedGeneration, taskID)
 }
 
 // All other TaskRepository methods panic — the AttachWorkspacePolicy

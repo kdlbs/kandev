@@ -379,13 +379,15 @@ describe("persistWorkflowDraft", () => {
 });
 
 describe("persistWorkflowDraft cancellation policy", () => {
-  it("forwards cancellation policy when creating a missing template step", async () => {
+  it("forwards step session policy and cancellation policy when creating a missing step", async () => {
     const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;
     const drafts = [
       {
         ...step(CLIENT_STEP_ONE, "Todo", 0, true),
         workflow_id: draftWorkflow.id,
         cancel_triggers_turn_complete: true,
+        profile_session_start_policy: "new",
+        profile_session_end_policy: "park",
       },
     ] as WorkflowStep[];
     vi.mocked(createWorkflowAction).mockResolvedValue({
@@ -410,6 +412,8 @@ describe("persistWorkflowDraft cancellation policy", () => {
     expect(createWorkflowStepAction).toHaveBeenCalledWith(
       expect.objectContaining({
         cancel_triggers_turn_complete: true,
+        profile_session_start_policy: "new",
+        profile_session_end_policy: "park",
       }),
     );
   });

@@ -9,10 +9,13 @@ import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
-import { linkToTask, linkToTasks } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
 import { getRecentTasks } from "@/lib/recent-tasks";
-import { isExplicitHomeDestination, resolveStartupTaskId } from "@/lib/startup-page";
-import { shouldRestoreHomeTaskListingView } from "@/lib/task-listing/view-preference";
+import {
+  isExplicitHomeDestination,
+  resolveStartupTaskId,
+  resolveStartupListingRedirect,
+} from "@/lib/startup-page";
 import { useTranslation } from "react-i18next";
 
 type PageClientProps = {
@@ -41,7 +44,16 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
   });
   const isResolvingStartupTask =
     startupPage === "last_task" && !hasExplicitDestination && recentTasks === null;
-  const hasWorkflowFilter = Boolean(searchParams.get("workflowId"));
+  const redirectHref = startupTaskId
+    ? linkToTask(startupTaskId)
+    : resolveStartupListingRedirect({
+        startupPage,
+        preferredView,
+        workspaceId,
+        searchParams,
+        initialTaskId,
+        initialSessionId,
+      });
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (typeof window === "undefined") return false;
     const completed = getLocalStorage(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
@@ -60,25 +72,8 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
   }, []);
 
   useEffect(() => {
-    if (isResolvingStartupTask) return;
-    if (startupTaskId) {
-      router.replace(linkToTask(startupTaskId));
-      return;
-    }
-    if (hasWorkflowFilter) return;
-    if (shouldRestoreHomeTaskListingView(preferredView, initialTaskId, initialSessionId)) {
-      router.replace(linkToTasks(workspaceId));
-    }
-  }, [
-    hasWorkflowFilter,
-    initialSessionId,
-    initialTaskId,
-    isResolvingStartupTask,
-    preferredView,
-    router,
-    startupTaskId,
-    workspaceId,
-  ]);
+    if (!isResolvingStartupTask && redirectHref) router.replace(redirectHref);
+  }, [isResolvingStartupTask, redirectHref, router]);
 
   if (isResolvingStartupTask || startupTaskId) {
     return (

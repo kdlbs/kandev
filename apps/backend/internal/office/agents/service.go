@@ -44,6 +44,7 @@ var (
 	ErrAgentReportsToSelf    = errors.New("agent cannot report to itself")
 	ErrAgentReportsToCycle   = errors.New("agent reporting structure cannot contain a cycle")
 	ErrAgentStatusTransition = errors.New("invalid status transition")
+	ErrAgentStatusStale      = errors.New("agent status changed before recovery")
 )
 
 // GovernanceSettingsReader reads workspace governance settings.
@@ -83,7 +84,7 @@ var validRoles = map[models.AgentRole]bool{
 
 // allowedTransitions defines which status transitions are valid.
 var allowedTransitions = map[models.AgentStatus][]models.AgentStatus{
-	models.AgentStatusIdle:            {models.AgentStatusWorking, models.AgentStatusPaused, models.AgentStatusStopped, models.AgentStatusPendingApproval},
+	models.AgentStatusIdle:            {models.AgentStatusPaused, models.AgentStatusStopped, models.AgentStatusPendingApproval},
 	models.AgentStatusWorking:         {models.AgentStatusIdle, models.AgentStatusPaused, models.AgentStatusStopped},
 	models.AgentStatusPaused:          {models.AgentStatusIdle, models.AgentStatusStopped},
 	models.AgentStatusStopped:         {models.AgentStatusIdle},
@@ -657,6 +658,63 @@ func (s *AgentService) UpdateAgentStatus(
 	agent.Status = newStatus
 	agent.PauseReason = pauseReason
 	return agent, nil
+}
+
+// UpdateAgentStatusIfCurrent performs the guarded recovery transition used by
+// the operator recovery control. It accepts a request rendered from either
+// recoverable status, but only applies it while the server still has a
+// recoverable status. A live working agent is never changed by a stale browser
+// request, and repeated recovery requests converge on idle.
+func (s *AgentService) UpdateAgentStatusIfCurrent(
+	ctx context.Context,
+	id string,
+	expectedStatus models.AgentStatus,
+	newStatus models.AgentStatus,
+	pauseReason string,
+) (*models.AgentInstance, error) {
+	if expectedStatus != models.AgentStatusPaused && expectedStatus != models.AgentStatusStopped {
+		return nil, fmt.Errorf("%w: expected status %q is not recoverable", ErrAgentStatusStale, expectedStatus)
+	}
+	if newStatus != models.AgentStatusIdle {
+		return nil, fmt.Errorf("%w: guarded recovery target must be idle", ErrAgentStatusTransition)
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		agent, err := s.GetAgentFromConfig(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if agent.Status == newStatus {
+			return agent, nil
+		}
+		if agent.Status != models.AgentStatusPaused && agent.Status != models.AgentStatusStopped {
+			return nil, fmt.Errorf("%w: current status %q is not recoverable", ErrAgentStatusStale, agent.Status)
+		}
+		if err := validateStatusTransition(agent.Status, newStatus); err != nil {
+			return nil, err
+		}
+
+		changed, dbErr := s.repo.UpdateAgentStatusFieldsIfCurrent(
+			ctx, agent.ID, string(agent.Status), string(newStatus), pauseReason,
+		)
+		if dbErr != nil {
+			return nil, fmt.Errorf("persist agent status: %w", dbErr)
+		}
+		if changed {
+			agent.Status = newStatus
+			agent.PauseReason = pauseReason
+			return agent, nil
+		}
+	}
+
+	current, err := s.GetAgentFromConfig(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if current.Status == newStatus {
+		return current, nil
+	}
+	return nil, fmt.Errorf("%w: current status %q is not recoverable", ErrAgentStatusStale, current.Status)
 }
 
 // DeleteAgentInstance deletes an agent instance from the DB and cascades

@@ -226,10 +226,12 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 // startPassthroughShell starts the shell session for a passthrough execution.
 // Non-fatal errors are logged with the provided warning message.
 func (m *Manager) startPassthroughShell(ctx context.Context, execution *AgentExecution, shellWarnMsg string) {
-	if execution.agentctl == nil {
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
 		return
 	}
-	if err := execution.agentctl.StartShell(ctx); err != nil {
+	if err := client.StartShell(ctx); err != nil {
 		m.logger.Warn(shellWarnMsg,
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
@@ -810,6 +812,11 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
 	execution.passthroughLaunchUsedResume = false
+	if requiresPassthroughInitialPrompt(execution, pt) {
+		execution.passthroughInitialPromptProcessID = processInfo.ID
+	} else {
+		execution.passthroughInitialPromptProcessID = ""
+	}
 	execution.passthroughLifecycleMu.Unlock()
 
 	m.logger.Info("passthrough session started",
@@ -822,17 +829,20 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 	m.startPassthroughShell(ctx, execution, "failed to start shell for passthrough session")
 
-	if m.streamManager != nil && execution.agentctl != nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	hasAgentStream := client != nil && client.HasAgentStream()
+	releaseClient()
+	if m.streamManager != nil && client != nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
 		// Also open the agent updates stream so the agentctl instance can proxy
 		// kandev MCP tool calls to the backend (passthrough has no ACP stream
 		// otherwise, so MCP tool calls would hang).
-		if !execution.agentctl.HasAgentStream() {
+		if !hasAgentStream {
 			m.streamManager.ConnectMCPStream(execution)
 		}
 	}
 
-	go m.autoInjectInitialPrompt(execution, pt)
+	go m.autoInjectInitialPrompt(execution, pt, processInfo.ID)
 
 	return nil
 }
@@ -947,6 +957,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 	// the deliberately-killed process.
 	oldProcessID := execution.PassthroughProcessID
 	execution.PassthroughProcessID = ""
+	execution.passthroughInitialPromptProcessID = ""
 	execution.PassthroughStartedAt = time.Time{}
 
 	if err := interactiveRunner.Stop(ctx, oldProcessID); err != nil {
@@ -969,6 +980,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 	execution.PassthroughProcessID = processInfo.ID
 	execution.PassthroughStartedAt = time.Now()
 	execution.passthroughLaunchUsedResume = false
+	execution.passthroughInitialPromptProcessID = ""
 
 	m.logger.Info("passthrough process restarted with fresh context",
 		zap.String("execution_id", execution.ID),
@@ -1070,6 +1082,7 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 	// (the ID is what routes a status update to this execution), so the flag has
 	// to be set before the process can exit and publish a status.
 	execution.passthroughLaunchUsedResume = useResume
+	execution.passthroughInitialPromptProcessID = ""
 	execution.PassthroughProcessID = processInfo.ID
 
 	m.logger.Info("passthrough session resumed",
@@ -1083,11 +1096,14 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 
 	// Connect to workspace stream for shell/git/file features.
 	// Only connect if not already connected (process restart reuses the same agentctl).
-	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	hasAgentStream := client != nil && client.HasAgentStream()
+	releaseClient()
+	if m.streamManager != nil && client != nil && execution.GetWorkspaceStream() == nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
 	}
 	// Re-open the MCP proxy stream too (drains kandev MCP tool calls).
-	if m.streamManager != nil && execution.agentctl != nil && !execution.agentctl.HasAgentStream() {
+	if m.streamManager != nil && client != nil && !hasAgentStream {
 		m.streamManager.ConnectMCPStream(execution)
 	}
 
@@ -1106,11 +1122,21 @@ func (m *Manager) handlePassthroughTurnComplete(sessionID, processID string) {
 			zap.String("session_id", sessionID))
 		return
 	}
-	if execution.PassthroughProcessID != processID {
+	execution.passthroughLifecycleMu.Lock()
+	activeProcessID := execution.PassthroughProcessID
+	initialPromptPending := execution.passthroughInitialPromptProcessID == processID
+	execution.passthroughLifecycleMu.Unlock()
+	if activeProcessID != processID {
 		m.logger.Debug("ignoring stale passthrough turn complete",
 			zap.String("session_id", sessionID),
 			zap.String("process_id", processID),
-			zap.String("active_process_id", execution.PassthroughProcessID))
+			zap.String("active_process_id", activeProcessID))
+		return
+	}
+	if initialPromptPending {
+		m.logger.Debug("ignoring passthrough turn complete while initial prompt is pending",
+			zap.String("session_id", sessionID),
+			zap.String("process_id", processID))
 		return
 	}
 
@@ -1387,6 +1413,11 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	execution.PassthroughStartedAt = time.Now()
 	execution.passthroughLaunchUsedResume = false
 	execution.PassthroughProcessID = processInfo.ID
+	if requiresPassthroughInitialPrompt(execution, pt) {
+		execution.passthroughInitialPromptProcessID = processInfo.ID
+	} else {
+		execution.passthroughInitialPromptProcessID = ""
+	}
 
 	if runner.ConnectSessionWebSocket(processInfo.ID) {
 		m.logger.Info("passthrough resume fallback succeeded",
@@ -1403,15 +1434,18 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	// shell/git/file features come back too — without this the main terminal
 	// works but the user's shell session and workspace stream stay torn down.
 	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
-	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	hasAgentStream := client != nil && client.HasAgentStream()
+	releaseClient()
+	if m.streamManager != nil && client != nil && execution.GetWorkspaceStream() == nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
 	}
-	if m.streamManager != nil && execution.agentctl != nil && !execution.agentctl.HasAgentStream() {
+	if m.streamManager != nil && client != nil && !hasAgentStream {
 		m.streamManager.ConnectMCPStream(execution)
 	}
 
 	// Fallback path is a fresh session (no --resume) — re-inject the prompt.
-	go m.autoInjectInitialPrompt(execution, pt)
+	go m.autoInjectInitialPrompt(execution, pt, processInfo.ID)
 }
 
 // attemptPassthroughRestart announces the restart on the terminal, waits the
@@ -1556,21 +1590,46 @@ type passthroughRunner interface {
 	WriteStdin(processID string, data string) error
 }
 
+func requiresPassthroughInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig) bool {
+	return pt.PromptFlag.IsEmpty() && getTaskDescriptionFromMetadata(execution) != ""
+}
+
+// claimPassthroughInitialPrompt verifies that this goroutine is still
+// associated with the active PTY process before proceeding with injection.
+// startPassthroughSession pre-sets the marker; this check deliberately does
+// not claim a marker for a replacement process.
+func claimPassthroughInitialPrompt(execution *AgentExecution, processID string) bool {
+	execution.passthroughLifecycleMu.Lock()
+	defer execution.passthroughLifecycleMu.Unlock()
+	if execution.PassthroughProcessID != processID || execution.passthroughInitialPromptProcessID != processID {
+		return false
+	}
+	return true
+}
+
+func clearPassthroughInitialPrompt(execution *AgentExecution, processID string) {
+	execution.passthroughLifecycleMu.Lock()
+	defer execution.passthroughLifecycleMu.Unlock()
+	if execution.passthroughInitialPromptProcessID == processID {
+		execution.passthroughInitialPromptProcessID = ""
+	}
+}
+
 // autoInjectInitialPrompt writes the task description to PTY stdin once a
 // passthrough agent without a PromptFlag is idle (ready for input). Called from
 // startPassthroughSession and attemptResumeFallback only — never from
 // ResumePassthroughSession (would duplicate the prompt in agent history).
-func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig) {
+func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig, processID string) {
 	runner := m.GetInteractiveRunner()
 	if runner == nil {
 		return
 	}
-	m.autoInjectInitialPromptWith(runner, execution, pt)
+	m.autoInjectInitialPromptWith(runner, execution, pt, processID)
 }
 
 // autoInjectInitialPromptWith is the testable inner of autoInjectInitialPrompt,
 // taking a runner seam so unit tests can avoid spawning a real PTY.
-func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, execution *AgentExecution, pt agents.PassthroughConfig) {
+func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, execution *AgentExecution, pt agents.PassthroughConfig, processID string) {
 	if !pt.PromptFlag.IsEmpty() {
 		// The agent already received the prompt as a CLI flag — no stdin
 		// delivery. This mirrors promptForPassthroughCommand, which only
@@ -1586,12 +1645,15 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 		// take this exit and never receive spurious stdin.
 		return
 	}
-	processID := execution.PassthroughProcessID
 	if processID == "" {
 		m.logger.Warn("autoInjectInitialPrompt called without passthrough process",
 			zap.String("execution_id", execution.ID))
 		return
 	}
+	if !claimPassthroughInitialPrompt(execution, processID) {
+		return
+	}
+	defer clearPassthroughInitialPrompt(execution, processID)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := runner.WaitForFirstIdle(ctx, processID); err != nil {
@@ -1599,6 +1661,9 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 			zap.String("execution_id", execution.ID),
 			zap.String("process_id", processID),
 			zap.Error(err))
+		return
+	}
+	if !m.passthroughProcessMatches(execution, processID) {
 		return
 	}
 	// WaitForFirstIdle also unblocks when the process exits — skip the write

@@ -439,10 +439,11 @@ type ListAgentUpdateJobsResponse struct {
 }
 
 type AgentProfileMcpConfigDTO struct {
-	ProfileID string                         `json:"profile_id"`
-	Enabled   bool                           `json:"enabled"`
-	Servers   map[string]mcpconfig.ServerDef `json:"servers"`
-	Meta      map[string]any                 `json:"meta,omitempty"`
+	ProfileID   string                         `json:"profile_id"`
+	WorkspaceID string                         `json:"-"`
+	Enabled     bool                           `json:"enabled"`
+	Servers     map[string]mcpconfig.ServerDef `json:"servers"`
+	Meta        map[string]any                 `json:"meta,omitempty"`
 }
 
 // CommandPreviewRequest is the request body for previewing the agent CLI command

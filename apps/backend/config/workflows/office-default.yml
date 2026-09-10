@@ -80,6 +80,12 @@ steps:
             reason: task_assigned
             payload:
               stage_type: review
+      on_agent_error:
+        - type: queue_run
+          config:
+            target: workspace.ceo_agent
+            task_id: this
+            reason: agent_error
       on_turn_complete:
         - type: move_to_step
           config:
@@ -113,6 +119,12 @@ steps:
             reason: task_assigned
             payload:
               stage_type: approval
+      on_agent_error:
+        - type: queue_run
+          config:
+            target: workspace.ceo_agent
+            task_id: this
+            reason: agent_error
       on_turn_complete:
         - type: move_to_step
           config:
@@ -132,6 +144,7 @@ steps:
     position: 4
     color: bg-green-500
     stage_type: custom
+    complete_task_on_enter: true
     allow_manual_move: true
     show_in_command_panel: true
     events:
@@ -141,3 +154,9 @@ steps:
             target: primary
             task_id: this
             reason: task_comment
+      on_agent_error:
+        - type: queue_run
+          config:
+            target: workspace.ceo_agent
+            task_id: this
+            reason: agent_error

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -73,7 +75,7 @@ test.describe("New session dialog", () => {
     }
   });
 
-  test("completed sessions replace the composer with a New Agent action", async ({
+  test("completed sessions show Resume and New Agent actions", async ({
     testPage,
     apiClient,
     seedData,
@@ -115,7 +117,8 @@ test.describe("New session dialog", () => {
     await expect(session.completedSessionNewAgentButton()).toHaveText("New Agent");
     await expect(session.activeChat().locator(".tiptap.ProseMirror")).not.toBeVisible();
     await expect(session.submitButton()).not.toBeVisible();
-    await expect(session.recoveryResumeButton()).not.toBeVisible();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.recoveryResumeButton()).toHaveText("Resume");
     await expect(session.recoveryFreshButton()).not.toBeVisible();
 
     await session.completedSessionNewAgentButton().click();
@@ -255,6 +258,73 @@ test.describe("New session dialog", () => {
     // 9. Verify the backend has two sessions
     const { sessions: allSessions } = await apiClient.listTaskSessions(task.id);
     expect(allSessions).toHaveLength(2);
+  });
+
+  test("starts a second session with a staged attachment", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const prompt = "/e2e:simple-message";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "New Session Attachment Task",
+      seedData.agentProfileId,
+      {
+        description: prompt,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for first session");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.openNewSessionDialog();
+
+    fs.mkdirSync(testInfo.outputDir, { recursive: true });
+    const attachmentPath = path.join(testInfo.outputDir, "new-session-note.txt");
+    fs.writeFileSync(attachmentPath, "new session attachment body");
+    const dialog = session.newSessionDialog();
+    await dialog.locator('input[type="file"]').setInputFiles(attachmentPath);
+    await expect(dialog.getByText("new-session-note.txt", { exact: true })).toBeVisible();
+    await session.newSessionPromptInput().fill(prompt);
+    await session.newSessionStartButton().click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    let secondSessionId = "";
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const second = sessions.find((candidate) => candidate.id !== task.session_id);
+          secondSessionId = second?.id ?? "";
+          return DONE_STATES.includes(second?.state ?? "");
+        },
+        { timeout: 30_000, message: "Waiting for attached New Agent session" },
+      )
+      .toBe(true);
+
+    const { messages } = await apiClient.listSessionMessages(secondSessionId);
+    const userMessage = messages.find(
+      (message) => message.author_type === "user" && message.content.includes(prompt),
+    );
+    const attachments = userMessage?.metadata?.attachments;
+    expect(Array.isArray(attachments) ? attachments[0] : undefined).toMatchObject({
+      name: "new-session-note.txt",
+    });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(
+      session.activeChat().getByText("new-session-note.txt", { exact: true }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("selects a saved prompt without submitting, then launches explicitly", async ({

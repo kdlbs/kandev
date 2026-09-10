@@ -126,13 +126,14 @@ func (s *CostService) evaluatePolicy(
 }
 
 // periodCutoff returns the time.Time at which the policy's spend window
-// starts. A zero time means "no filter" (lifetime / total).
+// starts. A zero time means "no filter" (lifetime / total) or an unknown
+// period retained for compatibility with stored policies.
 func periodCutoff(period string, now time.Time) time.Time {
-	if period == budgetPeriodMonthly {
-		n := now.UTC()
-		return time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, time.UTC)
+	start, ok := windowStart(models.BudgetPeriod(period), now)
+	if !ok {
+		return time.Time{}
 	}
-	return time.Time{}
+	return start
 }
 
 func (s *CostService) getSpendForPolicy(
@@ -214,6 +215,40 @@ func (s *CostService) CheckPreExecutionBudget(
 	return true, "", nil
 }
 
+// EvaluateProjectBudget evaluates project-scoped budget policies for
+// projectID after a task is reassigned into it — the only budget hook on
+// the reassignment path. Reassignment can move a task's historical spend
+// across the project boundary that GetCostForProjectSince rolls up, so
+// without this the destination project's policies never see the crossing.
+//
+// Only policies with ScopeType==project and ScopeID==projectID are
+// evaluated: reassignment does not change the workspace total, so
+// re-checking scopeWorkspace policies (as CheckBudget does) would emit a
+// duplicate alert on every reassignment in an already over-budget
+// workspace. The source project is not evaluated either — reassignment
+// only lowers its spend, so it can't newly cross a threshold. A no-op
+// projectID (clearing a project) has no destination to evaluate.
+func (s *CostService) EvaluateProjectBudget(ctx context.Context, workspaceID, projectID string) error {
+	if projectID == "" {
+		return nil
+	}
+	policies, err := s.repo.ListBudgetPolicies(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, policy := range policies {
+		if policy.ScopeType != scopeProject || policy.ScopeID != projectID {
+			continue
+		}
+		if _, err := s.evaluatePolicy(ctx, workspaceID, policy); err != nil {
+			s.logger.Error("project budget check failed",
+				zap.String("policy_id", policy.ID),
+				zap.Error(err))
+		}
+	}
+	return nil
+}
+
 func (s *CostService) pauseAgentForBudget(ctx context.Context, agentID string) bool {
 	agent, err := s.agents.GetAgentInstance(ctx, agentID)
 	if err != nil {
@@ -238,6 +273,9 @@ func (s *CostService) pauseAgentForBudget(ctx context.Context, agentID string) b
 
 // CreateBudgetPolicy creates a new budget policy.
 func (s *CostService) CreateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error {
+	if err := validateBudgetPolicyWrite(policy); err != nil {
+		return err
+	}
 	return s.repo.CreateBudgetPolicy(ctx, policy)
 }
 
@@ -253,6 +291,9 @@ func (s *CostService) GetBudgetPolicy(ctx context.Context, id string) (*BudgetPo
 
 // UpdateBudgetPolicy updates a budget policy.
 func (s *CostService) UpdateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error {
+	if err := validateBudgetPolicyWrite(policy); err != nil {
+		return err
+	}
 	return s.repo.UpdateBudgetPolicy(ctx, policy)
 }
 

@@ -4,6 +4,8 @@ import type { DockviewApi } from "dockview-react";
 vi.mock("@/lib/local-storage", () => ({
   setEnvLayout: vi.fn(),
   getEnvLayout: vi.fn(() => null),
+  getEnvLayoutProfile: vi.fn(() => null),
+  setEnvLayoutProfile: vi.fn(),
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
@@ -185,6 +187,7 @@ function resetStoreForIntegration() {
     isRestoringLayout: false,
     pinnedWidths: new Map(),
     userDefaultLayout: null,
+    userDefaultLayoutProfile: { kind: "built-in", id: "default" },
   });
 }
 

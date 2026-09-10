@@ -6,8 +6,6 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
-import { scoreBranch } from "@/lib/utils/branch-filter";
-import { BranchRefreshButton } from "./branch-refresh-button";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import {
   processFile,
@@ -29,6 +27,12 @@ import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import { MentionMenu } from "@/components/task/chat/mention-menu";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import { composeLaunchPreviewPrompt } from "@/components/task-create-dialog-launch-preview";
+import {
+  TaskCreateLaunchPreviewContent,
+  TaskCreateLaunchPreviewToggle,
+} from "@/components/task-create-dialog-launch-preview-control";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { JiraImportBar } from "@/components/jira/jira-import-bar";
 import { LinearImportBar } from "@/components/linear/linear-import-bar";
@@ -48,6 +52,9 @@ import {
   useStablePluginComposerCapability,
 } from "@/lib/plugins/composer-capability";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+
+export { BranchSelector } from "./branch-selector";
+export type { BranchOption, BranchSelectorProps } from "./branch-selector";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -114,82 +121,6 @@ export const RepositorySelector = memo(function RepositorySelector({
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
       testId="repository-selector"
-    />
-  );
-});
-
-type BranchOption = {
-  value: string;
-  label: string;
-  keywords?: string[];
-  renderLabel?: () => React.ReactNode;
-};
-
-type BranchSelectorProps = {
-  options: BranchOption[];
-  value: string;
-  onValueChange: (value: string) => void;
-  disabled: boolean;
-  placeholder: string;
-  searchPlaceholder: string;
-  emptyMessage: string;
-  triggerClassName?: string;
-  onRefresh?: () => void;
-  refreshing?: boolean;
-  fetchedAt?: string;
-  fetchError?: string;
-  loading?: boolean;
-  ariaLabel?: string;
-  testId?: string;
-  dropdownTestId?: string;
-  dropdownLabel?: string;
-};
-
-export const BranchSelector = memo(function BranchSelector({
-  options,
-  value,
-  onValueChange,
-  disabled,
-  placeholder,
-  searchPlaceholder,
-  emptyMessage,
-  triggerClassName,
-  onRefresh,
-  refreshing,
-  fetchedAt,
-  fetchError,
-  loading,
-  ariaLabel,
-  testId = "branch-selector",
-  dropdownTestId,
-  dropdownLabel = t("task:baseBranch2"),
-}: BranchSelectorProps) {
-  const headerAction = onRefresh ? (
-    <BranchRefreshButton
-      onRefresh={onRefresh}
-      refreshing={refreshing}
-      fetchedAt={fetchedAt}
-      fetchError={fetchError}
-    />
-  ) : undefined;
-  return (
-    <Combobox
-      options={options}
-      value={value}
-      onValueChange={onValueChange}
-      placeholder={placeholder}
-      searchPlaceholder={searchPlaceholder}
-      emptyMessage={emptyMessage}
-      disabled={disabled}
-      ariaLabel={ariaLabel}
-      dropdownLabel={dropdownLabel}
-      className={disabled ? undefined : CURSOR_POINTER_CLASS}
-      triggerClassName={triggerClassName}
-      testId={testId}
-      dropdownTestId={dropdownTestId}
-      filter={scoreBranch}
-      headerAction={headerAction}
-      loading={loading}
     />
   );
 });
@@ -359,6 +290,7 @@ type TaskFormInputsProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  launchPreview?: TaskCreateLaunchPreview | null;
   jiraImport?: {
     workspaceId: string | null;
     disabled?: boolean;
@@ -715,6 +647,9 @@ type FormInputsToolbarProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  launchPreview?: TaskCreateLaunchPreview | null;
+  isLaunchPromptPreview: boolean;
+  onToggleLaunchPromptPreview: () => void;
   jiraImport?: TaskFormInputsProps["jiraImport"];
   linearImport?: TaskFormInputsProps["linearImport"];
   pluginActions?: React.ReactNode;
@@ -726,6 +661,9 @@ function FormInputsToolbar({
   onEnhancePrompt,
   isEnhancingPrompt,
   isUtilityConfigured,
+  launchPreview,
+  isLaunchPromptPreview,
+  onToggleLaunchPromptPreview,
   jiraImport,
   linearImport,
   pluginActions,
@@ -738,6 +676,14 @@ function FormInputsToolbar({
           onClick={onEnhancePrompt}
           isLoading={isEnhancingPrompt ?? false}
           isConfigured={isUtilityConfigured}
+        />
+      )}
+      {launchPreview?.stepPrompt.trim() && (
+        <TaskCreateLaunchPreviewToggle
+          active={isLaunchPromptPreview}
+          disabled={disabled}
+          stepName={launchPreview.stepName}
+          onToggle={onToggleLaunchPromptPreview}
         />
       )}
       {jiraImport && (
@@ -912,12 +858,18 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   onEnhancePrompt,
   isEnhancingPrompt,
   isUtilityConfigured,
+  launchPreview,
   jiraImport,
   linearImport,
   onComposerSubmit,
   taskId = null,
 }: TaskFormInputsProps) {
   const { t } = useTranslation();
+  const [isLaunchPromptPreview, setIsLaunchPromptPreview] = useState(false);
+  const hasLaunchPromptPreview = Boolean(launchPreview?.stepPrompt.trim());
+  useEffect(() => {
+    if (!hasLaunchPromptPreview) setIsLaunchPromptPreview(false);
+  }, [hasLaunchPromptPreview]);
   const {
     attachments,
     isDragging,
@@ -963,6 +915,10 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     insertAtCursor,
     submit: onComposerSubmit,
   });
+  const launchPromptPreview =
+    hasLaunchPromptPreview && launchPreview
+      ? composeLaunchPreviewPrompt(launchPreview.stepPrompt, description)
+      : "";
 
   return (
     <div
@@ -975,31 +931,38 @@ export const TaskFormInputs = memo(function TaskFormInputs({
         className={`min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30 ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
         <ContextZone items={contextItems} />
-        <Textarea
-          ref={textareaRef}
-          placeholder={
-            placeholder ??
-            (isSessionMode
-              ? t("task:describeWhatYouWantTheAgent")
-              : t("task:writeAPromptForTheAgent"))
-          }
-          value={description}
-          onChange={handleChange}
-          onKeyDownCapture={handleKeyDownCapture}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          data-testid="task-description-input"
-          rows={2}
-          className={`min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
-          required={isSessionMode}
-          disabled={disabled}
-        />
+        {isLaunchPromptPreview ? (
+          <TaskCreateLaunchPreviewContent content={launchPromptPreview} />
+        ) : (
+          <Textarea
+            ref={textareaRef}
+            placeholder={
+              placeholder ??
+              (isSessionMode
+                ? t("task:describeWhatYouWantTheAgent")
+                : t("task:writeAPromptForTheAgent"))
+            }
+            value={description}
+            onChange={handleChange}
+            onKeyDownCapture={handleKeyDownCapture}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            data-testid="task-description-input"
+            rows={2}
+            className={`min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
+            required={isSessionMode}
+            disabled={disabled}
+          />
+        )}
         <FormInputsToolbar
           onAttach={handleAttachClick}
           disabled={disabled}
           onEnhancePrompt={onEnhancePrompt}
           isEnhancingPrompt={isEnhancingPrompt}
           isUtilityConfigured={isUtilityConfigured}
+          launchPreview={launchPreview}
+          isLaunchPromptPreview={isLaunchPromptPreview}
+          onToggleLaunchPromptPreview={() => setIsLaunchPromptPreview((active) => !active)}
           jiraImport={jiraImport}
           linearImport={linearImport}
           pluginActions={pluginActions}

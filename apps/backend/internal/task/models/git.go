@@ -22,19 +22,20 @@ const (
 
 // GitSnapshot represents a git status snapshot at a specific point in time
 type GitSnapshot struct {
-	ID           string                 `json:"id"`
-	SessionID    string                 `json:"session_id"`
-	SnapshotType SnapshotType           `json:"snapshot_type"`
-	Branch       string                 `json:"branch"`
-	RemoteBranch string                 `json:"remote_branch"`
-	HeadCommit   string                 `json:"head_commit"`
-	BaseCommit   string                 `json:"base_commit"`
-	Ahead        int                    `json:"ahead"`
-	Behind       int                    `json:"behind"`
-	Files        map[string]interface{} `json:"files"` // FileInfo objects with diff content
-	TriggeredBy  string                 `json:"triggered_by"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
+	ID                string                 `json:"id"`
+	TaskEnvironmentID string                 `json:"task_environment_id"`
+	SessionID         string                 `json:"session_id"`
+	SnapshotType      SnapshotType           `json:"snapshot_type"`
+	Branch            string                 `json:"branch"`
+	RemoteBranch      string                 `json:"remote_branch"`
+	HeadCommit        string                 `json:"head_commit"`
+	BaseCommit        string                 `json:"base_commit"`
+	Ahead             int                    `json:"ahead"`
+	Behind            int                    `json:"behind"`
+	Files             map[string]interface{} `json:"files"` // FileInfo objects with diff content
+	TriggeredBy       string                 `json:"triggered_by"`
+	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
 }
 
 // SessionCommit represents a commit made during a task session

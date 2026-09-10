@@ -43,6 +43,7 @@ func (a *DashboardApprovalAdapter) QueueApprovalRuns(
 			ActorType:       w.ActorType,
 			Role:            w.Role,
 			DecisionComment: w.DecisionComment,
+			IdempotencyKey:  w.IdempotencyKey,
 		}
 		if err := a.scheduler.QueueRunCtx(ctx, w.AgentID, c); err != nil {
 			a.scheduler.logger.Warn("approval run failed: " + err.Error())

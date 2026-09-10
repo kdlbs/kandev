@@ -8,6 +8,10 @@ status: completed
 
 ## Overview
 
+Follow-up: [Task removal navigation](../task-removal-navigation/plan.md) preserves
+the preference while changing local removal presentation and failure recovery.
+This completed package retains its historical scope and results.
+
 Extend the existing per-user JSON settings contract with a default-true archive confirmation preference. Hydrate it into frontend state, expose an optimistic General settings toggle, and let the shared archive dialog execute immediately with cascade disabled when confirmation is off so every current archive surface inherits the behavior.
 
 ## Backend

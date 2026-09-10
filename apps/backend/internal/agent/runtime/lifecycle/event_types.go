@@ -14,6 +14,7 @@ type AgentEventPayload struct {
 	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
+	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
 	TurnID             string                 `json:"turn_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
@@ -263,13 +264,14 @@ type AgentStreamEventData struct {
 // for execution-scoped logic (e.g., resume-token CAS that must reject writes from
 // a defunct execution).
 type AgentStreamEventPayload struct {
-	Type        string                `json:"type"` // Always "agent/event"
-	Timestamp   string                `json:"timestamp"`
-	AgentID     string                `json:"agent_id"`     // Historical: execution.ID. Prefer ExecutionID.
-	ExecutionID string                `json:"execution_id"` // Lifecycle execution ID; stable across the payload's lifetime.
-	TaskID      string                `json:"task_id"`
-	SessionID   string                `json:"session_id"` // Task session ID
-	Data        *AgentStreamEventData `json:"data"`
+	Type           string                `json:"type"` // Always "agent/event"
+	Timestamp      string                `json:"timestamp"`
+	AgentID        string                `json:"agent_id"`                   // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID    string                `json:"execution_id"`               // Lifecycle execution ID; stable across the payload's lifetime.
+	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
+	TaskID         string                `json:"task_id"`
+	SessionID      string                `json:"session_id"` // Task session ID
+	Data           *AgentStreamEventData `json:"data"`
 }
 
 // GitEventType discriminates the type of git event
@@ -286,11 +288,12 @@ const (
 // GitEventPayload is a unified payload for all git-related WebSocket events.
 // Uses discriminated union pattern with Type field.
 type GitEventPayload struct {
-	Type      GitEventType `json:"type"`
-	TaskID    string       `json:"task_id,omitempty"`
-	SessionID string       `json:"session_id"`
-	AgentID   string       `json:"agent_id,omitempty"`
-	Timestamp string       `json:"timestamp"`
+	Type              GitEventType `json:"type"`
+	TaskID            string       `json:"task_id,omitempty"`
+	SessionID         string       `json:"session_id"`
+	TaskEnvironmentID string       `json:"task_environment_id,omitempty"`
+	AgentID           string       `json:"agent_id,omitempty"`
+	Timestamp         string       `json:"timestamp"`
 
 	// For status_update
 	Status *GitStatusData `json:"status,omitempty"`

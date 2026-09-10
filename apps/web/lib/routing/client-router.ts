@@ -126,6 +126,7 @@ function paramsForPath(pathname: string): Record<string, string> {
   assignSingle(params, "profileId", segments, ["settings", "agents", "*", "profiles"]);
   assignSingle(params, "profileId", segments, ["settings", "executors"]);
   assignSingle(params, "executorId", segments, ["settings", "executors", "ssh"]);
+  assignSingle(params, "executorId", segments, ["settings", "executors", "k8s"]);
   assignSingle(params, "type", segments, ["settings", "executors", "new"]);
   assignSingle(params, "id", segments, ["settings", "workspace"]);
   assignSingle(params, "automationId", segments, ["settings", "workspace", "*", "automations"]);

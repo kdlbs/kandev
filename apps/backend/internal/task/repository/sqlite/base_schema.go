@@ -15,6 +15,7 @@ import (
 // added without growing the function's cyclomatic complexity.
 func (r *Repository) initSchema() error {
 	steps := []func() error{
+		r.initDesktopDiscoverySchema,
 		r.initCoreSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
@@ -39,10 +40,12 @@ func (r *Repository) initSchema() error {
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
+		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
+		r.migrateGitSnapshotOwnership,
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
@@ -66,6 +69,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			state TEXT NOT NULL DEFAULT 'selecting',
 			continuation_json TEXT NOT NULL DEFAULT '',
 			policy_state_json TEXT NOT NULL DEFAULT '',
+			legacy_active_backfill_applied INTEGER NOT NULL DEFAULT 1,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
@@ -162,6 +166,25 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	if _, err := r.db.Exec(pendingIndex); err != nil {
 		return err
 	}
+	// idx_messages_metadata_pending_id leads with task_session_id, so it
+	// cannot be used by the clarification claim query, which filters on
+	// pending_id alone across all sessions. This bare-expression index makes
+	// that lookup seekable.
+	pendingIndexLookup := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_metadata_pending_id_lookup ON task_session_messages((%s))`,
+		dialect.JSONExtract(driver, "metadata", "pending_id"),
+	)
+	if _, err := r.db.Exec(pendingIndexLookup); err != nil {
+		return err
+	}
+	lookupIndex := dialect.PendingIDLookupIndexDDL(
+		driver,
+		"idx_messages_metadata_pending_id_lookup_ordered",
+		"task_session_messages",
+	)
+	if _, err := r.db.Exec(lookupIndex); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -191,12 +214,12 @@ func (r *Repository) ensurePromptOrderIndex() error {
 // would error with "no such table". Stubs created here are minimal —
 // the workflow repo's init still runs and adds the rest of its columns
 // via idempotent ALTER and CREATE statements.
-func (r *Repository) ensureRunnerProjectionTables() {
+func (r *Repository) ensureRunnerProjectionTables() error {
 	// workflow_steps: matches the full schema declared in the workflow
 	// repo so workflow.NewWithDB's later ALTER ADD COLUMNs become no-ops
-	// (column-already-exists errors are swallowed). Mirrors
+	// (only column-already-exists errors are tolerated). Mirrors
 	// internal/workflow/repository/sqlite.go (the canonical owner).
-	_, _ = r.db.Exec(`
+	if _, err := r.db.Exec(`
 		CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,
 			workflow_id TEXT NOT NULL DEFAULT '',
@@ -210,13 +233,19 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			show_in_command_panel INTEGER DEFAULT 1,
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
-			stage_type TEXT NOT NULL DEFAULT 'custom',
-			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
+		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		stage_type TEXT NOT NULL DEFAULT 'custom',
+		session_target TEXT,
+		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
+			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`)
-	_, _ = r.db.Exec(`
+		)`); err != nil {
+		return fmt.Errorf("create workflow_steps projection table: %w", err)
+	}
+	if _, err := r.db.Exec(`
 		CREATE TABLE IF NOT EXISTS workflow_step_participants (
 			id TEXT PRIMARY KEY,
 			step_id TEXT NOT NULL DEFAULT '',
@@ -224,8 +253,12 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
-		)`)
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+		)`); err != nil {
+		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) initCoreSchema() error {
@@ -270,6 +303,7 @@ const infraSchemaDDL = `
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		owner_id TEXT DEFAULT '',
+		org_id TEXT NOT NULL DEFAULT '',
 		default_executor_id TEXT DEFAULT '',
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
@@ -277,6 +311,24 @@ const infraSchemaDDL = `
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS workspace_members (
+		workspace_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'collaborator',
+		added_by TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (workspace_id, user_id),
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		-- No foreign key to users: that table belongs to internal/user/store,
+		-- which initializes independently of this repository, so a reference
+		-- here fails schema init whenever the task repository is created
+		-- first. Account removal clears membership through
+		-- DeleteWorkspaceMembersByUser instead, matching how this codebase
+		-- handles every other cross-store side table.
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
 
 	CREATE TABLE IF NOT EXISTS executors (
 		id TEXT PRIMARY KEY,
@@ -551,6 +603,7 @@ func (r *Repository) initCoreIndexes() error {
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at);
+	CREATE INDEX IF NOT EXISTS idx_tasks_updated_at_id ON tasks(updated_at, id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
 	CREATE INDEX IF NOT EXISTS idx_task_workspace_folders_task_position ON task_workspace_folders(task_id, position);
@@ -570,12 +623,41 @@ func (r *Repository) initPlansSchema() error {
 		created_by TEXT NOT NULL DEFAULT 'agent',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		comments_revision INTEGER NOT NULL DEFAULT 0,
 		implementation_started_at TIMESTAMP,
 		implementation_started_session_id TEXT,
 		implementation_started_by TEXT,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_task_plans_id_task_id ON task_plans(id, task_id);
+	CREATE TABLE IF NOT EXISTS task_plan_comments (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		body TEXT NOT NULL,
+		selected_text TEXT NOT NULL,
+		anchor_from INTEGER NOT NULL,
+		anchor_to INTEGER NOT NULL,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comments_task_order
+		ON task_plan_comments(task_id, created_at, id);
+	CREATE TABLE IF NOT EXISTS task_plan_comment_admissions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comment_admissions_task
+		ON task_plan_comment_admissions(task_id, plan_id);
 	`); err != nil {
 		return err
 	}
@@ -589,6 +671,9 @@ func (r *Repository) initPlansSchema() error {
 		author_kind TEXT NOT NULL DEFAULT 'agent',
 		author_name TEXT NOT NULL DEFAULT '',
 		revert_of_revision_id TEXT,
+		workflow_step_id TEXT NOT NULL DEFAULT '',
+		workflow_step_name TEXT NOT NULL DEFAULT '',
+		workflow_step_color TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
@@ -922,6 +1007,7 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		queue_incarnation_id TEXT NOT NULL DEFAULT '',
 		agent_execution_id TEXT NOT NULL DEFAULT '',
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
@@ -964,6 +1050,7 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_environments (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		ownership_generation INTEGER NOT NULL DEFAULT 1,
 		executor_type TEXT NOT NULL DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',
@@ -1016,7 +1103,8 @@ func (r *Repository) initGitSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
+		task_environment_id TEXT NOT NULL,
+		session_id TEXT,
 		snapshot_type TEXT NOT NULL,
 		branch TEXT NOT NULL,
 		remote_branch TEXT DEFAULT '',
@@ -1028,7 +1116,8 @@ func (r *Repository) initGitSchema() error {
 		triggered_by TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE SET NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_git_snapshots_session ON task_session_git_snapshots(session_id, created_at DESC);

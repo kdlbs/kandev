@@ -287,10 +287,11 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 }
 
 type UpdateAgentRequest struct {
-	ID            string
-	WorkspaceID   *string
-	SupportsMCP   *bool
-	MCPConfigPath *string
+	ID               string
+	WorkspaceID      *string
+	SupportsMCP      *bool
+	MCPConfigPath    *string
+	MCPConfigPathSet bool
 }
 
 func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*dto.AgentDTO, error) {
@@ -304,7 +305,13 @@ func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*
 	if req.SupportsMCP != nil {
 		agent.SupportsMCP = *req.SupportsMCP
 	}
-	if req.MCPConfigPath != nil {
+	if req.MCPConfigPathSet {
+		if req.MCPConfigPath == nil {
+			agent.MCPConfigPath = ""
+		} else {
+			agent.MCPConfigPath = *req.MCPConfigPath
+		}
+	} else if req.MCPConfigPath != nil {
 		agent.MCPConfigPath = *req.MCPConfigPath
 	}
 	if err := c.repo.UpdateAgent(ctx, agent); err != nil {

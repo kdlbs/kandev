@@ -45,7 +45,7 @@ async function seedMobilePlanTask(
   await session.waitForChatIdle({ timeout: 45_000 });
 
   await session.togglePlanMode();
-  await testPage.getByRole("button", { name: "Plan", exact: true }).tap();
+  await testPage.getByRole("navigation").getByRole("button", { name: "Plan", exact: true }).tap();
   await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
   await expect(session.planPanel).toContainText("Mobile draft B", { timeout: 15_000 });
   return session;

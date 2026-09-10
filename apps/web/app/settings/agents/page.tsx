@@ -22,6 +22,7 @@ import {
   listAgents,
   listAvailableAgents,
 } from "@/lib/api";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
@@ -44,6 +45,8 @@ import {
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { HideDisabledAgentProfilesSetting } from "@/app/settings/agents/hide-disabled-agent-profiles-setting";
 import type { AgentDiscovery, Agent, AvailableAgent, RuntimeUpdate } from "@/lib/types/http";
+
+const installedAgentsActionClassName = settingsActionClassName("cursor-pointer");
 
 type InstalledAgentsSectionProps = {
   installedAgents: AgentDiscovery[];
@@ -71,6 +74,7 @@ type InstalledAgentsSectionProps = {
   ) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
+  canManage: boolean;
 };
 
 function InstalledAgentsHeader({
@@ -81,7 +85,10 @@ function InstalledAgentsHeader({
 }: {
   rescanning: boolean;
   onOpenShell: () => void;
-  onOpenTuiDialog: () => void;
+  /** Absent for a caller without org.config.manage: creating a TUI agent is
+   *  a write this page must not offer them. Rescan and the host shell stay:
+   *  discovery is a read. */
+  onOpenTuiDialog?: () => void;
   onRescan: () => void;
 }) {
   const { t } = useTranslation();
@@ -94,9 +101,8 @@ function InstalledAgentsHeader({
       <div className="flex w-full flex-wrap gap-2 md:w-auto" data-testid="installed-agents-actions">
         <Button
           variant="outline"
-          size="sm"
           onClick={onOpenShell}
-          className="h-11 cursor-pointer md:h-6"
+          className={installedAgentsActionClassName}
           data-testid="open-host-shell"
         >
           <IconTerminal2 className="h-4 w-4 mr-2" />
@@ -104,10 +110,9 @@ function InstalledAgentsHeader({
         </Button>
         <Button
           variant="outline"
-          size="sm"
           onClick={onRescan}
           disabled={rescanning}
-          className="h-11 cursor-pointer md:h-6"
+          className={installedAgentsActionClassName}
           data-testid="rescan-agents-button"
         >
           {rescanning ? (
@@ -117,16 +122,17 @@ function InstalledAgentsHeader({
           )}
           {t("agents:rescan")}
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onOpenTuiDialog}
-          className="h-11 cursor-pointer md:h-6"
-          data-testid="new-agent-button"
-        >
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:addTuiAgent")}
-        </Button>
+        {onOpenTuiDialog && (
+          <Button
+            variant="outline"
+            onClick={onOpenTuiDialog}
+            className={installedAgentsActionClassName}
+            data-testid="new-agent-button"
+          >
+            <IconPlus className="h-4 w-4 mr-2" />
+            {t("agents:addTuiAgent")}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -189,6 +195,7 @@ function InstalledAgentsSection({
   startUpdate,
   setTuiDialogOpen,
   handleRescan,
+  canManage,
 }: InstalledAgentsSectionProps) {
   const { t } = useTranslation();
   const [shellOpen, setShellOpen] = useState(false);
@@ -207,7 +214,7 @@ function InstalledAgentsSection({
       <InstalledAgentsHeader
         rescanning={rescanning}
         onOpenShell={() => setShellOpen(true)}
-        onOpenTuiDialog={() => setTuiDialogOpen(true)}
+        onOpenTuiDialog={canManage ? () => setTuiDialogOpen(true) : undefined}
         onRescan={() => void handleRescan()}
       />
       <HostShellDialog
@@ -253,8 +260,8 @@ function InstalledAgentsSection({
                   runtimeUpdateStatus: resolveRuntimeUpdateStatus(agent.name),
                   installJob: installJobs[agent.name],
                   updateJob: updateJobs[agent.name],
-                  onPreview: previewUpdate,
-                  onUpdate: startUpdate,
+                  onPreview: canManage ? previewUpdate : undefined,
+                  onUpdate: canManage ? startUpdate : undefined,
                   onAuthComplete: () => void handleRescan(),
                 }
               : {})}
@@ -282,6 +289,9 @@ function useAgentPageState() {
   const { items: availableAgents } = useAvailableAgents();
   const [rescanning, setRescanning] = useState(false);
   const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
+  // Agents and agent profiles are org configuration: every write behind this
+  // page requires org.config.manage, which only an administrator holds.
+  const canManage = useIsAdmin();
   const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
   const { refresh: refreshRuntimeUpdateStatuses, statusByAgent } =
     useAgentRuntimeUpdateStatuses(updateJobs);
@@ -340,6 +350,7 @@ function useAgentPageState() {
   };
 
   return {
+    canManage,
     savedAgents,
     installedAgents,
     discoveryAgents,
@@ -363,6 +374,7 @@ function useAgentPageState() {
 
 export default function AgentsSettingsPage() {
   const {
+    canManage,
     savedAgents,
     installedAgents,
     discoveryAgents,
@@ -393,17 +405,18 @@ export default function AgentsSettingsPage() {
         </div>
         {/* The page's primary action: everything else on this page manages what
             is already installed. */}
-        <Button
-          size="sm"
-          className={settingsActionClassName("cursor-pointer")}
-          asChild
-          data-testid="install-agents-button"
-        >
-          <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
-            <IconDownload className="h-4 w-4 mr-2" />
-            {t("agents:installAgents")}
-          </Link>
-        </Button>
+        {canManage && (
+          <Button
+            className={installedAgentsActionClassName}
+            asChild
+            data-testid="install-agents-button"
+          >
+            <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
+              <IconDownload className="h-4 w-4 mr-2" />
+              {t("agents:installAgents")}
+            </Link>
+          </Button>
+        )}
       </div>
 
       <Separator />
@@ -411,6 +424,7 @@ export default function AgentsSettingsPage() {
       <HideDisabledAgentProfilesSetting />
 
       <InstalledAgentsSection
+        canManage={canManage}
         installedAgents={installedAgents}
         discoveryOrder={discoveryAgents}
         savedAgents={savedAgents}

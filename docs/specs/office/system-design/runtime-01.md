@@ -19,6 +19,12 @@ This design preserves the technical source detail for `REQ-OFFICE-RUNTIME-001` d
 | --- | --- |
 | `REQ-OFFICE-RUNTIME-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Related decisions
+
+[Keep MCP availability separate from runtime permissions](../../../decisions/2026-09-07-separate-runtime-permissions-and-advisory-actions.md)
+defines the boundary between enforced runtime permissions and seat-derived
+prompt metadata.
+
 ## Migrated source detail
 
 > **Amendment (2026-08-17):** The provider-classification and automatic
@@ -62,6 +68,7 @@ A follow-up spec can introduce per-adapter classification once we have real usag
 - No automatic retry. Every adapter error is terminal for the wakeup that produced it.
 - The wakeup row is stamped with `status = failed` and `error_message`. No follow-up wakeup is queued from the failure path.
 - Re-runs only happen via explicit user action: **Resume session** in chat, **Mark fixed** on an inbox entry, or task reassignment to a different agent.
+- A terminal failure still stamps `office_agent_runtime.last_run_finished_at` — `HandleAgentFailure` calls the same `Service.stampRunFinished` helper the completed/stopped paths use. Cooldown is a run-pacing mechanism, not a success tracker: a below-threshold failing agent is paced by `cooldown_sec` on its next heartbeat-driven fire exactly as it would be after a success, so a flapping provider or a misconfigured agent cannot retry back-to-back with zero pacing and burn cost/tokens before hitting auto-pause. This applies uniformly across every task assigned to the agent, not just the one that just failed - `cooldown_sec` gates the agent's next heartbeat-triggered fire, regardless of which task last failed. It does not gate task assignment or manual resume: those go through the runs scheduler's `ClaimNextRun`/`ProcessRunGuard` path, which does not consult `last_run_finished_at`. The consecutive-failure counter and auto-pause threshold (below) are the separate, existing mechanism for stopping a chronically broken agent altogether; cooldown only paces the failures that happen before that threshold is reached.
 
 ### Inbox surfacing
 
@@ -206,7 +213,7 @@ Mounted by `runtime.RegisterRoutes` (`internal/office/runtime/handler.go`). Ever
 | GET | `/runtime/skills` | `list_skills` | – |
 | DELETE | `/runtime/skills/:id` | `delete_skills` | – |
 
-Capability-denied (`ErrCapabilityDenied`), task-out-of-scope (`ErrTaskOutOfScope`), and workspace-out-of-scope (`ErrWorkspaceOutOfScope`) errors return `403 Forbidden` and append a `runtime.denied` event to `office_run_events`. Successful actions append `runtime.action`. Missing dependencies surface as `500` with `ErrRuntimeDependencyMissing`.
+Capability-denied (`ErrCapabilityDenied`), task-out-of-scope (`ErrTaskOutOfScope`), and workspace-out-of-scope (`ErrWorkspaceOutOfScope`) errors return `403 Forbidden` and append a `runtime.denied` event to `office_run_events`. Successful actions append `runtime.action`. Missing dependencies and other operational errors return `500 Internal Server Error` with the stable `internal runtime error` message. The server log keeps the original error cause.
 
 ### Recovery actions (UI-facing, dashboard handler)
 
@@ -255,7 +262,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **Mark fixed (inbox dismiss + retry)** and **Resume session**: any workspace user. There is no agent-role gating on these affordances; they are explicit human-driven recovery actions surfaced in the inbox and per-task chat.
 - **Reassignment** (`PATCH /tasks/:id` with new `assignee_agent_instance_id`): workspace user. Agent JWTs cannot reassign tasks via the runtime action surface in v1; there is no `CapabilityReassignTask`.
 - **Manual unpause** (clearing `pause_reason` from the agent detail page): workspace admin / CEO role only, enforced by `isAdminRole` in `internal/office/agents/handler.go`.
-- **Runtime action surface capabilities**: derived from `agent_instances.role` / `permissions` via `runtime.FromAgent`. The agent JWT carries the serialized `Capabilities` snapshot taken at run-claim time; subsequent permission revocations on the agent profile do not affect a JWT already in flight (it expires after `DefaultTokenDuration = 4h`).
+- **Runtime action surface capabilities**: derived from `agent_instances.role` / `permissions` via `runtime.FromAgent`. The agent JWT carries the serialized `Capabilities` snapshot taken at run-claim time; subsequent permission revocations on the agent profile do not affect a JWT already in flight (it expires after `DefaultTokenDuration = 4h`). The seat-derived `record_step_decision` CLI affordance is not a runtime capability. `runtime.ContextBuilder.Build` stores it in `RunContext.AvailableActions` when the agent holds the current workflow participant seat. The scheduler uses this advisory action to inject `kandev-step-decision` and add the command to the prompt, but does not add it to JWT capability claims. The task-bound runtime decision handler derives task, session, and agent identity from the signed run context and performs live authorization through `DashboardService.RecordAgentDecision` and `ResolveParticipantRole`.
 - **Task scope**: `RunContext.CanMutateTask(taskID)` returns true only when `taskID == runCtx.TaskID` or `taskID` (or wildcard `*`) appears in `Capabilities.AllowedTaskIDs`. Out-of-scope mutations return `ErrTaskOutOfScope`.
 - **Workspace scope**: every action that touches another entity (target agent, target skill, target task) is rejected with `ErrWorkspaceOutOfScope` when the target's `workspace_id` does not match the run's.
 - **Memory namespaces**: `CanAccessMemory` enforces workspace match plus, for `kind=agent`, that the namespace ID matches `runCtx.AgentID`. Agents cannot read or write another agent's memory.
@@ -282,6 +289,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **Capability snapshot on the run** (`runs.capabilities`, `runs.input_snapshot`): durable, written by `ContextBuilder.BuildAndPersist`. A re-issued JWT after restart uses the same capability set so the run keeps the permissions it was granted at claim time.
 - **Agent JWT signing key**: process-local. Defaults to a random 32-byte key when the `KANDEV_AGENT_JWT_KEY` config is empty, in which case all in-flight JWTs are invalidated on restart and agents must mint fresh tokens on the next prompt cycle. Configurable for stable cross-restart JWTs.
 - **`affected_tasks` snapshot on `agent_paused_after_failures`**: NOT recomputed when listed tasks are reassigned away. The snapshot is intentionally point-in-time so the user resolves the pause entry as a whole.
+- **`office_agent_runtime.last_run_finished_at`**: durable. Stamped on every terminal run outcome for the agent, including failure - not just completion/stop - so the heartbeat cooldown gate paces the agent's next fire regardless of why the previous run ended. See [`office/agents.md`](../requirements/agents.md#persistence-guarantees) persistence guarantees for the gate itself.
 - **`scheduled_retry` runs**: not produced in v1. Every adapter error is terminal; the wakeup is stamped `failed` with no follow-up scheduled. The `scheduled_retry` status is reserved for a future classifier.
 
 See also: [Dynamic Agent Routing](../../agents/requirements/dynamic-agent-routing.md) for provider routing and [`office/scheduler.md`](../requirements/scheduler.md) for wakeup queue semantics and the staleness check that cancels superseded wakeups.

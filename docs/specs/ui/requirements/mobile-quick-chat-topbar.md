@@ -2,98 +2,91 @@
 status: active
 system: ui
 created: 2026-07-17
-updated: 2026-08-18
+updated: 2026-09-09
 owners:
   - kandev
 ---
-# Mobile Workspace Topbar Actions Requirements
+
+# Mobile Workspace Topbar Requirements
 
 ## Overview
 
-Mobile users need direct access to workspace actions from the Home and Tasks headers. The header must remain usable when resource metrics and plugin actions add more controls than a phone can fit.
+Phone Kanban, List, and Threads share one compact listing header. Current
+context and navigation remain visible while secondary workspace actions stay
+available in a touch-friendly menu. UI owns this reusable presentation
+contract; each listing retains its own filtering and navigation state.
 
 ## Requirements
 
-### REQ-UI-MOBILE-QUICK-CHAT-TOPBAR-001: Mobile Workspace Topbar Actions
+### REQ-UI-MOBILE-QUICK-CHAT-TOPBAR-001: Mobile workspace topbar
 
-**Intent:** Mobile users need direct access to workspace actions from the Home and Tasks headers. The header must remain usable when resource metrics and plugin actions add more controls than a phone can fit.
+**Intent:** Make listing modes feel like one application without crowding the
+conversation, board, or task list.
 
 #### Acceptance criteria
 
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.1:** On mobile Home and Tasks headers with an active workspace, `Quick Terminal` appears before `Quick Chat`. `Quick Chat` appears immediately before the task-search button.
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.2:** Activating `Quick Chat` opens Quick Chat for the active workspace. Existing workspace chats are available in the dialog, and its existing new-chat action remains available.
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.3:** Activating `Quick Terminal` opens the active workspace's terminal in the shared Quick Chat surface.
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.4:** The mobile Kandev wordmark is a link to the active workspace's Home board.
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.5:** The Home header does not render a separate `Home` label. Non-Home headers retain their existing page-title visibility while keeping the Kandev home link available.
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.6:** The Kandev link is the only fixed content at the left edge. The menu button is the only fixed content at the right edge.
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.7:** A non-Home title, its workspace label, plugin actions, resource metrics, `Quick Terminal`, `Quick Chat`, and search use one horizontal strip between the fixed controls.
-- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.8:** When the strip content fits, its actions are aligned against the fixed menu on the right. The middle strip scrolls horizontally only when its content does not fit. It does not add horizontal scrolling to the page.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.1:** On phone Kanban, List, and Threads
+  with an active workspace, the header menu shall expose Quick Chat and Quick
+  Terminal as labeled touch actions.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.2:** Activating Quick Chat shall open it
+  for the active workspace with existing chats and its new-chat action
+  available. The listing menu shall close before the chat surface opens.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.3:** Activating Quick Terminal shall open
+  the active workspace's terminal in the shared Quick Chat surface. The listing
+  menu shall close before that surface opens.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.4:** Each phone listing menu shall expose
+  Home through the existing workspace-aware home navigation. Changing header
+  presentation shall not alter the selected listing preference or Home routing.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.5:** Each phone listing header shall show
+  one unboxed, two-line current-context control. Kanban and List shall identify
+  their mode and workspace; Threads shall identify its mode and active saved
+  view. Long names shall truncate within the control.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.6:** The context control shall remain at
+  the left and the navigation menu shall remain at the right, using the same
+  header height, spacing, typography, and touch-target geometry across all
+  three modes. Neither shall require horizontal scrolling to reach.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.7:** The idle phone listing header shall
+  not contain a separate wordmark, redundant page breadcrumb, utility action
+  strip, or extra navigation row. Threads pagination follows the
+  [Threads deck contract](threads-conversation-deck.md).
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.8:** The header and its menu shall not
+  cause document-level horizontal overflow, including with long translated
+  labels, enabled metrics, or multiple plugin actions. A long menu shall scroll
+  vertically inside the viewport and clear safe-area insets.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.9:** Activating the Kanban or List
+  context control shall open the existing listing menu. Activating the Threads
+  context control shall retain its saved-view picker. Mode switching,
+  workspace selection, applicable filters, and display options shall remain
+  available without introducing new saved-view semantics in Kanban or List.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.10:** When task search is supported, the
+  menu shall expose its existing search action. Opening search shall dismiss
+  the menu and focus a visible search input. Closing search shall clear its
+  query and restore unfiltered results. No permanent search row shall appear
+  while search is closed.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.11:** Page-specific plugin actions,
+  workspace actions, enabled metrics, and system status shall remain reachable
+  from the phone listing menu. Their existing availability settings, workspace
+  scope, and action behavior shall be preserved.
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.12:** The persistent menu control shall
+  preserve connection warnings and Quick Chat activity feedback, including
+  accessible descriptions. Quick Chat activity follows the existing
+  [activity indicator contract](quick-chat-idle-dot.md).
+- **AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.13:** Context controls, standalone menu
+  buttons, and utility rows shall provide touch targets of at least 44 CSS
+  pixels in the active dimension. Dismissing an overlay shall restore focus to
+  a mounted trigger. Without an active workspace, unusable workspace launchers
+  shall not appear.
 
-## Migrated source detail
+## Compatibility and exclusions
 
-## Why
+The compact phone composition supersedes the former fixed-wordmark and
+scrolling-action-strip presentation. Workspace launchers move into the menu;
+the underlying capabilities and navigation preferences do not change.
 
-Mobile users need direct access to workspace actions from the Home and Tasks headers. The header
-must remain usable when resource metrics and plugin actions add more controls than a phone can fit.
+Tablet and desktop headers, task-session chrome, mobile bottom navigation,
+floating task creation, session lifecycle, plugin APIs, and persistence are
+outside this change. Selecting an explicit default Home view is separate work.
 
-## What
+## System design
 
-- On mobile Home and Tasks headers with an active workspace, `Quick Terminal` appears before
-  `Quick Chat`. `Quick Chat` appears immediately before the task-search button.
-- Activating `Quick Chat` opens Quick Chat for the active workspace. Existing workspace chats
-  are available in the dialog, and its existing new-chat action remains available.
-- Activating `Quick Terminal` opens the active workspace's terminal in the shared Quick Chat
-  surface.
-- The mobile Kandev wordmark is a link to the active workspace's Home board.
-- The Home header does not render a separate `Home` label. Non-Home headers retain their
-  existing page-title visibility while keeping the Kandev home link available.
-- The Kandev link is the only fixed content at the left edge. The menu button is the only fixed
-  content at the right edge.
-- A non-Home title, its workspace label, plugin actions, resource metrics, `Quick Terminal`,
-  `Quick Chat`, and search use one horizontal strip between the fixed controls.
-- When the strip content fits, its actions are aligned against the fixed menu on the right. The
-  middle strip scrolls horizontally only when its content does not fit. It does not add horizontal
-  scrolling to the page.
-- A fade appears at each strip edge only when more actions exist beyond that edge. The fade
-  disappears when the strip reaches that edge.
-- Native icon buttons in this header use the same 32 by 32 CSS-pixel visible box and 16 CSS-pixel
-  icon. Resource metric and host-rendered plugin icons use the same 16 CSS-pixel icon size.
-- The resource metrics region uses the same 32 CSS-pixel height as the icon buttons.
-- Quick Terminal and Quick Chat retain a 44 CSS-pixel coarse-pointer hit area around their 32
-  CSS-pixel visible boxes without widening the action-strip items.
-- The tablet header and mobile task switcher retain their existing Quick Chat entry points.
-- Desktop headers do not change.
-
-## Scenarios
-
-- **GIVEN** a mobile Home header with an active workspace, **WHEN** the header renders, **THEN**
-  the terminal, chat, search, and menu controls use the same visible size and no separate `Home`
-  label is shown.
-- **GIVEN** a mobile Home header, **WHEN** the user activates `Quick Chat`, **THEN** the active
-  workspace's Quick Chat dialog opens and the user can access existing chats or start a new one.
-- **GIVEN** a mobile Home header, **WHEN** the user activates `Quick Terminal`, **THEN** the active
-  workspace's terminal opens in the shared Quick Chat surface.
-- **GIVEN** resource metrics and plugin actions that exceed the middle strip width, **WHEN** the
-  mobile header renders, **THEN** the Kandev link and menu remain fixed while the strip scrolls.
-- **GIVEN** a scrollable middle strip, **WHEN** hidden actions exist to the left or right, **THEN**
-  only the corresponding directional fade is visible.
-- **GIVEN** a middle strip whose actions fit, **WHEN** the mobile header renders, **THEN** its
-  actions align against the menu, no overflow fade is visible, and the document has no horizontal
-  overflow.
-- **GIVEN** a mobile non-Home workbench page, **WHEN** the user activates the Kandev wordmark,
-  **THEN** the app navigates to that workspace's Home board.
-- **GIVEN** no active workspace, **WHEN** the mobile header renders, **THEN** it does not show an
-  unusable Quick Chat or Quick Terminal button.
-
-## Out of scope
-
-- Changes to Quick Chat creation, persistence, session selection, or modal layout.
-- Changes to Quick Terminal lifecycle or terminal layout.
-- Changes to desktop topbars.
-- Changes to tablet header sizing.
-- Changes to task-session topbars, mobile bottom navigation, or floating task creation.
-
-## Implementation plan
-
-- [Original Quick Chat topbar implementation](../../../plans/mobile-quick-chat-topbar/plan.md)
-- [Scrollable mobile topbar repair](../../../plans/mobile-topbar-action-strip/plan.md)
+- [Mobile Workspace Topbar](../system-design/mobile-quick-chat-topbar.md)

@@ -54,6 +54,22 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Agent-authored plugin web applications. Off in every shipped profile until
+  # the isolated runtime and lifecycle are ready for opt-in use.
+  KANDEV_FEATURES_CANVASES:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Organizations: a tenant boundary above users. Requires KANDEV_FEATURES_AUTH;
+  # the backend refuses to start with this on and auth off. Off everywhere until
+  # the runtime-isolation work (per-org filesystem roots, per-org agent
+  # credentials, tenant-pinned executors) lands.
+  KANDEV_FEATURES_MULTI_TENANCY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Dynamic agent profiles and provider-error routing. Off in every shipped
   # profile until the complete guarded implementation is ready.
   KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING:
@@ -75,6 +91,20 @@ features:
     prod: "false"
     dev:  "false"
     e2e:  "false"
+
+  # High-risk Office per-agent session identity: keys an Office task's session
+  # on the run's own agent instead of the runner seat, and binds an agent's
+  # decision re-evaluation to its own calling session. Default-on in every
+  # profile; it remains a high-risk, path-scoped change to durable session
+  # identity. A live (task_id, agent_profile_id) pair is guarded in-transaction
+  # on the office session creation path instead of by a table-level constraint.
+  # Pre-existing duplicate rows stay safe by selection, not migration. Disabling
+  # this toggle and restarting reverts to runner-seat binding and task-active-
+  # session decision re-evaluation.
+  KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
 
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production

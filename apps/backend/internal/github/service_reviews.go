@@ -427,7 +427,7 @@ func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, client Client, w
 			prs, err = client.ListReviewRequestedPRs(ctx, watch.ReviewScope, qualifier, "")
 		}
 		if err != nil {
-			if isConnectivityError(err) {
+			if IsConnectivityError(err) {
 				s.logger.Warn("failed to list review PRs (connectivity)",
 					zap.String("filter", qualifier), zap.Error(err))
 			} else {

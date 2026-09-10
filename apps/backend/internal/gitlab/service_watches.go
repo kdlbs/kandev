@@ -836,17 +836,11 @@ func (s *Service) requireStore() *Store {
 // appendLabelsToQuery merges a label list into an existing customQuery string.
 // If the query already has a `labels` key the caller's value is kept (we
 // don't want to silently double-up). url.ParseQuery is used for an exact
-// key match — strings.Contains("labels=") would false-positive on keys
-// like `mylabels=` and silently drop the watch's labels.
+// key match by the shared appendQueryParam helper — strings.Contains("labels=")
+// would false-positive on keys like `mylabels=` and silently drop the watch's
+// labels.
 func appendLabelsToQuery(customQuery string, labels []string) string {
-	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has("labels") {
-		return customQuery
-	}
-	encoded := url.QueryEscape(strings.Join(labels, ","))
-	if customQuery == "" {
-		return "labels=" + encoded
-	}
-	return customQuery + "&labels=" + encoded
+	return appendQueryParam(customQuery, "labels", strings.Join(labels, ","))
 }
 
 func normalizeProjectFilters(in []ProjectFilter) []ProjectFilter {

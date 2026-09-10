@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -122,6 +123,7 @@ type CommentPostedData struct {
 	AuthorType             string `json:"author_type"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
 	EngineDispatched       string `json:"engine_dispatched"`
+	Source                 string `json:"source"`
 }
 
 // ApprovalResolvedData represents an approval resolved event payload.
@@ -275,11 +277,12 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 
 // AgentTurnMessageData is the payload of an agent.turn.message_saved event.
 type AgentTurnMessageData struct {
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
-	TurnID    string `json:"turn_id"`
-	AgentText string `json:"agent_text"`
-	AgentID   string `json:"agent_id"`
+	TaskID         string `json:"task_id"`
+	SessionID      string `json:"session_id"`
+	TurnID         string `json:"turn_id"`
+	AgentText      string `json:"agent_text"`
+	AgentID        string `json:"agent_id"`
+	AgentProfileID string `json:"agent_profile_id"`
 }
 
 // handleAgentTurnMessageSaved auto-bridges an agent session response to a
@@ -331,10 +334,32 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return nil
 	}
 
+	// Attribute to the agent that actually ran the turn, not the task's
+	// assignee — the two diverge for a reviewer/approver turn. The event
+	// carries the acting agent's own office identity directly
+	// (execution.officeProfileID(), captured at launch before step/routing
+	// overrides mutate the profile). The session-row lookup only reflects
+	// the acting agent when features.officeSessionIdentity is on — off by
+	// default in every shipped profile, it stores the assignee for every
+	// participant's session — so it is kept only as a fallback for events
+	// published before this field existed. Final fallback is the assignee,
+	// mirroring handlePromptUsage's log-and-continue fallback below.
+	authorID := fields.AssigneeAgentProfileID
+	if data.AgentProfileID != "" {
+		authorID = data.AgentProfileID
+	} else if id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID); lookupErr != nil {
+		s.logger.Warn("session agent profile lookup failed",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(lookupErr))
+	} else if id != "" {
+		authorID = id
+	}
+
 	comment := &models.TaskComment{
 		TaskID:     data.TaskID,
 		AuthorType: "agent",
-		AuthorID:   fields.AssigneeAgentProfileID,
+		AuthorID:   authorID,
 		Body:       agentText,
 		Source:     "session",
 	}
@@ -344,10 +369,10 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 		return cErr
 	}
 	s.publishCommentCreated(ctx, comment)
-	// Successful turn → reset the agent's consecutive-failure counter
-	// regardless of which task succeeded. A bridged comment is the
-	// only place we know a turn produced real output.
-	s.RecordAgentSuccess(ctx, fields.AssigneeAgentProfileID)
+	// Successful turn → reset the acting agent's consecutive-failure
+	// counter. A bridged comment is the only place we know a turn
+	// produced real output.
+	s.RecordAgentSuccess(ctx, authorID)
 	// Lifecycle: each successful turn under an in-flight run lands a
 	// "step" event so the run detail page's Events log gets a row per
 	// turn. Resolve the run from the currently-claimed run for this
@@ -384,6 +409,14 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// No claimed run resolves for this event: it already finished
+			// via another path, arrived late/duplicated, or a cancellation
+			// marked the run terminal before this event landed. There is no
+			// run left to reach stampRunFinished, but the agent may still
+			// be sitting at "working" from the launch that produced it.
+			// Scoped to data.RunID so a stale/duplicate event for this
+			// finished run can't clobber a successor run's live status.
+			s.clearAgentWorking(ctx, data.AgentProfileID, data.RunID)
 			return nil
 		}
 		return err
@@ -406,6 +439,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// eventually reclaims it, instead of releasing a lock for a run that
 	// never actually reached a terminal state.
 	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
+		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
@@ -414,7 +448,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 }
 
 // warnIfReviewDecisionMissing flags a review or approval run that finished
-// without the agent ever calling record_step_decision_kandev. A reviewer can
+// without the agent ever recording a workflow decision. A reviewer can
 // post a full critique and reject the work in a comment, but if that comment
 // never becomes a recorded decision the workflow engine has nothing to act
 // on and the task strands in its current step forever. This does not fix
@@ -492,6 +526,16 @@ func (s *Service) handleTasklessAgentCompleted(
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Same reasoning as handleAgentCompleted's and handleAgentFailed's
+			// ErrNoRows exits: no claimed run resolves, so nothing reaches
+			// this function's own clear below, but the agent may still be
+			// "working" from the launch. Scoped to data.RunID for the same
+			// reason.
+			agentProfileID := data.AgentProfileID
+			if agentProfileID == "" {
+				agentProfileID = data.AgentID
+			}
+			s.clearAgentWorking(ctx, agentProfileID, data.RunID)
 			return nil
 		}
 		return err
@@ -638,6 +682,11 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Same reasoning as handleAgentCompleted's ErrNoRows exit: no
+			// claimed run resolves, so nothing reaches HandleAgentFailure's
+			// clear, but the agent may still be "working" from the launch.
+			// Scoped to data.RunID for the same reason.
+			s.clearAgentWorking(ctx, data.AgentProfileID, data.RunID)
 			return nil
 		}
 		return err
@@ -648,6 +697,9 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		"session_id":    data.SessionID,
 		"error_message": data.ErrorMessage,
 	})
+	// Clear before routing can make the run claimable again. This prevents
+	// cleanup from this attempt from matching a relaunch that reuses its run ID.
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
 		return nil
 	}
@@ -944,8 +996,8 @@ func (s *Service) queueTaskAssignedRun(
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues
-// downstream blocker / children-completed runs when a task lands in a
-// terminal step. Canonical task-state activity is written by the task service
+// downstream blocker / children-completed runs when a task enters a terminal
+// step. Canonical task-state activity is written by the task service
 // before task.state_changed is published, so the workflow move path is durable
 // before any WebSocket refetch can run. Stage progression itself is owned by
 // the workflow engine (the orchestrator subscribes to TaskMoved and fires
@@ -968,22 +1020,39 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 			runID, data.SessionID)
 	}
 
-	if categorizeStep(data.ToStepName) == stepCategoryDone {
+	if categorizeStep(data.ToStepName) == stepCategoryDone &&
+		categorizeStep(data.FromStepName) != stepCategoryDone {
 		return s.finalizeDone(ctx, data)
 	}
 	return nil
 }
 
-// finalizeDone resolves blockers and notifies parents when a task lands
-// in a terminal step. Both side-effects route through the engine via
-// dispatchEngineTrigger (on_blocker_resolved / on_children_completed).
+// finalizeDone resolves blockers, notifies parents, and closes out a
+// linked routine run when a task enters a terminal step. The blocker
+// and parent side-effects route through the engine via
+// dispatchEngineTrigger (on_blocker_resolved / on_children_completed);
+// the routine sync is a direct call since it's a simple status write,
+// not an engine trigger.
 func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
+	if s.routineRunSyncer != nil {
+		terminal := "done"
+		if strings.EqualFold(data.ToStepName, "cancelled") {
+			terminal = "cancelled"
+		}
+		if err := s.routineRunSyncer.SyncRunStatus(ctx, data.TaskID, terminal); err != nil {
+			s.logger.Warn("sync routine run status", zap.Error(err))
+		}
+	}
 	if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
 		s.logger.Error("blocker resolution runs failed", zap.Error(err))
 	}
 	if data.ParentID != "" {
 		if err := s.queueChildrenCompletedRun(ctx, data.ParentID); err != nil {
-			s.logger.Error("children completed run failed", zap.Error(err))
+			// Warn, not Error: ParentWakeReconciler is the documented
+			// recovery path for a parent whose wake didn't get queued
+			// here (including a transient GetChildSetKey failure), so
+			// this is expected to self-heal rather than page anyone.
+			s.logger.Warn("children completed run failed", zap.Error(err))
 		}
 	}
 	return nil
@@ -1067,33 +1136,31 @@ func (s *Service) lookupChildPRLinks(
 }
 
 // queueChildrenCompletedRun checks if all children of a parent are terminal
-// and, if so, dispatches an on_children_completed trigger to the engine
-// with child summaries in the payload.
+// and, if so, dispatches an on_children_completed trigger to the engine.
 func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string) error {
 	allDone, err := s.repo.AreAllChildrenTerminal(ctx, parentID)
 	if err != nil || !allDone {
 		return err
 	}
 
-	children, _, err := s.repo.GetChildSummaries(ctx, parentID)
+	// Derived the same way as ParentWakeReconciler's recovery dispatch
+	// (wakeOperationID) so both producers land on the identical operation
+	// id for the same parent + child set + generation. That shared id is
+	// what lets idx_run_idempotency actually dedupe the pair when the
+	// reconciler races this edge-triggered path for the same completion
+	// wave.
+	childSetKey, generation, err := s.repo.GetChildSetKeyAndGeneration(ctx, parentID)
 	if err != nil {
-		s.logger.Error("get child summaries failed", zap.Error(err))
-		children = nil
+		return fmt.Errorf("get child set key: %w", err)
 	}
 
-	key := fmt.Sprintf("children_completed:%s", parentID)
-	summaries := make([]engine.ChildSummary, 0, len(children))
-	prsByTask := s.lookupChildPRLinks(ctx, children)
-	for _, c := range children {
-		summaries = append(summaries, engine.ChildSummary{
-			TaskID:  c.TaskID,
-			Status:  c.State,
-			Summary: c.LastComment,
-			PRLinks: prsByTask[c.TaskID],
-		})
-	}
+	// No child summaries are assembled here. The prompt path derives the
+	// child list at assembly time from the parent's current children, so a
+	// summary read at this point would pay for data that is discarded and
+	// would make the wake's content depend on which producer won the race.
+	key := wakeOperationID(parentID, childSetKey, generation)
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
-		engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, key)
+		engine.OnChildrenCompletedPayload{}, key)
 }
 
 // handleCommentCreated loads the comment and relays it to external channels.
@@ -1126,6 +1193,11 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		return nil
 	}
 	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
+		return nil
+	}
+	// A session-bridged comment mirrors a turn that already ran; it must
+	// never itself queue a new run, whichever agent it's attributed to.
+	if data.Source == "session" {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is

@@ -53,6 +53,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		project_id TEXT DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'TODO',
 		title TEXT DEFAULT '',
+		assignee_user_id TEXT NOT NULL DEFAULT '',
 		description TEXT DEFAULT '',
 		identifier TEXT DEFAULT '',
 		workflow_id TEXT DEFAULT '',
@@ -207,15 +208,29 @@ func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOption
 	if o.EventBus != nil {
 		opts.EventBus = o.EventBus
 	}
+	if o.TaskPRs != nil {
+		opts.TaskPRs = o.TaskPRs
+	}
 }
 
 // insertTestCostEvent inserts a cost event directly into the DB for
 // budget rollup tests. costSubcents is hundredths of a cent.
+//
+// occurred_at/created_at are bound as time.Time values, not pre-formatted
+// strings: the production CreateCostEvent path binds event.OccurredAt the
+// same way, and the pre-launch spend-window queries
+// (internal/office/repository/sqlite/spendwindow.go) compare occurred_at
+// against a time.Time bound the same way too. A hand-formatted
+// time.RFC3339 string ("...T...Z") sorts inconsistently against the
+// driver's own time.Time formatting ("... ...+00:00") once a query compares
+// two timestamps seconds apart rather than months apart, which silently
+// zeroed out spend in AC-OFFICE-BUDGET-006 admission tests until this was
+// made to match.
 func insertTestCostEvent(t *testing.T, svc interface {
 	ExecSQL(t *testing.T, q string, args ...interface{})
 }, agentID, taskID string, costSubcents int64) {
 	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
 	svc.ExecSQL(t,
 		`INSERT INTO office_cost_events (id, agent_profile_id, task_id, cost_subcents, occurred_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,

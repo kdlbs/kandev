@@ -5,7 +5,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/dra
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import { IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
+import { IconColumns, IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import {
@@ -33,15 +33,18 @@ import {
   mobileSectionClass,
   mobileSectionTitleClass,
 } from "./mobile-menu-styles";
+import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 export type MobileMenuSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   workspaceId?: string;
-  currentPage?: "kanban" | "tasks";
+  currentPage?: TaskListingPage;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
+  pageActions?: ReactNode;
 };
 
 export type MobileDisplayOptionsProps = {
@@ -58,6 +61,8 @@ export type MobileDisplayOptionsProps = {
   onToggleTasksListShowDetails: (checked: boolean) => void;
   showTaskDetails: boolean;
   showWorkflow: boolean;
+  showRepository: boolean;
+  showPreviewPanel: boolean;
   tasksListOptions?: TasksListDisplayOptions;
   /**
    * Column visibility for the workflow the phone board is focused on. Null off
@@ -85,6 +90,7 @@ function MobileDisplaySelects({
   repositoriesLoading,
   onRepositoryChange,
   showWorkflow,
+  showRepository,
 }: Omit<
   MobileDisplayOptionsProps,
   | "enablePreviewOnClick"
@@ -92,6 +98,7 @@ function MobileDisplaySelects({
   | "tasksListShowDetails"
   | "onToggleTasksListShowDetails"
   | "showTaskDetails"
+  | "showPreviewPanel"
   | "tasksListOptions"
   | "columnsSection"
 >) {
@@ -120,30 +127,32 @@ function MobileDisplaySelects({
         </div>
       )}
 
-      <div className={mobileFieldClass}>
-        <label className={mobileFieldLabelClass}>{t("kanban:repository")}</label>
-        <Select
-          value={repositoryValue}
-          onValueChange={(value) => onRepositoryChange(value as string | "all")}
-          disabled={repositories.length === 0}
-        >
-          <SelectTrigger className={mobileControlClass}>
-            <SelectValue
-              placeholder={t(
-                getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
-              )}
-            />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t("kanban:allRepositories")}</SelectItem>
-            {repositories.map((repo: Repository) => (
-              <SelectItem key={repo.id} value={repo.id}>
-                {repo.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {showRepository && (
+        <div className={mobileFieldClass}>
+          <label className={mobileFieldLabelClass}>{t("kanban:repository")}</label>
+          <Select
+            value={repositoryValue}
+            onValueChange={(value) => onRepositoryChange(value as string | "all")}
+            disabled={repositories.length === 0}
+          >
+            <SelectTrigger className={mobileControlClass}>
+              <SelectValue
+                placeholder={t(
+                  getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
+                )}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("kanban:allRepositories")}</SelectItem>
+              {repositories.map((repo: Repository) => (
+                <SelectItem key={repo.id} value={repo.id}>
+                  {repo.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </>
   );
 }
@@ -156,6 +165,7 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
     tasksListShowDetails,
     onToggleTasksListShowDetails,
     showTaskDetails,
+    showPreviewPanel,
     tasksListOptions,
     columnsSection,
     ...selectProps
@@ -170,18 +180,20 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
           <ColumnsMenu {...columnsSection} touchTargets />
         </div>
       )}
-      <div className={mobileFieldClass}>
-        <label className={mobileFieldLabelClass}>{t("kanban:previewPanel")}</label>
-        <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
-          <Checkbox
-            checked={enablePreviewOnClick ?? false}
-            onCheckedChange={(checked) => {
-              onTogglePreviewOnClick?.(!!checked);
-            }}
-          />
-          <span className="text-sm">{t("kanban:openPreviewOnClick")}</span>
-        </label>
-      </div>
+      {showPreviewPanel && (
+        <div className={mobileFieldClass}>
+          <label className={mobileFieldLabelClass}>{t("kanban:previewPanel")}</label>
+          <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
+            <Checkbox
+              checked={enablePreviewOnClick ?? false}
+              onCheckedChange={(checked) => {
+                onTogglePreviewOnClick?.(!!checked);
+              }}
+            />
+            <span className="text-sm">{t("kanban:openPreviewOnClick")}</span>
+          </label>
+        </div>
+      )}
       {showTaskDetails && (
         <div className={mobileFieldClass}>
           <label className={mobileFieldLabelClass}>{t("kanban:listRows")}</label>
@@ -283,6 +295,13 @@ function MobileViewSection({
           </ToggleGroupItem>
         )}
         <ToggleGroupItem
+          value="threads"
+          className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
+        >
+          <IconColumns className={mobileControlIconClass} />
+          {t("kanban:threads")}
+        </ToggleGroupItem>
+        <ToggleGroupItem
           value="list"
           className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
@@ -300,6 +319,7 @@ function ResponsiveMenuSurface({
   onOpenChange,
   contentRef,
   onOpenAutoFocus,
+  onCloseAutoFocus,
   children,
 }: {
   isMobile: boolean;
@@ -307,6 +327,7 @@ function ResponsiveMenuSurface({
   onOpenChange: (open: boolean) => void;
   contentRef: RefObject<HTMLDivElement | null>;
   onOpenAutoFocus: (event: Event) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -317,6 +338,7 @@ function ResponsiveMenuSurface({
           ref={contentRef}
           tabIndex={-1}
           onOpenAutoFocus={onOpenAutoFocus}
+          onCloseAutoFocus={onCloseAutoFocus}
           className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none"
         >
           <div
@@ -342,6 +364,7 @@ function ResponsiveMenuSurface({
         side="right"
         tabIndex={-1}
         onOpenAutoFocus={onOpenAutoFocus}
+        onCloseAutoFocus={onCloseAutoFocus}
         className="w-full overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:max-w-sm"
       >
         <SheetHeader>
@@ -354,6 +377,7 @@ function ResponsiveMenuSurface({
 }
 
 function MobileMenuContent({
+  isMobile,
   workspaceId,
   searchQuery,
   onSearchChange,
@@ -364,10 +388,17 @@ function MobileMenuContent({
   showPipeline,
   displayOptions,
   navControls,
+  pageActions,
 }: Pick<
   MobileMenuSheetProps,
-  "workspaceId" | "searchQuery" | "onSearchChange" | "isSearchLoading" | "onOpenChange"
+  | "workspaceId"
+  | "searchQuery"
+  | "onSearchChange"
+  | "isSearchLoading"
+  | "onOpenChange"
+  | "pageActions"
 > & {
+  isMobile: boolean;
   viewValue: string;
   onViewChange: (value: string) => void;
   showPipeline: boolean;
@@ -376,11 +407,13 @@ function MobileMenuContent({
 }) {
   return (
     <div className="flex min-h-full flex-col gap-6 p-4">
-      <MobileSearchSection
-        searchQuery={searchQuery ?? ""}
-        onSearchChange={onSearchChange}
-        isSearchLoading={isSearchLoading ?? false}
-      />
+      {pageActions ?? (
+        <MobileSearchSection
+          searchQuery={searchQuery ?? ""}
+          onSearchChange={onSearchChange}
+          isSearchLoading={isSearchLoading ?? false}
+        />
+      )}
       <MobileWorkspaceSection onOpenChange={onOpenChange} />
       <MobileViewSection
         viewValue={viewValue}
@@ -388,12 +421,11 @@ function MobileMenuContent({
         showPipeline={showPipeline}
       />
       <MobileDisplayOptions {...displayOptions} />
-      {/* Home and Tasks are omitted here on purpose: the mobile header's brand
-          link is this surface's home affordance and the View toggle above
-          switches between Kanban and List. */}
+      {/* Phone Home lives in this menu; the View toggle owns listing modes. */}
       <AppNavSections
         onNavigate={() => onOpenChange(false)}
-        omitSections={["primary"]}
+        omitSections={isMobile || viewValue === "threads" ? [] : ["primary"]}
+        omitDestinations={["tasks", "threads"]}
         workspaceActions={<MobileWorkspaceActionsSection workspaceId={workspaceId} />}
         controls={navControls}
       />
@@ -404,12 +436,14 @@ function MobileMenuContent({
 export function MobileMenuSheet({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   workspaceId,
   currentPage = "kanban",
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
+  pageActions,
 }: MobileMenuSheetProps) {
   const navControls = useAppNavDialogs(() => onOpenChange(false));
   const { contentRef, isMobile, viewValue, handleViewChange, displayOptions, focusMenu } =
@@ -422,6 +456,7 @@ export function MobileMenuSheet({
       onOpenChange={onOpenChange}
       contentRef={contentRef}
       onOpenAutoFocus={focusMenu}
+      onCloseAutoFocus={onCloseAutoFocus}
       workspaceId={workspaceId}
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
@@ -430,6 +465,7 @@ export function MobileMenuSheet({
       onViewChange={handleViewChange}
       displayOptions={displayOptions}
       navControls={navControls}
+      pageActions={pageActions}
     />
   );
 }
@@ -437,7 +473,14 @@ export function MobileMenuSheet({
 function MobileMenuRender(
   props: Pick<
     MobileMenuSheetProps,
-    "open" | "onOpenChange" | "workspaceId" | "searchQuery" | "onSearchChange" | "isSearchLoading"
+    | "open"
+    | "onOpenChange"
+    | "onCloseAutoFocus"
+    | "workspaceId"
+    | "searchQuery"
+    | "onSearchChange"
+    | "isSearchLoading"
+    | "pageActions"
   > & {
     isMobile: boolean;
     contentRef: RefObject<HTMLDivElement | null>;

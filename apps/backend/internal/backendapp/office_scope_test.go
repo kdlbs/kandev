@@ -793,7 +793,7 @@ func TestOfficeScopeDefersAgentCommentReadToRelationGuard(t *testing.T) {
 	group := engine.Group(officeRoutePrefix)
 	group.Use(officeagents.AgentAuthMiddleware(agentSvc))
 	group.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
-	officedashboard.RegisterRoutes(group, dashboardSvc, officeRepo, nil, handoff, log)
+	officedashboard.RegisterRoutes(group, dashboardSvc, officeRepo, nil, handoff, nil, log)
 
 	cases := []struct {
 		name string

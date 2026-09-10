@@ -86,6 +86,8 @@ func (r *Registry) LoadDefaults() {
 		agents.NewDevinACP(),
 		agents.NewGrokACP(),
 		agents.NewHermesACP(),
+		agents.NewGooseACP(),
+		agents.NewAntigravityACP(),
 		agents.NewMockAgent(),
 	}
 

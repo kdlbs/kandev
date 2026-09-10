@@ -33,6 +33,7 @@ import (
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
@@ -54,6 +55,7 @@ import (
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/integrations/workspacescope"
 	"github.com/kandev/kandev/internal/jira"
+	kuberneteshandlers "github.com/kandev/kandev/internal/kubernetes"
 	"github.com/kandev/kandev/internal/linear"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
@@ -65,6 +67,9 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/org"
+	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/profiles"
@@ -94,12 +99,14 @@ import (
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	"github.com/kandev/kandev/internal/workflowsync"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 const (
 	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
 	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
+	desktopRuntimeEnv        = "KANDEV_DESKTOP_RUNTIME"
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
@@ -269,14 +276,15 @@ func appendSessionStateMessageWithCancellation(
 // appendLiveGitStatusMessage adds git status notification(s) from the canonical
 // task-environment workspace. Multi-repo workspaces emit one notification per
 // repo (stamped with repository_name); single-repo emits a single untagged
-// notification. Sessions without a task environment retain the legacy
-// session-scoped behavior.
+// notification. A session without an environment has no authoritative status
+// scope and therefore emits nothing.
 func appendLiveGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, sessionID string, session *models.TaskSession, result []*ws.Message, log *logger.Logger) []*ws.Message {
 	sources, ok := resolveGitStatusSources(ctx, taskRepo, session, log)
 	if !ok {
 		return result
 	}
-	if msgs := tryGetLiveGitStatus(ctx, lifecycleMgr, sessionID, sources, log); len(msgs) > 0 {
+	msgs, live := tryGetLiveGitStatusWithState(ctx, lifecycleMgr, sessionID, sources, log)
+	if live {
 		return append(result, msgs...)
 	}
 	return appendDBSnapshotGitStatus(ctx, taskRepo, sessionID, sources, result, log)
@@ -285,10 +293,24 @@ func appendLiveGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Reposi
 // tryGetLiveGitStatus attempts to get live git status from agentctl.
 // Returns one notification per repo (one entry for single-repo workspaces).
 // Returns nil when no eligible source has a live execution or agentctl is
-// stuck.
+// stuck. Callers that need to distinguish a failed live query from an absent
+// live execution should use tryGetLiveGitStatusWithState.
 func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, requestedSessionID string, sources *gitStatusSources, log *logger.Logger) []*ws.Message {
+	msgs, _ := tryGetLiveGitStatusWithState(ctx, lifecycleMgr, requestedSessionID, sources, log)
+	return msgs
+}
+
+// tryGetLiveGitStatusWithState probes every eligible execution in the
+// environment under one deadline. The boolean is true as soon as an eligible
+// non-terminal execution is found, even when agentctl cannot answer. This
+// prevents a stale persisted snapshot from replacing an authoritative but
+// currently unavailable live source.
+func tryGetLiveGitStatusWithState(ctx context.Context, lifecycleMgr *lifecycle.Manager, requestedSessionID string, sources *gitStatusSources, log *logger.Logger) ([]*ws.Message, bool) {
 	if lifecycleMgr == nil {
-		return nil
+		return nil, false
+	}
+	if sources == nil || sources.environmentID == "" {
+		return nil, false
 	}
 
 	// Bound the complete source probe, not each source independently. Shared
@@ -297,9 +319,10 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, r
 	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
+	live := false
 	for _, sourceSessionID := range sources.sessionIDs {
 		if err := rpcCtx.Err(); err != nil {
-			return nil
+			return nil, live
 		}
 		execution, ok := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
 		if !ok {
@@ -308,16 +331,34 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, r
 		if !executionMatchesGitStatusSource(sources, execution, sourceSessionID, log) {
 			continue
 		}
-		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, execution, requestedSessionID, sourceSessionID, log); len(msgs) > 0 {
-			return msgs
+		if !isLiveGitStatusExecution(execution) {
+			continue
+		}
+		live = true
+		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, execution, requestedSessionID, sourceSessionID, sources.environmentID, log); len(msgs) > 0 {
+			return msgs, true
 		}
 	}
-	return nil
+	return nil, live
+}
+
+func isLiveGitStatusExecution(execution *lifecycle.AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	switch execution.Status {
+	case v1.AgentStatusCompleted, v1.AgentStatusFailed, v1.AgentStatusStopped:
+		return false
+	default:
+		// An empty status is retained as live for recovered/legacy in-memory
+		// executions that have been registered but not promoted yet.
+		return true
+	}
 }
 
 func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifecycle.AgentExecution, sessionID string, log *logger.Logger) bool {
-	if execution == nil || sources.environmentID == "" {
-		return execution != nil
+	if execution == nil || sources == nil || sources.environmentID == "" {
+		return false
 	}
 	if execution.TaskEnvironmentID != "" && execution.TaskEnvironmentID != sources.environmentID {
 		log.Debug("rejecting live git status source",
@@ -336,10 +377,11 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 	return true
 }
 
-func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID string, log *logger.Logger) []*ws.Message {
-	agentClient := execution.GetAgentCtlClient()
+func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
-		log.Debug("no agentctl client available for session, will fall back to DB snapshot",
+		log.Debug("no agentctl client available for live git status",
 			zap.String("source_session_id", sourceSessionID))
 		return nil
 	}
@@ -347,7 +389,7 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 	// Force fresh git query: cache can wedge when the poll loop misses a HEAD change.
 	multi, err := agentClient.GetGitStatusMultiFresh(ctx)
 	if err != nil {
-		log.Debug("failed to get live git status, will fall back to DB snapshot",
+		log.Debug("failed to get live git status",
 			zap.String("source_session_id", sourceSessionID),
 			zap.Error(err))
 		return nil
@@ -361,7 +403,7 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 		if !repo.Status.Success {
 			continue
 		}
-		notification := buildGitStatusNotification(requestedSessionID, repo.RepositoryName, repo.Status)
+		notification := buildGitStatusNotification(requestedSessionID, taskEnvironmentID, repo.RepositoryName, repo.Status)
 		if notification != nil {
 			out = append(out, notification)
 		}
@@ -380,7 +422,10 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 // the frontend can route through its existing git-status handler. The
 // repository_name is stamped on the inner status payload so the frontend
 // stores it under byEnvironmentRepo[envKey][repository_name].
-func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
+func buildGitStatusNotification(sessionID, taskEnvironmentID, repositoryName string, status client.GitStatusResult) *ws.Message {
+	if taskEnvironmentID == "" {
+		return nil
+	}
 	statusPayload := map[string]interface{}{
 		branchFieldKey:          status.Branch,
 		"remote_branch":         status.RemoteBranch,
@@ -408,10 +453,11 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		statusPayload["repository_name"] = repositoryName
 	}
 	gitEventData := map[string]interface{}{
-		"type":       "status_update",
-		"session_id": sessionID,
-		"timestamp":  status.Timestamp,
-		"status":     statusPayload,
+		"type":                "status_update",
+		"session_id":          sessionID,
+		"task_environment_id": taskEnvironmentID,
+		"timestamp":           status.Timestamp,
+		"status":              statusPayload,
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
 	if err != nil {
@@ -424,13 +470,14 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 // eligible DB snapshot. The selected source is always routed as the requested
 // subscription session.
 func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID string, sources *gitStatusSources, result []*ws.Message, log *logger.Logger) []*ws.Message {
-	logFields := []zap.Field{zap.String("requested_session_id", sessionID)}
-	if sources.environmentID != "" {
-		logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
+	if taskRepo == nil || sources == nil || sources.environmentID == "" {
+		return result
 	}
+	logFields := []zap.Field{zap.String("requested_session_id", sessionID)}
+	logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
 	log.Debug("falling back to DB snapshot for git status", logFields...)
 
-	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsBySessionIDs(ctx, sources.sessionIDs)
+	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, []string{sources.environmentID})
 	if err != nil {
 		log.Warn("failed to load DB snapshots for git status",
 			zap.String("requested_session_id", sessionID),
@@ -454,9 +501,7 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 			zap.String("requested_session_id", sessionID),
 			zap.String("source_session_id", snapshot.SessionID),
 		}
-		if sources.environmentID != "" {
-			logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
-		}
+		logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
 		if repositoryName != "" {
 			logFields = append(logFields, zap.String("repository_name", repositoryName))
 		}
@@ -469,7 +514,7 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 }
 
 func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *models.GitSnapshot) *ws.Message {
-	if snapshot == nil {
+	if snapshot == nil || snapshot.TaskEnvironmentID == "" {
 		return nil
 	}
 	metadata := snapshot.Metadata
@@ -499,10 +544,11 @@ func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *mo
 		statusPayload["repository_name"] = repositoryName
 	}
 	gitEventData := map[string]interface{}{
-		"type":       "status_update",
-		"session_id": sessionID,
-		"timestamp":  metadata["timestamp"],
-		"status":     statusPayload,
+		"type":                "status_update",
+		"session_id":          sessionID,
+		"task_environment_id": snapshot.TaskEnvironmentID,
+		"timestamp":           metadata["timestamp"],
+		"status":              statusPayload,
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
 	if err != nil {
@@ -649,6 +695,7 @@ type routeParams struct {
 	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
 	dbPool                        *db.Pool
+	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
@@ -690,10 +737,17 @@ func registerRoutes(p routeParams) {
 	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
+	// Stamps each plan revision with the task's workflow step at write time.
+	planService.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: p.services.Workflow})
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Archive's batch session cancellation bypasses the orchestrator's own
+	// per-session state-transition chokepoint, so it needs an explicit hook to
+	// clear that session's parked-projection tracking (spec:
+	// docs/specs/disambiguate-waiting).
+	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
@@ -721,6 +775,7 @@ func registerRoutes(p routeParams) {
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
+	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
@@ -738,11 +793,25 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	// Startup repair for the workspace_orphaned board marker: stamps historical
+	// unmarked orphaned tasks and clears stale claims left by a crashed clear.
+	// Must run after SetTaskEventPublisher above (publishing needs it) and
+	// before the gateway accepts clients.
+	handoffSvc.RepairOrphanedWorkspaceMarkers(context.Background())
+	handoffSvc.SetVacatedStepReconciler(p.taskSvc)
 	// Per-user scoping for the cascade is installed by
 	// TaskHandlers.SetHandoffService, which is the call that makes the archive /
 	// delete routes prefer the cascade over the guarded Service methods.
 	if p.services.Office != nil {
 		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
+	}
+	// Config sync's own tables (office_config_sync_configs,
+	// office_config_sync_manifest) have no FK/cascade onto the workspace
+	// row, so DeleteWorkspace must release them explicitly or the poller
+	// keeps running against — and resurrecting entities into — a deleted
+	// workspace (see the "Workspace deletion side tables" convention).
+	if p.services.Office != nil && p.services.OfficeSvcs != nil && p.services.OfficeSvcs.ConfigSync != nil {
+		p.services.Office.SetConfigSyncCleaner(p.services.OfficeSvcs.ConfigSync)
 	}
 	// Cascade archive/delete must tear down runtime resources
 	// (container, sandbox, worktree, executor_running rows) for every
@@ -810,7 +879,7 @@ func registerRoutes(p routeParams) {
 	registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
-		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
+		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.services.SessionHostnameResolver, p.log)
 	}
 
 	// /health is a liveness probe: it answers 200 unconditionally, matching
@@ -929,6 +998,16 @@ func readyHandler(p routeParams) gin.HandlerFunc {
 			})
 			return
 		}
+		if p.persistenceHealth != nil && !p.persistenceHealth.Healthy() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
+				versionFieldKey: version,
+				"reason":        "persistence",
+				"store_ids":     p.persistenceHealth.UnhealthyStoreIDs(),
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			statusKey:       "ok",
 			serviceFieldKey: kandevName,
@@ -986,9 +1065,11 @@ func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
-		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
-		Locale:        i18n.FromRequest(req),
-		TitlePrefix:   strings.TrimSpace(titlePrefix),
+		NonProduction:               profiles.DetectEnvironment() != profiles.EnvProd,
+		Locale:                      i18n.FromRequest(req),
+		TitlePrefix:                 strings.TrimSpace(titlePrefix),
+		NativeFolderPickerAvailable: strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
+		DesktopRuntime:              strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
 	}
 }
 
@@ -998,9 +1079,13 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	if route.Route == webapp.RouteTaskDetail && routeData == nil && canLoadTaskDetailFallback(req, p.authSvc) {
 		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
 	}
+	runtime := webRuntimeConfig(p.devMode, p.webTitlePrefix, req)
+	if p.systemSvc != nil && p.systemSvc.Info != nil {
+		runtime.BootID = p.systemSvc.Info.Info().BootID
+	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
+		runtime,
 		initialState,
 	)
 	payload.RouteData = routeData
@@ -1185,11 +1270,19 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterMemberRoutes(p.router, p.taskSvc, p.log)
+	if p.services != nil && p.services.Org != nil {
+		org.NewController(p.services.Org, p.log).RegisterRoutes(p.router)
+	}
+	if p.services.OrgUnits != nil {
+		orgunit.NewController(p.services.OrgUnits, p.log).RegisterRoutes(p.router)
+	}
 	if p.services != nil {
 		registerMentionRoutes(p.router, p.services.Mentions)
 	}
 	workflowH := taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
+	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
@@ -1235,7 +1328,8 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.router, p.gateway.Dispatcher, p.taskSvc,
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
-	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	taskhandlers.RegisterWorkspaceFileRoutes(p.router, processHandlers)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
 	if p.services.Share != nil {
@@ -1333,6 +1427,15 @@ func registerSecondaryRoutes(
 	}
 
 	if p.taskRepo != nil {
+		kuberneteshandlers.RegisterRoutes(
+			p.router,
+			p.gateway.Dispatcher,
+			p.taskRepo,
+			p.services.Task,
+			p.log,
+		)
+		p.log.Debug("Registered Kubernetes handlers (HTTP + WebSocket)")
+
 		sshhandlers.RegisterRoutes(
 			p.router,
 			p.gateway.Dispatcher,
@@ -1352,9 +1455,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
 		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
+		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
 	if p.services.AzureDevOps != nil {
@@ -1399,6 +1502,10 @@ func registerSecondaryRoutes(
 			p.services.Plugins.SetAuthLoginBridge(pluginSSOBridge{auth: p.authSvc})
 		}
 		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		if p.features.Canvases {
+			plugins.RegisterWebAppRuntimeRoutes(p.router, p.services.Plugins.WebRuntime())
+			registerCanvasRoutes(p)
+		}
 		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 
@@ -1458,6 +1565,8 @@ func registerSecondaryRoutes(
 			officeAgentSvc,
 			p.eventBus,
 			p.log,
+			p.orchestratorSvc,
+			p.taskSvc,
 		)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}
@@ -1558,17 +1667,28 @@ type lifecycleAccessAuthorizer interface {
 	AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error
 	AuthorizeTaskAccess(ctx context.Context, taskID string) error
 	AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error
+	AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error
+	AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error
 }
 
 // wireLifecycleAccessCheckers installs every per-user visibility check on the
 // lifecycle manager. Kept together so a surface that needs a new kind of check
 // has one place to add it, rather than another setter call somewhere else in
 // startup that nothing asserts on.
-func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, authz lifecycleAccessAuthorizer) {
-	lifecycleMgr.SetSessionAccessChecker(authz.AuthorizeSessionAccess)
-	lifecycleMgr.SetEnvironmentAccessChecker(authz.AuthorizeEnvironmentAccess)
-	lifecycleMgr.SetTaskAccessChecker(authz.AuthorizeTaskAccess)
-	lifecycleMgr.SetTaskEnvironmentAccessChecker(authz.AuthorizeTaskEnvironmentAccess)
+func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, access lifecycleAccessAuthorizer) {
+	lifecycleMgr.SetSessionAccessChecker(access.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(access.AuthorizeEnvironmentAccess)
+	lifecycleMgr.SetTaskAccessChecker(access.AuthorizeTaskAccess)
+	lifecycleMgr.SetTaskEnvironmentAccessChecker(access.AuthorizeTaskEnvironmentAccess)
+	// Execution surfaces (terminal, shell, file writes, VS Code, port
+	// previews) require session.exec, which a viewer does not hold. They are
+	// keyed either by session or by environment, so both slots get one.
+	lifecycleMgr.SetSessionExecAccessChecker(func(ctx context.Context, sessionID string) error {
+		return access.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionExec)
+	})
+	lifecycleMgr.SetEnvironmentExecAccessChecker(func(ctx context.Context, environmentID string) error {
+		return access.AuthorizeEnvironmentScope(ctx, environmentID, authz.ScopeSessionExec)
+	})
 }
 
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
@@ -1727,9 +1847,51 @@ func registerMCPAndDebugRoutes(
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	mcpHandlers.SetPluginService(p.services.Plugins)
+	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
+		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
+			p.services.Canvas, p.services.Plugins, p.taskSvc,
+			lifecycleCanvasExecutionResolver{manager: p.lifecycleMgr}, p.homeDir, p.log,
+		))
+	}
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
+	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
+		p.log.Error("failed to build settings catalog", zap.Error(err))
+	} else {
+		mcpHandlers.SetSettingsCatalog(settingsRegistry)
+		var storageSettings settingsStorageService
+		if p.systemSvc != nil {
+			storageSettings = p.systemSvc.Storage
+		}
+		mcpHandlers.SetSettingsOperations(newSettingsOperations(
+			settingsRegistry,
+			p.agentSettingsController,
+			p.services.User,
+			settingsDomainDependencies{
+				broadcaster:   p.gateway.Hub,
+				authEnabled:   func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
+				task:          p.taskSvc,
+				workflow:      p.services.Workflow,
+				workflowCtrl:  wfCtrl,
+				prompts:       p.services.Prompts,
+				utility:       p.services.Utility,
+				editors:       p.services.Editor,
+				notifications: p.notificationCtrl,
+				runtimeFlags:  p.services.RuntimeFlags,
+				storage:       storageSettings,
+				automation:    automationServiceFromComponents(p.services.Automation),
+				agent:         p.agentSettingsController,
+				jira:          settingsJiraServiceFromPointer(p.services.Jira),
+				linear:        settingsLinearServiceFromPointer(p.services.Linear),
+				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
+				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
+				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
+				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
+			},
+		))
+	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)
@@ -1751,13 +1913,12 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
 	}
+	if p.orchestratorSvc != nil {
+		mcpHandlers.SetTaskPRAutoFixOutcomeService(p.orchestratorSvc)
+	}
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
-	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
-		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
-	}
-
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so
 	// workspace-group state stays consistent across both surfaces.
@@ -1822,6 +1983,9 @@ func registerMCPAndDebugRoutes(
 	if p.devMode {
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
+		if p.dbPool != nil {
+			db.RegisterWriterPoolStats(p.dbPool)
+		}
 	}
 }
 

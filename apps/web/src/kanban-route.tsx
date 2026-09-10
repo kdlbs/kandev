@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { PageClient } from "@/app/page-client";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -82,13 +82,33 @@ function useKanbanWorkspaceMismatchRedirect(route: KanbanRouteSelection): string
   return redirectHref;
 }
 
-function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
+/**
+ * Hydrates workspaces, workflows and repositories for a board-backed route.
+ * Exported because Threads renders the same workspace data from a different
+ * arrangement, and a second bootstrap would be a second source of truth for
+ * which workspace is active.
+ */
+export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
   const store = useAppStoreApi();
+  const selection = useMemo(
+    () => ({ workspaceId: route.workspaceId, workflowId: route.workflowId }),
+    [route.workspaceId, route.workflowId],
+  );
+  const [completedSelection, setCompletedSelection] = useState<typeof selection | null>(null);
+  const hydrated = useAppStore(
+    (state) => state.userSettings.loaded && hasHydratedKanbanRouteState(state, selection),
+  );
 
   useEffect(() => {
     promoteLegacyWorkspaceSelection(store.getState().workspaces.items);
     if (skip) return;
-    if (hasHydratedKanbanRouteState(store.getState(), route)) return;
+    if (
+      store.getState().userSettings.loaded &&
+      hasHydratedKanbanRouteState(store.getState(), selection)
+    ) {
+      setCompletedSelection(selection);
+      return;
+    }
 
     let cancelled = false;
 
@@ -105,7 +125,7 @@ function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
       promoteLegacyWorkspaceSelection(workspaceItems);
       const activeWorkspaceId = resolveKanbanRouteWorkspaceId(
         workspaceItems,
-        route.workspaceId,
+        selection.workspaceId,
         readActiveWorkspaceCookie(),
         settingsWorkspaceId,
       );
@@ -138,7 +158,7 @@ function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
       if (cancelled) return;
 
       const workflowId = resolveDesiredWorkflowId({
-        activeWorkflowId: route.workflowId ?? null,
+        activeWorkflowId: selection.workflowId ?? null,
         settingsWorkflowId,
         workspaceWorkflows: workflowsResponse.workflows,
       });
@@ -157,11 +177,16 @@ function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
       store.getState().setRepositories(activeWorkspaceId, repositoriesResponse.repositories);
     }
 
-    void bootstrap();
+    void bootstrap().then(() => {
+      if (!cancelled) setCompletedSelection(selection);
+    });
     return () => {
       cancelled = true;
     };
-  }, [route.workspaceId, route.workflowId, skip, store]);
+  }, [selection, skip, store]);
+
+  // Completion is tied to this route request, including empty and failed fetches.
+  return hydrated || completedSelection === selection;
 }
 
 function mapWorkflowItem(workflow: Workflow) {
@@ -186,14 +211,14 @@ export function KanbanRoute({
   fallback: React.ReactNode;
 }) {
   const redirectHref = useKanbanWorkspaceMismatchRedirect(route);
-  useKanbanRouteBootstrap(route, redirectHref !== null);
+  const ready = useKanbanRouteBootstrap(route, redirectHref !== null);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
 
-  if (redirectHref) return <>{fallback}</>;
+  if (redirectHref || !ready) return <>{fallback}</>;
 
   return (
     <PageClient
-      workspaceId={route.workspaceId ?? activeWorkspaceId ?? undefined}
+      workspaceId={activeWorkspaceId ?? undefined}
       initialTaskId={route.taskId}
       initialSessionId={route.sessionId}
     />

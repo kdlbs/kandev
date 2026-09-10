@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-08
-updated: 2026-08-30
+updated: 2026-08-31
 owners:
   - cfl
 ---
@@ -32,4 +32,6 @@ A session is a conversation and execution reference inside a task; it is not the
 
 ## System design
 
-The migrated technical source is split into [part 1](../system-design/session-delete-resource-cleanup.md).
+The migrated technical source is split into
+[resource ownership](../system-design/session-delete-resource-cleanup.md) and
+[environment-owned Git status](../system-design/environment-owned-git-status.md).

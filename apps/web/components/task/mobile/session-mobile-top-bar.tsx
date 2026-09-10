@@ -5,11 +5,13 @@ import Link from "@/components/routing/app-link";
 import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import type { FileInfo } from "@/lib/state/slices";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
@@ -35,6 +37,7 @@ type SessionMobileTopBarProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
 };
 
 function MobileTaskTitle({
@@ -84,7 +87,7 @@ function MobileTaskTitle({
   );
 }
 
-function RemoteExecutorIndicator({
+export function MobileRemoteExecutorIndicator({
   taskId,
   sessionId,
   remoteExecutorType,
@@ -103,6 +106,9 @@ function RemoteExecutorIndicator({
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
 }) {
+  if (remoteExecutorType === "k8s") {
+    return <ExecutorSettingsButton taskId={taskId} sessionId={sessionId} />;
+  }
   return (
     <RemoteCloudTooltip
       taskId={taskId ?? ""}
@@ -176,6 +182,7 @@ type MobileTopBarActionsProps = {
   sessionId?: string | null;
   taskTitle?: string;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
   onMenuClick: () => void;
 };
 
@@ -194,12 +201,14 @@ function MobileTopBarActions({
   sessionId,
   taskTitle,
   isArchived,
+  onTaskUnarchived,
   onMenuClick,
 }: MobileTopBarActionsProps) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
+      {isArchived && <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} mobile />}
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
       {!isArchived && (
         <TaskTopBarPluginActions
@@ -210,7 +219,7 @@ function MobileTopBarActions({
         />
       )}
       {isRemoteExecutor && (
-        <RemoteExecutorIndicator
+        <MobileRemoteExecutorIndicator
           taskId={taskId}
           sessionId={sessionId}
           remoteExecutorType={remoteExecutorType}
@@ -279,6 +288,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         sessionId={props.sessionId}
         taskTitle={props.taskTitle}
         isArchived={props.isArchived}
+        onTaskUnarchived={props.onTaskUnarchived}
         onMenuClick={props.onMenuClick}
       />
     </header>

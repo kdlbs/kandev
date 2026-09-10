@@ -114,17 +114,19 @@ export interface IntegrationSettingsRegistration {
  * "task-sidebar", "settings-nav", "chat-input-actions"
  * (icon buttons in the chat composer toolbar, beside the model picker / mic /
  * send — receives `{ taskId, taskTitle, activeSessionId, sessionIds }` as
- * `slotProps`), "chat-top-bar" (status in the session top bar, beside the
+ * `slotProps`), "chat-submit-decoration" (a layer *over* the send button's own
+ * box, for adornments that belong on the send affordance rather than beside it
+ * — receives `ChatSubmitDecorationSlotProps`; the host positions the layer and
+ * makes it `pointer-events-none`, see chat-submit-plugin-decoration.tsx), "chat-top-bar" (status in the session top bar, beside the
  * CPU/DB metrics — receives `{ taskId, taskTitle, workspaceId, activeSessionId,
  * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
  * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
  * view/display controls — the app-wide, task-agnostic counterpart to
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
  * presentation }`). On phones, `presentation` is "mobile": contributions
- * join the horizontally scrollable middle action strip between the fixed
- * Kandev link and menu button. Use the host `ui.Button` icon-button contract
- * there: a 32px box with a 16px SVG icon. Desktop contributions retain their
- * existing sizing.
+ * live in the listing topbar menu with 44px touch targets and 16px SVG icons.
+ * Slots retain ownership of their controls and disclosure state; arbitrary
+ * interactions do not dismiss the host menu. Desktop sizing stays unchanged.
  * "app-status-bar-left" / "app-status-bar-right" (receives
  * `AppStatusBarSlotProps` as `slotProps`), and
  * "plugin-settings" (inline UI on a plugin's own settings
@@ -266,6 +268,36 @@ export type ReviewProviderRegistration = Parameters<
 
 /** Presentation context a task panel or kanban menu action renders under. */
 export type PluginPresentation = "desktop" | "mobile";
+
+/**
+ * Props forwarded to every plugin component registered for the
+ * `chat-submit-decoration` slot. Canonical host counterpart of the
+ * `@kandev/plugin-sdk` export of the same name; the two are pinned together by
+ * `sdk-contract.test.ts`.
+ *
+ * These are kandev session ids. Resolving them to an agent/ACP transcript id
+ * is the plugin's job -- do it server-side in the plugin backend through the
+ * Host data API, not here. See PLUGIN-API.md.
+ */
+export type ChatSubmitDecorationSlotProps = {
+  /** Task the composer belongs to, or null for task-less quick chat. */
+  taskId: string | null;
+  /** Display title of the task, when known. */
+  taskTitle?: string;
+  /** Session the composer is currently bound to, or null before one exists. */
+  activeSessionId: string | null;
+  /** Every kandev session id on the task (includes `activeSessionId`). */
+  sessionIds: string[];
+  presentation: PluginPresentation;
+  /** True while the composer is dispatching the current message. */
+  isSending: boolean;
+  /** True when the agent is mid-turn, so the next send queues behind it. */
+  isAgentBusy: boolean;
+  /** True when the send button itself is disabled. */
+  disabled: boolean;
+  /** True when plan mode is on (the button sends a plan request). */
+  planModeEnabled: boolean;
+};
 
 export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
 

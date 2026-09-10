@@ -23,13 +23,16 @@ import type { HydrationState } from "./store";
 import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-actions";
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
+import { normalizeThreadViews } from "./slices/ui/thread-view-builtins";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
   kanbanMulti: defaultKanbanState.kanbanMulti,
   sidebarArchivedTasks: defaultKanbanState.sidebarArchivedTasks,
   workflows: defaultKanbanState.workflows,
+  workspaceContextGeneration: defaultKanbanState.workspaceContextGeneration,
   tasks: defaultKanbanState.tasks,
+  taskRemoval: defaultKanbanState.taskRemoval,
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
   repositorySets: defaultWorkspaceState.repositorySets,
@@ -53,6 +56,7 @@ export const defaultState = {
   turns: defaultSessionState.turns,
   taskSessions: defaultSessionState.taskSessions,
   taskSessionsByTask: defaultSessionState.taskSessionsByTask,
+  pendingActionProjectionsBySessionId: defaultSessionState.pendingActionProjectionsBySessionId,
   sessionAgentctl: defaultSessionState.sessionAgentctl,
   worktrees: defaultSessionState.worktrees,
   sessionWorktreesBySessionId: defaultSessionState.sessionWorktreesBySessionId,
@@ -69,6 +73,7 @@ export const defaultState = {
   gitStatus: defaultSessionRuntimeState.gitStatus,
   environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
+  gitCheckoutGeneration: defaultSessionRuntimeState.gitCheckoutGeneration,
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
   availableCommands: defaultSessionRuntimeState.availableCommands,
@@ -108,6 +113,8 @@ export const defaultState = {
   office: defaultOfficeState.office,
   features: defaultFeaturesState.features,
   auth: defaultAuthState.auth,
+  sessionHostnames: defaultAuthState.sessionHostnames,
+  sessionHostnamesEpoch: defaultAuthState.sessionHostnamesEpoch,
   automations: defaultAutomationsState.automations,
   automationRuns: defaultAutomationsState.automationRuns,
   system: defaultSystemState.system,
@@ -126,6 +133,7 @@ export const defaultState = {
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
   bottomTerminal: defaultUIState.bottomTerminal,
   sidebarViews: defaultUIState.sidebarViews,
+  threadViews: defaultUIState.threadViews,
   collapsedSubtaskParents: defaultUIState.collapsedSubtaskParents,
   kanbanPreviewedTaskId: defaultUIState.kanbanPreviewedTaskId,
   sidebarTaskPrefs: defaultUIState.sidebarTaskPrefs,
@@ -204,6 +212,24 @@ function mergeSidebarViewState(initialState: HydrationState): DefaultState["side
   return sidebarViews;
 }
 
+/** Merge Threads saved views from user settings over the UI defaults. */
+function mergeThreadViewState(initialState: HydrationState): DefaultState["threadViews"] {
+  const threadViews = { ...defaultState.threadViews, ...initialState.threadViews };
+  const serverViews = initialState.userSettings?.threadViews;
+  if (serverViews) threadViews.views = normalizeThreadViews(serverViews);
+
+  const activeViewId = initialState.userSettings?.threadActiveViewId;
+  if (activeViewId && threadViews.views.some((view) => view.id === activeViewId)) {
+    threadViews.activeViewId = activeViewId;
+  } else if (!threadViews.views.some((view) => view.id === threadViews.activeViewId)) {
+    threadViews.activeViewId = threadViews.views[0].id;
+  }
+  if (initialState.userSettings?.threadViewDraft !== undefined) {
+    threadViews.draft = initialState.userSettings.threadViewDraft;
+  }
+  return threadViews;
+}
+
 /** Merge sidebar task prefs, copying the server-provided pinned, ordered, and subtask-order lists from user settings over defaults. */
 function mergeSidebarTaskPrefsState(
   initialState: HydrationState,
@@ -267,6 +293,10 @@ function mergePromptHistoryState(initialState: HydrationState) {
       ...defaultState.messagePrompts.generationBySession,
       ...initialState.messagePrompts?.generationBySession,
     },
+    refreshGenerationBySession: {
+      ...defaultState.messagePrompts.refreshGenerationBySession,
+      ...initialState.messagePrompts?.refreshGenerationBySession,
+    },
   };
 }
 
@@ -327,6 +357,36 @@ function mergeTurnsState(
   return { ...merged, loadedBySession, settledBoundaryBySession };
 }
 
+function mergeTaskSessionState(initialState: HydrationState) {
+  return {
+    taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
+    taskSessionsByTask: {
+      ...defaultState.taskSessionsByTask,
+      ...initialState.taskSessionsByTask,
+      itemsByTaskId: {
+        ...defaultState.taskSessionsByTask.itemsByTaskId,
+        ...initialState.taskSessionsByTask?.itemsByTaskId,
+      },
+      loadingByTaskId: {
+        ...defaultState.taskSessionsByTask.loadingByTaskId,
+        ...initialState.taskSessionsByTask?.loadingByTaskId,
+      },
+      loadedByTaskId: {
+        ...defaultState.taskSessionsByTask.loadedByTaskId,
+        ...initialState.taskSessionsByTask?.loadedByTaskId,
+      },
+      errorByTaskId: {
+        ...defaultState.taskSessionsByTask.errorByTaskId,
+        ...initialState.taskSessionsByTask?.errorByTaskId,
+      },
+    },
+    pendingActionProjectionsBySessionId: {
+      ...defaultState.pendingActionProjectionsBySessionId,
+      ...initialState.pendingActionProjectionsBySessionId,
+    },
+  };
+}
+
 /**
  * Builds the full default state from the SSR/boot hydration payload, merging
  * per-slice (kanban, turns, settings, ...) so partial payloads never clobber
@@ -335,12 +395,15 @@ function mergeTurnsState(
 // eslint-disable-next-line max-lines-per-function -- merges every hydrated state slice in one place.
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
+  const hydration = { ...initialState };
+  delete hydration.taskRemoval;
   return {
     ...defaultState,
-    ...initialState,
+    ...hydration,
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     kanbanMulti: { ...defaultState.kanbanMulti, ...initialState.kanbanMulti },
     workflows: { ...defaultState.workflows, ...initialState.workflows },
+    workspaceContextGeneration: mergeWorkspaceContextGeneration(initialState),
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
@@ -373,14 +436,9 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     messages: { ...defaultState.messages, ...initialState.messages },
     messagePrompts: mergePromptHistoryState(initialState),
     turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
-    taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
-    taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
+    ...mergeTaskSessionState(initialState),
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
-    worktrees: { ...defaultState.worktrees, ...initialState.worktrees },
-    sessionWorktreesBySessionId: {
-      ...defaultState.sessionWorktreesBySessionId,
-      ...initialState.sessionWorktreesBySessionId,
-    },
+    ...mergeWorktreeState(initialState),
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
@@ -391,6 +449,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     processes: { ...defaultState.processes, ...initialState.processes },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
+    gitCheckoutGeneration: {
+      ...defaultState.gitCheckoutGeneration,
+      ...initialState.gitCheckoutGeneration,
+    },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
@@ -428,11 +490,34 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     office: { ...defaultState.office, ...initialState.office },
     features: { ...defaultState.features, ...initialState.features },
     auth: { ...defaultState.auth, ...initialState.auth },
+    ...mergeSessionHostnamesState(initialState),
     automations: { ...defaultState.automations, ...initialState.automations },
     automationRuns: { ...defaultState.automationRuns, ...initialState.automationRuns },
     system: { ...defaultState.system, ...initialState.system },
     ...mergeUIPanelState(initialState),
   };
+}
+
+/** Merge the worktree state fields (worktrees, session worktrees) from hydration state over defaults. */
+function mergeWorktreeState(initialState: HydrationState) {
+  return {
+    worktrees: { ...defaultState.worktrees, ...initialState.worktrees },
+    sessionWorktreesBySessionId: {
+      ...defaultState.sessionWorktreesBySessionId,
+      ...initialState.sessionWorktreesBySessionId,
+    },
+  };
+}
+
+/** Merge the session-hostname resolution fields from hydration state over defaults. */
+function mergeSessionHostnamesState(initialState: HydrationState) {
+  return {
+    sessionHostnames: { ...defaultState.sessionHostnames, ...initialState.sessionHostnames },
+    sessionHostnamesEpoch: initialState.sessionHostnamesEpoch ?? defaultState.sessionHostnamesEpoch,
+  };
+}
+function mergeWorkspaceContextGeneration(initialState: HydrationState) {
+  return initialState.workspaceContextGeneration ?? defaultState.workspaceContextGeneration;
 }
 
 // Split out of mergeInitialState to stay under the per-function line limit —
@@ -455,6 +540,7 @@ function mergeUIPanelState(initialState: HydrationState) {
     sessionFailureNotification: mergeSessionFailureNotification(initialState),
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
     sidebarViews: mergeSidebarViewState(initialState),
+    threadViews: mergeThreadViewState(initialState),
     sidebarTaskPrefs: mergeSidebarTaskPrefsState(initialState),
     collapsedSubtaskParents:
       initialState.collapsedSubtaskParents ?? defaultState.collapsedSubtaskParents,

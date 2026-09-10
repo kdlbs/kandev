@@ -66,7 +66,9 @@ describe("toSheetItem", () => {
   it("preserves the archived marker for projected rows", () => {
     expect(toSheetItem(task({ isArchived: true }), emptyCtx()).isArchived).toBe(true);
   });
+});
 
+describe("toSheetItem status", () => {
   it("reads pending permission from the task status summary", () => {
     const item = toSheetItem(
       task({

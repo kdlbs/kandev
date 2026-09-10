@@ -78,6 +78,11 @@ type Worktree struct {
 	// closed if the recorded path or branch advanced before teardown.
 	CleanupHeadOID string `json:"-"`
 
+	// CleanupHeadOIDUnavailable indicates that the current durable cleanup
+	// snapshot intentionally omitted this worktree's commit identity. It is
+	// internal provenance, so it is rebuilt when a snapshot is loaded.
+	CleanupHeadOIDUnavailable bool `json:"-"`
+
 	// BaseBranch is the branch this worktree was created from.
 	BaseBranch string `json:"base_branch"`
 
@@ -159,6 +164,12 @@ type CreateRequest struct {
 	// miss, invalid directory, or mismatched canonical record may create or
 	// recreate a worktree in this mode.
 	ReuseRequired bool
+
+	// AllowBranchReplacement explicitly permits recovery to create a new branch
+	// when the persisted worktree branch no longer exists. It is only set by the
+	// user-selected resume-new-branch action; ordinary resume keeps the original
+	// branch and returns ErrBranchUnrecoverable.
+	AllowBranchReplacement bool
 
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
+import { defaultState } from "@/lib/state/default-state";
 import { AppNavSheet } from "./app-nav-sheet";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
 
@@ -16,8 +17,14 @@ const THEME_TOGGLE_TEST_ID = "mobile-theme-toggle-button";
 const ARIA_LABEL = "aria-label";
 
 const state = {
+  features: { canvases: false },
   workspaces: { activeId: "ws-1" as string | null },
+  userSettings: { ...defaultState.userSettings },
 };
+
+beforeEach(() => {
+  state.userSettings = { ...defaultState.userSettings };
+});
 
 let healthHasIssues = false;
 let statusSeverity: "none" | "unstable" | "lost" = "none";
@@ -155,14 +162,17 @@ describe("AppNavSheet", () => {
     expect(pageNavIndex).toBe(0);
   });
 
-  it("routes the Home row through the manifest href", () => {
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.4
+  it.each([
+    ["task_overview", "/?home=overview&workspaceId=ws-1"],
+    ["threads", "/threads?workspace=ws-1"],
+  ] as const)("routes the Home row through the manifest href for %s", (startupPage, href) => {
+    state.userSettings.startupPage = startupPage;
     render(<AppNavSheet />);
 
     fireEvent.click(screen.getByTestId("app-nav-trigger"));
 
-    expect(screen.getByRole("link", { name: "Home" }).getAttribute("href")).toBe(
-      "/?home=overview&workspaceId=ws-1",
-    );
+    expect(screen.getByRole("link", { name: "Home" }).getAttribute("href")).toBe(href);
   });
 
   it("exposes workspace actions through the shared phone navigation sheet", () => {

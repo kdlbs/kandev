@@ -15,3 +15,12 @@ export function compareUserSettingsRevisions(
   if (leftValue === rightValue) return 0;
   return leftValue > rightValue ? 1 : -1;
 }
+
+export function isUserSettingsResponseCurrent(
+  responseRevision: number | null | undefined,
+  currentRevision: number | null | undefined,
+  isSubmittedSnapshot: boolean,
+): boolean {
+  const order = compareUserSettingsRevisions(responseRevision, currentRevision);
+  return order === null ? isSubmittedSnapshot : order >= 0;
+}

@@ -335,7 +335,7 @@ func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, client Client, 
 			issues, err = client.ListIssues(ctx, filter, "")
 		}
 		if err != nil {
-			if isConnectivityError(err) {
+			if IsConnectivityError(err) {
 				s.logger.Warn("failed to list issues (connectivity)",
 					zap.String("filter", qualifier), zap.Error(err))
 			} else {

@@ -16,14 +16,16 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db               *sqlx.DB // writer
-	ro               *sqlx.DB // reader (read-only pool)
-	ownsDB           bool
-	log              *logger.Logger
-	migrate          *db.MigrateLogger
-	queuePurgeMu     sync.RWMutex
-	queuePurger      func(context.Context, string)
-	queuePurgeNotify func(context.Context, string)
+	db                      *sqlx.DB // writer
+	ro                      *sqlx.DB // reader (read-only pool)
+	ownsDB                  bool
+	log                     *logger.Logger
+	migrate                 *db.MigrateLogger
+	queuePurgeMu            sync.RWMutex
+	queuePurger             func(context.Context, string)
+	queuePurgePrepare       func(context.Context, string)
+	queuePurgeNotify        func(context.Context, string)
+	queueSessionPurgeNotify func(context.Context, string, string)
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
@@ -31,6 +33,10 @@ type Repository struct {
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
 	failCutoverAfter string
+	// failGitSnapshotCutoverAfter is a test-only failpoint for the Git snapshot
+	// ownership cutover. It is separate from the worktree failpoint because the
+	// two migrations can be exercised independently in the same repository.
+	failGitSnapshotCutoverAfter string
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns
@@ -65,8 +71,14 @@ type Repository struct {
 	// single-connection test repositories (SetMaxOpenConns(1) serializes
 	// all writes), so this stands in for one.
 	failParticipantSeatReconcileAttempts int
-	failUsageEventRollupAttempts         int
-	failUsageEventRollupErr              error
+	// failAgentErrorReconcileAttempts is a test-only failpoint for the
+	// on_agent_error reconciler's bounded retry loop (WO-05-2): while > 0,
+	// tryHealAgentErrorRow reports a synthetic concurrent-modification retry
+	// without touching the database, and decrements the counter. Same
+	// rationale as failParticipantSeatReconcileAttempts above.
+	failAgentErrorReconcileAttempts int
+	failUsageEventRollupAttempts    int
+	failUsageEventRollupErr         error
 	// usageEventPreRollupHook is a test-only synchronization seam, called (if
 	// set) inside insertUsageEventAndRollup's transaction at the same point as
 	// the failUsageEventRollup* failpoint - after the ledger row insert
@@ -105,6 +117,14 @@ func (r *Repository) SetTaskQueuePurger(purger func(context.Context, string)) {
 	r.queuePurger = purger
 }
 
+// SetTaskQueuePurgePreparer registers a bounded in-process cancellation hook
+// invoked before a task lifecycle transaction purges queue rows.
+func (r *Repository) SetTaskQueuePurgePreparer(prepare func(context.Context, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queuePurgePrepare = prepare
+}
+
 // SetTaskQueuePurgeNotifier registers a post-commit observer for every path
 // that purges a task's queued_messages (archive/delete/workspace cascade).
 // Callers must not purge the production SQLite queue again — that already
@@ -115,6 +135,15 @@ func (r *Repository) SetTaskQueuePurgeNotifier(notifier func(context.Context, st
 	r.queuePurgeMu.Lock()
 	defer r.queuePurgeMu.Unlock()
 	r.queuePurgeNotify = notifier
+}
+
+func (r *Repository) notifyTaskQueuePurging(ctx context.Context, taskID string) {
+	r.queuePurgeMu.RLock()
+	prepare := r.queuePurgePrepare
+	r.queuePurgeMu.RUnlock()
+	if prepare != nil {
+		prepare(ctx, taskID)
+	}
 }
 
 func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
@@ -130,6 +159,23 @@ func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
 	}
 }
 
+// SetTaskSessionQueuePurgeNotifier registers a post-commit observer for queue
+// rows removed by DeleteTaskSession.
+func (r *Repository) SetTaskSessionQueuePurgeNotifier(notifier func(context.Context, string, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queueSessionPurgeNotify = notifier
+}
+
+func (r *Repository) notifyTaskSessionQueuePurged(ctx context.Context, taskID, sessionID string) {
+	r.queuePurgeMu.RLock()
+	notifier := r.queueSessionPurgeNotify
+	r.queuePurgeMu.RUnlock()
+	if notifier != nil {
+		notifier(ctx, taskID, sessionID)
+	}
+}
+
 // NewWithDB creates a new SQLite repository with an existing database connection (shared ownership).
 func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
 	return newRepository(writer, reader, log, false)
@@ -141,7 +187,7 @@ func newRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*R
 		ro:      reader,
 		ownsDB:  ownsDB,
 		log:     log,
-		migrate: db.NewMigrateLogger(writer, log),
+		migrate: db.NewRequiredMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {

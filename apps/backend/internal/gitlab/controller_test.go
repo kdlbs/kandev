@@ -403,3 +403,65 @@ func TestHttpSearchUserIssues_TranslatesTabFilters(t *testing.T) {
 		})
 	}
 }
+
+// httpSearchUserIssues wiring is otherwise only unit-tested one layer down
+// (buildIssueSearchQuery, trimGitLabWhitespace); nothing previously asserted
+// end to end that the ?milestone= query key is actually read off the
+// request and reaches the outbound GitLab call. A typo in the query key
+// name would have passed every other test in this package.
+func TestHttpSearchUserIssues_MilestoneReachesUpstreamRequest(t *testing.T) {
+	router, rec, stop := newControllerFixture(t, "alice")
+	defer stop()
+
+	resp := hit(router, "/api/v1/gitlab/user/issues?filter=assigned_to_me&milestone="+url.QueryEscape("Next"))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	req := rec.findByPath("/api/v4/issues")
+	if req == nil {
+		t.Fatal("/api/v4/issues was never called")
+	}
+	if got := req.Query.Get("milestone"); got != "Next" {
+		t.Errorf("milestone = %q, want Next", got)
+	}
+	if got := req.Query.Get("scope"); got != "assigned_to_me" {
+		t.Errorf("scope = %q, want assigned_to_me (milestone must not clobber the preset)", got)
+	}
+}
+
+// A whitespace-only milestone (Scenario 3's second boundary) trims to "" and
+// must produce a request identical to omitting the parameter entirely — no
+// milestone key on the wire at all.
+func TestHttpSearchUserIssues_WhitespaceOnlyMilestoneOmitsKey(t *testing.T) {
+	router, rec, stop := newControllerFixture(t, "alice")
+	defer stop()
+
+	resp := hit(router, "/api/v1/gitlab/user/issues?filter=assigned_to_me&milestone="+url.QueryEscape("   "))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	req := rec.findByPath("/api/v4/issues")
+	if req == nil {
+		t.Fatal("/api/v4/issues was never called")
+	}
+	if req.Query.Has("milestone") {
+		t.Errorf("query = %v, want no milestone key for a whitespace-only value", req.Query)
+	}
+}
+
+func TestHttpSearchUserIssues_MalformedCustomQueryReturns400(t *testing.T) {
+	router, rec, stop := newControllerFixture(t, "alice")
+	defer stop()
+
+	resp := hit(
+		router,
+		"/api/v1/gitlab/user/issues?custom_query="+url.QueryEscape("%zz")+
+			"&milestone="+url.QueryEscape("Next"),
+	)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", resp.Code, resp.Body.String())
+	}
+	if req := rec.findByPath("/api/v4/issues"); req != nil {
+		t.Errorf("/api/v4/issues was called with query %v — malformed custom query should be rejected", req.Query)
+	}
+}

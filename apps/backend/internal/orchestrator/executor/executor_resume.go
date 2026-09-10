@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -738,15 +739,47 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 	return lifecycle.SerializePrepareResult(result)
 }
 
+// ResumeOptions controls explicit recovery behavior for a session resume.
+// Branch replacement is intentionally opt-in; ordinary resume preserves the
+// original worktree branch and reports when it is unrecoverable.
+type ResumeOptions struct {
+	AllowBranchReplacement bool
+	// AllowCompletedSessionResume is granted only by an explicit user recovery
+	// or a pinned follow-up dispatch. It does not change the global terminal
+	// session predicate or permit implicit resume paths.
+	AllowCompletedSessionResume bool
+}
+
 // ResumeSession restarts an existing task session using its stored worktree.
 // When startAgent is false, only the executor runtime is started (agent process is not launched).
 func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
+	return e.resumeSession(ctx, session, startAgent, ResumeOptions{})
+}
+
+// ResumeSessionWithOptions restarts an existing task session with an explicit
+// recovery permission. It keeps the same session and provider resume identity.
+func (e *Executor) ResumeSessionWithOptions(
+	ctx context.Context,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*TaskExecution, error) {
+	return e.resumeSession(ctx, session, startAgent, options)
+}
+
+//nolint:cyclop,gocognit,funlen // Resume coordinates the established launch, rollback, and stale-execution recovery sequence.
+func (e *Executor) resumeSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*TaskExecution, error) {
 	if session != nil {
 		resumeSnapshot := *session
 		resumeSnapshot.Metadata = cloneMetadata(session.Metadata)
 		session = &resumeSnapshot
 	}
-	task, unlock, err := e.validateAndLockResume(ctx, session)
+	task, unlock, err := e.validateAndLockResume(ctx, session, options)
 	if err != nil {
 		return nil, err
 	}
@@ -754,7 +787,9 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
-	wasTerminalResume := isTerminalSessionState(resumeInitialState)
+	completedResume := options.AllowCompletedSessionResume &&
+		resumeInitialState == models.TaskSessionStateCompleted
+	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
 	// Force-cleanup any stale in-memory execution / agentctl state for terminal-state
 	// sessions. Their agent process is dead by definition, so "already running" signals
 	// from the execution store or agentctl's "starting" status are stale and would
@@ -771,15 +806,17 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	var beforeCredentialLease func() error
 	if startAgent {
 		beforeCredentialLease = func() error {
-			if persistErr := e.persistResumeState(ctx, task.ID, session, true); persistErr != nil {
+			// The rollback path must remain armed if persistence fails after the
+			// session has entered STARTING.
+			resumeStatePersisted = true
+			if persistErr := e.persistResumeStateWithOptions(ctx, task.ID, session, true, options); persistErr != nil {
 				return persistErr
 			}
-			resumeStatePersisted = true
 			return nil
 		}
 	}
-	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundary(
-		ctx, task, session, startAgent, beforeCredentialLease,
+	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundaryWithOptions(
+		ctx, task, session, startAgent, beforeCredentialLease, options,
 	)
 	if err != nil {
 		if resumeStatePersisted {
@@ -894,7 +931,13 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 
 	if startAgent {
-		e.startAgentProcessOnResume(ctx, task.ID, session, resp.AgentExecutionID)
+		e.startAgentProcessOnResumeWithTaskPromotion(
+			ctx,
+			task.ID,
+			session,
+			resp.AgentExecutionID,
+			!completedResume,
+		)
 	}
 
 	return execution, nil
@@ -1001,9 +1044,13 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 // validateAndLockResume validates the session is resumable, acquires the per-session lock,
 // and loads the associated task. Returns the task, an unlock function, and any error.
 // The caller must call unlock() when the critical section is complete.
-func (e *Executor) validateAndLockResume(ctx context.Context, session *models.TaskSession) (*v1.Task, func(), error) {
-	if session == nil {
-		return nil, func() {}, ErrExecutionNotFound
+func (e *Executor) validateAndLockResume(
+	ctx context.Context,
+	session *models.TaskSession,
+	options ResumeOptions,
+) (*v1.Task, func(), error) {
+	if err := validateResumeSession(session, options); err != nil {
+		return nil, func() {}, err
 	}
 	requestedState := session.State
 
@@ -1014,31 +1061,10 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	sessionLock.Lock()
 	unlock := func() { sessionLock.Unlock() }
 
-	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
+	task, err := e.loadResumeTask(ctx, session)
 	if err != nil {
 		unlock()
-		e.logger.Error("failed to load task for session resume",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
 		return nil, func() {}, err
-	}
-	if taskModel.ArchivedAt != nil {
-		unlock()
-		return nil, func() {}, ErrTaskArchived
-	}
-	task := taskModel.ToAPI()
-	if task == nil {
-		unlock()
-		return nil, func() {}, ErrExecutionNotFound
-	}
-
-	if session.AgentProfileID == "" {
-		unlock()
-		e.logger.Error("task session has no agent_profile_id configured",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID))
-		return nil, func() {}, ErrNoAgentProfileID
 	}
 
 	// Re-read session state after acquiring the lock. The caller fetched the
@@ -1049,43 +1075,102 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	// registered, launching a duplicate. If the re-read fails, abort rather than
 	// proceeding with uncertain state — silently falling back to the stale state
 	// would reintroduce the exact race this re-read prevents.
-	fresh, fetchErr := e.repo.GetTaskSession(ctx, session.ID)
-	if fetchErr != nil {
+	if err := e.refreshResumeSessionState(ctx, session, requestedState); err != nil {
 		unlock()
-		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
-			zap.String("session_id", session.ID),
-			zap.Error(fetchErr))
-		return nil, func() {}, fetchErr
-	}
-	if fresh != nil {
-		if isTerminalSessionState(fresh.State) && fresh.State != requestedState {
-			unlock()
-			return nil, func() {}, &SessionStateSupersededError{
-				SessionID: session.ID,
-				State:     fresh.State,
-			}
-		}
-		session.State = fresh.State
+		return nil, func() {}, err
 	}
 
 	// Skip the "already running" rejection for terminal-state sessions — the agent
 	// process is dead by definition, and ResumeSession will force-cleanup stale
 	// state before the relaunch.
-	if !isTerminalSessionState(session.State) {
-		if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
-			unlock()
-			return nil, func() {}, ErrExecutionAlreadyRunning
-		}
+	if err := e.rejectRunningResume(session, options); err != nil {
+		unlock()
+		return nil, func() {}, err
 	}
 
 	return task, unlock, nil
+}
+
+func validateResumeSession(session *models.TaskSession, options ResumeOptions) error {
+	if session == nil {
+		return ErrExecutionNotFound
+	}
+	if session.State == models.TaskSessionStateCompleted && !options.AllowCompletedSessionResume {
+		return &SessionStateSupersededError{
+			SessionID: session.ID,
+			State:     session.State,
+		}
+	}
+	return nil
+}
+
+func (e *Executor) loadResumeTask(ctx context.Context, session *models.TaskSession) (*v1.Task, error) {
+	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		e.logger.Error("failed to load task for session resume",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return nil, err
+	}
+	if taskModel.ArchivedAt != nil {
+		return nil, ErrTaskArchived
+	}
+	task := taskModel.ToAPI()
+	if task == nil {
+		return nil, ErrExecutionNotFound
+	}
+	if session.AgentProfileID == "" {
+		e.logger.Error("task session has no agent_profile_id configured",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID))
+		return nil, ErrNoAgentProfileID
+	}
+	return task, nil
+}
+
+func (e *Executor) refreshResumeSessionState(
+	ctx context.Context,
+	session *models.TaskSession,
+	requestedState models.TaskSessionState,
+) error {
+	fresh, err := e.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return err
+	}
+	if fresh == nil {
+		return nil
+	}
+	if isTerminalSessionState(fresh.State) && fresh.State != requestedState {
+		return &SessionStateSupersededError{
+			SessionID: session.ID,
+			State:     fresh.State,
+		}
+	}
+	session.State = fresh.State
+	return nil
+}
+
+func (e *Executor) rejectRunningResume(session *models.TaskSession, options ResumeOptions) error {
+	completedResume := options.AllowCompletedSessionResume &&
+		session.State == models.TaskSessionStateCompleted
+	if isTerminalSessionState(session.State) || completedResume {
+		return nil
+	}
+	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
+		return ErrExecutionAlreadyRunning
+	}
+	return nil
 }
 
 // buildResumeRequest constructs the LaunchAgentRequest for a session resume, resolving executor config,
 // repository details, worktree settings, and ACP resume token.
 // Returns the request, repository ID, executor config, existing ExecutorRunning record (may be nil), and error.
 func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
-	return e.buildResumeRequestAtCredentialBoundary(ctx, task, session, startAgent, nil)
+	return e.buildResumeRequestAtCredentialBoundaryWithOptions(ctx, task, session, startAgent, nil, ResumeOptions{})
 }
 
 // buildResumeRequestAtCredentialBoundary prepares a resume request and invokes
@@ -1099,23 +1184,98 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	startAgent bool,
 	beforeCredentialLease func() error,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
+	return e.buildResumeRequestAtCredentialBoundaryWithOptions(
+		ctx, task, session, startAgent, beforeCredentialLease, ResumeOptions{},
+	)
+}
+
+func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	beforeCredentialLease func() error,
+	options ResumeOptions,
+) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
+	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	existingRunning, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return nil, "", executorConfig{}, nil, nil,
+			fmt.Errorf("load runtime inventory for session %q: %w", session.ID, runningErr)
+	}
+	recordedKubernetes := existingRunning != nil && existingRunning.Runtime == agentruntime.RuntimeKubernetes
+	if recordedKubernetes {
+		applyAuthoritativeKubernetesRunningMetadata(metadata, existingRunning.Metadata)
+	}
+	var execConfig executorConfig
+	if recordedKubernetes {
+		var configErr error
+		execConfig, configErr = e.applyRecordedKubernetesExecutorConfigToResumeRequest(
+			ctx, req, session, metadata, existingRunning,
+		)
+		if configErr != nil {
+			return nil, "", executorConfig{}, nil, existingRunning, configErr
+		}
+		if err := lifecycle.ValidateKubernetesResumeMetadata(
+			metadata, task.ID, session.ID, execConfig.ExecutorCfg,
+		); err != nil {
+			return nil, "", executorConfig{}, nil, existingRunning,
+				fmt.Errorf("validate recorded Kubernetes runtime for resume: %w", err)
+		}
+	} else {
+		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+	}
+	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
+		ctx, task, session, req,
+	)
+	if err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
+	}
+	if err := e.applyResumeMCPSettings(ctx, task.ID, session, req); err != nil {
+		return nil, "", execConfig, existingEnv, nil, err
+	}
+
+	existingRunning = e.applyRunningRecordToResumeRequest(req, task, session, startAgent, existingRunning)
+	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+	if err := e.configureResumeGitHubCredentials(
+		ctx, req, session, allRepos, beforeCredentialLease,
+	); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+	e.injectGitLabWorkspaceCredentials(ctx, req)
+	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
+
+	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
+}
+
+func newResumeLaunchRequest(
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (*LaunchAgentRequest, map[string]interface{}) {
 	executionProfileID := session.ExecutionProfileID
 	if executionProfileID == "" {
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
-		TaskID:               task.ID,
-		WorkspaceID:          task.WorkspaceID,
-		SessionID:            session.ID,
-		TaskTitle:            task.Title,
-		AgentProfileID:       executionProfileID,
-		OfficeAgentProfileID: session.AgentProfileID,
-		StartAgent:           startAgent,
-		TaskDescription:      task.Description,
-		Priority:             task.Priority,
-		IsEphemeral:          task.IsEphemeral,
-		IsPassthrough:        session.IsPassthrough,
-		TaskEnvironmentID:    session.TaskEnvironmentID,
+		TaskID:                 task.ID,
+		WorkspaceID:            task.WorkspaceID,
+		SessionID:              session.ID,
+		TaskTitle:              task.Title,
+		AgentProfileID:         executionProfileID,
+		OfficeAgentProfileID:   session.AgentProfileID,
+		StartAgent:             startAgent,
+		TaskDescription:        task.Description,
+		Priority:               task.Priority,
+		IsEphemeral:            task.IsEphemeral,
+		IsPassthrough:          session.IsPassthrough,
+		TaskEnvironmentID:      session.TaskEnvironmentID,
+		AllowBranchReplacement: options.AllowBranchReplacement,
 	}
 
 	metadata := map[string]interface{}{}
@@ -1131,12 +1291,21 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
+	return req, metadata
+}
 
-	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
-
-	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
+func (e *Executor) prepareResumeRepositorySettings(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+) (string, *models.TaskEnvironment, []*repoInfo, error) {
+	existingEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
+	}
+	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+		return "", existingEnv, nil, err
 	}
 	if session.TaskEnvironmentID != "" {
 		req.TaskEnvironmentID = session.TaskEnvironmentID
@@ -1150,52 +1319,106 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 
 	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, session.ID)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
 	}
 	req.McpProviders = deriveMCPProviders(allRepos)
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return "", nil, nil, err
 	}
-	if len(allRepos) > 0 {
-		req.PullBeforeWorktree = allRepos[0].PullBeforeWorktree
-		req.RemoteSyncHandled = allRepos[0].RemoteSyncHandled
-		req.RefreshRepository = allRepos[0].RefreshRepository
-		req.RefreshRepositoryWithState = allRepos[0].RefreshRepositoryWithState
-		req.RemoteRefState = allRepos[0].RemoteRefState
-	}
+	applyResumeRepositoryFlags(req, allRepos)
 	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
-		return nil, "", execConfig, existingEnv, nil, err
+		return "", existingEnv, nil, err
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
+	return repositoryID, existingEnv, allRepos, nil
+}
 
-	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)
-	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+func applyResumeRepositoryFlags(req *LaunchAgentRequest, repositories []*repoInfo) {
+	if len(repositories) == 0 {
+		return
 	}
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, true)
+	first := repositories[0]
+	req.PullBeforeWorktree = first.PullBeforeWorktree
+	req.RemoteSyncHandled = first.RemoteSyncHandled
+	req.RefreshRepository = first.RefreshRepository
+	req.RefreshRepositoryWithState = first.RefreshRepositoryWithState
+	req.RemoteRefState = first.RemoteRefState
+}
+
+func (e *Executor) applyResumeMCPSettings(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+) error {
+	mode, err := e.resolveTaskSessionMCPMode(ctx, taskID, session, true)
 	if err != nil {
-		return nil, "", execConfig, nil, nil, err
+		return err
 	}
+	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, true)
+	if err != nil {
+		return err
+	}
+	req.McpMode = mode
 	profileContext.Providers = req.McpProviders
 	req.McpProfile = &profileContext
+	return nil
+}
 
-	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
-	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
-		return nil, "", execConfig, existingEnv, nil, err
+func applyAuthoritativeKubernetesRunningMetadata(
+	metadata map[string]interface{},
+	recorded map[string]interface{},
+) {
+	for key := range metadata {
+		if isKubernetesRecordedMetadataKey(key) {
+			delete(metadata, key)
+		}
 	}
-	if err := e.configureResumeGitHubCredentials(
-		ctx, req, session, allRepos, beforeCredentialLease,
-	); err != nil {
-		return nil, "", execConfig, existingEnv, existingRunning, err
+	for key, value := range recorded {
+		if isKubernetesRecordedMetadataKey(key) && lifecycle.ShouldPersistMetadataKey(key) {
+			metadata[key] = value
+		}
 	}
-	e.injectGitLabWorkspaceCredentials(ctx, req)
-	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
-		return nil, "", execConfig, existingEnv, existingRunning, err
-	}
+}
 
-	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
+func isKubernetesRecordedMetadataKey(key string) bool {
+	return strings.HasPrefix(key, "kubernetes_") ||
+		key == lifecycle.MetadataKeyIsRemote ||
+		key == lifecycle.MetadataKeyExecutorProfileID ||
+		key == lifecycle.MetadataKeyAuthTokenSecret ||
+		key == lifecycle.MetadataKeyBootstrapNonceSecret
+}
+
+func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	session *models.TaskSession,
+	metadata map[string]interface{},
+	running *models.ExecutorRunning,
+) (executorConfig, error) {
+	executorID := strings.TrimSpace(running.ExecutorID)
+	if executorID == "" {
+		return executorConfig{}, errors.New("resume Kubernetes executor: recorded executor ID is missing")
+	}
+	current, err := e.repo.GetExecutor(ctx, executorID)
+	if err != nil {
+		return executorConfig{}, fmt.Errorf("resume Kubernetes executor %q: %w", executorID, err)
+	}
+	if current == nil || current.Type != models.ExecutorTypeKubernetes {
+		return executorConfig{}, fmt.Errorf("resume Kubernetes executor %q: current Kubernetes executor is unavailable", executorID)
+	}
+	metadata["executor_id"] = executorID
+	config := executorConfig{
+		ExecutorID: executorID, ExecutorType: string(current.Type), ExecutorCfg: current.Config,
+		Metadata: metadata, Resumable: current.Resumable, RuntimeName: string(current.Type),
+	}
+	session.ExecutorID = executorID
+	req.ExecutorType = config.ExecutorType
+	req.ExecutorConfig = config.ExecutorCfg
+	req.Metadata = metadata
+	return config, nil
 }
 
 func (e *Executor) applyResumeWorkspaceFolders(
@@ -1236,6 +1459,22 @@ func (e *Executor) configureResumeGitHubCredentials(
 }
 
 func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	taskModel, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup task for environment resume: %w", err)
+	}
+	task := &v1.Task{ID: taskID}
+	if taskModel != nil {
+		task = taskModel.ToAPI()
+	}
+	return e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
+}
+
+func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	if task == nil || session == nil {
+		return nil, nil
+	}
+	taskID := task.ID
 	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
@@ -1262,7 +1501,13 @@ func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID stri
 				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
 			}
 			if inherited != nil {
+				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
+					return nil, err
+				}
 				return inherited, nil
+			}
+			if taskUsesInheritedWorkspace(task) {
+				return nil, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
 			}
 		}
 		return nil, nil
@@ -1312,18 +1557,35 @@ func isArchiveCancelledResumeSession(session *models.TaskSession) bool {
 
 // applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
 // resume-related fields (remote reconnect, resume token) to the request.
-func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, startAgent bool) *models.ExecutorRunning {
-	running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
-	if runErr != nil || running == nil {
+func (e *Executor) applyRunningRecordToResumeRequest(
+	req *LaunchAgentRequest,
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	running *models.ExecutorRunning,
+) *models.ExecutorRunning {
+	if running == nil {
 		// Archive cleanup tears down the executors_running row entirely, so an
-		// archive-cancelled session reaches this point with running == nil —
-		// exactly the shape GetTaskSessionStatus's resumeReasonArchiveCancelledResumable
-		// auto-resumes once the task is unarchived. There is no resume token or
-		// running record to fall back on here, but the launch still must not
-		// replay task.Description as a fresh prompt — see the else-if branch
-		// below for the same guard on the running-record path.
-		if startAgent && isArchiveCancelledResumeSession(session) {
-			req.TaskDescription = ""
+		// archive-cancelled session reaches this point with running == nil. The
+		// session metadata mirrors the provider conversation identity so an
+		// explicit completed follow-up can still restore the same conversation
+		// after runtime cleanup removed the operational row.
+		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
+			isArchiveCancelledResumeSession(session) ||
+			session.State == models.TaskSessionStateCompleted
+		if startAgent && noAutoPromptState {
+			if token := persistedSessionResumeToken(session); token != "" {
+				req.ACPSessionID = token
+				req.TaskDescription = ""
+				e.logger.Info("found persisted session resume token after runtime cleanup",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", session.ID),
+					zap.Bool("has_resume_token", true))
+			} else {
+				// A missing token must still never turn recovery into an automatic
+				// task-description prompt.
+				req.TaskDescription = ""
+			}
 		}
 		return nil
 	}
@@ -1356,11 +1618,12 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
-	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput || isArchiveCancelledResumeSession(session)) {
+	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
+		isArchiveCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
-		// description. Also covers an archive-cancelled session whose running
-		// record survived cleanup but carries no token — same auto-resume shape
-		// as the running==nil branch above.
+		// description. Also covers completed and archive-cancelled sessions whose
+		// running record survived cleanup but carries no token — the same
+		// auto-resume shape as the running==nil branch above.
 		req.TaskDescription = ""
 		e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
 			zap.String("task_id", task.ID),
@@ -1368,6 +1631,34 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 	}
 
 	return running
+}
+
+// persistedSessionResumeToken returns the provider conversation identity that
+// survives executors_running cleanup. The dynamic route projection is checked
+// first; the generic ACP metadata mirror is the fallback for ordinary sessions.
+func persistedSessionResumeToken(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	if session.DownstreamACPSessionID != "" {
+		return session.DownstreamACPSessionID
+	}
+	if session.Metadata == nil {
+		return ""
+	}
+	acp, ok := session.Metadata["acp"]
+	if !ok {
+		return ""
+	}
+	switch value := acp.(type) {
+	case map[string]interface{}:
+		token, _ := value["session_id"].(string)
+		return token
+	case map[string]string:
+		return value["session_id"]
+	default:
+		return ""
+	}
 }
 
 // applyResumeRepoConfig resolves repository details and applies them to req.
@@ -1624,16 +1915,41 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 // lifecycle.persistExecutorRunning. The orchestrator's remaining
 // responsibility is the session-row state machine (STARTING / CompletedAt-clear).
 func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) error {
+	return e.persistResumeStateWithOptions(ctx, taskID, session, startAgent, ResumeOptions{})
+}
+
+func (e *Executor) persistResumeStateWithOptions(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) error {
 	expectedState := session.State
+	completedResume := startAgent && options.AllowCompletedSessionResume &&
+		expectedState == models.TaskSessionStateCompleted
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 		session.CompletedAt = nil
+		if completedResume {
+			if session.Metadata == nil {
+				session.Metadata = make(map[string]interface{})
+			}
+			session.Metadata[models.SessionMetaKeyCompletionFollowUp] = true
+		}
 	}
 
 	var updateErr error
 	if startAgent {
-		updateErr = e.updateSessionStarting(ctx, taskID, session, expectedState, false)
+		updateErr = e.updateSessionStartingWithOptions(
+			ctx,
+			taskID,
+			session,
+			expectedState,
+			false,
+			completedResume,
+		)
 	} else {
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
@@ -1644,7 +1960,39 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 			zap.Error(updateErr))
 		return updateErr
 	}
+	if completedResume {
+		return e.persistCompletionFollowUpMarker(ctx, session.ID)
+	}
 	return nil
+}
+
+func (e *Executor) persistCompletionFollowUpMarker(ctx context.Context, sessionID string) error {
+	setter, ok := e.repo.(sessionMetadataKeyStateSetter)
+	if !ok {
+		return e.repo.SetSessionMetadataKey(
+			ctx,
+			sessionID,
+			models.SessionMetaKeyCompletionFollowUp,
+			true,
+		)
+	}
+	changed, err := setter.SetSessionMetadataKeyIfState(
+		ctx,
+		sessionID,
+		models.SessionMetaKeyCompletionFollowUp,
+		true,
+		models.TaskSessionStateStarting,
+	)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	return &SessionStateSupersededError{
+		SessionID: sessionID,
+		State:     models.TaskSessionStateStarting,
+	}
 }
 
 // prNumberFromMetadata extracts a GitHub PR number from a task_repository's
@@ -1680,12 +2028,24 @@ func prNumberFromMetadata(metadata map[string]interface{}) int {
 // Task state is managed by workflow triggers and stream handlers elsewhere; this callback
 // just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
+	e.startAgentProcessOnResumeWithTaskPromotion(ctx, taskID, session, agentExecutionID, true)
+}
+
+func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	agentExecutionID string,
+	promoteTask bool,
+) {
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
-		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
-			e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.Error(updateErr))
+		if promoteTask {
+			if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
+				e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(updateErr))
+			}
 		}
 		e.logger.Debug("agent resumed successfully",
 			zap.String("task_id", taskID),

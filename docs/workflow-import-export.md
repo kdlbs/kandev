@@ -104,6 +104,8 @@ Each entry under `steps:`:
     agent_name: Claude Code
     model: claude-opus-4-7
     mode: default
+  profile_session_start_policy: reuse
+  profile_session_end_policy: complete
   events:
     # triggers — see "Triggers" below
 ```
@@ -120,11 +122,13 @@ Each entry under `steps:`:
 | `allow_manual_move` | bool | — | always emitted | Whether users can drag the task into this step manually. |
 | `auto_archive_after_hours` | int | no | omitted when `0` | Auto-archive a task this many hours after it lands in the step. `0` / omitted = never. |
 | `agent_profile` | object | no | omitted when none | Step-level agent profile, overriding the workflow default. See [Agent profiles](#agent-profiles). |
+| `profile_session_start_policy` | enum | no | `reuse` | When this destination step changes the effective agent profile, reuse the newest eligible nonterminal session for that profile, or use `new` to always start a fresh conversation. |
+| `profile_session_end_policy` | enum | no | `complete` | When this source step is left for a different profile, complete its session, or use `park` to stop the agent while keeping the conversation available. |
 
 > **Note:** `position`, `color`, `events`, and the three booleans carry no
 > `omitempty`, so they always appear in exported files (even when `false` or
 > empty). The `prompt`, `auto_archive_after_hours`, and `agent_profile` fields
-> are omitted when unset.
+> are omitted when unset. Session policies use their defaults when omitted.
 
 > **Not in the portable format:** office/Phase-2 step metadata — `stage_type`,
 > step participants (reviewers/approvers), and recorded decisions — is **not**

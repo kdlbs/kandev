@@ -246,6 +246,14 @@ func (c *feedbackConcurrencyClient) ListCheckRuns(ctx context.Context, _ string,
 	return c.checks, nil
 }
 
+func (c *feedbackConcurrencyClient) ListWorkflowRuns(context.Context, string, string, string) ([]WorkflowRun, error) {
+	return nil, nil
+}
+
+func (c *feedbackConcurrencyClient) ListWorkflowRunJobs(context.Context, string, string, int64, int) ([]WorkflowJob, error) {
+	return nil, nil
+}
+
 func (c *feedbackConcurrencyClient) wait(ctx context.Context, request string) error {
 	c.started <- request
 	if c.fail != "" && c.fail != request {

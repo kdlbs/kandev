@@ -8,9 +8,9 @@ export function upsertOpenFileTab(prev: OpenFileTab[], fileTab: OpenFileTab): Op
   const fileKey = getFileTabKey(fileTab);
   const existingIndex = prev.findIndex((tab) => getFileTabKey(tab) === fileKey);
   if (existingIndex >= 0) {
-    if (fileTab.markdownPreview === undefined) return prev;
+    if (fileTab.renderedPreview === undefined) return prev;
     return prev.map((tab, index) =>
-      index === existingIndex ? { ...tab, markdownPreview: fileTab.markdownPreview } : tab,
+      index === existingIndex ? { ...tab, renderedPreview: fileTab.renderedPreview } : tab,
     );
   }
   const maxTabs = 4;

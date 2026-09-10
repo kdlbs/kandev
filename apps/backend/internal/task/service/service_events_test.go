@@ -122,6 +122,83 @@ func TestTaskPublication_ActivityRefreshDoesNotOvertakeOrdinaryUpdate(t *testing
 	<-activityDone
 }
 
+type firstTaskReadBarrierRepository struct {
+	repository.TaskRepository
+	firstReadEntered chan struct{}
+	releaseFirstRead chan struct{}
+
+	mu       sync.Mutex
+	getCalls int
+}
+
+func (r *firstTaskReadBarrierRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	task, err := r.TaskRepository.GetTask(ctx, id)
+
+	r.mu.Lock()
+	r.getCalls++
+	firstRead := r.getCalls == 1
+	r.mu.Unlock()
+	if firstRead {
+		close(r.firstReadEntered)
+		<-r.releaseFirstRead
+	}
+	return task, err
+}
+
+func TestPublishTaskUpdatedByID_ReloadsInsideTaskPublicationQueue(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	if err := repo.UpdateTaskState(ctx, "task-1", v1.TaskStateTODO); err != nil {
+		t.Fatalf("initialize task state: %v", err)
+	}
+
+	barrier := &firstTaskReadBarrierRepository{
+		TaskRepository:   svc.tasks,
+		firstReadEntered: make(chan struct{}),
+		releaseFirstRead: make(chan struct{}),
+	}
+	svc.tasks = barrier
+
+	firstDone := make(chan struct{})
+	go func() {
+		svc.PublishTaskUpdatedByID(ctx, "task-1")
+		close(firstDone)
+	}()
+	<-barrier.firstReadEntered
+
+	if err := repo.UpdateTaskState(ctx, "task-1", v1.TaskStateInProgress); err != nil {
+		t.Fatalf("update task state: %v", err)
+	}
+	svc.PublishTaskUpdatedByID(ctx, "task-1")
+
+	close(barrier.releaseFirstRead)
+	<-firstDone
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 2 {
+		t.Fatalf("published %d events, want 2", len(published))
+	}
+	states := make([]string, 0, len(published))
+	for _, event := range published {
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("event data type = %T, want map[string]interface{}", event.Data)
+		}
+		state, ok := data["state"].(string)
+		if !ok {
+			t.Fatalf("event state type = %T, want string", data["state"])
+		}
+		states = append(states, state)
+	}
+	if got, want := states[0], string(v1.TaskStateTODO); got != want {
+		t.Fatalf("first published state = %q, want %q", got, want)
+	}
+	if got, want := states[1], string(v1.TaskStateInProgress); got != want {
+		t.Fatalf("last published state = %q, want %q", got, want)
+	}
+}
+
 func TestTaskPublication_PreservesSameSecondActivityOrdering(t *testing.T) {
 	svc, eventBus, _ := createTestService(t)
 	messageAt := time.Date(2026, 8, 18, 10, 20, 0, 100_000_000, time.UTC)
@@ -155,6 +232,22 @@ func TestTaskPublication_PreservesSameSecondActivityOrdering(t *testing.T) {
 	}
 	if !parsed.After(messageAt) {
 		t.Fatalf("task mutation at %s was not ordered after same-second message at %s", parsed, messageAt)
+	}
+}
+
+func TestTaskPublication_KnownPrimaryWithoutAgentIdentityEmitsExplicitNulls(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	data := make(map[string]interface{})
+	svc.addPrimarySessionEventFields(context.Background(), "task-1", data, &models.TaskSession{
+		ID:    "session-1",
+		State: models.TaskSessionStateRunning,
+	})
+
+	if value, ok := data["primary_agent_profile_id"]; !ok || value != nil {
+		t.Fatalf("primary_agent_profile_id = %#v (present = %t), want explicit null", value, ok)
+	}
+	if value, ok := data["primary_agent_name"]; !ok || value != nil {
+		t.Fatalf("primary_agent_name = %#v (present = %t), want explicit null", value, ok)
 	}
 }
 

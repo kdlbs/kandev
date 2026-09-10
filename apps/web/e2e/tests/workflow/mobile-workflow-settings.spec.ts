@@ -2,6 +2,38 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
+  test("keeps the workflow reorder handle inside the card with a touch-sized target", async ({
+    testPage,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const handle = page.dragHandle(seedData.workflowId);
+    const list = testPage.getByTestId("workflow-order-list");
+    await expect(handle).toBeVisible();
+    await expect(handle).toHaveAccessibleName("Reorder E2E Workflow");
+
+    const [cardBox, handleBox, listBox] = await Promise.all([
+      card.boundingBox(),
+      handle.boundingBox(),
+      list.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(handleBox).not.toBeNull();
+    expect(listBox).not.toBeNull();
+    expect(handleBox!.width).toBeGreaterThanOrEqual(44);
+    expect(handleBox!.height).toBeGreaterThanOrEqual(44);
+    expect(handleBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(handleBox!.x + handleBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(handleBox!.x).toBeGreaterThan(cardBox!.x + cardBox!.width / 2);
+    expect(Math.abs(cardBox!.x - listBox!.x)).toBeLessThanOrEqual(1);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+  });
+
   test("remove sync confirmation keeps 44px inline actions", async ({
     testPage,
     apiClient,
@@ -225,6 +257,60 @@ test.describe("Workflow settings on mobile", () => {
       () => document.documentElement.scrollWidth > window.innerWidth,
     );
     expect(hasDocumentOverflow).toBe(false);
+  });
+
+  test("changes both profile session lifecycle settings with touch-sized controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const policySelect = await page
+      .selectStep(card, seedData.steps[0]!.name, true)
+      .then(() => page.stepAgentProfileSelect(card));
+    await expect(policySelect).toBeVisible();
+    await policySelect.tap();
+
+    const lifecycleNavigation = page.stepProfileSessionLifecycleSelect();
+    await expect(lifecycleNavigation).toBeVisible();
+    await lifecycleNavigation.tap();
+    const stepId = seedData.steps[0]!.id;
+    const startOption = testPage.getByTestId(`${stepId}-profile-session-start-new`);
+    const endOption = testPage.getByTestId(`${stepId}-profile-session-end-park`);
+    await expect(startOption).toBeVisible();
+    await expect(endOption).toBeVisible();
+
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    for (const control of [policySelect, startOption, endOption]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
+    }
+
+    await startOption.tap();
+    await endOption.tap();
+    await testPage.keyboard.press("Escape");
+    await page.saveChanges(true);
+
+    const savedStep = (await apiClient.listWorkflowSteps(seedData.workflowId)).steps.find(
+      (step) => step.id === stepId,
+    );
+    expect(savedStep?.profile_session_start_policy).toBe("new");
+    expect(savedStep?.profile_session_end_policy).toBe("park");
+
+    await page.goto(seedData.workspaceId);
+    const reloadedCard = await page.findWorkflowCard("E2E Workflow");
+    await page.selectStep(reloadedCard, seedData.steps[0]!.name, true);
+    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText("New on start");
+    await expect(page.stepAgentProfileSelect(reloadedCard)).toContainText("Park on end");
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
   });
 
   test("shows optional feeder guidance from the WIP info tooltip", async ({

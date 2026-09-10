@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-MCP-SESSION-OBSERVABILITY-001
 created: 2026-07-30
-updated: 2026-08-18
+updated: 2026-09-09
 owners:
   - Kandev
 ---
@@ -56,7 +56,7 @@ turning absence into failure:
 | Configured   | The server exists in the selected profile or is Kandev's built-in task server.                                                                   |
 | Filtered     | Kandev deliberately omitted the server because the agent, executor policy, transport, or passthrough strategy could not expose it.               |
 | Delivered    | The server was included in ACP `session/new`, `session/load`, or `session/reset`, or was materialized into a passthrough CLI's effective config. |
-| Connected    | Kandev's in-session MCP endpoint observed that client connection initialize successfully.                                                        |
+| Connected    | Kandev's in-session MCP endpoint accepted the client's protocol. For a legacy client, initialize supplies this evidence.                         |
 | Tools loaded | Kandev's in-session endpoint served `tools/list` successfully to that connection.                                                                |
 | Used         | Kandev's in-session endpoint observed at least one tool call on that connection.                                                                 |
 | Failed       | Kandev received an explicit server-specific attachment error.                                                                                    |
@@ -81,9 +81,12 @@ from profile configuration, agent capability flags, a successful ACP
 - The report carries the backend-owned `task_id`, `session_id`, `execution_id`,
   `attachment_attempt_id`, `agent_id`, and `agent_profile_id`. It also records
   the provider's `acp_session_id` when available.
-- Each observed MCP transport client receives a connection ID. Connection
-  evidence is attributed to the agentctl instance's backend-owned task and
-  session identity, never to IDs supplied by the agent.
+- Each observed legacy MCP transport client receives a connection ID.
+  Connection evidence is attributed to the agentctl instance's backend-owned
+  task and session identity, never to IDs supplied by the agent.
+- Modern MCP requests are stateless. Their protocol, tool-list, and tool-call
+  evidence belongs to the current attachment attempt. Kandev does not invent a
+  connection ID and does not treat the end of an HTTP request as a disconnect.
 - Multiple agents inside one task remain distinct because they have distinct
   Kandev session IDs. Restarting one session creates a new execution report;
   evidence from the superseded execution cannot keep the current execution
@@ -104,7 +107,7 @@ Each attempt timeline is bounded and can contain these events:
 - server filtered, with a stable reason code;
 - server delivered;
 - agent session accepted;
-- MCP initialize observed;
+- MCP protocol accepted, including legacy initialize where applicable;
 - tools list observed, including tool count;
 - tool call observed, without tool arguments or result;
 - explicit attachment error;
@@ -120,6 +123,46 @@ stable reason code plus a bounded sanitized summary.
 
 Raw ACP JSONL logging remains a development-only diagnostic and is not enabled
 by this feature.
+
+## Frontend session-list reconciliation
+
+Task-detail boot state restores attachment history during initial navigation.
+Later task switches use `ListTaskSessionSummariesResponse`, which includes
+public session metadata. Both paths supply the same persisted history, and
+forced task-detail route hydration uses the same freshness-aware merge.
+
+`setTaskSessionsForTask` reads `metadata.mcp_attachment_state` in its existing
+Immer transaction. A runtime guard accepts only the known frontend projection:
+
+- The value is an object with schema version `1`.
+- The current attempt has a nonempty `attachment_attempt_id`.
+- Each attempt has a valid RFC3339 `started_at` value.
+- Optional `updated_at` and `tools_listed_at` values are valid RFC3339 values
+  when present. A JSON `null` value is treated as absent.
+- Each server has a nonempty name and a known attachment status.
+- Optional previous attempts satisfy the same attempt and server rules.
+
+The guard permits unknown optional fields from the backend report. This rule
+keeps the frontend compatible with additive safe metadata.
+
+The current attempt supplies the freshness value. The client uses `updated_at`
+when that field exists. Otherwise, the client uses `started_at`.
+
+A valid incoming history initializes an empty store entry. It also replaces
+stored history with an invalid freshness value. For two valid values, only a
+strictly newer incoming value replaces the stored history. Equal values retain
+the stored history because it can contain live evidence from a WebSocket event.
+The same comparator applies when a forced task-detail route hydration merges a
+snapshot into the active session, so an equal or older route response cannot
+regress live evidence.
+
+The reconciliation paths change only `sessionMcpStatus.bySessionId` for the
+session that owns the accepted history. Invalid or absent metadata does not
+clear live evidence. It does not change a sibling session.
+
+Desktop and mobile surfaces already read the shared session-runtime slice.
+This repair does not change layout, navigation, touch behavior, or viewport
+behavior.
 
 ## Kandev tool catalog
 

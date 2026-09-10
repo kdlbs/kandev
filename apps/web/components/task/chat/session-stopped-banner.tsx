@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import {
   IconAlertTriangle,
   IconCircleCheck,
@@ -12,8 +12,17 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
+import {
+  EnsureSessionErrorBanner,
+  SessionRecoveryNotice,
+} from "@/components/task/ensure-session-error";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import {
+  useSessionRecoveryActions,
+  type SessionRecoveryBusyAction,
+  type SessionRecoveryActions,
+} from "@/hooks/domains/session/use-session-recovery-actions";
+import type { BranchRecoveryDetails } from "@/lib/services/session-recovery-service";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
 
@@ -28,71 +37,255 @@ export type SessionStoppedBannerProps = {
   detail?: string;
   resumeLabel?: string;
   resumingLabel?: string;
+  recoveryActions?: SessionRecoveryActions;
 };
 
-async function requestSessionRecover(
-  taskId: string,
-  sessionId: string,
-  action: "resume" | "fresh_start",
-): Promise<boolean> {
-  const client = getWebSocketClient();
-  if (!client) return false;
-  try {
-    await client.request(
-      "session.recover",
-      { task_id: taskId, session_id: sessionId, action },
-      30000,
-    );
-    return true;
-  } catch {
-    return false;
-  }
+function StoppedRecoveryFeedback({
+  workspaceId,
+  recoveryError,
+  recoveryNotice,
+  branchDetails,
+  busyAction,
+  onRetry,
+  onRestore,
+  onNewBranch,
+}: {
+  workspaceId?: string | null;
+  recoveryError: Error | null;
+  recoveryNotice: string | null;
+  branchDetails: BranchRecoveryDetails | null;
+  busyAction: SessionRecoveryBusyAction;
+  onRetry: () => void;
+  onRestore: () => void;
+  onNewBranch: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!recoveryError && !recoveryNotice) return null;
+  const restoreAction = {
+    label: t("task:restoreReadOnlyWorkspace"),
+    onClick: onRestore,
+    testId: "recovery-restore-workspace-button",
+    disabled: busyAction !== null,
+  };
+  return (
+    <>
+      {recoveryError ? (
+        <EnsureSessionErrorBanner
+          error={recoveryError}
+          onRetry={onRetry}
+          retryDisabled={busyAction !== null}
+          workspaceId={workspaceId}
+          compact
+          action={
+            branchDetails
+              ? {
+                  label: t("task:continueOnNewBranch"),
+                  onClick: onNewBranch,
+                  testId: "recovery-new-branch-button",
+                  disabled: busyAction !== null,
+                }
+              : restoreAction
+          }
+          secondaryAction={branchDetails ? restoreAction : undefined}
+          testId="session-recovery-error"
+        />
+      ) : null}
+      {recoveryNotice ? <SessionRecoveryNotice message={recoveryNotice} /> : null}
+    </>
+  );
 }
 
-function RecoverableSessionActions({
-  onShowDialog,
-  taskId,
-  sessionId,
-  resumeLabel,
-  resumingLabel,
-}: Pick<
-  SessionStoppedBannerProps,
-  "onShowDialog" | "taskId" | "sessionId" | "resumeLabel" | "resumingLabel"
->) {
-  const { t } = useTranslation();
-  const resumeText = resumeLabel ?? t("task:resume");
-  const resumingText = resumingLabel ?? t("task:resuming");
-  const [isResuming, setIsResuming] = useState(false);
-  const [isStartingFresh, setIsStartingFresh] = useState(false);
-
-  const profileExists = useAppStore((s) => {
+function useSessionProfileExists(sessionId: string | null): boolean {
+  return useAppStore((s) => {
     if (!sessionId) return false;
     const agentProfileId = s.taskSessions.items[sessionId]?.agent_profile_id;
     return (
       !!agentProfileId && s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId)
     );
   });
+}
 
-  const handleRecover = useCallback(
-    async (action: "resume" | "fresh_start") => {
-      if (!sessionId || !taskId) return;
-      const setBusy = action === "resume" ? setIsResuming : setIsStartingFresh;
-      setBusy(true);
-      const ok = await requestSessionRecover(taskId, sessionId, action);
-      if (!ok) setBusy(false);
-    },
-    [sessionId, taskId],
-  );
+function RecoverableSessionActions({
+  onShowDialog,
+  taskId,
+  sessionId,
+  workspaceId,
+  resumeLabel,
+  resumingLabel,
+  recoveryActions,
+}: Pick<
+  SessionStoppedBannerProps,
+  | "onShowDialog"
+  | "taskId"
+  | "sessionId"
+  | "workspaceId"
+  | "resumeLabel"
+  | "resumingLabel"
+  | "recoveryActions"
+>) {
+  const { t } = useTranslation();
+  const resumeText = resumeLabel ?? t("task:resume");
+  const resumingText = resumingLabel ?? t("task:resuming");
+  const localRecoveryActions = useSessionRecoveryActions({
+    taskId: taskId ?? "",
+    sessionId: sessionId ?? "",
+  });
+  const {
+    busyAction,
+    recoveryError,
+    branchDetails,
+    recoveryNotice,
+    handleRecover,
+    handleRestore,
+    handleRetry,
+    handleNewBranch,
+  } = recoveryActions ?? localRecoveryActions;
 
-  const handleResume = useCallback(() => handleRecover("resume"), [handleRecover]);
+  const profileExists = useSessionProfileExists(sessionId);
+
+  const handleResume = useCallback(() => {
+    if (taskId && sessionId) void handleRecover("resume");
+  }, [handleRecover, sessionId, taskId]);
   const handleFreshStart = useCallback(() => {
     if (!profileExists) {
       onShowDialog(true);
       return;
     }
-    void handleRecover("fresh_start");
+    if (taskId && sessionId) void handleRecover("fresh_start");
   }, [profileExists, onShowDialog, handleRecover]);
 
+  return (
+    <div className="flex w-full flex-col gap-2 sm:w-auto">
+      <StoppedRecoveryFeedback
+        workspaceId={workspaceId}
+        recoveryError={recoveryError}
+        recoveryNotice={recoveryNotice}
+        branchDetails={branchDetails}
+        busyAction={busyAction}
+        onRetry={handleRetry}
+        onRestore={() => void handleRestore()}
+        onNewBranch={handleNewBranch}
+      />
+      <RecoverableSessionButtons
+        taskId={taskId}
+        sessionId={sessionId}
+        profileExists={profileExists}
+        busyAction={busyAction}
+        resumeText={resumeText}
+        resumingText={resumingText}
+        onResume={handleResume}
+        onFreshStart={handleFreshStart}
+      />
+    </div>
+  );
+}
+
+function CompletedSessionActions({
+  onShowDialog,
+  taskId,
+  sessionId,
+  workspaceId,
+  recoveryActions,
+}: Pick<
+  SessionStoppedBannerProps,
+  "onShowDialog" | "taskId" | "sessionId" | "workspaceId" | "recoveryActions"
+>) {
+  const { t } = useTranslation();
+  const localRecoveryActions = useSessionRecoveryActions({
+    taskId: taskId ?? "",
+    sessionId: sessionId ?? "",
+  });
+  const {
+    busyAction,
+    recoveryError,
+    branchDetails,
+    recoveryNotice,
+    handleRecover,
+    handleRestore,
+    handleRetry,
+    handleNewBranch,
+  } = recoveryActions ?? localRecoveryActions;
+  const profileExists = useSessionProfileExists(sessionId);
+
+  const handleResume = useCallback(() => {
+    if (taskId && sessionId) void handleRecover("resume");
+  }, [handleRecover, sessionId, taskId]);
+
+  return (
+    <div className="flex w-full flex-col gap-2 sm:w-auto">
+      <StoppedRecoveryFeedback
+        workspaceId={workspaceId}
+        recoveryError={recoveryError}
+        recoveryNotice={recoveryNotice}
+        branchDetails={branchDetails}
+        busyAction={busyAction}
+        onRetry={handleRetry}
+        onRestore={() => void handleRestore()}
+        onNewBranch={handleNewBranch}
+      />
+      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        {sessionId && taskId && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="inline-flex w-full sm:w-auto"
+                data-testid="completed-session-resume-wrapper"
+                tabIndex={busyAction !== null || !profileExists ? 0 : -1}
+              >
+                <Button
+                  variant="default"
+                  data-testid="recovery-resume-button"
+                  className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+                  onClick={handleResume}
+                  disabled={busyAction !== null || !profileExists}
+                >
+                  <IconPlayerPlay className="h-3.5 w-3.5" />
+                  {busyAction === "resume" ? t("task:resuming") : t("task:resume")}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {!profileExists && (
+              <TooltipContent>{t("task:agentProfileNoLongerExists")}</TooltipContent>
+            )}
+          </Tooltip>
+        )}
+        <Button
+          variant="outline"
+          className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+          onClick={() => {
+            if (taskId) onShowDialog(true);
+          }}
+          disabled={busyAction !== null || !taskId}
+          data-testid="completed-session-new-agent-button"
+        >
+          <IconPlus className="h-3.5 w-3.5" />
+          {t("task:newAgent")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RecoverableSessionButtons({
+  taskId,
+  sessionId,
+  profileExists,
+  busyAction,
+  resumeText,
+  resumingText,
+  onResume,
+  onFreshStart,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  profileExists: boolean;
+  busyAction: SessionRecoveryBusyAction;
+  resumeText: string;
+  resumingText: string;
+  onResume: () => void;
+  onFreshStart: () => void;
+}) {
+  const { t } = useTranslation();
   return (
     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
       {sessionId && taskId && (
@@ -101,17 +294,17 @@ function RecoverableSessionActions({
             <span
               className="inline-flex w-full sm:w-auto"
               data-testid="failed-session-resume-wrapper"
+              tabIndex={busyAction !== null || !profileExists ? 0 : -1}
             >
               <Button
                 variant="default"
-                size="sm"
                 data-testid="recovery-resume-button"
-                className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-                onClick={handleResume}
-                disabled={isResuming || !profileExists}
+                className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+                onClick={onResume}
+                disabled={busyAction !== null || !profileExists}
               >
                 <IconPlayerPlay className="h-3.5 w-3.5" />
-                {isResuming ? resumingText : resumeText}
+                {busyAction === "resume" ? resumingText : resumeText}
               </Button>
             </span>
           </TooltipTrigger>
@@ -122,14 +315,13 @@ function RecoverableSessionActions({
       )}
       <Button
         variant="outline"
-        size="sm"
-        className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-        onClick={handleFreshStart}
-        disabled={isStartingFresh}
+        className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+        onClick={onFreshStart}
+        disabled={busyAction !== null}
         data-testid="recovery-fresh-button"
       >
         <IconRefresh className="h-3.5 w-3.5" />
-        {isStartingFresh ? t("task:starting") : t("task:startFreshSession")}
+        {busyAction === "fresh_start" ? t("task:starting") : t("task:startFreshSession")}
       </Button>
     </div>
   );
@@ -146,6 +338,7 @@ export function SessionStoppedBanner({
   detail,
   resumeLabel,
   resumingLabel,
+  recoveryActions,
 }: SessionStoppedBannerProps) {
   const { t } = useTranslation();
   const isCompleted = mode === "completed";
@@ -174,26 +367,22 @@ export function SessionStoppedBanner({
           </div>
 
           {isCompleted ? (
-            <Button
-              variant="default"
-              size="sm"
-              data-testid="completed-session-new-agent-button"
-              className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-              onClick={() => {
-                if (taskId) onShowDialog(true);
-              }}
-              disabled={!taskId}
-            >
-              <IconPlus className="h-3.5 w-3.5" />
-              {t("task:newAgent")}
-            </Button>
+            <CompletedSessionActions
+              onShowDialog={onShowDialog}
+              taskId={taskId}
+              sessionId={sessionId}
+              workspaceId={workspaceId}
+              recoveryActions={recoveryActions}
+            />
           ) : (
             <RecoverableSessionActions
               onShowDialog={onShowDialog}
               taskId={taskId}
               sessionId={sessionId}
+              workspaceId={workspaceId}
               resumeLabel={resumeLabel}
               resumingLabel={resumingLabel}
+              recoveryActions={recoveryActions}
             />
           )}
         </div>

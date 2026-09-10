@@ -170,6 +170,59 @@ describe("duration-aware shard planning", () => {
     expect(plan.shards[0]?.predictedSeconds).toBe(40);
   });
 
+  it("budgets unknown Kubernetes specs for real cluster lifecycle time", () => {
+    const plan = createShardPlan(
+      [
+        {
+          project: "containers",
+          file: "tests/kubernetes/kubernetes-executor.spec.ts",
+          fileHash: "hash-kubernetes",
+          testCount: 2,
+        },
+      ],
+      {
+        cohort: "containers",
+        shardCount: 1,
+        generatedAt: "2026-08-10T00:00:00.000Z",
+      },
+    );
+
+    expect(plan.shards[0]?.predictedSeconds).toBe(360);
+  });
+
+  it("uses the Kubernetes fallback for tests missing from a timing profile", () => {
+    const kubernetesUnit: CatalogUnit = {
+      project: "containers",
+      file: "tests/kubernetes/kubernetes-executor.spec.ts",
+      fileHash: "hash-kubernetes",
+      testCount: 2,
+    };
+    const kubernetesProfile: TimingProfile = {
+      ...profile,
+      entries: [
+        {
+          ...profile.entries[0]!,
+          key: "containers::tests/kubernetes/kubernetes-executor.spec.ts::launches",
+          project: "containers",
+          file: kubernetesUnit.file,
+          fileHash: kubernetesUnit.fileHash,
+          p50Seconds: 120,
+          p75Seconds: 140,
+        },
+      ],
+    };
+
+    const plan = createShardPlan([kubernetesUnit], {
+      cohort: "containers",
+      shardCount: 1,
+      profile: kubernetesProfile,
+      generatedAt: "2026-08-10T00:00:00.000Z",
+    });
+
+    expect(plan.shards[0]?.predictedSeconds).toBe(320);
+    expect(plan.shards[0]?.units[0]?.classification).toBe("unknown");
+  });
+
   it("adds a fallback estimate for new tests in a profiled file", () => {
     const plan = createShardPlan(
       [{ project: "chromium", file: "tests/a.spec.ts", fileHash: "hash-a", testCount: 2 }],

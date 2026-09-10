@@ -31,18 +31,21 @@ import (
 
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/auth/hostnames"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // Handlers carries the auth HTTP handler dependencies.
 type Handlers struct {
-	svc *auth.Service
-	log *logger.Logger
+	svc      *auth.Service
+	resolver *hostnames.Resolver
+	log      *logger.Logger
 }
 
 // RegisterRoutes mounts the auth API on the main router.
-func RegisterRoutes(router *gin.Engine, svc *auth.Service, log *logger.Logger) {
-	h := &Handlers{svc: svc, log: log}
+func RegisterRoutes(router *gin.Engine, svc *auth.Service, resolver *hostnames.Resolver, log *logger.Logger) {
+	h := &Handlers{svc: svc, resolver: resolver, log: log}
 	group := router.Group("/api/v1/auth")
 	// Public bootstrap + credential-issuing endpoints (allowlisted in httpmw).
 	group.POST("/setup", h.setup)
@@ -65,12 +68,12 @@ func RegisterRoutes(router *gin.Engine, svc *auth.Service, log *logger.Logger) {
 
 	// RequireAdmin allows the synthetic admin, so RequireRealIdentity must
 	// precede it to keep these locked while auth is disabled.
-	admin := group.Group("", authn.RequireRealIdentity(), authn.RequireAdmin())
+	admin := group.Group("", authn.RequireRealIdentity(), authz.RequireOrgScope(authz.ScopeOrgMembersManage))
 	admin.GET("/invites", h.listInvites)
 	admin.POST("/invites", h.createInvite)
 	admin.DELETE("/invites/:id", h.deleteInvite)
 
-	users := router.Group("/api/v1/users", authn.RequireRealIdentity(), authn.RequireAdmin())
+	users := router.Group("/api/v1/users", authn.RequireRealIdentity(), authz.RequireOrgScope(authz.ScopeOrgMembersManage))
 	users.GET("", h.listUsers)
 	users.POST("", h.createUser)
 	users.PATCH("/:id", h.updateUser)
@@ -175,14 +178,29 @@ func (h *Handlers) listSessions(c *gin.Context) {
 		return
 	}
 	items := make([]gin.H, 0, len(sessions))
+	ips := make([]string, 0, len(sessions))
 	for _, session := range sessions {
+		ips = append(ips, session.IP)
+	}
+	resolved := map[string]hostnames.CacheEntry{}
+	if h.resolver != nil {
+		resolved = h.resolver.HostnamesForSessionIPs(c.Request.Context(), identity.UserID, ips)
+	}
+	for _, session := range sessions {
+		entry := resolved[session.IP]
+		var resolvedAt any
+		if entry.ResolvedAt != nil {
+			resolvedAt = hostnames.FormatTimestamp(*entry.ResolvedAt)
+		}
 		items = append(items, gin.H{
-			"id":           session.ID,
-			"created_at":   session.CreatedAt,
-			"last_seen_at": session.LastSeenAt,
-			"user_agent":   session.UserAgent,
-			"ip":           session.IP,
-			"current":      session.ID == identity.SessionID,
+			"id":                   session.ID,
+			"created_at":           session.CreatedAt,
+			"last_seen_at":         session.LastSeenAt,
+			"user_agent":           session.UserAgent,
+			"ip":                   session.IP,
+			"hostname":             entry.Hostname,
+			"hostname_resolved_at": resolvedAt,
+			"current":              session.ID == identity.SessionID,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"sessions": items})
@@ -218,6 +236,10 @@ func (h *Handlers) writeAuthError(c *gin.Context, err error) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+	// 403, not 401: the credential was accepted, so the browser must not
+	// treat this as a session challenge and loop back to the sign-in form.
+	case errors.Is(err, auth.ErrOrgUnavailable):
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error(), "code": "org_suspended"})
 	case errors.Is(err, auth.ErrSetupNotAvailable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, auth.ErrInviteInvalid):

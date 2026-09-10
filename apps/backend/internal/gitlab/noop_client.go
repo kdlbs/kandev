@@ -123,11 +123,11 @@ func (c *NoopClient) GetRepoFileContent(context.Context, string, string, string)
 	return nil, ErrNoClient
 }
 
-func (c *NoopClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
+func (c *NoopClient) ListIssues(context.Context, string, string, string) ([]*Issue, error) {
 	return nil, ErrNoClient
 }
 
-func (c *NoopClient) ListIssuesPaged(context.Context, string, string, int, int) (*IssueSearchPage, error) {
+func (c *NoopClient) ListIssuesPaged(context.Context, string, string, string, int, int) (*IssueSearchPage, error) {
 	return nil, ErrNoClient
 }
 

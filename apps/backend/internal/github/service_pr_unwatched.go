@@ -62,10 +62,11 @@ func taskPRNeedsUnwatchedSync(tp *TaskPR, now time.Time) bool {
 // leaves the row for the next attempt, matching the surrounding
 // reconciliation paths — a dead repo must not fail the caller's sync.
 //
-// Only lifecycle fields are written (see reconcileTaskPRLifecycle). Check and
-// review aggregates deliberately stay untouched: they belong to the active,
-// watch-covered PR, and a row nobody watches only needs to learn that it
-// reached a terminal state.
+// Only lifecycle and head-scoped workflow-attention fields are written (see
+// reconcileTaskPRLifecycle). Check and review aggregates deliberately stay
+// untouched: they belong to the active, watch-covered PR, and a row nobody
+// watches only needs to learn that it reached a terminal state or that its
+// current head needs provider attention.
 //
 // fallbackWorkspaceID covers legacy rows written before task_prs carried
 // workspace ownership; rows with neither are skipped because there is no
@@ -97,10 +98,32 @@ func (s *Service) syncUnwatchedTaskPRGroup(ctx context.Context, workspaceID stri
 		return
 	}
 	live := s.fetchUnwatchedTaskPRs(ctx, resolved, group)
+	seen := make(map[string]struct{}, len(group))
 	for _, tp := range group {
+		if tp == nil || tp.TaskID == "" {
+			continue
+		}
 		status := live[prStatusCacheKey(tp.Owner, tp.Repo, tp.PRNumber)]
 		if status == nil || status.PR == nil {
 			continue
+		}
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, "", tp.TaskID, tp.RepositoryID, tp.PRNumber)
+		seenKey := fmt.Sprintf("%s\x00%s\x00%d", effectiveTaskID, tp.RepositoryID, tp.PRNumber)
+		if _, duplicate := seen[seenKey]; duplicate {
+			continue
+		}
+		seen[seenKey] = struct{}{}
+		if effectiveTaskID != tp.TaskID {
+			ownerTP, loadErr := s.store.GetTaskPRByRepoAndNumber(ctx, effectiveTaskID, tp.RepositoryID, tp.PRNumber)
+			if loadErr != nil {
+				s.logger.Debug("load reconciled owner task PR failed",
+					zap.String("task_id", effectiveTaskID), zap.Int("pr_number", tp.PRNumber), zap.Error(loadErr))
+				continue
+			}
+			if ownerTP == nil {
+				continue
+			}
+			tp = ownerTP
 		}
 		if syncErr := s.reconcileTaskPRLifecycle(ctx, tp, status); syncErr != nil {
 			s.logger.Debug("unwatched task PR reconcile failed",
@@ -131,8 +154,13 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	pr := status.PR
 	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)
+	nextHeadSHA := tp.HeadSHA
+	if pr.HeadSHA != "" {
+		nextHeadSHA = pr.HeadSHA
+	}
 
-	changed := tp.State != pr.State ||
+	changed := tp.HeadSHA != nextHeadSHA ||
+		tp.State != pr.State ||
 		!timeEqual(tp.MergedAt, pr.MergedAt) ||
 		!timeEqual(tp.ClosedAt, pr.ClosedAt) ||
 		!boolPtrEqual(tp.IsDraft, isDraft) ||
@@ -140,8 +168,11 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 		!stringPtrEqual(tp.MergedByLogin, mergedByLogin) ||
 		!stringPtrEqual(tp.ClosedByLogin, closedByLogin) ||
 		!timeEqual(tp.AutoMergeObservedAt, autoMergeObservedAt)
+	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, nextHeadSHA)
+	changed = changed || !workflowAttentionSemanticEqual(tp.WorkflowAttention, nextWorkflowAttention)
 
 	tp.State = pr.State
+	tp.HeadSHA = nextHeadSHA
 	tp.MergedAt = pr.MergedAt
 	tp.ClosedAt = pr.ClosedAt
 	tp.IsDraft = isDraft
@@ -149,6 +180,8 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	tp.MergedByLogin = mergedByLogin
 	tp.ClosedByLogin = closedByLogin
 	tp.AutoMergeObservedAt = autoMergeObservedAt
+	tp.WorkflowAttention = nextWorkflowAttention
+	tp.WorkflowAttentionJSON = marshalWorkflowAttention(nextWorkflowAttention)
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
 
@@ -214,7 +247,8 @@ func (s *Service) batchedUnwatchedFetch(
 		// concurrent eviction wins; see Service.markRepoAsMissing.
 		repoErrGen := s.repoErrorGenSnapshot()
 		out, queryErr := runBatchedPRQuery(fetchCtx, exec, refs)
-		return s.absorbMissingReposErr(out, queryErr, cacheScope, repoErrGen)
+		out, queryErr = s.absorbMissingReposErr(out, queryErr, cacheScope, repoErrGen)
+		return out, queryErr
 	})
 	if err != nil {
 		return nil, err

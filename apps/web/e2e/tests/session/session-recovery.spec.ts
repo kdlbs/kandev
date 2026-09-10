@@ -3,6 +3,12 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import {
+  cleanupDelayedResumeFixture,
+  seedDelayedResumeFixture,
+  waitForSessionReady,
+  waitForQueuedCount,
+} from "../../helpers/session-resume-prompt-queue";
 
 type ContextWindowStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
@@ -112,6 +118,57 @@ const CRASH_RECOVERY_TIMEOUT = 170_000;
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
 
+  test("session startup keeps the composer editable and queues a submitted prompt", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const fixture = await seedDelayedResumeFixture(
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      "Session startup composer readiness test",
+    );
+
+    try {
+      const editor = fixture.session.activeChat().getByTestId("chat-input-editor");
+      const submit = fixture.session.submitButton();
+
+      // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await editor.fill('e2e:message("startup queue marker")');
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.1
+      await expect(submit).toBeEnabled();
+      await submit.click();
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.2
+      await expect(editor).toHaveText("");
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expect(fixture.session.activeChat().getByTestId("queue-chip")).toBeVisible();
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.8
+      await testPage.reload();
+      await fixture.session.waitForLoad();
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+
+      await waitForSessionReady(testPage, apiClient, fixture.task.id, fixture.identity.sessionId);
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.3
+      const responses = fixture.session
+        .activeChat()
+        .locator("[data-agent-message-body][data-message-id]")
+        .filter({ hasText: "startup queue marker" });
+      await expect(responses).toHaveCount(1, { timeout: 60_000 });
+    } finally {
+      await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
+
   test("reset context hides stale usage until a fresh report arrives", async ({
     testPage,
     apiClient,
@@ -169,12 +226,9 @@ test.describe("Session recovery", () => {
     // Click "Start fresh session"
     await session.recoveryFreshButton().click();
 
-    // Recovery briefly exposes the idle placeholder before the replacement
-    // agent starts. Observe the starting phase before treating the composer as
-    // ready so that transient idle state cannot satisfy the assertion.
-    const freshStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-    await expect(freshStarting).toBeVisible({ timeout: 30_000 });
-    await expect(freshStarting).not.toBeVisible({ timeout: 30_000 });
+    // Native session resume can move directly from recovery into an editable
+    // replacement session, so assert stable readiness instead of a transient
+    // placeholder that may be skipped.
     await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
       "contenteditable",
       "true",
@@ -208,20 +262,13 @@ test.describe("Session recovery", () => {
 
     // Click "Resume session"
     await session.recoveryResumeButton().click();
-
-    // Recovery briefly exposes the idle placeholder before the resumed agent
-    // starts. Observe the starting phase before treating the composer as ready
-    // so that transient idle state cannot satisfy the assertion.
-    const resumeStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-    await expect(resumeStarting).toBeVisible({ timeout: 30_000 });
-    await expect(resumeStarting).not.toBeVisible({ timeout: 30_000 });
-    await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
-      "contenteditable",
-      "true",
-      {
-        timeout: 30_000,
-      },
-    );
+    const editor = session.activeChat().getByTestId("chat-input-editor");
+    // The recovery endpoint waits until the resumed agent is prompt-ready
+    // before it resolves. The startup-specific composer gate is exercised by
+    // the slow-preparation test above; this flow verifies the recovered
+    // composer is usable afterwards.
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+    await expect(session.submitButton()).toBeEnabled({ timeout: 30_000 });
 
     // The resume settles the session back to WAITING_FOR_INPUT (agent idle).
     // The recovery card must not reappear now that the resume is resolved —
@@ -247,7 +294,7 @@ test.describe("Session recovery", () => {
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
 
-    // Verify agent works after recovery
+    // Verify the resumed agent works after recovery.
     await session.sendMessage("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });

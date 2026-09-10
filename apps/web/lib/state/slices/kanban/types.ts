@@ -1,10 +1,12 @@
 import type {
   ForegroundActivity,
   TaskPendingAction,
+  TaskOrigin,
   TaskPriority,
   TaskState as TaskStatus,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { BeginTaskRemovalInput, TaskRemovalState } from "@/lib/state/task-removal";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -44,6 +46,7 @@ export type KanbanState = {
     position: number;
     events?: KanbanStepEvents;
     allow_manual_move?: boolean;
+    auto_advance_requires_signal?: boolean;
     prompt?: string;
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
@@ -72,6 +75,7 @@ export type KanbanState = {
     description?: string;
     autopilot?: boolean;
     priority?: TaskPriority;
+    origin?: TaskOrigin | string;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */
@@ -114,14 +118,35 @@ export type KanbanState = {
     /** True when a workflow step's auto_start_agent on_enter action failed to
      *  launch a run for this task. */
     autoStartFailed?: boolean;
+    /**
+     * True when the task is waiting on the operator to notice, not on the
+     * operator to act — a settled session with a positively-sampled
+     * background process still live (spec:
+     * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
+     * and any live foregroundActivity.
+     */
+    parkedOnBackgroundWork?: boolean;
+    /** Process-local transition generation for parkedOnBackgroundWork; used to discard a stale event. */
+    parkedRevision?: number;
+    /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+    parkedEpoch?: number;
+    /** True when this task inherits an archived parent's workspace and can no
+     *  longer materialize or start. */
+    workspaceOrphaned?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;
+    primaryExecutorProfileId?: string | null;
     primaryExecutorType?: string | null;
     primaryExecutorName?: string | null;
+    primaryAgentProfileId?: string | null;
+    primaryAgentName?: string | null;
+    labels?: string[];
     isRemoteExecutor?: boolean;
+    /** Human assignee (user id). Independent of any agent assignment. */
+    assigneeUserId?: string;
     parentTaskId?: string | null;
     workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
     updatedAt?: string;
@@ -222,6 +247,8 @@ export type KanbanSliceState = {
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   tasks: TaskState;
+  /** Browser-local removal intent. It is deliberately excluded from hydration. */
+  taskRemoval: TaskRemovalState;
 };
 
 export type KanbanSliceActions = {
@@ -230,6 +257,8 @@ export type KanbanSliceActions = {
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
+  /** Automatic task selection that must not invalidate a user navigation revision. */
+  setActiveTaskAuto: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
   // setActiveSessionAuto updates the active session without creating or
   // clearing a user pin. Callers that intentionally override a pin must clear
@@ -241,6 +270,14 @@ export type KanbanSliceActions = {
   // the live session row with typed store access), so a stale status response
   // can never leave a Start button while the agent is actually running.
   setResumeSkipped: (sessionId: string, skipped: boolean) => void;
+  beginTaskRemoval: (input: Omit<BeginTaskRemovalInput, "token">) => string | null;
+  recordTaskRemovalResult: (
+    token: string,
+    taskIds: string[],
+    outcome: "succeeded" | "failed" | "unknown",
+  ) => void;
+  releaseTaskRemoval: (token: string) => void;
+  advanceTaskNavigationRevision: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;

@@ -503,6 +503,121 @@ func TestHandlePassthroughTurnCompleteUnknownSession(t *testing.T) {
 	require.Empty(t, bus.PublishedEvents)
 }
 
+type pendingInitialPromptRunner struct {
+	waiting     chan struct{}
+	release     chan struct{}
+	writeCalled bool
+}
+
+func (r *pendingInitialPromptRunner) WaitForFirstIdle(context.Context, string) error {
+	close(r.waiting)
+	<-r.release
+	return nil
+}
+
+func (r *pendingInitialPromptRunner) WriteStdin(string, string) error {
+	r.writeCalled = true
+	return nil
+}
+
+// @covers AC-TASKS-PASSTHROUGH-INITIAL-TURN-001.1
+func TestHandlePassthroughTurnCompleteSuppressesPendingInitialPrompt(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := newAutoInjectExecution("Ship the release")
+	execution.Status = v1.AgentStatusRunning
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	runner := &pendingInitialPromptRunner{
+		waiting: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{SubmitSequence: "\r"}, execution.PassthroughProcessID)
+	}()
+	released := false
+	defer func() {
+		if !released {
+			close(runner.release)
+			<-done
+		}
+	}()
+
+	<-runner.waiting
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+
+	require.Equal(t, v1.AgentStatusRunning, execution.Status,
+		"startup readiness must not complete a turn before initial prompt injection")
+	bus := mgr.eventBus.(*MockEventBus)
+	require.Empty(t, bus.PublishedEvents, "startup readiness must not publish a lifecycle event")
+
+	close(runner.release)
+	released = true
+	<-done
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+
+	require.Equal(t, v1.AgentStatusReady, execution.Status)
+	require.Len(t, bus.PublishedEvents, 1)
+	require.Equal(t, events.AgentReady, bus.PublishedEvents[0].Type)
+}
+
+// @covers AC-TASKS-PASSTHROUGH-INITIAL-TURN-001.5
+func TestAutoInjectCleanupDoesNotClearReplacementInitialPrompt(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := newAutoInjectExecution("Ship the release")
+	execution.Status = v1.AgentStatusRunning
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	runner := &pendingInitialPromptRunner{
+		waiting: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{SubmitSequence: "\r"}, execution.PassthroughProcessID)
+	}()
+	defer func() {
+		select {
+		case <-done:
+		default:
+			close(runner.release)
+			<-done
+		}
+	}()
+
+	<-runner.waiting
+	execution.passthroughLifecycleMu.Lock()
+	execution.PassthroughProcessID = "proc-replacement"
+	execution.passthroughInitialPromptProcessID = "proc-replacement"
+	execution.passthroughLifecycleMu.Unlock()
+	close(runner.release)
+	<-done
+
+	require.False(t, runner.writeCalled,
+		"an injection owned by the old process must not write after replacement")
+	mgr.handlePassthroughTurnComplete(execution.SessionID, "proc-replacement")
+	require.Equal(t, v1.AgentStatusRunning, execution.Status,
+		"cleanup from the old injection must not expose the replacement turn boundary")
+}
+
+// @covers AC-TASKS-PASSTHROUGH-INITIAL-TURN-001.5
+func TestAutoInjectSkipsReplacementBeforeClaim(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := newAutoInjectExecution("Ship the release")
+	execution.PassthroughProcessID = "proc-replacement"
+	execution.passthroughInitialPromptProcessID = "proc-replacement"
+	runner := &fakePassthroughRunner{}
+
+	mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{SubmitSequence: "\r"}, "proc-original")
+
+	require.False(t, runner.writeCalled,
+		"an injector for the replaced process must not write to the replacement")
+	require.Equal(t, "proc-replacement", execution.passthroughInitialPromptProcessID,
+		"the replacement marker must remain available to its injector")
+}
+
 // TestAutoInjectMarksRunningBeforeWriting pins the ordering that blocks a
 // racing composer submission: the execution must be RUNNING before the first
 // chunk lands on the PTY, so checkSessionPromptable rejects a concurrent
@@ -516,7 +631,7 @@ func TestAutoInjectMarksRunningBeforeWriting(t *testing.T) {
 	var statusAtFirstWrite v1.AgentStatus
 	runner := &statusObservingRunner{onWrite: func() { statusAtFirstWrite = execution.Status }}
 
-	mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{SubmitSequence: "\r"})
+	mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{SubmitSequence: "\r"}, execution.PassthroughProcessID)
 
 	require.Equal(t, []string{"Ship the release\r"}, runner.writes)
 	require.Equal(t, v1.AgentStatusRunning, statusAtFirstWrite,
@@ -534,10 +649,14 @@ func TestAutoInjectStopsAfterWriteFailure(t *testing.T) {
 		SubmitSequence:        "\r",
 		DisableBracketedPaste: true,
 		SubmitDelay:           time.Millisecond,
-	})
+	}, execution.PassthroughProcessID)
 
 	require.Len(t, runner.writes, 1,
 		"a failed write must abort the chunk loop instead of continuing to the submit byte")
+
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	require.Equal(t, v1.AgentStatusReady, execution.Status,
+		"a failed injection must release the completion boundary for later manual work")
 }
 
 func TestAutoInjectSkipsDuringShutdown(t *testing.T) {
@@ -545,9 +664,10 @@ func TestAutoInjectSkipsDuringShutdown(t *testing.T) {
 	mgr.shuttingDown.Store(true)
 	runner := &fakePassthroughRunner{}
 
-	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("Ship it"), agents.PassthroughConfig{
+	execution := newAutoInjectExecution("Ship it")
+	mgr.autoInjectInitialPromptWith(runner, execution, agents.PassthroughConfig{
 		SubmitSequence: "\r",
-	})
+	}, execution.PassthroughProcessID)
 
 	require.False(t, runner.writeCalled, "teardown must not race a stdin write into a dying PTY")
 }
@@ -561,7 +681,7 @@ func TestAutoInjectInitialPromptWithoutRunnerIsNoOp(t *testing.T) {
 	execution.Status = v1.AgentStatusReady
 	require.NoError(t, mgr.executionStore.Add(execution))
 
-	mgr.autoInjectInitialPrompt(execution, agents.PassthroughConfig{SubmitSequence: "\r"})
+	mgr.autoInjectInitialPrompt(execution, agents.PassthroughConfig{SubmitSequence: "\r"}, execution.PassthroughProcessID)
 
 	require.Equal(t, v1.AgentStatusReady, execution.Status,
 		"without a runner the execution must not be flipped to RUNNING")

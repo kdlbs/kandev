@@ -12,11 +12,12 @@ package adapter
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
-	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -147,6 +148,16 @@ type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 }
 
+// TurnStartRecorder is an optional interface implemented by adapters that
+// record a wall-clock turn-start timestamp per session, covering both a
+// human prompt dispatch and a synthetic ScheduleWakeup self-resume (spec
+// docs/specs/disambiguate-waiting/spec.md, D3). Only ACP adapters implement
+// this today. The background-workload liveness probe (agent.background.probe)
+// uses it to anchor the probe's start-time comparison.
+type TurnStartRecorder interface {
+	RecordedTurnStart(sessionID string) (time.Time, bool)
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`
@@ -260,11 +271,6 @@ type Config struct {
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
 
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
-
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
@@ -328,7 +334,6 @@ func (c *Config) ToSharedConfig() *shared.Config {
 	return &shared.Config{
 		WorkDir:                   c.WorkDir,
 		AutoApprove:               c.AutoApprove,
-		ApprovalPolicy:            c.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   c.AgentID,
 		AgentName:                 c.AgentName,

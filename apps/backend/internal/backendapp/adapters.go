@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -21,11 +22,201 @@ import (
 	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
+
+// canvasAgentCtlClient is the small agentctl surface shared by canvas
+// authoring and browser-initiated canvas editing. The concrete runtime client
+// stays behind this adapter so higher-level services do not couple to the
+// lifecycle or agentctl implementation packages.
+type canvasAgentCtlClient interface {
+	CreateFile(context.Context, string, string) (*streams.FileCreateResponse, error)
+	ApplyFileDiff(context.Context, string, string, string, string, *string) (*streams.FileUpdateResponse, error)
+	DeleteFile(context.Context, string, string) (*streams.FileDeleteResponse, error)
+	RenameFile(context.Context, string, string, string) (*streams.FileRenameResponse, error)
+	StreamCanvasSource(context.Context, string) (io.ReadCloser, error)
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasCopyFilesResult struct {
+	Warnings []string
+	Present  bool
+}
+
+type canvasEditAgentCtl interface {
+	CopyFiles(context.Context, string, []copyfiles.Entry) (canvasCopyFilesResult, error)
+}
+
+type canvasAgentExecution struct {
+	TaskID    string
+	SessionID string
+	client    canvasAgentCtlClient
+}
+
+func (e *canvasAgentExecution) GetAgentCtlClient() canvasAgentCtlClient {
+	if e == nil {
+		return nil
+	}
+	return e.client
+}
+
+type canvasExecutionResolver interface {
+	ResolveCanvasExecution(string) (*canvasAgentExecution, error)
+}
+
+type canvasEditExecutionResolver interface {
+	ResolveAgentCtl(string) (canvasEditAgentCtl, error)
+}
+
+// lifecycleCanvasExecutionResolver is the approved low-level adapter from
+// the lifecycle manager to the canvas services. Keep direct runtime imports
+// here, at the boundary, instead of spreading them through feature code.
+type lifecycleCanvasExecutionResolver struct {
+	manager *lifecycle.Manager
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveCanvasExecution(executionID string) (*canvasAgentExecution, error) {
+	if r.manager == nil || executionID == "" {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	execution, ok := r.manager.GetExecution(executionID)
+	if !ok || execution == nil {
+		return nil, errors.New("agent execution is unavailable")
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		release()
+		return nil, errors.New("agent execution is unavailable")
+	}
+	release()
+	return &canvasAgentExecution{
+		TaskID: execution.TaskID, SessionID: execution.SessionID,
+		client: canvasAgentCtlAdapter{acquire: execution.AcquireAgentCtlClient},
+	}, nil
+}
+
+func (r lifecycleCanvasExecutionResolver) ResolveAgentCtl(executionID string) (canvasEditAgentCtl, error) {
+	execution, err := r.ResolveCanvasExecution(executionID)
+	if err != nil {
+		return nil, err
+	}
+	return execution.GetAgentCtlClient(), nil
+}
+
+type canvasAgentCtlAdapter struct {
+	client  *client.Client
+	acquire func() (*client.Client, func())
+}
+
+func (a canvasAgentCtlAdapter) acquireClient() (*client.Client, func(), error) {
+	if a.acquire != nil {
+		client, release := a.acquire()
+		if client == nil {
+			release()
+			return nil, func() {}, errors.New("agentctl client is unavailable")
+		}
+		return client, release, nil
+	}
+	if a.client == nil {
+		return nil, func() {}, errors.New("agentctl client is unavailable")
+	}
+	return a.client, func() {}, nil
+}
+
+func (a canvasAgentCtlAdapter) CreateFile(ctx context.Context, path, repo string) (*streams.FileCreateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.CreateFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) ApplyFileDiff(ctx context.Context, path, diff, originalHash, repo string, desiredContent *string) (*streams.FileUpdateResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.ApplyFileDiff(ctx, path, diff, originalHash, repo, desiredContent)
+}
+
+func (a canvasAgentCtlAdapter) DeleteFile(ctx context.Context, path, repo string) (*streams.FileDeleteResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.DeleteFile(ctx, path, repo)
+}
+
+func (a canvasAgentCtlAdapter) RenameFile(ctx context.Context, oldPath, newPath, repo string) (*streams.FileRenameResponse, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return client.RenameFile(ctx, oldPath, newPath, repo)
+}
+
+func (a canvasAgentCtlAdapter) StreamCanvasSource(ctx context.Context, root string) (io.ReadCloser, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return nil, err
+	}
+	stream, err := client.StreamCanvasSource(ctx, root)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	if stream == nil {
+		release()
+		return nil, errors.New("agentctl returned an empty source stream")
+	}
+	return &canvasSourceReadCloser{ReadCloser: stream, release: release}, nil
+}
+
+func (a canvasAgentCtlAdapter) CopyFiles(ctx context.Context, repo string, entries []copyfiles.Entry) (canvasCopyFilesResult, error) {
+	client, release, err := a.acquireClient()
+	if err != nil {
+		return canvasCopyFilesResult{}, err
+	}
+	defer release()
+	response, err := client.CopyFiles(ctx, repo, entries)
+	if response == nil {
+		return canvasCopyFilesResult{}, err
+	}
+	return canvasCopyFilesResult{Warnings: append([]string(nil), response.Warnings...), Present: true}, err
+}
+
+type canvasSourceReadCloser struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (r *canvasSourceReadCloser) releaseClient() {
+	r.once.Do(r.release)
+}
+
+func (r *canvasSourceReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil {
+		r.releaseClient()
+	}
+	return n, err
+}
+
+func (r *canvasSourceReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.releaseClient()
+	return err
+}
 
 // taskGetterRepo is the minimal interface needed by the scheduler adapter.
 type taskGetterRepo interface {
@@ -224,6 +415,7 @@ func buildLifecycleLaunchRequest(
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
+		AllowBranchReplacement:        req.AllowBranchReplacement,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
@@ -233,6 +425,7 @@ func buildLifecycleLaunchRequest(
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
+		AdditionalSkillSlugs:          append([]string(nil), req.AdditionalSkillSlugs...),
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
@@ -326,6 +519,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			ContributionDestination:    r.ContributionDestination,
 			ComparisonTarget:           r.ComparisonTarget,
 			WorktreeID:                 r.WorktreeID,
+			AllowBranchReplacement:     r.AllowBranchReplacement,
 			WorktreeBranchPrefix:       r.WorktreeBranchPrefix,
 			WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 			WorktreeBranchTicket:       r.WorktreeBranchTicket,
@@ -619,6 +813,12 @@ func (a *lifecycleAdapter) CancelPermissionBySessionID(ctx context.Context, sess
 	return a.mgr.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
 }
 
+// ProbeBackgroundWorkloads samples a session's agent process for
+// background-workload liveness (spec docs/specs/disambiguate-waiting/spec.md).
+func (a *lifecycleAdapter) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return a.mgr.ProbeBackgroundWorkloadsBySessionID(ctx, sessionID)
+}
+
 // IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes the actual agent (Docker container or standalone process)
 func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
@@ -666,6 +866,7 @@ func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, recor
 	lcRecords := make([]lifecycle.RemoteStatusPollRecord, len(records))
 	for i, r := range records {
 		lcRecords[i] = lifecycle.RemoteStatusPollRecord{
+			TaskID:           r.TaskID,
 			SessionID:        r.SessionID,
 			Runtime:          r.Runtime,
 			AgentExecutionID: r.AgentExecutionID,
@@ -742,7 +943,8 @@ func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit 
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -755,7 +957,8 @@ func (a *lifecycleAdapter) GetCumulativeDiff(ctx context.Context, sessionID, bas
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -771,7 +974,8 @@ func (a *lifecycleAdapter) GetGitStatus(ctx context.Context, sessionID string) (
 	if !ok {
 		return nil, nil // No execution, not an error
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -784,7 +988,8 @@ func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID stri
 	if !ok {
 		return nil, nil
 	}
-	agentClient := execution.GetAgentCtlClient()
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentClient == nil {
 		return nil, nil
 	}
@@ -802,6 +1007,8 @@ type orchestratorWrapper struct {
 	svc *orchestrator.Service
 }
 
+var _ taskhandlers.AtomicQueuedPromptCoordinator = (*orchestratorWrapper)(nil)
+
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
 func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -818,6 +1025,47 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error {
 	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
 	return err
+}
+
+// PrepareDirectPrompt forwards the backend-owned direct-message preparation
+// seam used by the WebSocket message handler.
+func (w *orchestratorWrapper) PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string) {
+	return w.svc.PrepareDirectPrompt(ctx, prompt, isPassthrough)
+}
+
+// StartCreatedSessionWithPromptContext forwards direct-message startup while
+// preserving the trusted saved-prompt context through the second canonicalizer.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContext(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidance forwards direct
+// startup together with the server-resolved capability projection used when
+// the message was persisted.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		canvasGuidanceResolved, includeCanvasGuidance,
+	)
 }
 
 type githubTaskIssueStoreAdapter struct {
@@ -906,9 +1154,23 @@ func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessi
 	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
+func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {
+	return w.svc.MaxQueuedPromptsPerSession()
+}
+
+func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
+	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
+}
+
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
+}
+
+// TaskSessionCanvasGuidanceEnabled forwards the resolved capability used when
+// the message handler persists a first-turn prompt.
+func (w *orchestratorWrapper) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	return w.svc.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
 }
 
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).
@@ -922,6 +1184,10 @@ func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskS
 
 func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
+func (w *orchestratorWrapper) SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerRecordedMessage(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
 // subagentContextAdapter adapts the task service to the
@@ -1002,6 +1268,22 @@ func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, 
 // CreateUserMessage creates a message with author_type="user"
 func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
+func (a *messageCreatorAdapter) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,

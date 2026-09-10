@@ -65,13 +65,16 @@ type TargetTaskStepResolver interface {
 }
 
 // QueueRunCallback executes the queue_run action by resolving Target/TaskID
-// then enqueuing a run via RunQueueAdapter.
+// then enqueuing a run via RunQueueAdapter. Logger is nil-safe (AC-24
+// convention, same as EnsureParticipantSeatCallback): a nil Logger skips
+// warning emission for the workspace.ceo_agent self-escalation guard.
 type QueueRunCallback struct {
 	Adapter      RunQueueAdapter
 	Participants ParticipantStore
 	CEOResolver  CEOAgentResolver
 	Primary      PrimaryAgentResolver
 	TaskSteps    TargetTaskStepResolver
+	Logger       *logger.Logger
 }
 
 // Execute satisfies ActionCallback.
@@ -143,7 +146,7 @@ func (c QueueRunCallback) resolveTarget(
 		if err != nil {
 			return nil, "", err
 		}
-		agentIDs, err := c.resolveCEO(ctx, taskID)
+		agentIDs, err := c.resolveCEO(ctx, in, taskID)
 		return agentIDs, stepID, err
 	default:
 		return nil, "", fmt.Errorf("queue_run: unsupported target %q", target)
@@ -273,7 +276,13 @@ func roleSeatsForFanOut(ctx context.Context, store ParticipantStore, stepID, tas
 	return seats, nil
 }
 
-func (c QueueRunCallback) resolveCEO(ctx context.Context, taskID string) ([]string, error) {
+// resolveCEO resolves the workspace CEO for a workspace.ceo_agent target. On
+// an on_agent_error trigger whose failed agent IS the resolved CEO, it
+// returns no agents instead of re-queueing the CEO to escalate its own
+// failure to itself — the run failure and inbox activity are already
+// recorded by the caller before this trigger fires, so skipping here loses
+// no visibility, only the self-escalation loop.
+func (c QueueRunCallback) resolveCEO(ctx context.Context, in ActionInput, taskID string) ([]string, error) {
 	if c.CEOResolver == nil {
 		return nil, fmt.Errorf("%w: queue_run target=workspace.ceo_agent requires CEOAgentResolver", ErrActionNotYetWired)
 	}
@@ -284,7 +293,26 @@ func (c QueueRunCallback) resolveCEO(ctx context.Context, taskID string) ([]stri
 	if id == "" {
 		return nil, fmt.Errorf("queue_run: workspace has no CEO agent profile for task %s", taskID)
 	}
+	if in.Trigger == TriggerOnAgentError {
+		if payload, ok := agentErrorPayload(in.Payload); ok && payload.FailedAgentID == id {
+			c.recordCEOSelfEscalationSkipped(taskID, id)
+			return nil, nil
+		}
+	}
 	return []string{id}, nil
+}
+
+// recordCEOSelfEscalationSkipped logs the skipped self-escalation for
+// operator visibility. Nil-safe: see the AC-24 convention note on
+// QueueRunCallback.
+func (c QueueRunCallback) recordCEOSelfEscalationSkipped(taskID, ceoAgentID string) {
+	if c.Logger == nil {
+		return
+	}
+	c.Logger.Warn("queue_run: skipped workspace.ceo_agent self-escalation",
+		zap.String("task_id", taskID),
+		zap.String("ceo_agent_id", ceoAgentID),
+	)
 }
 
 // resolveTaskID maps the action's TaskID string into a concrete id, honouring
@@ -372,6 +400,8 @@ func queueActionDigest(in ActionInput) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// queueRunPayload combines trigger metadata with workflow-authored fields.
+// Typed failure metadata provides defaults, while authored fields override it.
 func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
 	out := make(map[string]any, len(actionPayload))
 	comment, ok := commentPayload(in.Payload)
@@ -383,8 +413,20 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 			out["author_id"] = comment.AuthorID
 		}
 	}
+	if agentErr, aok := agentErrorPayload(in.Payload); aok {
+		if agentErr.FailedAgentID != "" {
+			out["failed_agent_id"] = agentErr.FailedAgentID
+		}
+		if agentErr.FailedSessionID != "" {
+			out["failed_session_id"] = agentErr.FailedSessionID
+		}
+		if agentErr.ErrorMessage != "" {
+			out["error"] = agentErr.ErrorMessage
+		}
+	}
 	// Workflow-authored payload fields are explicit overrides. The trigger's
-	// comment_id/author_id only provide defaults for ordinary comment wakes.
+	// comment_id/author_id/failed_agent_id/etc. only provide defaults for
+	// their respective wake kinds.
 	for k, v := range actionPayload {
 		out[k] = v
 	}
@@ -410,6 +452,19 @@ func commentPayload(payload any) (OnCommentPayload, bool) {
 		}
 	}
 	return OnCommentPayload{}, false
+}
+
+// agentErrorPayload normalizes value and pointer trigger payloads.
+func agentErrorPayload(payload any) (OnAgentErrorPayload, bool) {
+	switch p := payload.(type) {
+	case OnAgentErrorPayload:
+		return p, true
+	case *OnAgentErrorPayload:
+		if p != nil {
+			return *p, true
+		}
+	}
+	return OnAgentErrorPayload{}, false
 }
 
 // ClearDecisionsCallback executes the clear_decisions action by deleting all
@@ -572,7 +627,7 @@ func (c EnsureParticipantSeatCallback) Execute(ctx context.Context, in ActionInp
 		c.recordSeatEnsureError(taskID, stepID, role, err)
 		return ActionResult{}, err
 	}
-	cast, err := c.Caster.CastParticipantSeat(ctx, taskID, stepID, role)
+	cast, err := c.Caster.CastParticipantSeat(ctx, workflowID, taskID, stepID, role)
 	if err != nil {
 		c.recordSeatEnsureError(taskID, stepID, role, err)
 		return ActionResult{}, fmt.Errorf("ensure_participant_seat cast: %w", err)

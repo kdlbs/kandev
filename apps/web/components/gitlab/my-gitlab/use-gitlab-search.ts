@@ -23,6 +23,7 @@ type SearchState = {
 type FetchArgs = {
   filter: string;
   customQuery: string;
+  milestone: string;
   page: number;
 };
 
@@ -32,6 +33,7 @@ type UseGitLabSearchOptions = {
   presets: PresetOption[];
   preset: string;
   customQuery: string;
+  milestone?: string;
   projectFilter?: string;
   // Gate the network fetch on the integration being connected. When GitLab is
   // not configured the page renders the connect notice instead of the list, so
@@ -73,12 +75,42 @@ function filterByProject(items: Item[], project: string): Item[] {
   return items.filter((it) => it.project_path === project);
 }
 
+async function fetchGitLabSearchPage(
+  kind: SearchKind,
+  workspaceId: string,
+  args: FetchArgs,
+): Promise<Omit<SearchState, "workspaceId">> {
+  const params = {
+    workspaceId,
+    filter: args.filter,
+    customQuery: args.customQuery,
+    page: args.page,
+    perPage: SEARCH_PAGE_SIZE,
+  };
+  const response =
+    kind === "mr"
+      ? await searchUserMRs(params)
+      : await searchUserIssues({ ...params, milestone: args.milestone });
+  const items: Item[] =
+    kind === "mr"
+      ? ((response as { mrs: MR[] | null } | null)?.mrs ?? [])
+      : ((response as { issues: Issue[] | null } | null)?.issues ?? []);
+  return {
+    items,
+    loading: false,
+    error: null,
+    lastFetchedAt: new Date(),
+    total: response?.total_count ?? items.length,
+  };
+}
+
 export function useGitLabSearch({
   workspaceId,
   kind,
   presets,
   preset,
   customQuery,
+  milestone = "",
   projectFilter = "",
   enabled = true,
 }: UseGitLabSearchOptions) {
@@ -91,7 +123,7 @@ export function useGitLabSearch({
   }, [preset, customQuery, kind]);
 
   const fetchData = useCallback(
-    async ({ filter: ef, customQuery: ec, page: epage }: FetchArgs) => {
+    async (args: FetchArgs) => {
       if (!enabled || !workspaceId) return;
       const seq = ++requestSeq.current;
       const requestedWorkspaceId = workspaceId;
@@ -108,28 +140,9 @@ export function useGitLabSearch({
             },
       );
       try {
-        const params = {
-          workspaceId,
-          filter: ef,
-          customQuery: ec,
-          page: epage,
-          perPage: SEARCH_PAGE_SIZE,
-        };
-        const response =
-          kind === "mr" ? await searchUserMRs(params) : await searchUserIssues(params);
+        const next = await fetchGitLabSearchPage(kind, workspaceId, args);
         if (seq !== requestSeq.current) return;
-        const items: Item[] =
-          kind === "mr"
-            ? ((response as { mrs: MR[] | null } | null)?.mrs ?? [])
-            : ((response as { issues: Issue[] | null } | null)?.issues ?? []);
-        setState({
-          items,
-          loading: false,
-          error: null,
-          lastFetchedAt: new Date(),
-          total: response?.total_count ?? items.length,
-          workspaceId: requestedWorkspaceId,
-        });
+        setState({ ...next, workspaceId: requestedWorkspaceId });
       } catch (err) {
         if (seq !== requestSeq.current) return;
         setState((s) => ({
@@ -155,12 +168,18 @@ export function useGitLabSearch({
     // its run callback and its debounce effect) so a disabled integration never
     // schedules a fetch. The callback keeps its own guard to also cover refresh().
     if (!enabled || !workspaceId) return;
-    void fetchData({ filter: resolved.filter, customQuery: resolved.customQuery, page });
-  }, [fetchData, enabled, workspaceId, resolved.filter, resolved.customQuery, page]);
+    void fetchData({
+      filter: resolved.filter,
+      customQuery: resolved.customQuery,
+      milestone,
+      page,
+    });
+  }, [fetchData, enabled, workspaceId, resolved.filter, resolved.customQuery, milestone, page]);
 
   const refresh = useCallback(
-    () => fetchData({ filter: resolved.filter, customQuery: resolved.customQuery, page }),
-    [fetchData, resolved.filter, resolved.customQuery, page],
+    () =>
+      fetchData({ filter: resolved.filter, customQuery: resolved.customQuery, milestone, page }),
+    [fetchData, resolved.filter, resolved.customQuery, milestone, page],
   );
 
   const isCurrentWorkspace = state.workspaceId === workspaceId;

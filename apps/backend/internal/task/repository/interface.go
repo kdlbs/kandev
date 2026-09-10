@@ -17,8 +17,10 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
+var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
 
@@ -31,6 +33,20 @@ type WorkspaceRepository interface {
 	DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error)
 	DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error)
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
+
+	// Workspace membership. Membership is the exception path next to
+	// Workspace.Visibility: it populates a private workspace, admits a guest
+	// to one workspace, and narrows a member to viewer on an org-visible one.
+	ListWorkspaceMembers(ctx context.Context, workspaceID string) ([]*models.WorkspaceMember, error)
+	GetWorkspaceMember(ctx context.Context, workspaceID, userID string) (*models.WorkspaceMember, error)
+	// ListWorkspaceIDsForMember returns workspaceID -> role for one user in a
+	// single query, so a board render resolves access without an N+1.
+	ListWorkspaceIDsForMember(ctx context.Context, userID string) (map[string]string, error)
+	UpsertWorkspaceMember(ctx context.Context, member *models.WorkspaceMember) error
+	DeleteWorkspaceMember(ctx context.Context, workspaceID, userID string) error
+	DeleteWorkspaceMembersByWorkspace(ctx context.Context, workspaceID string) error
+	CountWorkspaceMembers(ctx context.Context) (map[string]int, error)
+	TransferWorkspaceOwnership(ctx context.Context, workspaceID, fromUserID, toUserID string) error
 }
 
 // TaskRepository handles task CRUD and workflow placement.
@@ -149,6 +165,13 @@ type TaskRepository interface {
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
 }
 
+// TaskPriorityRepository updates a task's priority without replacing the
+// complete task row. Implementations use this capability for priority-only
+// mutations so concurrent changes to other task fields are preserved.
+type TaskPriorityRepository interface {
+	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
+}
+
 // TaskStatusSummaryRepository stores the bounded task-level projection used by
 // list and switcher surfaces. Implementations must compare revisions and the
 // semantic payload atomically so retries and concurrent source observations do
@@ -209,6 +232,13 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// HasUserPromptHistory reports whether the session has ever accepted a user
+	// prompt. The durable prompt sequence remains after message deletion.
+	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
+	// ClaimInitialPromptFallback atomically admits the task-description fallback
+	// for a never-prompted session. It returns false when another prompt or
+	// fallback has already claimed the session's first prompt slot.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
 	// GetMessageWithPromptIndex retrieves a message by ID with its computed
 	// prompt_index (1-based ordinal among the session's user messages).
 	// Used by the idempotent WS replay/response path and user update-event
@@ -251,8 +281,17 @@ type AttachmentRepository interface {
 	ClaimMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID string) error
 	DeleteClaimedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
 	DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
+	DeleteMessageAttachmentsBySession(ctx context.Context, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
+	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// QueueAttachmentAdmissionRepository scopes provisional attachment claims to
+// one caller-owned queue admission so rollback can restore only that attempt.
+type QueueAttachmentAdmissionRepository interface {
+	ClaimQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, queueID string) error
+	RestoreQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, queueID string) error
 }
 
 // TurnRepository handles conversation turn persistence.
@@ -334,7 +373,7 @@ type SessionRepository interface {
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error)
 	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
-	DeleteTaskSession(ctx context.Context, id string) error
+	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
@@ -390,6 +429,9 @@ type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error)
+	GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
@@ -423,6 +465,18 @@ type RepositoryEntityRepository interface {
 	// single-process race; it is not a substitute for a database-level
 	// uniqueness constraint against writers outside this process.
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
+}
+
+// DesktopDiscoveryRootRepository stores install-wide desktop discovery roots
+// and one-time migration state. These records are not owned by a workspace.
+type DesktopDiscoveryRootRepository interface {
+	ListDesktopDiscoveryRoots(ctx context.Context) ([]*models.DesktopDiscoveryRoot, error)
+	GetDesktopDiscoveryRoot(ctx context.Context, path string) (*models.DesktopDiscoveryRoot, error)
+	CreateDesktopDiscoveryRoot(ctx context.Context, root *models.DesktopDiscoveryRoot) error
+	UpdateDesktopDiscoveryRoot(ctx context.Context, root *models.DesktopDiscoveryRoot) error
+	DeleteDesktopDiscoveryRoot(ctx context.Context, path string) error
+	GetDesktopDiscoveryMigration(ctx context.Context) (*models.DesktopDiscoveryMigration, error)
+	SetDesktopDiscoveryMigration(ctx context.Context, migration *models.DesktopDiscoveryMigration) error
 }
 
 // RepositorySetRepository stores named, reusable groups of workspace
@@ -494,6 +548,7 @@ type ExecutorRepository interface {
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
+	UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
@@ -584,6 +639,10 @@ type PlanRepository interface {
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
+	ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error)
+	CreateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment) (*models.TaskPlanCommentSnapshot, error)
+	UpdateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
+	DeleteTaskPlanComment(ctx context.Context, taskID, planID, commentID string, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
 
 	// Revision history
 	InsertTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error
@@ -595,7 +654,14 @@ type PlanRepository interface {
 	// WritePlanRevision atomically upserts the HEAD plan and writes/merges a revision in a
 	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
 	// otherwise a new revision is appended with revision_number computed inside the tx.
-	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
+	//
+	// preserveTitle and preserveCreatedBy gate the HEAD upsert's ON CONFLICT branch only: when
+	// true, an existing row keeps its stored title / created_by rather than taking head's value.
+	// They have no effect on a fresh insert, which always uses head's value. Callers set a flag
+	// only when the value they would otherwise overwrite with could not be read (see
+	// docs/specs/tasks/system-design/plan-write-consistency.md, "Existing behavior that must
+	// change"); every other caller passes false.
+	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string, preserveTitle, preserveCreatedBy bool) error
 }
 
 // SubagentContextRepository persists the durable, queryable record of a

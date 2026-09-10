@@ -51,6 +51,9 @@ const ALLOW_ALL_TOOLS_FLAG = "--allow-all-tools";
 const COMMAND_PREFIX = "greywall --";
 const PERSISTED_PROFILE_ID = toAgentProfileId("persisted-profile");
 const DRAFT_PROFILE_ID = toAgentProfileId("draft-profile");
+const NEW_PROFILE_ID = toAgentProfileId("draft-new-profile");
+const NEW_PROFILE_NAME = "New profile";
+const PLAYWRIGHT_MCP_SERVERS = '{"mcpServers":{"playwright":{"command":"npx"}}}';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -283,7 +286,7 @@ describe("saveNewAgent", () => {
       id: DRAFT_PROFILE_ID,
       mcp_config: {
         enabled: true,
-        servers: '{"mcpServers":{"playwright":{"command":"npx"}}}',
+        servers: PLAYWRIGHT_MCP_SERVERS,
         dirty: true,
         error: null,
       },
@@ -329,11 +332,11 @@ describe("saveNewAgent", () => {
 describe("saveExistingAgent", () => {
   it("reconciles a created profile so a failed MCP write retries without duplication", async () => {
     const newProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-new-profile"),
-      name: "New profile",
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
       mcp_config: {
         enabled: true,
-        servers: '{"mcpServers":{"playwright":{"command":"npx"}}}',
+        servers: PLAYWRIGHT_MCP_SERVERS,
         dirty: true,
         error: null,
       },
@@ -435,8 +438,8 @@ describe("command prefix save payloads", () => {
   it("includes the command prefix when adding a new profile to an existing agent", async () => {
     const savedAgent = agentWithProfiles([baseProfile]);
     const newProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-new-profile"),
-      name: "New profile",
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
       commandPrefix: COMMAND_PREFIX,
     });
     const draftAgent = agentWithProfiles([baseProfile, newProfile]);
@@ -502,8 +505,8 @@ describe("fallback model save payloads", () => {
   it("includes the fallback fields when adding a new profile to an existing agent", async () => {
     const savedAgent = agentWithProfiles([baseProfile]);
     const newProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-new-profile"),
-      name: "New profile",
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
       fallbackModel: "gpt-5",
       autoFallback: true,
     });
@@ -561,8 +564,8 @@ describe("provider config save payloads", () => {
   it("includes provider fields when adding a new profile to an existing agent", async () => {
     const savedAgent = agentWithProfiles([baseProfile]);
     const newProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-new-profile"),
-      name: "New profile",
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
       providerKind: OPENAI_COMPATIBLE,
       providerBaseUrl: BASE_URL,
     });

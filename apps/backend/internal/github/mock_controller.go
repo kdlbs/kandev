@@ -59,6 +59,8 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/repo-files", c.addRepoFiles)
 	api.POST("/task-prs", c.associateTaskPR)
 	api.POST("/pr-feedback", c.seedPRFeedback)
+	api.POST("/workflow-runs", c.addWorkflowRuns)
+	api.POST("/workflow-jobs", c.addWorkflowRunJobs)
 	api.PUT("/auth-health", c.setAuthHealth)
 	api.PUT("/workspace-connections/:workspaceId", c.setWorkspaceConnection)
 	api.DELETE("/workspace-connections/:workspaceId", c.deleteWorkspaceConnection)
@@ -536,7 +538,7 @@ func (c *MockController) setMergeOutcome(ctx *gin.Context) {
 	switch req.Outcome {
 	case "failed":
 		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge provider unavailable")
-	case "pending":
+	case computedReviewStatePending:
 		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge request remained pending")
 	case "head_mismatch":
 		c.mock.SetMergeFailure(req.Owner, req.Repo, req.Number, "mock merge head mismatch")
@@ -548,7 +550,7 @@ func (c *MockController) setMergeOutcome(ctx *gin.Context) {
 
 func validMockMergeOutcome(outcome string) bool {
 	switch outcome {
-	case string(MergeOutcomeMerged), string(MergeOutcomeQueued), "failed", "pending", "head_mismatch":
+	case string(MergeOutcomeMerged), string(MergeOutcomeQueued), "failed", computedReviewStatePending, "head_mismatch":
 		return true
 	default:
 		return false
@@ -715,6 +717,8 @@ type associateTaskPRRequest struct {
 	AuthorLogin                           string     `json:"author_login"`
 	State                                 string     `json:"state"`
 	HeadSHA                               string     `json:"head_sha,omitempty"`
+	HeadRepoOwner                         string     `json:"head_repo_owner,omitempty"`
+	HeadRepoName                          string     `json:"head_repo_name,omitempty"`
 	ReviewState                           string     `json:"review_state"`
 	ChecksState                           string     `json:"checks_state"`
 	MergeableState                        string     `json:"mergeable_state"`
@@ -844,6 +848,8 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		State:                                 req.State,
 		HeadBranch:                            req.HeadBranch,
 		HeadSHA:                               headSHA,
+		HeadRepoOwner:                         req.HeadRepoOwner,
+		HeadRepoName:                          req.HeadRepoName,
 		BaseBranch:                            req.BaseBranch,
 		AuthorLogin:                           req.AuthorLogin,
 		MergeableState:                        req.MergeableState,
@@ -869,12 +875,18 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 // resolves them via ListCheckRuns.
 func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 	var req struct {
-		Owner    string      `json:"owner"`
-		Repo     string      `json:"repo"`
-		PRNumber int         `json:"pr_number"`
-		Checks   []CheckRun  `json:"checks"`
-		Reviews  []PRReview  `json:"reviews"`
-		Comments []PRComment `json:"comments"`
+		Owner        string        `json:"owner"`
+		Repo         string        `json:"repo"`
+		PRNumber     int           `json:"pr_number"`
+		Checks       []CheckRun    `json:"checks"`
+		Reviews      []PRReview    `json:"reviews"`
+		Comments     []PRComment   `json:"comments"`
+		WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+		WorkflowJobs []struct {
+			RunID      int64         `json:"run_id"`
+			RunAttempt int           `json:"run_attempt"`
+			Jobs       []WorkflowJob `json:"jobs"`
+		} `json:"workflow_jobs"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -906,11 +918,76 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 	c.mock.ReplaceCheckRuns(req.Owner, req.Repo, headSHA, req.Checks)
 	c.mock.ReplaceReviews(req.Owner, req.Repo, req.PRNumber, req.Reviews)
 	c.mock.ReplaceComments(req.Owner, req.Repo, req.PRNumber, req.Comments)
+	for i := range req.WorkflowRuns {
+		if req.WorkflowRuns[i].HeadSHA == "" {
+			req.WorkflowRuns[i].HeadSHA = headSHA
+		}
+	}
+	c.mock.ReplaceWorkflowRuns(req.Owner, req.Repo, headSHA, req.WorkflowRuns)
+	for _, workflowJobs := range req.WorkflowJobs {
+		attempt := workflowJobs.RunAttempt
+		if attempt <= 0 {
+			attempt = 1
+		}
+		c.mock.ReplaceWorkflowRunJobs(req.Owner, req.Repo, workflowJobs.RunID, attempt, workflowJobs.Jobs)
+	}
+	// A feedback seed represents a provider-side mutation. Drop the service
+	// snapshots so the next browser refresh observes the new mock data without
+	// waiting for the production cache TTL.
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
 	ctx.JSON(http.StatusOK, gin.H{
 		"checks":   len(req.Checks),
 		"reviews":  len(req.Reviews),
 		"comments": len(req.Comments),
 	})
+}
+
+func (c *MockController) addWorkflowRuns(ctx *gin.Context) {
+	var req struct {
+		Owner   string        `json:"owner"`
+		Repo    string        `json:"repo"`
+		HeadSHA string        `json:"head_sha"`
+		Runs    []WorkflowRun `json:"runs"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Owner == "" || req.Repo == "" || req.HeadSHA == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, head_sha are required"})
+		return
+	}
+	for i := range req.Runs {
+		if req.Runs[i].HeadSHA == "" {
+			req.Runs[i].HeadSHA = req.HeadSHA
+		}
+	}
+	c.mock.ReplaceWorkflowRuns(req.Owner, req.Repo, req.HeadSHA, req.Runs)
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
+	ctx.JSON(http.StatusOK, gin.H{"runs": len(req.Runs)})
+}
+
+func (c *MockController) addWorkflowRunJobs(ctx *gin.Context) {
+	var req struct {
+		Owner      string        `json:"owner"`
+		Repo       string        `json:"repo"`
+		RunID      int64         `json:"run_id"`
+		RunAttempt int           `json:"run_attempt"`
+		Jobs       []WorkflowJob `json:"jobs"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Owner == "" || req.Repo == "" || req.RunID == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner, repo, run_id are required"})
+		return
+	}
+	attempt := req.RunAttempt
+	if attempt <= 0 {
+		attempt = 1
+	}
+	c.mock.ReplaceWorkflowRunJobs(req.Owner, req.Repo, req.RunID, attempt, req.Jobs)
+	if c.service != nil {
+		c.service.ClearPRCaches()
+	}
+	ctx.JSON(http.StatusOK, gin.H{"jobs": len(req.Jobs)})
 }
 
 // setAuthHealth toggles the mock client's authenticated state so e2e tests

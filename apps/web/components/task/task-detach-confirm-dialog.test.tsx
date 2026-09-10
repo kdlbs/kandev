@@ -21,6 +21,8 @@ function PopoverHarness({ onConfirm = vi.fn() }: { onConfirm?: () => void | Prom
       <TaskDetachConfirmPopover
         open={open}
         anchorRef={anchorRef}
+        focusReturnRef={anchorRef}
+        restoreFocusOnConfirm
         taskTitle="Child task"
         sharesParentWorkspace
         onOpenChange={setOpen}
@@ -69,18 +71,36 @@ describe("task detach confirmation adapters", () => {
     expect(screen.queryByTestId("detach-task-inline-confirmation")).toBeNull();
   });
 
+  it("returns focus to the menu trigger after confirmation", async () => {
+    const onConfirm = vi.fn();
+    render(<PopoverHarness onConfirm={onConfirm} />);
+
+    fireEvent.click(screen.getByTestId("detach-task-confirm"));
+
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("detach-anchor")));
+  });
+
   it("keeps task-switcher detachment on its existing modal branch", async () => {
+    const longTaskTitle = `Child task ${"x".repeat(180)}`;
     render(
       <TaskDetachTargetConfirmDialog
-        target={{ id: "child", title: "Child task", workspaceMode: "inherit_parent" }}
+        target={{ id: "child", title: longTaskTitle, workspaceMode: "inherit_parent" }}
         detachingTaskId={null}
         onDismiss={vi.fn()}
         onConfirm={vi.fn()}
       />,
     );
 
-    await waitFor(() =>
-      expect(screen.getByRole("alertdialog", { name: "Detach task from parent?" })).not.toBeNull(),
-    );
+    await waitFor(() => {
+      const dialog = screen.getByRole("alertdialog", { name: "Detach task from parent?" });
+      const description = dialog.querySelector('[data-slot="alert-dialog-description"]');
+      expect(description).not.toBeNull();
+      expect(description?.id).toBe(dialog.getAttribute("aria-describedby"));
+      expect(description?.classList.contains("min-w-0")).toBe(true);
+      expect(description?.classList.contains("text-left")).toBe(true);
+      expect(description?.querySelectorAll("p")).toHaveLength(3);
+      expect(description?.textContent).toContain(longTaskTitle);
+    });
   });
 });

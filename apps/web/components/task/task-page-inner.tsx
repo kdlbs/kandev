@@ -10,7 +10,10 @@ import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import { EnsureSessionErrorBanner } from "@/components/task/ensure-session-error";
+import {
+  EnsureSessionErrorBanner,
+  SessionRecoveryFeedback,
+} from "@/components/task/ensure-session-error";
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
@@ -24,6 +27,7 @@ import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -34,6 +38,7 @@ import type {
   useMergedAgentState,
 } from "./task-page-content";
 import { useTranslation } from "react-i18next";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -56,6 +61,7 @@ export type TaskPageInnerProps = {
   officeTaskHref?: string | null;
   ensureSession: UseEnsureTaskSessionResult;
   onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
 };
 
 type RemoteExecutorStatus = {
@@ -99,6 +105,7 @@ function resolveCurrentStepId(
 
 function buildTaskTopBarProps(params: {
   taskProps: ReturnType<typeof resolveTaskProps>;
+  actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
@@ -129,6 +136,13 @@ function buildTaskTopBarProps(params: {
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
+    actionsMenuBoardRow: params.actionsMenuBoardRow,
+    // The subject's own last-known values, independent of `actionsMenuBoardRow`:
+    // the board excludes archived (and can lag/miss cross-workflow) tasks, so
+    // these stay available for the actions menu's plugin context and
+    // executor-aware confirmation copy even when the board row is unresolvable.
+    subjectWorkflowStepId: taskProps.workflowStepId,
+    subjectPrimaryExecutorType: taskProps.primaryExecutorType,
   };
 }
 
@@ -142,9 +156,12 @@ function buildTaskLayoutProps(params: {
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   initialLayout?: string | null;
+  onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
+    taskId: taskProps.taskId,
     workspaceId: taskProps.workspaceId,
     workflowId: taskProps.workflowId,
     sessionId: effectiveSessionId,
@@ -153,6 +170,7 @@ function buildTaskLayoutProps(params: {
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
+    taskCanvases: params.taskCanvases ?? [],
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
     baseBranch: taskProps.baseBranch,
@@ -165,6 +183,7 @@ function buildTaskLayoutProps(params: {
     remoteCheckedAt: params.remote.remoteCheckedAt,
     remoteStatusError: params.remote.remoteStatusError,
     isArchived: taskProps.isArchived,
+    onTaskUnarchived: params.onTaskUnarchived,
   };
 }
 
@@ -227,11 +246,13 @@ function useTaskPageDerivedProps({
   initialLayout,
   officeTaskHref,
   onTaskUnarchived,
+  taskCanvases,
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
   const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
+  const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -250,6 +271,7 @@ function useTaskPageDerivedProps({
   });
   const topBarProps = buildTaskTopBarProps({
     taskProps,
+    actionsMenuBoardRow,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,
@@ -270,6 +292,8 @@ function useTaskPageDerivedProps({
     merged,
     remote,
     initialLayout,
+    onTaskUnarchived,
+    taskCanvases,
   });
 
   return { taskProps, debugEntries, topBarProps, layoutProps };
@@ -330,6 +354,17 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 workspaceId={task?.workspace_id ?? null}
               />
             )}
+            <SessionRecoveryFeedback
+              error={props.resumption.error}
+              notice={props.resumption.notice}
+              recoveryFailure={props.resumption.recoveryFailure}
+              onRetry={() => void props.resumption.resumeSession()}
+              retryDisabled={
+                props.resumption.resumptionState === "checking" ||
+                props.resumption.resumptionState === "resuming"
+              }
+              workspaceId={task?.workspace_id ?? null}
+            />
             <TaskArchivedProvider value={archivedValue}>
               <TaskLaunchErrorProvider
                 value={{

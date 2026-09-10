@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { WebSocketClient } from "./client";
+import { WebSocketClient, WebSocketRequestError } from "./client";
 
 type SentRequest = {
   id: string;
@@ -166,6 +166,88 @@ describe("session subscription readiness", () => {
     await expect(reconnected.ready).resolves.toBeUndefined();
     initial.unsubscribe();
     reconnected.unsubscribe();
+  });
+});
+
+describe("connection generations", () => {
+  it("ignores notifications delivered by a replaced socket", () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient({ enabled: true, initialDelay: 0, maxAttempts: 1 });
+    const handler = vi.fn();
+    client.on("message.queue.status_changed", handler);
+
+    socket.close();
+    vi.advanceTimersByTime(0);
+    const reconnectedSocket = FakeWebSocket.latest();
+    reconnectedSocket.open();
+
+    socket.receive({
+      id: "stale-status",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: {
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        status_epoch: "old-backend",
+        status_generation: 99,
+        count: 1,
+        max: 10,
+        merge_enabled: true,
+      },
+    });
+    expect(handler).not.toHaveBeenCalled();
+
+    reconnectedSocket.receive({
+      id: "current-status",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: {
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        status_epoch: "current-backend",
+        status_generation: 1,
+        count: 0,
+        max: 10,
+        merge_enabled: true,
+      },
+    });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
+describe("request errors", () => {
+  it("retains the backend code and details when a request fails", async () => {
+    const { client, socket } = connectClient();
+    const request = client.request("session.recover", { action: "resume" });
+    const sent = socket.sent.at(-1);
+    if (!sent) throw new Error("No request was sent");
+
+    socket.receive({
+      id: sent.id,
+      type: "error",
+      payload: {
+        code: "CONFLICT",
+        message: "The saved branch is no longer available.",
+        details: {
+          kind: "branch_unrecoverable",
+          recovery_action: "resume_new_branch",
+          original_branch: "feature/lost",
+        },
+      },
+    });
+
+    await expect(request).rejects.toBeInstanceOf(WebSocketRequestError);
+    await expect(request).rejects.toMatchObject({
+      message: "The saved branch is no longer available.",
+      code: "CONFLICT",
+      details: {
+        kind: "branch_unrecoverable",
+        recovery_action: "resume_new_branch",
+        original_branch: "feature/lost",
+      },
+    });
   });
 });
 

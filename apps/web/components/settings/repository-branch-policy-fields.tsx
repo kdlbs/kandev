@@ -14,14 +14,16 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import { BranchSelector } from "@/components/task-create-dialog-selectors";
+import { BranchSelector } from "@/components/branch-selector";
 import {
   branchToOption,
   buildBranchKeywords,
   sortBranches,
-} from "@/components/task-create-dialog-branch-options";
+} from "@/components/branch-picker-options";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { Branch, RepositoryBranchPolicy } from "@/lib/types/http";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { settingsControlClassName } from "./settings-control";
 
 export type PolicyDraft = Omit<
   RepositoryBranchPolicy,
@@ -55,7 +57,7 @@ export function FieldHelp({ label, description }: { label: string; description: 
   const button = (
     <button
       type="button"
-      className="min-h-11 min-w-11 cursor-pointer text-muted-foreground hover:text-foreground"
+      className={`${controlSizingClassName("icon")} cursor-pointer text-muted-foreground hover:text-foreground`}
       aria-label={label}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
       aria-expanded={usesTouchDrawer ? open : undefined}
@@ -134,7 +136,9 @@ export function BranchPolicyBranchPicker({
       ariaLabel={label}
       dropdownLabel={label}
       testId={testId}
-      triggerClassName="min-h-11 border border-input bg-background px-3 hover:bg-background"
+      triggerClassName={settingsControlClassName(
+        "border border-input bg-background px-3 hover:bg-background",
+      )}
     />
   );
 }

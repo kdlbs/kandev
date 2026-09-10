@@ -110,17 +110,28 @@ export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
   }).toPass({ timeout: 10_000, intervals: [250, 500, 1_000] });
 }
 
+export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Locator> {
+  const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await expect(dialog.locator('[data-testid="submit-message-button"]:visible').first()).toBeEnabled(
+    {
+      timeout: 30_000,
+    },
+  );
+  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  return editor;
+}
+
 export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await selectAgentIfNeeded(dialog, page);
   await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
   await dialog.getByTestId("quick-chat-start").click();
 
-  // Wait for chat input to appear AND become editable. Eager init means the
-  // agent starts during the HTTP request, so the input is briefly disabled
-  // while the FE store catches up to the RUNNING session state.
-  const editor = dialog.locator(".tiptap.ProseMirror");
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  // The composer is intentionally editable during STARTING, so editability
+  // alone is no longer a readiness signal. Wait for the submit gate to clear
+  // before callers begin a turn; this keeps tests from typing into a draft that
+  // cannot yet be submitted.
+  await waitForQuickChatComposerReady(dialog);
 }
 
 export async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {
@@ -146,4 +157,40 @@ export async function sendQuickChatMessage(dialog: Locator, page: Page, text: st
     await dialog.getByTestId("submit-message-button").click({ timeout: 1_000 });
     await expect(editor).toHaveText("", { timeout: 2_000 });
   }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
+}
+
+export async function readQuickChatViewportLayout(dialog: Locator) {
+  return dialog.evaluate(async (element) => {
+    const animations = element.getAnimations({ subtree: true }).filter((animation) => {
+      const iterations = animation.effect?.getComputedTiming().iterations;
+      return typeof iterations === "number" && Number.isFinite(iterations);
+    });
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+
+    const content = element.querySelector<HTMLElement>('[data-testid="quick-chat-content"]');
+    const messages = element.querySelector<HTMLElement>('[data-testid="quick-chat-messages"]');
+    const composer = element.querySelector<HTMLElement>('[data-testid="chat-input-area"]');
+    const messageScroller = messages?.querySelector<HTMLElement>(
+      ".session-panel-content-wrapper > div",
+    );
+    if (!content || !composer || !messageScroller) {
+      throw new Error("Quick Chat viewport layout elements are unavailable");
+    }
+
+    const dialogBounds = element.getBoundingClientRect();
+    const contentBounds = content.getBoundingClientRect();
+    const composerBounds = composer.getBoundingClientRect();
+    return {
+      dialogTop: dialogBounds.top,
+      dialogBottom: dialogBounds.bottom,
+      dialogClientHeight: element.clientHeight,
+      dialogScrollHeight: element.scrollHeight,
+      contentTop: contentBounds.top,
+      contentBottom: contentBounds.bottom,
+      composerTop: composerBounds.top,
+      composerBottom: composerBounds.bottom,
+      messageScrollerClientHeight: messageScroller.clientHeight,
+      messageScrollerScrollHeight: messageScroller.scrollHeight,
+    };
+  });
 }

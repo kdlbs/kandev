@@ -5,6 +5,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  deleteExecutor,
   fetchMessageQueueSettings,
   fetchSleepInhibitionSettings,
   resolveAgentModelConfig,
@@ -102,6 +103,24 @@ describe("message queue settings api", () => {
     await updateMessageQueueSettings({ auto_merge_enabled: false });
 
     expect(lastCall().init?.body).toBe(JSON.stringify({ auto_merge_enabled: false }));
+  });
+});
+
+describe("executor settings api", () => {
+  it("provides an executor delete client", async () => {
+    const api = (await import("./settings-api")) as Record<string, unknown>;
+
+    expect(typeof api.deleteExecutor).toBe("function");
+  });
+
+  it("DELETEs an encoded executor id", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ success: true }));
+
+    const result = await deleteExecutor("executor one/primary", { init: { method: "GET" } });
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/executors/executor%20one%2Fprimary");
+    expect(lastCall().init?.method).toBe("DELETE");
+    expect(result).toEqual({ success: true });
   });
 });
 

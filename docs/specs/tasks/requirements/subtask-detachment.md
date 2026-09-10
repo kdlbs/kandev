@@ -31,7 +31,7 @@ Users can create and reorganize task trees, but they cannot promote an existing 
 
 - A user can detach a subtask from its parent from the sidebar task context menu and the task card's three-dot and context menus.
 - The action is shown only for tasks with a parent and requires confirmation.
-- Confirmation explains that detachment changes task hierarchy only and that a workspace shared with the parent remains shared.
+- Confirmation explains that the workspace remains shared even though cleanup stewardship is separated from the former parent.
 - Detachment clears the task's parent relationship without changing its workflow, workflow step, state, blockers, descendants, repositories, sessions, or agent execution.
 - A detached task becomes a top-level root of its existing subtree. Its descendants remain attached to it.
 - A task using `inherit_parent` workspace mode changes to `shared_group` mode when detached. Its workspace-group membership remains active, so current and future sessions continue using the same materialized workspace.
@@ -46,8 +46,9 @@ Detachment updates existing persisted fields; it adds no table or column.
 
 - `tasks.parent_id` becomes the empty string.
 - `tasks.metadata.workspace.mode` changes from `inherit_parent` to `shared_group` when applicable.
-- `task_workspace_group_members` is unchanged. Active membership remains the durable source of shared workspace access.
-- Existing blocker rows, task-session rows, task-environment rows, and descendant `parent_id` values are unchanged.
+- The child's active `task_workspace_group_members` row remains the durable source of shared workspace access. The owner role can move to the child.
+- Workspace-group and task-environment owners and ownership generations change atomically when the former parent owns the shared materialization.
+- Existing blocker rows, task-session rows, environment identity, and descendant `parent_id` values are unchanged.
 
 The hierarchy update and workspace-mode update are persisted in the same task-row update.
 
@@ -75,11 +76,11 @@ If workspace mode is `inherit_parent`, the same operation also transitions it to
 - If the task no longer exists, the UI keeps its current state and shows the request error.
 - If persistence fails, neither the UI nor API reports success. The task remains attached according to durable state.
 - Repeated submissions are safe because detaching an already-root task is a no-op.
-- Detachment does not create, copy, move, clean, or delete workspace files.
+- Detachment does not create, copy, move, clean, or delete workspace files. It can transfer the logical stewardship of those files.
 
 ## Persistence guarantees
 
-The cleared parent relationship and normalized workspace mode survive backend restarts. Existing workspace-group membership and materialized workspace ownership remain unchanged and follow the existing cleanup lifecycle for the group.
+The cleared parent relationship, normalized workspace mode, current workspace steward, and ownership generation survive backend restarts. See [Detached Workspace Continuity](detached-workspace-continuity.md) for the cleanup and concurrency contract.
 
 ## Scenarios
 

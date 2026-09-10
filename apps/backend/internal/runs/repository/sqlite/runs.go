@@ -452,16 +452,34 @@ func (r *Repository) CoalesceRun(
 	ctx context.Context, agentInstanceID, reason string, windowSecs int, payload string,
 ) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowSecs) * time.Second)
-	taskID := taskIDFromPayload(payload)
-	taskPredicate := ""
+	taskID, invalidTaskID := taskIDFromPayload(payload)
 	args := []interface{}{payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix + "%"}
-	// Assignment wakes are task-specific: merging two tasks for the same
-	// agent would replace the first task's payload and silently drop its
-	// launch. Other reasons, such as task comments, intentionally retain
-	// their existing cross-task coalescing behaviour.
-	if taskID != "" && reason == "task_assigned" {
-		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(r.db.DriverName(), "payload", "task_id"))
+	// A payload's task_id identifies which launch it belongs to: merging
+	// across two different task_ids (present or absent) would replace one
+	// launch's payload with an unrelated one and silently drop it. The
+	// check is symmetric so both directions are covered. json_extract (and
+	// its Postgres ->> equivalent) yields NULL for both an absent key and
+	// an explicit JSON null, and '' for a present-but-empty string, so the
+	// taskless branch coalesces all three shapes together via COALESCE.
+	jsonExtract := dialect.JSONExtract(r.db.DriverName(), "payload", "task_id")
+	var taskPredicate string
+	switch {
+	case invalidTaskID:
+		// task_id is present but not a string (e.g. a number): it names a
+		// task we can't compare textually, so it must not be treated as
+		// taskless and must not match any queued row at all.
+		taskPredicate = " AND 1 = 0"
+	case taskID != "":
+		// The stored value must itself be a JSON string, not merely equal
+		// as text: Postgres's ->> converts a stored JSON number (or
+		// object) to text before the comparison, so an untyped payload
+		// with e.g. {"task_id":42} could otherwise textually match an
+		// incoming {"task_id":"42"} and get overwritten.
+		taskPredicate = fmt.Sprintf(" AND %s AND %s = ?",
+			dialect.JSONTypeIsString(r.db.DriverName(), "payload", "task_id"), jsonExtract)
 		args = append(args, taskID)
+	default:
+		taskPredicate = fmt.Sprintf(" AND COALESCE(%s, '') = ''", jsonExtract)
 	}
 	query := fmt.Sprintf(`
 		UPDATE runs
@@ -487,13 +505,25 @@ func (r *Repository) CoalesceRun(
 	return rows > 0, nil
 }
 
-func taskIDFromPayload(payload string) string {
+// taskIDFromPayload extracts payload.task_id for CoalesceRun's task-scoping
+// predicate. invalidTaskID is true only when the key is present with a
+// non-string value: that shape names some task_id, just not one comparable
+// as a string, so it must be kept out of the taskless bucket (an absent key,
+// a JSON null, or a present empty string all return "", invalidTaskID=false).
+func taskIDFromPayload(payload string) (taskID string, invalidTaskID bool) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
-		return ""
+		return "", false
 	}
-	taskID, _ := raw["task_id"].(string)
-	return taskID
+	v, present := raw["task_id"]
+	if !present || v == nil {
+		return "", false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", true
+	}
+	return s, false
 }
 
 // ClaimNextEligibleRun atomically claims the next queued run,

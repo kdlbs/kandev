@@ -13,10 +13,10 @@ import {
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { AssigneeBadge } from "@/components/kanban-card-assignee-badge";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
@@ -25,11 +25,14 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
+import { RepoChipRow } from "@/components/kanban-card-repository-chips";
 import { CardTitle } from "@/components/kanban-card-title";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import {
   getTaskStateIcon,
   shouldShowTaskRunningSpinner,
@@ -38,6 +41,7 @@ import {
 } from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
+import { canShowHumanAssignee } from "@/lib/auth/human-assignee";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
 
 const kanbanStatusDebug = createDebugLogger("kanban:task-status");
@@ -70,66 +74,6 @@ export type KanbanCardShellProps = KanbanCardActionProps &
     onCheckboxClick: (e: React.MouseEvent) => void;
   };
 
-const REPO_CHIPS_VISIBLE = 2;
-
-function RepoChip({ chip }: { chip: RepositoryChip }) {
-  const badge = (
-    <span
-      title={chip.path}
-      className="shrink-0 rounded-sm bg-muted/60 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight max-w-[8rem] truncate"
-    >
-      {chip.label}
-    </span>
-  );
-  if (!chip.path) return badge;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{badge}</TooltipTrigger>
-      <TooltipContent side="top" align="start">
-        <span className="max-w-[22rem] break-all text-xs">{chip.path}</span>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function OverflowRepoTooltip({ chips }: { chips: RepositoryChip[] }) {
-  return (
-    <div className="flex max-w-[24rem] flex-col gap-1 text-xs">
-      {chips.map((chip) => (
-        <div key={`${chip.label}:${chip.path ?? ""}`} className="min-w-0">
-          <div className="font-medium">{chip.label}</div>
-          {chip.path && <div className="break-all text-muted-foreground">{chip.path}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RepoChipRow({ chips }: { chips: RepositoryChip[] }) {
-  if (chips.length === 0) return null;
-  const visible = chips.slice(0, REPO_CHIPS_VISIBLE);
-  const overflow = chips.slice(REPO_CHIPS_VISIBLE);
-  return (
-    <div className="mb-1 flex items-center gap-1 min-w-0 overflow-hidden">
-      {visible.map((chip) => (
-        <RepoChip key={`${chip.label}:${chip.path ?? ""}`} chip={chip} />
-      ))}
-      {overflow.length > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80">
-              +{overflow.length}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top" align="start">
-            <OverflowRepoTooltip chips={overflow} />
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
-
 export function KanbanCardBody({
   task,
   repositoryChips,
@@ -148,7 +92,8 @@ export function KanbanCardBody({
           <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
             <CardTitle task={task} enableTitleHover={enableTitleHover} />
-            <PRTaskIcon taskId={task.id} />
+            <KanbanCardPriorityIndicator priority={task.priority} />
+            <PRTaskIcon taskId={task.id} prInfo={taskPRInfoFromSummary(task.statusSummary)} />
             <MRTaskIcon taskId={task.id} />
             <RegisteredChangeRequestTaskIcon taskId={task.id} />
             <TaskCardIndicators task={task} />
@@ -158,6 +103,7 @@ export function KanbanCardBody({
           <RemoteCloudTooltip
             taskId={task.id}
             sessionId={task.primarySessionId ?? null}
+            executorId={task.primaryExecutorId}
             executorType={task.primaryExecutorType}
             fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
           />
@@ -201,13 +147,15 @@ function KanbanCardRelationship({ task }: { task: Task }) {
 
 function KanbanCardBadges({ task }: { task: Task }) {
   const { t } = useTranslation();
-  const showRow = hasCardBadges(task);
+  const showHumanAssignee = useAppStore((s) => canShowHumanAssignee(s.auth));
+  const showRow = hasCardBadges(task, showHumanAssignee);
 
   if (!showRow) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
       {task.blocked && <BlockedBadge task={task} />}
+      {showHumanAssignee && task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
       {task.queuedForStepId && (
         <Badge
           variant="secondary"
@@ -285,14 +233,67 @@ function BlockedBadge({ task }: { task: Task }) {
   );
 }
 
-function hasCardBadges(task: Task): boolean {
+function hasCardBadges(task: Task, showHumanAssignee: boolean): boolean {
   return Boolean(
     (task.sessionCount && task.sessionCount > 1) ||
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
     task.queuedForStepId ||
+    (showHumanAssignee && task.assigneeUserId) ||
     task.blocked,
   );
+}
+
+// Status markers that mask the launch spinner and gate the "resting" no-affordance
+// case. Bundled together so renderTaskStatusIcon's own branching stays under the
+// complexity limit — see the helpers below for what each flag means for masking.
+type StatusMaskFlags = {
+  needsMe: boolean;
+  showInterrupted: boolean;
+  showAutoStartFailed: boolean;
+  parkedOnBackgroundWork: boolean;
+  showWorkspaceOrphaned: boolean;
+};
+
+function hasNoStatusAffordance(
+  showRunningSpinner: boolean,
+  hasActivity: boolean,
+  flags: StatusMaskFlags,
+): boolean {
+  return (
+    !showRunningSpinner &&
+    !flags.needsMe &&
+    !hasActivity &&
+    !flags.showInterrupted &&
+    !flags.showAutoStartFailed &&
+    !flags.parkedOnBackgroundWork &&
+    !flags.showWorkspaceOrphaned
+  );
+}
+
+// A "needs me" prompt (pending clarification / permission) must not be masked
+// by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
+// coarse running state. Live foreground activity still wins, handled inside
+// getTaskStateIcon. A failed auto-start or an orphaned workspace must not be
+// masked either: startTask sets the task to SCHEDULING before the launch, so
+// a session-less SCHEDULING/IN_PROGRESS task (whether from a launch failure
+// or a vanished parent workspace) reads as showRunningSpinner=true, the exact
+// shape both markers exist to surface. The parked affordance (AC-58) is
+// likewise never masked by the generic spinner — it renders through
+// getTaskStateIcon below.
+function resolveForegroundActivity(
+  task: Task,
+  showRunningSpinner: boolean,
+  flags: StatusMaskFlags,
+): Task["foregroundActivity"] {
+  const shouldForceGenerating =
+    showRunningSpinner &&
+    !flags.needsMe &&
+    !flags.showAutoStartFailed &&
+    !flags.parkedOnBackgroundWork &&
+    !flags.showWorkspaceOrphaned &&
+    task.foregroundActivity !== "background";
+  return shouldForceGenerating ? "generating" : task.foregroundActivity;
 }
 
 // renderTaskStatusIcon resolves the card status icon, or null when the actions
@@ -310,37 +311,27 @@ export function renderTaskStatusIcon(
   hasPendingClarification: boolean,
   hasPendingPermission: boolean,
 ) {
-  const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarification);
-  const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
-  const needsMe = showQuestionIcon || showPermissionIcon;
-  const showInterrupted = !!task.interrupted;
-  const showAutoStartFailed = !!task.autoStartFailed;
+  const flags: StatusMaskFlags = {
+    needsMe:
+      shouldUseQuestionTaskIcon(task.state, hasPendingClarification) ||
+      shouldUsePermissionTaskIcon(hasPendingPermission),
+    showInterrupted: !!task.interrupted,
+    showAutoStartFailed: !!task.autoStartFailed,
+    parkedOnBackgroundWork: !!task.parkedOnBackgroundWork,
+    showWorkspaceOrphaned: !!task.workspaceOrphaned,
+  };
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted && !showAutoStartFailed) {
-    return null;
-  }
-  // A "needs me" prompt (pending clarification / permission) must not be masked
-  // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
-  // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon. A failed auto-start must not be masked either: startTask
-  // sets the task to SCHEDULING before the launch, so a launch failure before
-  // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
-  // reads as showRunningSpinner=true — the exact shape the failure marker exists
-  // to surface.
-  const foregroundActivity =
-    showRunningSpinner &&
-    !needsMe &&
-    !showAutoStartFailed &&
-    task.foregroundActivity !== "background"
-      ? "generating"
-      : task.foregroundActivity;
+  if (hasNoStatusAffordance(showRunningSpinner, hasActivity, flags)) return null;
+  const foregroundActivity = resolveForegroundActivity(task, showRunningSpinner, flags);
   return getTaskStateIcon(task.state, "h-4 w-4", {
     hasPendingClarification,
     foregroundActivity,
     hasPendingPermission,
-    interrupted: showInterrupted,
-    autoStartFailed: showAutoStartFailed,
+    interrupted: flags.showInterrupted,
+    autoStartFailed: flags.showAutoStartFailed,
+    parkedOnBackgroundWork: flags.parkedOnBackgroundWork,
+    workspaceOrphaned: flags.showWorkspaceOrphaned,
   });
 }
 
@@ -408,6 +399,7 @@ function KanbanCardActions({
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
+    statusSummary: task.statusSummary,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
@@ -514,7 +506,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
         <button
           ref={menuTriggerRef}
           type="button"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
+          className="text-muted-foreground hover:text-foreground hover:bg-muted inline-flex h-11 min-h-11 w-11 min-w-11 items-center justify-center rounded-sm p-0 transition-colors cursor-pointer sm:h-auto sm:min-h-0 sm:w-auto sm:min-w-0 sm:p-1 sm:-m-1"
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
           aria-label={t("kanban:moreOptions")}

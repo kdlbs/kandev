@@ -18,6 +18,15 @@ const DEFAULT_SIDEBAR_VIEW = {
   collapsed_groups: [],
 };
 
+const DEFAULT_THREAD_VIEW = {
+  id: "view-all-threads",
+  name: "All threads",
+  task_scope: { mode: "all", task_ids: [] },
+  filters: [],
+  sort: { key: "attention", direction: "asc" },
+  max_columns: 5,
+};
+
 const AGENT_PROFILE_READY_TIMEOUT_MS = 30_000;
 const AGENT_PROFILE_READY_POLL_MS = 250;
 
@@ -79,6 +88,8 @@ export type SeedData = {
   repositoryPath: string;
   /** Offline bare origin for tests that must exercise remote-ref failures. */
   repositoryRemoteURL: string;
+  /** Immutable initial commit used to restore the shared worker checkout. */
+  repositoryBaselineOID: string;
   agentProfileId: string;
   /** Executor profile ID for the worktree executor — use to create tasks with git worktree isolation. */
   worktreeExecutorProfileId: string;
@@ -166,6 +177,7 @@ export const test = backendFixture.extend<
   {
     testPage: Page;
     tabletTestPage: Page;
+    coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
     /**
      * Auto fixture that resets integration mock state and any persisted
@@ -258,6 +270,12 @@ export const test = backendFixture.extend<
       );
       execSync("git add walkthrough_base.txt", { cwd: repoDir, env: gitEnv });
       execSync('git commit -m "init"', { cwd: repoDir, env: gitEnv });
+      const repositoryBaselineOID = execSync("git rev-parse HEAD", {
+        cwd: repoDir,
+        env: gitEnv,
+      })
+        .toString()
+        .trim();
       execSync(`git remote add origin "file://${remoteDir}"`, { cwd: repoDir, env: gitEnv });
       execSync("git push origin main", { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);
@@ -314,6 +332,7 @@ export const test = backendFixture.extend<
         repositoryId: repo.id,
         repositoryPath: repoDir,
         repositoryRemoteURL: `file://${remoteDir}`,
+        repositoryBaselineOID,
         agentProfileId,
         worktreeExecutorProfileId,
       });
@@ -355,6 +374,9 @@ export const test = backendFixture.extend<
         sidebar_views: [DEFAULT_SIDEBAR_VIEW],
         sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
         sidebar_draft: null,
+        thread_views: [DEFAULT_THREAD_VIEW],
+        thread_active_view_id: DEFAULT_THREAD_VIEW.id,
+        thread_view_draft: null,
         saved_layouts: [],
         lsp_auto_start_languages: [],
         lsp_auto_install_languages: [],
@@ -408,6 +430,20 @@ export const test = backendFixture.extend<
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
       viewport: { width: 900, height: 900 },
+      hasTouch: true,
+      isMobile: false,
+    });
+    const page = await context.newPage();
+    await setupPage(page, backend);
+    await use(page);
+    await context.close();
+  },
+
+  coarseDesktopTestPage: async ({ browser, backend, testPage }, use) => {
+    void testPage;
+    const context = await browser.newContext({
+      baseURL: backend.frontendUrl,
+      viewport: { width: 1280, height: 900 },
       hasTouch: true,
       isMobile: false,
     });
@@ -498,17 +534,21 @@ export function restoreSeedRepositoryOrigin(seedData: SeedData) {
   });
 }
 
-/** Restores the shared seed checkout to its clean main branch. */
+/** Restores the shared seed checkout to the immutable fixture baseline. */
 export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
   const env = makeGitEnv(tmpDir);
   execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
     env,
     stdio: "ignore",
   });
-  execFileSync("git", ["-C", seedData.repositoryPath, "reset", "--hard", "main"], {
-    env,
-    stdio: "ignore",
-  });
+  execFileSync(
+    "git",
+    ["-C", seedData.repositoryPath, "reset", "--hard", seedData.repositoryBaselineOID],
+    {
+      env,
+      stdio: "ignore",
+    },
+  );
   execFileSync("git", ["-C", seedData.repositoryPath, "clean", "-fd"], {
     env,
     stdio: "ignore",
@@ -588,6 +628,9 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       sidebar_views: [DEFAULT_SIDEBAR_VIEW],
       sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
       sidebar_draft: null,
+      thread_views: [DEFAULT_THREAD_VIEW],
+      thread_active_view_id: DEFAULT_THREAD_VIEW.id,
+      thread_view_draft: null,
       saved_layouts: [],
       // Status-surface specs opt in from their local beforeEach hooks; unrelated
       // tests start from the portable setting's default-off state.
@@ -610,6 +653,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
         agent_profile_id: seedData.agentProfileId,
         workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
       },
+      sidebar_task_color_automation: { enabled: false, rules: [] },
     });
   });
 });

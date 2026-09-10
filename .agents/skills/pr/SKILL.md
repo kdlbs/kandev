@@ -71,11 +71,20 @@ explicitly requests task tracking.
    when the user explicitly requests separate PRs. Use `--draft` if requested,
    otherwise create as ready-for-review.
 
-   **Architecture and scope gate:** Before running any PR creation command, check
-   large changes for a linked issue with maintainer discussion. If it is missing,
-   stop and report the blocker. Do not open a PR to start the discussion. Prefer
-   one logical change and the smallest practical diff; split unrelated cleanup,
-   refactoring, and feature work into separate PRs.
+   **Architecture and scope gate:** Before running any PR creation command, verify
+   the authenticated actor's repository permission. Do not treat a user statement
+   as proof of maintainer status. On GitHub, query
+   `gh api repos/{owner}/{repo}/collaborators/{login}/permission`; `push`,
+   `maintain`, and `admin` permissions are write-authorized, so those actors may
+   open large or architectural PRs directly. On other hosts, use the equivalent
+   repository permission check. When the host confirms write access, the
+   permission itself satisfies this gate and no linked issue is required solely
+   for this purpose. If permission cannot be verified, or the actor has no write
+   access, require a linked issue with maintainer discussion before opening a
+   large or architectural PR. If that issue or discussion is missing, stop and
+   report the blocker. Do not create an issue or open a PR solely to start the
+   discussion. Prefer one logical change and the smallest practical diff; split
+   unrelated cleanup, refactoring, and feature work into separate PRs.
 
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
@@ -98,6 +107,13 @@ explicitly requests task tracking.
 
    Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
+   If `gh pr create` fails after the branch is pushed with a credential-lease
+   or repository-scope error, use the REST fallback with the same template body.
+   Build the payload with `jq --rawfile` and submit it with
+   `gh api --method POST repos/<owner>/<repo>/pulls --input <payload-file>`;
+   preserve the validated title, head, base, and body, and never hand-escape
+   Markdown or JSON.
+
 6. **If ready (not draft):** For GitHub, do not begin `/pr-fixup` until any
 required screenshot embedding in step 7 is complete.
 
@@ -109,6 +125,9 @@ required screenshot embedding in step 7 is complete.
      treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
      assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
      the temporary spec and confirm `git status` is clean.
+   - After opening a popover or dialog, assert that the intended surface is
+     visible and await finite active CSS animations (`element.getAnimations().finished`)
+     before capture; do not publish a mid-transition asset.
    - For disposable capture specs, prefer the existing `prCapture` fixture from
      `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
      manifest for PR assets.
@@ -175,11 +194,19 @@ required screenshot embedding in step 7 is complete.
    PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
    jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
    jq empty "$PAYLOAD"
-   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD"
+   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD" --silent
    ```
+   For a write-only PATCH, `--silent` prevents `gh` from decoding a response
+   body that the caller does not consume. Redirecting stdout to `/dev/null`
+   does not prevent a truncated or empty JSON response from making `gh` report
+   an error after the mutation succeeds. Read the resource back with a
+   separate GET and verify the intended change.
    **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
    validate payloads without interpolating untrusted Markdown into shell
-   syntax. Keep the REST fallback byte-preserving for command substitutions,
+   syntax. When command output is redirected, piped, or consumed by `jq` or
+   another parser, run the command through `rtk proxy` so stdout is
+   byte-preserving; normal RTK filtering can truncate or annotate machine-readable
+   output. Keep the REST fallback byte-preserving for command substitutions,
    `xargs`, and any other consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable

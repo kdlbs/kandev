@@ -115,6 +115,10 @@ func (h *ExecutorHandlers) httpCreateExecutor(c *gin.Context) {
 		Config:    body.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -168,8 +172,16 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 		Config:    body.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			c.JSON(http.StatusConflict, gin.H{"error": "executor is used by an active agent session"})
 			return
 		}
 		h.logger.Error("failed to update executor", zap.Error(err))
@@ -181,6 +193,10 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 
 func (h *ExecutorHandlers) httpDeleteExecutor(c *gin.Context) {
 	if err := h.service.DeleteExecutor(c.Request.Context(), c.Param("id")); err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, service.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "executor is used by an active agent session"})
 			return
@@ -235,8 +251,11 @@ func (h *ExecutorHandlers) wsCreateExecutor(ctx context.Context, msg *ws.Message
 		Config:    req.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
 		}
 		h.logger.Error("failed to create executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create executor", nil)
@@ -298,8 +317,15 @@ func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message
 		Config:    req.Config,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
+		}
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"executor is used by an active agent session", nil)
 		}
 		h.logger.Error("failed to update executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor", nil)

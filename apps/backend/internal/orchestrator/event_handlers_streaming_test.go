@@ -31,6 +31,7 @@ type recordingEventBus struct {
 type recordedEvent struct {
 	subject string
 	event   *bus.Event
+	ctx     context.Context
 }
 
 // taskServiceStateRepository exercises runtime task-state reconciliation
@@ -154,6 +155,23 @@ func (r failSessionStateUpdateRepo) UpdateTaskSessionState(
 	string,
 ) error {
 	return r.err
+}
+
+// UpdateTaskSessionStateIfCurrent must also fail: repoStore now declares this
+// method, so the embedded repoStore field promotes it and
+// persistStrictTaskSessionState's conditionalTaskSessionStateUpdater
+// assertion succeeds, routing state transitions through this narrow CAS
+// instead of the plain UpdateTaskSessionState this double otherwise
+// overrides. Without this override, the transition would silently succeed
+// against the embedded real repo instead of surfacing the injected failure.
+func (r failSessionStateUpdateRepo) UpdateTaskSessionStateIfCurrent(
+	context.Context,
+	string,
+	models.TaskSessionState,
+	models.TaskSessionState,
+	string,
+) (bool, time.Time, error) {
+	return false, time.Time{}, r.err
 }
 
 type failSetBaselineRepo struct {
@@ -324,8 +342,8 @@ func (r failSetSessionMetadataRepo) SetSessionMetadataKey(
 	return errors.New("set session metadata failed")
 }
 
-func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
-	b.events = append(b.events, recordedEvent{subject: subject, event: event})
+func (b *recordingEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	b.events = append(b.events, recordedEvent{subject: subject, event: event, ctx: ctx})
 	return nil
 }
 func (b *recordingEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {

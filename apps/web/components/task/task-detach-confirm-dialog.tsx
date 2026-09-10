@@ -28,13 +28,32 @@ export type TaskDetachConfirmationCopyProps = {
 function TaskDetachDescription({
   taskTitle,
   sharesParentWorkspace,
-}: TaskDetachConfirmationCopyProps): ReactNode {
+  structured = false,
+}: TaskDetachConfirmationCopyProps & { structured?: boolean }): ReactNode {
   const { t } = useTranslation();
+  const title = taskTitle || t("task:thisTask2");
+
+  if (structured) {
+    return (
+      <>
+        <p className="break-words">
+          {t("task:detachWillBecomeTopLevel", {
+            taskTitle: title,
+          })}
+        </p>
+        <p>{t("task:detachingChangesTheHierarchyOnlyAccess")}</p>
+        {sharesParentWorkspace && (
+          <p className="font-medium text-foreground">{t("task:thisTaskSharesItsParentS")}</p>
+        )}
+      </>
+    );
+  }
+
   return (
     <span className="block space-y-2">
       <span className="block">
         {t("task:detachWillBecomeTopLevel", {
-          taskTitle: taskTitle || t("task:thisTask2"),
+          taskTitle: title,
         })}
       </span>
       <span className="block">{t("task:detachingChangesTheHierarchyOnlyAccess")}</span>
@@ -55,6 +74,7 @@ export type TaskDetachConfirmPopoverProps = TaskDetachConfirmationCopyProps & {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm?: boolean;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   onOpenChange: (open: boolean) => void;
   onCancel?: () => void;
@@ -65,6 +85,7 @@ export function TaskDetachConfirmPopover({
   open,
   anchorRef,
   focusReturnRef,
+  restoreFocusOnConfirm = false,
   focusBoundaryRef,
   taskTitle,
   sharesParentWorkspace,
@@ -78,6 +99,7 @@ export function TaskDetachConfirmPopover({
       open={open}
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
+      restoreFocusOnConfirm={restoreFocusOnConfirm}
       focusBoundaryRef={focusBoundaryRef}
       title={t(DETACH_TASK_FROM_PARENT_KEY)}
       description={
@@ -138,6 +160,7 @@ export type TaskDetachConfirmationSurfaceProps = TaskDetachConfirmationCopyProps
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
 };
@@ -146,6 +169,7 @@ export function TaskDetachConfirmationSurface({
   open,
   anchorRef,
   focusReturnRef,
+  restoreFocusOnConfirm = false,
   taskTitle,
   sharesParentWorkspace,
   onOpenChange,
@@ -158,6 +182,7 @@ export function TaskDetachConfirmationSurface({
         open={open}
         anchorRef={anchorRef}
         focusReturnRef={focusReturnRef}
+        restoreFocusOnConfirm={restoreFocusOnConfirm}
         focusBoundaryRef={anchorRef}
         taskTitle={taskTitle}
         sharesParentWorkspace={sharesParentWorkspace}
@@ -208,10 +233,11 @@ export function TaskDetachConfirmDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{t(DETACH_TASK_FROM_PARENT_KEY)}</AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div>
+            <div className="min-w-0 space-y-2 text-left">
               <TaskDetachDescription
                 taskTitle={taskTitle}
                 sharesParentWorkspace={sharesParentWorkspace}
+                structured
               />
             </div>
           </AlertDialogDescription>

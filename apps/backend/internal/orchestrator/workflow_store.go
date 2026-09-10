@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -57,6 +58,21 @@ type workflowMoveAdmissionCASRepository interface {
 	) (applied bool, err error)
 }
 
+type deferredMoveAdmissionRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
+		ctx context.Context,
+		task *models.Task,
+		expectedStepID, targetStepID string,
+		limit int,
+		record messagequeue.PendingMoveRecord,
+	) (admitted, applied bool, err error)
+	MarkDeferredMoveAppliedForSession(
+		ctx context.Context,
+		taskID, moveID string,
+		record messagequeue.PendingMoveRecord,
+	) (applied bool, err error)
+}
+
 type workflowQueuedTaskPromoter interface {
 	PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, error)
 }
@@ -88,6 +104,31 @@ func queuedMoveExitPending(task *models.Task) bool {
 	return !completed
 }
 
+// operationLedger is the in-memory idempotency ledger every OperationID-keyed
+// workflow trigger dedups against. Its zero value is usable: no constructor,
+// no initialization statement, safe for concurrent use without external
+// locking. A Service holds exactly one, as a direct field whose lifetime
+// outlives any single workflowStore built from it (see
+// docs/specs/workflow-engine-operation-ledger-lifetime/spec.md).
+type operationLedger struct {
+	applied sync.Map
+}
+
+func (l *operationLedger) isApplied(operationID string) bool {
+	if operationID == "" {
+		return false
+	}
+	_, ok := l.applied.Load(operationID)
+	return ok
+}
+
+func (l *operationLedger) markApplied(operationID string) {
+	if operationID == "" {
+		return
+	}
+	l.applied.Store(operationID, true)
+}
+
 // workflowStore implements engine.TransitionStore by delegating to the
 // orchestrator's existing repositories and services.
 type workflowStore struct {
@@ -101,7 +142,7 @@ type workflowStore struct {
 	logger              *logger.Logger
 	stepHistoryRecorder StepHistoryRecorder
 	guardedLifecycle    guardedTransitionLifecycle
-	appliedOps          sync.Map
+	ledger              *operationLedger
 	stepCache           *stepSpecCache
 }
 
@@ -111,6 +152,7 @@ func newWorkflowStore(
 	agentMgr executor.AgentManagerClient,
 	publishTaskUpdated taskUpdatedPublisher,
 	log *logger.Logger,
+	ledger *operationLedger,
 	publishers ...interface{},
 ) *workflowStore {
 	var moved taskMovedPublisher
@@ -147,6 +189,7 @@ func newWorkflowStore(
 		publishStateChanged: stateChanged,
 		logger:              log,
 		stepHistoryRecorder: history,
+		ledger:              ledger,
 		stepCache:           newStepSpecCache(),
 	}
 }
@@ -246,14 +289,42 @@ func (s *workflowStore) LoadPreviousStep(ctx context.Context, workflowID string,
 }
 
 func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger) error {
-	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, trigger, "")
+	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, trigger, "", nil)
 }
 
-func (s *workflowStore) ApplyDeferredMoveTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID, moveID string) error {
-	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID)
+func (s *workflowStore) ApplyDeferredMoveTransition(
+	ctx context.Context,
+	taskID, sessionID, fromStepID, toStepID, moveID string,
+	record messagequeue.PendingMoveRecord,
+) error {
+	return s.applyTransition(
+		ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID, &record,
+	)
 }
 
-func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, moveID string) error {
+func (s *workflowStore) MarkDeferredMoveApplied(
+	ctx context.Context,
+	taskID, moveID string,
+	record messagequeue.PendingMoveRecord,
+) error {
+	if moveID == "" {
+		return nil
+	}
+	repo, ok := s.repo.(deferredMoveAdmissionRepository)
+	if !ok {
+		return fmt.Errorf("deferred move repository unavailable")
+	}
+	applied, err := repo.MarkDeferredMoveAppliedForSession(ctx, taskID, moveID, record)
+	if err != nil {
+		return fmt.Errorf("persist deferred move identity: %w", err)
+	}
+	if !applied {
+		return errDeferredMoveAlreadyApplied
+	}
+	return nil
+}
+
+func (s *workflowStore) markDeferredMoveAppliedUnfenced(ctx context.Context, taskID, moveID string) error {
 	if moveID == "" {
 		return nil
 	}
@@ -270,7 +341,13 @@ func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, mov
 	return nil
 }
 
-func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger, moveID string) error {
+func (s *workflowStore) applyTransition(
+	ctx context.Context,
+	taskID, sessionID, fromStepID, toStepID string,
+	trigger engine.Trigger,
+	moveID string,
+	deferredMove *messagequeue.PendingMoveRecord,
+) error {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load task for transition: %w", err)
@@ -301,30 +378,21 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 	}
+	// Publish the on_turn_complete signal's handoff on the same task snapshot
+	// as admission so a queued destination cannot promote in between.
+	s.carryStepHandoffForTransition(ctx, task, sessionID, fromStepID, toStepID, trigger)
 	task.UpdatedAt = time.Now().UTC()
 	// engine_transition applies only when no outer caller already declared a
 	// trigger — applyPendingMove sets mcp_deferred_move before reaching this
 	// path, and that must survive rather than be overwritten.
-	transitionCtx := ctx
-	if !steptelemetry.HasTrigger(transitionCtx) {
-		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
-	}
-	// Only attach a PendingAllocation when the caller already opted in by
-	// wrapping ctx with a ResultHolder (applyEngineTransition does this for
-	// the engine-driven on_turn_complete path). Attaching it unconditionally
-	// would allocate workflow_step_entries rows for every transition into a
-	// step with engine-owned on_enter actions, including the callers (manual
-	// move, deferred move) that don't yet dispatch through them this Build
-	// round — see docs/specs/workflow-on-enter-action-dispatch/spec.md and
-	// the task plan's scope note for why those entry paths are deferred.
-	if targetStep != nil {
-		if _, wantsAllocation := stepentry.ResultHolderFromContext(ctx); wantsAllocation {
-			if pending, ok := stepentry.BuildPendingAllocation(targetStep.ID, targetStep.Events.OnEnter); ok {
-				transitionCtx = stepentry.WithPendingAllocation(transitionCtx, pending)
-			}
+	transitionCtx := transitionContext(ctx, sessionID, trigger, targetStep)
+	if deferredMove != nil {
+		if err := s.updateDeferredTransitionTask(
+			transitionCtx, task, fromStepID, targetStep, *deferredMove,
+		); err != nil {
+			return fmt.Errorf("update task workflow step: %w", err)
 		}
-	}
-	if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
+	} else if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
@@ -334,7 +402,7 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 	// instead of leaving a stale duplicate until reload.
 	s.publishTaskUpdated(ctx, task, oldWorkflowID)
 
-	if task.QueuedForStepID == "" {
+	if deferredMove == nil && task.QueuedForStepID == "" {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
 				zap.String("session_id", sessionID),
@@ -350,6 +418,74 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 
 	s.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 
+	return nil
+}
+
+func (s *workflowStore) carryStepHandoffForTransition(
+	ctx context.Context,
+	task *models.Task,
+	sessionID, fromStepID, toStepID string,
+	trigger engine.Trigger,
+) {
+	if trigger != engine.TriggerOnTurnComplete {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to load session for step handoff carry",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if session == nil {
+		return
+	}
+	var consumedSignal *models.PendingStepCompletionSignal
+	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == fromStepID {
+		consumedSignal = &signal
+	}
+	setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+}
+
+func transitionContext(
+	ctx context.Context,
+	sessionID string,
+	trigger engine.Trigger,
+	targetStep *wfmodels.WorkflowStep,
+) context.Context {
+	transitionCtx := ctx
+	if !steptelemetry.HasTrigger(transitionCtx) {
+		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
+	}
+	if targetStep != nil {
+		if _, wantsAllocation := stepentry.ResultHolderFromContext(ctx); wantsAllocation {
+			if pending, ok := stepentry.BuildPendingAllocation(targetStep.ID, targetStep.Events.OnEnter); ok {
+				transitionCtx = stepentry.WithPendingAllocation(transitionCtx, pending)
+			}
+		}
+	}
+	return transitionCtx
+}
+
+func (s *workflowStore) updateDeferredTransitionTask(
+	ctx context.Context,
+	task *models.Task,
+	fromStepID string,
+	targetStep *wfmodels.WorkflowStep,
+	record messagequeue.PendingMoveRecord,
+) error {
+	repo, ok := s.repo.(deferredMoveAdmissionRepository)
+	if !ok {
+		return fmt.Errorf("deferred move repository unavailable")
+	}
+	_, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
+		ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit, record,
+	)
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return fmt.Errorf("deferred move source changed")
+	}
 	return nil
 }
 
@@ -646,7 +782,7 @@ func (s *workflowStore) pullOneFeederTask(
 		if candidate.Metadata == nil {
 			candidate.Metadata = make(map[string]interface{})
 		}
-		candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+		candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{"from_step_id": fromStepID}
 		candidate.Position = position
 		oldState, stateChanged, err := s.syncQueuedPromotionState(ctx, candidate, vacatedStep)
 		if err != nil {
@@ -711,7 +847,7 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
-	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{"from_step_id": fromStepID}
 	candidate.Position = position
 	candidate.UpdatedAt = time.Now().UTC()
 	oldState, stateChanged, err := s.syncQueuedPromotionState(ctx, candidate, step)
@@ -884,18 +1020,11 @@ func (s *workflowStore) PersistData(ctx context.Context, sessionID string, data 
 }
 
 func (s *workflowStore) IsOperationApplied(_ context.Context, operationID string) (bool, error) {
-	if operationID == "" {
-		return false, nil
-	}
-	_, ok := s.appliedOps.Load(operationID)
-	return ok, nil
+	return s.ledger.isApplied(operationID), nil
 }
 
 func (s *workflowStore) MarkOperationApplied(_ context.Context, operationID string) error {
-	if operationID == "" {
-		return nil
-	}
-	s.appliedOps.Store(operationID, true)
+	s.ledger.markApplied(operationID)
 	return nil
 }
 

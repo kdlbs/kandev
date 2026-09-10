@@ -40,7 +40,7 @@ func newSQLiteRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB boo
 		ro:      reader,
 		ownsDB:  ownsDB,
 		log:     log,
-		migrate: db.NewMigrateLogger(writer, log),
+		migrate: db.NewRequiredMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
@@ -95,6 +95,7 @@ func (r *sqliteRepository) initSchema() error {
 		status TEXT NOT NULL DEFAULT 'idle'
 			CHECK (status IN ('idle','working','paused','stopped','pending_approval')),
 		pause_reason TEXT NOT NULL DEFAULT '',
+		working_run_id TEXT NOT NULL DEFAULT '',
 		last_run_finished_at TIMESTAMP,
 		max_concurrent_sessions INTEGER NOT NULL DEFAULT 1,
 		cooldown_sec INTEGER NOT NULL DEFAULT 0,
@@ -178,8 +179,11 @@ func (r *sqliteRepository) initSchema() error {
 	}
 
 	// Migration: ADR 0005 Wave A — enrich agent_profiles with office columns.
-	// Each ALTER is idempotent — duplicate-column errors are swallowed.
-	r.migrateOfficeEnrichmentColumns()
+	// Duplicate-column errors are the only replay result tolerated by the
+	// required migration logger.
+	if err := r.migrateOfficeEnrichmentColumns(); err != nil {
+		return fmt.Errorf("failed to migrate agent profile office columns: %w", err)
+	}
 
 	// command_prefix is added after the table-recreation migration above so a
 	// legacy DB that recreates agent_profiles (to drop the model CHECK) still
@@ -192,6 +196,9 @@ func (r *sqliteRepository) initSchema() error {
 	// recreates agent_profiles would otherwise lose columns added before it.
 	r.migrate.Apply("agent_profiles.fallback_model", `ALTER TABLE agent_profiles ADD COLUMN fallback_model TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("agent_profiles.auto_fallback", `ALTER TABLE agent_profiles ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 0`)
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required agent settings migration: %w", err)
+	}
 
 	// OpenAI-compatible providers: added after the table-recreation block for
 	// the same reason as command_prefix / fallback_model — a legacy DB that
@@ -204,9 +211,9 @@ func (r *sqliteRepository) initSchema() error {
 }
 
 // migrateOfficeEnrichmentColumns adds the office-enrichment columns introduced
-// in ADR 0005 Wave A. Each ALTER is idempotent: errors raised when the column
-// already exists are swallowed.
-func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
+// in ADR 0005 Wave A. Each ALTER is idempotent: only errors raised when the
+// column already exists are tolerated.
+func (r *sqliteRepository) migrateOfficeEnrichmentColumns() error {
 	type migration struct {
 		name string
 		stmt string
@@ -221,6 +228,7 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
 		{"agent_profiles.custom_prompt", `ALTER TABLE agent_profiles ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.status", `ALTER TABLE agent_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'`},
 		{"agent_profiles.pause_reason", `ALTER TABLE agent_profiles ADD COLUMN pause_reason TEXT NOT NULL DEFAULT ''`},
+		{"agent_profiles.working_run_id", `ALTER TABLE agent_profiles ADD COLUMN working_run_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_profiles.last_run_finished_at", `ALTER TABLE agent_profiles ADD COLUMN last_run_finished_at TIMESTAMP`},
 		{"agent_profiles.max_concurrent_sessions", `ALTER TABLE agent_profiles ADD COLUMN max_concurrent_sessions INTEGER NOT NULL DEFAULT 1`},
 		{"agent_profiles.cooldown_sec", `ALTER TABLE agent_profiles ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0`},
@@ -233,14 +241,26 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
 		{"agent_profiles.permissions", `ALTER TABLE agent_profiles ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'`},
 	}
 	for _, m := range migrations {
-		r.migrate.Apply(m.name, m.stmt)
+		if err := r.migrate.Apply(m.name, m.stmt); err != nil {
+			return err
+		}
 	}
 	// Indexes are idempotent via IF NOT EXISTS, but the partial-index variant
 	// required for role/reports_to needs the column to exist first - so create
 	// here after the ALTERs to handle databases upgraded from older schemas.
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_workspace ON agent_profiles(workspace_id)`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_role ON agent_profiles(workspace_id, role) WHERE role != ''`)
-	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_profiles_reports_to ON agent_profiles(reports_to) WHERE reports_to != ''`)
+	if err := r.migrate.Apply("idx_agent_profiles_workspace",
+		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_workspace ON agent_profiles(workspace_id)`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("idx_agent_profiles_role",
+		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_role ON agent_profiles(workspace_id, role) WHERE role != ''`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("idx_agent_profiles_reports_to",
+		`CREATE INDEX IF NOT EXISTS idx_agent_profiles_reports_to ON agent_profiles(reports_to) WHERE reports_to != ''`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // migrateDropModelCheckConstraint recreates agent_profiles without the legacy
@@ -478,12 +498,18 @@ func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profile
 		FROM agent_profile_mcp_configs
 		WHERE profile_id = ?
 	`), profileID)
+	return scanAgentProfileMcpConfig(row)
+}
+
+func scanAgentProfileMcpConfig(scanner interface {
+	Scan(dest ...any) error
+}) (*models.AgentProfileMcpConfig, error) {
 
 	var config models.AgentProfileMcpConfig
 	var enabled int
 	var serversJSON string
 	var metaJSON string
-	if err := row.Scan(&config.ProfileID, &enabled, &serversJSON, &metaJSON, &config.CreatedAt, &config.UpdatedAt); err != nil {
+	if err := scanner.Scan(&config.ProfileID, &enabled, &serversJSON, &metaJSON, &config.CreatedAt, &config.UpdatedAt); err != nil {
 		return nil, err
 	}
 	config.Enabled = enabled == 1
@@ -494,6 +520,89 @@ func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profile
 		return nil, fmt.Errorf("failed to parse MCP meta JSON: %w", err)
 	}
 	return &config, nil
+}
+
+// UpdateAgentProfileMcpConfigPatch updates only the requested MCP columns in
+// one database statement. The upsert keeps the other document columns intact,
+// including when two callers update different fields concurrently.
+//
+//nolint:cyclop // The transaction validates ownership, builds the partial SQL update, and returns the row.
+func (r *sqliteRepository) UpdateAgentProfileMcpConfigPatch(
+	ctx context.Context,
+	profileID string,
+	enabled *bool,
+	servers *map[string]interface{},
+) (*models.AgentProfileMcpConfig, error) {
+	if profileID == "" {
+		return nil, fmt.Errorf("profile ID is required")
+	}
+	if enabled == nil && servers == nil {
+		return nil, fmt.Errorf("MCP config patch is empty")
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var supportsMCP int
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`
+		SELECT a.supports_mcp
+		FROM agent_profiles p
+		JOIN agents a ON a.id = p.agent_id
+		WHERE p.id = ? AND p.deleted_at IS NULL
+	`), profileID).Scan(&supportsMCP); err != nil {
+		return nil, err
+	}
+	if supportsMCP != 1 {
+		return nil, fmt.Errorf("mcp not supported by agent")
+	}
+
+	const emptyJSON = "{}"
+	enabledValue := 0
+	if enabled != nil && *enabled {
+		enabledValue = 1
+	}
+	serversJSON := emptyJSON
+	if servers != nil {
+		encoded, marshalErr := json.Marshal(*servers)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("failed to serialize MCP servers: %w", marshalErr)
+		}
+		serversJSON = string(encoded)
+	}
+	updates := make([]string, 0, 3)
+	if enabled != nil {
+		updates = append(updates, "enabled = excluded.enabled")
+	}
+	if servers != nil {
+		updates = append(updates, "servers_json = excluded.servers_json")
+	}
+	updates = append(updates, "updated_at = excluded.updated_at")
+	now := time.Now().UTC()
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO agent_profile_mcp_configs (profile_id, enabled, servers_json, meta_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(profile_id) DO UPDATE SET
+			`+strings.Join(updates, ",\n\t\t\t")+
+		`
+	`), profileID, enabledValue, serversJSON, emptyJSON, now, now)
+	if err != nil {
+		return nil, err
+	}
+	config, err := scanAgentProfileMcpConfig(tx.QueryRowxContext(ctx, tx.Rebind(`
+		SELECT profile_id, enabled, servers_json, meta_json, created_at, updated_at
+		FROM agent_profile_mcp_configs
+		WHERE profile_id = ?
+	`), profileID))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return config, nil
 }
 
 func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error {
@@ -1149,7 +1258,19 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			cli_passthrough = ?, enabled = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
 			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
-			status = ?, pause_reason = ?, last_run_finished_at = ?,
+			status = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN status
+				ELSE ?
+			END,
+			pause_reason = CASE
+				WHEN (status = 'working' AND working_run_id <> '') OR ? = 'working' THEN pause_reason
+				ELSE ?
+			END,
+			working_run_id = CASE
+				WHEN status = 'working' AND working_run_id <> '' THEN working_run_id
+				ELSE ''
+			END,
+			last_run_finished_at = ?,
 			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
@@ -1164,7 +1285,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
-		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
+		enrich.status, enrich.status, enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
 		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
 		profile.ConsecutiveFailures, enrich.failureThreshold,
 		enrich.executorPreference,

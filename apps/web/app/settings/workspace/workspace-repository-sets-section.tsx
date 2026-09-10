@@ -74,7 +74,6 @@ export function WorkspaceRepositorySetsSection({
       action={
         readOnly ? undefined : (
           <Button
-            size="sm"
             className="cursor-pointer"
             onClick={() => manager.startCreate()}
             data-testid="repository-set-create"
@@ -256,7 +255,7 @@ function RepositorySetRowActions({
   return (
     <div className="flex shrink-0 gap-1">
       <Button
-        size="sm"
+        size="icon"
         variant="ghost"
         className="cursor-pointer"
         aria-label={t("workspaces:repositorySetsEdit")}
@@ -267,7 +266,7 @@ function RepositorySetRowActions({
       </Button>
       <Button
         ref={deleteAnchorRef}
-        size="sm"
+        size="icon"
         variant="ghost"
         className="cursor-pointer"
         aria-label={t("workspaces:repositorySetsDelete")}

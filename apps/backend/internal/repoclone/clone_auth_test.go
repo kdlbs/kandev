@@ -174,7 +174,7 @@ helper=${GIT_CONFIG_VALUE_1#!}
 		t.Fatal(err)
 	}
 	if got := string(args); !strings.Contains(got, "fetch\n--prune\n--force\n--no-tags\norigin\n") ||
-		!strings.Contains(got, "pull/42/head:refs/remotes/origin/pr/42\n") || strings.Contains(got, "--all") {
+		!strings.Contains(got, "pull/42/head:refs/kandev/pull/42/head\n") || strings.Contains(got, "--all") {
 		t.Fatalf("refresh args = %q", got)
 	}
 	scope, err := os.ReadFile(capturePath + ".scope")

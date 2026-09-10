@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-07-15
-updated: 2026-08-24
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -41,7 +41,9 @@ meaning of archive, deletion, or agent-driven operations.
   the control and subsequent archive behavior shall remain at the previously
   persisted value.
 - **AC-TASKS-ARCHIVE-CONFIRMATION-001.6:** When archive execution fails after
-  temporary navigation, the system shall restore the original task and URL.
+  temporary navigation, the system shall restore the available original task
+  and URL unless the user has since navigated. Restoration shall not undo an
+  archive that the server completed despite an uncertain response.
 - **AC-TASKS-ARCHIVE-CONFIRMATION-001.7:** Delete confirmations and
   programmatic, API, CLI, MCP, or agent-driven archive operations shall remain
   unchanged.
@@ -55,8 +57,11 @@ meaning of archive, deletion, or agent-driven operations.
 ## System design
 
 - [Task Archive Confirmation System Design](../system-design/archive-confirmation.md)
+- [Task removal navigation](removal-navigation.md) defines immediate departure,
+  destination eligibility, and conditional recovery for local archive/delete.
 
 ## Implementation plans
 
 - [Archive Confirmation Preference](../../../plans/archive-confirmation-preference/plan.md)
 - [Cascade Archive Navigation](../../../plans/cascade-archive-navigation/plan.md)
+- [Task removal navigation](../../../plans/task-removal-navigation/plan.md)
