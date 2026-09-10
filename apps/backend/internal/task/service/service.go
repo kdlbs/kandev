@@ -440,10 +440,10 @@ type Service struct {
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
-	// orphanReapHostSnapshotter and orphanReapVerifier back
-	// REQ-TASKS-ORPHAN-REAP-002/003.7. Nil selects the real platform
-	// implementation (resource_cleanup_orphan_reap_host_*.go); tests override
-	// them directly since they are unexported and this is a whitebox package.
+	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
+	// host process detection. Nil selects the real platform implementation
+	// (resource_cleanup_orphan_reap_host_*.go); tests override them
+	// directly since they are unexported and this is a whitebox package.
 	orphanReapHostSnapshotter   orphanReapHostSnapshotter
 	orphanReapVerifier          orphanReapVerifier
 	orphanReapSignaler          orphanReapSignaler

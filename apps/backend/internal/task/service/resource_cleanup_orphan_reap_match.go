@@ -13,9 +13,8 @@ type orphanReapCandidate struct {
 
 // attributeOrphanReapCandidates matches every snapshot process against the
 // active reap roots and returns the matches grouped by root, attributing a
-// candidate under more than one root to the longest (deepest) match
-// (AC-TASKS-ORPHAN-REAP-002.4, AC-TASKS-ORPHAN-REAP-002.5,
-// AC-TASKS-ORPHAN-REAP-002.7). Matching uses working directory alone.
+// candidate under more than one root to the longest (deepest) match.
+// Matching uses working directory alone.
 func attributeOrphanReapCandidates(snapshot []hostProcess, roots []string) map[string][]orphanReapCandidate {
 	// Longest root first so the first match found is the deepest one.
 	ordered := append([]string(nil), roots...)
@@ -38,7 +37,7 @@ func attributeOrphanReapCandidates(snapshot []hostProcess, roots []string) map[s
 
 // orphanReapPathWithinRoot reports whether candidate is root itself or nested
 // inside it on a whole path-component boundary, so a root of ".../task-a"
-// never matches ".../task-abc" (AC-TASKS-ORPHAN-REAP-002.4).
+// never matches ".../task-abc".
 func orphanReapPathWithinRoot(root, candidate string) bool {
 	if root == "" || candidate == "" {
 		return false

@@ -203,6 +203,43 @@ func TestSignalOrphanReapCandidatesSurvivesSigkill(t *testing.T) {
 	})
 }
 
+// AC-TASKS-ORPHAN-REAP-004.6 + REQ-005: an indeterminate liveness read (the
+// platform could not tell whether the process is still alive) must never be
+// recorded as a successful reap. It is treated the same as "still alive":
+// escalation proceeds to SIGKILL, and if liveness is still indeterminate
+// afterward, the candidate is recorded survived with a retryable error --
+// never terminated/killed on a liveness check that was never actually
+// confirmed.
+func TestSignalOrphanReapCandidatesTreatsUnknownLivenessAsUnresolvedNotTerminated(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc := newOrphanReapSignalTestService()
+		verifier := newFakeOrphanReapVerifier()
+		verifier.set(500, "/tasks/task-a")
+		signaler := newFakeOrphanReapSignaler()
+		// Deliberately never call setAlive: Alive(500) returns (false, false)
+		// throughout, simulating a platform liveness probe that can never
+		// determine the process's state.
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = signaler
+
+		cand := newOrphanReapOwnershipCandidate(500, 1, "/tasks/task-a", "/tasks/task-a")
+		snapshot := &taskResourceCleanupSnapshot{}
+		errs := svc.signalOrphanReapCandidates(context.Background(), "task-a", []orphanReapCandidate{cand}, snapshot)
+		if len(errs) != 1 || !errors.Is(errs[0], errOrphanReapCandidateSurvived) {
+			t.Fatalf("expected errOrphanReapCandidateSurvived on unresolved liveness, got %v", errs)
+		}
+		rec, ok := findOrphanReapRecord(snapshot, 500)
+		if !ok || rec.Outcome != orphanReapOutcomeSurvived {
+			t.Fatalf("expected pid 500 recorded survived (never confirmed dead), got %+v (found=%v)", rec, ok)
+		}
+		sent := signaler.sentSignals()
+		if len(sent) != 2 || sent[0].sig != orphanReapSigterm || sent[1].sig != orphanReapSigkill {
+			t.Fatalf("expected escalation to proceed through sigterm and sigkill despite unresolved "+
+				"liveness (never short-circuited to a false 'terminated'), got %+v", sent)
+		}
+	})
+}
+
 // AC-TASKS-ORPHAN-REAP-003.7: identity is re-verified immediately before
 // every signal. A pid whose cwd has moved outside its root between attribution
 // and the SIGKILL decision must not receive SIGKILL.
@@ -428,6 +465,15 @@ func TestSignalOrphanReapCandidatesStopsSigkillLoopOnCancellationMidBurst(t *tes
 			if s.pid == 600 && s.sig == orphanReapSigkill {
 				t.Fatalf("expected no SIGKILL sent to pid 600 after cancellation stopped the loop, got %+v", signaler.sentSignals())
 			}
+		}
+		// AC-TASKS-ORPHAN-REAP-006.3: pid 600 already received SIGTERM before
+		// this cancellation, so it must still be persisted as skipped naming
+		// that signal, not silently dropped for never reaching the SIGKILL
+		// check.
+		rec, ok := findOrphanReapRecord(snapshot, 600)
+		if !ok || rec.Outcome != orphanReapOutcomeSkipped || rec.Reason != "sigterm already sent" {
+			t.Fatalf("expected pid 600 (already sigtermed, never reached by the sigkill loop) recorded "+
+				"skipped/\"sigterm already sent\", got %+v (found=%v)", rec, ok)
 		}
 	})
 }

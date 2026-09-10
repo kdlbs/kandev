@@ -3,15 +3,52 @@ package service
 import (
 	"bufio"
 	"bytes"
+	"os"
 	"strconv"
 	"strings"
 )
 
+// procDeletedSuffix is the suffix Linux appends to /proc/<pid>/cwd's link
+// target once the directory it points to has been removed.
+const procDeletedSuffix = " (deleted)"
+
+// trimProcCwdDeletedSuffix strips /proc/<pid>/cwd's " (deleted)" suffix.
+// Pure string logic, so it carries no build tag even though only Linux's
+// snapshotter calls it -- see apps/backend/AGENTS.md's
+// platform-untagged-helper rule.
+func trimProcCwdDeletedSuffix(target string) string {
+	return strings.TrimSuffix(target, procDeletedSuffix)
+}
+
+// parseProcStatLine parses the content of /proc/<pid>/stat: "pid (comm)
+// state ppid ...". comm is located between the first '(' and the last ')'
+// so an embedded space or paren in the command name cannot desynchronize
+// the field count. Pure string logic, so it carries no build tag even
+// though only Linux's snapshotter calls it.
+func parseProcStatLine(line string) (ppid int, command string, err error) {
+	line = strings.TrimSpace(line)
+	open := strings.IndexByte(line, '(')
+	closeParen := strings.LastIndexByte(line, ')')
+	if open < 0 || closeParen < open {
+		return 0, "", os.ErrInvalid
+	}
+	command = line[open+1 : closeParen]
+	rest := strings.Fields(line[closeParen+1:])
+	if len(rest) < 2 {
+		return 0, "", os.ErrInvalid
+	}
+	ppid, err = strconv.Atoi(rest[1])
+	if err != nil {
+		return 0, "", err
+	}
+	return ppid, command, nil
+}
+
 // parseLsofCwdEntries parses `lsof -F pcn` output. A record missing a parsed
-// pid or cwd is dropped rather than surfaced (AC-TASKS-ORPHAN-REAP-002.1: "A
-// process whose entry cannot be parsed is not a candidate"). Pure string
-// parsing, so it carries no build tag even though only darwin's snapshotter
-// calls it — see apps/backend/AGENTS.md's platform-untagged-helper rule.
+// pid or cwd is dropped rather than surfaced as a candidate with a partial
+// identity. Pure string parsing, so it carries no build tag even though only
+// darwin's snapshotter calls it — see apps/backend/AGENTS.md's
+// platform-untagged-helper rule.
 func parseLsofCwdEntries(out []byte) map[int]hostProcess {
 	byPID := make(map[int]hostProcess)
 	scanner := bufio.NewScanner(bytes.NewReader(out))
@@ -95,9 +132,8 @@ func parsePSAncestry(out []byte) map[int]int {
 // per-pid ancestry into one host snapshot. A pid lsof could not resolve a cwd
 // for still contributes its ancestry (ppid) with an empty Cwd: candidate
 // attribution already requires a non-empty Cwd (attributeOrphanReapCandidates
-// skips empty-cwd entries), but the ownership walk
-// (AC-TASKS-ORPHAN-REAP-003.3) needs every pid's ancestry to be resolvable,
-// including one whose cwd is unreadable.
+// skips empty-cwd entries), but the ownership ancestry walk needs every pid's
+// ancestry to be resolvable, including one whose cwd is unreadable.
 func combineLsofAndPSSnapshot(byPID map[int]hostProcess, ppidByPID map[int]int) []hostProcess {
 	procs := make([]hostProcess, 0, len(byPID)+len(ppidByPID))
 	seen := make(map[int]struct{}, len(byPID))

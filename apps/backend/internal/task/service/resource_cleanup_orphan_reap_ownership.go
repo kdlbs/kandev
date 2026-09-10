@@ -10,13 +10,12 @@ import (
 )
 
 // applyOrphanReapOwnership filters attributed candidates down to the ones
-// this task may signal (REQ-TASKS-ORPHAN-REAP-003). Every check fails closed
-// at the narrowest unit it governs (AC-TASKS-ORPHAN-REAP-003.6): a repository
-// error is phase-wide inconclusive across every currently active root, a
-// stored-path resolution failure is inconclusive across every root (the
-// system cannot rule out "containing" for an unresolvable path), a blocked
-// root excludes only that root's candidates, and a protected or
-// otherwise-owned PID excludes only that one candidate.
+// this task may signal. Every check fails closed at the narrowest unit it
+// governs: a repository error is phase-wide inconclusive across every
+// currently active root, a stored-path resolution failure is inconclusive
+// across every root (the system cannot rule out "containing" for an
+// unresolvable path), a blocked root excludes only that root's candidates,
+// and a protected or otherwise-owned PID excludes only that one candidate.
 func (s *Service) applyOrphanReapOwnership(
 	ctx context.Context,
 	taskID string,
@@ -43,19 +42,18 @@ func (s *Service) applyOrphanReapOwnership(
 
 	localPIDOwner, liveWorktreeRoots, worktreeResolutionFailed := orphanReapOtherExecutorOwnership(otherExecutors, taskID)
 	if worktreeResolutionFailed {
-		// AC-TASKS-ORPHAN-REAP-003.4 + 003.6: an unresolvable other-task live
-		// executor worktree path cannot be ruled out as "containing" any
-		// root, so every root this attempt found is inconclusive — the same
-		// posture otherTaskSessionPaths already applies below.
+		// An unresolvable other-task live executor worktree path cannot be
+		// ruled out as "containing" any root, so every root this attempt
+		// found is inconclusive: the same posture otherTaskSessionPaths
+		// already applies below.
 		s.skipEveryOrphanReapRoot(snapshot, byRoot, "ownership check inconclusive: could not resolve another task's live executor worktree path")
 		return nil
 	}
 
 	otherSessionPaths, resolutionFailed := s.otherTaskSessionPaths(otherSessions, taskID)
 	if resolutionFailed {
-		// AC-TASKS-ORPHAN-REAP-003.2 + 003.6: an unresolvable stored path
-		// cannot be ruled out as "containing" any root, so every root this
-		// attempt found is inconclusive.
+		// An unresolvable stored path cannot be ruled out as "containing"
+		// any root, so every root this attempt found is inconclusive.
 		s.skipEveryOrphanReapRoot(snapshot, byRoot, "ownership check inconclusive: could not resolve another task's session workspace path")
 		return nil
 	}
@@ -80,12 +78,11 @@ func (s *Service) applyOrphanReapOwnership(
 }
 
 // orphanReapOtherExecutorOwnership indexes every other task's recorded
-// executions into a local_pid ownership map (AC-TASKS-ORPHAN-REAP-003.3) and
-// the set of live worktree roots another task's recorded execution occupies
-// (AC-TASKS-ORPHAN-REAP-003.4). resolutionFailed is true when any live
-// executor's worktree path could not be resolved — mirrors
-// otherTaskSessionPaths, since an unresolvable path can silently fail to
-// match a process's real (resolved) cwd.
+// executions into a local_pid ownership map and the set of live worktree
+// roots another task's recorded execution occupies. resolutionFailed is
+// true when any live executor's worktree path could not be resolved:
+// mirrors otherTaskSessionPaths, since an unresolvable path can silently
+// fail to match a process's real (resolved) cwd.
 func orphanReapOtherExecutorOwnership(
 	otherExecutors []*models.ExecutorRunning, taskID string,
 ) (localPIDOwner map[int]string, liveWorktreeRoots []orphanReapOwnedPath, resolutionFailed bool) {
@@ -137,10 +134,10 @@ func (s *Service) applyOrphanReapPerCandidateOwnership(
 	return append(toSignal, cand)
 }
 
-// skipEveryOrphanReapRoot is only ever called for an AC-TASKS-ORPHAN-REAP-003.6
-// detection failure (a repository error, or an unresolvable other-task stored
-// path), never for a completed check that found real ownership, so every
-// skip it records uses the detection-failure severity.
+// skipEveryOrphanReapRoot is only ever called for a detection failure (a
+// repository error, or an unresolvable other-task stored path), never for a
+// completed check that found real ownership, so every skip it records uses
+// the detection-failure severity.
 func (s *Service) skipEveryOrphanReapRoot(
 	snapshot *taskResourceCleanupSnapshot, byRoot map[string][]orphanReapCandidate, reason string,
 ) {
@@ -155,9 +152,8 @@ type orphanReapOwnedPath struct {
 }
 
 // otherTaskSessionPaths resolves every other task's live session workspace
-// path. A session with an empty workspace_path names no path
-// (AC-TASKS-ORPHAN-REAP-003.2). resolutionFailed is true when any non-empty
-// path could not be resolved.
+// path. A session with an empty workspace_path names no path.
+// resolutionFailed is true when any non-empty path could not be resolved.
 func (s *Service) otherTaskSessionPaths(
 	sessions []*models.TaskSession, taskID string,
 ) (paths []orphanReapOwnedPath, resolutionFailed bool) {
@@ -179,8 +175,8 @@ func (s *Service) otherTaskSessionPaths(
 	return paths, resolutionFailed
 }
 
-// orphanReapFindOverlap reports whether root is equal to, inside, or contains
-// any of paths (AC-TASKS-ORPHAN-REAP-003.2's "equal to, inside, or containing").
+// orphanReapFindOverlap reports whether root is equal to, inside, or
+// contains any of paths.
 func orphanReapFindOverlap(paths []orphanReapOwnedPath, root string) (owner string, found bool) {
 	for _, p := range paths {
 		if p.path == root || orphanReapPathWithinRoot(root, p.path) || orphanReapPathWithinRoot(p.path, root) {
@@ -190,8 +186,9 @@ func orphanReapFindOverlap(paths []orphanReapOwnedPath, root string) (owner stri
 	return "", false
 }
 
-// orphanReapFindContainment reports whether root is equal to or inside any of
-// paths (AC-TASKS-ORPHAN-REAP-003.4's narrower "equal to or inside").
+// orphanReapFindContainment reports whether root is equal to or inside any
+// of paths, a narrower test than orphanReapFindOverlap's "equal to, inside,
+// or containing".
 func orphanReapFindContainment(paths []orphanReapOwnedPath, root string) (owner string, found bool) {
 	for _, p := range paths {
 		if p.path == root || orphanReapPathWithinRoot(p.path, root) {
@@ -201,11 +198,11 @@ func orphanReapFindContainment(paths []orphanReapOwnedPath, root string) (owner 
 	return "", false
 }
 
-// orphanReapExecutorIsLive applies REQ-TASKS-ORPHAN-REAP-003's fail-closed
-// posture to an undefined term: AC-TASKS-ORPHAN-REAP-003.4 turns on "another
-// task's live recorded execution" without defining live. A row is treated as
-// live unless its status is one of the three the executors_running state
-// model uses for a row that has finished running.
+// orphanReapExecutorIsLive applies a fail-closed posture to an undefined
+// term: "another task's live recorded execution" has no definition of live
+// on its own. A row is treated as live unless its status is one of the
+// three the executors_running state model uses for a row that has finished
+// running.
 func orphanReapExecutorIsLive(status string) bool {
 	switch status {
 	case models.ExecutorRunningStatusFailed,
@@ -219,10 +216,10 @@ func orphanReapExecutorIsLive(status string) bool {
 
 // orphanReapAncestorOwner walks pid's ancestry (including pid itself) over
 // the ppid chain from one host snapshot and reports the owning task if any
-// hop is the local_pid of another task's recorded execution
-// (AC-TASKS-ORPHAN-REAP-003.3). A process reparented away from its launcher
-// has no ancestry left to walk, so this can miss it by design;
-// AC-TASKS-ORPHAN-REAP-003.4 covers that case at the root level instead.
+// hop is the local_pid of another task's recorded execution. A process
+// reparented away from its launcher has no ancestry left to walk, so this
+// can miss it by design; the root-level worktree-containment check covers
+// that case instead.
 func orphanReapAncestorOwner(pid int, ppidByPID map[int]int, owners map[int]string) (string, bool) {
 	seen := make(map[int]bool)
 	for pid > 0 && !seen[pid] {
@@ -239,10 +236,10 @@ func orphanReapAncestorOwner(pid int, ppidByPID map[int]int, owners map[int]stri
 	return "", false
 }
 
-// orphanReapProtectedPIDs computes the protected set of AC-TASKS-ORPHAN-REAP-003.5:
-// the backend process (which is also "the process running the reap phase",
-// since the phase runs in-process) and every ancestor of the backend process,
-// walked over the same parent identifiers as every other check in this phase.
+// orphanReapProtectedPIDs computes the protected set: the backend process
+// (which is also "the process running the reap phase", since the phase
+// runs in-process) and every ancestor of the backend process, walked over
+// the same parent identifiers as every other check in this phase.
 func orphanReapProtectedPIDs(ppidByPID map[int]int) map[int]bool {
 	protected := make(map[int]bool)
 	self := os.Getpid()

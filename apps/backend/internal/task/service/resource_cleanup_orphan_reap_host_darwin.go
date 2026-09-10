@@ -10,11 +10,11 @@ import (
 	"strings"
 )
 
-// darwinOrphanReapHost implements AC-TASKS-ORPHAN-REAP-002.1's macOS
-// mechanism: `lsof -a -d cwd -F pcn` for pid/command/cwd, merged with
-// `ps -Ao pid=,ppid=` for ancestry. Measured against the input-inventory
-// receipts recorded in the task plan: ~0.17s over 1300+ host processes, and
-// lsof still reports a process's cwd after the directory itself is removed.
+// darwinOrphanReapHost implements the macOS detection mechanism:
+// `lsof -a -d cwd -F pcn` for pid/command/cwd, merged with
+// `ps -Ao pid=,ppid=` for ancestry. Measured at ~0.17s over 1300+ host
+// processes, and lsof still reports a process's cwd after the directory
+// itself is removed.
 type darwinOrphanReapHost struct{}
 
 func defaultOrphanReapHostSnapshotter() orphanReapHostSnapshotter { return darwinOrphanReapHost{} }
