@@ -13,10 +13,12 @@ import {
   endWrite,
   getCanonicalValue,
   nextTaskSequence,
+  recordWriteFailed,
   recordWriteSettled,
   recordWriteSuccess,
   shouldRestoreAfterFailedWrite,
   TASK_SCOPE,
+  type TaskScopeValues,
 } from "@/lib/state/office-task-content-sync";
 
 /**
@@ -66,9 +68,11 @@ export function useOptimisticTaskMutation() {
       const snapshot = ctx.task;
       const storePatch = toOfficeTaskPatch(patch);
       const storeSnapshot = storeApi.getState().office.tasks.items.find((t) => t.id === taskId);
+      const taskScopePatch = toTaskScopeValues(patch);
+      const taskScopeBefore = taskScopeBeforeValues(snapshot, storeSnapshot, patch);
 
       const sequence = nextTaskSequence(taskId);
-      beginWrite(taskId, TASK_SCOPE, sequence);
+      beginWrite(taskId, TASK_SCOPE, sequence, taskScopeBefore, taskScopePatch);
 
       // Apply optimistic patches (local + store).
       ctx.applyPatch(patch);
@@ -78,51 +82,21 @@ export function useOptimisticTaskMutation() {
 
       try {
         await apiCall();
-        recordWriteSettled(taskId, TASK_SCOPE, sequence);
-        endWrite(taskId, TASK_SCOPE, sequence);
+        recordWriteSettled(taskId, TASK_SCOPE, sequence, taskScopePatch);
+        const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
+        if (reconciliation) {
+          applyTaskScopeReconciliation(taskId, reconciliation, ctx.applyPatch, storeApi);
+        }
       } catch (err) {
-        if (err instanceof ApprovalGateError) {
-          // The backend has already persisted the redirected status at this
-          // write's sequence regardless of whether the UI ends up showing it,
-          // so a later-failing, lower-sequence write must see this as settled
-          // rather than treating it as unresolved and clobbering it.
-          recordWriteSettled(taskId, TASK_SCOPE, sequence);
-        }
-        // Only restore if no later-sequenced mutation on this task has
-        // already succeeded or is still in flight — otherwise this stale
-        // failure's rollback would clobber newer, server-confirmed state.
-        const shouldRestore = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
-        endWrite(taskId, TASK_SCOPE, sequence);
-        if (shouldRestore) {
-          if (err instanceof ApprovalGateError) {
-            // The backend already redirected and persisted this status
-            // server-side before returning the error, so a plain rollback
-            // would show a status the server no longer holds. Settle on the
-            // redirected status instead — status-only, not the whole
-            // snapshot, so a stale `rawStatus` on the snapshot can't
-            // re-normalize the card back to its pre-mutation column.
-            const redirectPatch: Partial<Task> = { status: err.redirectedStatus as TaskStatus };
-            ctx.applyPatch(redirectPatch);
-            if (storeSnapshot) {
-              storeApi.getState().patchTaskInStore(taskId, toOfficeTaskPatch(redirectPatch));
-            }
-          } else {
-            // Rollback both layers. This hook never patches title/description
-            // (see `toOfficeTaskPatch` above), so the rollback must not touch
-            // them either — those two fields are governed exclusively by the
-            // per-field guard in office-task-content-sync.ts and have their own
-            // dedicated writers (useCommitTaskTitle/useCommitTaskDescription).
-            // Restoring the full pre-mutation snapshot here would silently
-            // revert a confirmed title/description edit whenever an unrelated
-            // picker mutation fails (AC-61: exactly two writers may touch a
-            // guarded field).
-            ctx.restore(snapshot);
-            if (storeSnapshot) {
-              const { title: _title, description: _description, ...storeRollback } = storeSnapshot;
-              storeApi.getState().patchTaskInStore(taskId, storeRollback);
-            }
-          }
-        }
+        handleTaskMutationFailure({
+          taskId,
+          sequence,
+          err,
+          snapshot,
+          storeSnapshot,
+          ctx,
+          storeApi,
+        });
         toastUpdateFailure(err);
         throw err;
       }
@@ -153,6 +127,114 @@ function toOfficeTaskPatch(patch: Partial<Task>): Partial<OfficeTask> {
   if (patch.labels !== undefined) out.labels = patch.labels;
   if (patch.blockedBy !== undefined) out.blockedBy = patch.blockedBy;
   return out;
+}
+
+function toTaskScopeValues(patch: Partial<Task>): TaskScopeValues {
+  const values: TaskScopeValues = {};
+  for (const key of Object.keys(patch)) {
+    values[key] = patch[key as keyof Task];
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "status")) {
+    values.rawStatus = patch.status;
+  }
+  return values;
+}
+
+function taskScopeBeforeValues(
+  snapshot: Task,
+  storeSnapshot: OfficeTask | undefined,
+  patch: Partial<Task>,
+): TaskScopeValues {
+  const values: TaskScopeValues = {};
+  for (const key of Object.keys(patch)) {
+    values[key] = snapshot[key as keyof Task];
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "status")) {
+    values.rawStatus = storeSnapshot?.rawStatus ?? snapshot.rawStatus;
+  }
+  return values;
+}
+
+function toOfficeTaskRollbackPatch(values: TaskScopeValues): Partial<OfficeTask> {
+  const patch = toOfficeTaskPatch(values as Partial<Task>);
+  if (Object.prototype.hasOwnProperty.call(values, "status")) {
+    patch.status = values.status as OfficeTask["status"];
+  }
+  if (Object.prototype.hasOwnProperty.call(values, "rawStatus")) {
+    patch.rawStatus = values.rawStatus as string | undefined;
+  }
+  return patch;
+}
+
+function applyTaskScopeReconciliation(
+  taskId: string,
+  values: TaskScopeValues,
+  applyLocalPatch: (patch: Partial<Task>) => void,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+): void {
+  applyLocalPatch(values as Partial<Task>);
+  storeApi.getState().patchTaskInStore(taskId, toOfficeTaskRollbackPatch(values));
+}
+
+type TaskMutationFailure = {
+  taskId: string;
+  sequence: number;
+  err: unknown;
+  snapshot: Task;
+  storeSnapshot: OfficeTask | undefined;
+  ctx: TaskOptimisticContextValue;
+  storeApi: ReturnType<typeof useAppStoreApi>;
+};
+
+function handleTaskMutationFailure({
+  taskId,
+  sequence,
+  err,
+  snapshot,
+  storeSnapshot,
+  ctx,
+  storeApi,
+}: TaskMutationFailure): void {
+  if (err instanceof ApprovalGateError) {
+    // The backend has already persisted the redirected status at this
+    // write's sequence, so retain it as a settled outcome for later writes.
+    recordWriteSettled(taskId, TASK_SCOPE, sequence, {
+      status: err.redirectedStatus,
+      rawStatus: err.redirectedStatus,
+    });
+  } else {
+    recordWriteFailed(taskId, TASK_SCOPE, sequence);
+  }
+
+  // Only restore if no later-sequenced mutation on this task has already
+  // succeeded or is still in flight.
+  const shouldRestore = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
+  const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
+  if (reconciliation) {
+    applyTaskScopeReconciliation(taskId, reconciliation, ctx.applyPatch, storeApi);
+    return;
+  }
+  if (!shouldRestore) return;
+
+  if (err instanceof ApprovalGateError) {
+    // The backend redirected and persisted this status before returning the
+    // error. Settle on the status only so stale rawStatus cannot re-normalize
+    // the card back to its pre-mutation column.
+    const redirectPatch: Partial<Task> = { status: err.redirectedStatus as TaskStatus };
+    ctx.applyPatch(redirectPatch);
+    if (storeSnapshot) {
+      storeApi.getState().patchTaskInStore(taskId, toOfficeTaskPatch(redirectPatch));
+    }
+    return;
+  }
+
+  // This hook never patches title/description, so the rollback must not touch
+  // them either. Those fields have their own dedicated writers.
+  ctx.restore(snapshot);
+  if (storeSnapshot) {
+    const { title: _title, description: _description, ...storeRollback } = storeSnapshot;
+    storeApi.getState().patchTaskInStore(taskId, storeRollback);
+  }
 }
 
 function toastUpdateFailure(err: unknown): void {

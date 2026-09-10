@@ -252,4 +252,46 @@ describe("applyStatusDrop generation guard — overlapping status mutations", ()
     expect(getCurrent().status).toBe("in_review");
     expect(d.onError).toHaveBeenCalledTimes(2);
   });
+
+  it("restores the baseline when an older drop fails before a newer drop", async () => {
+    const { d, getCurrent } = liveDeps(task("t1", "todo"));
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    d.updateStatus.mockImplementationOnce(() => older.promise);
+    d.updateStatus.mockImplementationOnce(() => newer.promise);
+
+    const p1 = applyStatusDrop("t1", "in_progress", d);
+    const p2 = applyStatusDrop("t1", "blocked", d);
+
+    older.reject(new Error("older failed"));
+    await p1;
+    expect(getCurrent().status).toBe("blocked");
+
+    newer.reject(new Error("newer failed"));
+    await p2;
+
+    expect(getCurrent().status).toBe("todo");
+    expect(d.onError).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an older approval-gate redirect when a newer drop fails", async () => {
+    const { d, getCurrent } = liveDeps(task("t1", "todo"));
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    d.updateStatus.mockImplementationOnce(() => older.promise);
+    d.updateStatus.mockImplementationOnce(() => newer.promise);
+
+    const p1 = applyStatusDrop("t1", "done", d);
+    const p2 = applyStatusDrop("t1", "blocked", d);
+
+    older.reject(new ApprovalGateError(GATE_MESSAGE, "in_review"));
+    await p1;
+    expect(getCurrent().status).toBe("blocked");
+
+    newer.reject(new Error("newer failed"));
+    await p2;
+
+    expect(getCurrent().status).toBe("in_review");
+    expect(d.onError).toHaveBeenCalledTimes(2);
+  });
 });

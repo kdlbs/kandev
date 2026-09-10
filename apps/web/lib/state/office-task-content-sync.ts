@@ -19,6 +19,8 @@ export type SyncField = "title" | "description";
  */
 export type SyncScope = SyncField | "task";
 export const TASK_SCOPE: SyncScope = "task";
+/** Values captured for a whole-task optimistic mutation. */
+export type TaskScopeValues = Record<string, unknown>;
 type CandidateKind = "refetch" | "write";
 
 type CanonicalRecord = {
@@ -32,6 +34,16 @@ type GuardState = {
   pendingWrites: Set<number>;
 };
 
+type TaskScopeWrite = {
+  patch: TaskScopeValues;
+};
+
+type TaskScopeState = {
+  baseline: TaskScopeValues;
+  writes: Map<number, TaskScopeWrite>;
+  outcomes: Map<number, TaskScopeValues | null>;
+};
+
 const FIELDS: SyncField[] = ["title", "description"];
 
 const canonicalByTaskField = new Map<string, Map<SyncField, CanonicalRecord>>();
@@ -40,6 +52,7 @@ const sequenceByTask = new Map<string, number>();
 const lastWriteIssueSequenceByTaskField = new Map<string, Map<SyncScope, number>>();
 const lastSuccessfulWriteSequenceByTaskField = new Map<string, Map<SyncScope, number>>();
 const listenersByTaskField = new Map<string, Map<SyncField, Set<(value: string) => void>>>();
+const taskScopeByTask = new Map<string, TaskScopeState>();
 
 function fieldMap<K, T>(store: Map<string, Map<K, T>>, taskId: string): Map<K, T> {
   let m = store.get(taskId);
@@ -217,17 +230,35 @@ export function recordRefetchCandidate(
 }
 
 /**
- * Records a write's sequence as the scope's latest successful commit, for
- * `shouldRestoreAfterFailedWrite`'s AC-44 check. The sole maintainer of
- * `lastSuccessfulWriteSequenceByTaskField` — `recordWriteSuccess` calls this
- * for the title/description scopes, and the generic task-mutation path calls
- * it directly for the `"task"` scope, which has no canonical value to record.
+ * Records a write's latest settled sequence and, for whole-task writes, its
+ * persisted values when supplied.
+ * The values are replayed in issue order after the final overlapping write
+ * settles, so an older failure cannot discard a newer failure's retained
+ * rollback baseline (or an approval-gate redirect).
  */
-export function recordWriteSettled(taskId: string, scope: SyncScope, sequence: number): void {
+export function recordWriteSettled(
+  taskId: string,
+  scope: SyncScope,
+  sequence: number,
+  settledValues?: TaskScopeValues,
+): void {
   const fm = fieldMap(lastSuccessfulWriteSequenceByTaskField, taskId);
   const current = fm.get(scope);
   if (current === undefined || sequence > current) {
     fm.set(scope, sequence);
+  }
+  if (scope !== TASK_SCOPE) return;
+  const state = taskScopeByTask.get(taskId);
+  if (!state) return;
+  const write = state.writes.get(sequence);
+  state.outcomes.set(sequence, settledValues ? { ...settledValues } : { ...write?.patch });
+}
+
+/** Records a whole-task write that did not persist any values. */
+export function recordWriteFailed(taskId: string, scope: SyncScope, sequence: number): void {
+  if (scope === TASK_SCOPE) {
+    const state = taskScopeByTask.get(taskId);
+    if (state) state.outcomes.set(sequence, null);
   }
 }
 
@@ -283,6 +314,9 @@ function releaseIfUnguarded(
     if (isSyncField(scope)) {
       notifyField(taskId, scope);
     }
+    if (gm.size === 0) {
+      guardByTaskField.delete(taskId);
+    }
   }
 }
 
@@ -307,21 +341,76 @@ export function closeFieldEditor(taskId: string, field: SyncField): void {
  * Registers an in-flight write's guard contribution and records this write
  * as the field's most-recently-issued write for AC-52 staleness comparisons.
  */
-export function beginWrite(taskId: string, scope: SyncScope, sequence: number): void {
+export function beginWrite(
+  taskId: string,
+  scope: SyncScope,
+  sequence: number,
+  before?: TaskScopeValues,
+  patch?: TaskScopeValues,
+): void {
   const gm = fieldMap(guardByTaskField, taskId);
   const guard = gm.get(scope) ?? { editorOpen: false, pendingWrites: new Set<number>() };
   guard.pendingWrites.add(sequence);
   gm.set(scope, guard);
   fieldMap(lastWriteIssueSequenceByTaskField, taskId).set(scope, sequence);
+  if (scope !== TASK_SCOPE || !before || !patch) return;
+
+  const state = taskScopeByTask.get(taskId) ?? {
+    baseline: {},
+    writes: new Map<number, TaskScopeWrite>(),
+    outcomes: new Map<number, TaskScopeValues | null>(),
+  };
+  for (const key of Object.keys(patch)) {
+    if (!Object.prototype.hasOwnProperty.call(state.baseline, key)) {
+      state.baseline[key] = before[key];
+    }
+  }
+  state.writes.set(sequence, { patch: { ...patch } });
+  taskScopeByTask.set(taskId, state);
+}
+
+function reconcileTaskScope(taskId: string): TaskScopeValues | undefined {
+  const state = taskScopeByTask.get(taskId);
+  if (!state) return undefined;
+  taskScopeByTask.delete(taskId);
+  if (state.writes.size < 2) return undefined;
+
+  const reconciliation = { ...state.baseline };
+  const settledSequences = [...state.outcomes.keys()].sort((a, b) => a - b);
+  for (const settledSequence of settledSequences) {
+    const outcome = state.outcomes.get(settledSequence);
+    if (outcome) Object.assign(reconciliation, outcome);
+  }
+  return reconciliation;
+}
+
+function clearTaskScopeSequenceBookkeeping(taskId: string): void {
+  const issued = lastWriteIssueSequenceByTaskField.get(taskId);
+  issued?.delete(TASK_SCOPE);
+  if (issued?.size === 0) lastWriteIssueSequenceByTaskField.delete(taskId);
+
+  const settled = lastSuccessfulWriteSequenceByTaskField.get(taskId);
+  settled?.delete(TASK_SCOPE);
+  if (settled?.size === 0) lastSuccessfulWriteSequenceByTaskField.delete(taskId);
 }
 
 /** AC-70: ends a write's guard contribution identically whether it succeeded or failed. */
-export function endWrite(taskId: string, scope: SyncScope, sequence: number): void {
+export function endWrite(
+  taskId: string,
+  scope: SyncScope,
+  sequence: number,
+): TaskScopeValues | undefined {
   const gm = guardByTaskField.get(taskId);
   const guard = gm?.get(scope);
-  if (!gm || !guard) return;
+  if (!gm || !guard) return undefined;
   guard.pendingWrites.delete(sequence);
+  const taskScopeSettled = scope === TASK_SCOPE && guard.pendingWrites.size === 0;
+  const reconciliation = taskScopeSettled ? reconcileTaskScope(taskId) : undefined;
+  if (taskScopeSettled) {
+    clearTaskScopeSequenceBookkeeping(taskId);
+  }
   releaseIfUnguarded(taskId, scope, gm, guard);
+  return reconciliation;
 }
 
 /**
@@ -349,4 +438,5 @@ export function __resetOfficeTaskContentSyncForTests(): void {
   lastWriteIssueSequenceByTaskField.clear();
   lastSuccessfulWriteSequenceByTaskField.clear();
   listenersByTaskField.clear();
+  taskScopeByTask.clear();
 }

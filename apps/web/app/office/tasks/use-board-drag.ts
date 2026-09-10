@@ -15,9 +15,11 @@ import {
   beginWrite,
   endWrite,
   nextTaskSequence,
+  recordWriteFailed,
   recordWriteSettled,
   shouldRestoreAfterFailedWrite,
   TASK_SCOPE,
+  type TaskScopeValues,
 } from "@/lib/state/office-task-content-sync";
 
 /**
@@ -57,27 +59,45 @@ export async function applyStatusDrop(
   if (snapshot.status === targetStatus) return;
 
   const sequence = nextTaskSequence(taskId);
-  beginWrite(taskId, TASK_SCOPE, sequence);
+  const taskScopeBefore: TaskScopeValues = {
+    status: snapshot.status,
+    rawStatus: snapshot.rawStatus,
+  };
+  const taskScopePatch: TaskScopeValues = {
+    status: targetStatus,
+    rawStatus: targetStatus,
+  };
+  beginWrite(taskId, TASK_SCOPE, sequence, taskScopeBefore, taskScopePatch);
 
   deps.patchTask(taskId, { status: targetStatus });
   try {
     await deps.updateStatus(taskId, targetStatus);
-    recordWriteSettled(taskId, TASK_SCOPE, sequence);
-    endWrite(taskId, TASK_SCOPE, sequence);
+    recordWriteSettled(taskId, TASK_SCOPE, sequence, taskScopePatch);
+    const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
+    if (reconciliation) {
+      deps.patchTask(taskId, toOfficeTaskReconciliationPatch(reconciliation));
+    }
   } catch (err) {
     if (err instanceof ApprovalGateError) {
       // The backend has already persisted the redirected status at this
       // write's sequence regardless of whether the UI ends up showing it, so
       // a later-failing, lower-sequence move must see this as settled rather
       // than treating it as unresolved and clobbering it.
-      recordWriteSettled(taskId, TASK_SCOPE, sequence);
+      recordWriteSettled(taskId, TASK_SCOPE, sequence, {
+        status: err.redirectedStatus,
+        rawStatus: err.redirectedStatus,
+      });
+    } else {
+      recordWriteFailed(taskId, TASK_SCOPE, sequence);
     }
     // Only settle onto this failure's outcome if no later-sequenced move on
     // this task has already succeeded or is still in flight — otherwise this
     // stale failure would clobber newer, server-confirmed state.
     const shouldRestore = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
-    endWrite(taskId, TASK_SCOPE, sequence);
-    if (shouldRestore) {
+    const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
+    if (reconciliation) {
+      deps.patchTask(taskId, toOfficeTaskReconciliationPatch(reconciliation));
+    } else if (shouldRestore) {
       if (err instanceof ApprovalGateError) {
         // The backend already redirected and persisted this status server-side
         // before returning the error (see ApprovalGateError), so the board is
@@ -93,6 +113,17 @@ export async function applyStatusDrop(
     // naming who still has to sign off.
     deps.onError(err instanceof Error ? err.message : t("task:failedToMoveTask"));
   }
+}
+
+function toOfficeTaskReconciliationPatch(values: TaskScopeValues): Partial<OfficeTask> {
+  const patch: Partial<OfficeTask> = {};
+  if (Object.prototype.hasOwnProperty.call(values, "status")) {
+    patch.status = values.status as OfficeTaskStatus;
+  }
+  if (Object.prototype.hasOwnProperty.call(values, "rawStatus")) {
+    patch.rawStatus = values.rawStatus as string | undefined;
+  }
+  return patch;
 }
 
 /**

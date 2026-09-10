@@ -386,6 +386,78 @@ describe("useOptimisticTaskMutation generation guard — overlapping status muta
   });
 });
 
+describe("useOptimisticTaskMutation retained rollback outcomes", () => {
+  it("chained double failure: an older failure does not leave its optimistic value after the newer failure", async () => {
+    const { Wrapper, taskRef, storeApiRef, mutateRef } = makeLiveHarness(baseTask, baseOfficeTask);
+    render(<Wrapper />);
+
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    let p1!: Promise<void>;
+    let p2!: Promise<void>;
+
+    act(() => {
+      p1 = mutateRef.current!("t-1", { status: "in_progress" }, () => older.promise);
+    });
+    act(() => {
+      p2 = mutateRef.current!("t-1", { status: "blocked" }, () => newer.promise);
+    });
+    const p1Settled = p1.catch(() => undefined);
+    const p2Settled = p2.catch(() => undefined);
+
+    await act(async () => {
+      older.reject(new Error(WRITE_FAILURE_MESSAGE));
+      await p1Settled;
+    });
+    expect(taskRef.current.status).toBe("blocked");
+    expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("blocked");
+
+    await act(async () => {
+      newer.reject(new Error(WRITE_FAILURE_MESSAGE));
+      await p2Settled;
+    });
+    expect(taskRef.current.status).toBe("todo");
+    expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("todo");
+    await expect(p1).rejects.toThrow(WRITE_FAILURE_MESSAGE);
+    await expect(p2).rejects.toThrow(WRITE_FAILURE_MESSAGE);
+  });
+
+  it("keeps an older approval-gate redirect when a newer mutation fails", async () => {
+    const { Wrapper, taskRef, storeApiRef, mutateRef } = makeLiveHarness(baseTask, baseOfficeTask);
+    render(<Wrapper />);
+
+    const older = deferred<void>();
+    const newer = deferred<void>();
+    let p1!: Promise<void>;
+    let p2!: Promise<void>;
+
+    act(() => {
+      p1 = mutateRef.current!("t-1", { status: "done" }, () => older.promise);
+    });
+    act(() => {
+      p2 = mutateRef.current!("t-1", { status: "blocked" }, () => newer.promise);
+    });
+    const p1Settled = p1.catch(() => undefined);
+    const p2Settled = p2.catch(() => undefined);
+
+    const gate = "Cannot mark done: awaiting approval from Ada, Grace";
+    await act(async () => {
+      older.reject(new ApprovalGateError(gate, "in_review"));
+      await p1Settled;
+    });
+    expect(taskRef.current.status).toBe("blocked");
+
+    await act(async () => {
+      newer.reject(new Error(WRITE_FAILURE_MESSAGE));
+      await p2Settled;
+    });
+    expect(taskRef.current.status).toBe("in_review");
+    expect(storeApiRef.current!.getState().office.tasks.items[0]?.status).toBe("in_review");
+    await expect(p1).rejects.toThrow(gate);
+    await expect(p2).rejects.toThrow(WRITE_FAILURE_MESSAGE);
+  });
+});
+
 describe("useOptimisticTaskMutation generation guard — approval gate redirect", () => {
   it("gate-redirect superseded by a newer success does not clobber the newer status", async () => {
     const { Wrapper, taskRef, storeApiRef, mutateRef } = makeLiveHarness(baseTask, baseOfficeTask);
