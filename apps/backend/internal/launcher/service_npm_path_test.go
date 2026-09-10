@@ -31,10 +31,18 @@ func TestSystemdServicePathExecutesNPMGlobalCLI(t *testing.T) {
 	})
 	var servicePath string
 	for _, line := range strings.Split(unit, "\n") {
-		if value, ok := strings.CutPrefix(line, "Environment=PATH="); ok {
-			servicePath = strings.ReplaceAll(value, "%h", home)
-			break
+		value, ok := strings.CutPrefix(line, "Environment=")
+		if !ok {
+			continue
 		}
+		value = strings.Trim(value, `"`)
+		value, ok = strings.CutPrefix(value, "PATH=")
+		if !ok {
+			continue
+		}
+		// %h is the systemd home-dir specifier; it differs from input.HomeDir (kandev data dir).
+		servicePath = strings.ReplaceAll(value, "%h", home)
+		break
 	}
 	if servicePath == "" {
 		t.Fatal("generated unit has no PATH environment entry")
