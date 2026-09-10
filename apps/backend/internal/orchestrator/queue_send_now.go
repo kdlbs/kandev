@@ -514,17 +514,7 @@ func (s *Service) executeSendNowClaimWithContext(
 	if err != nil {
 		var acceptedDispatch *acceptedPromptDispatchError
 		if deliveryAttempted || errors.As(err, &acceptedDispatch) {
-			s.logger.Warn("send-now replacement prompt was accepted but acceptance persistence failed; settling without restore",
-				zap.String("session_id", sessionID), zap.Error(err))
-			if markErr := s.markSendNowClaimAcceptedWithRetry(ctx, claim); markErr != nil {
-				s.logger.Error("failed to persist accepted send-now queue claim",
-					zap.String("session_id", sessionID), zap.Error(markErr))
-			}
-			if ackErr := s.acknowledgeSendNowClaimWithRetry(ctx, claim); ackErr != nil {
-				s.logger.Error("failed to acknowledge accepted send-now queue claim",
-					zap.String("session_id", sessionID), zap.Error(ackErr))
-			}
-			s.publishQueueStatusEvent(context.Background(), sessionID)
+			s.settleAttemptedSendNowClaim(ctx, claim, err)
 			return
 		}
 		s.logger.Warn("send-now replacement prompt failed; restoring queue claim",
@@ -539,6 +529,25 @@ func (s *Service) executeSendNowClaimWithContext(
 		return
 	}
 	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
+}
+
+func (s *Service) settleAttemptedSendNowClaim(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+	dispatchErr error,
+) {
+	sessionID := claim.Dispatch.SessionID
+	s.logger.Warn("send-now replacement prompt was attempted but handling failed; settling without restore",
+		zap.String("session_id", sessionID), zap.Error(dispatchErr))
+	if err := s.markSendNowClaimAcceptedWithRetry(ctx, claim); err != nil {
+		s.logger.Error("failed to persist accepted send-now queue claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	if err := s.acknowledgeSendNowClaimWithRetry(ctx, claim); err != nil {
+		s.logger.Error("failed to acknowledge accepted send-now queue claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	s.publishQueueStatusEvent(context.Background(), sessionID)
 }
 
 func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {

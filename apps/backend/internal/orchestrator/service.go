@@ -3227,7 +3227,7 @@ func (s *Service) reconcileDurablePlanCommentDeliveriesOnStartup(ctx context.Con
 			continue
 		}
 		if entry.IsDeliveryAttempted() {
-			if err := s.messageQueue.AcknowledgeQueued(ctx, entry.SessionID, entry.ID); err != nil &&
+			if err := s.messageQueue.AcknowledgeQueued(ctx, &entry); err != nil &&
 				!errors.Is(err, messagequeue.ErrEntryNotFound) {
 				s.logger.Warn("failed to clear attempted plan-comment receipt on startup",
 					zap.String("task_id", entry.TaskID), zap.String("session_id", entry.SessionID),

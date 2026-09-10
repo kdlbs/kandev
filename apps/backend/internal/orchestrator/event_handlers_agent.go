@@ -1242,7 +1242,7 @@ func (s *Service) finishQueuedPassthroughExecution(
 ) {
 	s.finishQueuedMessageExecution(
 		ctx, identity.SessionID, identity.SessionID, queuedMsg, reservation,
-		isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"]),
+		isLifecycleAutomationMessage(queuedMsg),
 		state.userMessageRecorded, state.deliveryAttempted, state.dispatchErr,
 	)
 	s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
@@ -1459,7 +1459,6 @@ func (s *Service) executeQueuedMessageWithReservation(
 			onAccepted: func(turnID string) {
 				s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
 			},
-			afterDispatch: afterDispatch,
 		})
 	if err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
@@ -1890,7 +1889,7 @@ func (s *Service) queuedMessageAfterDispatch(
 	queuedMsg *messagequeue.QueuedMessage,
 	lifecyclePrompt bool,
 ) func() error {
-	if lifecyclePrompt || queuedMsg == nil || s.messageQueue == nil ||
+	if lifecyclePrompt || queuedMsg == nil || queuedMsg.IsDurablePlanComment() || s.messageQueue == nil ||
 		!s.messageQueue.PendingQueueDispatchPersistenceAvailable() {
 		return nil
 	}

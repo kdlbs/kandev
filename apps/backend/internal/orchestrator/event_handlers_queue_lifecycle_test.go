@@ -524,11 +524,23 @@ func TestStartupReconciliationDoesNotRedispatchAttemptedPlanComment(t *testing.T
 		map[string]interface{}{
 			plancomments.MetadataClientQueueID:      "startup-attempted",
 			plancomments.MetadataRequestFingerprint: "fingerprint-startup",
-			messagequeue.MetadataDeliveryAttempted:  true,
 		},
 	)
 	if err != nil {
 		t.Fatalf("queue attempted receipt: %v", err)
+	}
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t1", "s1")
+	if err != nil {
+		t.Fatalf("resolve queue identity: %v", err)
+	}
+	reserved, found, autoRun, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+	if err != nil || !found || !autoRun {
+		t.Fatalf("reserve queue receipt: found=%v autoRun=%v err=%v", found, autoRun, err)
+	}
+	if err := svc.messageQueue.MarkDeliveryAttemptedForSession(
+		ctx, identity, []messagequeue.QueuedMessage{*reserved},
+	); err != nil {
+		t.Fatalf("mark queue delivery attempted: %v", err)
 	}
 
 	svc.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)

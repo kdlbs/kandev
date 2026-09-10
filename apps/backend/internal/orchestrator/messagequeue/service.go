@@ -2664,7 +2664,7 @@ func (s *Service) DeletePendingQueueDispatch(ctx context.Context, msg *QueuedMes
 
 func (s *Service) deletePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
 	repo, ok := s.repo.(pendingQueueDispatchRepository)
-	if !ok || msg.IsDurableLifecycle() {
+	if !ok || msg.IsDurableDelivery() {
 		return nil
 	}
 	return repo.DeletePendingQueueDispatch(ctx, msg)

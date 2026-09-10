@@ -424,6 +424,7 @@ func (m *QueuedMessage) bindDeliveryReservation(metadata map[string]interface{})
 	if m == nil {
 		return
 	}
+	m.lifecycleReservationID, _ = metadata[metadataLifecycleReservationID].(string)
 	m.reservationToken = deliveryReservationToken(metadata)
 	m.reservationExpiresAt = deliveryReservationExpiresAt(metadata)
 }

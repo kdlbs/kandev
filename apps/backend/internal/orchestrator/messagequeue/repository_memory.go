@@ -852,7 +852,9 @@ func (r *memoryRepository) ListDurableDeliveryEntries(_ context.Context) ([]Queu
 	for _, list := range r.entries {
 		for _, msg := range list {
 			if msg.IsDurableDelivery() {
-				out = append(out, *cloneQueuedMessage(msg))
+				entry := cloneQueuedMessage(msg)
+				entry.bindDeliveryReservation(entry.Metadata)
+				out = append(out, *entry)
 			}
 		}
 	}
