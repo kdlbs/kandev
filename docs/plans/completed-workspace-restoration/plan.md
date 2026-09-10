@@ -174,6 +174,9 @@ Implementation and regression tests completed on 2026-09-10:
 - PR #3577 follow-up aligned the workflow DTO and WebSocket mapper with the
   current `main` contract after the merge-result check exposed a stale
   duplicate field deletion. Local typecheck, lint, and mapper tests passed.
+- The subsequent frontend failure was isolated to an incomplete existing test
+  mock after the store API became a workspace-restoration dependency. The
+  responsive File Browser mock now supplies that API, and its three tests pass.
 
 Design validation before implementation on 2026-09-10:
 

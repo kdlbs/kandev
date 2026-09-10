@@ -25,6 +25,9 @@ vi.mock("@/components/state-provider", () => ({
       sessionWorktreesBySessionId: { itemsBySessionId: {} },
       workspaceFilesRefresh: { bySessionId: {} },
     }),
+  useAppStoreApi: () => ({
+    getState: () => ({ workspaceRestoration: { byEnvironmentId: {} } }),
+  }),
 }));
 vi.mock("@/hooks/use-open-session-folder", () => ({
   useOpenSessionFolder: () => ({ open: vi.fn() }),
