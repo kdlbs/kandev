@@ -38,16 +38,38 @@ func parseLsofCwdEntries(out []byte) map[int]hostProcess {
 			}
 		case 'c':
 			if haveCurrent {
-				current.Command = line[1:]
+				if value := line[1:]; containsOrphanReapControlByte(value) {
+					haveCurrent = false
+				} else {
+					current.Command = value
+				}
 			}
 		case 'n':
 			if haveCurrent {
-				current.Cwd = line[1:]
+				if value := line[1:]; containsOrphanReapControlByte(value) {
+					haveCurrent = false
+				} else {
+					current.Cwd = value
+				}
 			}
 		}
 	}
 	flush()
 	return byPID
+}
+
+// containsOrphanReapControlByte reports whether s carries a raw ASCII
+// control byte. Genuine lsof -F output escapes such bytes to a printable
+// caret form, so a raw one in a parsed field is not a real path or command --
+// the record it belongs to is treated as unparseable rather than trusted with
+// a partial or corrupted value.
+func containsOrphanReapControlByte(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // parsePSAncestry parses `ps -Ao pid=,ppid=` output into a pid->ppid map.

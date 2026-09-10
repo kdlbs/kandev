@@ -39,6 +39,37 @@ func TestParseLsofCwdEntriesDropsMalformedPID(t *testing.T) {
 	}
 }
 
+// A raw control byte inside a cwd or command value never occurs in genuine
+// lsof -F output (it escapes such bytes to a printable caret form), so its
+// presence signals a record this parser cannot trust the identity of --
+// including one crafted to smuggle a fabricated p/c/n record into the
+// stream. The whole record is dropped rather than truncated at the control
+// byte, and a well-formed record elsewhere in the same input still parses.
+func TestParseLsofCwdEntriesDropsRecordWithControlByteInCwd(t *testing.T) {
+	input := "p111\ncbash\nn/home/a\x01evil\np222\ncsh\nn/home/b\n"
+	got := parseLsofCwdEntries([]byte(input))
+	if len(got) != 1 {
+		t.Fatalf("expected only the well-formed record to survive, got %+v", got)
+	}
+	if _, ok := got[111]; ok {
+		t.Fatalf("expected pid 111's record (control byte in cwd) to be dropped, got %+v", got[111])
+	}
+	if got[222].Cwd != "/home/b" || got[222].Command != "sh" {
+		t.Fatalf("unexpected entry for pid 222: %+v", got[222])
+	}
+}
+
+func TestParseLsofCwdEntriesDropsRecordWithControlByteInCommand(t *testing.T) {
+	input := "p111\ncba\x07sh\nn/home/a\np222\ncsh\nn/home/b\n"
+	got := parseLsofCwdEntries([]byte(input))
+	if len(got) != 1 {
+		t.Fatalf("expected only the well-formed record to survive, got %+v", got)
+	}
+	if _, ok := got[111]; ok {
+		t.Fatalf("expected pid 111's record (control byte in command) to be dropped, got %+v", got[111])
+	}
+}
+
 func TestParsePSAncestry(t *testing.T) {
 	input := "  1   0\n  222   1\n"
 	got := parsePSAncestry([]byte(input))
