@@ -94,9 +94,8 @@ Threads requirements/design, existing mobile column navigator and picker sheet.
   public documentation validation passed.
 - A disposable mock instance was evaluated on loopback port 48490, with
   four fictional tasks and five sessions, then stopped at the user's request.
-  The manual send check received a normal mock reply. Evaluation, shutdown,
-  and restart instructions are recorded in
-  `/tmp/kandev-mobile-threads-PuEDK5/README.md`.
+  The manual send check received a normal mock reply. The demo backend and
+  private route are stopped; its database and captures were retained locally.
 - No production credentials, personal instance, real provider calls, commit,
   push, or publication were used. Real-device keyboard/Safari checks remain
   outside this emulated-browser verification.

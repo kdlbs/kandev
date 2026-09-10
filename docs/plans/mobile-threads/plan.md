@@ -184,8 +184,8 @@ formatting passed. This follow-up changes no application behavior.
   `https://koi.taile29c7d.ts.net:48490/threads` through Tailscale Serve.
   It is now stopped. Its retained fictional workspace has four tasks, five
   sessions, and two demo profiles.
-  Runtime ownership, seed IDs, screenshots, and stop instructions are in
-  `/tmp/kandev-mobile-threads-PuEDK5/README.md`.
+  Its runtime records and captures were retained locally as historical
+  evaluation artifacts, not as repository prerequisites.
 - Manual phone-emulation checks at 360 pixels verified equal viewport/chat
   widths, successful mock reply delivery, and secondary-agent selection.
   Physical-device keyboard and Safari behavior were not exercised.
