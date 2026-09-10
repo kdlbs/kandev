@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { buttonVariants } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { Input } from "@kandev/ui/input";
+
+afterEach(() => cleanup());
 
 describe("shared control sizing", () => {
   it("keeps the ordinary button at desktop density and enlarges touch contexts", () => {
@@ -24,5 +28,14 @@ describe("shared control sizing", () => {
     expect(controlSizingClassName("standard")).toBe(
       "h-7 max-md:h-11 [@media(pointer:coarse)]:h-11",
     );
+  });
+
+  it("allows fixed embedded inputs to opt out of adaptive sizing", () => {
+    render(<Input data-testid="embedded-input" controlSize="none" className="h-5" />);
+
+    const input = screen.getByTestId("embedded-input");
+    expect(input.className).toContain("h-5");
+    expect(input.className).not.toContain("max-md:h-11");
+    expect(input.className).not.toContain("[@media(pointer:coarse)]:h-11");
   });
 });

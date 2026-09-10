@@ -47,7 +47,9 @@ and adaptive touch classes. It contains no feature state or React hook.
 Preserve the existing Button size API and its specialized `xs` and `lg` variants.
 Use default Button size for ordinary actions and `sm` for deliberate compact
 inline actions. Do not redefine `sm` globally as 28px.
-Input retains its native HTML `size` attribute semantics.
+Input retains its native HTML `size` attribute semantics and accepts
+`controlSize="none"` when a fixed editor or file-browser field owns its own
+geometry.
 
 Reuse the shared size classes in Button, Input, SelectTrigger, and the single-line
 InputGroup shell. Apply adaptive touch classes at shared application wrappers

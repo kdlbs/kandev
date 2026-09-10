@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import type { ApiClient } from "../../helpers/api-client";
@@ -50,7 +51,9 @@ test.describe("Task control sizing", () => {
   test("task creation keeps touch sizing until the md breakpoint", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    const branchesOrWorkflowLoaded = waitForHttp(testPage, "GET", /\/workflows|\/repositories/);
     await kanban.createTaskButton.first().click();
+    await branchesOrWorkflowLoaded;
     await testPage.setViewportSize({ width: 700, height: 900 });
 
     const dialog = testPage.getByTestId("create-task-dialog");
@@ -59,7 +62,7 @@ test.describe("Task control sizing", () => {
     await dialog.getByTestId("task-description-input").fill("Check task action geometry");
 
     const startButton = dialog.getByTestId("submit-start-agent");
-    await expect(startButton).toBeEnabled({ timeout: 30_000 });
+    await expect(startButton).toBeEnabled();
     await expectControlHeight(startButton, 44);
   });
 });
