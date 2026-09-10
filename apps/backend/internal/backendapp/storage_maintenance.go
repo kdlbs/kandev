@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/databasestore"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
@@ -176,6 +178,12 @@ func prepareStorageDependencies(
 		HomeDir: cfg.ResolvedHomeDir(), TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
 		Settings: settings, Store: store, Scanner: scanner,
 	})
+	database := databasestore.New(databasestore.Config{
+		Driver:        cfg.Database.Driver,
+		DatabasePath:  storageDatabasePath(cfg),
+		Scanner:       scanner,
+		ExistingRoots: storageExistingMeasurementRoots(cfg.ResolvedHomeDir()),
+	})
 	lifecycleMgr.SetActivityCoordinator(coordinator)
 	lifecycleMgr.SetManagedGoCacheEnvironmentProvider(goCache)
 	if worktreeMgr != nil {
@@ -188,7 +196,7 @@ func prepareStorageDependencies(
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
-		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider,
+		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider, database: database,
 	}
 	cachedOverview := newStorageOverviewCache(overview, eventBus, log, logError)
 	quarantine := &workspaceQuarantineController{
@@ -305,6 +313,7 @@ type storageOverview struct {
 	workspaceFactory workspaceFactory
 	workspaceAnalyze func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error)
 	goCache          *gocache.Provider
+	database         *databasestore.Provider
 	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
 	tempArtifacts    *tempartifacts.Provider
@@ -343,9 +352,13 @@ func (o *storageOverview) summary(
 		dockerSummary     dockerstore.Analysis
 		tempSummary       tempartifacts.Analysis
 		tempErr           error
+		databaseSummary   databasestore.Measurement
+		databaseErr       error
+		backupSummary     databasestore.Measurement
+		backupErr         error
 	)
 	var measurements sync.WaitGroup
-	measurements.Add(4)
+	measurements.Add(6)
 	workspaceAnalyze := o.workspaceAnalyze
 	if workspaceAnalyze == nil {
 		workspaceAnalyze = func(ctx context.Context, settings storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
@@ -380,6 +393,18 @@ func (o *storageOverview) summary(
 		dockerSummary = o.docker.Analyze(ctx)
 		reporter.complete(storagepkg.StorageSourceDocker, dockerSummaryMap(dockerSummary), nil)
 	}()
+	go func() {
+		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDatabase)
+		databaseSummary, databaseErr = o.analyzeDatabase(ctx, reporter)
+		reporter.complete(storagepkg.StorageSourceDatabase, databaseSummary, databaseErr)
+	}()
+	go func() {
+		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDatabaseBackups)
+		backupSummary, backupErr = o.analyzeDatabaseBackups(ctx, reporter)
+		reporter.complete(storagepkg.StorageSourceDatabaseBackups, backupSummary, backupErr)
+	}()
 	if o.tempArtifacts != nil {
 		measurements.Add(1)
 		go func() {
@@ -402,6 +427,7 @@ func (o *storageOverview) summary(
 	return summaryFromMeasurements(
 		workspaceSummary, workspaceErr, goCacheSummary, goCacheErr,
 		quarantineSummary, quarantineErr, tempSummary, tempErr, dockerSummary,
+		databaseSummary, databaseErr, backupSummary, backupErr,
 	), nil
 }
 
@@ -415,6 +441,10 @@ func summaryFromMeasurements(
 	tempSummary tempartifacts.Analysis,
 	tempErr error,
 	dockerSummary dockerstore.Analysis,
+	databaseSummary databasestore.Measurement,
+	databaseErr error,
+	backupSummary databasestore.Measurement,
+	backupErr error,
 ) storagepkg.Summary {
 	return storagepkg.Summary{
 		Workspaces:         summaryValue(workspaceSummary, workspaceErr),
@@ -422,6 +452,58 @@ func summaryFromMeasurements(
 		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
 		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
 		Docker:             dockerSummaryMap(dockerSummary),
+		Database:           databaseMeasurementValue(databaseSummary, databaseErr),
+		DatabaseBackups:    databaseMeasurementValue(backupSummary, backupErr),
+	}
+}
+
+func (o *storageOverview) analyzeDatabase(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+) (databasestore.Measurement, error) {
+	if o.database == nil {
+		return databasestore.Measurement{
+			Status: databasestore.StatusNotApplicable,
+			Reason: databasestore.ReasonUnsupportedDriver,
+		}, nil
+	}
+	return o.database.AnalyzeDatabase(ctx, reporter.filesystem(storagepkg.StorageSourceDatabase))
+}
+
+func (o *storageOverview) analyzeDatabaseBackups(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+) (databasestore.Measurement, error) {
+	if o.database == nil {
+		return databasestore.Measurement{
+			Status: databasestore.StatusNotApplicable,
+			Reason: databasestore.ReasonUnsupportedDriver,
+		}, nil
+	}
+	return o.database.AnalyzeBackups(ctx, reporter.filesystem(storagepkg.StorageSourceDatabaseBackups))
+}
+
+func databaseMeasurementValue(measurement databasestore.Measurement, err error) any {
+	if measurement.Status != "" {
+		return measurement
+	}
+	return summaryValue(measurement, err)
+}
+
+func storageDatabasePath(cfg *config.Config) string {
+	if cfg != nil && strings.TrimSpace(cfg.Database.Path) != "" {
+		return cfg.Database.Path
+	}
+	if cfg == nil {
+		return ""
+	}
+	return filepath.Join(cfg.ResolvedDataDir(), "kandev.db")
+}
+
+func storageExistingMeasurementRoots(homeDir string) []string {
+	return []string{
+		filepath.Join(homeDir, "tasks"),
+		filepath.Join(homeDir, "cache", "go-build"),
 	}
 }
 

@@ -40,11 +40,23 @@ const completeSummary: StorageSummary = {
     build_cache_bytes: 7,
     unused_image_bytes: 11,
   },
+  database: {
+    status: "measured",
+    size_bytes: 1,
+    path: "/data/kandev.db",
+    included_in_total: true,
+  },
+  database_backups: {
+    status: "measured",
+    size_bytes: 2,
+    path: "/data/backups",
+    included_in_total: true,
+  },
 };
 
 describe("storageAnalysisTotal", () => {
   it("sums non-overlapping top-level measurements", () => {
-    expect(storageAnalysisTotal(completeSummary)).toEqual({ bytes: 49, partial: false });
+    expect(storageAnalysisTotal(completeSummary)).toEqual({ bytes: 52, partial: false });
   });
 
   it("excludes workspace subsets and unused Docker images", () => {
@@ -67,7 +79,7 @@ describe("storageAnalysisTotal", () => {
       docker: { ...completeSummary.docker, available: false },
     };
 
-    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 16, partial: true });
+    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 19, partial: true });
   });
 
   it("does not require a user cache when no distinct path is reported", () => {
@@ -80,7 +92,7 @@ describe("storageAnalysisTotal", () => {
       },
     };
 
-    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 45, partial: false });
+    expect(storageAnalysisTotal(summary)).toEqual({ bytes: 48, partial: false });
   });
 
   it("sums only completed values in a partial first-scan summary", () => {
@@ -90,6 +102,48 @@ describe("storageAnalysisTotal", () => {
     };
 
     expect(storageAnalysisTotal(summary)).toEqual({ bytes: 12, partial: true });
+  });
+
+  it("adds measured database and backup bytes exactly once", () => {
+    expect(
+      storageAnalysisTotal({
+        ...completeSummary,
+        database: completeSummary.database,
+        database_backups: completeSummary.database_backups,
+      }),
+    ).toEqual({ bytes: 52, partial: false });
+  });
+
+  it("does not add overlap or not-applicable database measurements", () => {
+    expect(
+      storageAnalysisTotal({
+        ...completeSummary,
+        database: {
+          status: "measured",
+          size_bytes: 9,
+          included_in_total: false,
+          reason: "overlaps_existing_source",
+        },
+        database_backups: {
+          status: "not_applicable",
+          included_in_total: false,
+          reason: "unsupported_driver",
+        },
+      }),
+    ).toEqual({ bytes: 49, partial: false });
+  });
+
+  it("marks unavailable or missing database measurements as partial", () => {
+    expect(
+      storageAnalysisTotal({
+        database: {
+          status: "unavailable",
+          included_in_total: false,
+          reason: "measurement_failed",
+        },
+        database_backups: undefined,
+      }),
+    ).toEqual({ bytes: 0, partial: true });
   });
 });
 

@@ -211,6 +211,20 @@ along with used, available, and total capacity. This is host-volume capacity, no
 that Kandev can classify. The card warns at 80% full and uses a critical style at 90%; these
 thresholds do not trigger cleanup.
 
+The storage analysis total is a classified Kandev total. It does not represent all host filesystem
+usage. In addition to workspaces, caches, quarantine, temporary artifacts, and Docker resources,
+the card can show these database resources:
+
+- **Database** includes the configured SQLite file and existing `-wal`, `-shm`, and `-journal`
+  sidecars.
+- **Database backups** includes regular files in the `backups/` directory beside the configured
+  database file. Symlinks are not followed.
+
+The card shows the measured path for each database resource. A measured resource contributes to the
+classified total only when it is not already covered by another category. An unavailable resource
+is not added to the total and is marked as unavailable. Database rows are not applicable for
+non-SQLite drivers.
+
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
 period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
 permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and

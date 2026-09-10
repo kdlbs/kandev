@@ -2,7 +2,7 @@
 status: active
 system: system-page
 created: 2026-07-14
-updated: 2026-08-12
+updated: 2026-09-10
 owners:
   - cfl
 ---
@@ -49,6 +49,32 @@ of treating a `/tmp` name or mtime as sufficient evidence.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.7:** Read-only analysis is available even when scheduled maintenance is disabled. It reports total task workspace bytes alongside active and orphan-candidate bytes, active quarantined count and bytes, the managed Go cache, the service user's default Go cache when it is a distinct path, Kandev-managed container count and writable-layer bytes, Docker image-layer bytes, Docker build cache, and unused Docker images.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.8:** Storage analysis shows a total counted size derived from the available non-overlapping top-level measurements: total task workspaces, quarantine, managed and distinct user Go caches, registered temporary artifacts, Kandev-managed container writable layers, Docker image layers, and Docker build cache. Active and candidate workspace/temporary-artifact bytes and unused-image bytes remain visible subset measurements and are not added again. If any top-level measurement is unavailable, the total is visibly identified as partial rather than presented as complete host disk usage.
 
+### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002: Database footprint visibility
+
+**Status:** Draft extension for the database storage plan package.
+
+**Intent:** Operators can see the space occupied by the local database and its backups.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.1:** Storage analysis shall show separate Database and Database backups sizes, with their resolved locations available in row details.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.2:** For SQLite, the Database measurement shall include the database file and existing journal sidecars. Backups shall include automatic and manual files in the active backup directory.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.3:** Total counted shall include both measurements once. A measurement already included in another category shall identify that overlap without increasing the total again.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.4:** Missing backups shall show zero. Failed measurements shall show unavailable and make the total partial, while successful categories remain visible.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.5:** Both rows shall participate in initial scan progress, cached snapshots, and manual Analyze refresh. Missing response fields shall not appear as measured zero.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.6:** For a database driver without a local SQLite footprint, both rows shall explain that local measurement is not applicable. They shall not increase the total or alone make it partial.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.7:** Desktop and mobile users shall be able to inspect both rows and long paths without horizontal page scrolling. Labels and explanations shall use the selected language.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.8:** Analysis shall remain read-only and preserve existing access restrictions. It shall not create backups, compact databases, change retention, or initiate cleanup.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-002.9:** The analysis shall visibly explain that its counted categories do not represent all filesystem usage.
+
+#### Exclusions
+
+Remote database sizing, additional cleanup controls, backup retention changes, database compaction,
+host-wide reconciliation, and additional categories such as logs are outside this extension.
+The existing application size-unit convention remains unchanged.
+
 ## System design
+
+The draft database extension is defined in [Database storage analysis](../system-design/storage-database-footprint.md).
 
 The migrated technical source is split into [part 1](../system-design/storage-maintenance-01.md), [part 2](../system-design/storage-maintenance-02.md), [part 3](../system-design/storage-maintenance-03.md).

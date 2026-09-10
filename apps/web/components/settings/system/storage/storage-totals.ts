@@ -1,5 +1,6 @@
 import type {
   StorageQuarantineEntry,
+  StorageFootprintMeasurement,
   StorageSummary,
   StorageSummaryPartial,
 } from "@/lib/types/system";
@@ -7,6 +8,30 @@ import type {
 export interface StorageAnalysisTotal {
   bytes: number;
   partial: boolean;
+}
+
+function addDatabaseMeasurement(
+  total: StorageAnalysisTotal,
+  measurement: StorageFootprintMeasurement | null | undefined,
+): void {
+  if (!measurement) {
+    total.partial = true;
+    return;
+  }
+  if (measurement.status === "not_applicable") {
+    return;
+  }
+  if (measurement.status !== "measured" || !isMeasuredBytes(measurement.size_bytes)) {
+    total.partial = true;
+    return;
+  }
+  if (measurement.included_in_total === true) {
+    total.bytes += measurement.size_bytes;
+    return;
+  }
+  if (measurement.included_in_total !== false) {
+    total.partial = true;
+  }
 }
 
 function isMeasuredBytes(value: number | undefined): value is number {
@@ -54,6 +79,9 @@ export function storageAnalysisTotal(
     addMeasurement(undefined, false);
     addMeasurement(undefined, false);
   }
+
+  addDatabaseMeasurement(total, summary.database);
+  addDatabaseMeasurement(total, summary.database_backups);
 
   return total;
 }

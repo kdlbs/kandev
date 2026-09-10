@@ -1,4 +1,5 @@
 import type {
+  StorageFootprintMeasurement,
   StorageOverviewResponse,
   StorageQuarantineSummary,
   StorageSourceProgress,
@@ -13,6 +14,8 @@ import { formatGigabytes } from "./storage-units";
  */
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
 export const TEMPORARY_ARTIFACTS_RESOURCE_ID = "temporary-artifacts";
+export const DATABASE_RESOURCE_ID = "database";
+export const DATABASE_BACKUPS_RESOURCE_ID = "database-backups";
 
 export interface StorageResource {
   id: string;
@@ -169,6 +172,60 @@ function quarantineResourceOrPending(
   return { ...quarantineResource(t, quarantine), source: "quarantine" };
 }
 
+function databaseResource(
+  t: Translate,
+  measurement: StorageFootprintMeasurement | null | undefined,
+  progress: StorageSourceProgress | undefined,
+  options: {
+    id: string;
+    label: string;
+    detailKey: string;
+    source: string;
+  },
+): StorageResource {
+  if (!measurement) {
+    return pendingStorageResource(t, options.id, options.label, progress, options.source);
+  }
+  if (measurement.status === "unavailable") {
+    return {
+      id: options.id,
+      label: options.label,
+      value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
+      detail: t("system:storageDatabaseUnavailable"),
+      warning: measurement.warning,
+      source: options.source,
+    };
+  }
+  if (measurement.status === "not_applicable") {
+    return {
+      id: options.id,
+      label: options.label,
+      value: t("system:storageNotApplicableValue"),
+      detail: t("system:storageDatabaseNotApplicable"),
+      warning: measurement.warning,
+      source: options.source,
+    };
+  }
+  const detail = [
+    t(options.detailKey),
+    measurement.included_in_total === false ? t("system:storageDatabaseAlreadyCounted") : undefined,
+    measurement.path,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    id: options.id,
+    label: options.label,
+    value:
+      measurement.size_bytes === undefined
+        ? t(STORAGE_UNAVAILABLE_VALUE_KEY)
+        : formatGigabytes(measurement.size_bytes),
+    detail,
+    warning: measurement.warning,
+    source: options.source,
+  };
+}
+
 type DockerSummary = NonNullable<StorageSummaryPartial["docker"]>;
 
 interface DockerResourceOptions {
@@ -305,6 +362,18 @@ export function storageResources(
   const progress = overview.analysis.progress.sources;
   return [
     workspaceResource(t, summary.workspaces, progress.workspaces),
+    databaseResource(t, summary.database, progress.database, {
+      id: DATABASE_RESOURCE_ID,
+      label: t("system:storageDatabase"),
+      detailKey: "system:storageDatabaseDetail",
+      source: "database",
+    }),
+    databaseResource(t, summary.database_backups, progress.database_backups, {
+      id: DATABASE_BACKUPS_RESOURCE_ID,
+      label: t("system:storageDatabaseBackups"),
+      detailKey: "system:storageDatabaseBackupsDetail",
+      source: "database_backups",
+    }),
     quarantineResourceOrPending(t, summary.quarantine, progress.quarantine),
     ...goCacheResources(
       t,

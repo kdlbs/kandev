@@ -56,12 +56,16 @@ const degradedOverview = {
     refresh_due_at: "2099-07-23T12:15:00Z",
     stale: false,
     error: null,
-    progress: { completed_sources: 5, total_sources: 5, sources: {} },
+    progress: { completed_sources: 7, total_sources: 7, sources: {} },
     partial_summary: null,
   } satisfies StorageAnalysisState,
   analyzed_at: "2026-07-23T12:00:00Z",
   last_run: null,
 } satisfies StorageOverviewResponse;
+
+const DATABASE_PATH = "/data/kandev.db";
+const DATABASE_BACKUP_PATH = "/data/backups";
+const DATABASE_TRIGGER_TEST_ID = "storage-resource-database-trigger";
 
 afterEach(cleanup);
 
@@ -160,6 +164,86 @@ describe("StorageOverviewCard", () => {
       "Total counted: 47 GB",
     );
     expect(screen.getByTestId("storage-analysis-total-partial")).toBeTruthy();
+  });
+});
+
+describe("StorageOverviewCard database footprint", () => {
+  it("renders database rows with paths, scope details, and total contribution", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        database: {
+          status: "measured",
+          size_bytes: 5 * 1024 ** 3,
+          path: DATABASE_PATH,
+          included_in_total: true,
+        },
+        database_backups: {
+          status: "measured",
+          size_bytes: 3 * 1024 ** 3,
+          path: DATABASE_BACKUP_PATH,
+          included_in_total: true,
+        },
+      },
+      analysis: {
+        ...degradedOverview.analysis,
+        progress: {
+          completed_sources: 7,
+          total_sources: 7,
+          sources: {
+            database: { state: "ready", completed_items: 1, bytes_scanned: 5 * 1024 ** 3 },
+            database_backups: { state: "ready", completed_items: 1, bytes_scanned: 3 * 1024 ** 3 },
+          },
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain("5 GB");
+    expect(screen.getByTestId("storage-resource-database-backups-trigger").textContent).toContain(
+      "3 GB",
+    );
+    fireEvent.click(screen.getByTestId(DATABASE_TRIGGER_TEST_ID));
+    fireEvent.click(screen.getByTestId("storage-resource-database-backups-trigger"));
+    expect(screen.getByTestId("storage-resource-database").textContent).toContain(DATABASE_PATH);
+    expect(screen.getByTestId("storage-resource-database-backups").textContent).toContain(
+      DATABASE_BACKUP_PATH,
+    );
+    expect(screen.getByTestId("storage-analysis-total").textContent).toContain(
+      "Total counted: 8 GB",
+    );
+    expect(screen.getByTestId("storage-analysis-scope").textContent).toContain(
+      "do not represent all host filesystem usage",
+    );
+  });
+
+  it("renders unavailable and not-applicable database states without zero bytes", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        database: {
+          status: "unavailable",
+          included_in_total: false,
+          reason: "measurement_failed",
+        },
+        database_backups: {
+          status: "not_applicable",
+          included_in_total: false,
+          reason: "unsupported_driver",
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain("Unavailable");
+    expect(screen.getByTestId("storage-resource-database-backups-trigger").textContent).toContain(
+      "Not applicable",
+    );
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).not.toContain("0 GB");
   });
 });
 
@@ -267,13 +351,15 @@ describe("StorageOverviewCard refresh and policy state", () => {
         stale: false,
         progress: {
           completed_sources: 1,
-          total_sources: 5,
+          total_sources: 7,
           sources: {
             workspaces: { state: "ready", completed_items: 3, total_items: 3, bytes_scanned: 42 },
             go_cache: { state: "scanning", completed_items: 1, total_items: 4, bytes_scanned: 10 },
             quarantine: { state: "pending", completed_items: 0, bytes_scanned: 0 },
             temporary_artifacts: { state: "pending", completed_items: 0, bytes_scanned: 0 },
             docker: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+            database: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+            database_backups: { state: "pending", completed_items: 0, bytes_scanned: 0 },
           },
         },
         partial_summary: {

@@ -361,12 +361,25 @@ export interface StorageTemporaryArtifactsSummary {
   warning?: string;
 }
 
+export type StorageFootprintMeasurementStatus = "measured" | "unavailable" | "not_applicable";
+
+export interface StorageFootprintMeasurement {
+  status: StorageFootprintMeasurementStatus;
+  size_bytes?: number;
+  path?: string;
+  included_in_total: boolean;
+  reason?: string;
+  warning?: string;
+}
+
 export interface StorageSummary {
   workspaces: StorageWorkspaceSummary;
   go_cache: StorageGoCacheSummary;
   quarantine: StorageQuarantineSummary;
   temporary_artifacts: StorageTemporaryArtifactsSummary;
   docker: StorageDockerSummary;
+  database?: StorageFootprintMeasurement;
+  database_backups?: StorageFootprintMeasurement;
 }
 
 export type StorageSummaryPartial = {
@@ -375,6 +388,8 @@ export type StorageSummaryPartial = {
   quarantine?: StorageQuarantineSummary | null;
   temporary_artifacts?: StorageTemporaryArtifactsSummary | null;
   docker?: StorageDockerSummary | null;
+  database?: StorageFootprintMeasurement | null;
+  database_backups?: StorageFootprintMeasurement | null;
 };
 
 export type StorageAnalysisStateName = "scanning" | "ready" | "failed";

@@ -292,6 +292,9 @@ function StorageOverviewHeader({
         )}
       </CardTitle>
       <CardDescription>{t("system:storageAnalysisDescription")}</CardDescription>
+      <p className="text-xs text-muted-foreground" data-testid="storage-analysis-scope">
+        {t("system:storageAnalysisScope")}
+      </p>
       <div className="flex flex-wrap items-center gap-1">
         <AnalysisStatusTime overview={overview} analyzedAt={analyzedAt} />
         <AnalysisTimingDisclosure overview={overview} />
