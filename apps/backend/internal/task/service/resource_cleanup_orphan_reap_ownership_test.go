@@ -307,6 +307,32 @@ func TestApplyOrphanReapOwnershipFailsClosedOnUnresolvedAncestryHop(t *testing.T
 	}
 }
 
+// AC-TASKS-ORPHAN-REAP-003.5 + 003.6: an unresolved hop in the backend's own
+// ancestry cannot be ruled out as hiding a protected ancestor, so every
+// active root is inconclusive, not just skipped for one unrelated candidate.
+func TestApplyOrphanReapOwnershipFailsClosedOnUnresolvedBackendAncestry(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+
+	self := os.Getpid()
+	root := t.TempDir()
+	byRoot := map[string][]orphanReapCandidate{root: {newOrphanReapOwnershipCandidate(500, 1, root, root)}}
+	snap := []hostProcess{
+		{PID: self, PPID: orphanReapUnresolvedPPID, Cwd: "", Command: ""},
+		{PID: 500, PPID: 1, Cwd: root, Command: "sh"},
+	}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+	if len(got) != 0 {
+		t.Fatalf("expected no signalable candidates when the backend's own ancestry is unresolved, got %+v", got)
+	}
+	if len(snapshot.OrphanReapSkips) != 1 {
+		t.Fatalf("expected the root to be skipped phase-wide, got %+v", snapshot.OrphanReapSkips)
+	}
+}
+
 // AC-TASKS-ORPHAN-REAP-003.5: the backend's own PID is always protected.
 func TestApplyOrphanReapOwnershipSkipsProtectedPID(t *testing.T) {
 	svc, _, repo := createTestService(t)
@@ -522,7 +548,10 @@ func TestOrphanReapProtectedPIDsWalksBackendAncestryChain(t *testing.T) {
 	grandparent := self + 20000
 	ppidByPID := map[int]int{self: parent, parent: grandparent}
 
-	got := orphanReapProtectedPIDs(ppidByPID)
+	got, inconclusive := orphanReapProtectedPIDs(ppidByPID)
+	if inconclusive {
+		t.Fatalf("expected a fully-resolved chain to not be inconclusive, got %+v", got)
+	}
 	for _, pid := range []int{self, parent, grandparent} {
 		if !got[pid] {
 			t.Fatalf("expected pid %d to be protected, got %+v", pid, got)
@@ -537,12 +566,31 @@ func TestOrphanReapProtectedPIDsStopsOnCycle(t *testing.T) {
 	other := self + 10000
 	ppidByPID := map[int]int{self: other, other: self}
 
-	got := orphanReapProtectedPIDs(ppidByPID)
+	got, inconclusive := orphanReapProtectedPIDs(ppidByPID)
+	if inconclusive {
+		t.Fatalf("expected a resolved cycle to not be inconclusive, got %+v", got)
+	}
 	if !got[self] || !got[other] {
 		t.Fatalf("expected both pids in the cycle to be protected, got %+v", got)
 	}
 	if len(got) != 2 {
 		t.Fatalf("expected exactly the two cycle pids protected (no runaway walk), got %+v", got)
+	}
+}
+
+// Hitting the unresolved-ppid sentinel while walking the backend's own
+// ancestry must report inconclusive, not fall through to "no more
+// ancestors, protect what was found and stop" -- mirrors
+// TestOrphanReapAncestorOwnerReturnsInconclusiveOnUnresolvedHop for the
+// sibling ownership walk.
+func TestOrphanReapProtectedPIDsReturnsInconclusiveOnUnresolvedHop(t *testing.T) {
+	self := os.Getpid()
+	parent := self + 10000
+	ppidByPID := map[int]int{self: parent, parent: orphanReapUnresolvedPPID}
+
+	got, inconclusive := orphanReapProtectedPIDs(ppidByPID)
+	if !inconclusive {
+		t.Fatalf("expected inconclusive=true when an ancestor's ppid is unresolved, got protected=%+v", got)
 	}
 }
 
