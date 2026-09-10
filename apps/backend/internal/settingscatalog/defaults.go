@@ -648,7 +648,7 @@ func userSettingsDomain() DomainDescriptor {
 		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string",
 		"system_metrics_display", "system metrics display", "object", "app_status_bar_enabled", "status bar", "boolean", "resolve_session_hostnames", "resolve hostnames", "boolean",
 		"app_status_bar_order", "status bar order", "object", "quick_chat_tab_order_by_workspace", "quick chat tab order", "object", "kanban_hidden_step_ids", "hidden kanban steps", "object",
-		"workflow_ids_with_auto_hide_empty_steps", "auto-hide workflows", "array",
+		"workflow_ids_with_auto_hide_empty_steps", "auto-hide workflows", "array", "kanban_sort", "kanban board sort", "string", "kanban_priority_filter_tokens", "kanban priority filter", "array",
 	}
 	fields := make([]FieldDescriptor, 0, len(values)/3)
 	for index := 0; index+2 < len(values); index += 3 {
