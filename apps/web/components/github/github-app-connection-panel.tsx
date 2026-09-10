@@ -91,17 +91,17 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
         <Button
           disabled={selectedRegistration?.status !== "active" || registrations.mutating}
           onClick={() => void install()}
-          className="h-11 cursor-pointer"
+          className="cursor-pointer"
           data-testid="github-app-install-button"
         >
           {registrations.mutating && <Spinner className="mr-2 h-4 w-4" />}
           {t("github:installForThisWorkspace")}
           <IconExternalLink className="ml-2 h-4 w-4" />
         </Button>
-        <Button variant="outline" className="h-11 cursor-pointer" onClick={() => setView("import")}>
+        <Button variant="outline" className="cursor-pointer" onClick={() => setView("import")}>
           <IconPlus className="mr-2 h-4 w-4" /> {t("github:addExistingApp")}
         </Button>
-        <Button variant="outline" className="h-11 cursor-pointer" onClick={() => setView("create")}>
+        <Button variant="outline" className="cursor-pointer" onClick={() => setView("create")}>
           <IconPlus className="mr-2 h-4 w-4" /> {t("github:createNewApp")}
         </Button>
       </div>
@@ -131,7 +131,7 @@ function useAppRegistrationSelection(workspaceId: string, registrations: Registr
 function BackButton({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation();
   return (
-    <Button variant="ghost" className="h-11 cursor-pointer px-2" onClick={onClick}>
+    <Button variant="ghost" className="cursor-pointer px-2" onClick={onClick}>
       {t("github:backToRegisteredApps")}
     </Button>
   );

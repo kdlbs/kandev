@@ -229,7 +229,7 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
           type="button"
           variant="destructive"
           onClick={() => setConfirmingDelete(true)}
-          className="ml-auto min-h-11 cursor-pointer"
+          className="ml-auto cursor-pointer"
           data-testid="linear-delete-button"
         >
           {t("linear:removeConfiguration")}

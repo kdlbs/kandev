@@ -2492,11 +2492,22 @@ func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, 
 	}
 
 	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	guard := models.ObservedWorkspaceGuard(workspace)
+	guard.RequireParentArchivedID = archived.ID
+	guard.RequireParentID = archived.ID
+	guard.RequireNoOwnEnvironment = true
+	guard.RequireTaskNotArchived = true
 	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
 
-	if err := s.updateTaskWorkspaceMetadata(ctx, child); err != nil {
+	landed, err := s.updateTaskWorkspaceMetadata(ctx, child, guard)
+	if err != nil {
 		s.logger.Warn("mark orphaned inherit_parent child failed",
 			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	if !landed {
+		s.logger.Debug("mark orphaned inherit_parent child lost its guard",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
 		return
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, child, nil)
@@ -2504,15 +2515,22 @@ func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, 
 		zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
 }
 
-func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+// updateTaskWorkspaceMetadata writes the whole workspace sub-map guarded by
+// cas, reporting whether the write landed. A wiring without the CAS
+// capability (never true in production) skips the write and logs Warn
+// rather than falling back to an unguarded whole-row UpdateTask.
+func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task, guard models.OrphanWriteGuard) (bool, error) {
 	if task == nil {
-		return nil
+		return false, nil
 	}
 	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
-	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
-		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	setter, ok := s.tasks.(taskWorkspaceMetadataCASSetter)
+	if !ok {
+		s.logger.Warn("task repository does not support guarded workspace metadata writes",
+			zap.String("task_id", task.ID))
+		return false, nil
 	}
-	return s.tasks.UpdateTask(ctx, task)
+	return setter.SetTaskWorkspaceMetadataIfUnchanged(ctx, task.ID, guard, workspace)
 }
 
 // finalizeCancelledSessions finalizes an archived task's active sessions in

@@ -1,9 +1,10 @@
 import { cn } from "@/lib/utils";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { SETTINGS_TYPOGRAPHY } from "./settings-typography";
 
-/** Editable/select settings controls: touch-sized on phones, compact on desktop. */
+/** Editable/select settings controls use the shared responsive size contract. */
 export function settingsControlClassName(className?: string) {
-  return cn("min-h-11 md:min-h-7", SETTINGS_TYPOGRAPHY.control, className);
+  return cn(controlSizingClassName("standard"), SETTINGS_TYPOGRAPHY.control, className);
 }
 
 /** Credential and secret fields share the technical value treatment. */
@@ -11,7 +12,7 @@ export function settingsCredentialClassName(className?: string) {
   return settingsControlClassName(cn("font-mono", className));
 }
 
-/** Settings actions use the same touch contract as editable controls. */
+/** Settings actions use the same responsive size contract as editable controls. */
 export function settingsActionClassName(className?: string) {
-  return cn(SETTINGS_TYPOGRAPHY.mobileAction, className);
+  return cn(controlSizingClassName("standard"), SETTINGS_TYPOGRAPHY.mobileAction, className);
 }

@@ -432,6 +432,10 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// unassigning invisible to every open client, and a takeover would
 		// leave the previous owner's name on their screens.
 		"assignee_user_id": task.AssigneeUserID,
+		// Same reasoning as auto_start_failed above: sent explicit so a clear
+		// (mode moved off inherit_parent, or the marker retracted) reaches
+		// already-open clients rather than being pinned by preserveOmittedField.
+		"workspace_orphaned": models.WorkspaceOrphaned(task.Metadata),
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {

@@ -12,6 +12,7 @@ import { loadOfficeAgents, loadOfficeInbox } from "@/hooks/use-office-workspace-
 import type { InboxItem } from "@/lib/state/slices/office/types";
 import { InboxItemRow } from "./inbox-item-row";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type TabValue = "mine" | "recent" | "all";
 
@@ -122,7 +123,7 @@ function InboxToolbar({
           <IconSearch className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder={t("office:search")}
-            className="w-[220px] h-8 pl-8 text-xs"
+            className={controlSizingClassName("standard", "w-[220px] pl-8 text-xs")}
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
           />

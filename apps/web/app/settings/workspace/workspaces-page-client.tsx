@@ -167,7 +167,7 @@ export function WorkspacesPageClient() {
             {t("workspaces:manageYourWorkspacesAndWorkflows")}
           </p>
         </div>
-        <Button size="sm" className={settingsActionClassName()} onClick={() => setIsAdding(true)}>
+        <Button className={settingsActionClassName()} onClick={() => setIsAdding(true)}>
           <IconPlus className="h-4 w-4 mr-2" />
           {t("workspaces:addWorkspace")}
         </Button>

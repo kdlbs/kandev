@@ -237,6 +237,11 @@ type TaskDTO struct {
 	// auto_start_failed metadata key at DTO conversion time (see
 	// FromTaskWithSessionInfo).
 	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
+	// WorkspaceOrphaned reports that this task's materialized workspace was
+	// removed when its parent was archived, while workspace.mode is still
+	// inherit_parent. Derived from metadata.workspace at DTO conversion time
+	// via models.WorkspaceOrphaned (see FromTaskWithSessionInfo).
+	WorkspaceOrphaned bool `json:"workspace_orphaned,omitempty"`
 
 	// Dependency projection. Derived on every read from task_blockers plus each
 	// related task's own state — never persisted, because a stale copy would be
@@ -982,6 +987,7 @@ func FromTaskWithSessionInfo(
 		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		WorkspaceOrphaned:           models.WorkspaceOrphaned(task.Metadata),
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.

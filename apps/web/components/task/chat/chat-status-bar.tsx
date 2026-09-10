@@ -27,6 +27,7 @@ import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
+import { shouldShowProceed } from "./types";
 
 type TodoDisplayItem = {
   text: string;
@@ -107,6 +108,7 @@ export type ChatStatusBarProps = {
   nextStepName: string | null;
   onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isAgentBusy: boolean;
+  hasPendingClarification: boolean;
   isMoving: boolean;
   queueChip?: ReactNode;
   showScrollToLastPrompt?: boolean;
@@ -124,6 +126,7 @@ export function ChatStatusBar({
   nextStepName,
   onProceed,
   isAgentBusy,
+  hasPendingClarification,
   isMoving,
   queueChip,
   showScrollToLastPrompt,
@@ -133,7 +136,7 @@ export function ChatStatusBar({
   onScrollToStart,
 }: ChatStatusBarProps) {
   const showTodos = todoItems.length > 0;
-  const showProceed = !!nextStepName && !isAgentBusy;
+  const showProceed = shouldShowProceed(nextStepName, isAgentBusy, hasPendingClarification);
   const autopilot = useTaskAutopilot(taskId);
   const showAutoScrollControl = useAppStore(
     (state) => state.userSettings.showTranscriptAutoScrollControl,

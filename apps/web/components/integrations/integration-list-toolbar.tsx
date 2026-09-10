@@ -6,6 +6,7 @@ import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export type IntegrationListToolbarProps = {
   title: string;
@@ -48,7 +49,7 @@ function RefreshControls({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 cursor-pointer"
+        className="cursor-pointer"
         onClick={onRefresh}
         disabled={loading}
         title={t("github:refresh")}
@@ -114,7 +115,7 @@ export function IntegrationListToolbar({
             if (dirty) onCommitCustomQuery();
           }}
           placeholder={queryPlaceholder}
-          className="h-8 pr-20"
+          className={controlSizingClassName("standard", "pr-20")}
           data-testid={queryTestId}
         />
         {dirty ? (
