@@ -71,7 +71,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/task-create-dialog-launch-preview-control.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task-create-dialog-pill.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task-create-dialog-priority-select.tsx` — changed in implementation; verified by source review and focused checks.
-- [x] `apps/web/components/task-create-dialog-remote-repo-chip.tsx` — content-sized; preserved because the surface is not an ordinary control.
+- [x] `apps/web/components/task-create-dialog-remote-repo-chip.tsx` — chip surface remains content-sized; embedded retry action uses the standard adaptive control size.
 - [x] `apps/web/components/task-create-dialog-repo-chip-parts.tsx` — content-sized; preserved because the surface is not an ordinary control.
 - [x] `apps/web/components/task-create-dialog-repository-sets-control.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task-create-dialog-source-mode.tsx` — already conforming; retained after source and responsive-geometry review.
@@ -111,7 +111,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/task/chat/reset-context-button.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task/chat/scroll-to-last-prompt-button.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task/chat/session-stopped-banner.tsx` — changed in implementation; verified by source review and focused checks.
-- [x] `apps/web/components/task/commit-detail-panel.tsx` — content-sized; preserved because the surface is not an ordinary control.
+- [x] `apps/web/components/task/commit-detail-panel.tsx` — panel surface remains content-sized; embedded retry action uses the standard adaptive control size.
 - [x] `apps/web/components/task/ensure-session-error.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task/executor-environment-info.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/task/executor-settings-button.tsx` — already conforming; retained after source and responsive-geometry review.
@@ -370,7 +370,7 @@ Do not mechanically replace every result.
 - [x] `apps/web/components/review/walkthrough-overlay.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/runs/automation-detail-page.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/runs/run-filters.tsx` — already conforming; retained after source and responsive-geometry review.
-- [x] `apps/web/components/sentry/sentry-instance-card.tsx` — content-sized; preserved because the surface is not an ordinary control.
+- [x] `apps/web/components/sentry/sentry-instance-card.tsx` — card surface remains content-sized; embedded Edit and Delete actions use the standard adaptive control size.
 - [x] `apps/web/components/sentry/sentry-issue-dialog.tsx` — changed in implementation; verified by source review and focused checks.
 - [x] `apps/web/components/sentry/sentry-issue-watch-multiselect.tsx` — already conforming; retained after source and responsive-geometry review.
 - [x] `apps/web/components/session/prepare-progress.tsx` — already conforming; retained after source and responsive-geometry review.

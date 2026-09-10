@@ -1,5 +1,5 @@
-import { test } from "../../fixtures/test-base";
-import { expectTouchControl } from "../../helpers/control-sizing";
+import { expect, test } from "../../fixtures/test-base";
+import { expectTouchControl, expectTouchSquareControl } from "../../helpers/control-sizing";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 
 test("keeps layout actions and repository secret fields touch-sized on mobile", async ({
@@ -30,4 +30,20 @@ test("keeps layout actions and repository secret fields touch-sized on mobile", 
     await apiClient.updateRepository(seedData.repositoryId, { secret_bindings: [] });
     await apiClient.deleteSecretIfPresent(secret.id);
   }
+});
+
+test("keeps the executor profile delete action touch-square on a phone", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  const { executors } = await apiClient.listExecutors();
+  const executor = executors.find((candidate) =>
+    candidate.profiles?.some((profile) => profile.id === seedData.worktreeExecutorProfileId),
+  );
+  expect(executor).toBeDefined();
+  await testPage.goto(`/settings/executor/${executor!.id}`);
+
+  await expectTouchSquareControl(testPage.getByTestId("executor-profile-delete-button"));
 });

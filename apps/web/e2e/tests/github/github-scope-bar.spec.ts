@@ -262,6 +262,18 @@ test.describe("Desktop /github scope bar", () => {
     await testPage.getByTestId("github-repo-filter-trigger").click();
     const search = testPage.getByTestId("github-repo-filter-dropdown").getByRole("combobox");
     await expect(search).toBeVisible();
+    const searchGroup = search.locator('xpath=ancestor::*[@data-slot="input-group"]');
+    for (const control of [search, searchGroup]) {
+      await expect
+        .poll(
+          async () => {
+            const box = await control.boundingBox();
+            return box ? Math.abs(box.height - 28) : Number.POSITIVE_INFINITY;
+          },
+          { timeout: 5_000 },
+        )
+        .toBeLessThanOrEqual(1);
+    }
 
     await search.fill("testorg");
     await testPage.getByRole("option", { name: "testorg/testrepo" }).click();

@@ -1,5 +1,5 @@
-import { test } from "../../fixtures/test-base";
-import { expectControlHeight } from "../../helpers/control-sizing";
+import { expect, test } from "../../fixtures/test-base";
+import { expectControlHeight, expectControlWidth } from "../../helpers/control-sizing";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 
 test.describe("Settings control sizing", () => {
@@ -37,5 +37,23 @@ test.describe("Settings control sizing", () => {
       await apiClient.updateRepository(seedData.repositoryId, { secret_bindings: [] });
       await apiClient.deleteSecretIfPresent(secret.id);
     }
+  });
+
+  test("keeps the executor profile delete action square on desktop", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    const { executors } = await apiClient.listExecutors();
+    const executor = executors.find((candidate) =>
+      candidate.profiles?.some((profile) => profile.id === seedData.worktreeExecutorProfileId),
+    );
+    expect(executor).toBeDefined();
+    await testPage.goto(`/settings/executor/${executor!.id}`);
+
+    const deleteButton = testPage.getByTestId("executor-profile-delete-button");
+    await expectControlHeight(deleteButton, 28);
+    await expectControlWidth(deleteButton, 28);
   });
 });
