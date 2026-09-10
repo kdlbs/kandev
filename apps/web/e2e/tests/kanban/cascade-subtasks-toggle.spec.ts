@@ -245,9 +245,7 @@ test.describe("Kanban card delete — cascade subtasks toggle", () => {
     await expect(cascade).not.toBeChecked();
 
     const discard = testPage.getByTestId("delete-discard-worktree-checkbox");
-    await expect(discard).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Delete" })).toBeDisabled();
-    await discard.click();
+    await expect(discard).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: "Delete" })).toBeEnabled();
 
     await dialog.getByRole("button", { name: "Delete" }).click();
@@ -290,11 +288,10 @@ test.describe("Kanban card delete — cascade subtasks toggle", () => {
     const cascade = testPage.getByTestId("delete-cascade-checkbox");
     await expect(cascade).toBeVisible();
     const discard = testPage.getByTestId("delete-discard-worktree-checkbox");
-    await expect(discard).toBeVisible();
-    await discard.click();
-    await expect(discard).toBeChecked();
+    await expect(discard).toHaveCount(0);
     await cascade.click();
     await expect(cascade).toBeChecked();
+    await expect(dialog.getByRole("button", { name: "Delete" })).toBeEnabled();
 
     await dialog.getByRole("button", { name: "Delete" }).click();
 

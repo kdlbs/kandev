@@ -220,6 +220,26 @@ export type DeleteTaskParams = {
   discardWorktreeChanges?: boolean;
 };
 
+export type TaskDeletePreflightResponse = {
+  requires_discard_consent: boolean;
+};
+
+export async function getTaskDeletePreflight(
+  taskIds: string[],
+  cascade: boolean,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
+    ...options,
+    cache: "no-store",
+    init: {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds, cascade }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
 export async function deleteTask(
   taskId: string,
   params?: DeleteTaskParams,

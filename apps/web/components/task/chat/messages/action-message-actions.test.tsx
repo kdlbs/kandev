@@ -5,10 +5,12 @@ import type { MessageAction } from "@/components/task/chat/types";
 import { ActionButton } from "./action-message-actions";
 
 const getSubtaskCountMock = vi.hoisted(() => vi.fn());
+const getTaskDeletePreflightMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal()),
   getSubtaskCount: getSubtaskCountMock,
+  getTaskDeletePreflight: getTaskDeletePreflightMock,
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -18,6 +20,7 @@ vi.mock("@/components/toast-provider", () => ({
 describe("ActionButton task deletion", () => {
   it("opens the shared discard-consent dialog", async () => {
     getSubtaskCountMock.mockResolvedValue({ count: 0 });
+    getTaskDeletePreflightMock.mockResolvedValue({ requires_discard_consent: false });
     const action: MessageAction = {
       type: "delete_task",
       label: "Delete task",
@@ -32,6 +35,7 @@ describe("ActionButton task deletion", () => {
     );
 
     fireEvent.click(screen.getByTestId("message-delete-task-button"));
-    expect(await screen.findByTestId("delete-discard-worktree-checkbox")).toBeTruthy();
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    expect(screen.queryByTestId("delete-discard-worktree-checkbox")).toBeNull();
   });
 });

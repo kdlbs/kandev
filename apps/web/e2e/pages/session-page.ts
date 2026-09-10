@@ -727,11 +727,9 @@ export class SessionPage {
   async deleteTaskInSidebar(title: string): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
     const dialog = this.page.getByRole("alertdialog");
-    const discard = dialog.getByTestId("delete-discard-worktree-checkbox");
-    if (await discard.isVisible()) {
-      await discard.click();
-    }
+    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
   }
 

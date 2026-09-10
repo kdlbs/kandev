@@ -68,7 +68,9 @@ test.describe("Task sidebar — delete shows confirmation", () => {
     await session.openSidebarMenuAndClick("Sidebar Delete Confirm Task", "Delete");
     const confirmedDeleteDialog = testPage.getByRole("alertdialog");
     await expect(confirmedDeleteDialog).toBeVisible();
-    await confirmedDeleteDialog.getByTestId("delete-discard-worktree-checkbox").click();
+    await expect(confirmedDeleteDialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(
+      0,
+    );
     await confirmedDeleteDialog.getByRole("button", { name: "Delete" }).click();
 
     await expect(session.taskInSidebar("Sidebar Delete Confirm Task")).not.toBeVisible({

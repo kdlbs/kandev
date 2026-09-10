@@ -137,7 +137,7 @@ test.describe("Kanban card actions menu — delete/archive in All Workflows view
 
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
-    await dialog.getByTestId("delete-discard-worktree-checkbox").click();
+    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     await dialog.getByRole("button", { name: "Delete" }).click();
 
     await expect(kanban.taskCardByTitle("All-Wf Delete Task")).not.toBeVisible({
