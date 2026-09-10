@@ -45,6 +45,7 @@ export type KanbanState = {
     position: number;
     events?: KanbanStepEvents;
     allow_manual_move?: boolean;
+    auto_advance_requires_signal?: boolean;
     prompt?: string;
     is_start_step?: boolean;
     show_in_command_panel?: boolean;

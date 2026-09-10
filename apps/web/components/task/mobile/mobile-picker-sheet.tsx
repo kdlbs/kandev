@@ -19,6 +19,8 @@ type MobilePickerSheetProps = {
   /** Optional trailing element rendered to the right of the title (e.g. a "+" CTA). */
   headerAction?: ReactNode;
   onCloseAutoFocus?: (event: Event) => void;
+  /** Fixed content above the single scrolling picker region. */
+  fixedContent?: ReactNode;
   children: ReactNode;
 };
 
@@ -35,6 +37,7 @@ export function MobilePickerSheet({
   contentTestId,
   headerAction,
   onCloseAutoFocus,
+  fixedContent,
   children,
 }: MobilePickerSheetProps) {
   return (
@@ -47,6 +50,7 @@ export function MobilePickerSheet({
           </div>
           {description && <DrawerDescription>{description}</DrawerDescription>}
         </DrawerHeader>
+        {fixedContent}
         <div
           className="flex-1 min-h-0 max-h-[70dvh] overflow-y-auto px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]"
           data-testid={contentTestId}

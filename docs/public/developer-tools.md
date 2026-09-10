@@ -46,8 +46,9 @@ Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its
 
 On a phone, open the topbar menu in **Kanban**, **List**, or **Threads**, then
 select **Quick Chat** or **Quick terminal**. The menu closes before the tool
-opens. Its topbar button keeps a blue dot while a chat is running and a green
-dot when a reply is ready to read.
+opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
+is running and a green dot when a reply is ready to read. Terminal tabs do not
+contribute to this activity indicator.
 
 ### Start a chat
 

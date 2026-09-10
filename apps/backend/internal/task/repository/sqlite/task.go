@@ -1521,6 +1521,36 @@ func (r *Repository) SetTaskMetadataKeyIfPresent(ctx context.Context, taskID, ke
 	return rows > 0, err
 }
 
+// SetTaskMetadataKeyIfAbsent writes one task metadata key only while the key
+// is absent. The predicate and write share one statement so concurrent first
+// session creation cannot replace the immutable workflow snapshot.
+func (r *Repository) SetTaskMetadataKeyIfAbsent(ctx context.Context, taskID, key string, value interface{}) (bool, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks
+			SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ?
+			WHERE id = ? AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) IS NULL`
+	} else {
+		query = `UPDATE tasks
+			SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ?
+			WHERE id = ? AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL`
+	}
+	path := key
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(key)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID, path)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 func jsonPath(key string) string { return "$." + key }
 
 func agentTitlePendingPredicate(driver string) string {
@@ -3345,6 +3375,9 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 	}
 	if err != nil {
 		return "", false, false, err
+	}
+	if oldState == v1.TaskStateCompleted && state == v1.TaskStateInProgress {
+		return oldState, false, false, nil
 	}
 	if archivedAt.Valid || currentSessionState != expectedSessionState ||
 		(requirePrimary && !currentSessionIsPrimary) {

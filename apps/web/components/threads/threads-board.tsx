@@ -81,6 +81,13 @@ function useRetiringFocusMark(focusedTaskId: string | null) {
   };
 }
 
+function focusThreadPicker(event: Event, column: Element | undefined) {
+  const trigger = column?.querySelector<HTMLButtonElement>('[data-testid="thread-picker-trigger"]');
+  if (!trigger) return;
+  event.preventDefault();
+  trigger.focus({ preventScroll: true });
+}
+
 /**
  * The deck: every live agent conversation as its own column, scrolled
  * horizontally. Columns keep the order the selector gave them, so a thread the
@@ -98,6 +105,7 @@ export function ThreadsBoard({
   const { markedTaskId, retire } = useRetiringFocusMark(focusedTaskId);
   const { isMobile } = useResponsiveBreakpoint();
   const [pickerOpen, setPickerOpen] = useState(false);
+  if (!isMobile && pickerOpen) setPickerOpen(false);
   const returnFocusTaskId = useRef<string | null>(null);
   const orderedIds = useMemo(() => threads.map((thread) => thread.taskId), [threads]);
   const { boardRef, registerColumn, preloadTaskIds, detailTaskIds, mobileTaskId } =
@@ -117,10 +125,11 @@ export function ThreadsBoard({
   }
 
   function restorePickerFocus(event: Event) {
-    event.preventDefault();
-    taskColumn(returnFocusTaskId.current)
-      ?.querySelector<HTMLButtonElement>('[data-testid="thread-picker-trigger"]')
-      ?.focus({ preventScroll: true });
+    const column =
+      taskColumn(returnFocusTaskId.current) ??
+      taskColumn(mobileTaskId) ??
+      taskColumn(orderedIds[0] ?? null);
+    focusThreadPicker(event, column);
   }
 
   return (

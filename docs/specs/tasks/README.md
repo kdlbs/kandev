@@ -36,6 +36,8 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [Task completion and conversation follow-ups](requirements/task-completion.md)
+
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
@@ -109,7 +111,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow Duplication](requirements/workflow-duplication.md)
 - [Explicit Workflow-Step Completion Signal](requirements/workflow-explicit-completion-signal.md)
-- [Workflow Profile Session Lifecycle](requirements/workflow-profile-session-lifecycle.md)
+- [Workflow Profile Session Lifecycle and Recipients](requirements/workflow-profile-session-lifecycle.md)
 - [Agent decision recording](requirements/workflow-quorum-decision-recording-agent-surface.md)
 - [Quorum ordering and concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
 - [Quorum diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
@@ -128,6 +130,8 @@ signals, and task-scoped scheduling contracts.
 - [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
+
+- [Task completion and conversation follow-ups](system-design/task-completion.md)
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
@@ -168,10 +172,11 @@ signals, and task-scoped scheduling contracts.
 - [Threads task actions](system-design/threads-task-actions.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow completion-signal payload delivery](system-design/workflow-completion-signal-payload-delivery.md)
+- [Signal-Gated Manual Move Visibility](system-design/workflow-signal-gated-manual-move-visibility.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
-- [Workflow Profile Session Lifecycle](system-design/workflow-profile-session-lifecycle.md)
+- [Workflow Profile Session Lifecycle and Recipients](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 - [Human Assignee](system-design/human-assignee.md)
 - [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)

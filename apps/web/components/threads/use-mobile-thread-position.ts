@@ -17,6 +17,7 @@ export function useMobileThreadPosition({
 }): string | null {
   const [taskId, setTaskId] = useState<string | null>(null);
   const idsKey = orderedIds.join("\u0000");
+  if (!enabled && taskId !== null) setTaskId(null);
 
   useEffect(() => {
     const board = boardRef.current;

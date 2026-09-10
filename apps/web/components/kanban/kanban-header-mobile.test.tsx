@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ComponentProps, ReactNode } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 vi.mock("@/components/page-topbar", () => ({
   PageTopbar: ({
@@ -68,6 +69,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  pluginRegistry.unregisterPlugin("stateful-topbar-test");
   vi.useRealTimers();
   vi.clearAllMocks();
   status.issueSeverity = "none";
@@ -94,6 +96,43 @@ function openMenu() {
 function frame() {
   act(() => vi.advanceTimersToNextFrame());
 }
+
+describe("stateful phone menu plugins", () => {
+  // Review-requested contract coverage: plugin slots own state, not just launch callbacks.
+  it("keeps a plugin's local disclosure and input mounted during interaction", () => {
+    function StatefulPlugin() {
+      const [open, setOpen] = useState(false);
+      const [value, setValue] = useState("");
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Plugin details</button>
+          {open && (
+            <input
+              aria-label="Plugin query"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+            />
+          )}
+        </>
+      );
+    }
+    pluginRegistry
+      .forPlugin("stateful-topbar-test")
+      .registerComponent("main-top-bar", StatefulPlugin);
+    renderHeader();
+    openMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Plugin details" }));
+    frame();
+    const query = screen.getByRole("textbox", { name: "Plugin query" });
+    fireEvent.click(query);
+    fireEvent.change(query, { target: { value: "checkout" } });
+    frame();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: "Plugin query" }) as HTMLInputElement).value).toBe(
+      "checkout",
+    );
+  });
+});
 
 describe("shared phone listing header", () => {
   // @covers AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.5 AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.7

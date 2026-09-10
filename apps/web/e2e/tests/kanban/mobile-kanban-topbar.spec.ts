@@ -1,7 +1,136 @@
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
+import { waitForLatestSessionDone } from "../../helpers/session";
 
 test.describe("Shared phone listing topbar", () => {
+  test("returns focus to the menu button when search is hidden", async ({ testPage }) => {
+    await testPage.goto("/tasks");
+    const opener = testPage.getByTestId("mobile-topbar-menu");
+    const menu = testPage.getByRole("dialog", { name: "Menu", exact: true });
+    const search = testPage.getByPlaceholder("Search tasks...");
+    await opener.tap();
+    await menu.getByTestId("mobile-search-toggle").tap();
+    await expect(menu).toBeHidden();
+    await expect(search).toBeFocused();
+    await search.fill("checkout");
+    await opener.tap();
+    await menu.getByTestId("mobile-search-toggle").tap();
+    await expect(menu).toBeHidden();
+    await expect(search).toBeHidden();
+    await expect(opener).toBeFocused();
+    await opener.tap();
+    await menu.getByTestId("mobile-search-toggle").tap();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+  });
+
+  test("keeps Home but does not duplicate Threads in the tablet menu", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 820, height: 1180 });
+    await testPage.goto("/threads");
+    await testPage
+      .locator("header")
+      .first()
+      .getByRole("button", { name: "Open menu", exact: true })
+      .tap();
+    const menu = testPage.getByRole("dialog", { name: "Menu", exact: true });
+    await expect(menu.getByRole("link", { name: "Home", exact: true })).toBeVisible();
+    await expect(menu.getByRole("radio", { name: "Threads", exact: true })).toHaveAttribute(
+      "data-state",
+      "on",
+    );
+    await expect(menu.getByRole("link", { name: "Threads", exact: true })).toHaveCount(0);
+  });
+
+  test("keeps saved-view sync recovery inside the drawer without crowding the topbar", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "mobile-topbar-recovery");
+    for (const title of ["First recovery thread", "Second recovery thread"]) {
+      const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, profile.id, {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      });
+      await openTaskSession(testPage, title);
+      await waitForLatestSessionDone(apiClient, task.id, 1, `agent turn for ${title}`);
+    }
+    await testPage.setViewportSize({ width: 360, height: 851 });
+    await testPage.goto("/threads");
+    let rejectWrites = true;
+    await testPage.route("**/api/v1/user/settings", async (route) => {
+      const request = route.request();
+      if (rejectWrites && request.method() === "PATCH" && request.postDataJSON()?.thread_views) {
+        await route.fulfill({ status: 500, json: { error: "Saved views unavailable" } });
+      } else {
+        await route.continue();
+      }
+    });
+
+    const header = testPage.getByTestId("threads-mobile-topbar");
+    const trigger = header.getByTestId("threads-mobile-view-trigger");
+    const drawer = testPage.getByTestId("threads-mobile-view-drawer");
+    await trigger.tap();
+    const failedWrite = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.status() === 500,
+    });
+    await drawer.getByTestId("threads-mobile-new-view").tap();
+    await failedWrite;
+    const recovery = drawer.getByTestId("threads-view-sync-error");
+    await expect(recovery).toBeVisible();
+    await expect(header.getByTestId("threads-view-sync-error")).toHaveCount(0);
+    await testPage.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(header.getByTestId("threads-mobile-view-sync-status")).toBeVisible();
+    expect((await requireBox(header, "header during sync failure")).height).toBe(56);
+    const cue = header.getByTestId("thread-swipe-cue");
+    await expect(cue).toHaveText("1/2");
+    for (const target of [trigger, header.getByTestId("mobile-topbar-menu")]) {
+      expect(
+        await target.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return element.contains(
+            document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+          );
+        }),
+      ).toBe(true);
+    }
+    const cueBox = await requireBox(cue, "pagination during sync failure");
+    const menuBox = await requireBox(header.getByTestId("mobile-topbar-menu"), "menu");
+    expect(cueBox.x + cueBox.width).toBeLessThanOrEqual(menuBox.x);
+    await assertNoDocumentHorizontalOverflow(testPage, "saved-view sync failure");
+
+    await trigger.tap();
+    for (const id of ["threads-view-sync-retry", "threads-view-sync-dismiss"]) {
+      expect(
+        (await requireBox(recovery.getByTestId(id), "recovery action")).height,
+      ).toBeGreaterThanOrEqual(44);
+    }
+    await recovery.getByTestId("threads-view-sync-dismiss").tap();
+    await expect(recovery).toHaveCount(0);
+    await expect(header.getByTestId("threads-mobile-view-sync-status")).toHaveCount(0);
+    const failedAgain = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.status() === 500,
+    });
+    await drawer.getByTestId("threads-mobile-new-view").tap();
+    await failedAgain;
+    await expect(recovery).toBeVisible();
+    rejectWrites = false;
+    const retried = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/, {
+      predicate: (response) => response.ok(),
+    });
+    await recovery.getByTestId("threads-view-sync-retry").tap();
+    await retried;
+    await expect(recovery).toHaveCount(0);
+    await testPage.reload();
+    await expect(trigger).toContainText("New view");
+    await expect(header.getByTestId("threads-mobile-view-sync-status")).toHaveCount(0);
+  });
+
   test("keeps all three modes compact with native context and menu targets", async ({
     testPage,
   }) => {

@@ -59,7 +59,7 @@ pnpm e2e:raw tests/kanban/mobile-kanban-topbar.spec.ts tests/plugins/mobile-plug
 - `apps/web/components/threads/`
 - `apps/web/components/kanban/kanban-header-mobile.tsx`
 - `apps/web/components/kanban/mobile-menu-sheet.tsx`
-- `apps/web/components/kanban/mobile-threads-menu-actions.tsx`
+- `apps/web/components/kanban/mobile-listing-menu-actions.tsx`
 - `apps/web/app/threads/threads-page-client.tsx`
 - `apps/web/src/locales/*/threads.json`
 - `apps/web/e2e/tests/task/mobile-threads-view.spec.ts`
@@ -92,10 +92,10 @@ Threads requirements/design, existing mobile column navigator and picker sheet.
   plugin reachability, and unchanged desktop behavior.
 - Web build, typecheck, scoped lint, i18n checks, specification checks, and
   public documentation validation passed.
-- A disposable mock instance remains available on loopback port 48490, with
-  four fictional tasks and five sessions. The manual send check received a
-  normal mock reply. Evaluation and stop instructions are recorded in
-  `/tmp/kandev-mobile-threads-PuEDK5/README.md`.
+- A disposable mock instance was evaluated on loopback port 48490, with
+  four fictional tasks and five sessions, then stopped at the user's request.
+  The manual send check received a normal mock reply. The demo backend and
+  private route are stopped; its database and captures were retained locally.
 - No production credentials, personal instance, real provider calls, commit,
   push, or publication were used. Real-device keyboard/Safari checks remain
   outside this emulated-browser verification.

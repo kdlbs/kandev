@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -102,11 +103,20 @@ func (r *Repository) ClaimMessageAttachments(ctx context.Context, ids []string, 
 	if len(ids) > models.MaxMessageAttachmentCount {
 		return models.ErrTooManyAttachments
 	}
+	queueLockPresent, err := r.queueSessionLockTablePresent(ctx)
+	if err != nil {
+		return fmt.Errorf("check queue session lock schema: %w", err)
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin attachment claim: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if queueLockPresent {
+		if err := messagequeue.LockSessionInTransaction(ctx, tx, r.db, sessionID); err != nil {
+			return fmt.Errorf("lock attachment claim session: %w", err)
+		}
+	}
 	if taskID != "" {
 		result, err := tx.ExecContext(ctx, tx.Rebind(`
 			UPDATE tasks SET updated_at = updated_at WHERE id = ?
@@ -233,7 +243,25 @@ func (r *Repository) DeleteMessageAttachment(ctx context.Context, id, ownerID st
 	return nil
 }
 
-func (r *Repository) DeleteClaimedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error) {
+func (r *Repository) DeleteClaimedMessageAttachments(
+	ctx context.Context, ids []string, ownerID, taskID, sessionID string,
+) ([]*models.TaskMessageAttachment, error) {
+	return r.deleteClaimedMessageAttachments(ctx, ids, ownerID, taskID, sessionID, true)
+}
+
+func (r *Repository) DeleteClaimedMessageAttachmentsByTaskSession(
+	ctx context.Context, ids []string, taskID, sessionID string,
+) ([]*models.TaskMessageAttachment, error) {
+	return r.deleteClaimedMessageAttachments(ctx, ids, "", taskID, sessionID, false)
+}
+
+//nolint:cyclop,funlen // Attachment release coordinates ownership, queue locks, and transactional cleanup.
+func (r *Repository) deleteClaimedMessageAttachments(
+	ctx context.Context,
+	ids []string,
+	ownerID, taskID, sessionID string,
+	ownerRequired bool,
+) ([]*models.TaskMessageAttachment, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -241,11 +269,21 @@ func (r *Repository) DeleteClaimedMessageAttachments(ctx context.Context, ids []
 	if err != nil {
 		return nil, fmt.Errorf("probe queue attachment references: %w", err)
 	}
+	queueLockPresent := false
+	if sessionID != "" {
+		queueLockPresent, err = r.queueSessionLockTablePresent(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("check queue session lock schema: %w", err)
+		}
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin claimed attachment release: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockClaimedAttachmentReleaseTx(ctx, tx, sessionID, queueLockPresent); err != nil {
+		return nil, err
+	}
 	if sessionID != "" {
 		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 			return nil, err
@@ -279,52 +317,41 @@ func (r *Repository) DeleteClaimedMessageAttachments(ctx context.Context, ids []
 		return nil, nil
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(releasable)), ",")
-	args := []interface{}{ownerID, taskID, sessionID, models.AttachmentStateClaimed}
+	ownerClause := ""
+	args := []interface{}{taskID, sessionID, models.AttachmentStateClaimed}
+	if ownerRequired {
+		ownerClause = "owner_id = ? AND "
+		args = append([]interface{}{ownerID}, args...)
+	}
 	args = append(args, idsToInterfaces(releasable)...)
-	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
-		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
-		WHERE owner_id = ? AND task_id = ? AND session_id = ? AND state = ?
-		  AND id IN (`+placeholders+`)
-	`), args...)
+	released, err := listClaimedAttachmentsForReleaseTx(
+		ctx, tx, ownerClause, attachmentSessionScopeClause(sessionID), placeholders, args,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("list claimed attachments for release: %w", err)
+		return nil, err
 	}
-	var released []*models.TaskMessageAttachment
-	for rows.Next() {
-		attachment := &models.TaskMessageAttachment{}
-		if err := rows.StructScan(attachment); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("scan claimed attachment for release: %w", err)
-		}
-		released = append(released, attachment)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, fmt.Errorf("iterate claimed attachments for release: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close claimed attachments for release: %w", err)
-	}
-	for _, attachment := range released {
-		result, err := tx.ExecContext(ctx, tx.Rebind(`
-			DELETE FROM task_message_attachments
-			WHERE id = ? AND owner_id = ? AND task_id = ? AND session_id = ? AND state = ?
-		`), attachment.ID, ownerID, taskID, sessionID, models.AttachmentStateClaimed)
-		if err != nil {
-			return nil, fmt.Errorf("release claimed attachment: %w", err)
-		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			return nil, fmt.Errorf("release claimed attachment rows affected: %w", err)
-		}
-		if affected != 1 {
-			return nil, models.ErrAttachmentClaimConflict
-		}
+	if err := deleteClaimedAttachmentsTx(
+		ctx, tx, released, ownerClause, attachmentSessionScopeClause(sessionID),
+		ownerID, ownerRequired, taskID, sessionID,
+	); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit claimed attachment release: %w", err)
 	}
 	return released, nil
+}
+
+func (r *Repository) lockClaimedAttachmentReleaseTx(
+	ctx context.Context, tx *sqlx.Tx, sessionID string, queueLockPresent bool,
+) error {
+	if !queueLockPresent {
+		return nil
+	}
+	if err := messagequeue.LockSessionInTransaction(ctx, tx, r.db, sessionID); err != nil {
+		return fmt.Errorf("lock attachment release session %s: %w", sessionID, err)
+	}
+	return nil
 }
 
 func lockAttachmentQueueSession(
@@ -351,6 +378,77 @@ func lockAttachmentQueueSession(
 		return fmt.Errorf("lock attachment queue session %q: %w", sessionID, err)
 	}
 	return nil
+}
+
+func listClaimedAttachmentsForReleaseTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ownerClause, sessionScopeClause, placeholders string,
+	args []interface{},
+) ([]*models.TaskMessageAttachment, error) {
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
+		WHERE `+ownerClause+`task_id = ? AND `+sessionScopeClause+` AND state = ?
+		  AND id IN (`+placeholders+`)
+	`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list claimed attachments for release: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var released []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			return nil, fmt.Errorf("scan claimed attachment for release: %w", err)
+		}
+		released = append(released, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claimed attachments for release: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close claimed attachments for release: %w", err)
+	}
+	return released, nil
+}
+
+func deleteClaimedAttachmentsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	released []*models.TaskMessageAttachment,
+	ownerClause, sessionScopeClause, ownerID string,
+	ownerRequired bool,
+	taskID, sessionID string,
+) error {
+	for _, attachment := range released {
+		deleteArgs := []interface{}{attachment.ID}
+		if ownerRequired {
+			deleteArgs = append(deleteArgs, ownerID)
+		}
+		deleteArgs = append(deleteArgs, taskID, sessionID, models.AttachmentStateClaimed)
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			DELETE FROM task_message_attachments
+			WHERE id = ? AND `+ownerClause+`task_id = ? AND `+sessionScopeClause+` AND state = ?
+		`), deleteArgs...)
+		if err != nil {
+			return fmt.Errorf("release claimed attachment: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("release claimed attachment rows affected: %w", err)
+		}
+		if affected != 1 {
+			return models.ErrAttachmentClaimConflict
+		}
+	}
+	return nil
+}
+
+func attachmentSessionScopeClause(sessionID string) string {
+	if sessionID == "" {
+		return "session_id = ?"
+	}
+	return "(session_id = ? OR session_id = '')"
 }
 
 type attachmentReference struct {
@@ -609,6 +707,52 @@ func (r *Repository) DeleteMessageAttachmentsByTask(ctx context.Context, taskID 
 	return attachments, nil
 }
 
+// DeleteMessageAttachmentsBySession removes claimed attachment descriptors
+// owned by a deleted task session. Staged uploads have no session binding and
+// remain governed by their expiry cleanup.
+func (r *Repository) DeleteMessageAttachmentsBySession(ctx context.Context, taskID, sessionID string) ([]*models.TaskMessageAttachment, error) {
+	if taskID == "" || sessionID == "" {
+		return nil, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin session attachment cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
+		WHERE task_id = ? AND session_id = ?
+	`), taskID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list session attachments for cleanup: %w", err)
+	}
+	var attachments []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan session attachment for cleanup: %w", err)
+		}
+		attachments = append(attachments, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate session attachments for cleanup: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close session attachments for cleanup: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM task_message_attachments WHERE task_id = ? AND session_id = ?
+	`), taskID, sessionID); err != nil {
+		return nil, fmt.Errorf("delete session attachments: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit session attachment cleanup: %w", err)
+	}
+	return attachments, nil
+}
+
 func (r *Repository) DeleteMessageAttachmentsByWorkspaceTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -623,26 +767,167 @@ func (r *Repository) DeleteMessageAttachmentsByWorkspaceTx(
 	if err != nil {
 		return nil, fmt.Errorf("list workspace attachments for cleanup: %w", err)
 	}
+	defer func() { _ = rows.Close() }()
 	var attachments []*models.TaskMessageAttachment
 	for rows.Next() {
 		attachment := &models.TaskMessageAttachment{}
 		if err := rows.StructScan(attachment); err != nil {
-			_ = rows.Close()
 			return nil, fmt.Errorf("scan workspace attachment for cleanup: %w", err)
 		}
 		attachments = append(attachments, attachment)
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return nil, fmt.Errorf("iterate workspace attachments for cleanup: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close workspace attachments for cleanup: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_message_attachments WHERE workspace_id = ?`), workspaceID); err != nil {
 		return nil, fmt.Errorf("delete workspace attachments: %w", err)
 	}
 	return attachments, nil
+}
+
+func (r *Repository) TransferMessageAttachments(
+	ctx context.Context,
+	taskID, oldSessionID, newSessionID string,
+	attachmentIDs []string,
+) error {
+	if taskID == "" || oldSessionID == "" || newSessionID == "" ||
+		oldSessionID == newSessionID || len(attachmentIDs) == 0 {
+		return nil
+	}
+	uniqueAttachmentIDs := uniqueAttachmentIDs(attachmentIDs)
+	queueLockPresent, err := r.queueSessionLockTablePresent(ctx)
+	if err != nil {
+		return fmt.Errorf("check queue session lock schema: %w", err)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transfer session attachments: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if queueLockPresent {
+		if err := messagequeue.LockSessionPairInTransaction(
+			ctx, tx, r.db, oldSessionID, newSessionID,
+		); err != nil {
+			return fmt.Errorf("lock transfer session pair: %w", err)
+		}
+	}
+	locations, err := transferAttachmentLocations(ctx, tx, taskID, uniqueAttachmentIDs)
+	if err != nil {
+		return err
+	}
+	sourceAttachmentIDs, err := validateTransferAttachmentLocations(
+		taskID, oldSessionID, newSessionID, uniqueAttachmentIDs, locations,
+	)
+	if err != nil {
+		return err
+	}
+	if err := updateTransferSessionAttachments(
+		ctx, tx, taskID, oldSessionID, newSessionID, sourceAttachmentIDs,
+	); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transfer session attachments: %w", err)
+	}
+	return nil
+}
+
+func uniqueAttachmentIDs(attachmentIDs []string) []string {
+	unique := make([]string, 0, len(attachmentIDs))
+	seen := make(map[string]struct{}, len(attachmentIDs))
+	for _, attachmentID := range attachmentIDs {
+		if _, ok := seen[attachmentID]; ok {
+			continue
+		}
+		seen[attachmentID] = struct{}{}
+		unique = append(unique, attachmentID)
+	}
+	return unique
+}
+
+func transferAttachmentLocations(
+	ctx context.Context, tx *sqlx.Tx, taskID string, attachmentIDs []string,
+) (map[string]string, error) {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(attachmentIDs)), ",")
+	args := make([]interface{}, 0, 2+len(attachmentIDs))
+	args = append(args, taskID, models.AttachmentStateClaimed)
+	for _, attachmentID := range attachmentIDs {
+		args = append(args, attachmentID)
+	}
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT id, session_id
+		FROM task_message_attachments
+		WHERE task_id = ? AND state = ? AND id IN (`+placeholders+`)
+	`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("inspect transfer session attachments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	locations := make(map[string]string, len(attachmentIDs))
+	for rows.Next() {
+		var attachmentID, sessionID string
+		if err := rows.Scan(&attachmentID, &sessionID); err != nil {
+			return nil, fmt.Errorf("scan transfer session attachment: %w", err)
+		}
+		locations[attachmentID] = sessionID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate transfer session attachments: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close transfer session attachments: %w", err)
+	}
+	return locations, nil
+}
+
+func validateTransferAttachmentLocations(
+	taskID, oldSessionID, newSessionID string, attachmentIDs []string, locations map[string]string,
+) ([]string, error) {
+	sourceAttachmentIDs := make([]string, 0, len(attachmentIDs))
+	for _, attachmentID := range attachmentIDs {
+		sessionID, ok := locations[attachmentID]
+		if !ok || (sessionID != "" && sessionID != oldSessionID && sessionID != newSessionID) {
+			return nil, fmt.Errorf(
+				"transfer session attachments: attachment %q is not a claimed attachment for task %q in either transfer session",
+				attachmentID, taskID,
+			)
+		}
+		if sessionID == oldSessionID {
+			sourceAttachmentIDs = append(sourceAttachmentIDs, attachmentID)
+		}
+	}
+	return sourceAttachmentIDs, nil
+}
+
+func updateTransferSessionAttachments(
+	ctx context.Context, tx *sqlx.Tx, taskID, oldSessionID, newSessionID string, attachmentIDs []string,
+) error {
+	if len(attachmentIDs) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(attachmentIDs)), ",")
+	args := make([]interface{}, 0, 5+len(attachmentIDs))
+	args = append(args, newSessionID, time.Now().UTC(), taskID, oldSessionID, models.AttachmentStateClaimed)
+	for _, attachmentID := range attachmentIDs {
+		args = append(args, attachmentID)
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE task_message_attachments
+		SET session_id = ?, updated_at = ?
+		WHERE task_id = ? AND session_id = ? AND state = ?
+		  AND id IN (`+placeholders+`)
+	`), args...)
+	if err != nil {
+		return fmt.Errorf("transfer session attachments: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count transferred session attachments: %w", err)
+	}
+	if affected != int64(len(attachmentIDs)) {
+		return fmt.Errorf("transfer session attachments: expected %d claimed source attachments, moved %d", len(attachmentIDs), affected)
+	}
+	return nil
 }
 
 func (r *Repository) MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error) {

@@ -142,6 +142,9 @@ const (
 	ActionMessageQueueCancel        = "message.queue.cancel" // Clears the entire queue for a session
 	ActionMessageQueueGet           = "message.queue.get"
 	ActionMessageQueueUpdate        = "message.queue.update"
+	ActionMessageQueueEditBegin     = "message.queue.edit.begin"
+	ActionMessageQueueEditRenew     = "message.queue.edit.renew"
+	ActionMessageQueueEditEnd       = "message.queue.edit.end"
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection

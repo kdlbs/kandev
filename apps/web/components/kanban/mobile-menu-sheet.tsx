@@ -425,7 +425,7 @@ function MobileMenuContent({
       <AppNavSections
         onNavigate={() => onOpenChange(false)}
         omitSections={isMobile || viewValue === "threads" ? [] : ["primary"]}
-        omitDestinations={isMobile ? ["tasks", "threads"] : ["tasks"]}
+        omitDestinations={["tasks", "threads"]}
         workspaceActions={<MobileWorkspaceActionsSection workspaceId={workspaceId} />}
         controls={navControls}
       />

@@ -139,6 +139,36 @@ Tasks 04-05 are complete:
   default-Home selection and task-level context-menu access remain separate
   queued subtasks, outside this implementation.
 
+### PR review follow-up
+
+Resolved narrow-layout recovery and focus edge cases: saved-view errors stay
+inside the phone drawer with a compact topbar warning; hiding search returns
+focus; an archived picker opener falls back to a remaining thread. Leaving
+phone layout clears measured position and closes the task picker. Tablet
+navigation no longer duplicates Threads, the phone status icon is decorative,
+and the swipe test helper always detaches CDP after touch failures.
+
+The review also clarified existing plugin ownership: arbitrary slot clicks
+cannot close and unmount stateful controls. A real-registry regression protects
+local plugin disclosure/input state. Public docs distinguish view selection,
+the separate tool menu, and Quick Chat-only activity. Supported raw Playwright
+project flags remain unchanged.
+
+Local follow-up verification passed 63 unit tests and 29 browser regressions
+(17 mobile, 12 desktop), with one browser worker and retries disabled. New
+failure-path, accessibility, focus, and responsive-transition regressions proved
+RED before their fixes. Web build, typecheck, scoped zero-warning lint,
+formatting, i18n checks/ratchet, specification lint, public-docs validation, and
+diff checks passed. The evaluated demo remains stopped. Remote CI/review state
+is tracked on the PR rather than recorded as a durable current-head claim.
+
+The first fixup CI run exposed the CDP unit test inside Playwright's discovery
+root. Moving it to `e2e/helpers/` preserves the two cleanup regressions while
+keeping Vitest outside browser discovery. The CI shard-planning command failed
+locally before the move, then generated all 14 normal and six container
+manifests successfully. The 13 helper/planner unit tests, typecheck, lint, and
+formatting passed. This follow-up changes no application behavior.
+
 ### Historical results (Tasks 01-03)
 
 - Implemented full-width phone pages, a title picker with focus return, a
@@ -150,11 +180,12 @@ Tasks 04-05 are complete:
   Threads, 12 desktop Threads, and four shared mobile-header/plugin tests.
 - Web build, typecheck, scoped zero-warning lint, translation checks, public
   docs validation, and specification lint passed.
-- The isolated branch instance is running privately at
+- The isolated branch instance was evaluated privately at
   `https://koi.taile29c7d.ts.net:48490/threads` through Tailscale Serve.
-  Its fictional workspace has four tasks, five sessions, and two demo profiles.
-  Runtime ownership, seed IDs, screenshots, and stop instructions are in
-  `/tmp/kandev-mobile-threads-PuEDK5/README.md`.
+  It is now stopped. Its retained fictional workspace has four tasks, five
+  sessions, and two demo profiles.
+  Its runtime records and captures were retained locally as historical
+  evaluation artifacts, not as repository prerequisites.
 - Manual phone-emulation checks at 360 pixels verified equal viewport/chat
   widths, successful mock reply delivery, and secondary-agent selection.
   Physical-device keyboard and Safari behavior were not exercised.

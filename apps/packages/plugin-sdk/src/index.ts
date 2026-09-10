@@ -27,7 +27,10 @@ export type PluginIcon = string | Component<PluginIconProps>;
 /** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
 export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
-/** Context passed to components registered for the `main-top-bar` slot. */
+/**
+ * Context for the `main-top-bar` slot. Phone listing contributions live in the
+ * menu with 44px touch targets; interactions retain the slot's local state.
+ */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;
   workspaceLabel?: string;

@@ -11,6 +11,7 @@ import type {
   AgentProfileRecentUseApiRecord,
   WorkflowProfileSessionStartPolicy,
   WorkflowProfileSessionEndPolicy,
+  WorkflowSessionTarget,
   TaskPriority,
   SidebarTaskColorPatchApi,
 } from "../../lib/types/http";
@@ -198,6 +199,7 @@ type CreateTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   agent_profile_id?: string;
+  session_target?: WorkflowSessionTarget | null;
   executor_profile_id?: string;
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
@@ -266,6 +268,7 @@ function buildCreateTaskBody(
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
   setIf(body, "agent_profile_id", options.agent_profile_id);
+  if (options.session_target !== undefined) body.session_target = options.session_target;
   setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
   setIf(
@@ -492,6 +495,7 @@ export class ApiClient {
       workflow_step_id?: string;
       /** Stored in task.Metadata so auto_start_agent can pick it up on on_enter. */
       agent_profile_id?: string;
+      session_target?: WorkflowSessionTarget | null;
       /** Executor profile used when the task session is prepared. */
       executor_profile_id?: string;
       /** Repository IDs to associate with the task (required for agent execution). */
@@ -819,8 +823,10 @@ export class ApiClient {
     opts?: {
       is_start_step?: boolean;
       agent_profile_id?: string;
+      session_target?: WorkflowSessionTarget | null;
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+      complete_task_on_enter?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -834,11 +840,15 @@ export class ApiClient {
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
       ...(opts?.agent_profile_id ? { agent_profile_id: opts.agent_profile_id } : {}),
+      ...(opts?.session_target !== undefined ? { session_target: opts.session_target } : {}),
       ...(opts?.profile_session_start_policy
         ? { profile_session_start_policy: opts.profile_session_start_policy }
         : {}),
       ...(opts?.profile_session_end_policy
         ? { profile_session_end_policy: opts.profile_session_end_policy }
+        : {}),
+      ...(opts?.complete_task_on_enter != null
+        ? { complete_task_on_enter: opts.complete_task_on_enter }
         : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
@@ -1267,12 +1277,15 @@ export class ApiClient {
         on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
+      auto_advance_requires_signal?: boolean;
       wip_limit?: number;
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
+      complete_task_on_enter?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+      session_target?: WorkflowSessionTarget | null;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });

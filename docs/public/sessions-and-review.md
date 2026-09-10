@@ -90,8 +90,11 @@ position beside the view name; small decks also show page dots. Position follows
 your swipe, even while the next conversation is loading. Swipe sideways,
 or tap the task title to choose a thread
 from a bottom sheet. The picker also shows task status, workflow, and step.
-Tap the view name below **Threads** at the top to change views. The menu contains
-Quick Chat, Quick Terminal, and system status.
+Tap the view name below **Threads** at the top to change views. Use the separate
+topbar menu button for Quick Chat, Quick Terminal, and system status.
+
+If a warning appears beside the view name on a phone, open the view picker to
+retry the failed saved-view update or dismiss the warning.
 
 Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
 
