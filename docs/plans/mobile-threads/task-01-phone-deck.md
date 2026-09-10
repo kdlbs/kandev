@@ -59,7 +59,7 @@ pnpm e2e:raw tests/kanban/mobile-kanban-topbar.spec.ts tests/plugins/mobile-plug
 - `apps/web/components/threads/`
 - `apps/web/components/kanban/kanban-header-mobile.tsx`
 - `apps/web/components/kanban/mobile-menu-sheet.tsx`
-- `apps/web/components/kanban/mobile-threads-menu-actions.tsx`
+- `apps/web/components/kanban/mobile-listing-menu-actions.tsx`
 - `apps/web/app/threads/threads-page-client.tsx`
 - `apps/web/src/locales/*/threads.json`
 - `apps/web/e2e/tests/task/mobile-threads-view.spec.ts`
