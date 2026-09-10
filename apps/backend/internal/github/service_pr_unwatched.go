@@ -162,6 +162,8 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 		!stringPtrEqual(tp.MergedByLogin, mergedByLogin) ||
 		!stringPtrEqual(tp.ClosedByLogin, closedByLogin) ||
 		!timeEqual(tp.AutoMergeObservedAt, autoMergeObservedAt)
+	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, pr.HeadSHA)
+	changed = changed || !workflowAttentionSemanticEqual(tp.WorkflowAttention, nextWorkflowAttention)
 
 	tp.State = pr.State
 	tp.MergedAt = pr.MergedAt
@@ -171,6 +173,8 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	tp.MergedByLogin = mergedByLogin
 	tp.ClosedByLogin = closedByLogin
 	tp.AutoMergeObservedAt = autoMergeObservedAt
+	tp.WorkflowAttention = nextWorkflowAttention
+	tp.WorkflowAttentionJSON = marshalWorkflowAttention(nextWorkflowAttention)
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
 
@@ -206,7 +210,7 @@ func (s *Service) fetchUnwatchedTaskPRs(
 		return nil
 	}
 	if exec, execErr := graphQLExecutorFor(resolved.Client); execErr == nil {
-		out, err := s.batchedUnwatchedFetch(ctx, exec, resolved.CacheScope, refs)
+		out, err := s.batchedUnwatchedFetch(ctx, resolved.Client, exec, resolved.CacheScope, refs)
 		if err == nil {
 			return out
 		}
@@ -226,7 +230,7 @@ func (s *Service) fetchUnwatchedTaskPRs(
 // derivedFetchContext so one caller disconnecting mid-flight doesn't cascade
 // context.Canceled to its co-waiters, while keeping the leader's deadline.
 func (s *Service) batchedUnwatchedFetch(
-	ctx context.Context, exec GraphQLExecutor, cacheScope string, refs []graphQLPRRef,
+	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string, refs []graphQLPRRef,
 ) (map[string]*PRStatus, error) {
 	key := scopedCacheKey(cacheScope, "unwatched:"+batchedRefsKey(refs))
 	fetchCtx, cancelFetch := derivedFetchContext(ctx)
@@ -236,7 +240,11 @@ func (s *Service) batchedUnwatchedFetch(
 		// concurrent eviction wins; see Service.markRepoAsMissing.
 		repoErrGen := s.repoErrorGenSnapshot()
 		out, queryErr := runBatchedPRQuery(fetchCtx, exec, refs)
-		return s.absorbMissingReposErr(out, queryErr, cacheScope, repoErrGen)
+		out, queryErr = s.absorbMissingReposErr(out, queryErr, cacheScope, repoErrGen)
+		if queryErr == nil {
+			s.enrichBatchedWorkflowAttention(fetchCtx, client, cacheScope, out)
+		}
+		return out, queryErr
 	})
 	if err != nil {
 		return nil, err
@@ -280,9 +288,12 @@ func (s *Service) fetchUnwatchedTaskPRsPerPR(
 			continue
 		}
 		if pr != nil {
+			workflowAttention, _ := collectWorkflowAttention(ctx, resolved.Client, ref.Owner, ref.Repo, pr)
 			out[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = &PRStatus{
-				PR:                     pr,
-				OutcomeFieldsPopulated: true,
+				PR:                         pr,
+				OutcomeFieldsPopulated:     true,
+				WorkflowAttention:          workflowAttention,
+				WorkflowAttentionPopulated: true,
 			}
 		}
 	}

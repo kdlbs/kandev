@@ -209,6 +209,8 @@ type batchedPRResult struct {
 	HeadRefName     string                  `json:"headRefName"`
 	BaseRefName     string                  `json:"baseRefName"`
 	HeadRefOid      string                  `json:"headRefOid"`
+	HeadRepository  ghRepository            `json:"headRepository"`
+	HeadRepoOwner   ghRepositoryOwner       `json:"headRepositoryOwner"`
 	Additions       int                     `json:"additions"`
 	Deletions       int                     `json:"deletions"`
 	// ChangedFiles is a pointer for the same reason as IsDraft (AC-12a): 0 is
@@ -434,7 +436,7 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 // the batched and single-PR paths returning the same data.
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
-		`headRefName baseRefName headRefOid additions deletions changedFiles ` +
+		`headRefName baseRefName headRefOid headRepository { id name nameWithOwner cloneUrl httpsUrl } headRepositoryOwner { login } additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
 		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
 		`createdAt updatedAt mergedAt closedAt ` +
@@ -487,6 +489,10 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		AuthorLogin:          raw.Author.Login,
 		RepoOwner:            owner,
 		RepoName:             repo,
+		HeadRepoNodeID:       raw.HeadRepository.ID,
+		HeadRepoOwner:        raw.HeadRepoOwner.Login,
+		HeadRepoName:         raw.HeadRepository.Name,
+		HeadRepoCloneURL:     raw.HeadRepository.CloneURL,
 		Draft:                draft,
 		IsDraftObserved:      raw.IsDraft != nil,
 		Mergeable:            raw.Mergeable == ghMergeableState,
@@ -502,6 +508,7 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		MergedAt:             parseTimePtr(raw.MergedAt),
 		ClosedAt:             parseTimePtr(raw.ClosedAt),
 	}
+	fillMissingHeadRepositoryIdentity(pr, raw.HeadRepository.NameWithOwner)
 
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
 	checksState := ""
@@ -541,6 +548,22 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		MergeQueueLastRemovalBeforeSHA:        removalBeforeSHA,
 		mergeQueuePopulated:                   true,
 		mergeQueueRecoveryPopulated:           true,
+	}
+}
+
+func fillMissingHeadRepositoryIdentity(pr *PR, nameWithOwner string) {
+	if pr.HeadRepoOwner != "" && pr.HeadRepoName != "" {
+		return
+	}
+	parts := strings.SplitN(nameWithOwner, "/", 2)
+	if len(parts) != 2 {
+		return
+	}
+	if pr.HeadRepoOwner == "" {
+		pr.HeadRepoOwner = parts[0]
+	}
+	if pr.HeadRepoName == "" {
+		pr.HeadRepoName = parts[1]
 	}
 }
 

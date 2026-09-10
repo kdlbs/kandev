@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -80,6 +81,7 @@ func (s *Service) syncWatchesBatchedWithClient(
 	if statuses == nil {
 		statuses = &batchedWatchStatuses{}
 	}
+	s.enrichBatchedWorkflowAttention(ctx, client, cacheScope, statuses.byKey)
 
 	results := make([]PRWatchSyncResult, 0, len(watches))
 	now := time.Now().UTC()
@@ -90,6 +92,156 @@ func (s *Service) syncWatchesBatchedWithClient(
 		results = append(results, s.applyBatchedSearchingWatch(ctx, client, cacheScope, w, statuses, now))
 	}
 	return results, nil
+}
+
+const (
+	workflowAttentionBatchConcurrency = 4
+	workflowAttentionBatchBudget      = 5 * time.Second
+)
+
+type workflowAttentionStatusGroup struct {
+	owner, repo, headSHA string
+	statuses             []*PRStatus
+}
+
+// enrichBatchedWorkflowAttention adds Actions evidence to GraphQL statuses.
+// Workflow runs are fetched once per credential scope, target repository, and
+// head SHA; job reads are shared within that group. The enrichment is best
+// effort so missing Actions permission never discards review or check data.
+func (s *Service) enrichBatchedWorkflowAttention(
+	ctx context.Context, client Client, cacheScope string, statuses map[string]*PRStatus,
+) {
+	groups := groupBatchedWorkflowAttentionStatuses(cacheScope, statuses)
+	if len(groups) == 0 {
+		return
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, workflowAttentionBatchBudget)
+	defer cancel()
+	sem := make(chan struct{}, workflowAttentionBatchConcurrency)
+	var wg sync.WaitGroup
+	for _, group := range groups {
+		group := group
+		wg.Add(1)
+		go s.enrichBatchedWorkflowAttentionGroup(fetchCtx, client, cacheScope, group, sem, &wg)
+	}
+	wg.Wait()
+}
+
+func groupBatchedWorkflowAttentionStatuses(
+	cacheScope string, statuses map[string]*PRStatus,
+) map[string]*workflowAttentionStatusGroup {
+	groups := make(map[string]*workflowAttentionStatusGroup)
+	for _, status := range statuses {
+		if status == nil || status.PR == nil {
+			continue
+		}
+		if isTerminalPR(status.PR) {
+			status.WorkflowAttention = workflowAttentionNone(status.PR.HeadSHA)
+			status.WorkflowAttentionPopulated = true
+			continue
+		}
+		if status.PR.HeadSHA == "" {
+			status.WorkflowAttention = workflowAttentionUnknown("")
+			status.WorkflowAttentionPopulated = true
+			continue
+		}
+		key := workflowAttentionBatchKey(cacheScope, status.PR.RepoOwner, status.PR.RepoName, status.PR.HeadSHA)
+		group := groups[key]
+		if group == nil {
+			group = &workflowAttentionStatusGroup{
+				owner: status.PR.RepoOwner, repo: status.PR.RepoName, headSHA: status.PR.HeadSHA,
+			}
+			groups[key] = group
+		}
+		group.statuses = append(group.statuses, status)
+	}
+	return groups
+}
+
+func acquireWorkflowAttentionBatchSlot(ctx context.Context, sem chan struct{}) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func markBatchedWorkflowAttentionUnknown(group *workflowAttentionStatusGroup) {
+	for _, status := range group.statuses {
+		status.WorkflowAttention = workflowAttentionUnknown(group.headSHA)
+		status.WorkflowAttentionPopulated = true
+	}
+}
+
+func (s *Service) enrichBatchedWorkflowAttentionGroup(
+	ctx context.Context,
+	client Client,
+	cacheScope string,
+	group *workflowAttentionStatusGroup,
+	sem chan struct{},
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+	if !acquireWorkflowAttentionBatchSlot(ctx, sem) {
+		markBatchedWorkflowAttentionUnknown(group)
+		return
+	}
+	defer func() { <-sem }()
+
+	key := workflowAttentionBatchKey(cacheScope, group.owner, group.repo, group.headSHA)
+	value, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
+		return client.ListWorkflowRuns(ctx, group.owner, group.repo, group.headSHA)
+	})
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Debug("workflow attention read unavailable",
+				zap.String("owner", group.owner), zap.String("repo", group.repo), zap.Error(err))
+		}
+		markBatchedWorkflowAttentionUnknown(group)
+		return
+	}
+	runs, ok := value.([]WorkflowRun)
+	if !ok {
+		markBatchedWorkflowAttentionUnknown(group)
+		return
+	}
+	s.applyBatchedWorkflowAttention(ctx, client, group, runs)
+}
+
+func (s *Service) applyBatchedWorkflowAttention(
+	ctx context.Context, client Client, group *workflowAttentionStatusGroup, runs []WorkflowRun,
+) {
+	jobs := make(map[workflowJobKey]struct {
+		value []WorkflowJob
+		err   error
+	})
+	readJobs := func(jobCtx context.Context, runID int64, attempt int) ([]WorkflowJob, error) {
+		jobKey := workflowJobKey{Owner: group.owner, Repo: group.repo, RunID: runID, Attempt: attempt}
+		if cached, found := jobs[jobKey]; found {
+			return cached.value, cached.err
+		}
+		value, readErr := client.ListWorkflowRunJobs(jobCtx, group.owner, group.repo, runID, attempt)
+		jobs[jobKey] = struct {
+			value []WorkflowJob
+			err   error
+		}{value: value, err: readErr}
+		return value, readErr
+	}
+	for _, status := range group.statuses {
+		if status == nil || status.PR == nil {
+			continue
+		}
+		status.WorkflowAttention = classifyWorkflowAttentionWithJobs(
+			ctx, group.owner, group.repo, status.PR, runs, readJobs,
+		)
+		status.WorkflowAttentionPopulated = true
+	}
+}
+
+func workflowAttentionBatchKey(cacheScope, owner, repo, headSHA string) string {
+	return scopedCacheKey(cacheScope, fmt.Sprintf("workflow-attention:%s/%s@%s", strings.ToLower(owner), strings.ToLower(repo), headSHA))
 }
 
 // batchedWatchStatuses is the shared, read-only result of one batched fetch.
