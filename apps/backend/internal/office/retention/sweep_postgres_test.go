@@ -199,3 +199,40 @@ func TestRunSweep_LockLostMidSweep_StopsBeforeNextTableAndDoesNotReacquire(t *te
 	}
 	replacement.release()
 }
+
+// TestCensusRoutineRuns_Postgres_TotalsQueryStaysConsistentUnderConcurrentWrite
+// proves routineRunCensusTotals' window-function query — SUM(COUNT(*)) OVER
+// () over a GROUP BY routine_id — is valid PostgreSQL and, being one
+// statement, cannot be split by a write landing between the unknown-status
+// scan and the totals read, unlike the two independent queries it replaced.
+func TestCensusRoutineRuns_Postgres_TotalsQueryStaysConsistentUnderConcurrentWrite(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	ctx := context.Background()
+
+	sweeper, conn := newPostgresTestSweeper(t, dsn)
+	store := sweeper.store
+
+	seedRoutine(t, conn, "r-1")
+	seedRoutine(t, conn, "r-2")
+	seedRoutineRun(t, conn, newID(), "r-1", "done", timePtr(daysAgo(1)), daysAgo(1))
+
+	testBetweenRoutineRunCensusReads = func(queryer) {
+		seedRoutineRun(t, conn, newID(), "r-2", "done", timePtr(daysAgo(1)), daysAgo(1))
+		seedRoutineRun(t, conn, newID(), "r-2", "done", timePtr(daysAgo(1)), daysAgo(1))
+	}
+	t.Cleanup(func() { testBetweenRoutineRunCensusReads = nil })
+
+	census, err := store.CensusRoutineRuns(ctx, conn, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CensusRoutineRuns: %v", err)
+	}
+	if census.RetainedCount != 3 {
+		t.Fatalf("retainedCount = %d, want 3 (the single totals read must see the concurrent write)", census.RetainedCount)
+	}
+	if census.TopRoutineID != "r-2" {
+		t.Fatalf("topRoutineID = %q, want r-2", census.TopRoutineID)
+	}
+	if got, want := census.TopRoutineShare, 2.0/3.0; got != want {
+		t.Fatalf("topRoutineShare = %v, want %v", got, want)
+	}
+}
