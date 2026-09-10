@@ -527,7 +527,6 @@ export type WorkflowStepDTO = {
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   stage_type?: "work" | "review" | "approval" | "custom";
-  auto_advance_requires_signal?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   complete_task_on_enter: boolean;
