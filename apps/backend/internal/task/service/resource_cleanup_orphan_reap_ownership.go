@@ -27,7 +27,14 @@ func (s *Service) applyOrphanReapOwnership(
 	for _, p := range snap {
 		ppidByPID[p.PID] = p.PPID
 	}
-	protected := orphanReapProtectedPIDs(ppidByPID)
+	protected, protectedInconclusive := orphanReapProtectedPIDs(ppidByPID)
+	if protectedInconclusive {
+		// An unresolved hop in the backend's own ancestry cannot be ruled
+		// out as hiding a protected ancestor, so every root this attempt
+		// found is inconclusive: the same posture as the checks below.
+		s.skipEveryOrphanReapRoot(snapshot, byRoot, "ownership check inconclusive: could not resolve the backend's own ancestry")
+		return nil
+	}
 
 	otherExecutors, execErr := s.executors.ListExecutorsRunning(ctx)
 	if execErr != nil {
@@ -257,20 +264,32 @@ func orphanReapAncestorOwner(pid int, ppidByPID map[int]int, owners map[int]stri
 // (which is also "the process running the reap phase", since the phase
 // runs in-process) and every ancestor of the backend process, walked over
 // the same parent identifiers as every other check in this phase.
-func orphanReapProtectedPIDs(ppidByPID map[int]int) map[int]bool {
-	protected := make(map[int]bool)
+// inconclusive is true when the walk reaches a hop whose ancestry the host
+// snapshot could not resolve (orphanReapUnresolvedPPID): mirrors
+// orphanReapAncestorOwner's own sentinel handling, since a gap in the
+// backend's own ancestry cannot be ruled out as hiding a protected
+// ancestor any more than a gap in a candidate's ancestry can be ruled out
+// as hiding an owning task.
+func orphanReapProtectedPIDs(ppidByPID map[int]int) (protected map[int]bool, inconclusive bool) {
+	protected = make(map[int]bool)
 	self := os.Getpid()
 	protected[self] = true
 	pid := self
 	seen := map[int]bool{pid: true}
 	for {
 		parent, ok := ppidByPID[pid]
-		if !ok || parent <= 0 || parent == pid || seen[parent] {
+		if !ok || parent == pid || seen[parent] {
+			break
+		}
+		if parent == orphanReapUnresolvedPPID {
+			return protected, true
+		}
+		if parent <= 0 {
 			break
 		}
 		protected[parent] = true
 		seen[parent] = true
 		pid = parent
 	}
-	return protected
+	return protected, false
 }
