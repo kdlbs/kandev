@@ -254,6 +254,26 @@ export function updateAgentProfile(
   }).then((res) => normalizeAgent(res.agent));
 }
 
+// Dedicated status transition endpoint: validates the transition table and
+// clears pause_reason as a side effect. The general agent update endpoint
+// above accepts a status field too but writes it unchecked, so callers that
+// need transition validation (e.g. agent recovery) must use this instead.
+// `expectedStatus` selects the guarded recovery form, which refuses to
+// overwrite a status that is no longer paused or stopped.
+export function updateAgentStatus(
+  id: string,
+  status: AgentStatus,
+  options?: ApiRequestOptions & { expectedStatus?: AgentStatus },
+) {
+  const { expectedStatus, ...requestOptions } = options ?? {};
+  const body: { status: AgentStatus; expected_status?: AgentStatus } = { status };
+  if (expectedStatus) body.expected_status = expectedStatus;
+  return fetchJson<AgentResponse>(`${BASE}/agents/${id}/status`, {
+    ...requestOptions,
+    init: { method: "PATCH", body: JSON.stringify(body), ...requestOptions.init },
+  }).then((res) => normalizeAgent(res.agent));
+}
+
 export function deleteAgentProfile(id: string, options?: ApiRequestOptions) {
   return fetchJson<void>(`${BASE}/agents/${id}`, {
     ...options,

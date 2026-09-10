@@ -231,12 +231,14 @@ describe("workflow step handlers", () => {
         color: REVIEW_STEP_COLOR,
         wip_limit: 2,
         pull_from_step_id: "step-0",
+        auto_advance_requires_signal: true,
       }),
     );
 
     expect(store.getState().kanban.steps[0]).toMatchObject({
       wip_limit: 2,
       pull_from_step_id: "step-0",
+      auto_advance_requires_signal: true,
     });
   });
 

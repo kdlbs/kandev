@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- queue ghost behavior is covered in one focused suite. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
@@ -36,6 +37,7 @@ const REMOVE_TESTID = "queue-entry-remove";
 const EDIT_TITLE = "Edit queued message";
 const MERGE_TITLE = "Merge with above";
 
+const QUEUE_EDIT_TEXTAREA_TESTID = "queue-edit-textarea";
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
     id: "q-1",
@@ -195,6 +197,67 @@ describe("QueuedGhostMessage reorder handle", () => {
     renderRow({ queued_by: "user-1" }, { canEdit: true });
     fireEvent.click(screen.getByTestId(EDIT_TESTID));
     expect(screen.queryByTestId(HANDLE_TESTID)).toBeNull();
+  });
+});
+describe("QueuedGhostMessage lease lifecycle", () => {
+  it("leaves edit mode when its lease is lost", () => {
+    const queuedEntry = entry({ queued_by: "user-1" });
+    const view = render(
+      <QueuedGhostMessage
+        entry={queuedEntry}
+        canEdit
+        editLeaseActive
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeTruthy();
+
+    view.rerender(
+      <QueuedGhostMessage
+        entry={queuedEntry}
+        canEdit
+        editLeaseActive={false}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeNull();
+  });
+  it("passes the acquired edit token to delayed save completion", async () => {
+    let resolveSave!: () => void;
+    const onSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const onEditComplete = vi.fn();
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        onEditStart={async () => "edit-1"}
+        onSave={onSave}
+        onEditComplete={onEditComplete}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeTruthy());
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), {
+      target: { value: "updated" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+
+    resolveSave();
+    await waitFor(() => expect(onEditComplete).toHaveBeenCalledWith("edit-1", true));
   });
 });
 
@@ -424,7 +487,7 @@ describe("QueuedGhostMessage entity references", () => {
     );
 
     fireEvent.click(screen.getByTitle(EDIT_TITLE));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), { target: { value: edited } });
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), { target: { value: edited } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(edited, [issue, task]));
@@ -447,12 +510,32 @@ describe("QueuedGhostMessage entity references", () => {
     );
 
     fireEvent.click(screen.getByTitle(EDIT_TITLE));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), {
       target: { value: "reference removed" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith("reference removed", []));
+  });
+
+  it("allows clearing text while retaining attachments", async () => {
+    const attachments = [{ type: "resource", data: "ZmlsZQ==", mime_type: "text/plain" }];
+    const onSave = vi.fn(async () => {});
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry({ attachments })}
+        canEdit
+        onSave={onSave}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle(EDIT_TITLE));
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("", [], attachments));
   });
 });
 

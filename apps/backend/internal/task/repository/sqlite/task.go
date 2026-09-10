@@ -3376,6 +3376,9 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 	if err != nil {
 		return "", false, false, err
 	}
+	if oldState == v1.TaskStateCompleted && state == v1.TaskStateInProgress {
+		return oldState, false, false, nil
+	}
 	if archivedAt.Valid || currentSessionState != expectedSessionState ||
 		(requirePrimary && !currentSessionIsPrimary) {
 		return oldState, false, false, nil

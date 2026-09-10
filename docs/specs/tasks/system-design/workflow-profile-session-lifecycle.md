@@ -142,7 +142,9 @@ callback cannot advance the destination step.
 
 A reuse candidate that becomes terminal before promotion is not revived. The
 orchestrator creates a new destination when the start setting is `reuse`.
-Terminal sessions remain historical endpoints.
+Completed sessions remain excluded from automatic workflow reuse. Explicit
+conversation follow-ups use [task completion](task-completion.md) and do not
+promote the historical session or advance the current workflow.
 
 Changing a step setting affects later transitions only.
 

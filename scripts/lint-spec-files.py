@@ -26,7 +26,28 @@ SIZE_EXCEPTIONS_PATH = "docs/specs/spec-lint-exceptions.tsv"
 REQ_ID_PATTERN = r"REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}"
 AC_ID_PATTERN = r"AC-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}\.\d+"
 REQ_HEADING = re.compile(rf"^###\s+(?P<id>{REQ_ID_PATTERN}):\s+\S")
-AC_DEFINITION = re.compile(rf"^\s*-\s+\*\*(?P<id>{AC_ID_PATTERN}):\*\*\s+\S")
+AC_DEFINITION = re.compile(
+    rf"^\s*-\s+\*\*(?P<id>{AC_ID_PATTERN}):\*\*\s+(?P<body>\S.*)$"
+)
+MIGRATED_SOURCE_HEADING = re.compile(r"^\s*##\s+Migrated source detail\s*$", re.IGNORECASE)
+GENERIC_AC_PATTERNS = (
+    re.compile(
+        r"\b(?:all|any|every|remaining|other)\s+(?:the\s+)?"
+        r"(?:behavior|behaviour|requirements?|details?|scenarios?)\b.*"
+        r"\b(?:legacy|original|source|copied|elsewhere)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:as|per)\s+(?:described|specified|documented)\b.*"
+        r"\b(?:legacy|original|source|elsewhere|above)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:see|refer(?:s)?|defer(?:s)?)\b.*"
+        r"\b(?:legacy|original|source|copied|elsewhere)\b",
+        re.IGNORECASE,
+    ),
+)
 
 
 def load_config(root: Path) -> dict:
@@ -38,6 +59,7 @@ def lint_specs(
     root: Path,
     config: dict | None = None,
     exceptions: dict[str, int] | None = None,
+    migration_audit: bool = False,
 ) -> list[Violation]:
     config = config or load_config(root)
     validate_config(config)
@@ -53,7 +75,7 @@ def lint_specs(
         return exception_violations
 
     paths = sorted(path for path in specs_root.rglob("*.md") if path.is_file())
-    migrated_systems = set()
+    system_migrations: dict[str, str] = {}
     for path in paths:
         inside = path.relative_to(specs_root).parts
         if (
@@ -67,9 +89,9 @@ def lint_specs(
             error is None
             and metadata is not None
             and metadata.get("specification_version") == "1"
-            and metadata.get("migration") == "complete"
+            and metadata.get("migration") in VALID_MIGRATION_STATUSES
         ):
-            migrated_systems.add(inside[0])
+            system_migrations[inside[0]] = str(metadata["migration"])
     violations: list[Violation] = []
     requirement_definitions: dict[str, list[tuple[Path, int]]] = {}
     acceptance_definitions: dict[str, list[tuple[Path, int]]] = {}
@@ -82,7 +104,7 @@ def lint_specs(
         kind, system = classify_path(relative)
         violations.extend(check_size(path, relative, kind, config, exceptions))
         inside = relative.relative_to("docs/specs").parts
-        if inside and inside[0] in migrated_systems and kind == "legacy":
+        if inside and system_migrations.get(inside[0]) == "complete" and kind == "legacy":
             violations.append(
                 Violation(
                     "system-layout",
@@ -108,6 +130,11 @@ def lint_specs(
             systems_with_new_artifacts.add(system)
 
         text = path.read_text(encoding="utf-8")
+        migration = system_migrations.get(system) if system is not None else None
+        if migration is not None:
+            violations.extend(
+                check_migration_content(path, text, migration, migration_audit)
+            )
         metadata, metadata_line, metadata_error = parse_frontmatter(text)
         if metadata_error:
             violations.append(Violation("frontmatter", path, metadata_line, metadata_error))
@@ -211,6 +238,50 @@ def lint_specs(
     violations.extend(check_legacy_size_ratchet(root, exceptions, previous_exceptions))
     violations.extend(exception_violations)
     return sorted(violations, key=lambda item: (item.path.as_posix(), item.line, item.rule))
+
+
+def check_migration_content(
+    path: Path, text: str, migration: str, migration_audit: bool
+) -> list[Violation]:
+    """Check canonical artifacts for migration-only content debt.
+
+    In-progress systems are intentionally opt-in so existing migrations can be
+    audited without making the normal specification lint fail. Completed
+    systems treat the same findings as blocking content violations.
+    """
+    if migration == "in_progress" and not migration_audit:
+        return []
+    if migration not in VALID_MIGRATION_STATUSES:
+        return []
+
+    rule = "migration-audit" if migration == "in_progress" else "migration-content"
+    violations: list[Violation] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if MIGRATED_SOURCE_HEADING.match(line):
+            violations.append(
+                Violation(
+                    rule,
+                    path,
+                    line_number,
+                    "remove the `Migrated source detail` wrapper after migration; "
+                    "keep authoritative content in named requirement or design sections",
+                )
+            )
+        acceptance_match = AC_DEFINITION.match(line)
+        if acceptance_match and any(
+            pattern.search(acceptance_match.group("body"))
+            for pattern in GENERIC_AC_PATTERNS
+        ):
+            violations.append(
+                Violation(
+                    rule,
+                    path,
+                    line_number,
+                    f"{acceptance_match.group('id')} must state observable behavior "
+                    "directly; do not defer to generic or copied legacy prose",
+                )
+            )
+    return violations
 
 
 def validate_config(config: dict) -> None:
@@ -660,19 +731,31 @@ def check_duplicate_ids(kind: str, definitions: dict[str, list[tuple[Path, int]]
 def main() -> int:
     parser = argparse.ArgumentParser(description="Lint Kandev specification files.")
     parser.add_argument("--all", action="store_true", help="Lint all specification files")
+    parser.add_argument(
+        "--migration-audit",
+        action="store_true",
+        help="Report non-blocking content debt in in-progress migrations",
+    )
     args = parser.parse_args()
     if not args.all:
         parser.print_usage(sys.stderr)
         return 2
 
     root = Path.cwd()
-    violations = lint_specs(root)
+    violations = lint_specs(root, migration_audit=args.migration_audit)
     for violation in violations:
         relative = violation.path.relative_to(root)
         print(f"{relative}:{violation.line}: [{violation.rule}] {violation.message}")
-    if violations:
-        print(f"\n{len(violations)} specification lint violation(s) found.", file=sys.stderr)
+    blocking = [violation for violation in violations if violation.rule != "migration-audit"]
+    if blocking:
+        print(f"\n{len(blocking)} specification lint violation(s) found.", file=sys.stderr)
         return 1
+    if violations:
+        print(
+            f"Specification files passed; {len(violations)} non-blocking migration "
+            "audit finding(s) reported."
+        )
+        return 0
     print("All specification files passed.")
     return 0
 

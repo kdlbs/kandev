@@ -40,6 +40,7 @@ type stepDefYAML struct {
 	SessionTarget              *models.WorkflowSessionTarget                `yaml:"session_target,omitempty"`
 	AutoAdvanceRequiresSignal  bool                                         `yaml:"auto_advance_requires_signal,omitempty"`
 	CancelTriggersTurnComplete bool                                         `yaml:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter        bool                                         `yaml:"complete_task_on_enter,omitempty"`
 	Events                     stepEventsYAML                               `yaml:"events,omitempty"`
 }
 
@@ -190,6 +191,7 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 		SessionTarget:              models.CloneWorkflowSessionTarget(s.SessionTarget),
 		AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        s.CompleteTaskOnEnter,
 		StageType:                  stage,
 	}, nil
 }

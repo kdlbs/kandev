@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1915,16 +1916,27 @@ func TestDispatchClarificationResumeLocked_ReturnPaths(t *testing.T) {
 		}
 	})
 
-	t.Run("immediate dispatch returns nil", func(t *testing.T) {
+	t.Run("immediate dispatch publishes queue status", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		recorded := &recordingEventBus{}
+		svc.eventBus = recorded
 		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
 		seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 		if err := svc.dispatchClarificationResumeLocked(ctx, data, "answer"); err != nil {
 			t.Fatalf("expected nil on immediate dispatch, got %v", err)
+		}
+		var queueStatusEvents int
+		for _, event := range recorded.events {
+			if event.subject == events.MessageQueueStatusChanged {
+				queueStatusEvents++
+			}
+		}
+		if queueStatusEvents == 0 {
+			t.Fatal("clarification resume did not publish queue status")
 		}
 	})
 }

@@ -12,15 +12,15 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-DESKTOP-DESKTOP-TAURI-APP-001` during migration.
+This design defines the technical contract for `REQ-DESKTOP-DESKTOP-TAURI-APP-001`.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture) |
 
-## Migrated source detail
+## Desktop architecture
 
 ## Why
 

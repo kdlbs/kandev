@@ -1050,10 +1050,11 @@ func cancelCompletionStepGetter(enabled, signalRequired bool) *mockStepGetter {
 		}}},
 	}
 	getter.steps["step3"] = &wfmodels.WorkflowStep{
-		ID:         "step3",
-		WorkflowID: "wf1",
-		Name:       "Done",
-		Position:   2,
+		ID:                  "step3",
+		WorkflowID:          "wf1",
+		Name:                "Done",
+		Position:            2,
+		CompleteTaskOnEnter: true,
 	}
 	return getter
 }
@@ -1383,6 +1384,7 @@ func TestCancelAgent_TerminalTransitionSkipsIntermediateReview(t *testing.T) {
 	seedSession(t, repo, taskID, sessionID, "step1")
 	steps := cancelCompletionStepGetter(true, false)
 	steps.steps["step2"].Name = "Done"
+	steps.steps["step2"].CompleteTaskOnEnter = true
 	delete(steps.steps, "step3")
 
 	taskRepo := newMockTaskRepo()
@@ -2185,6 +2187,25 @@ func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 	if !status.AutoRun {
 		t.Fatal("expected explicit drain to resume Auto-run")
 	}
+}
+
+func TestDrainQueuedMessageIfAutoRunDoesNotResumePausedQueue(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	_, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "paused queued message", "", messagequeue.QueuedByUser, false, nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, "session1", false))
+
+	drained, err := svc.DrainQueuedMessageIfAutoRun(ctx, "session1")
+	require.NoError(t, err)
+	require.False(t, drained)
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	require.False(t, status.AutoRun)
+	require.Len(t, status.Entries, 1)
 }
 
 func queueAndInterruptForPeerMessage(

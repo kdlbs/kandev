@@ -62,6 +62,7 @@ export type KanbanUpdatePayload = {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
     show_in_command_panel?: boolean;
+    auto_advance_requires_signal?: boolean;
     wip_limit?: number;
     pull_from_step_id?: string | null;
   }>;
@@ -152,6 +153,11 @@ export type AgentUpdatePayload = {
  */
 export type AgentSettingsUpdatedPayload = {
   agent: Agent;
+};
+
+export type AgentProfileMcpConfigUpdatedPayload = {
+  profile_id: string;
+  workspace_id?: string | null;
 };
 
 export type AgentAvailableUpdatedPayload = {
@@ -285,6 +291,7 @@ export type StepPayload = {
   is_start_step?: boolean;
   allow_manual_move?: boolean;
   show_in_command_panel?: boolean;
+  auto_advance_requires_signal?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
@@ -432,6 +439,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.plan.reverted": BackendMessage<"task.plan.reverted", TaskPlanRevisionEventPayload>;
     "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
     "agent.settings.updated": BackendMessage<"agent.settings.updated", AgentSettingsUpdatedPayload>;
+    "agent.profile.mcp_config.updated": BackendMessage<
+      "agent.profile.mcp_config.updated",
+      AgentProfileMcpConfigUpdatedPayload
+    >;
     "agent.available.updated": BackendMessage<
       "agent.available.updated",
       AgentAvailableUpdatedPayload

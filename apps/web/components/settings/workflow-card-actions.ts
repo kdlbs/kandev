@@ -13,8 +13,8 @@ import { useToast } from "@/components/toast-provider";
 import { useSerializedMutationQueue } from "./use-serialized-mutation-queue";
 import type { WorkflowMutationGuardController } from "./workflow-mutation-guard";
 import { applyWorkflowStepUpdates } from "./workflow-step-mutations";
-import { areStepDraftsEqual, stepUpdatePayload } from "./workflow-step-draft-equality";
-export { areStepDraftsEqual } from "./workflow-step-draft-equality";
+import { areStepDraftsEqual, stepUpdatePayload } from "./workflow-step-equality";
+export { areStepDraftsEqual } from "./workflow-step-equality";
 import {
   createWorkflowAction,
   createWorkflowStepAction,
@@ -95,6 +95,7 @@ function createDraftStep(workflow: Workflow, position: number): WorkflowStep {
     ...NEW_STEP_DEFAULTS,
     position,
     allow_manual_move: true,
+    complete_task_on_enter: false,
     created_at: "",
     updated_at: "",
   };
@@ -337,6 +338,7 @@ async function createMissingSteps(
       position: step.position,
       color: step.color,
       stage_type: step.stage_type ?? "custom",
+      complete_task_on_enter: step.complete_task_on_enter ?? false,
       cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
       agent_profile_id: step.agent_profile_id,
       profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
