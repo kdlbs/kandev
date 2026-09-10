@@ -58,7 +58,8 @@ type taskTitleSessionClaimer interface {
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
-type atomicQueuedPromptCoordinator interface {
+// AtomicQueuedPromptCoordinator exposes admission limits and committed prompt delivery.
+type AtomicQueuedPromptCoordinator interface {
 	MaxQueuedPromptsPerSession() int
 	NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string)
 }
@@ -770,7 +771,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	atomicQueuedPlanComments := len(req.PlanCommentRefs) > 0
 	switch {
 	case atomicQueuedPlanComments:
-		coordinator, ok := h.orchestrator.(atomicQueuedPromptCoordinator)
+		coordinator, ok := h.orchestrator.(AtomicQueuedPromptCoordinator)
 		if !ok {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queued prompt admission is unavailable", nil)
 		}
@@ -887,7 +888,7 @@ func (h *MessageHandlers) addMessageReplayResponse(
 		// the atomically persisted delivery receipt. Notification is idempotent:
 		// an acknowledged receipt makes this a no-op.
 		if len(req.PlanCommentRefs) > 0 {
-			if coordinator, ok := h.orchestrator.(atomicQueuedPromptCoordinator); ok {
+			if coordinator, ok := h.orchestrator.(AtomicQueuedPromptCoordinator); ok {
 				coordinator.NotifyQueuedUserPrompt(ctx, existing.TaskID, existing.TaskSessionID)
 			}
 		}

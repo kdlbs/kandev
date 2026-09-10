@@ -58,6 +58,10 @@ for the alternatives and rationale.
 - The direct-message and message-queue admission boundaries validate comment
   references, format their persisted contents, persist the target prompt, and
   consume the comments as one transaction.
+- The production message adapter implements `AtomicQueuedPromptCoordinator`,
+  forwarding queue capacity and committed-prompt notification to the
+  orchestrator. A compile-time assertion keeps this capability wired through
+  the adapter used by the actual WebSocket handler.
 - The frontend task-plan state holds one comment snapshot per task. It does not
   place plan comments in `CommentsState.bySession` or under
   `kandev.comments.<sessionId>`.

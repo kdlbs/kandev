@@ -121,3 +121,11 @@ Task 01.
 - Final rendered prompts now share the 1 MiB direct/queue admission limit.
   SQLite and Postgres regressions prove rejection leaves comments unchanged;
   handler tests verify validation errors rather than internal errors.
+- Real desktop/mobile checks exposed missing queue-coordination forwarding in
+  the production orchestrator adapter. The adapter now forwards both methods,
+  with a compile-time contract and a regression test using the production wrapper.
+- Post-fix adapter/handler tests pass with
+  `go test ./internal/backendapp ./internal/task/handlers -run 'OrchestratorWrapperExposesAtomicPlanCommentQueue|PlanComment' -count=1`.
+  The managed `task-plan-comments.spec.ts` (Chromium) and
+  `mobile-task-plan-comments.spec.ts` (mobile Chrome) checks both pass without
+  retries against the combined branch and current-main build.

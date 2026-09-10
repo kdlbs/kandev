@@ -22,6 +22,7 @@ import (
 	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -1006,6 +1007,8 @@ type orchestratorWrapper struct {
 	svc *orchestrator.Service
 }
 
+var _ taskhandlers.AtomicQueuedPromptCoordinator = (*orchestratorWrapper)(nil)
+
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
 func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -1149,6 +1152,14 @@ func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, se
 // QueueUserPrompt forwards a prompt that must wait for workflow admission.
 func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
 	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+}
+
+func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {
+	return w.svc.MaxQueuedPromptsPerSession()
+}
+
+func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
+	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
 }
 
 // StepRequiresCompletionSignal forwards to the orchestrator service.
