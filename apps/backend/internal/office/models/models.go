@@ -375,6 +375,10 @@ type BudgetPolicy struct {
 	ActionOnExceed    BudgetActionOnExceed `json:"action_on_exceed" db:"action_on_exceed"`
 	CreatedAt         time.Time            `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time            `json:"updated_at" db:"updated_at"`
+	// Revision identifies which immutable set of the fields above a budget
+	// claim was evaluated against (REQ-OFFICE-COSTS-003). Server-assigned:
+	// starts at 1 and increases by exactly 1 on each successful update.
+	Revision int64 `json:"revision" db:"revision"`
 }
 
 // Run represents a run queue entry.

@@ -64,6 +64,30 @@ type Repository struct {
 	ro      *sqlx.DB // reader
 	log     *logger.Logger
 	migrate *db.MigrateLogger
+
+	// failBudgetPolicyUpdateErr is a test-only failpoint: when set,
+	// updateBudgetPolicyTx returns it after the claim discard has run but
+	// before the policy row update, so a test can prove the two are
+	// transactional without a fault-injecting driver.
+	failBudgetPolicyUpdateErr error
+
+	// failBudgetClaimsRecreateErr is a test-only failpoint: when set,
+	// recreateBudgetClaimsForRevision returns it instead of touching the
+	// database, so a test can prove initSchema surfaces the error rather
+	// than swallowing it.
+	failBudgetClaimsRecreateErr error
+
+	// failBudgetClaimsRecreateAfterDropErr is a test-only failpoint: when
+	// set, recreateBudgetClaimsForRevision returns it after DROP TABLE has
+	// run but before CREATE TABLE, inside the same transaction, so a test
+	// can prove the two are atomic rather than two independent statements.
+	failBudgetClaimsRecreateAfterDropErr error
+
+	// failBudgetExceededCompanionErr is a test-only failpoint: when set,
+	// ClaimExceeded returns it after the exceeded-level insert has run but
+	// before the companion alert-level insert, so a test can prove the
+	// pair rolls back together.
+	failBudgetExceededCompanionErr error
 }
 
 // NewWithDB creates a new office repository with existing database connections.
@@ -113,6 +137,12 @@ func (r *Repository) ReaderDB() *sqlx.DB { return r.ro }
 func (r *Repository) initSchema() error {
 	if err := r.createCoreTables(); err != nil {
 		return err
+	}
+	// Runs after createCoreTables (which creates office_budget_claims) so
+	// it probes the real table rather than racing its creation. Its error
+	// is returned, not swallowed: see recreateBudgetClaimsForRevision.
+	if err := r.recreateBudgetClaimsForRevision(); err != nil {
+		return fmt.Errorf("recreate office_budget_claims: %w", err)
 	}
 	if err := r.createExtensionTables(); err != nil {
 		return err
@@ -322,11 +352,37 @@ func (r *Repository) createCostTables() error {
 		alert_threshold_pct INTEGER DEFAULT 80,
 		action_on_exceed TEXT DEFAULT 'notify_only',
 		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
+		updated_at TIMESTAMP NOT NULL,
+		revision INTEGER NOT NULL DEFAULT 1
 	);
-	`)
+	` + budgetClaimsDDL)
 	return err
 }
+
+// budgetClaimsDDL is the final office_budget_claims shape: one row per
+// (policy, evaluation period, level, policy revision) that has already
+// produced its budget.alert / budget.exceeded notification. revision is
+// part of the primary key, not just a fence input, so a claim written
+// against a revision a concurrent update has already superseded can never
+// match a later evaluation's fenced insert. Used both for fresh-database
+// creation here and for the recreate in recreateBudgetClaimsForRevision, so
+// a fresh database and a migrated one converge. office_budget_claims must
+// be created after office_budget_policies: its foreign key references that
+// table, and PostgreSQL rejects a forward reference at CREATE TABLE time
+// even though SQLite tolerates it. ON DELETE CASCADE removes a policy's
+// claims on every deletion path without a matching code change at any of
+// them.
+const budgetClaimsDDL = `
+	CREATE TABLE IF NOT EXISTS office_budget_claims (
+		policy_id TEXT NOT NULL,
+		period_key TEXT NOT NULL,
+		level TEXT NOT NULL,
+		revision INTEGER NOT NULL,
+		claimed_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (policy_id, period_key, level, revision),
+		FOREIGN KEY (policy_id) REFERENCES office_budget_policies(id) ON DELETE CASCADE
+	);
+`
 
 func (r *Repository) createRunTables() error {
 	_, err := r.db.Exec(`
