@@ -311,6 +311,53 @@ identity-checked sandbox wrapper stopped its backend and agent descendants;
 ports 19468, 59468 and 59568-59667 no longer listen. Disposable data and captures
 are retained. The main :9998 runtime was not stopped or reconfigured.
 
+## Ready PR integration (2026-09-10)
+
+The user requested a concise, template-based ready PR. Feature commit
+`046832b6d` passed the normal commit hooks. Parent PR #3570 remained open;
+its reviewed tip `8b508fdb307f4449edc2c2fbe23a5dad4d87a54e` was integrated
+through merge `4c68ac5c5`. The PR targets `feature/improve-mobile-threa-f2f`
+so its diff contains only this follow-up, not the parent's changes.
+
+The combined board exceeded the function-size lint by one line. Extracting
+its existing picker-focus helper preserved behavior; all 26 board tests
+passed before and after extraction, followed by successful normal merge
+hooks. No parent behavior or unrelated main-branch changes were replaced.
+
+Integrated validation passed: 219 focused unit/component tests in 27 files
+(including extracted listing-removal cases and parent mobile-position
+coverage), typecheck, i18n checks and ratchet, public-doc validator tests and
+all 46 published pages, 36 specification-linter tests, full specification
+lint, and whitespace checks.
+
+A fresh managed backend/web build produced synthetic-data PR screenshots
+at 1280x850 desktop and 360x780 touch-phone sizes. The desktop root menu,
+phone root drawer and nested workflow-step drawer were inspected and PNG
+compressed. The ignored `.pr-assets/manifest.json` maps all three files;
+the disposable capture spec was removed. The manual Tailscale preview
+remained stopped throughout.
+
+The first combined build/browser invocation was terminated with SIGTERM
+(exit 143) after 19 passing tests, including the cross-device capture; it
+reported no assertion failure. Its processes had exited before the final
+regression runs reused the same fresh build.
+
+The final desktop run passed all 23 tests with one worker and no retries:
+
+```sh
+cd apps/web
+pnpm e2e:run --host --no-build --project chromium tests/task/threads-task-actions.spec.ts tests/task/threads-view.spec.ts tests/kanban/cross-workflow-task-move.spec.ts -- --retries=0
+```
+
+Both bounded mobile runs also passed, with one worker and no retries:
+14 Threads/task-action/swipe tests and 17 shared-sidebar regressions.
+Together, final browser verification covers 23 desktop and 31 mobile cases.
+
+```sh
+pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/task/mobile-threads-view.spec.ts tests/task/mobile-threads-swipe.spec.ts -- --retries=0
+pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts -- --retries=0
+```
+
 ## Risks
 
 - Parent files and archive-confirmation work can change before integration;
