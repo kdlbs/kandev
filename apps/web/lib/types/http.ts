@@ -539,6 +539,7 @@ export type WorkflowStepDTO = {
   wip_limit?: number;
   pull_from_step_id?: string | null;
   complete_task_on_enter: boolean;
+  auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;
   created_at?: string;
   updated_at?: string;

@@ -171,6 +171,9 @@ Implementation and regression tests completed on 2026-09-10:
   backend normal suites ran 5,395 tests across three packages, and the
   lifecycle race block ran 81 tests. Web typecheck, full lint, E2E build, and
   both desktop/mobile cold-runtime flows passed again.
+- PR #3577 follow-up aligned the workflow DTO and WebSocket mapper with the
+  current `main` contract after the merge-result check exposed a stale
+  duplicate field deletion. Local typecheck, lint, and mapper tests passed.
 
 Design validation before implementation on 2026-09-10:
 
