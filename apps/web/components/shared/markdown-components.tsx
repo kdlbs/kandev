@@ -92,7 +92,8 @@ function MarkdownFileAnchor({
   });
   const filePath = target?.kind === "file" ? target.path : null;
   const isBlocked = target?.kind === "blocked";
-  const isInternal = !!target || href?.startsWith("/") || href?.startsWith("#");
+  const isInternal =
+    !!target || (href?.startsWith("/") && !href.startsWith("//")) || href?.startsWith("#");
 
   const handleClick = target
     ? (event: MouseEvent<HTMLAnchorElement>) => {

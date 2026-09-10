@@ -28,6 +28,9 @@ env:
   POSTGRES_DIGEST: sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
   POSTGRES_SOURCE: docker.io/library/postgres:16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
   POSTGRES_TARGET: ghcr.io/kdlbs/kandev-ci:postgres-16
+  POSTGRES_18_DIGEST: sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+  POSTGRES_18_SOURCE: docker.io/library/postgres:18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+  POSTGRES_18_TARGET: ghcr.io/kdlbs/kandev-ci:postgres-18
 
 jobs:
   build-and-push:
@@ -69,6 +72,10 @@ jobs:
             --tag "${POSTGRES_TARGET}" \
             "${POSTGRES_SOURCE}"
 
+          docker buildx imagetools create \
+            --tag "${POSTGRES_18_TARGET}" \
+            "${POSTGRES_18_SOURCE}"
+
           mirrored_digest="sha256:$(
             docker buildx imagetools inspect --raw "${POSTGRES_TARGET}" \
               | sha256sum \
@@ -76,6 +83,16 @@ jobs:
           )"
           if [[ "${mirrored_digest}" != "${POSTGRES_DIGEST}" ]]; then
             echo "::error::Postgres mirror digest ${mirrored_digest} does not match ${POSTGRES_DIGEST}"
+            exit 1
+          fi
+
+          mirrored_18_digest="sha256:$(
+            docker buildx imagetools inspect --raw "${POSTGRES_18_TARGET}" \
+              | sha256sum \
+              | cut -d ' ' -f 1
+          )"
+          if [[ "${mirrored_18_digest}" != "${POSTGRES_18_DIGEST}" ]]; then
+            echo "::error::Postgres 18 mirror digest ${mirrored_18_digest} does not match ${POSTGRES_18_DIGEST}"
             exit 1
           fi
 
@@ -159,6 +176,7 @@ jobs:
             echo "- build:   \`${IMAGE_NAME}:build-sha-${IMAGE_TAG}\` / \`build-latest\`"
             echo "- desktop: \`${IMAGE_NAME}:desktop-sha-${IMAGE_TAG}\` / \`desktop-latest\`"
             echo "- postgres: \`${POSTGRES_TARGET}@${POSTGRES_DIGEST}\`"
+            echo "- postgres 18: \`${POSTGRES_18_TARGET}@${POSTGRES_18_DIGEST}\`"
             echo "- pushed:  \`${PUSHED}\`"
           } >> "$GITHUB_STEP_SUMMARY"
         env:

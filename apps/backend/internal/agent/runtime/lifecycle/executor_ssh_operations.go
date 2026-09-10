@@ -542,7 +542,10 @@ func retryRemoteAgentctlPort(
 		}
 		lastErr = err
 		if !errors.Is(err, errSSHAgentctlPortInUse) {
-			return 0, 0, err
+			// Preserve whatever start() reported (e.g. a live pid on a
+			// ready-timeout) so the caller can still tear down a process that
+			// did start, instead of leaking it.
+			return port, pid, err
 		}
 	}
 	return 0, 0, fmt.Errorf(
@@ -571,7 +574,7 @@ func startRemoteAgentctlOnPort(
 	// exactly the same resolved credentials as clone/setup commands.
 	innerScript := fmt.Sprintf(
 		`set -ae
-. /dev/stdin
+`+sshStdinEnvImport+`
 set +a
 set -e
 mkdir -p %[1]s
@@ -597,9 +600,25 @@ echo "$AGENTCTL_PID"
 		return 0, fmt.Errorf("ssh: agentctl wrapper returned non-numeric pid %q", out)
 	}
 
-	// Poll the on-disk log for the "bound successfully" line; until then the
-	// process is starting up and a port-forward connect would race the bind.
-	deadline := time.Now().Add(sshAgentctlReadyTimeout)
+	return awaitRemoteAgentctlReady(
+		ctx, client, sessionDir, port, pid, sshAgentctlReadyTimeout, sshAgentctlReadyPoll, log,
+	)
+}
+
+// awaitRemoteAgentctlReady polls the on-disk log for the "bound successfully"
+// line; until then the process is starting up and a port-forward connect
+// would race the bind. timeout/poll are parameters (rather than reading the
+// package constants directly) so tests can exercise the timeout path without
+// waiting on the real 30s budget.
+func awaitRemoteAgentctlReady(
+	ctx context.Context,
+	client *ssh.Client,
+	sessionDir string,
+	port, pid int,
+	timeout, poll time.Duration,
+	log *logger.Logger,
+) (int, error) {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		logOut, _, _ := runSSHCommand(ctx, client,
 			"cat "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
@@ -616,18 +635,28 @@ echo "$AGENTCTL_PID"
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
 		// Also catch "exited without binding" via pid check — if the wrapper
-		// exited before logging, kill -0 fails and we fail fast.
-		if !isRemoteAgentctlAlive(ctx, client, pid) {
+		// exited before logging, kill -0 confirms absence and we fail fast.
+		alive, probeErr := probeRemoteAgentctlLiveness(ctx, client, pid)
+		if !alive {
+			if probeErr != nil {
+				return pid, fmt.Errorf(
+					"ssh: agentctl readiness probe failed: %w; log tail:\n%s",
+					probeErr, lastLines(logOut, sshAgentctlLogTailLines))
+			}
 			return 0, fmt.Errorf(
 				"ssh: agentctl exited before becoming ready; log tail:\n%s",
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
-		time.Sleep(sshAgentctlReadyPoll)
+		time.Sleep(poll)
 	}
 	tail, _, _ := runSSHCommand(ctx, client,
 		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
-	return 0, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
-		sshAgentctlReadyTimeout, tail)
+	// The loop above only reaches the deadline after a liveness probe reported
+	// the process alive. That probe is not a permanent guarantee, so describe
+	// it as alive on the last probe before the deadline. Return its pid so the
+	// caller can tear it down instead of leaking it.
+	return pid, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
+		timeout, tail)
 }
 
 const sshAgentctlLogTailLines = 25
@@ -739,6 +768,13 @@ func setSSHControlAuthorization(req *http.Request, token string) {
 	}
 }
 
+// errSSHAgentctlHandshakeRejected marks a handshake that reached a listener —
+// this launch's own freshly-started agentctl or a stale one left on the same
+// port — that rejected the nonce. Mirrors the errSSHAgentctlPortInUse idiom:
+// the caller uses errors.Is to decide whether a fresh instance is worth
+// retrying, as opposed to a transport failure or a malformed response.
+var errSSHAgentctlHandshakeRejected = errors.New("ssh: agentctl handshake rejected")
+
 func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (string, error) {
 	body, err := json.Marshal(map[string]string{"nonce": nonce})
 	if err != nil {
@@ -756,8 +792,17 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 		return "", fmt.Errorf("ssh: agentctl handshake: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusForbidden {
+		// 403 is exactly ConsumeNonce rejecting the nonce (control_server.go) —
+		// the one case worth a fresh instance and a retry.
+		return "", fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ssh: agentctl handshake returned %d", resp.StatusCode)
+		// Any other non-200 (400/404/500/...) is not the nonce rejection and
+		// must not trigger retryAgentctlHandshake's retry — that would cost
+		// up to sshAgentctlHandshakeAttempts full start-agentctl-and-tear-down
+		// cycles for a failure a fresh instance can't fix.
+		return "", fmt.Errorf("ssh: agentctl handshake: unexpected status %d", resp.StatusCode)
 	}
 	var result struct {
 		Token string `json:"token"`
@@ -766,6 +811,90 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 		return "", errors.New("ssh: agentctl handshake returned no token")
 	}
 	return result.Token, nil
+}
+
+// readRemoteAgentctlLogTail best-effort reads the tail of the current
+// session's agentctl.log, for attaching to a diagnosable error. Errors are
+// swallowed — a missing or unreadable log must not mask the real failure.
+func readRemoteAgentctlLogTail(ctx context.Context, client *ssh.Client, sessionDir string) string {
+	tail, _, _ := runSSHCommand(ctx, client,
+		"tail -n "+strconv.Itoa(sshAgentctlLogTailLines)+" "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+	return tail
+}
+
+const sshAgentctlHandshakeAttempts = 3
+
+// sshAgentctlHandshakeRetryDelay is the pause between handshake retry
+// attempts. Sized against the operator-measured trigger on the SSH remote:
+// two independent launches within ~15-30s of each other race the picked
+// port's bootstrap nonce, and the loser gets rejected. The prior zero-delay
+// retry burned all sshAgentctlHandshakeAttempts in under a second — well
+// inside that window — so it could not durably escape the race it exists to
+// recover from. Waiting this long between attempts gives a concurrently
+// launching sibling time to finish (or fail) and vacate the port before the
+// next attempt.
+const sshAgentctlHandshakeRetryDelay = 15 * time.Second
+
+// retryAgentctlHandshake calls attempt up to sshAgentctlHandshakeAttempts
+// times, tearing down and retrying only when attempt fails with
+// errSSHAgentctlHandshakeRejected — the observed shape when a handshake
+// reaches a listener other than the agentctl this launch just started (a
+// stale process left on the picked port). Any other failure (bind
+// exhaustion, transport, a malformed response) is terminal and returned
+// immediately after tearing down anything attempt already started (pid > 0).
+// A teardown error is terminal too, because the next attempt would reuse the
+// same session directory while the old process may still own its pid and log.
+// delay is called between attempts (not after the last one) and is injectable
+// so tests can run the retry loop without waiting on the real backoff; ctx
+// cancellation during the wait aborts the retry immediately.
+func retryAgentctlHandshake(
+	ctx context.Context,
+	attempt func() (port, pid int, token string, err error),
+	teardown func(port, pid int) error,
+	delay func(ctx context.Context, d time.Duration) error,
+) (port, pid int, token string, err error) {
+	var lastErr error
+	for i := range sshAgentctlHandshakeAttempts {
+		port, pid, token, err = attempt()
+		if err == nil {
+			return port, pid, token, nil
+		}
+		if pid > 0 {
+			if teardownErr := teardown(port, pid); teardownErr != nil {
+				return 0, 0, "", fmt.Errorf(
+					"ssh: agentctl teardown after attempt %d: %w",
+					i+1, errors.Join(teardownErr, err))
+			}
+		}
+		// teardown removes sessionDir. startRemoteAgentctl recreates it before
+		// each new pid/log pair, so every retry starts with a clean directory.
+		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
+			return 0, 0, "", err
+		}
+		lastErr = err
+		if i < sshAgentctlHandshakeAttempts-1 {
+			if derr := delay(ctx, sshAgentctlHandshakeRetryDelay); derr != nil {
+				return 0, 0, "", fmt.Errorf("ssh: agentctl handshake retry cancelled: %w", derr)
+			}
+		}
+	}
+	return 0, 0, "", fmt.Errorf(
+		"ssh: agentctl exhausted %d handshake attempts: %w",
+		sshAgentctlHandshakeAttempts, lastErr,
+	)
+}
+
+// sleepOrContextDone blocks for d or until ctx is cancelled, whichever comes
+// first. Shared delay primitive for retryAgentctlHandshake's production caller.
+func sleepOrContextDone(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func remoteControlHTTPClient(client *ssh.Client, controlPort int) *http.Client {
@@ -800,6 +929,18 @@ const (
 	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
 	envKeyMCPTimeout           = "MCP_TIMEOUT"
 	envKeyMCPToolTimeout       = "MCP_TOOL_TIMEOUT"
+	envKeyKandevAPIURL         = "KANDEV_API_URL"
+	envKeyKandevAPIKey         = "KANDEV_API_KEY"
+	envKeyKandevRunToken       = "KANDEV_RUN_TOKEN"
+	envKeyKandevCLI            = "KANDEV_CLI"
+	envKeyKandevAgentID        = "KANDEV_AGENT_ID"
+	envKeyKandevAgentName      = "KANDEV_AGENT_NAME"
+	envKeyKandevWorkspaceID    = "KANDEV_WORKSPACE_ID"
+	envKeyKandevRunID          = "KANDEV_RUN_ID"
+	envKeyKandevTaskID         = "KANDEV_TASK_ID"
+	envKeyKandevWakeReason     = "KANDEV_WAKE_REASON"
+	envKeyKandevWakeCommentID  = "KANDEV_WAKE_COMMENT_ID"
+	envKeyKandevWakePayload    = "KANDEV_WAKE_PAYLOAD_JSON"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -815,11 +956,23 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyKandevGitLabHost,
 }
 
-// sshRemoteAgentRuntimeEnvKeys are non-secret runtime controls that must reach
-// the remote agent process after profile and agent precedence has been resolved.
+// sshRemoteAgentRuntimeEnvKeys are resolved runtime contract values that must
+// reach the remote agent process after profile and agent precedence is applied.
 var sshRemoteAgentRuntimeEnvKeys = []string{
 	envKeyMCPTimeout,
 	envKeyMCPToolTimeout,
+	envKeyKandevAPIURL,
+	envKeyKandevAPIKey,
+	envKeyKandevRunToken,
+	envKeyKandevCLI,
+	envKeyKandevAgentID,
+	envKeyKandevAgentName,
+	envKeyKandevWorkspaceID,
+	envKeyKandevRunID,
+	envKeyKandevTaskID,
+	envKeyKandevWakeReason,
+	envKeyKandevWakeCommentID,
+	envKeyKandevWakePayload,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each

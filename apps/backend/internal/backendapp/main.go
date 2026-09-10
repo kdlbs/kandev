@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/org"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -80,7 +81,6 @@ import (
 	"github.com/kandev/kandev/internal/office/configloader"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/orchestrator"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Office feature packages
 	office "github.com/kandev/kandev/internal/office"
@@ -451,9 +451,9 @@ func startServices( //nolint:cyclop
 			return err == nil && record.Active()
 		})
 	}
-	hostnameStore, err := hostnames.NewStore(dbPool.Writer(), dbPool.Reader())
-	if err != nil {
-		log.Error("Failed to initialize session hostname cache", zap.Error(err))
+	hostnameStore := repos.HostnameCache
+	if hostnameStore == nil {
+		log.Error("Failed to initialize session hostname cache: required store is unavailable")
 		return false
 	}
 	hostnameResolver := hostnames.NewResolver(
@@ -598,7 +598,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
-	worktreeMgr, _, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
+	worktreeMgr, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
 		log.Error("Failed to initialize worktree manager", zap.Error(err))
 		return false
@@ -674,7 +674,8 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials)
+		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
+		repos.SystemSettings, repos.RequiredStores)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -843,15 +844,16 @@ func startAgentInfrastructure(
 	// tables exist (already true here, provided in provideRepositories) —
 	// the ledger's foreign keys require them present at CREATE TABLE time
 	// on PostgreSQL. services.Task satisfies delivery.CheckoutResolver.
-	if _, deliveryCleanup, err := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log); err != nil {
-		log.Warn("delivery ledger sweep unavailable", zap.Error(err))
-	} else {
-		// Must be addRuntimeCleanup, not addCleanup: RestoreQuiesce only
-		// stops workers registered here, and a restore checkpoints, closes,
-		// and replaces the shared database pool. A five-minute sweep pass
-		// overlapping that would race the pool swap.
-		databaseQuiesce = addRuntimeCleanup(deliveryCleanup)
+	_, deliveryCleanup, deliveryErr := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log)
+	if recordErr := recordRequiredStore(repos.RequiredStores, "delivery", deliveryErr); recordErr != nil {
+		log.Error("delivery ledger initialization failed", zap.Error(recordErr))
+		return false
 	}
+	// Must be addRuntimeCleanup, not addCleanup: RestoreQuiesce only
+	// stops workers registered here, and a restore checkpoints, closes,
+	// and replaces the shared database pool. A five-minute sweep pass
+	// overlapping that would race the pool swap.
+	databaseQuiesce = addRuntimeCleanup(deliveryCleanup)
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
@@ -986,29 +988,6 @@ func startGatewayAndServe(
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
-	go func() {
-		if err := hostUtilityMgr.Start(ctx); err != nil {
-			log.Warn("host utility manager bootstrap error", zap.Error(err))
-		}
-		// Reconcile profiles against fresh probe results — seeds defaults for
-		// newly probed agents, heals stale profile models/modes, cleans up
-		// orphans referencing removed agents.
-		if err := profileReconciler.Run(ctx); err != nil {
-			log.Warn("profile reconciler error", zap.Error(err))
-		}
-		if migrated, err := services.Utility.MigrateLegacyBindings(ctx); err != nil {
-			log.Warn("utility profile migration failed", zap.Error(err))
-		} else if migrated > 0 {
-			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
-		}
-		migrateDefaultUtilityProfile(ctx, services.User, repos.AgentSettings, agentRegistry, log)
-	}()
-	addCleanup(func() error {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		hostUtilityMgr.Stop(stopCtx)
-		return nil
-	})
 
 	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
 	// calls to the utility agent selected in each plugin's configuration and
@@ -1129,6 +1108,7 @@ func startGatewayAndServe(
 	// Composed before HTTP routes so the registration pass below can mount
 	// the /api/v1/system/* group; started before the listener so the
 	// updates poller is alive as soon as we accept connections.
+	persistenceHealth := requiredstores.NewHealth(repos.RequiredStores, dbPool, log)
 	systemSvc := systemsvc.Provide(cfg, log, dbPool, eventBus, systemsvc.BuildInfo{
 		Version:   Version,
 		Commit:    Commit,
@@ -1137,20 +1117,35 @@ func startGatewayAndServe(
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
 		DatabaseQuiesce:      databaseQuiesce,
 		RestoreQuiesce:       restoreQuiesce,
+		SystemSettings:       repos.SystemSettings,
+		RequiredStores:       repos.RequiredStores,
+		PersistenceHealth:    persistenceHealth,
 		MessageQueue:         orchestratorSvc.GetMessageQueue(),
 		MessageQueueConfig:   queueConfiguration(cfg),
 		TaskSessions:         repos.Task,
 	})
-	storageComposition, err := provideStorageComposition(
-		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+	storageComposition, err := provideStorageCompositionWithDependencies(
+		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
 		log,
 		func(message string, err error) { log.Error(message, zap.Error(err)) },
+		repos.RequiredStores, repos.SystemSettings,
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
+	if err := repos.RequiredStores.ValidateComplete(); err != nil {
+		log.Error("Required-store bootstrap is incomplete", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	if err := persistenceHealth.Check(ctx); err != nil {
+		log.Error("Required-store health check failed", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	addCleanup(persistenceHealth.Start(ctx))
 	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	var hostUtilityWG sync.WaitGroup
@@ -1166,6 +1161,12 @@ func startGatewayAndServe(
 		if err := profileReconciler.Run(hostUtilityCtx); err != nil {
 			log.Warn("profile reconciler error", zap.Error(err))
 		}
+		if migrated, err := services.Utility.MigrateLegacyBindings(hostUtilityCtx); err != nil {
+			log.Warn("utility profile migration failed", zap.Error(err))
+		} else if migrated > 0 {
+			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
+		}
+		migrateDefaultUtilityProfile(hostUtilityCtx, services.User, repos.AgentSettings, agentRegistry, log)
 	}()
 	addCleanup(func() error {
 		hostUtilityCancel()
@@ -1220,7 +1221,7 @@ func startGatewayAndServe(
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1232,6 +1233,19 @@ func startGatewayAndServe(
 		zap.String("health", "/health"),
 		zap.String("http", "/api/v1"),
 	)
+	// Record the version only after every required store, the immediate health
+	// probe, and the complete HTTP wiring have succeeded. A late startup
+	// failure must leave the previous version marker intact so the next boot
+	// still takes the upgrade backup.
+	if err := recordSchemaVersionAfterPersistence(
+		repos.RequiredStores.ValidateComplete,
+		func() error { return persistenceHealth.Check(ctx) },
+		func() { recordSchemaVersion(dbPool.Writer(), cfg.Database.Driver, Version, log) },
+	); err != nil {
+		log.Error("Required persistence changed before readiness", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
 
 	// Flip readiness before swapping in the fully wired router — see
 	// publishReadiness for why the order matters and
@@ -2041,17 +2055,16 @@ func backfillAgentDefaultSkills(
 	}
 }
 
-// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnv in the
-// officeservice.TaskStarterWithEnvFunc adapter. Extracted from
+// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnvAndSkills in the
+// officeservice.TaskStarterWithLaunchContextFunc adapter. Extracted from
 // initOfficeServices to keep that function under the funlen cap.
 func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.TaskStarter {
-	return officeservice.TaskStarterWithEnvFunc(
-		func(ctx context.Context, taskID, agentProfileID, executorID,
-			executorProfileID string, priority string, prompt, workflowStepID string,
-			planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
-			_, err := orchestratorSvc.StartTaskWithEnv(ctx, taskID, agentProfileID,
-				executorID, executorProfileID, priority, prompt,
-				workflowStepID, planMode, false, attachments, env)
+	return officeservice.TaskStarterWithLaunchContextFunc(
+		func(ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext) error {
+			_, err := orchestratorSvc.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+				launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
+				launch.WorkflowStepID, launch.PlanMode, false, launch.Attachments, launch.Env,
+				launch.AdditionalSkillSlugs)
 			return err
 		},
 	)
@@ -2114,6 +2127,12 @@ func buildOfficeFeatureServices(
 	})
 	routineSvc.SetWorkflowEnsurer(&workflowEnsurerAdapter{repo: taskRepo})
 	routineSvc.SetTaskCreator(&taskCreatorAdapter{taskSvc: services.Task})
+	// office-routine-runs: closes out a heavy routine run when its
+	// linked task reaches a terminal step, so the routine's next fire
+	// isn't gated by a task that already finished.
+	if services.Office != nil {
+		services.Office.SetRoutineRunSyncer(routineSvc)
+	}
 	approvalSvc := officeapprovals.NewApprovalService(repo, log, activity, services.Office)
 	approvalSvc.SetAgentWriter(agentSvc)
 	channelSvc := officechannels.NewChannelService(repo, log, activity, agentSvc)
@@ -2258,6 +2277,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	persistenceHealth ...*requiredstores.Health,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -2298,8 +2318,16 @@ func buildHTTPServer(
 		addCleanup,
 	)
 
-	// Opt-in authentication. Runs after CORS; in disabled mode it only
-	// injects the synthetic single-user identity (behavior unchanged).
+	var requiredHealth *requiredstores.Health
+	if len(persistenceHealth) > 0 {
+		requiredHealth = persistenceHealth[0]
+	}
+	// Gate stateful requests before authentication can query the required
+	// stores. This preserves the actionable persistence_unavailable 503 when
+	// auth is enabled and the database is unhealthy.
+	router.Use(requiredPersistenceMiddleware(requiredHealth))
+	// Opt-in authentication. In disabled mode it only injects the synthetic
+	// single-user identity (behavior unchanged).
 	router.Use(authhttpmw.Middleware(services.Auth))
 	// Per-user workspace ownership on the third-party integration route
 	// groups (jira/gitlab/github/...), which resolve a caller-supplied
@@ -2307,6 +2335,10 @@ func buildHTTPServer(
 	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
 	secretsSvc := secrets.NewService(userSecretStore, log)
+	secretsSvc.SetReferenceChecker(secretReferenceChecker{
+		agents: repos.AgentSettings, tasks: repos.Task,
+		authorizeWorkspace: services.Task.AuthorizeWorkspaceAccess,
+	}.list)
 	// Workspace classification happens here, at the wiring boundary, where both
 	// packages are importable: the task service's not-found sentinel becomes
 	// the secrets sentinel (404), while raw lookup/storage errors pass through
@@ -2347,6 +2379,7 @@ func buildHTTPServer(
 		temporaryArtifacts:            temporaryArtifacts,
 		runtimeFlagsSvc:               services.RuntimeFlags,
 		dbPool:                        dbPool,
+		persistenceHealth:             requiredHealth,
 		agentSettingsController:       agentSettingsController,
 		agentSettingsRepo:             repos.AgentSettings,
 		agentList:                     agentRegistry,

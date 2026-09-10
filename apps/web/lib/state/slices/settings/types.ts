@@ -9,6 +9,7 @@ import type {
   Executor,
   NotificationProvider,
   SavedLayout,
+  SidebarTaskColorAutomation,
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
@@ -28,6 +29,7 @@ import type {
   AgentProfileRecentUseState,
 } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { TaskColor } from "@/lib/task-colors";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -380,6 +382,10 @@ export type NotificationProvidersState = {
   loading: boolean;
 };
 
+export type NotificationProvidersUpdate = Omit<NotificationProvidersState, "appriseAvailable"> & {
+  appriseAvailable?: boolean;
+};
+
 export type SettingsDataState = {
   executorsLoaded: boolean;
   agentsLoaded: boolean;
@@ -434,6 +440,8 @@ export type UserSettingsState = {
   threadActiveViewId: string | null;
   threadViewDraft: ThreadViewDraft | null;
   sidebarTaskPrefs: SidebarTaskPrefsState;
+  sidebarTaskColorAutomation: SidebarTaskColorAutomation;
+  sidebarTaskColors: Record<string, TaskColor | null>;
   taskCreateLastUsed: TaskCreateLastUsedState;
   jiraSavedViews: unknown;
   jiraTaskPresets: unknown;
@@ -524,7 +532,8 @@ export type SettingsSliceActions = {
   setSpritesInstances: (instances: SpritesInstance[]) => void;
   setSpritesLoading: (loading: boolean) => void;
   removeSpritesInstance: (name: string) => void;
-  setNotificationProviders: (state: NotificationProvidersState) => void;
+  setNotificationProviders: (state: NotificationProvidersUpdate) => void;
+  setAppriseAvailable: (available: boolean) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setSleepInhibition: (response: SleepInhibitionResponse) => void;

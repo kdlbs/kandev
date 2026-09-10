@@ -1,8 +1,7 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useEffect, useLayoutEffect, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { IconLoader } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
@@ -39,6 +38,8 @@ export type TaskArchiveConfirmationProps = {
   confirmTestId?: string;
   /** Render a simple confirmation inside an existing action surface. */
   inline?: boolean;
+  /** Use the contained dialog even when classification resolves without descendants. */
+  forceDialog?: boolean;
 };
 
 function ArchiveDescription({
@@ -155,50 +156,47 @@ function ArchiveConfirmPopover({
   );
 }
 
-function ArchiveClassifyingPopover({
+function PendingArchiveDismissal({
   anchorRef,
   focusReturnRef,
-  focusBoundaryRef,
   onOpenChange,
-  confirmTestId,
 }: {
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
-  focusBoundaryRef?: RefObject<HTMLElement | null>;
   onOpenChange: (open: boolean) => void;
-  confirmTestId: string;
 }) {
-  const { t } = useTranslation();
-  return (
-    <ActionConfirmPopover
-      open
-      size="wide"
-      anchorRef={anchorRef}
-      focusReturnRef={focusReturnRef}
-      focusBoundaryRef={focusBoundaryRef ?? anchorRef}
-      title={t("task:archiveTaskTitle")}
-      description={
-        <span className="flex items-center gap-2">
-          <IconLoader className="h-4 w-4 animate-spin" />
-          {t("common:loading")}
-        </span>
-      }
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t(ARCHIVE_LABEL_KEY)}
-      confirmAriaLabel={t(ARCHIVE_LABEL_KEY)}
-      confirmTestId={confirmTestId}
-      confirmDisabled
-      testId="task-archive-confirm-popover"
-      onOpenChange={onOpenChange}
-      onCancel={() => onOpenChange(false)}
-      onConfirm={() => undefined}
-    />
-  );
+  useLayoutEffect(() => {
+    if (anchorRef.current?.isConnected) return;
+    onOpenChange(false);
+  });
+
+  useEffect(() => {
+    const dismiss = () => onOpenChange(false);
+    const handlePointerDown = () => dismiss();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const focusTarget = focusReturnRef?.current ?? anchorRef.current;
+      dismiss();
+      if (focusTarget?.isConnected) focusTarget.focus();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [anchorRef, focusReturnRef, onOpenChange]);
+
+  return null;
 }
 
 type ArchiveDialogProps = Pick<
   TaskArchiveConfirmationProps,
   | "onOpenChange"
+  | "focusReturnRef"
   | "taskTitle"
   | "isBulkOperation"
   | "count"
@@ -220,6 +218,7 @@ function ArchiveDialog({ subtaskClassification, ...props }: ArchiveDialogProps) 
 
 type ArchiveConfirmationContentProps = ArchiveDialogProps & {
   confirmTaskArchive: boolean;
+  forceDialog: boolean;
   isFinePointer: boolean;
   taskIsInFlight: boolean;
   anchorRef: RefObject<HTMLElement | null>;
@@ -230,6 +229,7 @@ type ArchiveConfirmationContentProps = ArchiveDialogProps & {
 
 function ArchiveConfirmationContent({
   confirmTaskArchive,
+  forceDialog,
   isFinePointer,
   taskIsInFlight,
   anchorRef,
@@ -241,13 +241,20 @@ function ArchiveConfirmationContent({
 }: ArchiveConfirmationContentProps) {
   const { t } = useTranslation();
   const shouldUseDialog =
+    forceDialog ||
     !confirmTaskArchive ||
     dialogProps.isBulkOperation ||
     subtaskClassification.status === "error" ||
     subtaskClassification.total > 0;
 
   if (shouldUseDialog) {
-    return <ArchiveDialog {...dialogProps} subtaskClassification={subtaskClassification} />;
+    return (
+      <ArchiveDialog
+        {...dialogProps}
+        focusReturnRef={focusReturnRef}
+        subtaskClassification={subtaskClassification}
+      />
+    );
   }
 
   if (subtaskClassification.status !== "resolved") {
@@ -260,12 +267,10 @@ function ArchiveConfirmationContent({
     }
     if (!isFinePointer) return null;
     return (
-      <ArchiveClassifyingPopover
+      <PendingArchiveDismissal
         anchorRef={anchorRef}
         focusReturnRef={focusReturnRef}
-        focusBoundaryRef={focusBoundaryRef}
         onOpenChange={dialogProps.onOpenChange}
-        confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
       />
     );
   }
@@ -321,6 +326,7 @@ export function TaskArchiveConfirmation({
   onConfirm,
   confirmTestId = DEFAULT_CONFIRM_TEST_ID,
   inline = false,
+  forceDialog = false,
 }: TaskArchiveConfirmationProps) {
   const { isFinePointer } = useResponsiveBreakpoint();
   const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
@@ -333,6 +339,7 @@ export function TaskArchiveConfirmation({
   return (
     <ArchiveConfirmationContent
       confirmTaskArchive={confirmTaskArchive}
+      forceDialog={forceDialog}
       isFinePointer={isFinePointer}
       taskIsInFlight={taskIsInFlight}
       anchorRef={anchorRef}

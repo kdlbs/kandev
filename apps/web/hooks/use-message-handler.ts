@@ -19,6 +19,7 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import {
   collectPromptReferenceExpansions,
   formatPromptReferenceExpansions,
+  sanitizePromptReferenceSystemText,
 } from "@/lib/prompts/expand-prompt-references";
 import {
   deriveSessionInputMode,
@@ -131,7 +132,7 @@ export function buildContextFilesContext(
             promptExpansions.set(expansion.name, expansion.content);
           }
         }
-        return `### ${prompt.name}\n${prompt.content}`;
+        return `### ${sanitizePromptReferenceSystemText(prompt.name)}\n${sanitizePromptReferenceSystemText(prompt.content)}`;
       })
       .filter(Boolean);
 
@@ -375,7 +376,7 @@ export function useMessageHandler({
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
       if (hasPendingClarification || inputMode === "queue") {
         const queueAttachments = buildQueueAttachments(payload.attachments);
-        await queue({
+        const admitted = await queue({
           taskId,
           content: finalMessage,
           model: modelToSend,
@@ -384,7 +385,7 @@ export function useMessageHandler({
           entityReferences: payload.entityReferences,
           ...(contextFilesMeta ? { contextFilesMeta } : {}),
         });
-        return;
+        return admitted;
       }
 
       // Add the returned message to the store directly so the chat updates

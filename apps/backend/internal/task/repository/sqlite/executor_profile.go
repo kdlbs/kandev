@@ -100,6 +100,35 @@ func (r *Repository) UpdateExecutorProfile(ctx context.Context, profile *models.
 	return nil
 }
 
+// UpdateExecutorProfileIfUnmodified updates a profile only when it still has
+// the timestamp observed by the caller. This prevents stale partial updates
+// from replacing concurrently changed profile configuration.
+func (r *Repository) UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error {
+	profile.UpdatedAt = time.Now().UTC()
+
+	configJSON, err := json.Marshal(profile.Config)
+	if err != nil {
+		return fmt.Errorf("failed to serialize profile config: %w", err)
+	}
+	envVarsJSON, err := json.Marshal(profile.EnvVars)
+	if err != nil {
+		return fmt.Errorf("failed to serialize profile env_vars: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executor_profiles SET name = ?, mcp_policy = ?, config = ?, prepare_script = ?, cleanup_script = ?, env_vars = ?, updated_at = ?
+		WHERE id = ? AND updated_at = ?
+	`), profile.Name, profile.McpPolicy, string(configJSON), profile.PrepareScript, profile.CleanupScript, string(envVarsJSON), profile.UpdatedAt, profile.ID, expectedUpdatedAt)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("executor profile changed or not found: %s", profile.ID)
+	}
+	return nil
+}
+
 func (r *Repository) DeleteExecutorProfile(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM executor_profiles WHERE id = ?`), id)
 	if err != nil {

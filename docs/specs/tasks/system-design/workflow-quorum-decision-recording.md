@@ -22,7 +22,7 @@ requirements:
 
 
 
-The task system owns quorum semantics, participant canonicalization, decision persistence, guarded transition application, and diagnostic projections. Office and MCP surfaces are transports over that engine-owned contract.
+The task system owns quorum semantics, participant canonicalization, decision persistence, guarded transition application, and diagnostic projections. The task-bound Office CLI and runtime API are transports over that engine-owned contract.
 
 
 
@@ -70,18 +70,19 @@ The engine's evaluation is therefore correct **given its inputs**. With zero
 decision rows, `all_approve` and `any_reject` both correctly evaluate false and
 the card correctly stays put. The defects are all on the input side.
 
-### Defect 1 — an agent has no tool to record a decision
+### Transport follow-up — remove the per-turn decision schema
 
-The MCP tool registry (`apps/backend/internal/mcp/server/server.go:892-923`)
-enables exactly four groups for `SurfaceOfficeTask`: `plan` (4 tools),
-`related-tasks` (1), `office-documents` (3), and the capability-gated
-`user-question` (1). Nine tools, none of which records a decision.
+The first agent surface added `record_step_decision_kandev` to
+`SurfaceOfficeTask`. That proved the server-owned decision and quorum path, but
+it also makes every Office turn carry a decision JSON schema, including turns
+whose agents do not occupy a reviewer or approver seat.
 
-`POST /api/v1/office/tasks/:id/approve` and `.../request-changes` exist
-(`office/dashboard/handler.go:91-92`) and are reachable from the human UI
-(`apps/web/components/task/simple/components/approval-action-bar.tsx:122-123`),
-but no agent can reach either. A reviewer agent's only means of expressing a
-verdict is a free-text comment, which nothing parses.
+Office already uses a signed, task-bound runtime CLI for its mutation surface.
+The final transport moves decision recording to that established path while
+retaining `DashboardService.RecordAgentDecision` and the workflow engine as the
+only business and transition path. The MCP registration, websocket transport,
+and transport-only tests are removed only after the CLI, runtime endpoint, and
+injected skill are covered.
 
 ### Defect 2 — the human path writes a verdict the evaluator cannot read
 
@@ -183,14 +184,19 @@ which `ConfigTransitionGuard` accepts (`workflow/engine/types.go:533`):
 
 Approval is the same shape with `role: approver`.
 
-## Tool contract
+## Agent command contract
 
 Pinned here because Build would otherwise invent it and Review would relitigate it.
 
-**Name.** `record_step_decision_kandev`, registered under a new
-`office-decisions` group in the profile registry
-(`apps/backend/internal/mcp/server/server.go:892-923`), enabled for
-`SurfaceOfficeTask` only.
+**Command.** `$KANDEV_CLI kandev task decision --decision approved|rejected
+--reason "..."`. The command is taught through the injected
+`kandev-step-decision` system skill and repeated in the review and approval
+stage prompts as the required final action.
+
+**HTTP endpoint.** `POST /api/v1/office/runtime/task/decision` with a closed JSON
+body containing only `decision` and `reason`. The route uses the existing
+Office runtime bearer-token middleware and does not expose a task id in its
+path. Identity-shaped body fields are rejected rather than ignored.
 
 **Arguments.**
 
@@ -200,16 +206,27 @@ Pinned here because Build would otherwise invent it and Review would relitigate 
 | `reason` | yes | non-empty string |
 
 No idempotency argument. A retry is a new verdict that supersedes the previous
-one under AC-TASKS-QUORUM-CONCURRENCY-001.2; the tool is deliberately NOT idempotent across calls, and
+one under AC-TASKS-QUORUM-CONCURRENCY-001.2; the command is deliberately NOT idempotent across calls, and
 AC-TASKS-QUORUM-CONCURRENCY-001.7 states this as contract so a builder does not invent a client-supplied
 key. Idempotency in this feature is confined to transition application
 (AC-TASKS-QUORUM-CONCURRENCY-001.6, AC-TASKS-QUORUM-CONCURRENCY-001.4).
 
-**Scoping.** The tool takes no `task_id`. It resolves the task and step from the
-calling session, matching every other Office tool. An agent cannot record a
-decision on a task other than the one its session is bound to.
+**Scoping.** The command and endpoint accept no task, step, role, participant,
+session, or agent identifier. The runtime handler derives `task_id`,
+`session_id`, and `agent_profile_id` from the validated signed Office run
+context. `DashboardService.RecordAgentDecision` resolves the task's current
+workflow step and the caller's canonical reviewer or approver seat live on
+every call. A token bound to one task cannot address another task, and a caller
+that no longer holds a decision seat is rejected without a write.
 
-**Return.** On success the tool returns exactly these seven fields, observed by
+**Transport boundary.** The runtime handler remains thin. A small composition
+adapter translates the runtime request and response types and calls
+`DashboardService.RecordAgentDecision`; the dashboard service continues to own
+validation order, decision publication, activity, reactivity, and delegation
+to the workflow engine's decision path. The runtime layer does not implement a
+second quorum or persistence path.
+
+**Return.** On success the command returns exactly these seven fields, observed by
 AC-TASKS-QUORUM-RECORDING-001.11:
 
 | Field | Meaning |
@@ -245,11 +262,29 @@ counted by that guard at all, so a single pair of counts is either ambiguous
 or actively misleading. `guards` gives the agent the count against each guard
 that exists, which is the question it was actually asking.
 
+A third case reaches the same cross-step scan without either seat sitting at
+the current step at all: both `AddTaskReviewer`/`AddTaskApprover` seats are
+cast while the task sits on an earlier step (e.g. Backlog), so by the time
+the task reaches Review neither seat's `StepID` matches `review`. The seats
+can share that earlier step or come from two different earlier steps. Here
+`ResolveParticipantRole` reads the role named by Review's own eligible
+`wait_for_quorum` guard and prefers the matching seat — `reviewer`, in the
+thin-workspace Review case — over the fixed approver-first order. This
+guard-role tiebreak only applies when the current step names exactly one
+role; a step naming both roles, naming neither, or that fails to load falls
+back to approver-wins unchanged, so this case narrows rather than replaces
+the existing precedence.
+
 This precedence applies only to the agent decision surface. The human decision
 path retains its existing `resolveDeciderRole` behavior and unconditional
 approver precedence, as required by AC-TASKS-QUORUM-RECORDING-001.4a. The two
 paths can therefore persist different roles for the same caller, task, and
 step. Future implementations must preserve this boundary.
+
+**MCP boundary.** `record_step_decision_kandev` is absent from the
+`SurfaceOfficeTask` registry and first-turn MCP inventory after this command is
+wired. Normal Kanban profiles remain unchanged and never receive the Office
+decision skill or CLI instruction.
 
 **Reason column.** The reason is written to `workflow_step_decisions.comment`,
 the column every Office reader already projects (`office/dashboard/decisions.go:141,428`).
@@ -264,7 +299,7 @@ task timeline — this is the concrete bug this paragraph exists to prevent.
 | Condition | Behavior |
 |---|---|
 | Agent not a participant | Permission error; no row written (AC-TASKS-QUORUM-RECORDING-001.3) |
-| Verdict outside `approved`/`rejected` on the tool | Validation error; no row (AC-TASKS-QUORUM-RECORDING-001.6) |
+| Verdict outside `approved`/`rejected` on the command or API | Validation error; no row (AC-TASKS-QUORUM-RECORDING-001.6) |
 | Empty reason | Validation error; no row (AC-TASKS-QUORUM-RECORDING-001.7) |
 | Task has no bound step | Error naming the unbound step; no row (AC-TASKS-QUORUM-RECORDING-001.8) |
 | Decision store not wired | Guard does not fire; reason recorded (AC-TASKS-QUORUM-DIAGNOSTICS-001.1) |
@@ -299,7 +334,7 @@ task timeline — this is the concrete bug this paragraph exists to prevent.
 | AC-TASKS-QUORUM-DIAGNOSTICS-001.4 read while the engine dispatcher is not wired | Endpoint errors; no office-side fallback evaluation (AC-TASKS-QUORUM-REEVALUATION-001.14, AC-TASKS-QUORUM-REEVALUATION-001.13) |
 | One guard's store read errors, siblings healthy | That entry alone reports `evaluation_error`; the others are still returned (AC-TASKS-QUORUM-REEVALUATION-001.14, AC-TASKS-QUORUM-DIAGNOSTICS-001.1) |
 | Decision recorded at a step that also configures a side-effect action on `on_turn_complete` | Only guarded transitions are evaluated; no callback re-fires (AC-TASKS-QUORUM-REEVALUATION-001.8) |
-| Tool called at a step with no guarded transition | `guards` is an empty list, not an error (AC-TASKS-QUORUM-RECORDING-001.11) |
+| Command called at a step with no guarded transition | `guards` is an empty list, not an error (AC-TASKS-QUORUM-RECORDING-001.11) |
 | Decision row id needed for the AC-TASKS-QUORUM-CONCURRENCY-001.6 operation id | Pre-generated caller-side into `DecisionInfo.ID`; never read back after the write (AC-TASKS-QUORUM-CONCURRENCY-001.8) |
 | Office needs `decision_id` / `created_at` to publish | Both returned by the AC-TASKS-QUORUM-REEVALUATION-001.10 entry point (AC-TASKS-QUORUM-REEVALUATION-001.11) |
 
@@ -327,7 +362,8 @@ Each of the following is a deliberate exclusion, not an oversight.
 
 - **Workspace `approvals` subsystem.** `POST /approvals/:id/decide` and its
   `"approved" | "rejected"` shape (`apps/web/lib/api/domains/office-api.ts:534`)
-  are a separate feature from task step decisions. Untouched.
+  are a separate feature from task step decisions. The
+  `agentctl kandev approvals decide` command remains untouched and is not reused.
 - **New thresholds.** `all_approve`, `all_decide`, `any_reject`,
   `majority_approve`, `n_approve:<N>` are the complete set. No new threshold.
 - **Guard variants beyond `wait_for_quorum`.** `TransitionGuard` stays
@@ -346,10 +382,11 @@ Each of the following is a deliberate exclusion, not an oversight.
 - **Timeouts and escalation.** A quorum that is never reached waits
   indefinitely. No auto-advance, no reminder, no deadline.
 - **Delegating or reassigning a pending decision.** Not addressed.
-- **Kanban-workflow decisions.** The decision tool is Office-surface only
-  (AC-TASKS-QUORUM-RECORDING-001.9); Kanban keeps `step_complete_kandev`.
+- **Kanban-workflow decisions.** The decision command is Office-run only
+  (AC-TASKS-QUORUM-RECORDING-001.9); Kanban keeps `step_complete_kandev` and
+  its existing MCP profile.
 - **Backfilling the zero existing decision rows.** There are none to migrate.
-- **Client-supplied idempotency keys on the decision tool.** Excluded by AC-TASKS-QUORUM-CONCURRENCY-001.7.
+- **Client-supplied idempotency keys on the decision command.** Excluded by AC-TASKS-QUORUM-CONCURRENCY-001.7.
   Transition application is idempotent (AC-TASKS-QUORUM-CONCURRENCY-001.6); recording is not.
 - **Giving the singleton human user a participant row.** AC-TASKS-QUORUM-VERDICT-001.3 makes a human
   rejection count without one. Seating the user in the slate would change who

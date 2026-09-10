@@ -185,6 +185,25 @@ describe("useSubmitHandler routing", () => {
     expect(onSend).toHaveBeenCalledWith({ message: "direct preview message" });
     expect(handleSendMessageMock).not.toHaveBeenCalled();
   });
+
+  it("does not clear composer side effects when admission reports unsuccessful", async () => {
+    const clearEphemeral = vi.fn();
+    handleSendMessageMock.mockResolvedValueOnce(false);
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          contextFiles: [{ path: "src", name: "src", isDirectory: true }],
+          clearEphemeral,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "keep this draft" });
+    });
+
+    expect(clearEphemeral).not.toHaveBeenCalled();
+  });
 });
 
 describe("useSubmitHandler plan mode", () => {

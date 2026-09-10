@@ -15,6 +15,7 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
         sessionId: "session-1",
         isSending: false,
         isStarting: false,
+        canQueueWhileStarting: false,
         isPreparingEnvironment: false,
         isMoving: false,
         isFailed: false,
@@ -48,6 +49,13 @@ describe("useChatInputContainer", () => {
     expect(result.current.isDisabled).toBe(false);
     expect(result.current.submitDisabled).toBe(true);
     expect(result.current.submitDisabledReason).toBeUndefined();
+  });
+
+  it("enables startup submission only when the selected session can queue", () => {
+    const { result } = renderInputState({ isStarting: true, canQueueWhileStarting: true });
+
+    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.submitDisabled).toBe(false);
   });
 
   it("preserves draft text when startup transitions to failed recovery", () => {

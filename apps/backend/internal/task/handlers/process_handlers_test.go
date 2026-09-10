@@ -468,7 +468,7 @@ func (m *mockRepository) CountActiveTaskSessionsByRepository(ctx context.Context
 func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	return 0, nil
 }
-func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error {
+func (m *mockRepository) DeleteTaskSession(ctx context.Context, session *models.TaskSession) error {
 	return nil
 }
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
@@ -765,6 +765,9 @@ func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*mo
 	return nil, nil
 }
 func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error {
 	return nil
 }
 func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) error { return nil }

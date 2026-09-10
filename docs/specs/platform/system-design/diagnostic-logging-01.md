@@ -80,6 +80,8 @@ history or returning an unbounded log export.
 - Every error toast displayed through either supported frontend toast system
   is reported immediately to the backend and written as an `error` entry named
   `frontend error toast`.
+- A backend-reload alert is not an error toast. Its allow-listed recovery report
+  uses the info-level contract in part 2 of this design.
 - Toast reporting includes the visible toast text plus rich browser context:
   the browser URL origin and pathname with query and fragment removed, browser
   identity fields, viewport dimensions, a client timestamp, the toast
@@ -163,6 +165,12 @@ paired [system design](../system-design/browser-console-retention.md).
   synchronously in the intercepted console call. A full staging queue drops
   lower-priority `debug`/`info` entries first and records loss metadata; it
   never delays the original console call.
+- Frontend bundle capture freezes the entries that exist at notification
+  receipt. Entries that arrive later do not extend the capture flush. The
+  capture uses its receipt-time memory snapshot if the flush exceeds one second.
+- The frontend reads and uploads one chronological browser page at a time. The
+  first page is smaller than later pages. A monotonic receipt-relative budget
+  stops page reads and uploads without using the browser wall clock.
 - A browser debug producer that scans a growing collection coalesces its own
   derived payload before it calls `console.debug`. The
   `messages:process` producer keeps the latest inputs and emits one trailing

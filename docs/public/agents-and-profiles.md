@@ -34,7 +34,8 @@ Antigravity has no automated install: Google distributes `agy_acp_server.par` (`
 
 Pi uses separate executables for its two Kandev modes:
 
-- Structured ACP sessions and one-shot inference use `npx -y pi-acp`.
+- Structured ACP sessions and one-shot inference use
+  `npx --yes --prefer-offline pi-acp@<effective-version>`.
 - CLI Passthrough starts the globally installed `pi` executable.
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -52,16 +53,30 @@ The status shown on this page is authoritative for the current host. A CLI that 
 
 ### Update a managed agent runtime
 
-The update icon is available on managed Claude, Codex, OpenCode, Copilot, and
-Gemini agent cards. It updates the runtime on the Kandev host.
+The update icon is available on managed Claude, Codex, OpenCode, Copilot,
+Gemini, and Pi agent cards. It updates the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
 inference, containers, and SSH commands. A successful version update stores
 your exact selection for this Kandev installation. The selection takes
-precedence over the default until you choose **Use Kandev default**. Kandev
-does not store the default as a user selection, so later Kandev releases can
-move unmodified installations to their reviewed defaults.
+precedence for the current default generation. **Use Kandev default** clears
+it, and a later shipped package or reviewed default resets it during startup.
+Kandev does not store the default as a user selection.
+
+When a Kandev upgrade changes the managed package or its reviewed default,
+Kandev removes the older selection during startup before the service becomes
+ready. New probes and launches then use the reviewed default for that release.
+On the first startup with this generation tracking, Kandev treats an existing
+selection without a generation marker as legacy and resets it once.
+When the package and default stay the same, Kandev preserves your selection
+across restarts and unrelated upgrades. A process that is already running is
+not replaced, so the new default applies when Kandev starts a future process.
+
+After startup, open the update control to select any validated stable version,
+including an older version. This lets you roll back the new default when a
+provider or environment requires it. The selection remains active until you
+change it or a later Kandev release changes that agent's package or default.
 
 When the cached npm check finds a newer stable release, the update control has
 a blue dot and its accessible label includes the effective and latest
@@ -101,6 +116,13 @@ registry contains that exact version. Kandev recognizes this specific npm
 resolution error, removes only the deterministic `_npx` execution tree for the
 selected package and version, then retries the same command once with an
 online-preferred metadata lookup.
+
+Kandev also performs this recovery while it builds the host capability
+catalogue used by agent profiles. A successful retry publishes the recovered
+models and keeps the saved model, fallback model, mode, runtime version, and
+enabled state unchanged. The profile remains selectable and does not show a
+capability warning. Kandev reports a failed capability status if it cannot
+prepare the retry or repair the cache, or if the one online retry fails.
 
 The same recovery applies to managed runtime startup on a local PC, in a local
 Docker executor, or in a remote SSH executor. Kandev sends the repair request
@@ -149,6 +171,14 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
 
+Agents can inspect and update declared profile settings through the compact
+`search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,
+and `update_settings_kandev` tools. Use the separate
+`agent_profile_mcp` target for the profile MCP document. The settings tools
+preserve profile validation and save replacement lists atomically. They never
+return environment values or MCP credentials; use references or the existing
+interactive credential flow when a secret is required.
+
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
 Configuration options are resolved for the model selected in the profile. An
@@ -156,6 +186,31 @@ agent can therefore show a different option set for each model. If a model
 change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
+
+### Model IDs and executor catalogs
+
+The host model probe is an editing hint. The selected executor owns the model
+catalog at launch. Kandev resolves a saved model in this order:
+
+1. Use the exact requested model when the executor advertises it.
+2. Use the advertised explicit fallback when the requested model is absent.
+3. Use one unique bracketed variation when the requested model is absent and
+   the executor advertises exactly one matching ID.
+4. Use the agent's current or default model when no earlier choice applies.
+
+Profiles with automatic fallback enabled keep the legacy behavior when the
+saved model is absent: Kandev ignores the explicit fallback and does not infer
+a variation. It uses the agent's current or default model instead.
+
+For example, a saved `opus` model can launch as `opus[1m]` when that is the
+only advertised `opus[...]` ID. If the executor advertises both
+`opus[270k]` and `opus[1m, fast]`, Kandev does not choose either variation.
+Variation text is opaque and model IDs remain case-sensitive.
+
+Kandev shows a warning when the launch result differs from the saved model.
+The saved profile remains `opus`; Kandev does not rewrite it after applying a
+unique variation or using the agent default. Recheck the executor catalog when
+the warning repeats after credentials, copied configuration, or agent updates.
 
 ### Use a dynamic profile
 
@@ -212,15 +267,18 @@ stale browser action does not replace a newer route decision.
 
 The model list shown while editing a profile comes from a host probe. It is an
 editing hint, not a launch gate. A profile remains selectable when its saved
-model is missing from that host list.
+model is missing from that host list. Profile selectors do not show a model
+warning for this difference. Inspect the model list in profile settings for
+discovery details. Authentication, installation, and probe-failure indicators
+remain visible on profile selectors.
 
-At task launch, the selected executor's ACP catalog is authoritative. Kandev
-sends the requested model only when the executor advertises it. If it does
-not, Kandev uses an advertised fallback when available, or sends no model
-request and continues with the agent's current or default model. Kandev stores
-one warning in task chat with the requested model and the effective model when
-known. The warning also identifies the agent and executor and asks you to
-check credentials, copied configuration, and the agent version.
+At task launch, the selected executor's ACP catalog is authoritative. For
+profiles without automatic fallback, Kandev follows the four-step order above.
+For profiles with automatic fallback enabled, an absent saved model causes no
+model request, and Kandev ignores the explicit fallback and any variation.
+Kandev stores one warning in task chat with the requested model and the
+effective model when known. The warning also identifies the agent and executor
+and asks you to check credentials, copied configuration, and the agent version.
 
 The saved profile model is not changed. Optional portable configuration can
 copy selected allowlisted files into a remote executor, but it cannot guarantee
@@ -308,7 +366,13 @@ Profile environment rules are:
 - `TASK_DESCRIPTION` and every `KANDEV_*` key are reserved;
 - an entry must use either a literal value or a secret reference, never both.
 
-Secret references are resolved at process launch. A deleted, missing, or unreadable secret causes that environment entry to be omitted; Kandev does not fall back to an old value. Empty resolved values are also omitted. Profile values fill missing environment keys but do not overwrite environment supplied by the executor or Kandev runtime.
+Kandev resolves secret references at process launch and cold resume. A deleted, missing, or unreadable secret blocks launch before the agent starts. The error identifies the environment key and its source.
+
+Secret deletion is blocked while an agent profile, executor profile, or repository environment references the secret. When you select Delete, Kandev checks first. If the secret is in use, a dialog lists the affected resources and does not offer a delete action. Remove or replace those references before deleting the secret.
+
+If a reference is already broken, open the named profile and select the replacement secret for the affected key, save, and retry. For a visible repository reference, open that repository's environment settings and replace the binding. A redacted `repository` reference means the repository is in a workspace that you cannot access; a workspace user with edit permission must locate and replace the binding in that workspace's repository settings. If no such user exists, ask a workspace owner or administrator to grant access or repair the binding. Creating a secret with the same name does not repair the reference because each secret has a separate ID.
+
+API clients can explicitly force deletion. This leaves broken references and blocks future launches until those references are repaired. See the [secret deletion API contract](websocket-api.md#settings-secrets-and-automations).
 
 Repositories can bind an environment key to a Global secret or to a Workspace secret from the same workspace under **Settings > Workspaces > _workspace_ > Repositories**. A task inherits bindings from every attached repository. Repository bindings are secret references, never values, and a repository binding to a deleted or unreadable secret blocks that task's launch. If two sources provide the same key, Kandev deduplicates an identical secret reference and rejects every other collision; repository order never chooses a winner.
 

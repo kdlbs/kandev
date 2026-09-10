@@ -1,6 +1,8 @@
 package service
 
 import (
+	"time"
+
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -251,6 +253,7 @@ type UpdateRepositoryRequest struct {
 	ProviderScope          *string `json:"provider_scope,omitempty"`
 	ProviderOwner          *string `json:"provider_owner,omitempty"`
 	ProviderName           *string `json:"provider_name,omitempty"`
+	RemoteURL              *string `json:"remote_url,omitempty"`
 	DefaultBranch          *string `json:"default_branch,omitempty"`
 	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix,omitempty"`
 	WorktreeBranchTemplate *string `json:"worktree_branch_template,omitempty"`
@@ -296,12 +299,13 @@ type CreateExecutorProfileRequest struct {
 
 // UpdateExecutorProfileRequest contains the data for updating an executor profile
 type UpdateExecutorProfileRequest struct {
-	Name          *string                `json:"name,omitempty"`
-	McpPolicy     *string                `json:"mcp_policy,omitempty"`
-	Config        map[string]string      `json:"config,omitempty"`
-	PrepareScript *string                `json:"prepare_script,omitempty"`
-	CleanupScript *string                `json:"cleanup_script,omitempty"`
-	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	Name              *string                `json:"name,omitempty"`
+	McpPolicy         *string                `json:"mcp_policy,omitempty"`
+	Config            map[string]string      `json:"config,omitempty"`
+	PrepareScript     *string                `json:"prepare_script,omitempty"`
+	CleanupScript     *string                `json:"cleanup_script,omitempty"`
+	EnvVars           []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	ExpectedUpdatedAt *time.Time             `json:"-"`
 }
 
 // CreateEnvironmentRequest contains the data for creating an environment

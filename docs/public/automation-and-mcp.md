@@ -582,12 +582,11 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
 - `list_related_tasks_kandev`;
-- `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
+- `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`;
 - `show_rich_output_kandev`;
-- `record_step_decision_kandev` records an `approved` or `rejected` verdict for the current workflow step. It requires a non-empty reason, and a later verdict supersedes the earlier one.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, related-task discovery, task documents, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 
@@ -602,6 +601,19 @@ If `agentctl kandev ...` reports that `KANDEV_API_URL` or `KANDEV_API_KEY` is
 missing, do not set either variable yourself. A regular task session should use
 its injected Kandev MCP tools. An Office-owned task must be started or woken
 through Office so the scheduler can supply its signed runtime context.
+
+Reviewers and approvers record a workflow-step verdict through the task-bound
+runtime CLI. The command accepts only `approved` or `rejected` and requires a
+non-empty reason:
+
+```bash
+$KANDEV_CLI kandev task decision --decision approved --reason "..."
+```
+
+The runtime derives the task, session, and agent identity from the signed run
+context. A repeated decision supersedes the earlier decision for that
+participant and step. Comments and approval-inbox commands do not record a
+workflow-step verdict.
 
 An Office run can inspect the projects in its current workspace:
 
@@ -722,13 +734,45 @@ Kandev does not upgrade or proxy configured third-party MCP servers. Their suppo
 
 This compatibility work does not add MCP Tasks, new OAuth behavior, or third-party MCP proxying.
 
-External MCP exposes 42 tools in these groups:
+External MCP exposes tools in these groups:
 
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
 - saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
+- agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
+
+### Agent-accessible settings
+
+External and task-scoped agents can use the same compact settings tools:
+
+```text
+search_settings_kandev
+describe_setting_kandev
+list_settings_resources_kandev
+get_settings_kandev
+update_settings_kandev
+```
+
+Search returns metadata only. Use `describe_setting_kandev` for the schema,
+target rules, authority, replacement behavior, and recovery guidance for one
+field. Use `list_settings_resources_kandev` when a field needs an exact
+workspace, repository, profile, task, or integration target. Then pass one
+target and the declared field paths to `get_settings_kandev` or
+`update_settings_kandev`.
+
+The backend validates every target and change against the owning domain. Writes
+keep the existing domain authorization, reference checks, atomicity, events,
+and cache behavior. Saved credential values are not returned. Secret-bearing
+fields return redacted values or safe references, and credential enrollment,
+deployment-owned configuration, plugin-owned settings, client-local state,
+and lifecycle actions remain on their existing explicit surfaces.
+
+The compact envelope is stable as domains grow. Agents should discover fields
+at runtime instead of assuming that a domain's full schema is present in the
+tool definition. Existing lifecycle tools and compatibility MCP tools remain
+available where documented.
 
 `export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
 

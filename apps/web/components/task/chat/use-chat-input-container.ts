@@ -23,13 +23,14 @@ type UseChatInputContainerParams = {
   workspaceId?: string | null;
   isSending: boolean;
   isStarting: boolean;
+  /** True when the selected startup session has a complete queue identity. */
+  canQueueWhileStarting: boolean;
   /** True only during a real Docker/Sprites prepare phase. Different from
    * `isStarting`, which fires for every session that's transitioning
    * through STARTING (including local quick-chat). Drives the "agent still
    * being set up" submit-disabled tooltip so it only appears when a
-   * container/sandbox is genuinely bootstrapping; the disabled state
-   * itself is still gated on the broader `isStarting` to keep e2e
-   * Cmd+Enter from racing the not-yet-ready agent. */
+   * container/sandbox is genuinely bootstrapping; startup submission also
+   * requires a complete queue identity. */
   isPreparingEnvironment: boolean;
   isMoving: boolean;
   isFailed: boolean;
@@ -137,13 +138,14 @@ function computeDerivedState(params: {
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
   steerPlaceholder: string | undefined;
+  canQueueWhileStarting: boolean;
 }) {
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   // Keep the editor available during STARTING so the user can prepare a draft.
-  // Regular submission remains blocked until the session reaches RUNNING. An
-  // interactive clarification is different: its queue path is persistence-only,
-  // so it remains safe while stale lifecycle metadata says STARTING.
-  const startupSubmitDisabled = params.isStarting && !hasClarification;
+  // Queue-capable sessions may submit during that state. Preparation-only
+  // status and sessions without an immutable queue identity remain blocked.
+  const startupSubmitDisabled =
+    params.isStarting && !hasClarification && !params.canQueueWhileStarting;
   const isDisabled =
     params.isMoving ||
     params.isSending ||
@@ -173,7 +175,7 @@ function computeDerivedState(params: {
     params.placeholder,
     params.isAgentBusy,
     params.hasAgentCommands,
-    params.isStarting && !hasClarification,
+    startupSubmitDisabled,
     params.steerPlaceholder,
   );
   return {
@@ -270,6 +272,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     isAgentBusy,
     hasAgentCommands,
     steerPlaceholder: supportsSteering ? t("chat:composerSteerPlaceholder") : undefined,
+    canQueueWhileStarting: params.canQueueWhileStarting,
   });
 
   return {

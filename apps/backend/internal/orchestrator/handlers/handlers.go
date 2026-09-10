@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -136,6 +137,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
 		// not a fault: log WARN (no stack trace) so it does not masquerade as a
@@ -256,6 +260,19 @@ func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, er
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), branchRecoveryErr.Details())
 }
 
+func taskArchivedConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	if !errors.Is(err, executor.ErrTaskArchived) {
+		return nil, nil
+	}
+	return ws.NewError(
+		msg.ID,
+		msg.Action,
+		ws.ErrorCodeConflict,
+		"Task is archived. Unarchive it before recovering this session.",
+		map[string]interface{}{"kind": "task_archived"},
+	)
+}
+
 // wsRecoverSession recovers a session by id (resume or fresh start).
 func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsRecoverSessionRequest
@@ -282,6 +299,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 
 	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
 	if err != nil {
+		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		if recoveryResponse, responseErr := branchRecoveryConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
@@ -312,7 +332,7 @@ func (h *Handlers) wsRecoverTaskLaunch(ctx context.Context, msg *ws.Message) (*w
 	if req.ErrorStamp == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required", nil)
 	}
-	if req.Action != "mark_review_done" && req.TaskRepositoryID == "" {
+	if req.Action != "mark_review_done" && req.Action != "retry_launch" && req.TaskRepositoryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required for branch recovery", nil)
 	}
 	if req.Action == "pick_base_branch" && req.BaseBranch == "" {

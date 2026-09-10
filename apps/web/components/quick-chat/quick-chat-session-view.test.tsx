@@ -8,12 +8,17 @@ const sessionRows = vi.hoisted(
       { task_id?: string; agent_profile_id?: string; is_passthrough?: boolean }
     >,
 );
+const quickChatSessions = vi.hoisted(
+  () => [] as Array<{ sessionId: string; taskId?: string; agentProfileId?: string }>,
+);
 const useEnsureTaskSession = vi.hoisted(() => vi.fn());
+const useTask = vi.hoisted(() => vi.fn());
 const useSessionResumption = vi.hoisted(() =>
   vi.fn(() => ({
     resumptionState: "idle",
     sessionStatus: null,
     error: null,
+    recoveryFailure: null,
     taskSessionState: null,
     worktreePath: null,
     worktreeBranch: null,
@@ -25,12 +30,13 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       taskSessions: { items: sessionRows },
-      quickChat: { sessions: [] },
+      quickChat: { sessions: quickChatSessions },
       agentProfiles: { items: [] },
     }),
 }));
 
 vi.mock("@/hooks/use-ensure-task-session", () => ({ useEnsureTaskSession }));
+vi.mock("@/hooks/use-task", () => ({ useTask }));
 vi.mock("@/hooks/domains/session/use-session-resumption", () => ({ useSessionResumption }));
 vi.mock("@/components/task/passthrough-terminal", () => ({
   PassthroughTerminal: () => <div data-testid="passthrough-terminal" />,
@@ -56,7 +62,10 @@ const session = {
 afterEach(() => {
   cleanup();
   delete sessionRows[session.sessionId];
+  quickChatSessions.length = 0;
   vi.clearAllMocks();
+  useTask.mockReset();
+  useTask.mockReturnValue(null);
 });
 
 // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2
@@ -66,7 +75,7 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId);
+    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId, null);
   });
 
   it("waits for session hydration before resuming a descriptor task", () => {
@@ -74,12 +83,16 @@ describe("QuickChatSessionView session resumption", () => {
       <QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />,
     );
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
 
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
     view.rerender(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(DESCRIPTOR_TASK_ID, session.sessionId);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      DESCRIPTOR_TASK_ID,
+      session.sessionId,
+      null,
+    );
   });
 
   it("falls back to the hydrated task-session row when the descriptor has no task id", () => {
@@ -87,13 +100,37 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId);
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null);
+  });
+
+  it("passes the hydrated task archive state to session recovery", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: true });
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true);
+  });
+
+  it("uses hydrated Quick Chat ownership when the ephemeral task is absent from kanban tasks", () => {
+    const view = render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+
+    quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
+    view.rerender(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+    );
   });
 
   it("passes a null task id until session hydration provides one", () => {
     const view = render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
 
     sessionRows[session.sessionId] = { task_id: "task-after-hydration" };
     view.rerender(<QuickChatSessionView session={session} />);
@@ -101,6 +138,7 @@ describe("QuickChatSessionView session resumption", () => {
     expect(useSessionResumption).toHaveBeenLastCalledWith(
       "task-after-hydration",
       session.sessionId,
+      null,
     );
   });
 });

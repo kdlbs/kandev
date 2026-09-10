@@ -21,6 +21,7 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs", "--log-level", "ERROR"}},
 		{"copilot", NewCopilotACP(), "@github/copilot", []string{"--acp"}},
 		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
+		{"pi", NewPiACP(), "pi-acp", nil},
 	}
 
 	for _, tt := range tests {
@@ -151,6 +152,7 @@ func TestManagedAgentsHonorExactVersionCommandOption(t *testing.T) {
 		{"opencode", NewOpenCodeACP()},
 		{"copilot", NewCopilotACP()},
 		{"gemini", NewGemini()},
+		{"pi", NewPiACP()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

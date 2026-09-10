@@ -5,6 +5,7 @@ created: 2026-08-03
 owners:
   - kandev
 ---
+
 # Manage Pending Message Queues Requirements
 
 ## Overview
@@ -27,6 +28,8 @@ Long-running tasks can receive messages faster than their active session can dra
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.6:** An entry already reserved for durable lifecycle delivery is not visible and cannot be removed by these controls. Task archive/delete retains its separate privileged purge behavior.
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.7:** **Settings > Task Behavior > Message Queue** exposes the maximum number of persisted messages allowed per session alongside independent manual and automatic merge switches.
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.8:** The default is `10`. A positive integer sets a cap; `0` means unlimited.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9:** When a queued-message preview fits within its collapsed rendered height, evaluated at the row width available while the optional disclosure control is omitted, the row shall omit the expand/collapse control. The control itself shall not change that fit decision. When viewport width or zoom changes whether the preview overflows, the control shall appear or disappear without a reload.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.10:** When a visible row offers removal, its expand/collapse control, when present, shall be immediately before the Remove control. Remove shall use the shared trash symbol and shall adopt the destructive color on hover while retaining its existing accessible name.
 
 ## Migrated source detail
 
@@ -73,9 +76,11 @@ remains full. Those same rows have no individual remove action.
   automatic merge switches.
 - The default is `10`. A positive integer sets a cap; `0` means unlimited.
 - A saved setting applies immediately to later admissions. Existing entries
-  are never trimmed. If a queue already exceeds a newly lowered limit, new
-  messages are rejected with `queue_full` until its persisted count is below
-  the limit.
+  are never trimmed. At or above a positive cap, an eligible direct automatic
+  fold into the pending tail may still succeed because it does not add a row.
+  Other admissions are rejected with `queue_full` until the persisted count is
+  below the limit. A staged-attachment admission cannot use the direct-fold
+  exception and is rejected before attachment claim or tail mutation.
 - Previously accepted work may be restored or retried after a delivery
   failure even when the new cap is lower. Capacity limits new work; it does not
   turn a failed delivery into message loss.

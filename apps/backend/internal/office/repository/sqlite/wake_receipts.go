@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -99,6 +100,7 @@ type StuckParentCandidate struct {
 // later (guardAgentStatus in the caller is exactly that — a cheap,
 // redundant closing of that race window, not the primary filter).
 func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit int) ([]StuckParentCandidate, error) {
+	driver := r.ro.DriverName()
 	var rows []StuckParentCandidate
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		WITH stuck AS (
@@ -107,7 +109,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 				`+RunnerProjection("p")+` AS assignee_agent_profile_id,
 				p.workflow_step_id AS workflow_step_id,
 				COALESCE((
-					SELECT GROUP_CONCAT(c.id || ':' || c.state, ',')
+					SELECT `+childSetKeyAggregate(driver)+`
 					FROM (
 						SELECT id, state FROM tasks
 						WHERE parent_id = p.id AND archived_at IS NULL
@@ -141,7 +143,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		WHERE s.assignee_agent_profile_id != ''
 		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
 		  AND (
-		      r.child_set_key IS NOT s.child_set_key
+		      r.child_set_key IS DISTINCT FROM s.child_set_key
 		      OR (
 		          NOT EXISTS (
 		              SELECT 1 FROM runs delivered
@@ -152,7 +154,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		  )
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
-		      WHERE json_extract(w.payload, '$.task_id') = s.parent_task_id
+		      WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
 		        AND w.reason = ?
 		        AND (
 		            w.status IN ('queued', 'claimed')
@@ -264,6 +266,17 @@ func (r *Repository) GetChildSetKeyTx(
 		return "", err
 	}
 	return formatChildSetKey(rows), nil
+}
+
+// childSetKeyAggregate renders the deterministic child-set key used by
+// ListStuckParents. Its output must match formatChildSetKey byte for byte.
+// Postgres requires ORDER BY inside STRING_AGG because subquery ordering does
+// not define aggregate input order.
+func childSetKeyAggregate(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `STRING_AGG(c.id || ':' || c.state, ',' ORDER BY c.id)`
+	}
+	return `GROUP_CONCAT(c.id || ':' || c.state, ',')`
 }
 
 func formatChildSetKey(rows []childSetKeyRow) string {

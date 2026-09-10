@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import type React from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileTree, searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -24,6 +25,45 @@ const FB_IS_DIR = (n: FileTreeNode) => n.is_dir;
 export type FileBrowserRow = VisibleRow<FileTreeNode>;
 
 export type LoadState = "loading" | "waiting" | "loaded" | "manual" | "error";
+
+type FileBrowserTreeResult = {
+  tree: FileTreeNode | null;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  expandedPaths: ReadonlySet<string>;
+  setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>;
+  visibleRows: FileBrowserRow[];
+  visibleLoadingPaths: Set<string>;
+  isLoadingTree: boolean;
+  loadState: LoadState;
+  loadError: string | null;
+  loadTree: ReturnType<typeof useTreeLoader>;
+  showLoading: (path: string) => void;
+  hideLoading: (path: string) => void;
+  isLoading: (path: string) => boolean;
+  collapseAll: () => void;
+};
+
+function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
+  return useMemo(
+    () => result,
+    [
+      result.tree,
+      result.setTree,
+      result.expandedPaths,
+      result.setExpandedPaths,
+      result.visibleRows,
+      result.visibleLoadingPaths,
+      result.isLoadingTree,
+      result.loadState,
+      result.loadError,
+      result.loadTree,
+      result.showLoading,
+      result.hideLoading,
+      result.isLoading,
+      result.collapseAll,
+    ],
+  );
+}
 
 /** Hook encapsulating file search state and handlers. */
 export function useFileBrowserSearch(sessionId: string) {
@@ -450,7 +490,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     setFilesPanelExpandedPaths(effectiveResetKey, Array.from(expandedPaths));
   }, [expandedPaths, effectiveResetKey, isLoadingTree]);
   useFileChangeSubscription({ sessionIdRef, expandedPathsRef, setTree, setLoadState });
-  return {
+  return useMemoizedFileBrowserTreeResult({
     tree,
     setTree,
     expandedPaths,
@@ -465,7 +505,7 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
     hideLoading,
     isLoading,
     collapseAll: treeApi.collapseAll,
-  };
+  });
 }
 
 export {

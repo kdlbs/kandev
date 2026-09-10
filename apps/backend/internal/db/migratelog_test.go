@@ -96,6 +96,37 @@ func TestMigrateLogger_Apply_BrokenStatement(t *testing.T) {
 	}
 }
 
+func TestRequiredMigrateLogger_Apply_ReturnsUnexpectedFailure(t *testing.T) {
+	db := memDB(t)
+	m := NewRequiredMigrateLogger(db, nil)
+
+	err := m.Apply("no_such.col", `ALTER TABLE no_such_table ADD COLUMN col TEXT`)
+	if err == nil {
+		t.Fatal("expected required migration failure")
+	}
+	if m.Err() == nil {
+		t.Fatal("expected required migration logger to retain the failure")
+	}
+}
+
+func TestRequiredMigrateLogger_Apply_AllowsIdempotentFailure(t *testing.T) {
+	db := memDB(t)
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE t ADD COLUMN col TEXT DEFAULT ''`); err != nil {
+		t.Fatalf("initial alter: %v", err)
+	}
+
+	m := NewRequiredMigrateLogger(db, nil)
+	if err := m.Apply("t.col", `ALTER TABLE t ADD COLUMN col TEXT DEFAULT ''`); err != nil {
+		t.Fatalf("idempotent migration: %v", err)
+	}
+	if m.Err() != nil {
+		t.Fatalf("idempotent migration recorded an error: %v", m.Err())
+	}
+}
+
 // TestMigrateLogger_Apply_NilLog verifies that a nil logger does not panic.
 func TestMigrateLogger_Apply_NilLog(t *testing.T) {
 	db := memDB(t)

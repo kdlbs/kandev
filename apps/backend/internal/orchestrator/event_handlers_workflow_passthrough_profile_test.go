@@ -169,7 +169,7 @@ func TestApplyEngineTransitionRejectsPassthroughTargetProfileBeforePersistingSte
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: steps, taskRepo: taskRepo, agentManager: agentManager,
 		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
-		workflowStore: newWorkflowStore(repo, steps, agentManager, noopPublisher, log),
+		workflowStore: newWorkflowStore(repo, steps, agentManager, noopPublisher, log, &operationLedger{}),
 	}
 
 	applied := svc.applyEngineTransition(ctx, "t1", session, engine.HandleResult{

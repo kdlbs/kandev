@@ -38,8 +38,7 @@ test.describe("managed agent runtime updates", () => {
     await trigger.click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
     await expect(dialog).toBeVisible();
-    const dialogBox = await dialog.boundingBox();
-    expect(dialogBox).not.toBeNull();
+    const dialogBox = await settledBoundingBox(dialog);
     expect(dialogBox!.width).toBeGreaterThanOrEqual(640);
     const selectorBox = await dialog
       .getByTestId(`agent-update-version-${runtime.agentName}`)

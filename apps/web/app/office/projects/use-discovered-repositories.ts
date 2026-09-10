@@ -1,10 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { discoverRepositoriesAction } from "@/app/actions/workspaces";
+import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
 import type { LocalRepository } from "@/lib/types/http";
-
-type DiscoveryResult = { ws: string; repos: LocalRepository[] };
 
 /**
  * Lazily discovers on-disk repositories while the picker popover is
@@ -22,23 +19,7 @@ export function useDiscoveredRepositories(
   open: boolean,
   workspaceId: string | null,
 ): LocalRepository[] | null {
-  const [result, setResult] = useState<DiscoveryResult | null>(null);
-
-  useEffect(() => {
-    if (!open || !workspaceId) return;
-    if (result?.ws === workspaceId) return;
-    let cancelled = false;
-    discoverRepositoriesAction(workspaceId)
-      .then((res) => {
-        if (!cancelled) setResult({ ws: workspaceId, repos: res.repositories ?? [] });
-      })
-      .catch(() => {
-        if (!cancelled) setResult({ ws: workspaceId, repos: [] });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, workspaceId, result]);
-
-  return result?.ws === workspaceId ? result.repos : null;
+  const discovery = useRepositoryDiscovery(workspaceId, open);
+  if (!open || !workspaceId || !discovery.hasSnapshot) return null;
+  return discovery.repositories;
 }

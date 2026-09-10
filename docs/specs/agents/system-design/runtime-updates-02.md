@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
 created: 2026-07-26
-updated: 2026-08-22
+updated: 2026-09-07
 owners:
   - Kandev
 ---
@@ -28,14 +28,13 @@ This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATE
   **WHEN** an operator selects an older published stable version and approves
   **Roll back runtime**, **THEN** Kandev prepares and probes that exact version,
   persists it only after success, and restores its model list without restart.
-- **GIVEN** a healthy exact active version, **WHEN** Kandev restarts, **THEN**
-  boot probes and later managed commands use the same exact version.
+- **GIVEN** a healthy exact active version and an unchanged default generation,
+  **WHEN** Kandev restarts, **THEN** boot probes and later commands use that version.
 - **GIVEN** an agent has no operator selection, **WHEN** Kandev builds any of
   its managed npm ACP commands, **THEN** the command uses the exact reviewed
   Kandev default and never an unversioned package spec.
-- **GIVEN** an agent has a validated operator selection, **WHEN** Kandev builds
-  a local, container, or SSH managed npm ACP command, **THEN** the command uses
-  that exact selection instead of the Kandev default.
+- **GIVEN** an agent has a current-generation operator selection, **WHEN**
+  Kandev builds a managed ACP command, **THEN** the command uses that selection.
 - **GIVEN** an operator selection exists, **WHEN** the operator chooses **Use
   Kandev default**, **THEN** Kandev validates the exact default, deletes the
   selection only after success, and future commands follow shipped defaults.
@@ -101,8 +100,8 @@ This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATE
 
 ## Out of scope
 
-- Automatic runtime installation, automatic operator-selection changes, and
-  automatic rollback after launch failure.
+- Automatic runtime installation, selection changes outside default-generation
+  activation, and automatic rollback after launch failure.
 - Global npm cache cleanup, registry replacement, dependency substitution, or
   automatic selection of another package version.
 - Prerelease, tag, arbitrary package-spec, registry, or shell-command input.

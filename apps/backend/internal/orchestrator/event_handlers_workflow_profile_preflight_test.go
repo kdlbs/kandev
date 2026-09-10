@@ -180,7 +180,7 @@ func TestApplyEngineTransitionRejectsTargetProfileBeforePersistingStep(t *testin
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: steps, taskRepo: taskRepo, agentManager: agentMgr,
 		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
-		workflowStore: newWorkflowStore(repo, steps, agentMgr, noopPublisher, log),
+		workflowStore: newWorkflowStore(repo, steps, agentMgr, noopPublisher, log, &operationLedger{}),
 	}
 
 	applied := svc.applyEngineTransition(ctx, "t1", session, engine.HandleResult{
@@ -267,7 +267,7 @@ func TestSwitchSessionForStepUsesReusableSessionExecutorProfileForCredentialAdmi
 	exec.SetGitHubCredentialBroker(fakeSwitchSessionCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve")
 	svc := &Service{
 		logger: log, repo: repo, taskRepo: taskRepo, agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
+		messageQueue: newAuthoritativeMemoryQueue(repo, log), executor: exec,
 	}
 
 	got, err := svc.switchSessionForStep(ctx, "t1", current, "profile-b")
