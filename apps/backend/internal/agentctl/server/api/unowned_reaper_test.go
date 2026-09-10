@@ -49,9 +49,11 @@ func TestUnownedReaperFiresShutdownAfterPeriodElapses(t *testing.T) {
 		t.Fatal("ownership.IsShuttingDown() = false after the unowned period elapsed, want true")
 	}
 
+	// Latching the one-way door and closing the signal channel are separate
+	// steps, so the signal is awaited rather than sampled once.
 	select {
 	case <-cs.ShutdownRequested():
-	default:
+	case <-time.After(2 * time.Second):
 		t.Fatal("ShutdownRequested() channel not closed after the reaper fired")
 	}
 }
