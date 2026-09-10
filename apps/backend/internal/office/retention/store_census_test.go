@@ -54,13 +54,14 @@ func TestCensusRoutineRuns_DetectsUnknownStatus(t *testing.T) {
 
 	seedRoutine(t, conn, "r-1")
 	seedRoutineRun(t, conn, newID(), "r-1", "quarantined", nil, daysAgo(1))
+	seedRoutineRun(t, conn, newID(), "r-1", "quarantined", nil, daysAgo(2))
 
 	census, err := store.CensusRoutineRuns(ctx, conn, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CensusRoutineRuns: %v", err)
 	}
-	if len(census.UnknownStatuses) != 1 || census.UnknownStatuses[0] != "quarantined" {
-		t.Fatalf("unknownStatuses = %v, want [quarantined]", census.UnknownStatuses)
+	if len(census.UnknownStatuses) != 1 || census.UnknownStatuses[0].Status != "quarantined" || census.UnknownStatuses[0].Count != 2 {
+		t.Fatalf("unknownStatuses = %v, want [{quarantined 2}]", census.UnknownStatuses)
 	}
 }
 
@@ -118,16 +119,17 @@ func TestCensusRuns_RetainedCountIsSumOfEveryStatusNoTopAttribution(t *testing.T
 	seedRun(t, conn, newID(), "agent-1", "finished", timePtr(daysAgo(1)), daysAgo(1))
 	seedRun(t, conn, newID(), "agent-1", "queued", nil, daysAgo(0))
 	seedRun(t, conn, newID(), "agent-1", "mystery", nil, daysAgo(0))
+	seedRun(t, conn, newID(), "agent-1", "mystery", nil, daysAgo(0))
 
 	census, err := store.CensusRuns(ctx, conn, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CensusRuns: %v", err)
 	}
-	if census.RetainedCount != 3 {
-		t.Fatalf("retainedCount = %d, want 3", census.RetainedCount)
+	if census.RetainedCount != 4 {
+		t.Fatalf("retainedCount = %d, want 4", census.RetainedCount)
 	}
-	if len(census.UnknownStatuses) != 1 || census.UnknownStatuses[0] != "mystery" {
-		t.Fatalf("unknownStatuses = %v, want [mystery]", census.UnknownStatuses)
+	if len(census.UnknownStatuses) != 1 || census.UnknownStatuses[0].Status != "mystery" || census.UnknownStatuses[0].Count != 2 {
+		t.Fatalf("unknownStatuses = %v, want [{mystery 2}]", census.UnknownStatuses)
 	}
 	if census.TopRoutineID != "" {
 		t.Fatalf("topRoutineID = %q, want empty (runs has no routine attribution)", census.TopRoutineID)

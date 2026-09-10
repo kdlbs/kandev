@@ -51,6 +51,19 @@ func seedRoutineRun(t *testing.T, conn *sqlx.DB, id, routineID, status string, c
 	}
 }
 
+func seedRoutineRunWithFingerprintAndLinkedTask(
+	t *testing.T, conn *sqlx.DB, id, routineID, status string,
+	completedAt *time.Time, createdAt time.Time, fingerprint, linkedTaskID string,
+) {
+	t.Helper()
+	if _, err := conn.Exec(conn.Rebind(`
+		INSERT INTO office_routine_runs (id, routine_id, source, status, completed_at, created_at, dispatch_fingerprint, linked_task_id)
+		VALUES (?, ?, 'trigger', ?, ?, ?, ?, ?)
+	`), id, routineID, status, completedAt, createdAt, fingerprint, linkedTaskID); err != nil {
+		t.Fatalf("seed routine run %s: %v", id, err)
+	}
+}
+
 func seedRun(t *testing.T, conn *sqlx.DB, id, agentProfileID, status string, finishedAt *time.Time, requestedAt time.Time) {
 	t.Helper()
 	if _, err := conn.Exec(conn.Rebind(`
@@ -78,6 +91,16 @@ func seedRouteAttempt(t *testing.T, conn *sqlx.DB, runID string, seq int) {
 		VALUES (?, ?, 'p', 'm', 't', 'ok', ?)
 	`), runID, seq, time.Now().UTC()); err != nil {
 		t.Fatalf("seed route attempt for %s: %v", runID, err)
+	}
+}
+
+func seedRunSkill(t *testing.T, conn *sqlx.DB, runID, skillID string) {
+	t.Helper()
+	if _, err := conn.Exec(conn.Rebind(`
+		INSERT INTO office_run_skills (run_id, skill_id, version, content_hash, materialized_path)
+		VALUES (?, ?, 'v1', 'hash', '/path')
+	`), runID, skillID); err != nil {
+		t.Fatalf("seed run skill for %s: %v", runID, err)
 	}
 }
 
@@ -206,19 +229,23 @@ func TestDeleteRunBatch_DeletesSatellitesAtomicallyWithRun(t *testing.T) {
 	seedRunEvent(t, conn, runID, 0)
 	seedRunEvent(t, conn, runID, 1)
 	seedRouteAttempt(t, conn, runID, 0)
+	seedRunSkill(t, conn, runID, "skill-1")
 
 	result, err := store.DeleteRunBatch(ctx, conn, daysAgo(30), 0, 100)
 	if err != nil {
 		t.Fatalf("DeleteRunBatch: %v", err)
 	}
-	if result.RunsDeleted != 1 || result.RunEventsDeleted != 2 || result.RouteAttemptsDeleted != 1 {
-		t.Fatalf("result = %+v, want RunsDeleted=1 RunEventsDeleted=2 RouteAttemptsDeleted=1", result)
+	if result.RunsDeleted != 1 || result.RunEventsDeleted != 2 || result.RouteAttemptsDeleted != 1 || result.RunSkillsDeleted != 1 {
+		t.Fatalf("result = %+v, want RunsDeleted=1 RunEventsDeleted=2 RouteAttemptsDeleted=1 RunSkillsDeleted=1", result)
 	}
 	if n := countRows(t, conn, `SELECT COUNT(*) FROM run_events WHERE run_id = ?`, runID); n != 0 {
 		t.Fatalf("%d run_events rows remain referencing a deleted run", n)
 	}
 	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_run_route_attempts WHERE run_id = ?`, runID); n != 0 {
 		t.Fatalf("%d route attempt rows remain referencing a deleted run", n)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_run_skills WHERE run_id = ?`, runID); n != 0 {
+		t.Fatalf("%d run skill rows remain referencing a deleted run", n)
 	}
 }
 

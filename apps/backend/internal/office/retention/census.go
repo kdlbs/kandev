@@ -63,14 +63,22 @@ func (s *CensusState) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("retention: unknown census state %q", name)
 }
 
+// UnknownStatusCount is one status this package does not recognize, with
+// the number of retained rows currently holding it
+// (AC-OFFICE-RUN-HISTORY-RETENTION-001.10).
+type UnknownStatusCount struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
 // TableCensus is one thresholded table's retained-count evaluation.
 type TableCensus struct {
-	State           CensusState `json:"state"`
-	RetainedCount   int64       `json:"retained_count"`
-	AsOf            time.Time   `json:"as_of"`
-	UnknownStatuses []string    `json:"unknown_statuses,omitempty"`  // ascending; only populated for status-bearing tables
-	TopRoutineID    string      `json:"top_routine_id,omitempty"`    // office_routine_runs only; empty when not applicable
-	TopRoutineShare float64     `json:"top_routine_share,omitempty"` // top routine's retained rows / table's retained count
+	State           CensusState          `json:"state"`
+	RetainedCount   int64                `json:"retained_count"`
+	AsOf            time.Time            `json:"as_of"`
+	UnknownStatuses []UnknownStatusCount `json:"unknown_statuses,omitempty"`  // ascending by status; only populated for status-bearing tables
+	TopRoutineID    string               `json:"top_routine_id,omitempty"`    // office_routine_runs only; empty when not applicable
+	TopRoutineShare float64              `json:"top_routine_share,omitempty"` // top routine's retained rows / table's retained count
 }
 
 // RetainedCounts holds the current census result for every thresholded
@@ -83,9 +91,10 @@ type RetainedCounts struct {
 
 // summarizeStatusCensus turns a status->count breakdown into a retained
 // count (the sum across every status, since "retained" is the table's
-// current row count) and the sorted list of statuses belonging to neither
-// the history nor the live-state set (AC-OFFICE-RUN-HISTORY-RETENTION-001.10).
-func summarizeStatusCensus(counts map[string]int64, history, live []string) (retained int64, unknown []string) {
+// current row count) and the status/count list, sorted ascending by
+// status, for statuses belonging to neither the history nor the
+// live-state set (AC-OFFICE-RUN-HISTORY-RETENTION-001.10).
+func summarizeStatusCensus(counts map[string]int64, history, live []string) (retained int64, unknown []UnknownStatusCount) {
 	known := make(map[string]bool, len(history)+len(live))
 	for _, s := range history {
 		known[s] = true
@@ -96,10 +105,10 @@ func summarizeStatusCensus(counts map[string]int64, history, live []string) (ret
 	for status, count := range counts {
 		retained += count
 		if !known[status] {
-			unknown = append(unknown, status)
+			unknown = append(unknown, UnknownStatusCount{Status: status, Count: count})
 		}
 	}
-	sort.Strings(unknown)
+	sort.Slice(unknown, func(i, j int) bool { return unknown[i].Status < unknown[j].Status })
 	return retained, unknown
 }
 

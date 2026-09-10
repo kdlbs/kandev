@@ -32,7 +32,7 @@ func TestSummarizeStatusCensus_DetectsUnknownStatusesSortedAscending(t *testing.
 	if retained != 4 {
 		t.Fatalf("retained = %d, want 4", retained)
 	}
-	want := []string{"alpha", "zeta"}
+	want := []UnknownStatusCount{{Status: "alpha", Count: 1}, {Status: "zeta", Count: 1}}
 	if !reflect.DeepEqual(unknown, want) {
 		t.Fatalf("unknown = %v, want %v", unknown, want)
 	}
@@ -94,7 +94,7 @@ func TestCensusTracker_FailedEvaluationAfterSuccessKeepsLastCountsMarkedStale(t 
 	first := TableCensus{
 		RetainedCount:   100,
 		AsOf:            time.Now().UTC(),
-		UnknownStatuses: []string{"weird"},
+		UnknownStatuses: []UnknownStatusCount{{Status: "weird", Count: 1}},
 		TopRoutineID:    "r-1",
 		TopRoutineShare: 0.5,
 	}
@@ -109,7 +109,7 @@ func TestCensusTracker_FailedEvaluationAfterSuccessKeepsLastCountsMarkedStale(t 
 	if got.RetainedCount != 100 {
 		t.Fatalf("retained = %d, want 100 (carried over)", got.RetainedCount)
 	}
-	if !reflect.DeepEqual(got.UnknownStatuses, []string{"weird"}) {
+	if !reflect.DeepEqual(got.UnknownStatuses, []UnknownStatusCount{{Status: "weird", Count: 1}}) {
 		t.Fatalf("unknownStatuses = %v, want carried over", got.UnknownStatuses)
 	}
 	if got.TopRoutineID != "r-1" || got.TopRoutineShare != 0.5 {
