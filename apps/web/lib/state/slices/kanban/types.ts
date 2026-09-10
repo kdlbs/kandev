@@ -129,6 +129,9 @@ export type KanbanState = {
     parkedRevision?: number;
     /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
     parkedEpoch?: number;
+    /** True when this task inherits an archived parent's workspace and can no
+     *  longer materialize or start. */
+    workspaceOrphaned?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;

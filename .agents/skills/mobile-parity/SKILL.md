@@ -13,6 +13,10 @@ Use this skill before planning or changing UI. Goal: desktop and mobile deliver 
 
 Before proposing a mobile design, read [Kandev Mobile UI Language](references/kandev-mobile-ui-language.md) and inspect the closest shipped mobile surface. Responsive CSS alone does not establish mobile parity.
 
+For buttons, single-line inputs, selectors, or control-size audits, also read
+[Control sizing](references/control-sizing.md). It defines desktop sizes,
+touch exceptions, and the sweep procedure.
+
 ## When It Applies
 
 Apply when task changes user-facing UI:
@@ -70,6 +74,8 @@ rendered phone surface with the assigned preview's structure and annotations.
 3. Implement responsive UI.
    - Reuse domain hooks, state, view-model derivation, filtering/selection, and action handlers across viewports; keep responsive wrappers focused on presentation. Branch composition when the desktop interaction model depends on width or a fine pointer. Do not mount a heavyweight desktop workbench and merely hide or squeeze it on phones.
    - Use `useResponsiveBreakpoint` and existing `@kandev/ui` or mobile primitives. Reuse current Dropdown/ContextMenu primitives for contextual actions; use `Drawer` or an existing picker shell for structured phone navigation and choices. Use `useTouchDrawer` when a hover disclosure needs a coarse-pointer alternative.
+   - Use 28px for ordinary desktop buttons, single-line inputs, select triggers, and combobox triggers. Use 24px only for deliberate compact inline controls. Match the desktop Start Task dialog and shared default primitives.
+   - Keep phone and coarse-pointer action targets at least 44px. Scope touch dimensions to those conditions. A desktop-visible action must not inherit an unconditional `h-11` or `min-h-11`. Check both height and minimum height: changing `h-*` does not remove an oversized `min-h-*`.
    - A Radix Tooltip that happens to open after Playwright `.tap()` is not a coarse-pointer alternative. Use `useTouchDrawer` with a Drawer branch and assert the drawer surface in mobile E2E.
    - Keep coarse-pointer and mobile touch targets large enough for touch use, generally at least 44px in the active dimension. This is an active hit-area rule, not a universal desktop visual-size rule: fine-pointer desktop controls should retain the surrounding design-system density, and touch-sized classes such as `h-11` must not become the shared desktop button size.
    - When one component serves both pointer modes, keep its fine-pointer size as the base class and add the 44px size only behind a coarse-pointer or phone variant. An unqualified `h-11` or `min-h-11` on a desktop-visible shared action is a sizing bug.

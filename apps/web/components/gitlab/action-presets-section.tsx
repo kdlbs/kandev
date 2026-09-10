@@ -15,6 +15,8 @@ import { useGitLabActionPresets } from "@/hooks/domains/gitlab/use-gitlab-action
 import type { GitLabActionPreset, GitLabActionPresets } from "@/lib/types/gitlab";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 function actionPromptPlaceholders(t: TFunction) {
   return [
@@ -84,7 +86,7 @@ function PresetList({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-11 w-11 cursor-pointer text-destructive sm:h-8 sm:w-8"
+              className={controlSizingClassName("icon", "cursor-pointer text-destructive")}
               aria-label={t("gitlab:remove", { label: preset.label })}
               onClick={() => onChange(presets.filter((_, current) => current !== index))}
             >
@@ -103,9 +105,8 @@ function PresetList({
       ))}
       <Button
         type="button"
-        size="sm"
         variant="outline"
-        className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+        className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}
         onClick={() => onChange([...presets, newPreset()])}
       >
         <IconPlus className="h-4 w-4" />
@@ -193,9 +194,8 @@ export function GitLabActionPresetsSection({ workspaceId }: { workspaceId: strin
       action={
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          className="h-11 cursor-pointer sm:h-8"
+          className={settingsActionClassName("cursor-pointer")}
           disabled={loading}
           aria-label={t("gitlab:resetQuickActionsToDefaults")}
           onClick={() => void resetDefaults()}

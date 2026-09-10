@@ -180,3 +180,10 @@ The broader affected component, board, priority and move suite passed 64 tests
 in ten files. Existing error feedback, captured identity and fallback contracts
 are unchanged. The ineffective props memo and duplicate destination filter were
 removed; comments and the empty-board dependency were clarified.
+
+Main-base integration preserves the landed shared archive/delete switching
+helper and dialog `focusReturnRef` contract. Threads passes its listing-only
+option through the shared helper and retains its explicit close-focus override.
+Two added dialog compatibility cases verify both focus paths. The integrated
+suite passed 252 tests in 29 files; 27 desktop browser cases also passed,
+including task-detail and preview archive/delete behavior and dismissal focus.

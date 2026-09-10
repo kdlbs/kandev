@@ -386,8 +386,19 @@ first-new-thread fallback before the genuinely empty state. These corrections
 implement the existing requirements and design, without a new contract or copy.
 
 Parent PR #3570 merged while review was in progress, retargeting this PR to
-`main`. Main-base conflict resolution and final integrated validation are the
-next delivery step; the earlier stacked-base results above are historical.
+`main`. Integration with `5ffe8818773bd7c7bda548f3086b305b9b618d55` preserves
+the landed control-sizing primitives, shared archive/delete switching helper,
+and task-detail dialog focus refs alongside Threads' listing-only removal and
+custom focus recovery. Two compatibility tests cover default-ref restoration
+and the Threads override. The integrated unit/component suite passed 252 tests
+in 29 files, and the fresh managed desktop build passed 27 browser tests with
+one worker and no retries, including shared task-detail/preview outcomes.
+The integrated phone run passed 15 cases with one worker and no retries:
+Threads actions, parent view/picker/swipe behavior, and the shared GitLab link
+row. It reused that freshly built backend/web pair.
+Typecheck, affected-file ESLint, locale validation, public-doc validation,
+specification lint and harness checks passed. Earlier stacked-base results
+above remain historical.
 Remote exact-head CI/review confirmation remains part of the ongoing fixup,
 not a completed claim in this local verification record.
 

@@ -7,6 +7,7 @@ import { Separator } from "@kandev/ui/separator";
 import { WorkflowSyncDialog } from "@/components/settings/workflow-sync-dialog";
 import { WorkflowSyncStatusCard } from "@/components/settings/workflow-sync-status-banner";
 import { useWorkflowSync } from "@/hooks/domains/settings/use-workflow-sync";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 // WorkflowSyncButton is the workflow sync entry point (GitHub or GitLab),
 // rendered alongside the other workflow actions (Export / Import / Add). The
@@ -20,7 +21,7 @@ export function WorkflowSyncButton({ onClick }: { onClick: () => void }) {
       variant="outline"
       size="sm"
       onClick={onClick}
-      className="cursor-pointer"
+      className={settingsActionClassName("cursor-pointer")}
       data-testid="workflow-sync-open"
     >
       <IconRefresh className="h-4 w-4 mr-2" />

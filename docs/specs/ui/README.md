@@ -17,6 +17,7 @@ UI owns responsive behavior; other systems own behavior/state.
 
 ### Requirements
 
+- [Control sizing](requirements/control-sizing.md)
 - [ACP model summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
@@ -151,6 +152,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 
 ### Design
+- [Control sizing](system-design/control-sizing.md)
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Dialog containment](system-design/dialog-content-containment.md)

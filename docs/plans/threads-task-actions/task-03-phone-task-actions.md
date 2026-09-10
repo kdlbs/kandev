@@ -286,3 +286,12 @@ action tests together (six tests, one worker, no retries):
 ```sh
 pnpm e2e:run --host --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/gitlab/mobile-gitlab-parity.spec.ts -- --grep 'Mobile GitLab parity.*links a GitLab MR from the visible task actions menu|^(?!.*Mobile GitLab parity)' --retries=0
 ```
+
+After the parent merged, main-base integration passed all 15 phone cases below
+against the freshly rebuilt backend/web pair. The shared control-sizing change
+preserves the approved alignment, 44px targets, drawer containment, all six
+actions, and native picker/swipe/focus behavior. One worker, no retries:
+
+```sh
+pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/task/mobile-threads-view.spec.ts tests/task/mobile-threads-swipe.spec.ts tests/gitlab/mobile-gitlab-parity.spec.ts -- --grep 'Mobile GitLab parity.*links a GitLab MR from the visible task actions menu|^(?!.*Mobile GitLab parity)' --retries=0
+```

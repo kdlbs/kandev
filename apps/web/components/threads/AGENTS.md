@@ -68,7 +68,7 @@ pointers use one `TaskManagementDrawer` with nested pages. Keep chat, editor,
 session and native swipe events outside this boundary.
 
 `useThreadSelectionRecovery` preserves the surviving reader's column offset
-and uses `resolveRemainingThreadId` for successor/predecessor/empty recovery
+and uses `resolveRemainingThreadId` for successor/predecessor/first-new/empty recovery
 when membership changes. This does not replace stable ordering, the parent's
 scroll-derived pagination, or transcript activation. Action focus restoration
 resolves a currently visible trigger and never scrolls to a removed opener.

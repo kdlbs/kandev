@@ -53,15 +53,16 @@ export function useTaskActions() {
 }
 
 /**
- * Archives a task and switches to the next available task.
- * Shared between the PR merged banner and the sidebar archive action.
+ * Runs a one-shot task action (archive or delete) and switches to the next
+ * available task, restoring the previous active task if the action rejects
+ * after an optimistic switch. Shared shape behind `useArchiveAndSwitchTask`
+ * and `useDeleteAndSwitchTask`.
  */
-export function useArchiveAndSwitchTask(opts?: {
-  useLayoutSwitch?: boolean;
-  stayOnListing?: boolean;
-}) {
+function useSwitchAfterTaskAction(
+  runAction: (taskId: string, opts?: { cascade?: boolean }) => Promise<unknown>,
+  opts?: { useLayoutSwitch?: boolean; stayOnListing?: boolean },
+) {
   const store = useAppStoreApi();
-  const { archiveTaskById } = useTaskActions();
   const { removeTaskFromBoard } = useTaskRemoval({
     store,
     useLayoutSwitch: opts?.useLayoutSwitch,
@@ -69,10 +70,10 @@ export function useArchiveAndSwitchTask(opts?: {
   });
 
   return useCallback(
-    async (taskId: string, opts?: TaskActionOptions) => {
+    async (taskId: string, actionOpts?: { cascade?: boolean }) => {
       const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
         store.getState().tasks;
-      const removalOptions = opts?.cascade ? { excludeTaskTree: true } : {};
+      const removalOptions = actionOpts?.cascade ? { excludeTaskTree: true } : {};
 
       const initialSwitch = await removeTaskFromBoard(taskId, {
         wasActiveTaskId,
@@ -82,7 +83,7 @@ export function useArchiveAndSwitchTask(opts?: {
       });
 
       try {
-        await archiveTaskById(taskId, opts);
+        await runAction(taskId, actionOpts);
         await removeTaskFromBoard(taskId, {
           wasActiveTaskId,
           wasActiveSessionId,
@@ -107,6 +108,27 @@ export function useArchiveAndSwitchTask(opts?: {
         throw error;
       }
     },
-    [archiveTaskById, removeTaskFromBoard, store],
+    [runAction, removeTaskFromBoard, store],
   );
+}
+
+/**
+ * Archives a task and switches to the next available task.
+ * Shared between the PR merged banner and the sidebar archive action.
+ */
+export function useArchiveAndSwitchTask(opts?: {
+  useLayoutSwitch?: boolean;
+  stayOnListing?: boolean;
+}) {
+  const { archiveTaskById } = useTaskActions();
+  return useSwitchAfterTaskAction(archiveTaskById, opts);
+}
+
+/**
+ * Deletes a task and switches to the next available task, mirroring
+ * `useArchiveAndSwitchTask`'s outcome for the task detail surface.
+ */
+export function useDeleteAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
+  const { deleteTaskById } = useTaskActions();
+  return useSwitchAfterTaskAction(deleteTaskById, opts);
 }

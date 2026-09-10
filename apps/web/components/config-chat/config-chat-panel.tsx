@@ -154,7 +154,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
           <PopoverTrigger asChild>
             <Button
               size="icon"
-              className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg"
+              className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 size-12 max-md:size-12 [@media(pointer:coarse)]:size-12 cursor-pointer rounded-full shadow-lg"
               aria-label={t("common:configurationChat")}
             >
               <IconSparkles className="h-6 w-6" />

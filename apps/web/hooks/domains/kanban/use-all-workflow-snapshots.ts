@@ -51,6 +51,14 @@ function hasNewerLiveAutoStartFailed(
   return existing.autoStartFailed !== fetchStart.autoStartFailed;
 }
 
+function hasNewerLiveWorkspaceOrphaned(
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): boolean {
+  if (!fetchStart) return true;
+  return existing.workspaceOrphaned !== fetchStart.workspaceOrphaned;
+}
+
 function hasNewerLiveExecutor(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
   if (!fetchStart) return true;
   return (
@@ -59,6 +67,24 @@ function hasNewerLiveExecutor(existing: KanbanTask, fetchStart: KanbanTask | und
     existing.primaryExecutorName !== fetchStart.primaryExecutorName ||
     existing.isRemoteExecutor !== fetchStart.isRemoteExecutor
   );
+}
+
+function preserveLiveMarkerFields(
+  merged: KanbanTask,
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): void {
+  // A task.updated event can set or clear either marker while the snapshot
+  // is in flight. Preserve the newer live value instead of rolling it back.
+  if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
+    merged.autoStartFailed = existing.autoStartFailed;
+  }
+  if (
+    merged.workspaceOrphaned === undefined ||
+    hasNewerLiveWorkspaceOrphaned(existing, fetchStart)
+  ) {
+    merged.workspaceOrphaned = existing.workspaceOrphaned;
+  }
 }
 
 function preserveLiveExecutorBinding(
@@ -122,11 +148,7 @@ function mergeFetchedTask(
   // Autopilot is immutable after creation. Keep the cached value when
   // an older or partial snapshot does not include the field.
   merged.autopilot = merged.autopilot ?? existing.autopilot;
-  // A task.updated event can set or clear this marker while the snapshot is
-  // in flight. Preserve that newer live value instead of rolling it back.
-  if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
-    merged.autoStartFailed = existing.autoStartFailed;
-  }
+  preserveLiveMarkerFields(merged, existing, fetchStart);
   preserveLiveExecutorBinding(merged, existing, fetchStart, source);
   return merged;
 }
