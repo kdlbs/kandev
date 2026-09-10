@@ -85,6 +85,7 @@ func TestPendingMove_ReviewToInProgress_OneTransitionOnly(t *testing.T) {
 func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	sc.stepGetter.steps[stepReviewedID].Name = "Done"
+	sc.stepGetter.steps[stepReviewedID].CompleteTaskOnEnter = true
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {

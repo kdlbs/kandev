@@ -12,20 +12,14 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// TestHandleAgentCompleted_SubtaskWithoutRequestsInputCollapsesToCompleted
-// pins the symptom reported in the v0.88 total-control fix plan:
-// "child in a terminal state without requests_input must NOT write
-// WAITING_FOR_INPUT". handleAgentCompleted's existing line 1238 writes
-// WAITING unconditionally for non-transitioned terminal receipts.
-// setSessionWaitingForInputIfRequested (this commit's guard) refuses
-// the WAITING write for child tasks and instead collapses the session
-// to COMPLETED, so a child agent's clean exit does not leave the
-// session in a stuck RUNNING/RUNNING-equivalent state.
+// TestHandleAgentCompleted_SubtaskWithoutRequestsInputRemainsPromptable
+// protects completed task conversation access. A successful child can finish
+// its task while its session remains an ordinary promptable conversation.
 //
 // The seed task is a subtask (ParentID="parent") in a terminal task state
 // and the agent's last message has requests_input=false; the orchestrator
-// must therefore finish the session to COMPLETED, not WAITING.
-func TestHandleAgentCompleted_SubtaskWithoutRequestsInputCollapsesToCompleted(t *testing.T) {
+// must therefore finish the session in WAITING_FOR_INPUT.
+func TestHandleAgentCompleted_SubtaskWithoutRequestsInputRemainsPromptable(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -40,8 +34,8 @@ func TestHandleAgentCompleted_SubtaskWithoutRequestsInputCollapsesToCompleted(t 
 	}
 	seedExecutorRunning(t, repo, "s-child", "child-task", "exec-child")
 
-	// No messages: requests_input must be false, so the guard refuses
-	// the WAITING write and collapses the session to COMPLETED.
+	// No messages: requests_input is false, but this is still a promptable
+	// successful conversation.
 
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
@@ -54,8 +48,8 @@ func TestHandleAgentCompleted_SubtaskWithoutRequestsInputCollapsesToCompleted(t 
 	if err != nil {
 		t.Fatalf("load session after subtask terminal: %v", err)
 	}
-	if updated.State != models.TaskSessionStateCompleted {
-		t.Fatalf("subtask terminal without requests_input must collapse to COMPLETED, got %q", updated.State)
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("successful subtask without requests_input must remain WAITING_FOR_INPUT, got %q", updated.State)
 	}
 }
 
@@ -95,7 +89,7 @@ func TestHandleAgentCompleted_NonTerminalSubtaskWithoutRequestsInputWritesWaitin
 	}
 }
 
-func TestHandleAgentCompleted_SubtaskIgnoresResolvedClarification(t *testing.T) {
+func TestHandleAgentCompleted_SubtaskWithResolvedClarificationRemainsPromptable(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -132,8 +126,8 @@ func TestHandleAgentCompleted_SubtaskIgnoresResolvedClarification(t *testing.T) 
 	if err != nil {
 		t.Fatalf("load session after resolved clarification: %v", err)
 	}
-	if updated.State != models.TaskSessionStateCompleted {
-		t.Fatalf("resolved clarification must not keep a terminal child waiting, got %q", updated.State)
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("resolved clarification must leave a completed child promptable, got %q", updated.State)
 	}
 }
 

@@ -744,6 +744,10 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 // original worktree branch and reports when it is unrecoverable.
 type ResumeOptions struct {
 	AllowBranchReplacement bool
+	// AllowCompletedSessionResume is granted only by an explicit user recovery
+	// or a pinned follow-up dispatch. It does not change the global terminal
+	// session predicate or permit implicit resume paths.
+	AllowCompletedSessionResume bool
 }
 
 // ResumeSession restarts an existing task session using its stored worktree.
@@ -775,7 +779,7 @@ func (e *Executor) resumeSession(
 		resumeSnapshot.Metadata = cloneMetadata(session.Metadata)
 		session = &resumeSnapshot
 	}
-	task, unlock, err := e.validateAndLockResume(ctx, session)
+	task, unlock, err := e.validateAndLockResume(ctx, session, options)
 	if err != nil {
 		return nil, err
 	}
@@ -783,7 +787,9 @@ func (e *Executor) resumeSession(
 
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
-	wasTerminalResume := isTerminalSessionState(resumeInitialState)
+	completedResume := options.AllowCompletedSessionResume &&
+		resumeInitialState == models.TaskSessionStateCompleted
+	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
 	// Force-cleanup any stale in-memory execution / agentctl state for terminal-state
 	// sessions. Their agent process is dead by definition, so "already running" signals
 	// from the execution store or agentctl's "starting" status are stale and would
@@ -800,10 +806,12 @@ func (e *Executor) resumeSession(
 	var beforeCredentialLease func() error
 	if startAgent {
 		beforeCredentialLease = func() error {
-			if persistErr := e.persistResumeState(ctx, task.ID, session, true); persistErr != nil {
+			// The rollback path must remain armed if persistence fails after the
+			// session has entered STARTING.
+			resumeStatePersisted = true
+			if persistErr := e.persistResumeStateWithOptions(ctx, task.ID, session, true, options); persistErr != nil {
 				return persistErr
 			}
-			resumeStatePersisted = true
 			return nil
 		}
 	}
@@ -923,7 +931,13 @@ func (e *Executor) resumeSession(
 	}
 
 	if startAgent {
-		e.startAgentProcessOnResume(ctx, task.ID, session, resp.AgentExecutionID)
+		e.startAgentProcessOnResumeWithTaskPromotion(
+			ctx,
+			task.ID,
+			session,
+			resp.AgentExecutionID,
+			!completedResume,
+		)
 	}
 
 	return execution, nil
@@ -1030,9 +1044,13 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 // validateAndLockResume validates the session is resumable, acquires the per-session lock,
 // and loads the associated task. Returns the task, an unlock function, and any error.
 // The caller must call unlock() when the critical section is complete.
-func (e *Executor) validateAndLockResume(ctx context.Context, session *models.TaskSession) (*v1.Task, func(), error) {
-	if session == nil {
-		return nil, func() {}, ErrExecutionNotFound
+func (e *Executor) validateAndLockResume(
+	ctx context.Context,
+	session *models.TaskSession,
+	options ResumeOptions,
+) (*v1.Task, func(), error) {
+	if err := validateResumeSession(session, options); err != nil {
+		return nil, func() {}, err
 	}
 	requestedState := session.State
 
@@ -1043,31 +1061,10 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	sessionLock.Lock()
 	unlock := func() { sessionLock.Unlock() }
 
-	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
+	task, err := e.loadResumeTask(ctx, session)
 	if err != nil {
 		unlock()
-		e.logger.Error("failed to load task for session resume",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
 		return nil, func() {}, err
-	}
-	if taskModel.ArchivedAt != nil {
-		unlock()
-		return nil, func() {}, ErrTaskArchived
-	}
-	task := taskModel.ToAPI()
-	if task == nil {
-		unlock()
-		return nil, func() {}, ErrExecutionNotFound
-	}
-
-	if session.AgentProfileID == "" {
-		unlock()
-		e.logger.Error("task session has no agent_profile_id configured",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID))
-		return nil, func() {}, ErrNoAgentProfileID
 	}
 
 	// Re-read session state after acquiring the lock. The caller fetched the
@@ -1078,36 +1075,95 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	// registered, launching a duplicate. If the re-read fails, abort rather than
 	// proceeding with uncertain state — silently falling back to the stale state
 	// would reintroduce the exact race this re-read prevents.
-	fresh, fetchErr := e.repo.GetTaskSession(ctx, session.ID)
-	if fetchErr != nil {
+	if err := e.refreshResumeSessionState(ctx, session, requestedState); err != nil {
 		unlock()
-		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
-			zap.String("session_id", session.ID),
-			zap.Error(fetchErr))
-		return nil, func() {}, fetchErr
-	}
-	if fresh != nil {
-		if isTerminalSessionState(fresh.State) && fresh.State != requestedState {
-			unlock()
-			return nil, func() {}, &SessionStateSupersededError{
-				SessionID: session.ID,
-				State:     fresh.State,
-			}
-		}
-		session.State = fresh.State
+		return nil, func() {}, err
 	}
 
 	// Skip the "already running" rejection for terminal-state sessions — the agent
 	// process is dead by definition, and ResumeSession will force-cleanup stale
 	// state before the relaunch.
-	if !isTerminalSessionState(session.State) {
-		if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
-			unlock()
-			return nil, func() {}, ErrExecutionAlreadyRunning
-		}
+	if err := e.rejectRunningResume(session, options); err != nil {
+		unlock()
+		return nil, func() {}, err
 	}
 
 	return task, unlock, nil
+}
+
+func validateResumeSession(session *models.TaskSession, options ResumeOptions) error {
+	if session == nil {
+		return ErrExecutionNotFound
+	}
+	if session.State == models.TaskSessionStateCompleted && !options.AllowCompletedSessionResume {
+		return &SessionStateSupersededError{
+			SessionID: session.ID,
+			State:     session.State,
+		}
+	}
+	return nil
+}
+
+func (e *Executor) loadResumeTask(ctx context.Context, session *models.TaskSession) (*v1.Task, error) {
+	taskModel, err := e.repo.GetTask(ctx, session.TaskID)
+	if err != nil {
+		e.logger.Error("failed to load task for session resume",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return nil, err
+	}
+	if taskModel.ArchivedAt != nil {
+		return nil, ErrTaskArchived
+	}
+	task := taskModel.ToAPI()
+	if task == nil {
+		return nil, ErrExecutionNotFound
+	}
+	if session.AgentProfileID == "" {
+		e.logger.Error("task session has no agent_profile_id configured",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID))
+		return nil, ErrNoAgentProfileID
+	}
+	return task, nil
+}
+
+func (e *Executor) refreshResumeSessionState(
+	ctx context.Context,
+	session *models.TaskSession,
+	requestedState models.TaskSessionState,
+) error {
+	fresh, err := e.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		e.logger.Warn("failed to re-read session state inside lock; aborting resume to avoid duplicate agent",
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return err
+	}
+	if fresh == nil {
+		return nil
+	}
+	if isTerminalSessionState(fresh.State) && fresh.State != requestedState {
+		return &SessionStateSupersededError{
+			SessionID: session.ID,
+			State:     fresh.State,
+		}
+	}
+	session.State = fresh.State
+	return nil
+}
+
+func (e *Executor) rejectRunningResume(session *models.TaskSession, options ResumeOptions) error {
+	completedResume := options.AllowCompletedSessionResume &&
+		session.State == models.TaskSessionStateCompleted
+	if isTerminalSessionState(session.State) || completedResume {
+		return nil
+	}
+	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {
+		return ErrExecutionAlreadyRunning
+	}
+	return nil
 }
 
 // buildResumeRequest constructs the LaunchAgentRequest for a session resume, resolving executor config,
@@ -1507,14 +1563,26 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 ) *models.ExecutorRunning {
 	if running == nil {
 		// Archive cleanup tears down the executors_running row entirely, so an
-		// archive-cancelled session reaches this point with running == nil —
-		// exactly the shape GetTaskSessionStatus's resumeReasonArchiveCancelledResumable
-		// auto-resumes once the task is unarchived. There is no resume token or
-		// running record to fall back on here, but the launch still must not
-		// replay task.Description as a fresh prompt — see the else-if branch
-		// below for the same guard on the running-record path.
-		if startAgent && isArchiveCancelledResumeSession(session) {
-			req.TaskDescription = ""
+		// archive-cancelled session reaches this point with running == nil. The
+		// session metadata mirrors the provider conversation identity so an
+		// explicit completed follow-up can still restore the same conversation
+		// after runtime cleanup removed the operational row.
+		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
+			isArchiveCancelledResumeSession(session) ||
+			session.State == models.TaskSessionStateCompleted
+		if startAgent && noAutoPromptState {
+			if token := persistedSessionResumeToken(session); token != "" {
+				req.ACPSessionID = token
+				req.TaskDescription = ""
+				e.logger.Info("found persisted session resume token after runtime cleanup",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", session.ID),
+					zap.Bool("has_resume_token", true))
+			} else {
+				// A missing token must still never turn recovery into an automatic
+				// task-description prompt.
+				req.TaskDescription = ""
+			}
 		}
 		return nil
 	}
@@ -1547,11 +1615,12 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
-	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput || isArchiveCancelledResumeSession(session)) {
+	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
+		isArchiveCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
-		// description. Also covers an archive-cancelled session whose running
-		// record survived cleanup but carries no token — same auto-resume shape
-		// as the running==nil branch above.
+		// description. Also covers completed and archive-cancelled sessions whose
+		// running record survived cleanup but carries no token — the same
+		// auto-resume shape as the running==nil branch above.
 		req.TaskDescription = ""
 		e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
 			zap.String("task_id", task.ID),
@@ -1559,6 +1628,34 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 	}
 
 	return running
+}
+
+// persistedSessionResumeToken returns the provider conversation identity that
+// survives executors_running cleanup. The dynamic route projection is checked
+// first; the generic ACP metadata mirror is the fallback for ordinary sessions.
+func persistedSessionResumeToken(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	if session.DownstreamACPSessionID != "" {
+		return session.DownstreamACPSessionID
+	}
+	if session.Metadata == nil {
+		return ""
+	}
+	acp, ok := session.Metadata["acp"]
+	if !ok {
+		return ""
+	}
+	switch value := acp.(type) {
+	case map[string]interface{}:
+		token, _ := value["session_id"].(string)
+		return token
+	case map[string]string:
+		return value["session_id"]
+	default:
+		return ""
+	}
 }
 
 // applyResumeRepoConfig resolves repository details and applies them to req.
@@ -1815,16 +1912,41 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 // lifecycle.persistExecutorRunning. The orchestrator's remaining
 // responsibility is the session-row state machine (STARTING / CompletedAt-clear).
 func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) error {
+	return e.persistResumeStateWithOptions(ctx, taskID, session, startAgent, ResumeOptions{})
+}
+
+func (e *Executor) persistResumeStateWithOptions(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) error {
 	expectedState := session.State
+	completedResume := startAgent && options.AllowCompletedSessionResume &&
+		expectedState == models.TaskSessionStateCompleted
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 		session.CompletedAt = nil
+		if completedResume {
+			if session.Metadata == nil {
+				session.Metadata = make(map[string]interface{})
+			}
+			session.Metadata[models.SessionMetaKeyCompletionFollowUp] = true
+		}
 	}
 
 	var updateErr error
 	if startAgent {
-		updateErr = e.updateSessionStarting(ctx, taskID, session, expectedState, false)
+		updateErr = e.updateSessionStartingWithOptions(
+			ctx,
+			taskID,
+			session,
+			expectedState,
+			false,
+			completedResume,
+		)
 	} else {
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
@@ -1835,7 +1957,39 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 			zap.Error(updateErr))
 		return updateErr
 	}
+	if completedResume {
+		return e.persistCompletionFollowUpMarker(ctx, session.ID)
+	}
 	return nil
+}
+
+func (e *Executor) persistCompletionFollowUpMarker(ctx context.Context, sessionID string) error {
+	setter, ok := e.repo.(sessionMetadataKeyStateSetter)
+	if !ok {
+		return e.repo.SetSessionMetadataKey(
+			ctx,
+			sessionID,
+			models.SessionMetaKeyCompletionFollowUp,
+			true,
+		)
+	}
+	changed, err := setter.SetSessionMetadataKeyIfState(
+		ctx,
+		sessionID,
+		models.SessionMetaKeyCompletionFollowUp,
+		true,
+		models.TaskSessionStateStarting,
+	)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	return &SessionStateSupersededError{
+		SessionID: sessionID,
+		State:     models.TaskSessionStateStarting,
+	}
 }
 
 // prNumberFromMetadata extracts a GitHub PR number from a task_repository's
@@ -1871,12 +2025,24 @@ func prNumberFromMetadata(metadata map[string]interface{}) int {
 // Task state is managed by workflow triggers and stream handlers elsewhere; this callback
 // just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
+	e.startAgentProcessOnResumeWithTaskPromotion(ctx, taskID, session, agentExecutionID, true)
+}
+
+func (e *Executor) startAgentProcessOnResumeWithTaskPromotion(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	agentExecutionID string,
+	promoteTask bool,
+) {
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
-		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
-			e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.Error(updateErr))
+		if promoteTask {
+			if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
+				e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(updateErr))
+			}
 		}
 		e.logger.Debug("agent resumed successfully",
 			zap.String("task_id", taskID),

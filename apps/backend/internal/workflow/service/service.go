@@ -392,6 +392,7 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)),
 			AutoAdvanceRequiresSignal:  stepDef.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: stepDef.CancelTriggersTurnComplete,
+			CompleteTaskOnEnter:        stepDef.CompleteTaskOnEnter,
 			WIPLimit:                   stepDef.WIPLimit,
 			PullFromStepID:             models.RemapStepID(stepDef.PullFromStepID, idMap),
 			StageType:                  stepDef.StageType,
@@ -734,6 +735,9 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
 		return nil, err
 	}
+	if err := export.NormalizeCompletionPolicy(); err != nil {
+		return nil, fmt.Errorf("invalid export data: %w", err)
+	}
 	if err := export.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid export data: %w", err)
 	}
@@ -879,6 +883,7 @@ func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepP
 		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(sp.ProfileSessionEndPolicy)),
 		AutoAdvanceRequiresSignal:  sp.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: sp.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        sp.CompleteTaskOnEnter,
 		WIPLimit:                   sp.WIPLimit,
 		PullFromStepID:             sp.PullFromStepID(posToID),
 	}

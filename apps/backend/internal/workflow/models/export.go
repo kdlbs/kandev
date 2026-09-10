@@ -1,16 +1,20 @@
 package models
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	ExportVersion = 1
-	ExportType    = "kandev_workflow"
+	LegacyExportVersion = 1
+	ExportVersion       = 2
+	ExportType          = "kandev_workflow"
 )
 
 // WorkflowExport is the portable format for sharing workflows.
@@ -49,22 +53,92 @@ type WorkflowPortable struct {
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                       string                                       `json:"name" yaml:"name"`
-	Position                   int                                          `json:"position" yaml:"position"`
-	Color                      string                                       `json:"color" yaml:"color"`
-	Prompt                     string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                     StepEvents                                   `json:"events" yaml:"events"`
-	IsStartStep                bool                                         `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel         bool                                         `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove            bool                                         `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours      int                                          `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile               *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	ProfileSessionStartPolicy  taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy    taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
-	AutoAdvanceRequiresSignal  bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
-	WIPLimit                   int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepPosition       *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	Name                         string                                       `json:"name" yaml:"name"`
+	Position                     int                                          `json:"position" yaml:"position"`
+	Color                        string                                       `json:"color" yaml:"color"`
+	Prompt                       string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                       StepEvents                                   `json:"events" yaml:"events"`
+	IsStartStep                  bool                                         `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel           bool                                         `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove              bool                                         `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours        int                                          `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile                 *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	ProfileSessionStartPolicy    taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy      taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
+	AutoAdvanceRequiresSignal    bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete   bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
+	CompleteTaskOnEnter          bool                                         `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
+	WIPLimit                     int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepPosition         *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	completionTaskOnEnterDecoded bool                                         `json:"-" yaml:"-"`
+	completionTaskOnEnterPresent bool                                         `json:"-" yaml:"-"`
+}
+
+// UnmarshalJSON records whether a decoded document explicitly supplied the
+// version-2 completion field. The domain field remains a bool so callers that
+// build exports in Go keep the same ergonomic API.
+func (s *StepPortable) UnmarshalJSON(data []byte) error {
+	type plainStepPortable StepPortable
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["complete_task_on_enter"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+	}
+	var decoded plainStepPortable
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = StepPortable(decoded)
+	_, s.completionTaskOnEnterPresent = fields["complete_task_on_enter"]
+	s.completionTaskOnEnterDecoded = true
+	return nil
+}
+
+// UnmarshalYAML records whether a decoded document explicitly supplied the
+// version-2 completion field.
+func (s *StepPortable) UnmarshalYAML(node *yaml.Node) error {
+	type plainStepPortable StepPortable
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value != "complete_task_on_enter" {
+				continue
+			}
+			valueNode := node.Content[i+1]
+			if valueNode.Tag == "!!null" || valueNode.ShortTag() == "!!null" {
+				return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+			}
+		}
+	}
+	var decoded plainStepPortable
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*s = StepPortable(decoded)
+	present := false
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value == "complete_task_on_enter" {
+				present = true
+				break
+			}
+		}
+	}
+	s.completionTaskOnEnterPresent = present
+	s.completionTaskOnEnterDecoded = true
+	return nil
+}
+
+func (s StepPortable) completionTaskOnEnterIsExplicit() bool {
+	if !s.completionTaskOnEnterDecoded {
+		return true
+	}
+	return s.completionTaskOnEnterPresent
+}
+
+func (s *StepPortable) markCompletionTaskOnEnterExplicit() {
+	s.completionTaskOnEnterPresent = true
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
@@ -105,6 +179,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
 			AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
+			CompleteTaskOnEnter:        s.CompleteTaskOnEnter,
 			WIPLimit:                   s.WIPLimit,
 		}
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
@@ -130,11 +205,14 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 
 // Validate checks that the export data is well-formed.
 func (e *WorkflowExport) Validate() error {
-	if e.Version != ExportVersion {
-		return fmt.Errorf("unsupported export version: %d (expected %d)", e.Version, ExportVersion)
+	if e.Version != LegacyExportVersion && e.Version != ExportVersion {
+		return fmt.Errorf("unsupported export version: %d (expected %d or %d)", e.Version, LegacyExportVersion, ExportVersion)
 	}
 	if e.Type != ExportType {
 		return fmt.Errorf("unsupported export type: %q (expected %q)", e.Type, ExportType)
+	}
+	if err := e.NormalizeCompletionPolicy(); err != nil {
+		return err
 	}
 	if len(e.Workflows) == 0 {
 		return fmt.Errorf("export contains no workflows")
@@ -152,6 +230,9 @@ func (e *WorkflowExport) Validate() error {
 				return fmt.Errorf("workflow %d: duplicate step position %d", i, step.Position)
 			}
 			positions[step.Position] = true
+			if e.Version == ExportVersion && !step.completionTaskOnEnterIsExplicit() {
+				return fmt.Errorf("workflow %d step %d: complete_task_on_enter must be explicitly set", i, j)
+			}
 			if err := validateOnEnterActions(step); err != nil {
 				return fmt.Errorf("workflow %d step %d: %w", i, j, err)
 			}
@@ -165,6 +246,37 @@ func (e *WorkflowExport) Validate() error {
 		}
 		if err := validatePullSourceRefs(wf.Steps, positions); err != nil {
 			return fmt.Errorf("workflow %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// NormalizeCompletionPolicy converts version-1 exports at the import/sync
+// boundary. Version 1 had no explicit completion field, so only its final
+// step inherits the legacy terminal-name convention. Version-2 values are
+// never inferred or changed.
+func (e *WorkflowExport) NormalizeCompletionPolicy() error {
+	if e.Version != LegacyExportVersion {
+		return nil
+	}
+	for workflowIndex := range e.Workflows {
+		workflow := &e.Workflows[workflowIndex]
+		if len(workflow.Steps) == 0 {
+			continue
+		}
+		maxPosition := workflow.Steps[0].Position
+		for _, step := range workflow.Steps[1:] {
+			if step.Position > maxPosition {
+				maxPosition = step.Position
+			}
+		}
+		for stepIndex := range workflow.Steps {
+			step := &workflow.Steps[stepIndex]
+			if step.completionTaskOnEnterDecoded && step.completionTaskOnEnterPresent {
+				continue
+			}
+			step.CompleteTaskOnEnter = step.Position == maxPosition && IsTerminalStepName(step.Name)
+			step.markCompletionTaskOnEnterExplicit()
 		}
 	}
 	return nil

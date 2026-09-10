@@ -916,20 +916,28 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	// Check for workflow transition based on session's current step.
-	// Uses the engine when available; falls back to legacy evaluation.
-	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
+	if completionFollowUp {
+		// A completed task's explicit follow-up turn is conversational only. It
+		// must become promptable again without re-evaluating the final step's
+		// workflow actions or changing the task's completed state.
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+	} else {
+		// Check for workflow transition based on session's current step.
+		// Uses the engine when available; falls back to legacy evaluation.
+		// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
+		transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
-	// When a workflow transition occurred (e.g. Work → Review), the new step's
-	// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
-	// Skip the queued-message check to avoid racing with that auto-start goroutine —
-	// both would try to call PromptTask and the loser's queued message would be lost.
-	if transitioned {
-		s.logger.Debug("workflow transition occurred, skipping queued message check",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID))
-		return
+		// When a workflow transition occurred (e.g. Work → Review), the new step's
+		// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
+		// Skip the queued-message check to avoid racing with that auto-start goroutine —
+		// both would try to call PromptTask and the loser's queued message would be lost.
+		if transitioned {
+			s.logger.Debug("workflow transition occurred, skipping queued message check",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
 	}
 
 	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
@@ -1811,17 +1819,22 @@ func (s *Service) finishAgentCompleted(
 	session *models.TaskSession,
 	guard *lockedCancelInFlightGuard,
 ) {
+	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
-	s.scheduler.HandleTaskCompleted(data.TaskID, true)
-	s.scheduler.RemoveTask(data.TaskID)
+	if !completionFollowUp {
+		s.scheduler.HandleTaskCompleted(data.TaskID, true)
+		s.scheduler.RemoveTask(data.TaskID)
+	}
 
 	// The agent finished a turn, so any stored failure no longer describes the
 	// session. `session` was read above, so the guard costs nothing.
 	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
 
-	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	if !completionFollowUp {
+		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	}
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
@@ -1836,9 +1849,10 @@ func (s *Service) finishAgentCompleted(
 		return
 	}
 
-	transitioned := !s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) &&
+	transitioned := !completionFollowUp &&
+		!s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) &&
 		s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
-	s.finishAgentCompletedTurn(ctx, data, session, transitioned, guard)
+	s.finishAgentCompletedTurn(ctx, data, session, transitioned, completionFollowUp, guard)
 }
 
 // finishAgentCompletedTurn runs the settle steps after
@@ -1852,6 +1866,7 @@ func (s *Service) finishAgentCompletedTurn(
 	data watcher.AgentEventData,
 	session *models.TaskSession,
 	transitioned bool,
+	completionFollowUp bool,
 	guard *lockedCancelInFlightGuard,
 ) {
 	// Agent-exit path: processOnTurnCompleteViaEngine handles normal
@@ -1888,7 +1903,9 @@ func (s *Service) finishAgentCompletedTurn(
 
 	// Finalize the automation run: mark status=succeeded so the automation's
 	// concurrency slot is released. The worktree stays.
-	s.finalizeAutomationRun(ctx, data.TaskID, true, "")
+	if !completionFollowUp {
+		s.finalizeAutomationRun(ctx, data.TaskID, true, "")
+	}
 
 	// Settle point: turn has been completed and the session state has been
 	// reconciled. reclaimIdleSession is the synchronous equivalent of the
@@ -2336,13 +2353,19 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 // run after the guard is released. Deletion uses the same guard, so an active
 // error event cannot publish after the deleted-session inactive event.
 func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data watcher.AgentEventData) func() {
+	completionFollowUp := false
+	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil && session != nil {
+		completionFollowUp = models.IsCompletionFollowUpSession(session.Metadata)
+	}
 	s.logger.Warn("handling recoverable agent failure",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("error", data.ErrorMessage))
 
 	// Complete the current turn.
-	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	if !completionFollowUp {
+		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	}
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.persistLastAgentError(ctx, data)
 
@@ -2383,7 +2406,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// the session's metadata bag until it's silently cleared on resume.
 	// Office sessions go FAILED, not WAITING_FOR_INPUT, and must not
 	// advance the step here.
-	if nextState == models.TaskSessionStateWaitingForInput && data.SessionID != "" {
+	if !completionFollowUp && nextState == models.TaskSessionStateWaitingForInput && data.SessionID != "" {
 		session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 		if err != nil {
 			s.logger.Warn("failed to reload session for step-completion reconciliation; "+
@@ -2404,6 +2427,9 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// guard, so dispatching while it is held would deadlock. Panic recovery is
 	// the recovered wrapper's job, not this one's — routes R2-R5 reach this
 	// closure with no recover above them on the stack.
+	if completionFollowUp {
+		return func() {}
+	}
 	return func() {
 		s.dispatchKanbanAgentErrorTriggerRecovered(context.WithoutCancel(ctx), data)
 	}

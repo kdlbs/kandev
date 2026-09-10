@@ -17,9 +17,10 @@ test.describe("Workflow import/export", () => {
     // Textarea should contain valid YAML with the workflow
     const textarea = dialog.locator("textarea");
     const yamlContent = await textarea.inputValue();
-    expect(yamlContent).toContain("version: 1");
+    expect(yamlContent).toContain("version: 2");
     expect(yamlContent).toContain("type: kandev_workflow");
     expect(yamlContent).toContain("E2E Workflow");
+    expect(yamlContent).toContain("complete_task_on_enter: false");
 
     // Copy button should work
     await dialog.getByRole("button", { name: "Copy" }).click();
