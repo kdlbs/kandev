@@ -88,7 +88,7 @@ func (r *Repository) ListTaskRepositories(ctx context.Context, taskID string) ([
 			position, metadata, created_at, updated_at
 		FROM task_repositories
 		WHERE task_id = ?
-		ORDER BY position ASC, created_at ASC
+		ORDER BY position ASC, created_at ASC, id ASC
 	`), taskID)
 	if err != nil {
 		return nil, err

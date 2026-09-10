@@ -1701,7 +1701,7 @@ func (e *Executor) applyResumeRepoConfig(
 	if err != nil {
 		return "", err
 	}
-	repositoryID, baseBranch := resolveResumeRepoIDAndBranch(task, session)
+	repositoryID, baseBranch := resolveResumeRepoIDAndBranch(session, allRepos)
 	baseBranch = resolveResumeBaseBranch(repositoryID, baseBranch, allRepos)
 	if baseBranch != "" {
 		req.Branch = baseBranch
@@ -1709,6 +1709,12 @@ func (e *Executor) applyResumeRepoConfig(
 	if repositoryID == "" {
 		return "", nil
 	}
+	// Stamp the resolved primary's identity on every executor type, whether or
+	// not it has a local clone: environmentReposForLaunch's single-repository
+	// fallback projects an inventory row from req.RepositoryID alone, and a
+	// task with exactly one attachment on a non-worktree executor reaches it
+	// with nothing else populated.
+	req.RepositoryID = repositoryID
 
 	var repository *models.Repository
 	for _, info := range allRepos {
@@ -1766,19 +1772,17 @@ func (e *Executor) resumeRepoSet(ctx context.Context, taskID string, resolved ..
 }
 
 // resolveResumeRepoIDAndBranch picks the primary repositoryID and baseBranch
-// for a resume, preferring the session's persisted values and falling back to
-// the task's primary repository when the session row was created before those
-// fields existed.
-func resolveResumeRepoIDAndBranch(task *v1.Task, session *models.TaskSession) (string, string) {
+// for a resume: the session's persisted preference when it is set, otherwise
+// the primary of the resolved task attachment set — its first entry, the same
+// definition GetPrimaryTaskRepository uses. A preference naming a repository
+// absent from the attachment set is used unchanged; resolution of that
+// repository is left to the caller's GetRepository fallback.
+func resolveResumeRepoIDAndBranch(session *models.TaskSession, allRepos []*repoInfo) (string, string) {
 	repositoryID := session.RepositoryID
-	if repositoryID == "" && len(task.Repositories) > 0 {
-		repositoryID = task.Repositories[0].RepositoryID
+	if repositoryID == "" && len(allRepos) > 0 && allRepos[0] != nil {
+		repositoryID = allRepos[0].RepositoryID
 	}
-	baseBranch := session.BaseBranch
-	if baseBranch == "" && len(task.Repositories) > 0 && task.Repositories[0].BaseBranch != "" {
-		baseBranch = task.Repositories[0].BaseBranch
-	}
-	return repositoryID, baseBranch
+	return repositoryID, session.BaseBranch
 }
 
 // resolveResumeBaseBranch prefers the current task-repository row when a

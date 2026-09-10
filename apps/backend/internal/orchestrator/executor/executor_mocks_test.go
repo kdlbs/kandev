@@ -294,6 +294,9 @@ type mockRepository struct {
 	createTaskEnvironmentRepoErr   error
 	finalizeTaskEnvironmentErr     error
 	createTaskSessionFunc          func(ctx context.Context, session *models.TaskSession) error
+	// listTaskRepositoriesFunc, when non-nil, overrides ListTaskRepositories
+	// entirely — used to simulate a transient attachment-set read failure.
+	listTaskRepositoriesFunc func(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	// getTaskSessionByTaskAndAgentFunc, when non-nil, overrides
 	// GetTaskSessionByTaskAndAgent entirely — used to simulate a transient
 	// lookup failure (e.g. the AC-003.7 re-read-after-conflict arm in
@@ -809,6 +812,9 @@ func (m *mockRepository) GetTaskRepository(ctx context.Context, id string) (*mod
 	return nil, nil
 }
 func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	if m.listTaskRepositoriesFunc != nil {
+		return m.listTaskRepositoriesFunc(ctx, taskID)
+	}
 	var out []*models.TaskRepository
 	for _, tr := range m.taskRepositories {
 		if tr.TaskID == taskID {
