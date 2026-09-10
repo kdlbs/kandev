@@ -498,6 +498,29 @@ func (s *Service) StartCreatedSessionWithPromptContext(
 	)
 }
 
+// StartCreatedSessionWithPromptContextAndCanvasGuidance starts a prepared
+// direct-message session with the exact server-side canvas capability decision
+// made while the user message was admitted. This prevents the launch-time
+// canonicalizer from producing a prompt that differs from the persisted row.
+func (s *Service) StartCreatedSessionWithPromptContextAndCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		startCreatedSessionOptions{
+			canvasGuidanceResolved: canvasGuidanceResolved,
+			includeCanvasGuidance:  includeCanvasGuidance,
+		},
+	)
+}
+
 // startCreatedSessionWithComposedPrompt launches a prepared session from an
 // auto-start path whose prompt was already composed and recorded by the
 // orchestrator. The ordinary public entry point intentionally applies the
@@ -527,6 +550,11 @@ type startCreatedSessionOptions struct {
 	skipTaskDescriptionFallback bool
 	promptAlreadyComposed       bool
 	retryPrompt                 string
+	// canvasGuidanceResolved carries the server-side capability projection
+	// from message admission. When false, this launch resolves the capability
+	// locally because no earlier producer has made a trusted decision.
+	canvasGuidanceResolved bool
+	includeCanvasGuidance  bool
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -739,10 +767,21 @@ func (s *Service) startCreatedSession(
 	// Passthrough profiles skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
+	includeCanvasGuidance := false
+	if (effectivePrompt != "" || len(attachments) > 0) && !isOfficeTask && !session.IsPassthrough && !configMode {
+		if options.canvasGuidanceResolved {
+			includeCanvasGuidance = options.includeCanvasGuidance
+		} else {
+			includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
+			}
+		}
+	}
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.wrapCreatedSessionPrompt(
 			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
-			isOfficeTask, configMode, titleOwner, references, promptReferenceContext,
+			isOfficeTask, configMode, titleOwner, includeCanvasGuidance, references, promptReferenceContext,
 		)
 	}
 
@@ -795,7 +834,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 	prompt, taskID, sessionID string,
 	session *models.TaskSession,
 	dbTask *models.Task,
-	isOfficeTask, configMode, titleOwner bool,
+	isOfficeTask, configMode, titleOwner, includeCanvasGuidance bool,
 	references []v1.EntityReference,
 	promptReferenceContext string,
 ) string {
@@ -820,6 +859,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			IncludeCoordinatorTaskControls: !configMode,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
+			IncludeCanvasGuidance:          includeCanvasGuidance,
 			Autopilot:                      dbTask.Autopilot,
 			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
 			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
@@ -989,6 +1029,15 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{Env: env})
 }
 
+// StartTaskWithEnvAndSkills starts a task with launch-scoped environment and
+// skills selected by the Office run rather than by the durable profile.
+func (s *Service) StartTaskWithEnvAndSkills(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{
+		Env:                  env,
+		AdditionalSkillSlugs: append([]string(nil), additionalSkillSlugs...),
+	})
+}
+
 // startTaskOptions carries the optional, server-only launch inputs that only
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
@@ -999,6 +1048,9 @@ type startTaskOptions struct {
 	ProfileExplicit bool
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// profile's durable skill selection.
+	AdditionalSkillSlugs []string
 	// Route pins a concrete execution profile chosen by Office provider routing.
 	Route *executor.RouteOverride
 	// SpawnOrigin is set when another agent session spawned this launch; it
@@ -1024,7 +1076,11 @@ func (s *Service) StartTaskWithRoute(
 	_, err := s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
 		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
-		launch.Attachments, startTaskOptions{Env: launch.Env, Route: &route})
+		launch.Attachments, startTaskOptions{
+			Env:                  launch.Env,
+			AdditionalSkillSlugs: append([]string(nil), launch.AdditionalSkillSlugs...),
+			Route:                &route,
+		})
 	return err
 }
 
@@ -1267,6 +1323,13 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// directly is wrong because it can be empty on manual user-initiated starts
 	// while the task is already bound to a signal-gated step in the DB.
 	if effectivePrompt != "" || len(attachments) > 0 {
+		includeCanvasGuidance := false
+		if !isOfficeTask && !skipKandevMCPWrap && !configMode {
+			includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, task.ID, launchSession, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
+			}
+		}
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
 			prompt:                    effectivePrompt,
 			taskID:                    task.ID,
@@ -1276,6 +1339,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			configMode:                configMode,
 			referenceContext:          promptReferenceContext,
 			includeTaskTitleTool:      !configMode && titleOwner,
+			includeCanvasGuidance:     includeCanvasGuidance,
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
 			spawnOrigin:               opts.SpawnOrigin,
@@ -1306,6 +1370,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		McpMode:              mcpMode,
 		Attachments:          attachments,
 		Env:                  env,
+		AdditionalSkillSlugs: append([]string(nil), opts.AdditionalSkillSlugs...),
 		RouteOverride:        route,
 	})
 	if err != nil {
@@ -1365,6 +1430,7 @@ type launchPromptContext struct {
 	isPassthrough             bool
 	configMode                bool
 	includeTaskTitleTool      bool
+	includeCanvasGuidance     bool
 	autopilot                 bool
 	includeParentQuestionTool bool
 	referenceContext          string
@@ -1405,6 +1471,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
+		IncludeCanvasGuidance:          p.includeCanvasGuidance,
 		Autopilot:                      p.autopilot,
 		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
 		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,
@@ -1909,11 +1976,11 @@ func (s *Service) applyWorkflowAndPlanMode(
 	)
 }
 
-// applyWorkflowAndPlanModeWithPromptContext composes a workflow prompt while
-// preserving a direct message's acceptance-time saved-prompt expansion. A
-// direct message already has canonical reference content, so resolving it
-// again would make persistence and ACP dispatch depend on mutable prompt
-// records. Workflow-only prompts still use the normal expansion path.
+// applyWorkflowAndPlanModeWithPromptContext composes a workflow prompt when
+// available and otherwise prepares the launch prompt directly. A direct
+// message already has canonical reference content, so resolving it again
+// would make persistence and ACP dispatch depend on mutable prompt records.
+// Workflow-only prompts still use the normal expansion path.
 func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 	ctx context.Context,
 	prompt string,
@@ -1927,8 +1994,19 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 ) (string, bool, string) {
 	effectivePrompt := prompt
 	promptReferenceContext := ""
+	if isPassthrough && trustedPromptContext != "" {
+		trustedBlock := sysprompt.Wrap(trustedPromptContext)
+		if strings.Contains(effectivePrompt, trustedBlock) {
+			effectivePrompt = strings.TrimSpace(strings.ReplaceAll(effectivePrompt, trustedBlock, ""))
+		}
+		// Dynamic routing can switch a prepared structured launch to a
+		// passthrough profile. Hidden saved-prompt context must not reach its PTY.
+		trustedPromptContext = ""
+		promptReferenceContext = ""
+	}
 
 	stepHasPlanMode := false
+	workflowPromptComposed := false
 	// Skip workflow step prompt injection for ephemeral tasks - they don't have workflows
 	if !isEphemeral && workflowStepID != "" && s.workflowStepGetter != nil {
 		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
@@ -1936,7 +2014,8 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 			s.logger.Warn("failed to get workflow step for prompt building",
 				zap.String("workflow_step_id", workflowStepID),
 				zap.Error(err))
-		} else {
+		} else if step != nil {
+			workflowPromptComposed = true
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 			if trustedPromptContext != "" {
 				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContext(
@@ -1947,6 +2026,19 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
 				)
 			}
+		}
+	}
+	if !workflowPromptComposed {
+		if trustedPromptContext != "" {
+			trustedBlock := sysprompt.Wrap(trustedPromptContext)
+			if !strings.Contains(effectivePrompt, trustedBlock) {
+				effectivePrompt += "\n\n" + trustedBlock
+			}
+			promptReferenceContext = trustedPromptContext
+		} else {
+			effectivePrompt, promptReferenceContext = s.expandPromptReferencesWithContext(
+				ctx, effectivePrompt, isPassthrough,
+			)
 		}
 	}
 
@@ -2209,25 +2301,32 @@ func (s *Service) ResumeTaskSessionWithOptions(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	allowCompletedResume := options.AllowCompletedSessionResume &&
+		session.State == models.TaskSessionStateCompleted
+	// The completed-session permission is valid only for the exact completed
+	// row admitted by the caller. Do not let an option intended for that state
+	// alter the ordinary FAILED/CANCELLED recovery paths.
+	options.AllowCompletedSessionResume = allowCompletedResume
+	// Completed sessions remain closed to every implicit resume path. Check this
+	// before looking for an executor row because cleanup commonly removes that
+	// row, and the caller should receive the terminal-state rejection rather
+	// than an incidental "no executor record" error.
+	if session.State == models.TaskSessionStateCompleted && !allowCompletedResume {
+		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
+	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if (err != nil || running == nil) &&
 		session.State != models.TaskSessionStateCancelled &&
-		session.State != models.TaskSessionStateFailed {
+		session.State != models.TaskSessionStateFailed &&
+		!allowCompletedResume {
 		// Executor record is required for non-terminal sessions. For cancelled/failed sessions
 		// the record may already have been cleaned up before the user clicked Resume — allow it.
+		// Explicit completed follow-up has the same cleanup shape and is admitted
+		// only through the narrow permission above.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	s.noteMissingWorktreesBeforeResume(sessionID, session)
 	branchRecoveryBefore := s.captureBranchRecoveryBeforeResume(ctx, taskID, sessionID, options)
-
-	// Completed sessions cannot be restarted — they require a new session.
-	// Failed and cancelled sessions keep the resume token so the relaunched
-	// agent continues the previous conversation (via ACP session/load for
-	// native-resume agents, or --resume on CLI). Users who want a fresh start
-	// after a failure can invoke RecoverSession with action="fresh_start".
-	if session.State == models.TaskSessionStateCompleted {
-		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
-	}
 
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
@@ -3586,8 +3685,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	s.clearTurnActivity(sessionID)
 
 	// Queue rows and per-session policy are removed atomically with the task
-	// session row. Publish only the task-scoped recount after commit.
-	s.publishTaskQueueStatusEvent(ctx, taskID, "")
+	// session row. The repository callback publishes a session-scoped event
+	// when it owns the purge; focused compositions use the task-scoped fallback.
+	if !s.sessionQueuePurgeNotifierRegistered {
+		s.publishTaskQueueStatusEvent(ctx, taskID, "")
+	}
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
@@ -3724,6 +3826,60 @@ func (s *Service) publishTaskSessionErrorEvent(
 		"orchestrator",
 		eventData,
 	))
+}
+
+// purgeDeletedSessionQueue invalidates in-process edit state and publishes the
+// queue update after the task repository commits the durable session purge.
+// Request cancellation must not prevent this post-commit notification.
+func (s *Service) purgeDeletedSessionQueue(ctx context.Context, taskID, sessionID string) {
+	cleanupCtx := context.WithoutCancel(ctx)
+	if s.messageQueue == nil {
+		return
+	}
+	s.messageQueue.InvalidateEditLeasesForSession(sessionID)
+	s.publishTaskQueueStatusEvent(cleanupCtx, taskID, sessionID)
+}
+
+// cancelDeletedSessionQueue removes file-backed prompt attachments left on a
+// deleted session. Queue rows and their status notification are owned by the
+// repository's post-commit callback when that callback is registered. Focused
+// compositions without the callback retain the direct queue purge fallback.
+func (s *Service) cancelDeletedSessionQueue(ctx context.Context, taskID, sessionID string) {
+	cleanupCtx := context.WithoutCancel(ctx)
+	if s.messageQueue == nil {
+		if s.sessionAttachmentCleaner != nil {
+			if err := s.sessionAttachmentCleaner.DeleteSessionMessageAttachments(cleanupCtx, taskID, sessionID); err != nil {
+				s.logger.Warn("failed to remove session attachment bytes after session delete",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		}
+		return
+	}
+	_ = s.messageQueue.WithSessionAdmission(cleanupCtx, sessionID, func(admittedCtx context.Context) error {
+		if s.sessionAttachmentCleaner != nil {
+			if err := s.sessionAttachmentCleaner.DeleteSessionMessageAttachments(admittedCtx, taskID, sessionID); err != nil {
+				s.logger.Warn("failed to remove session attachment bytes after session delete",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		}
+		if s.sessionQueuePurgeNotifierRegistered {
+			return nil
+		}
+		if _, err := s.messageQueue.PurgeSession(admittedCtx, sessionID); err != nil {
+			s.logger.Warn("failed to purge queued prompts after session delete",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+		return nil
+	})
+	if !s.sessionQueuePurgeNotifierRegistered {
+		s.publishTaskQueueStatusEvent(cleanupCtx, taskID, sessionID)
+	}
 }
 
 // quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle
@@ -4293,6 +4449,7 @@ type promptTaskOptions struct {
 	claimEntryID          string
 	lifecyclePrompt       bool
 	afterClaim            func() error
+	afterDispatch         func() error
 	preservePromptContext bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
@@ -4573,6 +4730,15 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		promptCtx, taskID, sessionID, rollback.sessionIdentity,
 		session.AgentExecutionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
 	)
+	if options.afterDispatch != nil {
+		originalOnDispatched := onDispatched
+		onDispatched = func() {
+			durableOutcomeErr := options.afterDispatch()
+			originalOnDispatched()
+			_, publicationErr := dispatchOutcome.snapshot()
+			dispatchOutcome.recordAccepted(errors.Join(durableOutcomeErr, publicationErr))
+		}
+	}
 	if releaseDispatchGuard != nil {
 		originalOnDispatched := onDispatched
 		onDispatched = func() {
@@ -5878,6 +6044,40 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	}
 	if err := s.messageQueue.SetAutoRun(ctx, sessionID, true); err != nil {
 		return false, fmt.Errorf("resume queue Auto-run: %w", err)
+	}
+	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
+}
+
+// DrainQueuedMessageIfAutoRun dispatches one queued message only when the
+// persisted Auto-run policy is already enabled. Unlike DrainQueuedMessage, it
+// never changes the policy as a side effect.
+func (s *Service) DrainQueuedMessageIfAutoRun(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session_id is required")
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
+		return false, nil
+	}
+	if s.sessionHasPendingClarification(ctx, sessionID) {
+		return false, nil
+	}
+	if s.messageQueue == nil {
+		return false, errors.New("message queue is not configured")
+	}
+	status := s.messageQueue.GetStatus(ctx, sessionID)
+	if !status.AutoRun {
+		return false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get session: %w", err)
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		return false, nil
 	}
 	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
 }

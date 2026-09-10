@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -52,6 +53,8 @@ var (
 	ErrServiceNotRunning     = errors.New("service is not running")
 	ErrRouteActionActiveTurn = errors.New("route actions require a settled turn")
 )
+
+const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
@@ -144,6 +147,23 @@ type MessageCreator interface {
 type TransientRetryMessageService interface {
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
+}
+
+// SessionAttachmentCleaner removes file-backed prompt attachments after a
+// task session has been deleted. The task service owns storage and authorization
+// details; the orchestrator only coordinates the post-commit lifecycle hook.
+type SessionAttachmentCleaner interface {
+	DeleteSessionMessageAttachments(ctx context.Context, taskID, sessionID string) error
+}
+
+// SessionAttachmentTransferer keeps the exact claimed prompt attachments
+// represented by a queue transfer bound to the queue's owning session.
+type SessionAttachmentTransferer interface {
+	TransferSessionMessageAttachments(
+		ctx context.Context,
+		taskID, oldSessionID, newSessionID string,
+		attachmentIDs []string,
+	) error
 }
 
 // SubagentContextRecorder persists a durable relational record of a subagent
@@ -278,6 +298,23 @@ type DirectPromptStarter interface {
 		attachments []v1.MessageAttachment,
 		references []v1.EntityReference,
 		promptReferenceContext string,
+	) (*executor.TaskExecution, error)
+}
+
+// DirectPromptStarterWithCanvasGuidance starts a prepared direct-message
+// session with the server-resolved canvas projection that was used before the
+// message was persisted. The projection is deliberately separate from the
+// prompt text so a second canonicalization cannot independently re-resolve a
+// different capability state.
+type DirectPromptStarterWithCanvasGuidance interface {
+	StartCreatedSessionWithPromptContextAndCanvasGuidance(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+		canvasGuidanceResolved, includeCanvasGuidance bool,
 	) (*executor.TaskExecution, error)
 }
 
@@ -597,7 +634,15 @@ type Service struct {
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
 	transientRetryMessages TransientRetryMessageService
+	// sessionQueuePurgeNotifierRegistered means the task repository owns
+	// queue cleanup and status publication after DeleteTaskSession commits.
+	// DeleteSession keeps its fallback cleanup for focused compositions that
+	// cannot register the repository callback, but must not publish twice when
+	// the callback is active.
+	sessionQueuePurgeNotifierRegistered bool
 
+	sessionAttachmentCleaner    SessionAttachmentCleaner
+	sessionAttachmentTransferer SessionAttachmentTransferer
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
 	// safe: both call sites guard on it. See SetSubagentContextRecorder.
@@ -1242,14 +1287,15 @@ type Service struct {
 	running   bool
 	startedAt time.Time
 
-	// sendNowWorkers owns the asynchronous replacement handoffs. The context
-	// is cancelled during Stop so a claimed durable source gets a bounded
-	// recovery attempt before shutdown returns.
+	// sendNowWorkers owns one generation of asynchronous replacement handoffs.
+	// Stop cancels the generation and waits only for a bounded interval; a late
+	// generation keeps its own wait group while the next Start creates another.
 	sendNowMu      sync.Mutex
 	sendNowCtx     context.Context
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
-	sendNowWorkers sync.WaitGroup
+	sendNowWorkers *sync.WaitGroup
+	sendNowDrain   chan struct{}
 
 	// ciAutomationWorkers owns the asynchronous per-PR automation loops. The
 	// service-owned context lets Stop cancel in-flight evaluations and prevents
@@ -1507,6 +1553,7 @@ func NewService(
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
+		sendNowWorkers:               &sync.WaitGroup{},
 		ciAutomationCtx:              ciAutomationCtx,
 		ciAutomationCancel:           ciAutomationCancel,
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
@@ -1534,7 +1581,19 @@ func NewService(
 		SetTaskQueuePurgeNotifier(func(context.Context, string))
 	}); ok {
 		registrar.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+			// SQLite task lifecycle purges the durable queue in its own
+			// transaction, so invalidate only the process-local edit leases
+			// here. Calling PurgeTask would race with the next queue generation.
+			msgQueue.InvalidateEditLeasesForTask(taskID)
 			s.publishTaskQueueStatusEvent(ctx, taskID, "")
+		})
+	}
+	if registrar, ok := repo.(interface {
+		SetTaskSessionQueuePurgeNotifier(func(context.Context, string, string))
+	}); ok {
+		s.sessionQueuePurgeNotifierRegistered = true
+		registrar.SetTaskSessionQueuePurgeNotifier(func(ctx context.Context, taskID, sessionID string) {
+			s.purgeDeletedSessionQueue(ctx, taskID, sessionID)
 		})
 	}
 	s.backgroundProbe = serviceBackgroundProbeAdapter{s: s}
@@ -1580,6 +1639,18 @@ func NewService(
 		promoteTask bool,
 	) error {
 		return s.setSessionStarting(ctx, taskID, session, expectedState, promoteTask)
+	})
+	exec.SetOnSessionStartingWithOptions(func(
+		ctx context.Context,
+		taskID string,
+		session *models.TaskSession,
+		expectedState models.TaskSessionState,
+		promoteTask bool,
+		allowCompletedResume bool,
+	) error {
+		return s.setSessionStartingWithOptions(
+			ctx, taskID, session, expectedState, promoteTask, allowCompletedResume,
+		)
 	})
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
@@ -1706,10 +1777,56 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// TaskSessionCanvasGuidanceEnabled reports whether the resolved MCP profile for
+// a session includes canvas authoring. It is the narrow read-only seam used by
+// message handlers before they persist the first prompt.
+func (s *Service) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
+		return false, err
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
+}
+
+// ErrTaskSessionPairMismatch reports that a task/session API request named
+// two rows that do not belong together.
+var ErrTaskSessionPairMismatch = errors.New("task session pair mismatch")
+
+func (s *Service) taskSessionCanvasGuidanceEnabled(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowTitleTool bool,
+) (bool, error) {
+	if s.executor == nil || session == nil {
+		return false, nil
+	}
+	profile, err := s.executor.ResolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
+	if err != nil {
+		return false, err
+	}
+	return profile.HasCapability(mcpprofile.CapabilityCanvas), nil
+}
+
 // SetLaunchAttachmentClaimer wires staged-descriptor admission into the
 // unified session launch boundary.
 func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {
 	s.launchAttachmentClaimer = claimer
+}
+
+// SetSessionAttachmentCleaner wires post-delete cleanup for claimed prompt
+// attachments belonging to a task session.
+func (s *Service) SetSessionAttachmentCleaner(cleaner SessionAttachmentCleaner) {
+	s.sessionAttachmentCleaner = cleaner
+}
+
+// SetSessionAttachmentTransferer wires the attachment registry update required
+// when queued work moves between task sessions.
+func (s *Service) SetSessionAttachmentTransferer(transfer SessionAttachmentTransferer) {
+	s.sessionAttachmentTransferer = transfer
 }
 
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session
@@ -1906,7 +2023,7 @@ func (s *Service) authorizeTaskSessionPair(ctx context.Context, taskID, sessionI
 		return nil //nolint:nilerr // both IDs authorized; consistency is best-effort
 	}
 	if session.TaskID != taskID {
-		return fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+		return fmt.Errorf("%w: session %s does not belong to task %s", ErrTaskSessionPairMismatch, sessionID, taskID)
 	}
 	return nil
 }
@@ -2741,6 +2858,39 @@ func (s *Service) isSessionResetInProgress(sessionID string) bool {
 	return inProgress
 }
 
+func (s *Service) reconcileDurableQueueStateOnStartup(ctx context.Context) error {
+	for attempt := 1; ; attempt++ {
+		err := s.reconcileSessionTransferCompensationsOnStartup(ctx)
+		if !errors.Is(err, messagequeue.ErrSessionTransferInProgress) {
+			if err != nil {
+				return fmt.Errorf("reconcile session transfer compensations: %w", err)
+			}
+			break
+		}
+		if attempt == maxStartupTransferReconcileAttempts {
+			return fmt.Errorf(
+				"reconcile session transfer compensations still blocked after %d attempts: %w",
+				attempt,
+				err,
+			)
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if err := s.reconcilePendingQueueDispatchesOnStartup(ctx); err != nil {
+		return fmt.Errorf("reconcile pending queue dispatches: %w", err)
+	}
+	if err := s.reconcilePendingSendNowClaimsOnStartup(ctx); err != nil {
+		return fmt.Errorf("reconcile pending Send Now claims: %w", err)
+	}
+	return nil
+}
+
 // Start starts all orchestrator components
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -2760,11 +2910,22 @@ func (s *Service) Start(ctx context.Context) error {
 
 	s.logger.Info("starting orchestrator service")
 	s.resetReservedPromptCallbacks()
-	s.resetSendNowWorkers()
+	if err := s.resetSendNowWorkers(); err != nil {
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
 	s.resetCIAutomationWorkers()
 	s.resetDynamicSuccessorWorkers()
+	if err := s.reconcileDurableQueueStateOnStartup(ctx); err != nil {
+		s.logger.Error("failed to reconcile durable queue state on startup", zap.Error(err))
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
 	s.resetParkedSamplingWorkers()
-
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
@@ -3611,6 +3772,29 @@ func (s *Service) QueueUserPrompt(
 // existing admission pattern at the queue boundary, rather than introducing a
 // different escape path inside the dispatch lifecycle.
 func (s *Service) tryFastPathDrainAfterEnqueue(ctx context.Context, taskID, sessionID string) {
+	s.tryQueueAdmissionReadiness(ctx, taskID, sessionID, nil)
+}
+
+// CheckQueueAdmissionReadiness rechecks automatic dispatch after a WebSocket
+// queue entry is admitted. It keeps the captured session incarnation so a
+// readiness event for a replaced session cannot dispatch the entry elsewhere.
+// A failed or deferred check leaves the durable entry for the existing lifecycle
+// triggers; queue admission itself has already succeeded.
+func (s *Service) CheckQueueAdmissionReadiness(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+) {
+	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
+		return
+	}
+	s.tryQueueAdmissionReadiness(ctx, identity.TaskID, identity.SessionID, &identity)
+}
+
+func (s *Service) tryQueueAdmissionReadiness(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) {
 	if s.messageQueue == nil {
 		return
 	}
@@ -3619,7 +3803,9 @@ func (s *Service) tryFastPathDrainAfterEnqueue(ctx context.Context, taskID, sess
 	}
 	const maxTaskAdmissionReadAttempts = 2
 	for attempt := 0; attempt < maxTaskAdmissionReadAttempts; attempt++ {
-		outcome := s.drainQueuedMessageForPromptableSessionWithTaskAdmission(ctx, taskID, sessionID)
+		outcome := s.drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIdentity(
+			ctx, taskID, sessionID, identity,
+		)
 		if outcome != queueDrainTaskAdmissionReadFailed {
 			return
 		}

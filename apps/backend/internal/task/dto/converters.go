@@ -28,6 +28,7 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		StageType:                  string(step.StageType),
 		AutoAdvanceRequiresSignal:  step.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: step.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        step.CompleteTaskOnEnter,
 	}
 	if hasStepEvents(step.Events) {
 		events := &StepEventsDTO{}

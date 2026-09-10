@@ -117,6 +117,89 @@ func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *t
 	}
 }
 
+type transferFailureQueueRepository struct {
+	messagequeue.Repository
+	err error
+}
+
+func (r *transferFailureQueueRepository) TransferSession(context.Context, string, string) error {
+	return r.err
+}
+
+func (r *transferFailureQueueRepository) TransferSessionIdentities(
+	context.Context,
+	messagequeue.QueueSessionIdentity,
+	messagequeue.QueueSessionIdentity,
+) error {
+	return r.err
+}
+
+func TestCreateNewSessionForStepFailsClosedWhenQueueTransferFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-queue-transfer", "session-queue-transfer", "step-one")
+	current, err := repo.GetTaskSession(ctx, "session-queue-transfer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.State = models.TaskSessionStateRunning
+	current.IsPrimary = true
+	current.AgentProfileID = "profile-old"
+	current.ExecutorID = models.ExecutorIDWorktree
+	current.TaskEnvironmentID = "environment-queue-transfer"
+	if err := repo.UpdateTaskSession(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: current.TaskEnvironmentID, TaskID: current.TaskID,
+		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "replacement-execution"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	transferErr := errors.New("queue transfer failed")
+	svc.messageQueue = messagequeue.NewService(
+		&transferFailureQueueRepository{Repository: newAuthoritativeMemoryRepository(repo), err: transferErr},
+		messagequeue.DefaultMaxPerSession,
+		testLogger(),
+	)
+	if _, err := svc.messageQueue.QueueMessage(ctx, current.ID, current.TaskID, "handoff", "", messagequeue.QueuedByUser, false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.createNewSessionForStep(ctx, current.TaskID, current, "profile-new")
+	if !errors.Is(err, transferErr) {
+		t.Fatalf("createNewSessionForStep error = %v, want queue transfer failure", err)
+	}
+	persisted, err := repo.GetTaskSession(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.State != models.TaskSessionStateRunning || !persisted.IsPrimary {
+		t.Fatalf("current session after failed queue transfer = state %q primary %t, want running primary", persisted.State, persisted.IsPrimary)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, current.ID).Count; got != 1 {
+		t.Fatalf("queued hand-off after failed transfer = %d, want 1", got)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, current.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if session.ID != current.ID && session.State != models.TaskSessionStateCompleted {
+			t.Fatalf("replacement session after failed transfer = %s, want completed cleanup", session.State)
+		}
+	}
+}
+
 // terminalizeCandidateBeforePromotionRepo pauses a profile-switch promotion
 // after lookup so the test can terminalize the selected row before the
 // promotion write begins.
@@ -277,6 +360,7 @@ func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSessi
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 	messages := &mockMessageCreator{}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.SetCanvasesEnabled(true)
 	svc.messageCreator = messages
 	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false, nil)
 	if err != nil {
@@ -287,6 +371,17 @@ func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSessi
 	}
 	if len(agentMgr.capturedPromptCalls) != 1 || !strings.Contains(agentMgr.capturedPromptCalls[0].Prompt, "step_complete_kandev") {
 		t.Fatalf("executor prompt lacks completion contract: %#v", agentMgr.capturedPromptCalls)
+	}
+	for _, prompt := range []string{messages.userMessages[0].content, agentMgr.capturedPromptCalls[0].Prompt} {
+		for _, tool := range []string{
+			"create_canvas_kandev",
+			"read_canvas_authoring_skill_kandev",
+			"publish_canvas_kandev",
+		} {
+			if !strings.Contains(prompt, tool) {
+				t.Fatalf("reset-context prompt lacks %s: %s", tool, prompt)
+			}
+		}
 	}
 	if !strings.Contains(messages.userMessages[0].content, "ask_parent_question_kandev") || strings.Contains(messages.userMessages[0].content, "ask_user_question_kandev") {
 		t.Fatalf("reused autopilot prompt has the wrong question contract: %s", messages.userMessages[0].content)
@@ -329,6 +424,9 @@ func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *
 	}
 	if !strings.Contains(messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS") || strings.Contains(messages.userMessages[0].content, "list_workspaces_kandev") {
 		t.Fatalf("reused Office prompt has the wrong tool contract: %s", messages.userMessages[0].content)
+	}
+	if strings.Contains(messages.userMessages[0].content, "create_canvas_kandev") {
+		t.Fatalf("reused Office prompt must not advertise canvas authoring: %s", messages.userMessages[0].content)
 	}
 }
 func TestResolveStepAgentProfile(t *testing.T) {
@@ -427,6 +525,36 @@ func TestPrepareWorkflowStepSession_PreservesMatchingProfileSession(t *testing.T
 	}
 	if !updated.IsPrimary {
 		t.Fatal("matching profile session must remain primary")
+	}
+}
+
+func TestPrepareWorkflowStepSession_ClearsCompletionFollowUpWithoutProfile(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyCompletionFollowUp, true); err != nil {
+		t.Fatalf("mark completion follow-up: %v", err)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	step := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	if _, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", session, step, nil); err != nil {
+		t.Fatalf("prepareWorkflowStepSession returned error: %v", err)
+	} else if switched {
+		t.Fatal("step without a profile must not switch sessions")
+	}
+
+	updated, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if models.IsCompletionFollowUpSession(updated.Metadata) {
+		t.Fatal("explicit workflow step entry retained completion follow-up ownership")
 	}
 }
 

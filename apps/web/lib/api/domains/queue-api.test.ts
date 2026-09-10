@@ -14,9 +14,13 @@ import {
   QueueSendNowError,
   QueueFullError,
   QueueEntryNotFoundError,
+  QueueEditConflictError,
   QueueReorderError,
+  beginQueuedMessageEdit,
+  endQueuedMessageEdit,
   mergeQueuedEntry,
   queueMessage,
+  renewQueuedMessageEdit,
   reorderQueuedEntries,
   rethrowQueueError,
   sendQueuedNow,
@@ -84,6 +88,15 @@ describe("rethrowQueueError", () => {
         message: "Already drained",
       }),
     ).toThrow(QueueEntryNotFoundError);
+  });
+
+  it("maps edit lease conflicts to QueueEditConflictError", () => {
+    expect(() =>
+      rethrowQueueError({
+        code: "edit_conflict",
+        message: "Edit lease expired",
+      }),
+    ).toThrow(QueueEditConflictError);
   });
 
   it("maps merge_reference_overflow errors to MergeReferenceOverflowError", () => {
@@ -214,6 +227,78 @@ describe("queue reference payloads", () => {
       entry_id: "q-1",
       content: "reference kept",
       entity_references: [reference],
+    });
+  });
+});
+
+describe("queued message edit leases", () => {
+  const lease = {
+    session_id: "session-1",
+    entry_id: "q-1",
+    lease_id: "lease-1",
+    target_revision: 3,
+  };
+
+  it("uses dedicated begin, renew, and end actions", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(lease)
+      .mockResolvedValueOnce({ ...lease, lease_generation: 2 })
+      .mockResolvedValueOnce(undefined);
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(beginQueuedMessageEdit("session-1", "q-1")).resolves.toEqual(lease);
+    await expect(renewQueuedMessageEdit(lease)).resolves.toMatchObject({
+      lease_generation: 2,
+    });
+    await expect(endQueuedMessageEdit(lease)).resolves.toBeUndefined();
+    expect(request).toHaveBeenNthCalledWith(1, "message.queue.edit.begin", {
+      session_id: "session-1",
+      entry_id: "q-1",
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "message.queue.edit.renew", lease);
+    expect(request).toHaveBeenNthCalledWith(3, "message.queue.edit.end", lease);
+  });
+  it("requests a policy-preserving drain after a successful save", async () => {
+    const request = vi.fn().mockResolvedValue(undefined);
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await endQueuedMessageEdit(lease, true);
+
+    expect(request).toHaveBeenCalledWith("message.queue.edit.end", {
+      ...lease,
+      dispatch_if_auto_run: true,
+    });
+  });
+
+  it("forwards operation and target revision fences when replacing content", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValue({ entry_id: "q-1", operation_id: "op-1", target_revision: 4 });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await updateQueuedMessage({
+      task_id: "task-1",
+      session_id: "session-1",
+      session_incarnation_id: INCARNATION_ID,
+      entry_id: "q-1",
+      lease_id: "lease-1",
+      operation_id: "op-1",
+      expected_target_revision: 3,
+      content: "edited",
+      entity_references: [],
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.update", {
+      task_id: "task-1",
+      session_id: "session-1",
+      session_incarnation_id: INCARNATION_ID,
+      entry_id: "q-1",
+      lease_id: "lease-1",
+      operation_id: "op-1",
+      expected_target_revision: 3,
+      content: "edited",
+      entity_references: [],
     });
   });
 });

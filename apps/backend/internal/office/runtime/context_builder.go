@@ -24,7 +24,7 @@ type RunSnapshotStore interface {
 // seat (reviewer or approver) at a task's current workflow step. Implemented
 // by *service.Service via HoldsDecisionSeat, mirroring the authorization
 // RecordAgentDecision itself applies. The result is advisory prompt metadata;
-// the decision tool performs live authorization when it is called.
+// the runtime decision endpoint performs live authorization when it is called.
 type DecisionSeatResolver interface {
 	HoldsDecisionSeat(ctx context.Context, taskID, agentProfileID string) (bool, error)
 }

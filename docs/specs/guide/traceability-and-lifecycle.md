@@ -47,9 +47,12 @@ Implementation state does not change a requirement document from `active` to
 
 ## Stable identities
 
-Requirement and acceptance-criterion IDs do not change when a file moves. Do
-not reuse removed IDs. A replacement requirement references the requirement
-that it supersedes.
+Requirement and acceptance-criterion IDs are globally unique and retain one
+meaning across concurrent branches; they do not change when a file moves. Do
+not reuse removed IDs or renumber an ID to hide a parallel-branch collision. A
+replacement requirement references the requirement that it supersedes. Reconcile
+parallel specification changes before merging them so every artifact continues
+to point to one authoritative contract.
 
 ## Migration
 

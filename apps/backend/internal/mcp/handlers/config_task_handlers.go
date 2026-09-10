@@ -362,7 +362,6 @@ func (h *Handlers) queueMoveTaskPromptWithMoveID(
 	if moveID != "" {
 		metadata = map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID}
 	}
-
 	var (
 		entry *messagequeue.QueuedMessage
 		err   error
@@ -396,7 +395,8 @@ func (h *Handlers) rollbackMoveTaskPrompt(ctx context.Context, handoff *queuedMo
 	if handoff == nil || h.messageQueue == nil {
 		return
 	}
-	if _, err := h.messageQueue.RemoveEntryForSession(ctx, handoff.identity, handoff.entryID); err != nil {
+	rollbackCtx := context.WithoutCancel(ctx)
+	if _, err := h.messageQueue.RemoveEntryForSession(rollbackCtx, handoff.identity, handoff.entryID); err != nil {
 		h.logger.Error("move_task: failed to roll back queued hand-off prompt",
 			zap.String("task_id", handoff.identity.TaskID),
 			zap.String("session_id", handoff.identity.SessionID),
@@ -405,7 +405,7 @@ func (h *Handlers) rollbackMoveTaskPrompt(ctx context.Context, handoff *queuedMo
 		return
 	}
 	if queue, ok := h.messageQueue.(*messagequeue.Service); ok {
-		h.publishQueueStatusEvent(ctx, handoff.identity, queue)
+		h.publishQueueStatusEvent(rollbackCtx, handoff.identity, queue)
 	}
 }
 

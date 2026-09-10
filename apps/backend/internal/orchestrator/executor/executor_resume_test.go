@@ -983,6 +983,45 @@ func TestResumeSession_ArchiveCancelledWithoutRunningRow_ClearsTaskDescription(t
 	}
 }
 
+func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "recover the failed task"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:                     "sess-1",
+		State:                  models.TaskSessionStateFailed,
+		DownstreamACPSessionID: "previous-conversation",
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, nil)
+
+	if req.TaskDescription != "recover the failed task" {
+		t.Fatalf("failed-session TaskDescription = %q, want original prompt", req.TaskDescription)
+	}
+	if req.ACPSessionID != "" {
+		t.Fatalf("failed-session ACP session ID = %q, want empty", req.ACPSessionID)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_CompletedTokenlessRunningRowClearsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "recover the completed task"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:    "sess-1",
+		State: models.TaskSessionStateCompleted,
+	}
+	running := &models.ExecutorRunning{SessionID: "sess-1", TaskID: "task-1"}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, running)
+
+	if req.TaskDescription != "" {
+		t.Fatalf("completed-session TaskDescription = %q, want empty", req.TaskDescription)
+	}
+}
+
 // TestResumeSession_UserCancelledWithoutRunningRow_KeepsTaskDescription is
 // the scoping counterpart to the archive-cancelled test above: a session the
 // user explicitly stopped (not an archive side effect) must not have its

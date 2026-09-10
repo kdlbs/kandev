@@ -38,6 +38,17 @@ func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.M
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 	}
+	if !h.requiresQueueIdentity() {
+		removed, err := h.cancelAllLegacy(ctx, req.SessionID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		h.publishStatus(ctx, req.SessionID)
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			fieldSessionID: req.SessionID,
+			"removed":      removed,
+		})
+	}
 	var removal *messagequeue.QueueRemovalResult
 	var removed int
 	var err error
@@ -302,6 +313,8 @@ func (h *QueueHandlers) sendNowErrorResponse(msg *ws.Message, sessionID string, 
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowQueueEmpty, "Queue is empty", nil)
 	case errors.Is(err, orchestrator.ErrSendNowQueueChanged):
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowQueueChanged, "Queue changed before Send Now could start", nil)
+	case errors.Is(err, orchestrator.ErrSendNowEditConflict):
+		return ws.NewError(msg.ID, msg.Action, "edit_conflict", "Queue entry is being edited by another view", nil)
 	case errors.Is(err, orchestrator.ErrSendNowConflict):
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowConflict, "Another cancellation or Send Now operation is in progress", nil)
 	case errors.Is(err, orchestrator.ErrSendNowTurnChanged):
@@ -385,6 +398,16 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 	if req.EntryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
 	}
+	if !h.requiresQueueIdentity() {
+		if err := h.removeEntryLegacy(ctx, req.SessionID, req.EntryID); err != nil {
+			if errors.Is(err, messagequeue.ErrEntryNotFound) {
+				return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		h.publishStatus(ctx, req.SessionID)
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+	}
 
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
@@ -416,6 +439,110 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 	h.releaseQueueRemovalAttachments(ctx, removal)
 	h.publishStatusForIdentity(ctx, identity)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+// cancelAllLegacy preserves the attachment cleanup contract for the
+// pre-incarnation queue API. Identity-bound callers use the atomic removal
+// result returned by CancelAllForSession above.
+//
+//nolint:cyclop,gocognit // Legacy cancellation preserves attachment cleanup across two queue service contracts.
+func (h *QueueHandlers) cancelAllLegacy(ctx context.Context, sessionID string) (int, error) {
+	var removed int
+	var removedEntries []messagequeue.QueuedMessage
+	var countRemovedEntries bool
+	cancel := func(cancelCtx context.Context) error {
+		prepared := make(map[string]*pendingQueueAttachmentCleanup)
+		status := h.queueService.GetStatus(cancelCtx, sessionID)
+		if status != nil {
+			for i := range status.Entries {
+				entry := &status.Entries[i]
+				if entry.IsReservedInFlight() {
+					continue
+				}
+				pending, prepareErr := h.prepareEntryRemovalCleanup(cancelCtx, entry, "cancel")
+				if prepareErr != nil {
+					for _, earlier := range prepared {
+						h.settlePendingAttachmentCleanup(earlier, nil)
+					}
+					return prepareErr
+				}
+				if pending != nil {
+					prepared[entry.ID] = pending
+				}
+			}
+		}
+
+		var err error
+		if batchCanceller, ok := h.queueService.(queueBatchCanceller); ok {
+			removedEntries, err = batchCanceller.CancelAllWithEntries(cancelCtx, sessionID)
+			countRemovedEntries = true
+		} else {
+			removed, err = h.queueService.CancelAll(cancelCtx, sessionID)
+			if err == nil && status != nil {
+				removedEntries = status.Entries
+			}
+		}
+		if err != nil {
+			for _, pending := range prepared {
+				h.settlePendingAttachmentCleanup(pending, nil)
+			}
+			return err
+		}
+		for i := range removedEntries {
+			if removedEntries[i].IsReservedInFlight() {
+				continue
+			}
+			if countRemovedEntries {
+				removed++
+			}
+			h.releaseQueuedAttachments(cancelCtx, &removedEntries[i], prepared[removedEntries[i].ID])
+		}
+		return nil
+	}
+	if admission, ok := h.queueService.(queueEditAdmissionController); ok {
+		if err := admission.WithSessionAdmission(ctx, sessionID, cancel); err != nil {
+			return 0, err
+		}
+		return removed, nil
+	}
+	if err := cancel(ctx); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
+// removeEntryLegacy preserves durable attachment cleanup for the
+// pre-incarnation queue API. The cleanup obligation is prepared before the
+// row is removed and settled only after the removal commits.
+func (h *QueueHandlers) removeEntryLegacy(ctx context.Context, sessionID, entryID string) error {
+	var err error
+	remove := func(removeCtx context.Context) error {
+		entry, getErr := h.queueService.GetEntry(removeCtx, sessionID, entryID)
+		if getErr != nil {
+			return getErr
+		}
+		pending, prepareErr := h.prepareEntryRemovalCleanup(removeCtx, entry, "remove")
+		if prepareErr != nil {
+			return prepareErr
+		}
+		if remover, ok := h.queueService.(queueEntryRemover); ok {
+			entry, err = remover.RemoveEntryWithEntry(removeCtx, sessionID, entryID)
+		} else {
+			err = h.queueService.RemoveEntry(removeCtx, sessionID, entryID)
+		}
+		if err != nil {
+			h.settlePendingAttachmentCleanup(pending, nil)
+			return err
+		}
+		h.releaseQueuedAttachments(removeCtx, entry, pending)
+		return nil
+	}
+	if admission, ok := h.queueService.(queueEditAdmissionController); ok {
+		err = admission.WithSessionAdmission(ctx, sessionID, remove)
+	} else {
+		err = remove(ctx)
+	}
+	return err
 }
 
 func (h *QueueHandlers) releaseQueueRemovalAttachments(ctx context.Context, removal *messagequeue.QueueRemovalResult) {
@@ -589,6 +716,9 @@ func (h *QueueHandlers) wsReorder(ctx context.Context, msg *ws.Message) (*ws.Mes
 		if errors.Is(err, messagequeue.ErrQueueChanged) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeQueueChanged, "Queue changed before the reorder could be applied", nil)
 		}
+		if errors.Is(err, messagequeue.ErrEditConflict) {
+			return h.queueEditLeaseError(msg, err), nil
+		}
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
 		}
@@ -609,6 +739,20 @@ func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string, adm
 	if h.eventBus == nil {
 		return
 	}
+	// A committed queue mutation still needs an authoritative snapshot when
+	// the initiating request has already been cancelled.
+	ctx = context.WithoutCancel(ctx)
+	if admission, ok := h.queueService.(queueEditAdmissionController); ok {
+		_ = admission.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+			h.publishStatusSnapshot(admittedCtx, sessionID, admitted...)
+			return nil
+		})
+		return
+	}
+	h.publishStatusSnapshot(ctx, sessionID, admitted...)
+}
+
+func (h *QueueHandlers) publishStatusSnapshot(ctx context.Context, sessionID string, admitted ...*messagequeue.QueuedMessage) {
 	status := h.queueService.GetStatus(ctx, sessionID)
 	eventData := map[string]interface{}{
 		fieldSessionID:  sessionID,

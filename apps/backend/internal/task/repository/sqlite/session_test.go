@@ -810,6 +810,45 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfStateGuardsTheSessionState(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-session-marker", "session-session-marker", "turn-session-marker")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-session-marker", "keep", "value"))
+
+	changed, err := repo.SetSessionMetadataKeyIfState(
+		ctx,
+		"session-session-marker",
+		"completion_follow_up",
+		true,
+		models.TaskSessionStateCreated,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"session-session-marker",
+		models.TaskSessionStateCancelled,
+		"stopped",
+	))
+	changed, err = repo.SetSessionMetadataKeyIfState(
+		ctx,
+		"session-session-marker",
+		"completion_follow_up",
+		false,
+		models.TaskSessionStateCreated,
+	)
+	require.NoError(t, err)
+	require.False(t, changed)
+
+	stored, err := repo.GetTaskSession(ctx, "session-session-marker")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
+	require.Equal(t, true, stored.Metadata["completion_follow_up"])
+	require.Equal(t, "value", stored.Metadata["keep"])
+}
+
 func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	seedForMsgTest(t, repo, "task-step-claim", "session-step-claim", "turn-step-claim")

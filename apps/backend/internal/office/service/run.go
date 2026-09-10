@@ -56,16 +56,17 @@ const (
 
 // Run outcome constants (docs/specs/task-delivery-ledger/spec.md, "Office run
 // outcome"). Written into runs.outcome alongside status='finished' at each of
-// the six terminal call sites; NULL on the failed path and on every
+// the seven terminal call sites; NULL on the failed path and on every
 // pre-activation row. RunOutcomeProcessed is the only value
 // RunCountsByDayForAgent counts as succeeded. Every other value buckets into
 // skipped.
 const (
-	RunOutcomeProcessed     = "processed"
-	RunOutcomeBudgetBlocked = "budget_blocked"
-	RunOutcomeIdleSkipped   = "idle_skipped"
-	RunOutcomeAgentInactive = "agent_inactive"
-	RunOutcomeTaskTreeHeld  = "task_tree_held"
+	RunOutcomeProcessed          = "processed"
+	RunOutcomeBudgetBlocked      = "budget_blocked"
+	RunOutcomeIdleSkipped        = "idle_skipped"
+	RunOutcomeAgentInactive      = "agent_inactive"
+	RunOutcomeTaskTreeHeld       = "task_tree_held"
+	RunOutcomeBudgetUnmeasurable = "budget_unmeasurable"
 )
 
 // CoalesceWindowSeconds is the default coalescing window.

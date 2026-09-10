@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-09-05
+updated: 2026-09-09
 owners:
   - cfl
 ---
@@ -12,7 +12,7 @@ owners:
 
 ## Purpose and boundaries
 
-This design record preserves the technical source for the capability mapped to REQ-TASKS-RUNTIME-CLEANUP-001 while the task system completes its migration.
+This design defines task runtime cleanup for REQ-TASKS-RUNTIME-CLEANUP-001.
 
 ## Requirement mapping
 
@@ -157,6 +157,9 @@ before remote or pull-request recovery. Delete remains separate and may remove
 owner rows after capturing its cleanup snapshot.
 
 ## Data Model
+
+Preparation with absent resources follows
+[Cleanup preparation](runtime-cleanup-preparation.md).
 
 ### `executors_running`
 
