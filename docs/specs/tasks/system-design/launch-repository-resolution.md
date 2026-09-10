@@ -47,7 +47,7 @@ own comment states: only a task with no repositories configured at all may
 legitimately have no inventory.
 
 **The launch** reads the session. `resolveResumeRepoIDAndBranch`
-(`apps/backend/internal/orchestrator/executor/executor_resume.go:1653`) takes
+(`apps/backend/internal/orchestrator/executor/executor_resume.go:1775`) takes
 `session.RepositoryID` and falls back to `task.Repositories[0]`. That fallback
 cannot fire: `validateAndLockResume` loads the task through the raw
 `Repository.GetTask` (`task.go:512`), which selects task columns only and never
@@ -70,7 +70,7 @@ the executor is the worktree one. That is the second half of this design; see
 **The record the launch already holds.** `applyResumeRepoConfig` opens by
 calling `resumeRepoSet`, which resolves the task's attachments through
 `ListTaskRepositories` — the same table the guard reads, ordered `position
-ASC, created_at ASC`. The authoritative set is therefore already in hand,
+ASC, created_at ASC, id ASC`. The authoritative set is therefore already in hand,
 fully resolved, before the session-derived primary is chosen. The primary
 selection is the only step that reaches for a different source.
 
@@ -217,7 +217,7 @@ divergence, re-created by a third writer of the same fact.
 | Component | Responsibility |
 | --- | --- |
 | `Executor.applyResumeRepoConfig` (`executor_resume.go:1573`) | Owns launch-time repository resolution. Already resolves the authoritative set; gains ownership of the primary selection, and of stamping the resolved primary's identity on the request for every executor type rather than only the worktree one. |
-| `resolveResumeRepoIDAndBranch` (`executor_resume.go:1653`) | Selects the primary. Must take the resolved set as input instead of the task record, and lose the unreachable branch. |
+| `resolveResumeRepoIDAndBranch` (`executor_resume.go:1775`) | Selects the primary. Must take the resolved set as input instead of the task record, and lose the unreachable branch. |
 | `Repository.ListTaskRepositories` (`task_repository.go:84`) | Authoritative ordered read of the attachment set. Its `ORDER BY` is the primary-selection order. |
 | `Repository.GetPrimaryTaskRepository` (`task_repository.go:255`) | Defines "primary" as the first row of that read. The launch must agree with it, not define a second primary. |
 | `environmentReposForLaunch` (`executor_execute.go:2622`) | Projects the launch request into inventory rows. Unchanged in itself — but it is correct only once the request actually carries the primary's identity, which on a non-worktree executor it does not today. See [stamp the primary repository identity](#decision-stamp-the-primary-repository-identity-on-every-executor-type); without that half, this component still returns `nil` at `:2650-2651` for a single-attachment non-worktree launch and the guard still refuses. |

@@ -12,9 +12,10 @@ owners:
 A task session launch must build its launch request from the repositories the
 task is attached to. Today it builds them from a snapshot on the session row,
 while the persistence guard admitting the resulting environment reads the
-`task_repositories` table. The two disagree whenever a repository is attached to
-a task after one of its sessions was created, and every later launch of that
-session fails with:
+`task_repositories` table. The two disagree whenever a task acquires its first
+attachment after one of its sessions was already created with an empty
+preference (the zero-to-one transition; see `## Prior art` and AC-001.3), and
+every later launch of that session fails with:
 
 ```text
 create task environment: create task environment: ready status requires

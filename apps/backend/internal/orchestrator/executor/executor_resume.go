@@ -1860,6 +1860,15 @@ func (e *Executor) applyResumeCloneURL(req *LaunchAgentRequest, repository *mode
 		return nil
 	}
 	cloneURL := repositoryCloneURL(repository)
+	// Local Docker can bind-mount a task's checked-out source directory and
+	// clone it there, mirroring the initial-launch path (applyRepositoryConfig):
+	// RepositoryPath is authoritative for this launch even when the persisted
+	// generic repository has no provider identity or origin URL (as in
+	// workspace-source and E2E fixtures). Without this fallback, a repository
+	// attached with only a local path can launch initially but never resume.
+	if cloneURL == "" && req.ExecutorType == string(models.ExecutorTypeLocalDocker) {
+		cloneURL = dockerLocalCloneSource(req.RepositoryPath)
+	}
 	if cloneURL == "" {
 		return ErrNoCloneURL
 	}

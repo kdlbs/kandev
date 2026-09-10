@@ -493,3 +493,55 @@ func TestApplyResumeRepoConfig_FailsClosedWhenAttachmentSetReadFails(t *testing.
 		t.Fatalf("req.RepositoryID = %q, want empty: a failed read must not proceed as though the task had no attachments", req.RepositoryID)
 	}
 }
+
+// TestApplyResumeRepoConfig_LocalDockerFallsBackToRepositoryPathOnResume is a
+// PR-fixup regression (greptile finding): applyResumeCloneURL, unlike the
+// initial-launch path (applyRepositoryConfig, executor_execute.go), never fell
+// back to dockerLocalCloneSource when the repository has no provider identity
+// or remote origin. A workspace-source repository with only a local checkout
+// could launch initially but never resume on local_docker, failing every
+// resume with ErrNoCloneURL.
+func TestApplyResumeRepoConfig_LocalDockerFallsBackToRepositoryPathOnResume(t *testing.T) {
+	repo := newMockRepository()
+	source := t.TempDir()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", Name: "repo-1", LocalPath: source}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0,
+	}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{ID: "sess-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v, want nil: a local_docker resume of a repository with only a local checkout must fall back to the repository path", err)
+	}
+	if req.RepositoryURL != source {
+		t.Fatalf("req.RepositoryURL = %q, want %q (the repository path used as the Docker bind-mount clone source)", req.RepositoryURL, source)
+	}
+}
+
+// TestApplyResumeRepoConfig_LocalDockerRejectsMissingRepositoryPathOnResume
+// pins the failure case: when neither a provider/remote clone URL nor a usable
+// local repository path exists, resume must still refuse with ErrNoCloneURL
+// rather than silently launching with an empty clone source.
+func TestApplyResumeRepoConfig_LocalDockerRejectsMissingRepositoryPathOnResume(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", Name: "repo-1"}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0,
+	}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{ID: "sess-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	_, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil)
+	if !errors.Is(err, ErrNoCloneURL) {
+		t.Fatalf("applyResumeRepoConfig error = %v, want ErrNoCloneURL", err)
+	}
+}
