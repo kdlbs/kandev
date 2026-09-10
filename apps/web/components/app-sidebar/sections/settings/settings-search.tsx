@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import type { ChangeEvent, KeyboardEvent, MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { navigateToSettingsDiscovery } from "@/lib/settings-discovery/navigation";
@@ -98,7 +99,10 @@ export function SettingsSearch({
             className={
               floating
                 ? "h-full appearance-none border-0 bg-transparent pl-9 pr-11 text-base shadow-none [&::-webkit-search-cancel-button]:hidden"
-                : "h-11 appearance-none bg-background pl-9 pr-11 text-base md:h-8 md:pl-8 md:pr-8 md:text-xs [&::-webkit-search-cancel-button]:hidden"
+                : controlSizingClassName(
+                    "standard",
+                    "appearance-none bg-background pl-9 pr-11 text-base md:pl-8 md:pr-8 md:text-xs [&::-webkit-search-cancel-button]:hidden",
+                  )
             }
           />
           {query && (

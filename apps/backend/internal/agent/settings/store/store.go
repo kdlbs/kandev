@@ -80,6 +80,19 @@ type Repository interface {
 	Close() error
 }
 
+// AgentProfileMcpConfigPatcher updates selected MCP document columns without
+// replacing fields that were not part of the request. The optional extension
+// keeps lightweight repositories compatible while real stores retain atomic
+// partial-update semantics.
+type AgentProfileMcpConfigPatcher interface {
+	UpdateAgentProfileMcpConfigPatch(
+		ctx context.Context,
+		profileID string,
+		enabled *bool,
+		servers *map[string]interface{},
+	) (*models.AgentProfileMcpConfig, error)
+}
+
 // DynamicProfileRepository is the optional extension implemented by settings
 // stores that persist the dynamic profile document. Keeping it separate from
 // Repository lets small controller fakes and plugin adapters retain the

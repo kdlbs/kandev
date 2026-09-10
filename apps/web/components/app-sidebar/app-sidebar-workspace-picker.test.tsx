@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { StartupPage } from "@/lib/types/http-user-settings";
 
 // The sidebar write path scopes names with the API-origin port; pin it so the
 // captured write assertions are deterministic.
@@ -44,6 +45,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 
 const storeState = {
   features: { office: false },
+  userSettings: { startupPage: "task_overview" as StartupPage },
   workspaces: {
     items: [
       { id: "w1", name: "Default Workspace", office_workflow_id: "" },
@@ -66,6 +68,7 @@ let cookieDescriptor: PropertyDescriptor | undefined;
 function resetWorkspaceSelectTest() {
   navigationMock.push = vi.fn();
   storeState.features.office = false;
+  storeState.userSettings.startupPage = "task_overview";
   storeState.workspaces.activeId = "w1";
   storeState.setActiveWorkspace = vi.fn();
   storeState.resetKanbanWorkspaceContext = vi.fn();
@@ -97,6 +100,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
   beforeEach(() => {
     navigationMock.push = vi.fn();
     storeState.features.office = false;
+    storeState.userSettings.startupPage = "task_overview";
     storeState.workspaces.activeId = "w1";
     storeState.setActiveWorkspace = vi.fn();
   });
@@ -182,6 +186,26 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     );
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w3");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w3");
+  });
+
+  // Contract coverage for the saved Home default on workspace selection.
+  it("uses the Threads default in the selected workspace", () => {
+    storeState.userSettings.startupPage = "threads";
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
+
+    expect(navigationMock.push).toHaveBeenCalledWith("/threads?workspace=w3");
+  });
+
+  it("keeps Office priority over the Threads default", () => {
+    storeState.features.office = true;
+    storeState.userSettings.startupPage = "threads";
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
+
+    expect(navigationMock.push).toHaveBeenCalledWith("/office?workspaceId=w2");
   });
 
   it("calls onActionComplete when selecting a different workspace", () => {

@@ -62,6 +62,9 @@ export interface Task {
    * type only needs the resolved boolean.
    */
   parkedOnBackgroundWork?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start. */
+  workspaceOrphaned?: boolean;
   /** Live subagents summed across this task's sessions; drives the count chip. */
   activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;

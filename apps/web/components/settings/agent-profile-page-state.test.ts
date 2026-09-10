@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Agent } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { reconcileAgentProfileOptions } from "./agent-profile-page-state";
+import {
+  reconcileAgentProfileOptions,
+  shouldSyncProfileSaveResponse,
+} from "./agent-profile-page-state";
 
 vi.mock("@/app/actions/agents", () => ({
   deleteAgentProfileAction: vi.fn(),
@@ -128,5 +131,15 @@ describe("reconcileAgentProfileOptions", () => {
     expect(options).toHaveLength(1);
     expect(options[0].enabled).toBe(false);
     expect(options[0].updatedAt).toBe("2026-08-11T22:00:00.100Z");
+  });
+});
+
+describe("shouldSyncProfileSaveResponse", () => {
+  it("rejects a response that is older than a newer websocket baseline", () => {
+    const current = agent("a1", "p1").profiles[0];
+    const response = { ...current, name: "stale response", updatedAt: "2026-01-01T00:00:00Z" };
+    const baseline = { ...current, name: "websocket update", updatedAt: "2026-01-01T01:00:00Z" };
+
+    expect(shouldSyncProfileSaveResponse(response, baseline)).toBe(false);
   });
 });

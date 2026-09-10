@@ -115,6 +115,9 @@ explicitly requests task tracking.
 qualifies as a successful hook receipt.
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
+   Before reviewing or committing, inspect every `??` path from `git status
+   --short`; `git diff` omits untracked files. Stage each relevant path or read
+   it explicitly so new tests and helpers are not missed.
    - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.
 
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
@@ -133,23 +136,41 @@ qualifies as a successful hook receipt.
    changed copy and fail. Localize it and add matching `en`/`pseudo` catalog
    entries before retrying; verify with `cd apps/web && pnpm run i18n:check` and
    the normal hook receipt.
-   Capture the normal hook stream in a temporary log while committing and use
-   that log to record each hook ID and result. Do not infer hook results from a
-   condensed launcher summary. For example:
+   If the commit command returns an `exec_command` `session_id`, preserve the
+   full result and poll that same session until it is terminal; never start a
+   second commit attempt while the first is live. Retain the exact temporary
+   log path from that single attempt for the hook receipt. Capture the normal
+   hook stream in a temporary log while committing and use that log to record
+   each hook ID and result. RTK can condense `rtk git commit`
+   output, so use `rtk proxy git commit` when preserving raw hook output. Do not
+   infer hook results from a condensed launcher summary. For example:
    ```bash
    COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
    set -o pipefail
-   git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG" >/dev/null
+   rtk proxy git commit -m "type(scope): description" 2>&1 | rtk proxy tee "$COMMIT_LOG" >/dev/null
    ```
-   Read the log to extract the hook receipt, rather than printing the full
-   stream again. Remove the exact temporary file after copying the receipt into
+   Both the commit and `tee` stages must use raw-output mode when the log is
+   parsed; normal `rtk git commit` output may contain only `ok <sha>` and is not
+   hook evidence. Read the log to extract every hook ID/result and confirm the receipt still
+   says `bypass: false`, rather than printing the full stream again. Remove the
+   exact temporary file after copying the receipt into
    the handoff:
    ```bash
    unlink "$COMMIT_LOG"
    ```
+   If a timed-out hook leaves a commit or linter process running, inspect
+   `git status`, `git log`, and only that attempt's processes before retrying.
+   Wait for or stop the owned process tree first; do not mistake a transient
+   `parallel golangci-lint is running` message for a second commit failure.
    If the commit exits nonzero, preserve and print the full or bounded log
    before cleanup so hook diagnostics are not lost. Remove the temporary log
    only after copying a successful hook receipt or recording the failed output.
+   When extracting receipt lines from a nested shell, use shell-safe single-
+   quoted `awk` or `sed` expressions; a double-quoted `sed` range containing
+   `$` can be expanded by the outer shell and hide the receipt. Record active
+   hooks that report `Skipped` or `no files to check` as `skipped`; do not infer
+   their result from the launcher's summary, and retain the log until both the
+   pre-commit and commit-msg results are recorded.
 
    If a hook fails only because another worktree is already running
    golangci-lint (for example, `parallel golangci-lint is running`), wait for

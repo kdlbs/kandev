@@ -31,7 +31,7 @@ func TestFromWorkflowStepIncludesProfileSessionPolicies(t *testing.T) {
 
 func TestFromWorkflowStepDefaultsMissingProfileSessionPolicies(t *testing.T) {
 	step := FromWorkflowStep(&wfmodels.WorkflowStep{ID: "step-1"})
-	if step.ProfileSessionStartPolicy != "reuse" || step.ProfileSessionEndPolicy != "complete" {
-		t.Fatalf("profile session policies = %q/%q, want reuse/complete", step.ProfileSessionStartPolicy, step.ProfileSessionEndPolicy)
+	if step.ProfileSessionStartPolicy != "reuse" || step.ProfileSessionEndPolicy != "park" {
+		t.Fatalf("profile session policies = %q/%q, want reuse/park", step.ProfileSessionStartPolicy, step.ProfileSessionEndPolicy)
 	}
 }

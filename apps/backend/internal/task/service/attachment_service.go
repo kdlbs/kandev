@@ -280,10 +280,64 @@ func (s *AttachmentService) Claim(ctx context.Context, ownerID, workspaceID, tas
 	return s.repo.ClaimMessageAttachments(ctx, ids, ownerID, workspaceID, taskID, sessionID)
 }
 
+func (s *AttachmentService) ClaimQueued(
+	ctx context.Context,
+	ownerID, workspaceID, taskID, sessionID, queueID string,
+	ids []string,
+) error {
+	if s.authorizeWorkspace != nil {
+		if err := s.authorizeWorkspace(ctx, workspaceID); err != nil {
+			return err
+		}
+	}
+	repo, ok := s.repo.(repository.QueueAttachmentAdmissionRepository)
+	if !ok {
+		return errors.New("queued attachment admission is unavailable")
+	}
+	return repo.ClaimQueuedMessageAttachments(ctx, ids, ownerID, workspaceID, taskID, sessionID, queueID)
+}
+
+func (s *AttachmentService) RestoreQueued(
+	ctx context.Context,
+	ownerID, taskID, sessionID, queueID string,
+	ids []string,
+) error {
+	repo, ok := s.repo.(repository.QueueAttachmentAdmissionRepository)
+	if !ok {
+		return errors.New("queued attachment admission is unavailable")
+	}
+	return repo.RestoreQueuedMessageAttachments(ctx, ids, ownerID, taskID, sessionID, queueID)
+}
+
 // Release removes claimed descriptors that are no longer referenced by a
 // queued message. It is used after an atomic queue replacement succeeds.
 func (s *AttachmentService) Release(ctx context.Context, ownerID, taskID, sessionID string, ids []string) error {
 	attachments, err := s.repo.DeleteClaimedMessageAttachments(ctx, ids, ownerID, taskID, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, attachment := range attachments {
+		s.removeBytes(attachment)
+	}
+	return nil
+}
+
+type claimedAttachmentCleanupRepository interface {
+	DeleteClaimedMessageAttachmentsByTaskSession(
+		context.Context, []string, string, string,
+	) ([]*models.TaskMessageAttachment, error)
+}
+
+// ReleaseForCleanup removes claimed descriptors using task/session ownership
+// rather than a user identity. It is restricted to durable queue cleanup.
+func (s *AttachmentService) ReleaseForCleanup(
+	ctx context.Context, taskID, sessionID string, ids []string,
+) error {
+	repo, ok := s.repo.(claimedAttachmentCleanupRepository)
+	if !ok {
+		return errors.New("attachment cleanup release is unavailable")
+	}
+	attachments, err := repo.DeleteClaimedMessageAttachmentsByTaskSession(ctx, ids, taskID, sessionID)
 	if err != nil {
 		return err
 	}
@@ -305,6 +359,31 @@ func (s *AttachmentService) DeleteByTask(ctx context.Context, taskID string) err
 		s.removeBytes(attachment)
 	}
 	return nil
+}
+
+// DeleteBySession removes all claimed attachment descriptors and private bytes
+// owned by a deleted task session. Staged uploads are intentionally excluded
+// because they are not bound to a session and expire independently.
+func (s *AttachmentService) DeleteBySession(ctx context.Context, taskID, sessionID string) error {
+	attachments, err := s.repo.DeleteMessageAttachmentsBySession(ctx, taskID, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, attachment := range attachments {
+		s.removeBytes(attachment)
+	}
+	return nil
+}
+
+// TransferSession rebinds only the claimed prompt attachments represented by
+// the queue transfer operation. The source-session predicate is the CAS guard
+// used by both forward transfer and rollback.
+func (s *AttachmentService) TransferSession(
+	ctx context.Context,
+	taskID, oldSessionID, newSessionID string,
+	attachmentIDs []string,
+) error {
+	return s.repo.TransferMessageAttachments(ctx, taskID, oldSessionID, newSessionID, attachmentIDs)
 }
 
 type transactionalWorkspaceAttachmentRepository interface {

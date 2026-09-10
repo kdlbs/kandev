@@ -39,6 +39,7 @@ import { GitHubRateLimitDisplay } from "./github-rate-limit";
 import { GitHubTaskAccessSummary } from "./github-task-credentials-section";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 // Keyed by the wire enum, which is never translated; only the label is copy.
 // Catalog keys rather than `t()` calls because this is module scope — a `t()`
@@ -237,7 +238,7 @@ function AutomationActions({
         onClick={onRefresh}
         disabled={refreshing}
         aria-busy={refreshing}
-        className="h-11 w-11 cursor-pointer"
+        className={controlSizingClassName("icon", "cursor-pointer")}
         aria-label={t("github:refreshGithubConnection")}
       >
         <IconRefresh className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -247,7 +248,7 @@ function AutomationActions({
           variant="outline"
           onClick={onDisconnect}
           disabled={busy}
-          className="h-11 cursor-pointer text-destructive"
+          className="cursor-pointer text-destructive"
         >
           <IconTrash className="mr-2 h-4 w-4" />
           {t("github:disconnect")}
@@ -357,7 +358,7 @@ function PersonalIdentityActions({
   return (
     <div className="flex flex-col gap-2 sm:flex-row">
       {status.app_available && status.automation?.source === "github_app_installation" && (
-        <Button disabled={busy} onClick={onConnect} className="h-11 cursor-pointer">
+        <Button disabled={busy} onClick={onConnect} className="cursor-pointer">
           <IconBrandGithub className="mr-2 h-4 w-4" />
           {status.personal ? t("github:reconnectIdentity") : t("github:connectIdentity")}
           <IconExternalLink className="ml-2 h-4 w-4" />
@@ -368,7 +369,7 @@ function PersonalIdentityActions({
           variant="outline"
           onClick={onDisconnect}
           disabled={busy}
-          className="h-11 cursor-pointer text-destructive"
+          className="cursor-pointer text-destructive"
         >
           <IconTrash className="mr-2 h-4 w-4" />
           {t("github:disconnect")}

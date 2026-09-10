@@ -173,7 +173,9 @@ describe("WatcherRepositoryFields", () => {
     expect(trigger?.getAttribute("aria-label")).toBe(BASE_BRANCH_LABEL);
     expect(trigger?.className).toContain("min-h-12");
     fireEvent.click(trigger!);
-    expect(screen.getByRole("option", { name: /^main local/ }).className).toContain("sm:min-h-12");
+    const optionClassName = screen.getByRole("option", { name: /^main local/ }).className;
+    expect(optionClassName).toContain("max-md:min-h-12");
+    expect(optionClassName).toContain("[@media(pointer:coarse)]:min-h-12");
     expect(screen.getByTestId("branch-refresh-button").className).toContain("h-12 w-12");
   });
 });

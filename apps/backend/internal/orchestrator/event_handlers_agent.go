@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -17,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -184,6 +187,12 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 	))
 }
 
+// PublishQueueStatusEvent publishes the authoritative queue snapshot after a
+// queue mutation performed by an integration adapter.
+func (s *Service) PublishQueueStatusEvent(ctx context.Context, sessionID string) {
+	s.publishQueueStatusEvent(context.WithoutCancel(ctx), sessionID)
+}
+
 func (s *Service) publishQueueStatusEventForIdentity(
 	ctx context.Context,
 	identity messagequeue.QueueSessionIdentity,
@@ -221,19 +230,40 @@ func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessi
 	// Detach so a client disconnect cannot cancel projector recount (which would
 	// leave queued_prompt_count stale on every live sidebar).
 	ctx = context.WithoutCancel(ctx)
+	if sessionID != "" && s.messageQueue != nil {
+		_ = s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+			s.publishTaskQueueStatusEventSnapshot(admittedCtx, taskID, sessionID)
+			return nil
+		})
+		return
+	}
+	s.publishTaskQueueStatusEventSnapshot(ctx, taskID, sessionID)
+}
+
+func (s *Service) publishTaskQueueStatusEventSnapshot(ctx context.Context, taskID, sessionID string) {
 	eventData := map[string]interface{}{
 		metaKeyTaskID:       taskID,
 		queueStatusScopeKey: queueStatusScopeTask,
 	}
 	if sessionID != "" && s.messageQueue != nil {
-		queueStatus, err := s.queueStatusSnapshot(ctx, sessionID)
-		if err != nil {
-			s.logger.Warn("snapshot task queue status event",
-				zap.String(metaKeyTaskID, taskID),
-				zap.String(metaKeySessionID, sessionID),
-				zap.Error(err))
-		} else {
+		if s.repo == nil {
+			// Focused adapters can provide only the queue service. Use its
+			// authoritative in-memory snapshot when no task repository is
+			// available to resolve the session identity.
+			queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
+			queueStatus.TaskID = taskID
+			queueStatus.SessionID = sessionID
 			eventData = queueStatusEventData(queueStatus)
+		} else {
+			queueStatus, err := s.queueStatusSnapshot(ctx, sessionID)
+			if err != nil {
+				s.logger.Warn("snapshot task queue status event",
+					zap.String(metaKeyTaskID, taskID),
+					zap.String(metaKeySessionID, sessionID),
+					zap.Error(err))
+			} else {
+				eventData = queueStatusEventData(queueStatus)
+			}
 		}
 	}
 	s.logger.Debug("publishing task queue status changed event",
@@ -254,8 +284,13 @@ func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessi
 // FIFO priority; reserved lifecycle messages release their exact durable row
 // so a newer coalesced successor cannot overwrite the in-flight delivery.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
-	if queuedMsg.QueuedBy != "" {
+	coalesceKey := messageCoalesceKey(queuedMsg)
+	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
 		queuedBy = queuedMsg.QueuedBy
+	}
+	if isLifecycleAutomationMessage(queuedMsg) && queuedMsg.IsReservedLifecycleDelivery() {
+		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
+		return
 	}
 	if err := s.messageQueue.RequeueAtHead(ctx, queuedMsg); err != nil {
 		s.logger.Error("failed to requeue message at head",
@@ -621,10 +656,13 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			zap.String("task_id", data.TaskID))
 		return
 	}
-	// A passthrough lifecycle reservation cannot be executed while this ready
-	// handler holds the per-session guard: executeQueuedMessage performs its
-	// own final claim through that guard. Register the deferred dispatch before
-	// acquiring it, so LIFO defer ordering releases the guard first.
+	// A passthrough queue entry requiring the executor path (a lifecycle
+	// reservation or an attachment-bearing ordinary entry) cannot be executed
+	// while this ready handler holds the per-session guard: executeQueuedMessage
+	// performs its own final claim through that guard. Register the deferred
+	// dispatch before acquiring it, so LIFO defer ordering releases the guard
+	// first. Keeping execution in this handler preserves the legacy ready-event
+	// completion boundary while still using the normal delivery pipeline.
 	var deferredLifecycleDispatch *messagequeue.QueuedMessage
 	var deferredLifecycleReservation *queuedDispatchReservation
 	defer func() {
@@ -881,20 +919,28 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	// Check for workflow transition based on session's current step.
-	// Uses the engine when available; falls back to legacy evaluation.
-	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
+	if completionFollowUp {
+		// A completed task's explicit follow-up turn is conversational only. It
+		// must become promptable again without re-evaluating the final step's
+		// workflow actions or changing the task's completed state.
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+	} else {
+		// Check for workflow transition based on session's current step.
+		// Uses the engine when available; falls back to legacy evaluation.
+		// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
+		transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
-	// When a workflow transition occurred (e.g. Work → Review), the new step's
-	// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
-	// Skip the queued-message check to avoid racing with that auto-start goroutine —
-	// both would try to call PromptTask and the loser's queued message would be lost.
-	if transitioned {
-		s.logger.Debug("workflow transition occurred, skipping queued message check",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID))
-		return
+		// When a workflow transition occurred (e.g. Work → Review), the new step's
+		// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
+		// Skip the queued-message check to avoid racing with that auto-start goroutine —
+		// both would try to call PromptTask and the loser's queued message would be lost.
+		if transitioned {
+			s.logger.Debug("workflow transition occurred, skipping queued message check",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
 	}
 
 	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
@@ -910,14 +956,53 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		if err != nil || !autoRun || !exists {
 			return
 		}
+		// ReserveQueued changes the visible queue immediately. Publish before
+		// any passthrough delivery so ordinary, attachment, and lifecycle
+		// reservations all reach clients, including the deferred async path.
+		s.publishQueueStatusEvent(ctx, data.SessionID)
+		// A durable lifecycle reservation must take the same guarded delivery
+		// path as an ACP session. In particular, executeQueuedMessage performs
+		// the final active-task/session claim, records the visible message, and
+		// only acknowledges the reservation after Executor.Prompt accepts it.
+		// Executor.Prompt itself is passthrough-aware and writes to PTY stdin.
+		// Attachment-bearing ordinary entries use that same path so their
+		// attachments are materialized and included in the prompt. Ordinary
+		// text-only entries retain the historical direct PTY behavior below.
 		if queuedMsg.IsDurableLifecycle() {
 			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithIdentityLocked(identity, queuedMsg.ID, queuedMsg)
 			deferredLifecycleDispatch = queuedMsg
 			return
 		}
+		if len(queuedMsg.Attachments) > 0 {
+			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithIdentityLocked(identity, queuedMsg.ID, queuedMsg)
+			deferredLifecycleDispatch = queuedMsg
+			return
+		}
+		deliveryAttempted := false
 		releaseReservation := func() {
+			if queuedMsg.IsDurablePlanComment() {
+				if deliveryAttempted {
+					if ackErr := s.messageQueue.AcknowledgeQueuedForSession(
+						context.WithoutCancel(ctx), identity, queuedMsg,
+					); ackErr != nil &&
+						!errors.Is(ackErr, messagequeue.ErrSessionIdentityMismatch) &&
+						!errors.Is(ackErr, messagequeue.ErrTaskInactive) {
+						s.logger.Warn("failed to acknowledge attempted passthrough queue reservation",
+							zap.String("session_id", data.SessionID), zap.Error(ackErr))
+					}
+					return
+				}
+				if retryErr := s.requeueMessageForSession(
+					context.WithoutCancel(ctx), identity, queuedMsg, "passthrough-delivery-retry",
+				); errors.Is(retryErr, messagequeue.ErrSessionIdentityMismatch) {
+					s.discardLifecycleReservationForReplacedSession(
+						context.WithoutCancel(ctx), queuedMsg, identity,
+					)
+				}
+				return
+			}
 			if releaseErr := s.messageQueue.ReleaseQueuedDeliveryForSession(
-				context.WithoutCancel(ctx), identity, queuedMsg.ID,
+				context.WithoutCancel(ctx), identity, queuedMsg,
 			); releaseErr != nil &&
 				!errors.Is(releaseErr, messagequeue.ErrSessionIdentityMismatch) &&
 				!errors.Is(releaseErr, messagequeue.ErrTaskInactive) {
@@ -935,7 +1020,18 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			releaseReservation()
 			return
 		}
-		if queuedMsg.Content != "" {
+		if queuedMsg.IsDurablePlanComment() {
+			if err := s.recordQueuedUserMessage(
+				dispatchCtx, queuedMsg, queuedMessageAttachmentsToV1(queuedMsg.Attachments),
+			); err != nil {
+				s.logger.Warn("failed to record passthrough plan-comment message",
+					zap.String("session_id", data.SessionID), zap.Error(err))
+				releaseReservation()
+				return
+			}
+		}
+		passthroughPrompt := queuedMessagePromptContent(queuedMsg)
+		if passthroughPrompt != "" {
 			if preparer, ok := s.agentManager.(passthroughRunningPreparer); ok {
 				finishRunning, prepareErr := preparer.PreparePassthroughRunning(data.SessionID)
 				err = prepareErr
@@ -949,11 +1045,29 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 						}
 					}
 				}
+				if err == nil && queuedMsg.IsDurablePlanComment() {
+					err = s.messageQueue.MarkDeliveryAttemptedForSession(
+						dispatchCtx, identity, []messagequeue.QueuedMessage{*queuedMsg},
+					)
+					if err == nil {
+						deliveryAttempted = true
+					}
+				}
 				if err == nil {
-					err = s.writePassthroughPrompt(dispatchCtx, data.SessionID, queuedMsg.Content)
+					err = s.writePassthroughPrompt(dispatchCtx, data.SessionID, passthroughPrompt)
 				}
 			} else {
-				err = s.deliverPassthroughPrompt(dispatchCtx, data.SessionID, queuedMsg.Content)
+				if queuedMsg.IsDurablePlanComment() {
+					err = s.messageQueue.MarkDeliveryAttemptedForSession(
+						dispatchCtx, identity, []messagequeue.QueuedMessage{*queuedMsg},
+					)
+					if err == nil {
+						deliveryAttempted = true
+					}
+				}
+				if err == nil {
+					err = s.deliverPassthroughPrompt(dispatchCtx, data.SessionID, passthroughPrompt)
+				}
 			}
 			if dispatchCtx.Err() != nil {
 				deferredPassthroughRunning = nil
@@ -964,9 +1078,10 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				releaseReservation()
 				return
 			}
+			return
 		}
 		if err := s.messageQueue.AcknowledgeQueuedForSession(
-			context.WithoutCancel(ctx), identity, queuedMsg.ID,
+			context.WithoutCancel(ctx), identity, queuedMsg,
 		); err != nil &&
 			!errors.Is(err, messagequeue.ErrSessionIdentityMismatch) &&
 			!errors.Is(err, messagequeue.ErrTaskInactive) {
@@ -984,20 +1099,58 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 const githubPRAutomationOrigin = "github_pr_automation"
 
-// isLifecycleAutomationOrigin reports whether a queued message's "origin"
-// metadata identifies it as a durable lifecycle prompt (GitHub PR or GitLab
-// MR automation) rather than an ordinary queued message. Both producers
-// share the same durable-queue contract (QueueLifecycleMessageWithCoalesceKey,
-// AcknowledgeQueued on accepted delivery); this is the single place that
-// recognizes the set of origins entitled to that treatment, so adding a
-// future provider only needs a change here.
-func isLifecycleAutomationOrigin(origin interface{}) bool {
-	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin || origin == ciAutomationOrigin
+// isLifecycleAutomationMessage reports whether a queued message is a durable
+// lifecycle prompt. The durable marker is authoritative for legacy rows whose
+// provider origin is absent, while IsDurableLifecycle also recognizes known
+// provider origins written by older versions.
+func isLifecycleAutomationMessage(msg *messagequeue.QueuedMessage) bool {
+	return msg != nil && msg.IsDurableLifecycle()
 }
 
-func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, attachments []v1.MessageAttachment) error {
+type queuedTranscriptReplayIdentity struct {
+	TaskID      string                 `json:"task_id"`
+	SessionID   string                 `json:"session_id"`
+	SourceIDs   []string               `json:"source_ids"`
+	Content     string                 `json:"content"`
+	PlanMode    bool                   `json:"plan_mode"`
+	Attachments []v1.MessageAttachment `json:"attachments"`
+}
+
+func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
+	if queuedMsg == nil {
+		return ""
+	}
+	content := queuedMsg.Content
+	// Handler-originated comment sends persist their fully composed transcript
+	// and queue receipt together. Other queue producers store references as
+	// metadata and compose them only when recording/delivering the prompt.
+	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID == "" {
+		references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
+		content = AppendEntityReferenceContext(content, references)
+	}
+	return appendStepHandoffToPrompt(content, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
+}
+
+func (s *Service) recordQueuedUserMessage(
+	ctx context.Context,
+	queuedMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	sourceIDs ...string,
+) error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
-	if s.messageCreator == nil || alreadyRecorded {
+	if alreadyRecorded {
+		return nil
+	}
+	// Handler-originated comment sends commit the transcript and queue receipt
+	// in one transaction. The marker is only written by that boundary.
+	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
+		markQueuedUserMessageRecorded(queuedMsg)
+		return nil
+	}
+	if s.messageCreator == nil {
+		if queuedMsg.IsDurablePlanComment() {
+			return errors.New("message creator is unavailable for durable plan-comment delivery")
+		}
 		return nil
 	}
 	turnID := s.getActiveTurnID(queuedMsg.SessionID)
@@ -1006,14 +1159,34 @@ func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messag
 		turnID = s.getActiveTurnID(queuedMsg.SessionID)
 	}
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
-	promptContent := AppendEntityReferenceContext(queuedMsg.Content, references)
-	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
+	promptContent := queuedMessagePromptContent(queuedMsg)
 	meta := NewUserMessageMeta().
 		WithPlanMode(queuedMsg.PlanMode).
 		WithAttachments(attachments).
 		WithEntityReferences(references)
 	metaMap := mergeMetadata(meta.ToMap(), metadataWithoutQueueOnlyKeys(queuedMsg.Metadata))
-	if err := s.messageCreator.CreateUserMessage(ctx, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap); err != nil {
+	if len(sourceIDs) == 0 {
+		sourceIDs = []string{queuedMsg.ID}
+	}
+	fingerprint, err := plancomments.Fingerprint(queuedTranscriptReplayIdentity{
+		TaskID: queuedMsg.TaskID, SessionID: queuedMsg.SessionID,
+		SourceIDs: append([]string(nil), sourceIDs...), Content: promptContent,
+		PlanMode: queuedMsg.PlanMode, Attachments: attachments,
+	})
+	if err != nil {
+		return err
+	}
+	if metaMap == nil {
+		metaMap = make(map[string]interface{})
+	}
+	metaMap[plancomments.MetadataClientMessageFingerprint] = fingerprint
+	messageID := uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
+	).String()
+	if err := s.messageCreator.CreateUserMessageIdempotent(
+		ctx, messageID, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap,
+	); err != nil {
 		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
 		return err
 	}
@@ -1026,6 +1199,151 @@ func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messag
 
 func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {
 	s.executeQueuedMessageWithReservation(callerSessionID, queuedMsg, nil)
+}
+
+func (s *Service) executeQueuedPassthroughMessageWithReservation(
+	identity messagequeue.QueueSessionIdentity,
+	queuedMsg *messagequeue.QueuedMessage,
+	reservation *queuedDispatchReservation,
+) {
+	ctx := context.Background()
+	state := queuedPassthroughExecutionState{}
+	state.userMessageRecorded, _ = queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+	defer s.finishQueuedPassthroughExecution(ctx, identity, queuedMsg, reservation, &state)
+
+	lock, release := s.acquireCancelInFlightGuard(identity.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if state.dispatchErr = s.waitForCancellationWithGuard(
+		ctx, identity.SessionID, lock.Unlock, lock.Lock,
+	); state.dispatchErr != nil {
+		return
+	}
+	if state.dispatchErr = s.validateQueuedPassthroughDelivery(ctx, identity); state.dispatchErr != nil {
+		return
+	}
+	s.deliverQueuedPassthroughPrompt(ctx, identity, queuedMsg, &state)
+}
+
+type queuedPassthroughExecutionState struct {
+	userMessageRecorded bool
+	deliveryAttempted   bool
+	dispatchErr         error
+	finishRunning       func()
+}
+
+func (s *Service) finishQueuedPassthroughExecution(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	queuedMsg *messagequeue.QueuedMessage,
+	reservation *queuedDispatchReservation,
+	state *queuedPassthroughExecutionState,
+) {
+	s.finishQueuedMessageExecution(
+		ctx, identity.SessionID, identity.SessionID, queuedMsg, reservation,
+		isLifecycleAutomationMessage(queuedMsg),
+		state.userMessageRecorded, state.deliveryAttempted, state.dispatchErr,
+	)
+	s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
+	s.drainQueuedDispatchIfPending(identity.SessionID)
+	s.finishPassthroughRunningIfCurrent(ctx, identity, state.finishRunning)
+	if s.onQueuedMessageExecutionComplete != nil {
+		s.onQueuedMessageExecutionComplete()
+	}
+}
+
+func (s *Service) finishPassthroughRunningIfCurrent(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	finishRunning func(),
+) {
+	if finishRunning == nil {
+		return
+	}
+	current, err := s.messageQueue.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
+	if err == nil && current == identity {
+		finishRunning()
+	}
+}
+
+func (s *Service) validateQueuedPassthroughDelivery(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+) error {
+	current, err := s.messageQueue.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
+	if err != nil || current != identity {
+		return errLifecyclePromptReservationSuperseded
+	}
+	session, err := s.repo.GetTaskSession(ctx, identity.SessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != identity.TaskID ||
+		session.QueueIncarnationID != identity.SessionIncarnationID {
+		return errLifecyclePromptReservationSuperseded
+	}
+	if err := s.checkSessionPromptable(
+		identity.TaskID, identity.SessionID, session.State,
+	); err != nil {
+		return err
+	}
+	if s.sessionHasPendingClarification(ctx, identity.SessionID) {
+		return ErrSessionNotPromptable
+	}
+	return nil
+}
+
+func (s *Service) deliverQueuedPassthroughPrompt(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	queuedMsg *messagequeue.QueuedMessage,
+	state *queuedPassthroughExecutionState,
+) {
+	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
+	promptContent := queuedMessagePromptContent(queuedMsg)
+	if state.dispatchErr = s.recordQueuedUserMessage(ctx, queuedMsg, attachments); state.dispatchErr != nil {
+		return
+	}
+	state.userMessageRecorded, _ = queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+
+	if preparer, ok := s.agentManager.(passthroughRunningPreparer); ok {
+		state.finishRunning, state.dispatchErr = preparer.PreparePassthroughRunning(identity.SessionID)
+		if state.dispatchErr != nil {
+			return
+		}
+	}
+	if state.dispatchErr = s.markQueuedPassthroughDeliveryAttempt(
+		ctx, identity, queuedMsg, state,
+	); state.dispatchErr != nil {
+		return
+	}
+	if state.finishRunning != nil {
+		state.dispatchErr = s.writePassthroughPrompt(ctx, identity.SessionID, promptContent)
+		return
+	}
+	// Older manager implementations cannot split the state transition from
+	// its event publication. Preserve their established delivery path.
+	state.dispatchErr = s.deliverPassthroughPrompt(ctx, identity.SessionID, promptContent)
+}
+
+func (s *Service) markQueuedPassthroughDeliveryAttempt(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	queuedMsg *messagequeue.QueuedMessage,
+	state *queuedPassthroughExecutionState,
+) error {
+	if !queuedMsg.IsDurablePlanComment() {
+		return nil
+	}
+	if err := s.messageQueue.MarkDeliveryAttemptedForSession(
+		ctx, identity, []messagequeue.QueuedMessage{*queuedMsg},
+	); err != nil {
+		return err
+	}
+	state.deliveryAttempted = true
+	queuedMsg.Metadata[messagequeue.MetadataDeliveryAttempted] = true
+	return nil
 }
 
 func (s *Service) executeQueuedMessageWithReservation(
@@ -1045,7 +1363,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			s.onQueuedMessageExecutionComplete()
 		}
 	}()
-	lifecyclePrompt := isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"])
+	lifecyclePrompt := isLifecycleAutomationMessage(queuedMsg)
 
 	claimEntryID, handoffDone := s.claimQueuedMessageHandoff(
 		promptCtx, callerSessionID, queuedMsg, reservation,
@@ -1097,22 +1415,20 @@ func (s *Service) executeQueuedMessageWithReservation(
 		return
 	}
 
-	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
-	for i, att := range queuedMsg.Attachments {
-		attachments[i] = v1.MessageAttachment{
-			Type:         att.Type,
-			AttachmentID: att.AttachmentID,
-			Data:         att.Data,
-			MimeType:     att.MimeType,
-			Name:         att.Name,
-			SizeBytes:    att.SizeBytes,
-			DeliveryMode: att.DeliveryMode,
-		}
-	}
-	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
-	promptContent := AppendEntityReferenceContext(queuedMsg.Content, references)
-	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
+	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
+	promptContent := queuedMessagePromptContent(queuedMsg)
 	userMessageRecorded := false
+	deliveryAttempted := false
+	if queuedMsg.IsDurablePlanComment() {
+		if err := s.recordQueuedUserMessage(promptCtx, queuedMsg, attachments); err != nil {
+			s.finishQueuedMessageExecution(
+				promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
+				lifecyclePrompt, false, false, err,
+			)
+			return
+		}
+		userMessageRecorded = true
+	}
 
 	// Call promptTask with this entry's ID as a second ownership check. The
 	// worker already claimed the handoff before visible side effects; promptTask
@@ -1124,12 +1440,22 @@ func (s *Service) executeQueuedMessageWithReservation(
 	afterClaim := s.queuedMessageAfterClaim(
 		promptCtx, dispatchIdentity, queuedMsg, attachments, lifecyclePrompt, &userMessageRecorded,
 	)
+	afterDispatch := s.queuedMessageAfterDispatch(promptCtx, queuedMsg, lifecyclePrompt)
+	var beforeDispatch func() error
+	if queuedMsg.IsDurablePlanComment() {
+		beforeDispatch = s.planCommentDeliveryBoundary(
+			promptCtx, dispatchIdentity, queuedMsg, &deliveryAttempted,
+		)
+	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		promptTaskOptions{
-			claimEntryID:    claimEntryID,
-			lifecyclePrompt: lifecyclePrompt,
-			afterClaim:      afterClaim,
+			claimEntryID:         claimEntryID,
+			lifecyclePrompt:      lifecyclePrompt,
+			afterClaim:           afterClaim,
+			afterDispatch:        afterDispatch,
+			beforeDispatch:       beforeDispatch,
+			disableDispatchRetry: queuedMsg.IsDurablePlanComment(),
 			onAccepted: func(turnID string) {
 				s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
 			},
@@ -1139,7 +1465,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
-		lifecyclePrompt, userMessageRecorded, err,
+		lifecyclePrompt, userMessageRecorded, deliveryAttempted, err,
 	)
 	s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
 	if err == nil {
@@ -1170,15 +1496,51 @@ func (s *Service) queuedMessageAfterClaim(
 		if lifecyclePrompt && !s.lifecycleQueuedDispatchIsCurrent(ctx, queuedMsg) {
 			return errLifecyclePromptReservationSuperseded
 		}
+		if queuedMsg.IsDurablePlanComment() {
+			return nil
+		}
 		if !alreadyRecorded {
 			if err := s.recordQueuedUserMessage(ctx, queuedMsg, attachments); err != nil {
-				if lifecyclePrompt {
+				if lifecyclePrompt || queuedMsg.IsDurablePlanComment() {
 					return err
 				}
 			} else if userMessageRecorded != nil && s.messageCreator != nil {
 				*userMessageRecorded = true
 			}
 		}
+		if session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID); err == nil &&
+			s.queuedSessionMatchesIdentity(session, identity) &&
+			!turnStartAlreadyProcessed(queuedMsg.Metadata) {
+			s.processOnTurnStartViaEngine(ctx, queuedMsg.TaskID, session)
+		}
+		return nil
+	}
+}
+
+func (s *Service) planCommentDeliveryBoundary(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	queuedMsg *messagequeue.QueuedMessage,
+	deliveryAttempted *bool,
+) func() error {
+	return func() error {
+		if identity.SessionIncarnationID == "" {
+			resolved, err := s.messageQueue.ResolveSessionIdentity(ctx, queuedMsg.TaskID, queuedMsg.SessionID)
+			if err != nil {
+				return err
+			}
+			identity = resolved
+		}
+		if err := s.messageQueue.MarkDeliveryAttemptedForSession(
+			ctx, identity, []messagequeue.QueuedMessage{*queuedMsg},
+		); err != nil {
+			return err
+		}
+		if deliveryAttempted != nil {
+			*deliveryAttempted = true
+		}
+		queuedMsg.Metadata[messagequeue.MetadataDeliveryAttempted] = true
+		markQueuedUserMessageRecorded(queuedMsg)
 		if session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID); err == nil &&
 			s.queuedSessionMatchesIdentity(session, identity) &&
 			!turnStartAlreadyProcessed(queuedMsg.Metadata) {
@@ -1217,15 +1579,26 @@ func (s *Service) finishQueuedMessageExecution(
 	callerSessionID, reservedSessionID string,
 	queuedMsg *messagequeue.QueuedMessage,
 	reservation *queuedDispatchReservation,
-	lifecyclePrompt, userMessageRecorded bool,
+	lifecyclePrompt, userMessageRecorded, deliveryAttempted bool,
 	err error,
 ) {
 	exactReservation := reservation != nil && reservation.identity.SessionIncarnationID != ""
+	if deliveryAttempted && err != nil {
+		if exactReservation {
+			s.acknowledgeLifecycleQueueEntryForSession(ctx, reservation.identity, queuedMsg)
+		} else {
+			s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
+		}
+		return
+	}
 	if errors.Is(err, errLifecyclePromptReservationSuperseded) {
 		s.logger.Info("discarding stale lifecycle dispatch after final claim",
 			zap.String("session_id", callerSessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID))
+		if exactReservation {
+			s.discardLifecycleReservationForReplacedSession(ctx, queuedMsg, reservation.identity)
+		}
 		return
 	}
 	if errors.Is(err, errLifecyclePromptInactive) {
@@ -1239,9 +1612,10 @@ func (s *Service) finishQueuedMessageExecution(
 	var reselected *lifecyclePromptReselectedError
 	if errors.As(err, &reselected) {
 		if !exactReservation {
-			queuedMsg.SessionID = reselected.sessionID
+			retry := *queuedMsg
+			retry.SessionID = reselected.sessionID
 			if s.requeueLifecycleMessage(
-				ctx, queuedMsg, queuedMsg.QueuedBy, messageCoalesceKey(queuedMsg),
+				ctx, &retry, retry.QueuedBy, messageCoalesceKey(&retry),
 			) {
 				s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
 			}
@@ -1282,18 +1656,34 @@ func (s *Service) finishQueuedMessageExecution(
 		}
 		return
 	}
+	var acceptedDispatch *acceptedPromptDispatchError
+	if errors.As(err, &acceptedDispatch) {
+		s.logger.Error("queued prompt was accepted but post-dispatch handling failed",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(err))
+		if lifecyclePrompt {
+			s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
+		} else {
+			s.acknowledgeOrdinaryQueueEntry(ctx, reservedSessionID, queuedMsg)
+		}
+		return
+	}
 	if err != nil {
 		s.handleQueuedMessageExecutionError(
 			ctx, callerSessionID, queuedMsg, reservation, lifecyclePrompt, userMessageRecorded, err,
 		)
 		return
 	}
-	if lifecyclePrompt {
+	if queuedMsg.IsDurableDelivery() {
 		if exactReservation {
 			s.acknowledgeLifecycleQueueEntryForSession(ctx, reservation.identity, queuedMsg)
 		} else {
 			s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
 		}
+	} else {
+		s.acknowledgeOrdinaryQueueEntry(ctx, reservedSessionID, queuedMsg)
 	}
 }
 
@@ -1312,9 +1702,11 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
-	// ErrSessionRuntimeUnavailable: the runtime for a just-promoted session has
-	// not finished launching. Requeue so the drain on agent.boot_ready delivers it.
-	if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
+	passthroughAttachmentRecovery := !lifecyclePrompt &&
+		len(queuedMsg.Attachments) > 0 &&
+		s.agentManager != nil &&
+		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
+	if passthroughAttachmentRecovery || lifecyclePrompt || queuedMsg.IsDurablePlanComment() || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
@@ -1328,10 +1720,21 @@ func (s *Service) handleQueuedMessageExecutionError(
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Bool("manual_recovery", manualRecovery))
 		switch {
+		case passthroughAttachmentRecovery && reservation != nil && reservation.identity.SessionIncarnationID != "":
+			s.restoreQueuedMessageForSession(ctx, reservation.identity, queuedMsg)
+		case passthroughAttachmentRecovery:
+			s.restoreQueuedMessage(ctx, queuedMsg)
 		case reservation != nil && reservation.identity.SessionIncarnationID != "" && manualRecovery:
 			s.restoreQueuedMessageForSession(ctx, reservation.identity, queuedMsg)
 		case reservation != nil && reservation.identity.SessionIncarnationID != "":
 			_ = s.requeueMessageForSession(ctx, reservation.identity, queuedMsg, "workflow-auto-start-retry")
+		case manualRecovery && lifecyclePrompt:
+			if s.requeueLifecycleMessage(ctx, queuedMsg, queuedMsg.QueuedBy, messageCoalesceKey(queuedMsg)) {
+				// A reserved lifecycle row remains in the queue while its retry
+				// successor is inserted. Settle the original reservation so
+				// manual recovery leaves one visible entry, not two.
+				s.acknowledgeLifecycleQueueEntry(ctx, queuedMsg.SessionID, queuedMsg)
+			}
 		case manualRecovery:
 			s.restoreQueuedMessage(ctx, queuedMsg)
 		default:
@@ -1407,10 +1810,10 @@ func (s *Service) discardLifecycleReservationForReplacedSession(
 	identity messagequeue.QueueSessionIdentity,
 ) {
 	if s.messageQueue == nil || queuedMsg == nil ||
-		!queuedMsg.IsReservedLifecycleDelivery() || identity.SessionIncarnationID == "" {
+		!queuedMsg.IsReservedDelivery() || identity.SessionIncarnationID == "" {
 		return
 	}
-	if err := s.messageQueue.DiscardLifecycleReservation(ctx, identity, queuedMsg.ID); err != nil {
+	if err := s.messageQueue.DiscardLifecycleReservation(ctx, identity, queuedMsg); err != nil {
 		s.logger.Error("failed to discard lifecycle reservation for replaced session",
 			zap.String("session_id", identity.SessionID),
 			zap.String("task_id", identity.TaskID),
@@ -1446,18 +1849,55 @@ func (s *Service) acknowledgeLifecycleQueueEntry(
 	sessionID string,
 	queuedMsg *messagequeue.QueuedMessage,
 ) {
-	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableLifecycle() {
+	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableDelivery() {
 		return
 	}
-	if err := s.messageQueue.AcknowledgeQueued(ctx, sessionID, queuedMsg.ID); err != nil {
-		s.logger.Error("failed to acknowledge accepted lifecycle message",
+	ackCtx := context.WithoutCancel(ctx)
+	if err := s.messageQueue.AcknowledgeQueued(ackCtx, queuedMsg); err != nil {
+		s.logger.Error("failed to acknowledge accepted durable message",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Error(err))
 		return
 	}
-	s.publishQueueStatusEvent(ctx, sessionID)
+	s.publishQueueStatusEvent(ackCtx, sessionID)
+}
+
+func (s *Service) acknowledgeOrdinaryQueueEntry(
+	ctx context.Context,
+	sessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+) {
+	if s.messageQueue == nil || queuedMsg == nil || queuedMsg.IsDurableLifecycle() {
+		return
+	}
+	ackCtx := context.WithoutCancel(ctx)
+	if err := s.retrySendNowClaimMutation(ackCtx, func(recoveryCtx context.Context) error {
+		return s.messageQueue.AcknowledgeQueued(recoveryCtx, queuedMsg)
+	}); err != nil {
+		s.logger.Error("failed to acknowledge accepted queue message",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) queuedMessageAfterDispatch(
+	ctx context.Context,
+	queuedMsg *messagequeue.QueuedMessage,
+	lifecyclePrompt bool,
+) func() error {
+	if lifecyclePrompt || queuedMsg == nil || queuedMsg.IsDurablePlanComment() || s.messageQueue == nil ||
+		!s.messageQueue.PendingQueueDispatchPersistenceAvailable() {
+		return nil
+	}
+	return func() error {
+		return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
+			return s.messageQueue.MarkPendingQueueDispatchAccepted(recoveryCtx, queuedMsg)
+		})
+	}
 }
 
 func (s *Service) acknowledgeLifecycleQueueEntryForSession(
@@ -1465,18 +1905,21 @@ func (s *Service) acknowledgeLifecycleQueueEntryForSession(
 	identity messagequeue.QueueSessionIdentity,
 	queuedMsg *messagequeue.QueuedMessage,
 ) {
-	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableLifecycle() {
+	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableDelivery() {
 		return
 	}
-	if err := s.messageQueue.AcknowledgeQueuedForSession(ctx, identity, queuedMsg.ID); err != nil {
-		s.logPostClaimQueueMutationFailure("acknowledge lifecycle message", identity, queuedMsg, err)
+	if err := s.messageQueue.AcknowledgeQueuedForSession(ctx, identity, queuedMsg); err != nil {
+		s.logPostClaimQueueMutationFailure("acknowledge durable message", identity, queuedMsg, err)
 		return
 	}
 	s.publishQueueStatusEventForIdentity(ctx, identity)
 }
 
 func (s *Service) restoreQueuedMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) {
-	restored, err := s.messageQueue.RestoreMessage(ctx, queuedMsg)
+	// Restoration follows a completed take and must survive cancellation of
+	// the request that initiated the dispatch.
+	restoreCtx := context.WithoutCancel(ctx)
+	restored, err := s.messageQueue.RestoreMessage(restoreCtx, queuedMsg)
 	if err != nil {
 		s.logger.Error("failed to restore queued message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -1490,7 +1933,7 @@ func (s *Service) restoreQueuedMessage(ctx context.Context, queuedMsg *messagequ
 		zap.String("task_id", restored.TaskID),
 		zap.String("queue_id", restored.ID),
 		zap.Int64("position", restored.Position))
-	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+	s.publishQueueStatusEvent(restoreCtx, queuedMsg.SessionID)
 }
 
 func (s *Service) restoreQueuedMessageForSession(
@@ -1516,6 +1959,22 @@ func markQueuedUserMessageRecorded(queuedMsg *messagequeue.QueuedMessage) {
 		queuedMsg.Metadata = make(map[string]interface{})
 	}
 	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
+}
+
+func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.MessageAttachment {
+	converted := make([]v1.MessageAttachment, len(attachments))
+	for index, attachment := range attachments {
+		converted[index] = v1.MessageAttachment{
+			Type:         attachment.Type,
+			AttachmentID: attachment.AttachmentID,
+			Data:         attachment.Data,
+			MimeType:     attachment.MimeType,
+			Name:         attachment.Name,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+		}
+	}
+	return converted
 }
 
 // metadataWithoutQueueOnlyKeys strips queue-transport-only keys before a
@@ -1689,17 +2148,22 @@ func (s *Service) finishAgentCompleted(
 	session *models.TaskSession,
 	guard *lockedCancelInFlightGuard,
 ) {
+	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
-	s.scheduler.HandleTaskCompleted(data.TaskID, true)
-	s.scheduler.RemoveTask(data.TaskID)
+	if !completionFollowUp {
+		s.scheduler.HandleTaskCompleted(data.TaskID, true)
+		s.scheduler.RemoveTask(data.TaskID)
+	}
 
 	// The agent finished a turn, so any stored failure no longer describes the
 	// session. `session` was read above, so the guard costs nothing.
 	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
 
-	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	if !completionFollowUp {
+		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	}
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
@@ -1714,9 +2178,10 @@ func (s *Service) finishAgentCompleted(
 		return
 	}
 
-	transitioned := !s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) &&
+	transitioned := !completionFollowUp &&
+		!s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) &&
 		s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
-	s.finishAgentCompletedTurn(ctx, data, session, transitioned, guard)
+	s.finishAgentCompletedTurn(ctx, data, session, transitioned, completionFollowUp, guard)
 }
 
 // finishAgentCompletedTurn runs the settle steps after
@@ -1730,6 +2195,7 @@ func (s *Service) finishAgentCompletedTurn(
 	data watcher.AgentEventData,
 	session *models.TaskSession,
 	transitioned bool,
+	completionFollowUp bool,
 	guard *lockedCancelInFlightGuard,
 ) {
 	// Agent-exit path: processOnTurnCompleteViaEngine handles normal
@@ -1766,7 +2232,9 @@ func (s *Service) finishAgentCompletedTurn(
 
 	// Finalize the automation run: mark status=succeeded so the automation's
 	// concurrency slot is released. The worktree stays.
-	s.finalizeAutomationRun(ctx, data.TaskID, true, "")
+	if !completionFollowUp {
+		s.finalizeAutomationRun(ctx, data.TaskID, true, "")
+	}
 
 	// Settle point: turn has been completed and the session state has been
 	// reconciled. reclaimIdleSession is the synchronous equivalent of the
@@ -2214,13 +2682,19 @@ func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watch
 // run after the guard is released. Deletion uses the same guard, so an active
 // error event cannot publish after the deleted-session inactive event.
 func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data watcher.AgentEventData) func() {
+	completionFollowUp := false
+	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil && session != nil {
+		completionFollowUp = models.IsCompletionFollowUpSession(session.Metadata)
+	}
 	s.logger.Warn("handling recoverable agent failure",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("error", data.ErrorMessage))
 
 	// Complete the current turn.
-	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	if !completionFollowUp {
+		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	}
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.persistLastAgentError(ctx, data)
 
@@ -2261,7 +2735,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// the session's metadata bag until it's silently cleared on resume.
 	// Office sessions go FAILED, not WAITING_FOR_INPUT, and must not
 	// advance the step here.
-	if nextState == models.TaskSessionStateWaitingForInput && data.SessionID != "" {
+	if !completionFollowUp && nextState == models.TaskSessionStateWaitingForInput && data.SessionID != "" {
 		session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 		if err != nil {
 			s.logger.Warn("failed to reload session for step-completion reconciliation; "+
@@ -2282,6 +2756,9 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// guard, so dispatching while it is held would deadlock. Panic recovery is
 	// the recovered wrapper's job, not this one's — routes R2-R5 reach this
 	// closure with no recover above them on the stack.
+	if completionFollowUp {
+		return func() {}
+	}
 	return func() {
 		s.dispatchKanbanAgentErrorTriggerRecovered(context.WithoutCancel(ctx), data)
 	}

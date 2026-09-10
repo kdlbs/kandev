@@ -45,7 +45,7 @@ func RunnerProjection(alias string) string {
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
 		 WHERE wsp.task_id = ` + alias + `.id
 		   AND wsp.role = 'runner'
-		 ORDER BY wsp.created_at DESC, wsp.agent_profile_id ASC, wsp.id ASC LIMIT 1), ''),
+		 ORDER BY wsp.created_at DESC, wsp.id ASC LIMIT 1), ''),
 		''
 	)`
 }
@@ -322,6 +322,15 @@ func (r *Repository) createCostTables() error {
 		alert_threshold_pct INTEGER DEFAULT 80,
 		action_on_exceed TEXT DEFAULT 'notify_only',
 		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
+
+	-- Built-in default spend ceiling (REQ-OFFICE-BUDGET-003): a stable
+	-- per-workspace identifier distinct from any office_budget_policies row
+	-- (AC-OFFICE-BUDGET-003.7), never listed alongside operator policies.
+	CREATE TABLE IF NOT EXISTS office_budget_default_settings (
+		workspace_id TEXT PRIMARY KEY,
+		limit_subcents INTEGER NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
 	`)
@@ -731,7 +740,8 @@ func (r *Repository) createParentChildWakeReceiptsTable() error {
 		child_set_key         TEXT NOT NULL,
 		delivered_run_id      TEXT NOT NULL DEFAULT '',
 		delivery_operation_id TEXT NOT NULL DEFAULT '',
-		delivered_at          TIMESTAMP NOT NULL
+		delivered_at          TIMESTAMP NOT NULL,
+		child_generation      TEXT NOT NULL DEFAULT ''
 	);
 	`)
 	return err

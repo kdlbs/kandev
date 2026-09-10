@@ -66,6 +66,9 @@ export type TaskLike = {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start. */
+  workspace_orphaned?: boolean;
   foreground_activity?: ForegroundActivity | null;
   parked_on_background_work?: boolean;
   parked_revision?: number;
@@ -288,6 +291,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     taskPendingAction: pickPendingAction(source.task_pending_action),
     interrupted: source.interrupted,
     autoStartFailed: source.auto_start_failed,
+    workspaceOrphaned: source.workspace_orphaned,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
     parkedOnBackgroundWork: source.parked_on_background_work,
     parkedRevision: source.parked_revision,

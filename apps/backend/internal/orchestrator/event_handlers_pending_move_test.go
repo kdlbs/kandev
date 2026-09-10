@@ -85,6 +85,7 @@ func TestPendingMove_ReviewToInProgress_OneTransitionOnly(t *testing.T) {
 func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	sc.stepGetter.steps[stepReviewedID].Name = "Done"
+	sc.stepGetter.steps[stepReviewedID].CompleteTaskOnEnter = true
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {
@@ -439,7 +440,8 @@ func newPendingMoveStepGetter() *mockStepGetter {
 	sg := newMockStepGetter()
 	sg.steps[stepInProgressID] = &wfmodels.WorkflowStep{
 		ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1,
-		AgentProfileID: profileImpl,
+		AgentProfileID:          profileImpl,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 		Events: wfmodels.StepEvents{
 			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
 			OnTurnComplete: []wfmodels.OnTurnCompleteAction{
@@ -449,7 +451,8 @@ func newPendingMoveStepGetter() *mockStepGetter {
 	}
 	sg.steps[stepInReviewID] = &wfmodels.WorkflowStep{
 		ID: stepInReviewID, WorkflowID: "wf1", Name: "In Review", Position: 2,
-		AgentProfileID: profileReview,
+		AgentProfileID:          profileReview,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 		Events: wfmodels.StepEvents{
 			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
 			OnTurnComplete: []wfmodels.OnTurnCompleteAction{

@@ -242,6 +242,79 @@ test.describe("mobile PR CI chip drawer", () => {
     );
   });
 
+  test("shows a workflow approval reason and link in the mobile drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPR({
+      apiClient,
+      seedData,
+      title: "Mobile workflow approval",
+      prOverrides: {
+        head_sha: "mobile-workflow-head",
+        head_repo_owner: "contributor",
+        head_repo_name: "demo-fork",
+        review_state: "approved",
+        mergeable_state: "clean",
+      },
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      workflow_runs: [
+        {
+          id: 700,
+          run_attempt: 1,
+          workflow_id: 900,
+          name: "Run tests",
+          event: "pull_request",
+          status: "completed",
+          conclusion: "action_required",
+          head_sha: "mobile-workflow-head",
+          head_branch: "feat/mobile-drawer",
+          head_repo_owner: "contributor",
+          head_repo_name: "demo-fork",
+          html_url: "https://github.com/acme/demo/actions/runs/700",
+          pull_requests: [
+            {
+              number: PR_NUMBER,
+              head_sha: "mobile-workflow-head",
+              head_branch: "feat/mobile-drawer",
+              head_repo_owner: "contributor",
+              head_repo_name: "demo-fork",
+            },
+          ],
+        },
+      ],
+    });
+
+    let session = await openTask(testPage, taskId);
+    await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
+    await session.tapPRStatusChip();
+    const notice = session.prStatusChipDrawer().getByTestId("pr-workflow-attention");
+    await expect(notice).toContainText("Awaiting maintainer approval");
+    const link = notice.getByTestId("pr-workflow-attention-link");
+    await expect(link).toHaveAttribute("href", "https://github.com/acme/demo/actions/runs/700");
+    const box = await link.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("mobile-workflow-approval-attention", {
+      caption: "Mobile PR drawer explains a workflow approval gate",
+    });
+
+    await session.prStatusChipDrawerClose().tap();
+    await testPage.reload();
+    session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.tapPRStatusChip();
+    await expect(session.prStatusChipDrawer().getByTestId("pr-workflow-attention")).toContainText(
+      "Awaiting maintainer approval",
+    );
+  });
+
   test("failed PR shows failed bucket inside the drawer", async ({
     testPage,
     apiClient,

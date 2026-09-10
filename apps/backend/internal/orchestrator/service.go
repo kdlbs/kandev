@@ -54,6 +54,8 @@ var (
 	ErrRouteActionActiveTurn = errors.New("route actions require a settled turn")
 )
 
+const maxStartupTransferReconcileAttempts = 30
+
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
 	Scheduler                     scheduler.SchedulerConfig
@@ -111,6 +113,7 @@ func DefaultServiceConfig() ServiceConfig {
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
+	CreateUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
@@ -145,6 +148,23 @@ type MessageCreator interface {
 type TransientRetryMessageService interface {
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
+}
+
+// SessionAttachmentCleaner removes file-backed prompt attachments after a
+// task session has been deleted. The task service owns storage and authorization
+// details; the orchestrator only coordinates the post-commit lifecycle hook.
+type SessionAttachmentCleaner interface {
+	DeleteSessionMessageAttachments(ctx context.Context, taskID, sessionID string) error
+}
+
+// SessionAttachmentTransferer keeps the exact claimed prompt attachments
+// represented by a queue transfer bound to the queue's owning session.
+type SessionAttachmentTransferer interface {
+	TransferSessionMessageAttachments(
+		ctx context.Context,
+		taskID, oldSessionID, newSessionID string,
+		attachmentIDs []string,
+	) error
 }
 
 // SubagentContextRecorder persists a durable relational record of a subagent
@@ -609,13 +629,28 @@ type Service struct {
 	passthroughDispatchMu sync.Mutex
 	passthroughDispatches map[string]map[*passthroughDispatchToken]struct{}
 
+	// autoStartOnCreateMu serializes the local ownership hand-off for the
+	// durable auto-start-on-create marker. The database marker survives a
+	// process restart; this map prevents recovery and event delivery from
+	// reclaiming the same marker while its detached launch is still running.
+	autoStartOnCreateMu       sync.Mutex
+	autoStartOnCreateInFlight map[string]struct{}
+
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
 	transientRetryMessages TransientRetryMessageService
+	// sessionQueuePurgeNotifierRegistered means the task repository owns
+	// queue cleanup and status publication after DeleteTaskSession commits.
+	// DeleteSession keeps its fallback cleanup for focused compositions that
+	// cannot register the repository callback, but must not publish twice when
+	// the callback is active.
+	sessionQueuePurgeNotifierRegistered bool
 
+	sessionAttachmentCleaner    SessionAttachmentCleaner
+	sessionAttachmentTransferer SessionAttachmentTransferer
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
 	// safe: both call sites guard on it. See SetSubagentContextRecorder.
@@ -1260,14 +1295,15 @@ type Service struct {
 	running   bool
 	startedAt time.Time
 
-	// sendNowWorkers owns the asynchronous replacement handoffs. The context
-	// is cancelled during Stop so a claimed durable source gets a bounded
-	// recovery attempt before shutdown returns.
+	// sendNowWorkers owns one generation of asynchronous replacement handoffs.
+	// Stop cancels the generation and waits only for a bounded interval; a late
+	// generation keeps its own wait group while the next Start creates another.
 	sendNowMu      sync.Mutex
 	sendNowCtx     context.Context
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
-	sendNowWorkers sync.WaitGroup
+	sendNowWorkers *sync.WaitGroup
+	sendNowDrain   chan struct{}
 
 	// ciAutomationWorkers owns the asynchronous per-PR automation loops. The
 	// service-owned context lets Stop cancel in-flight evaluations and prevents
@@ -1518,6 +1554,7 @@ func NewService(
 		executor:                     exec,
 		scheduler:                    sched,
 		messageQueue:                 msgQueue,
+		autoStartOnCreateInFlight:    make(map[string]struct{}),
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
@@ -1525,6 +1562,7 @@ func NewService(
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
+		sendNowWorkers:               &sync.WaitGroup{},
 		ciAutomationCtx:              ciAutomationCtx,
 		ciAutomationCancel:           ciAutomationCancel,
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
@@ -1552,7 +1590,19 @@ func NewService(
 		SetTaskQueuePurgeNotifier(func(context.Context, string))
 	}); ok {
 		registrar.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+			// SQLite task lifecycle purges the durable queue in its own
+			// transaction, so invalidate only the process-local edit leases
+			// here. Calling PurgeTask would race with the next queue generation.
+			msgQueue.InvalidateEditLeasesForTask(taskID)
 			s.publishTaskQueueStatusEvent(ctx, taskID, "")
+		})
+	}
+	if registrar, ok := repo.(interface {
+		SetTaskSessionQueuePurgeNotifier(func(context.Context, string, string))
+	}); ok {
+		s.sessionQueuePurgeNotifierRegistered = true
+		registrar.SetTaskSessionQueuePurgeNotifier(func(ctx context.Context, taskID, sessionID string) {
+			s.purgeDeletedSessionQueue(ctx, taskID, sessionID)
 		})
 	}
 	s.backgroundProbe = serviceBackgroundProbeAdapter{s: s}
@@ -1598,6 +1648,18 @@ func NewService(
 		promoteTask bool,
 	) error {
 		return s.setSessionStarting(ctx, taskID, session, expectedState, promoteTask)
+	})
+	exec.SetOnSessionStartingWithOptions(func(
+		ctx context.Context,
+		taskID string,
+		session *models.TaskSession,
+		expectedState models.TaskSessionState,
+		promoteTask bool,
+		allowCompletedResume bool,
+	) error {
+		return s.setSessionStartingWithOptions(
+			ctx, taskID, session, expectedState, promoteTask, allowCompletedResume,
+		)
 	})
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
@@ -1762,6 +1824,18 @@ func (s *Service) taskSessionCanvasGuidanceEnabled(
 // unified session launch boundary.
 func (s *Service) SetLaunchAttachmentClaimer(claimer LaunchAttachmentClaimer) {
 	s.launchAttachmentClaimer = claimer
+}
+
+// SetSessionAttachmentCleaner wires post-delete cleanup for claimed prompt
+// attachments belonging to a task session.
+func (s *Service) SetSessionAttachmentCleaner(cleaner SessionAttachmentCleaner) {
+	s.sessionAttachmentCleaner = cleaner
+}
+
+// SetSessionAttachmentTransferer wires the attachment registry update required
+// when queued work moves between task sessions.
+func (s *Service) SetSessionAttachmentTransferer(transfer SessionAttachmentTransferer) {
+	s.sessionAttachmentTransferer = transfer
 }
 
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session
@@ -2793,6 +2867,39 @@ func (s *Service) isSessionResetInProgress(sessionID string) bool {
 	return inProgress
 }
 
+func (s *Service) reconcileDurableQueueStateOnStartup(ctx context.Context) error {
+	for attempt := 1; ; attempt++ {
+		err := s.reconcileSessionTransferCompensationsOnStartup(ctx)
+		if !errors.Is(err, messagequeue.ErrSessionTransferInProgress) {
+			if err != nil {
+				return fmt.Errorf("reconcile session transfer compensations: %w", err)
+			}
+			break
+		}
+		if attempt == maxStartupTransferReconcileAttempts {
+			return fmt.Errorf(
+				"reconcile session transfer compensations still blocked after %d attempts: %w",
+				attempt,
+				err,
+			)
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if err := s.reconcilePendingQueueDispatchesOnStartup(ctx); err != nil {
+		return fmt.Errorf("reconcile pending queue dispatches: %w", err)
+	}
+	if err := s.reconcilePendingSendNowClaimsOnStartup(ctx); err != nil {
+		return fmt.Errorf("reconcile pending Send Now claims: %w", err)
+	}
+	return nil
+}
+
 // Start starts all orchestrator components
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -2812,11 +2919,22 @@ func (s *Service) Start(ctx context.Context) error {
 
 	s.logger.Info("starting orchestrator service")
 	s.resetReservedPromptCallbacks()
-	s.resetSendNowWorkers()
+	if err := s.resetSendNowWorkers(); err != nil {
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
 	s.resetCIAutomationWorkers()
 	s.resetDynamicSuccessorWorkers()
+	if err := s.reconcileDurableQueueStateOnStartup(ctx); err != nil {
+		s.logger.Error("failed to reconcile durable queue state on startup", zap.Error(err))
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
 	s.resetParkedSamplingWorkers()
-
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
@@ -2872,6 +2990,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	s.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
 
 	// Run the startup lifecycle sweep (reconcileTaskLifecycleTokens, then
 	// reconcileDependencyLaunchesOnStartup — sequenced so an
@@ -3096,6 +3215,50 @@ func (s *Service) reconcileUnpublishedPromptTurnsOnStartup(ctx context.Context) 
 		}
 	}
 	return nil
+}
+
+// reconcileDurablePlanCommentDeliveriesOnStartup resumes receipts that were
+// committed before a process crash. Attempted receipts are terminal under the
+// at-most-once contract; pre-attempt leases become eligible at their expiry.
+func (s *Service) reconcileDurablePlanCommentDeliveriesOnStartup(ctx context.Context) {
+	if s.messageQueue == nil {
+		return
+	}
+	entries, err := s.messageQueue.ListDurableDeliveryEntries(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list durable plan-comment deliveries on startup", zap.Error(err))
+		return
+	}
+	for index := range entries {
+		entry := entries[index]
+		if !entry.IsDurablePlanComment() {
+			continue
+		}
+		if entry.IsDeliveryAttempted() {
+			if err := s.messageQueue.AcknowledgeQueued(ctx, &entry); err != nil &&
+				!errors.Is(err, messagequeue.ErrEntryNotFound) {
+				s.logger.Warn("failed to clear attempted plan-comment receipt on startup",
+					zap.String("task_id", entry.TaskID), zap.String("session_id", entry.SessionID),
+					zap.String("queue_id", entry.ID), zap.Error(err))
+			}
+			continue
+		}
+		delay := time.Until(entry.DeliveryReservationExpiresAt())
+		if !entry.IsReservedInFlight() || delay <= 0 {
+			s.NotifyQueuedUserPrompt(ctx, entry.TaskID, entry.SessionID)
+			continue
+		}
+		go func(entry messagequeue.QueuedMessage, delay time.Duration) {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				s.NotifyQueuedUserPrompt(context.WithoutCancel(ctx), entry.TaskID, entry.SessionID)
+			}
+		}(entry, delay)
+	}
 }
 
 func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
@@ -3634,6 +3797,36 @@ func (s *Service) QueueUserPrompt(
 	// in-flight checks (cheaper than the DB read).
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)
 	return nil
+}
+
+// MaxQueuedPromptsPerSession exposes the active queue capacity to transaction
+// owners that persist a user message and its deferred delivery atomically.
+func (s *Service) MaxQueuedPromptsPerSession() int {
+	if s.messageQueue == nil {
+		return 0
+	}
+	return s.messageQueue.MaxPerSession()
+}
+
+// NotifyQueuedUserPrompt publishes and opportunistically drains a queue row
+// that another repository committed atomically with its user-message record.
+func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
+	s.publishQueueStatusEvent(ctx, sessionID)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
+		go func(profileID string) {
+			_, launchErr := s.startCreatedSessionWithComposedPrompt(
+				context.WithoutCancel(ctx), taskID, sessionID, profileID,
+				"", "", true, false, false, nil, nil,
+			)
+			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
+				s.logger.Warn("failed to start session for durable queued prompt",
+					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(launchErr))
+			}
+		}(session.AgentProfileID)
+		return
+	}
+	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)
 }
 
 // tryFastPathDrainAfterEnqueue is the T2 fast-path drain. After QueueUserPrompt

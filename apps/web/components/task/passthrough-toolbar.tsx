@@ -41,6 +41,7 @@ import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import type { DiffComment } from "@/lib/diff/types";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
+import { hasPendingClarification, shouldShowProceed } from "./chat/types";
 import { Trans, useTranslation } from "react-i18next";
 
 function isEditableElement(element: Element | null) {
@@ -136,7 +137,15 @@ export function PassthroughToolbar({
     handlePlanModeChange: panelState.handlePlanModeChange,
     chatInputRef,
   });
-  const showProceed = !!planActions.proceedStepName && !isAgentBusy;
+  const clarificationPending = hasPendingClarification(
+    Boolean(panelState.pendingClarification),
+    panelState.session?.pending_action,
+  );
+  const showProceed = shouldShowProceed(
+    planActions.proceedStepName,
+    isAgentBusy,
+    clarificationPending,
+  );
   const implementPlanHandler =
     isAgentBusy || !panelState.planModeEnabled ? undefined : planActions.implementPlanHandler;
 

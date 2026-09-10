@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
@@ -628,6 +629,7 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	commentID := s.maybeCreateStatusComment(ctx, req)
 	s.logTaskStatusChangeActivity(ctx, req)
 	s.publishTaskStatusChanged(ctx, req)
+	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
 	s.runReactivityForStatus(ctx, req, commentID, preStatus)
 	s.maybeSupersedeOnRework(ctx, req.TaskID, preStatus, dbState)
 
@@ -982,6 +984,29 @@ func (s *DashboardService) publishTaskStatusChanged(ctx context.Context, req Tas
 		s.logger.Error("publish task status changed event failed",
 			zap.String("task_id", req.TaskID), zap.Error(err))
 	}
+}
+
+// canonicalTaskUpdatedPublishTimeout bounds the detached reload+publish in
+// publishCanonicalTaskUpdated so a caller-cancelled ctx can't hang it forever.
+const canonicalTaskUpdatedPublishTimeout = 10 * time.Second
+
+// publishCanonicalTaskUpdated publishes the canonical task.updated event for
+// a task row this function has just mutated via s.repo.UpdateTaskState.
+// office.task.status_changed above only reaches the Office board;
+// task.updated is what WS-driven UI outside Office (the All-Workflows
+// kanban view, task views, the task/statussummary projector) keys off.
+// Nil-safe: skipped when no publisher is wired. Runs on a context detached
+// from ctx's cancellation: the mutation has already committed, so a caller
+// that disconnects (HTTP) or a ctx that expires after the write must not
+// suppress the event other WS-driven views depend on. The task service owns
+// the reload and per-task publication queue.
+func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, taskID string) {
+	if s.taskLifecycle == nil {
+		return
+	}
+	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), canonicalTaskUpdatedPublishTimeout)
+	defer cancel()
+	s.taskLifecycle.PublishTaskUpdatedByID(pubCtx, taskID)
 }
 
 // runReactivityForComment fires the pipeline for a standalone comment

@@ -124,10 +124,9 @@ export interface IntegrationSettingsRegistration {
  * view/display controls — the app-wide, task-agnostic counterpart to
  * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
  * presentation }`). On phones, `presentation` is "mobile": contributions
- * join the horizontally scrollable middle action strip between the fixed
- * Kandev link and menu button. Use the host `ui.Button` icon-button contract
- * there: a 32px box with a 16px SVG icon. Desktop contributions retain their
- * existing sizing.
+ * live in the listing topbar menu with 44px touch targets and 16px SVG icons.
+ * Slots retain ownership of their controls and disclosure state; arbitrary
+ * interactions do not dismiss the host menu. Desktop sizing stays unchanged.
  * "app-status-bar-left" / "app-status-bar-right" (receives
  * `AppStatusBarSlotProps` as `slotProps`), and
  * "plugin-settings" (inline UI on a plugin's own settings

@@ -37,12 +37,14 @@ import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 export type MobileMenuSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   workspaceId?: string;
   currentPage?: TaskListingPage;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
+  pageActions?: ReactNode;
 };
 
 export type MobileDisplayOptionsProps = {
@@ -317,6 +319,7 @@ function ResponsiveMenuSurface({
   onOpenChange,
   contentRef,
   onOpenAutoFocus,
+  onCloseAutoFocus,
   children,
 }: {
   isMobile: boolean;
@@ -324,6 +327,7 @@ function ResponsiveMenuSurface({
   onOpenChange: (open: boolean) => void;
   contentRef: RefObject<HTMLDivElement | null>;
   onOpenAutoFocus: (event: Event) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -334,6 +338,7 @@ function ResponsiveMenuSurface({
           ref={contentRef}
           tabIndex={-1}
           onOpenAutoFocus={onOpenAutoFocus}
+          onCloseAutoFocus={onCloseAutoFocus}
           className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none"
         >
           <div
@@ -359,6 +364,7 @@ function ResponsiveMenuSurface({
         side="right"
         tabIndex={-1}
         onOpenAutoFocus={onOpenAutoFocus}
+        onCloseAutoFocus={onCloseAutoFocus}
         className="w-full overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:max-w-sm"
       >
         <SheetHeader>
@@ -371,6 +377,7 @@ function ResponsiveMenuSurface({
 }
 
 function MobileMenuContent({
+  isMobile,
   workspaceId,
   searchQuery,
   onSearchChange,
@@ -381,10 +388,17 @@ function MobileMenuContent({
   showPipeline,
   displayOptions,
   navControls,
+  pageActions,
 }: Pick<
   MobileMenuSheetProps,
-  "workspaceId" | "searchQuery" | "onSearchChange" | "isSearchLoading" | "onOpenChange"
+  | "workspaceId"
+  | "searchQuery"
+  | "onSearchChange"
+  | "isSearchLoading"
+  | "onOpenChange"
+  | "pageActions"
 > & {
+  isMobile: boolean;
   viewValue: string;
   onViewChange: (value: string) => void;
   showPipeline: boolean;
@@ -393,11 +407,13 @@ function MobileMenuContent({
 }) {
   return (
     <div className="flex min-h-full flex-col gap-6 p-4">
-      <MobileSearchSection
-        searchQuery={searchQuery ?? ""}
-        onSearchChange={onSearchChange}
-        isSearchLoading={isSearchLoading ?? false}
-      />
+      {pageActions ?? (
+        <MobileSearchSection
+          searchQuery={searchQuery ?? ""}
+          onSearchChange={onSearchChange}
+          isSearchLoading={isSearchLoading ?? false}
+        />
+      )}
       <MobileWorkspaceSection onOpenChange={onOpenChange} />
       <MobileViewSection
         viewValue={viewValue}
@@ -405,12 +421,11 @@ function MobileMenuContent({
         showPipeline={showPipeline}
       />
       <MobileDisplayOptions {...displayOptions} />
-      {/* Home and Tasks are omitted here on purpose: the mobile header's brand
-          link is this surface's home affordance and the View toggle above
-          switches between Kanban and List. */}
+      {/* Phone Home lives in this menu; the View toggle owns listing modes. */}
       <AppNavSections
         onNavigate={() => onOpenChange(false)}
-        omitSections={["primary"]}
+        omitSections={isMobile || viewValue === "threads" ? [] : ["primary"]}
+        omitDestinations={["tasks", "threads"]}
         workspaceActions={<MobileWorkspaceActionsSection workspaceId={workspaceId} />}
         controls={navControls}
       />
@@ -421,12 +436,14 @@ function MobileMenuContent({
 export function MobileMenuSheet({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   workspaceId,
   currentPage = "kanban",
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
   tasksListOptions,
+  pageActions,
 }: MobileMenuSheetProps) {
   const navControls = useAppNavDialogs(() => onOpenChange(false));
   const { contentRef, isMobile, viewValue, handleViewChange, displayOptions, focusMenu } =
@@ -439,6 +456,7 @@ export function MobileMenuSheet({
       onOpenChange={onOpenChange}
       contentRef={contentRef}
       onOpenAutoFocus={focusMenu}
+      onCloseAutoFocus={onCloseAutoFocus}
       workspaceId={workspaceId}
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
@@ -447,6 +465,7 @@ export function MobileMenuSheet({
       onViewChange={handleViewChange}
       displayOptions={displayOptions}
       navControls={navControls}
+      pageActions={pageActions}
     />
   );
 }
@@ -454,7 +473,14 @@ export function MobileMenuSheet({
 function MobileMenuRender(
   props: Pick<
     MobileMenuSheetProps,
-    "open" | "onOpenChange" | "workspaceId" | "searchQuery" | "onSearchChange" | "isSearchLoading"
+    | "open"
+    | "onOpenChange"
+    | "onCloseAutoFocus"
+    | "workspaceId"
+    | "searchQuery"
+    | "onSearchChange"
+    | "isSearchLoading"
+    | "pageActions"
   > & {
     isMobile: boolean;
     contentRef: RefObject<HTMLDivElement | null>;

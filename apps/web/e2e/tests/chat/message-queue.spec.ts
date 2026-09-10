@@ -5,6 +5,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
+import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
 import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
@@ -12,6 +13,7 @@ import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
+import { watchWs } from "../../helpers/causal-waits";
 
 registerSeparateQueueRows(test);
 
@@ -167,13 +169,18 @@ test.describe("Quick chat queue", () => {
 // Task session queue tests
 // ---------------------------------------------------------------------------
 
+type SeededSessionPage = SessionPage & {
+  taskId: string;
+  sessionId: string;
+};
+
 async function seedTaskAndWaitForIdle(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
   description = "/e2e:simple-message",
-): Promise<SessionPage> {
+): Promise<SeededSessionPage> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -191,8 +198,11 @@ async function seedTaskAndWaitForIdle(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (!task.session_id) {
+    throw new Error("task did not have a primary session");
+  }
 
-  return session;
+  return Object.assign(session, { taskId: task.id, sessionId: task.session_id });
 }
 
 async function queueMessages(
@@ -558,6 +568,170 @@ test.describe("Task session queue", () => {
         { timeout: 5_000 },
       )
       .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
+  });
+
+  test("editing a later queued entry does not pause earlier FIFO delivery", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const gateway = watchWs(testPage);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue edit lease ordering test",
+    );
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(
+      session.taskId,
+      session.sessionId,
+    );
+
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("first queued"),
+      scriptedQueueMessage("second queued"),
+    ]);
+    await openQueuePanel(testPage);
+
+    const rows = testPage.getByTestId("queue-entry");
+    await expect(rows).toHaveCount(2, { timeout: 10_000 });
+    await rows.nth(1).getByTestId("queue-entry-edit").click();
+
+    const textarea = testPage.getByTestId("queue-edit-textarea");
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill(scriptedQueueMessage("second edited"));
+
+    // The later entry stays leased while the earlier FIFO turn drains.
+    await waitForAgentMessage(apiClient, session.sessionId, "first queued");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+
+    const saveResponse = gateway.waitForResponse("message.queue.update");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await saveResponse;
+
+    // Saving releases the lease and resumes Auto-run for the edited entry.
+    await waitForAgentMessage(apiClient, session.sessionId, "second edited");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+    await expect(rows).toHaveCount(0);
+  });
+
+  test("saving the held head after its turn completes resumes Auto-run", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const gateway = watchWs(testPage);
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue edit save dispatch test",
+    );
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(
+      session.taskId,
+      session.sessionId,
+    );
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("edited head dispatched"),
+    ]);
+
+    await openQueuePanel(testPage);
+    const row = testPage.getByTestId("queue-entry").first();
+    await row.getByTestId("queue-entry-edit").click();
+    await testPage
+      .getByTestId("queue-edit-textarea")
+      .fill(scriptedQueueMessage("edited head dispatched after save"));
+
+    await waitForAgentMessage(apiClient, session.sessionId, "Slow response complete");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+
+    const saveResponse = gateway.waitForResponse("message.queue.update");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await saveResponse;
+    await waitForAgentMessage(apiClient, session.sessionId, "edited head dispatched after save");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+    await expect(testPage.getByTestId("queue-entry")).toHaveCount(0);
+  });
+
+  test("queue editor reconciles after switching sessions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const replacementTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Queue editor replacement B",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!replacementTask.session_id) {
+      throw new Error("replacement task did not have a primary session");
+    }
+    await waitForSessionDone(
+      apiClient,
+      replacementTask.id,
+      replacementTask.session_id,
+      "replacement task should finish its seed turn",
+    );
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue editor replacement A",
+    );
+    await session.sendMessage("/slow 30s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("replacement first"),
+      scriptedQueueMessage("replacement second"),
+    ]);
+
+    await openQueuePanel(testPage);
+    const rows = testPage.getByTestId("queue-entry");
+    await expect(rows).toHaveCount(2, { timeout: 10_000 });
+    await rows.nth(1).getByTestId("queue-entry-edit").click();
+    await expect(testPage.getByTestId("queue-edit-textarea")).toBeVisible();
+
+    await session.clickTaskInSidebar("Queue editor replacement B");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${replacementTask.id}$`), {
+      timeout: 15_000,
+    });
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await session.clickTaskInSidebar("Queue editor replacement A");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${session.taskId}$`), {
+      timeout: 15_000,
+    });
+    await session.waitForLoad();
+    await openQueuePanel(testPage);
+    const remountedRows = testPage.getByTestId("queue-entry");
+    await expect(remountedRows).toHaveCount(2, { timeout: 10_000 });
+    await remountedRows.nth(1).getByTestId("queue-entry-edit").click();
+    await testPage.getByTestId("queue-edit-textarea").fill("replacement second edited");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(testPage.getByTestId("queue-entry-text").last()).toContainText(
+      "replacement second edited",
+    );
   });
 
   test("merges a queued message into the message above it", async ({

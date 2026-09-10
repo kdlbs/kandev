@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultState } from "@/lib/state/default-state";
 
 const mocks = vi.hoisted(() => ({
   openQuickChat: vi.fn(),
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 const state = {
   workspaces: { activeId: "ws-1" as string | null },
+  userSettings: { ...defaultState.userSettings },
   office: { inboxCountByWorkspaceId: {} as Record<string, number> },
   quickChat: {
     isOpen: false,
@@ -64,6 +66,7 @@ function renderNav(collapsed: boolean) {
 describe("AppSidebarPrimaryNav", () => {
   beforeEach(() => {
     state.workspaces.activeId = "ws-1";
+    state.userSettings = { ...defaultState.userSettings };
     state.office.inboxCountByWorkspaceId = {};
     state.quickChat.isOpen = false;
     state.quickChat.sessions = [];
@@ -138,11 +141,17 @@ describe("AppSidebarPrimaryNav", () => {
     expect(screen.queryByRole("button", { name: QUICK_CHAT_LABEL })).toBeNull();
   });
 
-  it("links Home to an explicit overview while keeping it active at the root route", () => {
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.4
+  it.each([
+    ["task_overview", "/?home=overview&workspaceId=ws-1"],
+    ["threads", "/threads?workspace=ws-1"],
+  ] as const)("links Home for %s and marks its route active", (startupPage, href) => {
+    state.userSettings.startupPage = startupPage;
+    pathname = href.split("?")[0];
     renderNav(false);
 
     const home = screen.getByRole("link", { name: "Home" });
-    expect(home.getAttribute("href")).toBe("/?home=overview&workspaceId=ws-1");
+    expect(home.getAttribute("href")).toBe(href);
     expect(home.className).toContain("before:bg-primary");
   });
 

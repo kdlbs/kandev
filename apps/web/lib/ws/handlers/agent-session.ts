@@ -758,7 +758,7 @@ function queueAutoMergeMeta(
 }
 
 /** Writes a message.queue.status_changed broadcast into the queue slice,
- * preserving known policy values when an older publisher omits them. */
+ * preserving known policy and capacity values when an older publisher omits them. */
 // eslint-disable-next-line complexity -- one handler atomically establishes a queue snapshot.
 function handleQueueStatusChangedMessage(
   store: StoreApi<AppState>,
@@ -773,9 +773,11 @@ function handleQueueStatusChangedMessage(
   if (rejectsQueueStatus(state, payload, previousMeta)) return;
 
   const entries = payload.entries ?? [];
+  const count = typeof payload.count === "number" ? payload.count : entries.length;
+  const max = typeof payload.max === "number" ? payload.max : (previousMeta?.max ?? 0);
   const meta = {
-    count: typeof payload.count === "number" ? payload.count : entries.length,
-    max: typeof payload.max === "number" ? payload.max : 0,
+    count,
+    max,
     mergeEnabled: payload.merge_enabled ?? previousMeta?.mergeEnabled ?? true,
     autoRun: payload.auto_run ?? previousMeta?.autoRun ?? true,
     ...queueIdentityMeta(payload, previousMeta),

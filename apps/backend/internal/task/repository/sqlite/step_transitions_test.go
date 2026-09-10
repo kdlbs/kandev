@@ -165,6 +165,45 @@ func TestGenesisRowRecordsFeederStepWhenWIPDivertsPlacement(t *testing.T) {
 	}
 }
 
+func TestGetLatestTaskStepTransitionID(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	ctx := context.Background()
+	createStepTransitionsTestTask(t, repo, "task-latest-transition", "wf-1", "step-a")
+
+	genesisID, err := repo.GetLatestTaskStepTransitionID(ctx, "task-latest-transition")
+	if err != nil {
+		t.Fatalf("GetLatestTaskStepTransitionID after create: %v", err)
+	}
+	if genesisID == 0 {
+		t.Fatal("GetLatestTaskStepTransitionID after create = 0, want genesis row")
+	}
+
+	task, err := repo.GetTask(ctx, "task-latest-transition")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	task.WorkflowStepID = "step-b"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	latestID, err := repo.GetLatestTaskStepTransitionID(ctx, "task-latest-transition")
+	if err != nil {
+		t.Fatalf("GetLatestTaskStepTransitionID after move: %v", err)
+	}
+	if latestID <= genesisID {
+		t.Fatalf("latest transition id = %d, want greater than genesis %d", latestID, genesisID)
+	}
+
+	missingID, err := repo.GetLatestTaskStepTransitionID(ctx, "missing-task")
+	if err != nil {
+		t.Fatalf("GetLatestTaskStepTransitionID missing task: %v", err)
+	}
+	if missingID != 0 {
+		t.Fatalf("missing task transition id = %d, want 0", missingID)
+	}
+}
+
 func TestUpdateTaskMoveWritesOneRowWithAttribution(t *testing.T) {
 	repo := newStepTransitionsTestRepo(t)
 	ctx := steptelemetry.WithAttribution(context.Background(), steptelemetry.Attribution{

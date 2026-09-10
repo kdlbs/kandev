@@ -155,6 +155,10 @@ export function mergeTaskUpdate(
     taskField: "autoStartFailed",
   });
   preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "workspace_orphaned",
+    taskField: "workspaceOrphaned",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "active_subagent_count",
     taskField: "activeSubagentCount",
   });

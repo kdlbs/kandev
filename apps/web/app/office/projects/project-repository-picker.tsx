@@ -19,6 +19,7 @@ import { normalizeRepoValue, shouldShowCustomEntry } from "./repo-entry";
 import { useDiscoveredRepositories } from "./use-discovered-repositories";
 import { useTranslation } from "react-i18next";
 import { RepositoryDiscoveryControls } from "@/components/repository-discovery-controls";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type Props = {
   workspaceId: string | null;
@@ -128,7 +129,7 @@ export function ProjectRepositoryPicker({
             placeholder={t("office:searchOrPasteAUrlOr")}
             value={query}
             onValueChange={setQuery}
-            className="h-9"
+            className={controlSizingClassName("standard")}
           />
           <PickerCommandList
             workspaceOptions={workspaceOptions}
@@ -150,7 +151,10 @@ function PickerTriggerButton({ label, ...rest }: { label: string }) {
       type="button"
       data-testid="project-add-repository"
       className={cn(
-        "h-8 inline-flex items-center gap-1.5 rounded-md border border-input bg-input/20 dark:bg-input/30 px-2.5 text-xs cursor-pointer",
+        controlSizingClassName(
+          "standard",
+          "inline-flex items-center gap-1.5 rounded-md border border-input bg-input/20 dark:bg-input/30 px-2.5 text-xs cursor-pointer",
+        ),
         "hover:bg-muted/60",
       )}
       {...rest}

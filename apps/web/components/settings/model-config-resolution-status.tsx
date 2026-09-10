@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { CapabilityStatus } from "@/lib/types/http";
+import { settingsActionClassName } from "./settings-control";
 
 export function ModelConfigResolutionStatus({
   status,
@@ -40,8 +41,7 @@ export function ModelConfigResolutionStatus({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
-        className="min-h-11 shrink-0 px-2 md:min-h-8"
+        className={settingsActionClassName("shrink-0 px-2")}
         onClick={() => void onRetry()}
       >
         {t("agents:retryModelOptions")}
