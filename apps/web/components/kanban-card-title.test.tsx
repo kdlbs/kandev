@@ -25,7 +25,12 @@ class CapturingResizeObserver {
 
 function setGeometry(
   element: Element,
-  overrides: { scrollHeight?: number; clientHeight?: number },
+  overrides: {
+    scrollHeight?: number;
+    clientHeight?: number;
+    scrollWidth?: number;
+    clientWidth?: number;
+  },
 ) {
   if (overrides.scrollHeight !== undefined) {
     Object.defineProperty(element, "scrollHeight", {
@@ -37,6 +42,18 @@ function setGeometry(
     Object.defineProperty(element, "clientHeight", {
       configurable: true,
       value: overrides.clientHeight,
+    });
+  }
+  if (overrides.scrollWidth !== undefined) {
+    Object.defineProperty(element, "scrollWidth", {
+      configurable: true,
+      value: overrides.scrollWidth,
+    });
+  }
+  if (overrides.clientWidth !== undefined) {
+    Object.defineProperty(element, "clientWidth", {
+      configurable: true,
+      value: overrides.clientWidth,
     });
   }
 }
@@ -113,10 +130,24 @@ describe("CardTitle", () => {
     expect(screen.queryByTestId(PREVIEW_TRIGGER_TEST_ID)).toBeNull();
 
     const titleEl = screen.getByTestId("task-card-title");
-    // line-clamp-1 clips vertically, not horizontally: a wrapping multi-word
-    // title never grows scrollWidth past clientWidth, so truncation must be
-    // measured on the height axis line-clamp actually clips.
+    // A normal multi-word title is clipped by line-clamp on the height axis.
     setGeometry(titleEl, { scrollHeight: 88, clientHeight: 18 });
+    fireResize(titleEl);
+
+    expect(screen.getByTestId(PREVIEW_TRIGGER_TEST_ID)).not.toBeNull();
+  });
+
+  it("mounts the hover trigger when only horizontal overflow is measured", () => {
+    renderCardTitle(makeTask());
+    expect(screen.queryByTestId(PREVIEW_TRIGGER_TEST_ID)).toBeNull();
+
+    const titleEl = screen.getByTestId("task-card-title");
+    setGeometry(titleEl, {
+      scrollHeight: 18,
+      clientHeight: 18,
+      scrollWidth: 220,
+      clientWidth: 200,
+    });
     fireResize(titleEl);
 
     expect(screen.getByTestId(PREVIEW_TRIGGER_TEST_ID)).not.toBeNull();

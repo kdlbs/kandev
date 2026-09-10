@@ -536,4 +536,19 @@ describe("TaskTitleHoverCard — keyboard-focusing the trigger opens the disclos
 
     await waitFor(() => expect(screen.queryByTestId(HOVER_CARD_TEST_ID)).toBeNull());
   });
+
+  it("moves focus into the preview when Enter activates an already focus-opened disclosure", async () => {
+    renderCard([
+      makeTask({ id: "parent-1" }),
+      makeTask({ id: "child-1", parentTaskId: "parent-1" }),
+    ]);
+    const trigger = screen.getByTestId(PREVIEW_TRIGGER_TEST_ID);
+    trigger.focus();
+    await screen.findAllByTestId(HOVER_CARD_TEST_ID);
+
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger, { detail: 0 });
+
+    await waitFor(() => expect(document.activeElement).toBe(subtaskRow("child-1")));
+  });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type FocusEvent, type MouseEvent, type ReactNode } from "react";
+import { useRef, type FocusEvent, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { IconSubtask } from "@tabler/icons-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
@@ -14,6 +14,12 @@ import { TaskSubtaskRow } from "./task-subtask-row";
 const MAX_VISIBLE_SUBTASKS = 12;
 const OPEN_DELAY_MS = 200;
 const CLOSE_DELAY_MS = 100;
+const PREVIEW_FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function focusFirstPreviewTarget(contentRef: RefObject<HTMLDivElement | null>) {
+  contentRef.current?.querySelector<HTMLElement>(PREVIEW_FOCUSABLE_SELECTOR)?.focus();
+}
 
 function SubtasksSection({ subtasks }: { subtasks: TaskSubtask[] }) {
   const { t } = useTranslation();
@@ -105,11 +111,15 @@ function DesktopTaskTitlePreview({
     event.preventDefault();
     event.stopPropagation();
     keyboardSessionRef.current = true;
+    if (hover.open) {
+      focusFirstPreviewTarget(contentRef);
+      return;
+    }
     hover.onOpenChange(true);
   };
 
   const handleContentBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) hover.onContentLeave();
+    if (!event.currentTarget.contains(event.relatedTarget)) hover.onContentLeave(event);
   };
 
   return (
@@ -158,13 +168,7 @@ function DesktopTaskTitlePreview({
         onBlurCapture={handleContentBlur}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          if (keyboardSessionRef.current) {
-            contentRef.current
-              ?.querySelector<HTMLElement>(
-                'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-              )
-              ?.focus();
-          }
+          if (keyboardSessionRef.current) focusFirstPreviewTarget(contentRef);
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();

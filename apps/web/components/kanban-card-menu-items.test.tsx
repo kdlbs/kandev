@@ -413,3 +413,46 @@ describe("buildKanbanCardMenuEntries — priority action", () => {
     expect(onSelectPriority).toHaveBeenCalledWith("critical");
   });
 });
+
+describe("buildKanbanCardMenuEntries — move-only disabled state", () => {
+  it("disables move entries without disabling unrelated task actions", () => {
+    const entries = buildKanbanCardMenuEntries({
+      currentWorkflowId: "wf-1",
+      currentStepId: "step-1",
+      workflows: [
+        { id: "wf-1", name: "Workflow 1" },
+        { id: "wf-2", name: "Workflow 2" },
+      ],
+      stepsByWorkflowId: {
+        "wf-1": [
+          { id: "step-1", title: "Step 1" },
+          { id: "step-2", title: "Step 2" },
+        ],
+        "wf-2": [{ id: "step-3", title: "Step 3" }],
+      },
+      moveDisabled: true,
+      onEdit: vi.fn(),
+      onSelectPriority: vi.fn(),
+      onMoveToStep: vi.fn(),
+      onSendToWorkflow: vi.fn(),
+      onLinkPullRequest: vi.fn(),
+      onArchive: vi.fn(),
+      onDelete: vi.fn(),
+    });
+
+    const entry = (key: string) => entries.find((candidate) => candidate.key === key);
+    const disabled = (key: string) => {
+      const candidate = entry(key);
+      return candidate?.kind === "item" || candidate?.kind === "submenu"
+        ? candidate.disabled
+        : undefined;
+    };
+    expect(disabled("edit")).toBe(false);
+    expect(disabled("priority")).toBe(false);
+    expect(disabled("move-to")).toBe(true);
+    expect(disabled("send-to-workflow")).toBe(true);
+    expect(disabled("link")).toBe(false);
+    expect(disabled("archive")).toBe(false);
+    expect(disabled("delete")).toBe(false);
+  });
+});

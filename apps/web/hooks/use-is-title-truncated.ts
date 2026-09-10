@@ -8,11 +8,9 @@ import { useEffect, useRef, useState } from "react";
  * the returned `ref` to the element whose truncation should be measured.
  *
  * The element is clamped with `line-clamp-1` (`-webkit-box` + `-webkit-line-
- * clamp`), which wraps text normally within the box's width and clips
- * vertically, not horizontally: a wrapping multi-word title never grows
- * `scrollWidth` past `clientWidth`, so that comparison never reports
- * truncation for the common case. `scrollHeight` vs `clientHeight` measures
- * the axis line-clamp actually clips.
+ * clamp`). Most titles are clipped vertically by the line clamp, while a
+ * single unbroken title can also be clipped horizontally. Both axes are
+ * checked so either case enables the full-title disclosure.
  *
  * `ResizeObserver` alone misses a truncation change caused by the title text
  * itself changing while the clamped box's own size stays constant (fixed
@@ -27,7 +25,10 @@ export function useIsTitleTruncated<T extends HTMLElement>(text?: string) {
     const element = ref.current;
     if (!element) return;
 
-    const update = () => setIsTruncated(element.scrollHeight > element.clientHeight);
+    const update = () =>
+      setIsTruncated(
+        element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth,
+      );
     update();
 
     const observer = new ResizeObserver(update);

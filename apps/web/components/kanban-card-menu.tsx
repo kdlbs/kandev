@@ -198,7 +198,8 @@ export function useKanbanCardMenus({
   const detachAnchorRef = useRef<HTMLDivElement>(null);
   const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
   const isDetaching = detachingTaskId === task.id;
-  const disabled = Boolean(isDeleting || isArchiving || isDetaching || isMoving);
+  const disabled = Boolean(isDeleting || isArchiving || isDetaching);
+  const moveDisabled = Boolean(disabled || isMoving);
   const actingOnMultiSelection = Boolean(isSelected && selectedIds && selectedIds.size > 1);
 
   const handleDetachConfirm = async () => {
@@ -228,6 +229,7 @@ export function useKanbanCardMenus({
     workflows: moveMenu.moveTargets.workflowItems,
     stepsByWorkflowId: moveMenu.moveTargets.stepsByWorkflowId,
     disabled,
+    moveDisabled,
     isDeleting,
     isArchiving,
     isDetaching,
