@@ -152,13 +152,28 @@ func TestCombineLsofAndPSSnapshotKeepsAncestryOnlyEntries(t *testing.T) {
 
 func TestCombineLsofAndPSSnapshotKeepsCwdOnlyEntry(t *testing.T) {
 	// A pid lsof saw but ps somehow missed (race between the two commands)
-	// still contributes what lsof knows, with ppid defaulting to 0.
+	// still contributes what lsof knows, but its ppid is marked unresolved
+	// rather than defaulted to 0 -- a real ppid of 0 and "ps never reported
+	// this pid" must stay distinguishable to the ownership ancestor walk.
 	byPID := map[int]hostProcess{
 		600: {PID: 600, Cwd: "/task/root", Command: "sh"},
 	}
 	got := combineLsofAndPSSnapshot(byPID, map[int]int{})
-	if len(got) != 1 || got[0].PID != 600 || got[0].Cwd != "/task/root" || got[0].PPID != 0 {
+	if len(got) != 1 || got[0].PID != 600 || got[0].Cwd != "/task/root" || got[0].PPID != orphanReapUnresolvedPPID {
 		t.Fatalf("unexpected combined snapshot: %+v", got)
+	}
+}
+
+// A pid ps reported with a genuine ppid of 0 must keep that real value, not
+// be confused with the sentinel used for "ps had no entry for this pid".
+func TestCombineLsofAndPSSnapshotKeepsGenuineZeroPPID(t *testing.T) {
+	byPID := map[int]hostProcess{
+		700: {PID: 700, Cwd: "/task/root", Command: "sh"},
+	}
+	ppidByPID := map[int]int{700: 0}
+	got := combineLsofAndPSSnapshot(byPID, ppidByPID)
+	if len(got) != 1 || got[0].PPID != 0 {
+		t.Fatalf("expected a genuine ppid of 0 preserved, got %+v", got)
 	}
 }
 

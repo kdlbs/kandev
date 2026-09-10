@@ -13,6 +13,11 @@ import (
 // target once the directory it points to has been removed.
 const procDeletedSuffix = " (deleted)"
 
+// orphanReapUnresolvedPPID marks a hostProcess entry whose parent process id
+// is unknown, distinct from a genuine ppid of 0. The ownership ancestor walk
+// treats it as an unresolvable hop rather than as the end of the chain.
+const orphanReapUnresolvedPPID = -1
+
 // trimProcCwdDeletedSuffix strips /proc/<pid>/cwd's " (deleted)" suffix.
 // Pure string logic, so it carries no build tag even though only Linux's
 // snapshotter calls it -- see apps/backend/AGENTS.md's
@@ -153,12 +158,18 @@ func parsePSAncestry(out []byte) map[int]int {
 // for still contributes its ancestry (ppid) with an empty Cwd: candidate
 // attribution already requires a non-empty Cwd (attributeOrphanReapCandidates
 // skips empty-cwd entries), but the ownership ancestry walk needs every pid's
-// ancestry to be resolvable, including one whose cwd is unreadable.
+// ancestry to be resolvable, including one whose cwd is unreadable. A pid ps
+// did not report gets orphanReapUnresolvedPPID rather than a defaulted 0, so
+// the ownership walk can tell "no ancestry" apart from "ancestry unknown".
 func combineLsofAndPSSnapshot(byPID map[int]hostProcess, ppidByPID map[int]int) []hostProcess {
 	procs := make([]hostProcess, 0, len(byPID)+len(ppidByPID))
 	seen := make(map[int]struct{}, len(byPID))
 	for pid, proc := range byPID {
-		proc.PPID = ppidByPID[pid]
+		if ppid, ok := ppidByPID[pid]; ok {
+			proc.PPID = ppid
+		} else {
+			proc.PPID = orphanReapUnresolvedPPID
+		}
 		procs = append(procs, proc)
 		seen[pid] = struct{}{}
 	}

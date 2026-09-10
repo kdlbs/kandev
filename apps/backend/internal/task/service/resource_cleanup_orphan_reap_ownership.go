@@ -123,7 +123,15 @@ func (s *Service) applyOrphanReapPerCandidateOwnership(
 		})
 		return toSignal
 	}
-	if owner, ok := orphanReapAncestorOwner(cand.PID, ppidByPID, localPIDOwner); ok {
+	owner, blocked, inconclusive := orphanReapAncestorOwner(cand.PID, ppidByPID, localPIDOwner)
+	if inconclusive {
+		s.recordOrphanReapCandidate(snapshot, taskID, orphanReapCandidateRecord{
+			PID: cand.PID, Cwd: cand.Cwd, Root: cand.Root, Command: cand.Command,
+			Outcome: orphanReapOutcomeSkipped, Reason: "ownership ancestry unresolvable",
+		})
+		return toSignal
+	}
+	if blocked {
 		s.recordOrphanReapCandidate(snapshot, taskID, orphanReapCandidateRecord{
 			PID: cand.PID, Cwd: cand.Cwd, Root: cand.Root, Command: cand.Command,
 			Outcome: orphanReapOutcomeSkipped,
@@ -219,21 +227,30 @@ func orphanReapExecutorIsLive(status string) bool {
 // hop is the local_pid of another task's recorded execution. A process
 // reparented away from its launcher has no ancestry left to walk, so this
 // can miss it by design; the root-level worktree-containment check covers
-// that case instead.
-func orphanReapAncestorOwner(pid int, ppidByPID map[int]int, owners map[int]string) (string, bool) {
+// that case instead. inconclusive is true when the walk reaches a hop whose
+// ancestry the host snapshot could not resolve (orphanReapUnresolvedPPID):
+// the walk cannot rule out ownership further up an unknown chain, so the
+// caller must fail that candidate closed rather than read this as "not
+// owned". A hop simply absent from ppidByPID (never seen by either host
+// command at all) still ends the walk as "not owned", a narrower and rarer
+// gap the root-level worktree-containment check also backstops.
+func orphanReapAncestorOwner(pid int, ppidByPID map[int]int, owners map[int]string) (owner string, blocked bool, inconclusive bool) {
 	seen := make(map[int]bool)
 	for pid > 0 && !seen[pid] {
 		seen[pid] = true
 		if owner, ok := owners[pid]; ok {
-			return owner, true
+			return owner, true, false
 		}
 		parent, ok := ppidByPID[pid]
 		if !ok || parent == pid {
 			break
 		}
+		if parent == orphanReapUnresolvedPPID {
+			return "", false, true
+		}
 		pid = parent
 	}
-	return "", false
+	return "", false, false
 }
 
 // orphanReapProtectedPIDs computes the protected set: the backend process
