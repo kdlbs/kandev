@@ -217,7 +217,7 @@ Public how-to documentation now explicitly names Kanban/Pipeline selections and
 disabled-Office Home behavior. All verification blocks use scoped directory
 changes. Public-docs validation passed for 46 pages and its validator test passed.
 
-### Current-main integration verification
+### Earlier current-main integration verification
 
 The managed host runner rebuilt the backend, web bundle, and packaged plugin
 fixture after main integration. The following commands from `apps/web` passed
@@ -235,3 +235,23 @@ scenarios cover desktop and native phone Home entry points, explicit routes,
 workspace retention, preference persistence, and the disabled-Office fallback.
 All managed fixtures stopped after the runs; the main instance and parent demo
 data were not used.
+
+### Landed-parent and CI repair verification
+
+After parent polish landed, phone Home uses the shared menu instead of the
+removed brand link. The startup and disabled-Office scenarios now tap that
+Home row. Existing touch/layout, workspace, preference, and reload assertions
+remain intact. Task 02 records the readiness and test-profile cleanup repairs.
+
+From `apps/web`, the following commands passed 25 desktop and 48 phone tests:
+
+```bash
+E2E_PORT_OFFSET=21 pnpm e2e:run --host --project chromium tests/kanban/step-visibility-filter.spec.ts tests/kanban/workflow-filter.spec.ts tests/settings/startup-page.spec.ts tests/office/sidebar-navigation.spec.ts -- --retries=0
+E2E_PORT_OFFSET=21 pnpm e2e:run --host --no-build --project mobile-chrome tests/office/mobile-office-navigation.spec.ts tests/settings/mobile-startup-page.spec.ts tests/kanban/mobile-kanban-topbar.spec.ts tests/kanban/mobile-kanban.spec.ts tests/task/mobile-threads-view.spec.ts tests/task/mobile-parked-background-work.spec.ts -- --retries=0
+```
+
+One worker, strict WebSocket checks, a task-owned Go cache, and `GOMAXPROCS=4`
+were used. The desktop command rebuilt backend/web/plugin artifacts; the phone
+command reused those unchanged artifacts. All eight failed CI filter cases
+and the mobile cleanup regression passed without retries. Fresh post-commit
+PR screenshots and exact-head CI/review results remain delivery evidence.

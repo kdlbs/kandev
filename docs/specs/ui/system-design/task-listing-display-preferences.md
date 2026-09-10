@@ -124,6 +124,11 @@ readiness gate: an empty workspace must still reach Threads or onboarding.
 Return explicit readiness from `useKanbanRouteBootstrap`, scoped to the
 requested workspace and fetch lifecycle, and consume it in `KanbanRoute` before
 mounting the default-resolving page.
+Record completion for both already-hydrated boot state and fetched state.
+Completion remains settled for the same route selection while live workflow
+filters or board snapshots change; these updates belong to the mounted listing,
+not startup. A different requested workspace or workflow has its own readiness
+and cancellation lifecycle.
 Failed settings fetches complete with the normal fallback rather than waiting
 forever. A late response for a previous workspace cannot redirect the current
 route. Existing Office mismatch handling runs before this task-listing choice.
@@ -156,11 +161,11 @@ the existing different query names (`workspaceId` for overview/Office,
 `workspace` for Threads). Unknown workspace mode retains the current disabled
 Home affordance. No-workspace onboarding remains available.
 
-Office priority uses effective mode, not workspace metadata alone. The phone
-listing brand gates its record-based Office destination with `useFeature("office")`,
-matching `useOfficeModeState` and the Kanban mismatch redirect. When disabled,
-it passes only the workspace ID to the shared resolver, preserving the saved
-task-listing default without linking to the unavailable Office surface.
+Office priority uses effective mode, not workspace metadata alone. Phone
+listing menus use `AppNavSections` and `useNavContext`, whose `useInOffice`
+input follows `useOfficeModeState` and the Office feature gate. With Office
+disabled, the shared resolver preserves the workspace and saved task-listing
+default without linking to the unavailable Office surface.
 
 Audit and wire these callers; do not infer workspace type from the pathname:
 
@@ -168,8 +173,8 @@ Audit and wire these callers; do not infer workspace type from the pathname:
 - Sidebar settings-exit action and workspace picker, including picking the
   active workspace again when that action currently navigates Home.
 - `useHomeAffordance`, used by shared topbars and mobile navigation.
-- The phone listing header's `MobileBrandLink`, which is the listing drawer's
-  Home affordance. Only its destination/state input changes.
+- The phone listing drawer's Home row in `AppNavSections`. Reuse the shared
+  compact header and menu composition; only Home destination/state changes.
 - Manifest mobile Home and palette `nav-home`. The palette retains its
   workspace-less overview override for existing startup choices, but routes
   a selected Threads default through the same

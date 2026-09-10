@@ -169,7 +169,7 @@ Extend `e2e/tests/settings/mobile-startup-page.spec.ts` (`mobile-chrome`):
 
 - **saves Threads from phone settings and returns Home after using List**:
   enter Settings through phone navigation, tap the labelled Threads row, Save,
-  reload, switch to List through the drawer, and tap the mobile brand Home.
+  reload, switch to List through the drawer, and tap the mobile menu Home row.
   Verify workspace, native deck, and a subsequent reload. Covers `003.1` to
   `003.4`, `003.6`, `003.8`.
 - **keeps explicit phone destinations with Threads selected**: List reload,
@@ -203,6 +203,20 @@ The current-main merge retained both UI design index entries and passed the
 122-test navigation suite, full web lint/typecheck/i18n, tagged startup/boot
 tests, and 21 focused desktop/phone browser scenarios. Broad frontend and
 current-head remote CI/review results are tracked in the PR delivery evidence.
+Later E2E CI exposed a startup-readiness regression when switching to All
+Workflows. Task 02 owns recording the hydrated fast-path completion, regression
+coverage for live filters and route changes, and focused browser verification.
+The existing listing-availability contract is clarified before this repair.
+The landed parent polish moved phone Home into the shared menu. Preserve its
+header and swipe implementation unchanged, retain the Threads choice through
+the shared navigation context, and update this package's phone entry-point
+tests and current design. The mobile parked-session flake is a separate
+test-profile cleanup defect, with no product contract change.
+After this integration, 109 focused frontend tests and 73 desktop/phone E2E
+tests passed, including every failed CI filter case and the profile cleanup
+regression. Full web lint/typecheck/i18n and specification/harness/public-docs
+validators passed. Tasks 02 and 03 record exact commands; current-head remote
+CI and review remain pending until the remediation push is verified.
 
 - `python3 scripts/lint-spec-files.test.py`: passed, 30 tests.
 - `python3 scripts/lint-spec-files.py --all`: passed for all specification files.

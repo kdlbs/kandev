@@ -74,7 +74,11 @@ test.describe("Mobile Threads Home default", () => {
     await expectEmptyList(testPage);
     await testPage.reload();
     await expectEmptyList(testPage);
-    await testPage.getByTestId("mobile-topbar-brand").tap();
+    await mobile.mobileMenuButton.tap();
+    await testPage
+      .getByRole("dialog", { name: "Menu" })
+      .getByRole("link", { name: "Home", exact: true })
+      .tap();
     await expectThreadsHome(testPage, seedData.workspaceId);
     expect((await apiClient.getUserSettings()).settings.startup_page).toBe("threads");
     await testPage.evaluate((key) => localStorage.removeItem(key), VIEW_STORAGE_KEY);

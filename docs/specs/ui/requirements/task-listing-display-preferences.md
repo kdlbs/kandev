@@ -124,6 +124,8 @@ task-listing mode.
   An explicit overview continues to mean the remembered task listing; the
   fixed Threads choice shall not override it. Saving a default while another
   destination is open shall not redirect that page.
+  After startup settles, changing workflow filters, including All Workflows,
+  shall keep the current listing usable rather than re-enter startup loading.
 - **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.6:** Home shall retain the active
   or explicitly requested workspace. Selecting another non-Office workspace
   shall apply Threads to that selected workspace. Office workspace Home shall

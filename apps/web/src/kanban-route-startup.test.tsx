@@ -170,6 +170,51 @@ describe("Home startup bootstrap", () => {
   });
 });
 
+// @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.5
+describe("Home readiness after hydrated startup", () => {
+  it.each([null, "wf-2"])(
+    "stays ready for live workflow filter %s but gates a new route",
+    async (id) => {
+      const pending = deferred<ReturnType<typeof settings>>();
+      mocks.fetchUserSettings.mockReturnValue(pending.promise);
+      const { rerender } = render(
+        <Subject
+          initialState={{
+            workspaces: { activeId: "ws-1", items: [workspace("ws-1")] },
+            userSettings: mapUserSettingsData(settings("task_overview").settings),
+            workflows: {
+              activeId: "wf-1",
+              items: ["wf-1", "wf-2"].map((workflowId) => ({
+                id: workflowId,
+                workspaceId: "ws-1",
+                name: workflowId,
+                description: null,
+                sortOrder: 0,
+              })),
+            },
+            kanban: { ...defaultState.kanban, workflowId: "wf-1" },
+          }}
+        />,
+      );
+      expect(screen.queryByRole("status")).toBeNull();
+      act(() => store.getState().setActiveWorkflow(id));
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(mocks.fetchUserSettings).not.toHaveBeenCalled();
+
+      mocks.listWorkspaces.mockResolvedValue({
+        workspaces: [workspace("ws-1"), workspace("ws-2")],
+        total: 2,
+      });
+      rerender(<Subject route={{ workspaceId: "ws-2" }} />);
+      expect(screen.getByRole("status")).toBeTruthy();
+      await act(async () => pending.resolve(settings("task_overview")));
+      await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+      expect(store.getState().workspaces.activeId).toBe("ws-2");
+      expect(mocks.router.replace).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("Home startup fallback", () => {
   it.each(["blocked", "malformed"])("uses fixed Threads with %s listing storage", async (mode) => {
     if (mode === "blocked") {

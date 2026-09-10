@@ -66,10 +66,8 @@ export const APP_DESTINATIONS: Destination[] = [
     icon: IconHome,
     section: "primary",
     href: homeDestinationHref,
-    // The sidebar's primary nav still owns "go home" on desktop; the mobile
-    // menu offers it so shells without kanban's brand link (Settings, Office,
-    // plugin pages) keep a phone home row. Kanban's drawer opts out via
-    // omitSections.
+    // The sidebar owns desktop Home; shared navigation and listing menus
+    // expose the same destination on phones.
     surfaces: MENU_AND_PALETTE,
     palette: {
       id: "nav-home",

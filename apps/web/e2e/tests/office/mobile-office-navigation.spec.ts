@@ -97,9 +97,12 @@ test.describe("Office mobile navigation", () => {
     try {
       await backend.restart({ KANDEV_FEATURES_OFFICE: "false" });
       await testPage.goto(`/?home=overview&workspaceId=${officeSeed.workspaceId}`);
-      const brand = testPage.getByTestId("mobile-topbar-brand");
-      await expect(brand).toHaveAttribute("href", `/threads?workspace=${officeSeed.workspaceId}`);
-      await brand.tap();
+      await testPage.getByTestId("mobile-topbar-menu").tap();
+      const home = testPage
+        .getByRole("dialog", { name: "Menu" })
+        .getByRole("link", { name: "Home", exact: true });
+      await expect(home).toHaveAttribute("href", `/threads?workspace=${officeSeed.workspaceId}`);
+      await home.tap();
       await expect(testPage).toHaveURL(
         (url) =>
           url.pathname === "/threads" &&

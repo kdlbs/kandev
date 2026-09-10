@@ -105,8 +105,10 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
     if (
       store.getState().userSettings.loaded &&
       hasHydratedKanbanRouteState(store.getState(), selection)
-    )
+    ) {
+      setCompletedSelection(selection);
       return;
+    }
 
     let cancelled = false;
 

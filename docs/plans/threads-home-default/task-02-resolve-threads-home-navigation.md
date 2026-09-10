@@ -100,7 +100,7 @@ complete the feature.
 - `apps/web/components/app-sidebar/app-sidebar-header.tsx`,
   `app-sidebar-primary-nav.tsx`, `app-sidebar-footer.tsx`,
   `app-sidebar-workspace-picker.tsx`, and `app-sidebar-workspace-navigation.test.ts`
-- `apps/web/components/kanban/kanban-header-mobile.tsx` (Home destination only)
+- `apps/web/components/navigation/app-nav-sections.tsx` (shared phone Home consumer)
 
 `view-preference.ts`, `view-navigation.ts`, and `use-home-affordance.ts` already
 own the correct lower-level contracts; change their production logic only if
@@ -117,7 +117,7 @@ needed for the shared resolver, not to move startup policy into view memory.
 - Gating on a workflow/snapshot deadlocks empty workspaces. Gating only on the
   local view hook's old `loaded: true` write races settings hydration.
 - A workspace picker must pass its selected workspace, not a stale active one.
-- The phone brand is Home on listing surfaces; task Task overview is a
+- The phone menu Home row owns listing Home; task Task overview is a
   separate explicit link and must not be swept into this change.
 
 ## Parallelism
@@ -135,7 +135,7 @@ needed for the shared resolver, not to move startup policy into view memory.
 ## Results
 
 Shared Home policy now covers the manifest, palette, sidebar, settings exit,
-workspace picker, and phone brand. Bare startup waits for authoritative route
+workspace picker, and phone Home. Bare startup waits for authoritative route
 bootstrap; explicit destinations and Office retain priority. The device view
 hook preserves settings readiness.
 
@@ -211,3 +211,56 @@ agent sandbox (`EPERM`) and was stopped without a verdict. Full-suite execution
 requires local IPC permission in this environment. Final broad-suite and
 current-head CI/review results belong to the PR delivery evidence; the scoped
 remediation checks above are complete.
+
+### CI live-filter readiness remediation
+
+E2E shard 7 exposed four step-visibility failures after selecting All Workflows.
+The hydrated boot path returns without recording completion; clearing the live
+workflow filter then makes the snapshot predicate false and unmounts the board
+behind Loading Home. The exact first scenario also fails locally with no retries.
+
+Keep completion settled for the same route on both hydration paths. Add focused
+tests for All Workflows, an uncached workflow, and a subsequent explicit route
+change that must still wait for its own bootstrap. Re-run the failed filter
+spec and the affected desktop/phone startup neighbors against a rebuilt bundle.
+This repairs AC-003.5 without changing default precedence, public copy, native
+layout, or the parent's topbar/swipe work. Before the later main merge, the two
+new unit assertions failed and then passed with 37 route/bootstrap tests; the
+rebuilt filter/startup E2E run passed 12 tests with no retries. Shard 5 later
+confirmed four more failures in `workflow-filter.spec.ts` with the same Loading
+Home evidence; include that complete spec in post-merge verification.
+
+### Landed parent and fixture integration
+
+The parent polish landed on main and removed the phone brand link. Keep its
+header and header tests unchanged; Home now belongs to the shared menu's
+`AppNavSections`, which already uses this task's saved startup choice and
+feature-aware Office context. Update both phone startup/Office scenarios to
+tap that actual Home row, retaining workspace, destination, and reload checks.
+The earlier brand-specific test evidence above is historical; menu-based
+verification supersedes it. Public how-to documentation retains both the
+parent's compact-menu guidance and this task's three startup choices.
+
+The mobile parked-background-work CI flake used a suite-level profile ID that
+per-test cleanup deleted when the seed already existed. Initial fresh-worker
+runs passed three times; seeding before provider restart reproduced the exact
+missing-session failure. Create a fresh mock profile after `testPage` cleanup.
+The existing scenario and its preceding file-viewer case passed twice (four
+tests, no retries). This is fixture-only repair; parked-work requirements and
+production behavior remain unchanged.
+
+Post-merge verification from `apps/web` passed 109 tests across 13 files:
+
+```bash
+pnpm exec vitest run src/kanban-route-startup.test.tsx src/kanban-route.test.ts lib/routing/kanban-route-hydration.test.ts app/page-client.test.tsx components/kanban/kanban-header-mobile.test.tsx components/navigation/app-nav-sheet.test.tsx hooks/use-app-destinations.test.tsx lib/navigation/core-destinations.test.ts lib/navigation/workspace-home.test.ts
+pnpm exec vitest run hooks/use-in-office.test.ts components/kanban/mobile-menu-sheet.test.tsx components/kanban/mobile-menu-utility-actions.test.tsx components/workspace-scope-provider.test.tsx
+pnpm run lint
+pnpm run typecheck
+pnpm run i18n:check
+```
+
+All commands passed. The 12 startup tests passed again after explicitly asserting
+the new route's resolved workspace. Focused ESLint over the changed E2E tests
+also passed. Task 03 records the 73 rebuilt desktop/phone browser checks. All
+specification, harness, and public-docs validators passed; PR-only whitespace
+checks passed. Current-head remote CI/review remains delivery work after push.
