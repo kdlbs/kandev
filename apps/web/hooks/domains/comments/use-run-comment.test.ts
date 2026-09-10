@@ -55,8 +55,11 @@ function makeStoreState(sessionState: string, planMode = false, foregroundActivi
   return {
     taskSessions: {
       items: {
-        "sess-1": { state: sessionState, foreground_activity: foregroundActivity },
-        "other-session": { state: "RUNNING", foreground_activity: "generating" },
+        "sess-1": {
+          state: sessionState,
+          foreground_activity: foregroundActivity,
+          queue_incarnation_id: "inc-1",
+        },
       },
     },
     chatInput: {

@@ -10,15 +10,14 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // ErrTaskNotFound is returned (wrapped) by repository task lookups when the
 // task row is absent. Callers that must distinguish "row missing" from
-// "lookup failed" should check with errors.Is — this is the positive
-// signal the office GC uses to classify a kandev-managed container as
-// safely removable.
+// "lookup failed" should check with errors.Is.
 var ErrTaskNotFound = errors.New("task not found")
 
 // Automation runs never appear in a task list: they are hidden by their
@@ -594,6 +593,9 @@ func (r *Repository) SearchTasks(ctx context.Context, workspaceID, query string,
 
 // hasFTSTable checks whether the tasks_fts virtual table exists.
 func (r *Repository) hasFTSTable() bool {
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		return false
+	}
 	var exists int
 	err := r.ro.QueryRow(
 		"SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks_fts'",

@@ -296,7 +296,7 @@ test.describe("Markdown preview", () => {
       "Persist Test",
     );
 
-    // Verify the markdownPreview flag is in sessionStorage
+    // Verify the renderedPreview flag is in sessionStorage
     const storedTabs = await testPage.evaluate((sid) => {
       const raw = window.sessionStorage.getItem(`kandev.openFiles.${sid}`);
       return raw ? JSON.parse(raw) : null;
@@ -304,7 +304,7 @@ test.describe("Markdown preview", () => {
     expect(storedTabs).not.toBeNull();
     const mdTab = storedTabs.find((t: { path: string }) => t.path.endsWith("persist-test.md"));
     expect(mdTab).toBeTruthy();
-    expect(mdTab.markdownPreview).toBe(true);
+    expect(mdTab.renderedPreview).toBe(true);
 
     // No settle needed before the reload: the assertions above already read
     // the flag back out of sessionStorage, so the write has demonstrably

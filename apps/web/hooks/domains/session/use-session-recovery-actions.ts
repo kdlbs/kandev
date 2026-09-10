@@ -75,7 +75,6 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
   );
 
   const handleRestore = useCallback(async () => {
-    const failedMessage = resumeError?.message ?? t("task:failedToResumeSession");
     setBusyAction("restore");
     setRestoreError(null);
     try {
@@ -85,7 +84,7 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
       setBranchDetails(null);
       setGuardDetails(null);
       setLastFailedAction(null);
-      setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly", { error: failedMessage }));
+      setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
     } catch (cause) {
       const guard = sessionRecoveryGuardDetails(cause);
       setRestoreError(

@@ -376,7 +376,7 @@ export function useMessageHandler({
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
       if (hasPendingClarification || inputMode === "queue") {
         const queueAttachments = buildQueueAttachments(payload.attachments);
-        await queue({
+        const admitted = await queue({
           taskId,
           content: finalMessage,
           model: modelToSend,
@@ -385,7 +385,7 @@ export function useMessageHandler({
           entityReferences: payload.entityReferences,
           ...(contextFilesMeta ? { contextFilesMeta } : {}),
         });
-        return;
+        return admitted;
       }
 
       // Add the returned message to the store directly so the chat updates

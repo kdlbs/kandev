@@ -5,6 +5,7 @@ created: 2026-08-03
 owners:
   - kandev
 ---
+
 # Manage Pending Message Queues Requirements
 
 ## Overview
@@ -75,9 +76,11 @@ remains full. Those same rows have no individual remove action.
   automatic merge switches.
 - The default is `10`. A positive integer sets a cap; `0` means unlimited.
 - A saved setting applies immediately to later admissions. Existing entries
-  are never trimmed. If a queue already exceeds a newly lowered limit, new
-  messages are rejected with `queue_full` until its persisted count is below
-  the limit.
+  are never trimmed. At or above a positive cap, an eligible direct automatic
+  fold into the pending tail may still succeed because it does not add a row.
+  Other admissions are rejected with `queue_full` until the persisted count is
+  below the limit. A staged-attachment admission cannot use the direct-fold
+  exception and is rejected before attachment claim or tail mutation.
 - Previously accepted work may be restored or retried after a delivery
   failure even when the new cap is lower. Capacity limits new work; it does not
   turn a failed delivery into message loss.

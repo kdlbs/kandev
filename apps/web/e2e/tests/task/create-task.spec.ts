@@ -245,7 +245,7 @@ test.describe("Task creation", () => {
       await expect(workflowSelector).toContainText("Launch Preview Workflow");
       await dialog.getByTestId("task-description-input").fill("");
       const launchStep = dialog.getByTestId("task-create-launch-step");
-      await expect(launchStep).toHaveText("Start step: Backlog");
+      await expect(launchStep).toHaveText("Backlog");
       await expect(workflowSelector).not.toContainText("Start step:");
       const selectorBox = await workflowSelector.boundingBox();
       const launchStepBox = await launchStep.boundingBox();
@@ -269,7 +269,7 @@ test.describe("Task creation", () => {
       await dialog.getByTestId("task-title-input").fill("Preview the launch prompt");
       const description = "Review the launch preview";
       await dialog.getByTestId("task-description-input").fill(description);
-      await expect(launchStep).toHaveText("Start step: In Progress");
+      await expect(launchStep).toHaveText("In Progress");
       const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
       await expect(toggle).toHaveAttribute(
         "aria-label",

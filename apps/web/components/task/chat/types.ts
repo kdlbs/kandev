@@ -1,6 +1,7 @@
 "use client";
 
 import type { Message } from "@/lib/types/http";
+import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 import { extractKandevStem } from "./messages/kandev/parse";
 
 export type SubagentTaskPayload = {
@@ -185,6 +186,64 @@ export function isRichOutputMessage(message: Message): boolean {
 export function isSubagentMessage(message: Message): boolean {
   const metadata = message.metadata as ToolCallMetadata | undefined;
   return metadata?.normalized?.kind === "subagent_task";
+}
+
+export type TaskLaunchErrorIdentity = Pick<TaskStatusSummaryActiveError, "session_id" | "stamp">;
+
+export function shouldRenderStoppedSessionBanner(input: {
+  isFailed: boolean;
+  isCompleted: boolean;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return (
+    !input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable)
+  );
+}
+
+export function shouldHideChatInputForLaunchError(input: {
+  isFailed: boolean;
+  launchErrorOwned?: boolean;
+}): boolean {
+  return input.launchErrorOwned === true && input.isFailed;
+}
+
+/** Matches one rendered error surface to the task-owned launch error. */
+export function isMatchingTaskLaunchError(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  candidate: { sessionId?: string | null; errorStamp?: string | null },
+): boolean {
+  if (!activeError?.stamp || !candidate.errorStamp) return false;
+  return (
+    (activeError.session_id ?? null) === (candidate.sessionId ?? null) &&
+    activeError.stamp === candidate.errorStamp
+  );
+}
+
+/** A task-wide launch error stays visible while any prior session is selected. */
+export function isTaskLaunchErrorVisibleForSession(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!activeError?.stamp) return false;
+  if (sessionId === undefined || activeError.session_id == null) return true;
+  return activeError.session_id === sessionId;
+}
+
+/** Whether the active launch error owns the selected session's surfaces. */
+export function isTaskLaunchErrorOwnedBySession(
+  activeError: TaskLaunchErrorIdentity | null | undefined,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!activeError?.stamp) return false;
+  if (activeError.session_id == null) return sessionId == null;
+  return sessionId != null && activeError.session_id === sessionId;
+}
+
+/** Messages that are only useful while a launch failure has no typed owner. */
+export function isLaunchErrorSurfaceMessage(message: Message): boolean {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  return metadata?.empty_turn === true || metadata?.failure_kind === "missing_pr_branch";
 }
 
 export type StatusMetadata = {

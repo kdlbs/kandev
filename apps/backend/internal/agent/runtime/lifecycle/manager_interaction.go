@@ -543,7 +543,9 @@ func (m *Manager) reapplySessionModelAfterReset(
 		m.sessionManager.publishModelSelectionWarningEvent(execution, newSessionID, decision)
 	}
 	if decision.EffectiveModel != "" &&
-		(decision.Outcome == ModelSelectionOutcomeApplied || decision.Outcome == ModelSelectionOutcomeExplicitFallback) {
+		(decision.Outcome == ModelSelectionOutcomeApplied ||
+			decision.Outcome == ModelSelectionOutcomeExplicitFallback ||
+			decision.Outcome == ModelSelectionOutcomeUniqueVariation) {
 		m.logger.Info("re-applied session model after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),
@@ -2275,6 +2277,25 @@ func (m *Manager) CancelPermissionBySessionID(ctx context.Context, sessionID, re
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	return client.CancelPermission(requestCtx, requestID, pendingID)
+}
+
+// ProbeBackgroundWorkloadsBySessionID samples the agent execution owning
+// sessionID for background-workload liveness (spec
+// docs/specs/disambiguate-waiting/spec.md, §"Probe transport"). Unlike
+// RespondToPermission, no timeout is applied here — the caller wraps ctx
+// with the KANDEV_PARKED_PROBE_BUDGET timeout (D2) before calling this.
+func (m *Manager) ProbeBackgroundWorkloadsBySessionID(ctx context.Context, sessionID string) (agentctlclient.ProbeResult, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return agentctlclient.ProbeResultUnknown, fmt.Errorf("no agent execution found for session: %s", sessionID)
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return agentctlclient.ProbeResultUnknown, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+
+	return client.ProbeBackgroundWorkloads(ctx, sessionID)
 }
 
 // stopAgentViaBackend stops the agent execution via the runtime that created it.

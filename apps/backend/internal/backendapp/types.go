@@ -28,6 +28,7 @@ import (
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
@@ -35,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
@@ -51,10 +53,11 @@ import (
 )
 
 type Repositories struct {
-	Task          *sqliterepo.Repository
-	Analytics     analyticsrepository.Repository
-	AgentSettings settingsstore.Repository
-	User          userstore.Repository
+	RequiredStores *requiredstores.Tracker
+	Task           *sqliterepo.Repository
+	Analytics      analyticsrepository.Repository
+	AgentSettings  settingsstore.Repository
+	User           userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository
@@ -69,7 +72,9 @@ type Repositories struct {
 	QuickTerminal *quickterminalrepository.Repository
 	RuntimeFlags  *runtimeflags.SQLiteStore
 	// Auth persists login identities, sessions, PATs, and invites.
-	Auth *authstore.Store
+	Auth           *authstore.Store
+	HostnameCache  *hostnames.Store
+	SystemSettings *systemsettings.Store
 }
 
 type Services struct {
@@ -101,11 +106,11 @@ type Services struct {
 	Office       *officeservice.Service
 	OfficeSvcs   *office.Services
 	// OrchScheduler is the office SchedulerIntegration constructed by
-	// startOfficeSchedulersAndGC. Exposed here so registerRoutes can
+	// startSchedulingRuntime. Exposed here so registerRoutes can
 	// wire SetTaskContextProvider after the HandoffService is built.
 	OrchScheduler *officeservice.SchedulerIntegration
-	// WorktreeMgr is the worktree manager. Exposed so the office GC can
-	// consult it as the authoritative inventory of live worktrees.
+	// WorktreeMgr is the worktree manager. Exposed here so the install-wide
+	// storage-maintenance composition can reach it for workspace cleanup.
 	WorktreeMgr *worktree.Manager
 	// Terminal is the first-class user-terminal service (rename, park, etc.).
 	// Wired into the gateway once lifecycle.Manager is up so the PTY backend

@@ -923,6 +923,41 @@ func TestTaskPRAutomationToolsBindCurrentTask(t *testing.T) {
 	assert.Equal(t, true, payload["auto_fix_enabled"])
 	assert.Equal(t, true, payload["prompt_on_review_requested"])
 	assert.Equal(t, false, payload["prompt_on_merged"])
+
+	result = callTool(t, s, "report_pr_auto_fix_outcome_kandev", map[string]interface{}{
+		"outcome": "action_taken",
+		"summary": "committed the failing test fix",
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPReportPRAutoFixOutcome, backend.lastAction)
+	payload, ok = backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "test-session", payload["session_id"])
+	assert.Equal(t, "action_taken", payload["outcome"])
+	assert.Equal(t, "committed the failing test fix", payload["summary"])
+}
+
+func TestReportPRAutoFixOutcomeToolRequiresDispositionAndSummary(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "report_pr_auto_fix_outcome_kandev", map[string]interface{}{
+		"outcome": "not-a-disposition",
+		"summary": "reason",
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+
+	result = callTool(t, s, "report_pr_auto_fix_outcome_kandev", map[string]interface{}{
+		"outcome": "blocked",
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+
+	properties := toolInputProperties(t, s, "report_pr_auto_fix_outcome_kandev")
+	assert.NotContains(t, properties, "task_id")
+	assert.NotContains(t, properties, "session_id")
 }
 
 func TestTaskPRAutomationToolsDoNotExposeLifecyclePromptOverrides(t *testing.T) {

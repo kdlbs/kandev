@@ -386,6 +386,9 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	if session.TaskID != req.TaskID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if err := s.ensureTaskNotArchived(ctx, req.TaskID); err != nil {
+		return nil, err
+	}
 
 	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, fmt.Errorf("failed to restore workspace: %w", err)
@@ -421,6 +424,9 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		return nil, err
 	}
 	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
 		return nil, err
 	}
 	if action == "runtime_retry" {

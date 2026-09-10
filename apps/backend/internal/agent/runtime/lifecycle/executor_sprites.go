@@ -50,7 +50,7 @@ func (u *spriteFileUploader) ReadFile(ctx context.Context, path string) ([]byte,
 		return data, err
 	}
 	if isSpritesNotFound(err) {
-		return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
+		return nil, &fs.PathError{Op: fileReadOperation, Path: path, Err: fs.ErrNotExist}
 	}
 	return data, err
 }

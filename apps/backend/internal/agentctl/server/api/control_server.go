@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
@@ -171,13 +172,23 @@ func (m *ControlServer) handleHandshake(c *gin.Context) {
 
 	token := m.cfg.ConsumeNonce(req.Nonce)
 	if token == "" {
-		m.logger.Warn("handshake failed: invalid or already-consumed nonce")
+		// A rejected handshake has three distinct causes that otherwise look
+		// identical from the outside: bootstrap nonce mode was never
+		// configured, the received nonce doesn't match what agentctl started
+		// with, or the configured nonce was already burned by an earlier
+		// handshake. Logging both fingerprints lets a field 403 be attributed
+		// to one of the three instead of guessed at.
+		m.logger.Warn("handshake failed: invalid or already-consumed nonce",
+			zap.Bool("bootstrap_nonce_configured", m.cfg.BootstrapNonceConfigured()),
+			zap.String("configured_nonce_fingerprint", m.cfg.BootstrapNonceFingerprint()),
+			zap.String("received_nonce_fingerprint", commonconfig.NonceFingerprint(req.Nonce)))
 		c.JSON(http.StatusForbidden, gin.H{"error": "invalid or already-consumed nonce"})
 		return
 	}
 
 	m.ownership.Renew()
-	m.logger.Info("bootstrap handshake completed, auth token issued")
+	m.logger.Info("bootstrap handshake completed, auth token issued",
+		zap.String("nonce_fingerprint", commonconfig.NonceFingerprint(req.Nonce)))
 	c.JSON(http.StatusOK, gin.H{"token": token})
 }
 

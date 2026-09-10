@@ -51,6 +51,21 @@ func TestDeleteWorkspaceDataDeletesOwnedOfficeRows(t *testing.T) {
 		assertTableCount(t, db, table, "ws-delete", 0)
 		assertTableCount(t, db, table, "ws-keep", 1)
 	}
+	var deletedRecoveries, keptRecoveries int
+	if err := db.Get(&deletedRecoveries,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ?`,
+		"ws-delete-agent"); err != nil {
+		t.Fatalf("count deleted pause recoveries: %v", err)
+	}
+	if err := db.Get(&keptRecoveries,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ?`,
+		"ws-keep-agent"); err != nil {
+		t.Fatalf("count kept pause recoveries: %v", err)
+	}
+	if deletedRecoveries != 0 || keptRecoveries != 1 {
+		t.Fatalf("pause recoveries = deleted:%d kept:%d, want 0 and 1",
+			deletedRecoveries, keptRecoveries)
+	}
 }
 
 func TestGetWorkspaceDeletionCounts(t *testing.T) {
@@ -120,6 +135,7 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	execRaw(t, repo, `INSERT INTO office_run_skills (run_id, skill_id, version, content_hash, materialized_path) VALUES (?, ?, 'v1', 'hash', '/tmp/skill')`, runID, workspaceID+"-skill")
 	execRaw(t, repo, `INSERT INTO agent_wakeup_requests (id, agent_profile_id, source, status, requested_at) VALUES (?, ?, 'test', 'queued', ?)`, workspaceID+"-wakeup", agentID, now)
 	execRaw(t, repo, `INSERT INTO agent_continuation_summaries (agent_profile_id, scope, content) VALUES (?, 'workspace', 'summary')`, agentID)
+	execRaw(t, repo, `INSERT INTO office_agent_pause_recoveries (agent_id, task_id, failed_run_id) VALUES (?, ?, ?)`, agentID, taskID, runID)
 	execRaw(t, repo, `INSERT INTO office_cost_events (id, agent_profile_id, project_id, occurred_at, created_at) VALUES (?, ?, ?, ?, ?)`, workspaceID+"-cost", agentID, projectID, now, now)
 	execRaw(t, repo, `INSERT INTO office_budget_policies (id, workspace_id, scope_type, scope_id, limit_subcents, period, created_at, updated_at) VALUES (?, ?, 'workspace', ?, 100, 'month', ?, ?)`, workspaceID+"-budget", workspaceID, workspaceID, now, now)
 	execRaw(t, repo, `INSERT INTO office_routines (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, routineID, workspaceID, "Routine "+workspaceID, now, now)

@@ -101,6 +101,19 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
+// ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
+// be sent to a session launch. Prompt producers use this read-only view so
+// optional guidance follows the same surface and capability resolver as the
+// runtime MCP server.
+func (e *Executor) ResolveTaskSessionMCPProfile(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowTitleTool bool,
+) (mcpprofile.Context, error) {
+	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
+}
+
 func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
 	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
 		return profile.WithCapability(mcpprofile.CapabilityCanvas)
@@ -1292,6 +1305,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 	req.StartAgent = startAgent
 	mergeEnv(req, opts.Env)
+	req.AdditionalSkillSlugs = append([]string(nil), opts.AdditionalSkillSlugs...)
 	if opts.RouteOverride != nil {
 		req.RouteOverride = opts.RouteOverride
 		if opts.RouteOverride.ExecutionProfileID == "" {
@@ -1307,6 +1321,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		profileContext := *opts.McpProfile
 		profileContext.Providers = deriveMCPProviders(allRepos)
 		req.McpProfile = &profileContext
+	}
+	if err := e.claimSharedTaskEnvironmentTaskDirName(ctx, existingEnv, req); err != nil {
+		return nil, err
 	}
 
 	// Carry the prior ACP session id forward so the agent CLI resumes the
@@ -2367,6 +2384,22 @@ func (e *Executor) persistTaskEnvironment(
 		// session elected to materialize a still-CREATING canonical environment
 		// (shared_group), which must run the normal finalize path below.
 		if existingEnv.TaskID != "" && existingEnv.TaskID != taskID && !isInitialMaterializer {
+			// A parent can start without a worktree and later admit an inherited
+			// sessionless subtask that materializes the first worktree. Preserve the
+			// request's stable task-root identity on the shared environment so
+			// cleanup validates the physical root against its ownership marker.
+			if existingEnv.TaskDirName == "" && req.UseWorktree && req.TaskDirName != "" {
+				if _, ok := e.repo.(taskEnvironmentTaskDirNameStamper); ok {
+					if err := e.claimSharedTaskEnvironmentTaskDirName(ctx, existingEnv, req); err != nil {
+						return err
+					}
+				} else {
+					existingEnv.TaskDirName = req.TaskDirName
+					if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
+						return fmt.Errorf("persist shared task directory name: %w", err)
+					}
+				}
+			}
 			bindSessionToTaskEnvironment(session, existingEnv)
 			return nil
 		}

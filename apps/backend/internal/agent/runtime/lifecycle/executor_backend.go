@@ -267,21 +267,23 @@ const (
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
-	MetadataKeySSHHostAlias          = "ssh_host_alias"
-	MetadataKeySSHHost               = "ssh_host"
-	MetadataKeySSHPort               = "ssh_port"
-	MetadataKeySSHUser               = "ssh_user"
-	MetadataKeySSHHostFingerprint    = "ssh_host_fingerprint"
-	MetadataKeySSHRemoteTaskDir      = "ssh_remote_task_dir"
-	MetadataKeySSHRemoteSessionDir   = "ssh_remote_session_dir"
-	MetadataKeySSHRemoteAgentctlPort = "ssh_remote_agentctl_port"
-	MetadataKeySSHRemoteAgentctlPID  = "ssh_remote_agentctl_pid"
-	MetadataKeySSHLocalForwardPort   = "ssh_local_forward_port"
-	MetadataKeySSHRemoteAgentctlURL  = "ssh_remote_agentctl_url"
-	MetadataKeySSHWorkdirRoot        = "ssh_workdir_root"
-	MetadataKeySSHProxyJump          = "ssh_proxy_jump"
-	MetadataKeySSHIdentitySource     = "ssh_identity_source"
-	MetadataKeySSHIdentityFile       = "ssh_identity_file"
+	MetadataKeySSHHostAlias            = "ssh_host_alias"
+	MetadataKeySSHHost                 = "ssh_host"
+	MetadataKeySSHPort                 = "ssh_port"
+	MetadataKeySSHUser                 = "ssh_user"
+	MetadataKeySSHHostFingerprint      = "ssh_host_fingerprint"
+	MetadataKeySSHRemoteTaskDir        = "ssh_remote_task_dir"
+	MetadataKeySSHRemoteSessionDir     = "ssh_remote_session_dir"
+	MetadataKeySSHRemoteAgentctlPort   = "ssh_remote_agentctl_port"
+	MetadataKeySSHRemoteAgentctlPID    = "ssh_remote_agentctl_pid"
+	MetadataKeySSHLocalForwardPort     = "ssh_local_forward_port"
+	MetadataKeySSHRemoteAgentctlURL    = "ssh_remote_agentctl_url"
+	MetadataKeySSHRuntimeAPILocalURL   = "ssh_runtime_api_local_url"
+	MetadataKeySSHRuntimeAPIRemotePort = "ssh_runtime_api_remote_port"
+	MetadataKeySSHWorkdirRoot          = "ssh_workdir_root"
+	MetadataKeySSHProxyJump            = "ssh_proxy_jump"
+	MetadataKeySSHIdentitySource       = "ssh_identity_source"
+	MetadataKeySSHIdentityFile         = "ssh_identity_file"
 	// MetadataKeySSHShell names the login shell used when running commands
 	// over SSH on the remote (probe, agentctl launch, install, setup
 	// scripts). Empty / unset falls back to "bash" at runtime — see
@@ -317,22 +319,24 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyLocalPort:       true,
 
 	// SSH runtime
-	MetadataKeySSHHost:               true,
-	MetadataKeySSHPort:               true,
-	MetadataKeySSHUser:               true,
-	MetadataKeySSHHostFingerprint:    true,
-	MetadataKeySSHRemoteTaskDir:      true,
-	MetadataKeySSHRemoteSessionDir:   true,
-	MetadataKeySSHRemoteAgentctlPort: true,
-	MetadataKeySSHRemoteAgentctlPID:  true,
-	MetadataKeySSHLocalForwardPort:   true,
-	MetadataKeySSHRemoteAgentctlURL:  true,
-	MetadataKeySSHWorkdirRoot:        true,
-	MetadataKeySSHProxyJump:          true,
-	MetadataKeySSHIdentitySource:     true,
-	MetadataKeySSHIdentityFile:       true,
-	MetadataKeySSHShell:              true,
-	MetadataKeySSHReclaimTaskDir:     true,
+	MetadataKeySSHHost:                 true,
+	MetadataKeySSHPort:                 true,
+	MetadataKeySSHUser:                 true,
+	MetadataKeySSHHostFingerprint:      true,
+	MetadataKeySSHRemoteTaskDir:        true,
+	MetadataKeySSHRemoteSessionDir:     true,
+	MetadataKeySSHRemoteAgentctlPort:   true,
+	MetadataKeySSHRemoteAgentctlPID:    true,
+	MetadataKeySSHLocalForwardPort:     true,
+	MetadataKeySSHRemoteAgentctlURL:    true,
+	MetadataKeySSHRuntimeAPILocalURL:   true,
+	MetadataKeySSHRuntimeAPIRemotePort: true,
+	MetadataKeySSHWorkdirRoot:          true,
+	MetadataKeySSHProxyJump:            true,
+	MetadataKeySSHIdentitySource:       true,
+	MetadataKeySSHIdentityFile:         true,
+	MetadataKeySSHShell:                true,
+	MetadataKeySSHReclaimTaskDir:       true,
 
 	// Kubernetes connection and exact resource inventory.
 	MetadataKeyKubernetesAuthMode:              true,
@@ -398,7 +402,8 @@ var persistentMetadataPrefixes = []string{
 // runtime resources (process PIDs, allocated ports, session directories on
 // the remote). These keys ARE persisted across a SAME-session resume — that's
 // how a backend restart reattaches to a still-running remote agent — but they
-// MUST NOT be carried across SIBLING sessions on the same task. If they were,
+// MUST NOT be carried across SIBLING sessions on the same task. This includes
+// the SSH runtime API reverse-tunnel URL and port. If they were,
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
@@ -411,6 +416,8 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteAgentctlPID:            true,
 	MetadataKeySSHLocalForwardPort:             true,
 	MetadataKeySSHRemoteAgentctlURL:            true,
+	MetadataKeySSHRuntimeAPILocalURL:           true,
+	MetadataKeySSHRuntimeAPIRemotePort:         true,
 	MetadataKeyKubernetesAuthMode:              true,
 	MetadataKeyKubernetesKubeconfigPath:        true,
 	MetadataKeyKubernetesKubeContext:           true,
