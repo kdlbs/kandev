@@ -723,6 +723,18 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 	}
 }
 
+func TestRunnerProjectionWorkflowSessionEndPolicyDefaultsToPark(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+
+	var endPolicyDefault string
+	if err := repo.db.QueryRow(`SELECT dflt_value FROM pragma_table_info('workflow_steps') WHERE name = 'profile_session_end_policy'`).Scan(&endPolicyDefault); err != nil {
+		t.Fatalf("inspect session end policy default: %v", err)
+	}
+	if endPolicyDefault != "'park'" {
+		t.Fatalf("profile_session_end_policy schema default = %q, want 'park'", endPolicyDefault)
+	}
+}
+
 func TestRunnerProjectionParticipantCreatedAtReplayMigration(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 

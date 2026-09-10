@@ -141,6 +141,7 @@ type CreateStepRequest struct {
 	CompleteTaskOnEnter        *bool              `json:"complete_task_on_enter,omitempty"`
 	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
+	SessionTarget              SessionTargetPatch `json:"session_target,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
 	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
 }
@@ -213,6 +214,9 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.ProfileSessionEndPolicy != nil {
 		step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(*req.ProfileSessionEndPolicy)
 	}
+	if req.SessionTarget.Set {
+		step.SessionTarget = models.CloneWorkflowSessionTarget(req.SessionTarget.Target)
+	}
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
@@ -260,6 +264,7 @@ type UpdateStepRequest struct {
 	CompleteTaskOnEnter        *bool              `json:"complete_task_on_enter,omitempty"`
 	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
+	SessionTarget              SessionTargetPatch `json:"session_target,omitempty"`
 	WIPLimit                   *int               `json:"wip_limit,omitempty"`
 	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
 }
@@ -329,6 +334,9 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.ProfileSessionEndPolicy != nil {
 		step.ProfileSessionEndPolicy = taskmodels.NormalizeWorkflowProfileSessionEndPolicy(*req.ProfileSessionEndPolicy)
 	}
+	if req.SessionTarget.Set {
+		step.SessionTarget = models.CloneWorkflowSessionTarget(req.SessionTarget.Target)
+	}
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
@@ -367,6 +375,12 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 // the reason, because there is nothing to hide from them and the editor has to
 // be able to explain it.
 func (c *Controller) validateStepReferences(ctx context.Context, step *models.WorkflowStep) error {
+	if err := c.validateSessionTarget(ctx, step); err != nil {
+		return err
+	}
+	if err := c.validateIncomingSessionTargets(ctx, step.WorkflowID, step, nil); err != nil {
+		return err
+	}
 	if err := c.validatePullFromStep(ctx, step); err != nil {
 		return err
 	}
@@ -380,6 +394,110 @@ func (c *Controller) validateStepReferences(ctx context.Context, step *models.Wo
 		if err := c.svc.AuthorizeTask(ctx, taskID); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (c *Controller) validateSessionTarget(ctx context.Context, step *models.WorkflowStep) error {
+	if err := models.ValidateWorkflowSessionTarget(step.SessionTarget); err != nil {
+		return fmt.Errorf("session_target is invalid: %w", err)
+	}
+	if step.SessionTarget == nil {
+		return nil
+	}
+	if step.AgentProfileID != "" {
+		return fmt.Errorf("session_target cannot be combined with agent_profile_id")
+	}
+	if step.SessionTarget.Kind == models.WorkflowSessionTargetInitial {
+		return nil
+	}
+	if step.ID != "" && step.SessionTarget.StepID == step.ID {
+		return fmt.Errorf("session_target cannot reference the same step")
+	}
+	if err := c.svc.AuthorizeStep(ctx, step.SessionTarget.StepID); err != nil {
+		return fmt.Errorf("session_target is invalid: %w", err)
+	}
+	target, err := c.svc.GetStep(ctx, step.SessionTarget.StepID)
+	if err != nil {
+		return fmt.Errorf("session_target is invalid: %w", err)
+	}
+	if target.WorkflowID != step.WorkflowID {
+		return fmt.Errorf("session_target must reference a step in the same workflow")
+	}
+	if target.Position >= step.Position {
+		return fmt.Errorf("session_target must reference an earlier step")
+	}
+	if target.AgentProfileID == "" {
+		return fmt.Errorf("session_target must reference a step with an agent profile")
+	}
+	if target.SessionTarget != nil {
+		return fmt.Errorf("session_target cannot reference a step with another session target")
+	}
+	return nil
+}
+
+// validateIncomingSessionTargets validates references pointing at the step
+// being written, not only the target carried by that step. This prevents a
+// profile removal or position edit from silently invalidating dependent
+// destinations.
+func (c *Controller) validateIncomingSessionTargets(
+	ctx context.Context,
+	workflowID string,
+	replacement *models.WorkflowStep,
+	positions map[string]int,
+) error {
+	steps, err := c.svc.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*models.WorkflowStep, len(steps)+1)
+	for _, existing := range steps {
+		if existing != nil {
+			byID[existing.ID] = existing
+		}
+	}
+	if replacement != nil {
+		byID[replacement.ID] = replacement
+	}
+	for _, current := range byID {
+		if current == nil || current.SessionTarget == nil || current.SessionTarget.Kind != models.WorkflowSessionTargetStep {
+			continue
+		}
+		if err := validateIncomingSessionTarget(workflowID, current, byID, positions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateIncomingSessionTarget(
+	workflowID string,
+	current *models.WorkflowStep,
+	byID map[string]*models.WorkflowStep,
+	positions map[string]int,
+) error {
+	source, ok := byID[current.SessionTarget.StepID]
+	if !ok || source == nil {
+		return fmt.Errorf("session_target source step %q was not found", current.SessionTarget.StepID)
+	}
+	currentPosition := current.Position
+	sourcePosition := source.Position
+	if positions != nil {
+		if value, found := positions[current.ID]; found {
+			currentPosition = value
+		}
+		if value, found := positions[source.ID]; found {
+			sourcePosition = value
+		}
+	}
+	if source.WorkflowID != workflowID || source.WorkflowID != current.WorkflowID {
+		return fmt.Errorf("session_target must reference a step in the same workflow")
+	}
+	if sourcePosition >= currentPosition {
+		return fmt.Errorf("session_target source step %q must remain earlier than %q", source.ID, current.ID)
+	}
+	if source.AgentProfileID == "" || source.SessionTarget != nil {
+		return fmt.Errorf("session_target source step %q must keep a direct agent profile", source.ID)
 	}
 	return nil
 }
@@ -485,6 +603,17 @@ func (c *Controller) DeleteStep(ctx context.Context, id string) error {
 	if err := c.svc.EnsureWorkflowMutable(ctx, step.WorkflowID); err != nil {
 		return err
 	}
+	steps, err := c.svc.ListStepsByWorkflow(ctx, step.WorkflowID)
+	if err != nil {
+		return err
+	}
+	for _, dependent := range steps {
+		if dependent != nil && dependent.SessionTarget != nil &&
+			dependent.SessionTarget.Kind == models.WorkflowSessionTargetStep &&
+			dependent.SessionTarget.StepID == id {
+			return fmt.Errorf("workflow step %q is the session target of %q", id, dependent.ID)
+		}
+	}
 	return c.svc.DeleteStep(ctx, id)
 }
 
@@ -502,6 +631,13 @@ func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) 
 		return err
 	}
 	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return err
+	}
+	positions := make(map[string]int, len(req.StepIDs))
+	for position, stepID := range req.StepIDs {
+		positions[stepID] = position
+	}
+	if err := c.validateIncomingSessionTargets(ctx, req.WorkflowID, nil, positions); err != nil {
 		return err
 	}
 	return c.svc.ReorderSteps(ctx, req.WorkflowID, req.StepIDs)

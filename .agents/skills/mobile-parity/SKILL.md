@@ -46,6 +46,12 @@ When a task changes composition, navigation, overlays, touch behavior, scrolling
 - shared state, view-model, filtering/selection, and business logic versus mobile-specific presentation
 - mobile Playwright scenario proving the same user value
 
+For a feature or fix design package, record the desktop and phone composition
+as ASCII previews in the plan and relevant UI work orders. Follow
+`docs/specs/guide/plans-and-work-orders.md#ascii-ui-previews`; include a compact
+preview in the final conversation handoff. During implementation, compare the
+rendered phone surface with the assigned preview's structure and annotations.
+
 ## Workflow
 
 1. Map affected surfaces.

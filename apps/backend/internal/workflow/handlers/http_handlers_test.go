@@ -498,7 +498,7 @@ func TestExportWorkflowEndpoints(t *testing.T) {
 	t.Run("single workflow export carries its steps", func(t *testing.T) {
 		h := newExportHarness(t)
 		export := decodeExport(t, doJSON(t, h.router, http.MethodGet, "/api/v1/workflows/workflow-1/export", nil))
-		if export.Version != models.ExportVersion || export.Type != models.ExportType {
+		if export.Version != models.LegacyExportVersion || export.Type != models.ExportType {
 			t.Fatalf("export envelope = %d/%q", export.Version, export.Type)
 		}
 		if len(export.Workflows) != 1 || export.Workflows[0].Name != "Main" {

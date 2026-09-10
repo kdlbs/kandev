@@ -79,6 +79,7 @@ func payload(step *models.WorkflowStep) map[string]interface{} {
 		"wip_limit":                     step.WIPLimit,
 		"pull_from_step_id":             step.PullFromStepID,
 		"agent_profile_id":              step.AgentProfileID,
+		"session_target":                models.CloneWorkflowSessionTarget(step.SessionTarget),
 		"profile_session_start_policy":  string(step.ProfileSessionStartPolicy),
 		"profile_session_end_policy":    string(step.ProfileSessionEndPolicy),
 		"stage_type":                    string(step.StageType),

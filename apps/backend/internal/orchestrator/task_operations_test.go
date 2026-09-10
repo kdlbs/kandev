@@ -5400,6 +5400,45 @@ func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
 }
 
+func TestStartTaskRecordsDirectWorkflowSourceBindingBeforeLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-source-start", "existing-session", models.TaskSessionStateCompleted)
+	dbTask, err := repo.GetTask(ctx, "task-source-start")
+	require.NoError(t, err)
+	dbTask.WorkflowStepID = "step-implement"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-implement"] = &wfmodels.WorkflowStep{
+		ID: "step-implement", WorkflowID: "wf1", AgentProfileID: "profile-implement",
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task-source-start"] = &v1.Task{
+		ID: "task-source-start", Title: "Source start", Description: "Start here", State: v1.TaskStateInProgress,
+	}
+	bindingPresentBeforeLaunch := false
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			binding, bindingErr := repo.GetWorkflowSessionBinding(ctx, "task-source-start", workflowSessionBindingTargetKey("step-implement"))
+			bindingPresentBeforeLaunch = bindingErr == nil && binding != nil && binding.SessionID == req.SessionID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	execution, err := svc.StartTask(ctx, "task-source-start", "profile-implement", "", "", "", "Start", "step-implement", false, false, nil)
+	require.NoError(t, err)
+	require.NotNil(t, execution)
+	require.True(t, bindingPresentBeforeLaunch)
+
+	binding, err := repo.GetWorkflowSessionBinding(ctx, "task-source-start", workflowSessionBindingTargetKey("step-implement"))
+	require.NoError(t, err)
+	require.NotNil(t, binding)
+	require.Equal(t, execution.SessionID, binding.SessionID)
+}
+
 // TestStartTaskWithEnv_OfficeCreateThenReusePublishesOneCreatedEvent drives
 // two sequential office wakeups for the same (task, agent) pair through the
 // full StartTaskWithEnv path — not just the repository call-count proxy used
