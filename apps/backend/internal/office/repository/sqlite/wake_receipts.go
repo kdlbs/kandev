@@ -278,6 +278,11 @@ type childSetKeyRow struct {
 	State string `db:"state"`
 }
 
+type childSetKeyAndGenerationRow struct {
+	ChildSetKey     string `db:"child_set_key"`
+	ChildGeneration string `db:"child_generation"`
+}
+
 // GetChildSetKey returns the deterministic key for the parent's current
 // active child set. It reads child ids and states separately from the
 // aggregate query so the same logic works on SQLite and PostgreSQL.
@@ -296,35 +301,17 @@ func (r *Repository) GetChildSetKey(ctx context.Context, parentTaskID string) (s
 
 // GetChildSetKeyAndGeneration returns both the deterministic child-set key
 // and the generation (newest non-archived child updated_at, rendered via
-// dialect.SecondPrecisionText) for a parent's current children. The edge
-// path (queueChildrenCompletedRun) needs both: the key for the trigger
-// payload identity, the generation as a wakeOperationID input so its
-// operation id matches what the reconciler (ListStuckParents,
-// StuckParentCandidate.NewestChildUpdatedAt) would compute for the same
-// completion wave.
+// dialect.SecondPrecisionText) for a parent's current children. Both values
+// come from one SQL statement so the edge path cannot combine a child-set
+// snapshot with a generation from a different concurrent update.
 func (r *Repository) GetChildSetKeyAndGeneration(ctx context.Context, parentTaskID string) (string, string, error) {
-	var rows []childSetKeyRow
-	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
-		SELECT id, state
-		FROM tasks
-		WHERE parent_id = ? AND archived_at IS NULL
-		ORDER BY id
-	`), parentTaskID); err != nil {
+	var row childSetKeyAndGenerationRow
+	query := childSetKeyAndGenerationQuery(r.ro.DriverName())
+	if err := r.ro.GetContext(ctx, &row, r.ro.Rebind(query), parentTaskID); err != nil {
 		return "", "", err
 	}
 
-	driver := r.ro.DriverName()
-	generationText := dialect.SecondPrecisionText(driver, "MAX(updated_at)")
-	var generation sql.NullString
-	if err := r.ro.GetContext(ctx, &generation, r.ro.Rebind(`
-		SELECT `+generationText+`
-		FROM tasks
-		WHERE parent_id = ? AND archived_at IS NULL
-	`), parentTaskID); err != nil {
-		return "", "", err
-	}
-
-	return formatChildSetKey(rows), generation.String, nil
+	return row.ChildSetKey, row.ChildGeneration, nil
 }
 
 // GetChildSetKeyTx is the transaction-scoped counterpart to GetChildSetKey.
@@ -354,6 +341,24 @@ func childSetKeyAggregate(driver string) string {
 		return `STRING_AGG(c.id || ':' || c.state, ',' ORDER BY c.id)`
 	}
 	return `GROUP_CONCAT(c.id || ':' || c.state, ',')`
+}
+
+// childSetKeyAndGenerationQuery reads the two values used by the edge wake
+// operation id from one child relation. A single statement gives both
+// expressions the same database snapshot, so a concurrent child update cannot
+// produce an operation id from a mixed child set and generation.
+func childSetKeyAndGenerationQuery(driver string) string {
+	return `
+		SELECT
+			COALESCE(` + childSetKeyAggregate(driver) + `, '') AS child_set_key,
+			COALESCE(` + dialect.SecondPrecisionText(driver, "MAX(c.updated_at)") + `, '') AS child_generation
+		FROM (
+			SELECT id, state, updated_at
+			FROM tasks
+			WHERE parent_id = ? AND archived_at IS NULL
+			ORDER BY id
+		) c
+	`
 }
 
 func formatChildSetKey(rows []childSetKeyRow) string {

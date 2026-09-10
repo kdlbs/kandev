@@ -176,6 +176,42 @@ func TestGetChildSetKey_UsesActiveChildren(t *testing.T) {
 	}
 }
 
+func TestGetChildSetKeyAndGeneration_UsesActiveChildren(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const (
+		parentID = "parent-1"
+		wsID     = "ws-1"
+		oldTime  = "2026-01-01 00:05:00"
+		newTime  = "2026-01-01 00:10:00"
+	)
+
+	insertTaskAt(t, repo, ctx, parentID, wsID, oldTime)
+	insertTaskAt(t, repo, ctx, "child-b", wsID, oldTime)
+	setChildStateAt(t, repo, ctx, parentID, "child-b", "COMPLETED", oldTime)
+	insertTaskAt(t, repo, ctx, "child-a", wsID, newTime)
+	setChildStateAt(t, repo, ctx, parentID, "child-a", "CANCELLED", newTime)
+	insertTaskAt(t, repo, ctx, "child-archived", wsID, newTime)
+	setChildStateAt(t, repo, ctx, parentID, "child-archived", "FAILED", newTime)
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET archived_at = ? WHERE id = ?`, newTime, "child-archived",
+	); err != nil {
+		t.Fatalf("archive child: %v", err)
+	}
+
+	key, generation, err := repo.GetChildSetKeyAndGeneration(ctx, parentID)
+	if err != nil {
+		t.Fatalf("GetChildSetKeyAndGeneration: %v", err)
+	}
+	if key != "child-a:CANCELLED,child-b:COMPLETED" {
+		t.Fatalf("child set key = %q, want child-a:CANCELLED,child-b:COMPLETED", key)
+	}
+	if generation != newTime {
+		t.Fatalf("child generation = %q, want %q", generation, newTime)
+	}
+}
+
 // TestListStuckParents_LimitDoesNotStarveLaterCandidates is R1-A's
 // regression test: candidates with an already-current receipt (nothing to
 // do) must not consume LIMIT slots ahead of candidates that genuinely need
