@@ -162,6 +162,13 @@ formatting, i18n checks/ratchet, specification lint, public-docs validation, and
 diff checks passed. The evaluated demo remains stopped. Remote CI/review state
 is tracked on the PR rather than recorded as a durable current-head claim.
 
+The first fixup CI run exposed the CDP unit test inside Playwright's discovery
+root. Moving it to `e2e/helpers/` preserves the two cleanup regressions while
+keeping Vitest outside browser discovery. The CI shard-planning command failed
+locally before the move, then generated all 14 normal and six container
+manifests successfully. The 13 helper/planner unit tests, typecheck, lint, and
+formatting passed. This follow-up changes no application behavior.
+
 ### Historical results (Tasks 01-03)
 
 - Implemented full-width phone pages, a title picker with focus return, a

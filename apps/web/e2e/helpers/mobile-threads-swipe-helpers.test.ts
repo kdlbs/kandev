@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { describe, expect, it } from "vitest";
-import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
+import { swipeDeckLeft } from "../tests/task/mobile-threads-swipe-helpers";
 
 describe("swipeDeckLeft cleanup", () => {
   it.each(["touchStart", "touchEnd"])("detaches CDP when %s fails", async (failure) => {

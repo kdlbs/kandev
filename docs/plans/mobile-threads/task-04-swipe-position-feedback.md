@@ -139,3 +139,7 @@ with a changed fallback task. The stale measured phone identity now clears
 when disabled. It also tests picker closure across phone/tablet/desktop
 transitions and CDP cleanup when touch start or end fails. Each regression
 failed before its fix. Combined follow-up results are recorded in the plan.
+
+CI follow-up keeps the CDP unit regression under `e2e/helpers/`, outside
+Playwright's `e2e/tests/` discovery root. CI's full shard-planning command
+reproduced the accidental Vitest import before this test-only relocation.
