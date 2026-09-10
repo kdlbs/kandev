@@ -40,9 +40,9 @@ or interfere with that separate, already-cooldown-aware retry path.
 - `HandleAgentFailure` calls `s.stampRunFinished(ctx, run)`, placed after
   `s.releaseTaskCheckoutForRun(ctx, run)` and before `IncrementAgentConsecutiveFailures`, mirroring
   the completed/stopped paths' ordering (terminal-mark -> release checkout -> stamp).
-- Behavior is identical to the completed/stopped paths: no-op safely if `run == nil` or
-  `run.AgentProfileID == ""` (already handled inside `stampRunFinished` — no new nil checks needed
-  here).
+- The shared `stampRunFinished` helper remains a no-op for `run == nil` or an empty
+  `run.AgentProfileID`. `HandleAgentFailure` itself still requires a non-nil run because it reads
+  `run.ID` before it calls the helper.
 - No change to the consecutive-failure counter, auto-pause threshold, or auto-pause behavior — this
   task only adds the cooldown stamp.
 
@@ -54,8 +54,8 @@ the runtime stamp — only checkout release) rather than duplicating its full se
 Mirror the assertion already used by `TestSchedulerTick_AgentCompletedReleasesTaskCheckout` in the
 same file:
 
-1. Capture `beforePublish := time.Now().UTC()` before publishing the `events.AgentFailed` event
-   (the test currently doesn't capture this — add it).
+1. Capture `beforePublish := time.Now().UTC()` immediately before publishing the
+   `events.AgentFailed` event, after setup and scheduler dispatch.
 2. After the existing checkout-reacquisition assertion, add:
    ```go
    runtime, err := svc.GetAgentRuntimeForTest(ctx, agent.ID)
@@ -80,7 +80,7 @@ This assertion must fail before the code change (no stamp call exists yet -> `ru
 ```bash
 cd apps/backend && go test ./internal/office/service/... -run TestSchedulerTick_AgentFailed -v
 cd apps/backend && go test ./internal/office/service/...
-cd apps/backend && golangci-lint run ./internal/office/service/... --new-from-rev=HEAD~1 --timeout=5m
+cd apps/backend && golangci-lint run ./internal/office/service/... --new-from-rev=HEAD --timeout=5m
 ```
 
 ## Files likely touched

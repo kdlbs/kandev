@@ -105,9 +105,13 @@ func TestHeartbeatAgentRuntime_AllowFire_ReadsOfficeRuntimeCooldown(t *testing.T
 	if err := repo.UpdateRuntimeLastRunFinished(ctx, agent.ID, now); err != nil {
 		t.Fatalf("stamp runtime: %v", err)
 	}
+	runtime, err := repo.GetAgentRuntime(ctx, agent.ID)
+	if err != nil || runtime == nil || runtime.LastRunFinishedAt == nil {
+		t.Fatalf("read stamped runtime: runtime=%+v, err=%v", runtime, err)
+	}
 
 	// Case 2: 30s into a 60s cooldown -> blocked.
-	allowed, err = gate.AllowFire(ctx, agent.ID, now.Add(30*time.Second))
+	allowed, err = gate.AllowFire(ctx, agent.ID, runtime.LastRunFinishedAt.Add(30*time.Second))
 	if err != nil {
 		t.Fatalf("AllowFire (within cooldown): %v", err)
 	}
@@ -115,13 +119,75 @@ func TestHeartbeatAgentRuntime_AllowFire_ReadsOfficeRuntimeCooldown(t *testing.T
 		t.Error("AllowFire (within cooldown) = true, want false")
 	}
 
-	// Case 3: 61s after the stamp -> cooldown elapsed, allowed.
-	allowed, err = gate.AllowFire(ctx, agent.ID, now.Add(61*time.Second))
+	// Case 3: exactly 60s after the stamp -> cooldown elapsed, allowed.
+	allowed, err = gate.AllowFire(ctx, agent.ID, runtime.LastRunFinishedAt.Add(60*time.Second))
 	if err != nil {
-		t.Fatalf("AllowFire (after cooldown): %v", err)
+		t.Fatalf("AllowFire (at cooldown boundary): %v", err)
 	}
 	if !allowed {
-		t.Error("AllowFire (after cooldown) = false, want true")
+		t.Error("AllowFire (at cooldown boundary) = false, want true")
+	}
+}
+
+func TestHeartbeatAgentRuntime_AllowFire_NullRuntimeTimestampAllows(t *testing.T) {
+	repo, database := newTestOfficeRepoForCron(t)
+	ctx := context.Background()
+	gate := &heartbeatAgentRuntime{office: repo}
+	agent := &models.AgentInstance{
+		ID:          "agent-cooldown-null",
+		WorkspaceID: "ws-1",
+		Name:        "null-timestamp-worker",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+		CooldownSec: 60,
+	}
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := repo.UpdateRuntimeLastRunFinished(ctx, agent.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("stamp runtime: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE office_agent_runtime SET last_run_finished_at = NULL WHERE agent_id = ?`,
+		agent.ID,
+	); err != nil {
+		t.Fatalf("clear runtime timestamp: %v", err)
+	}
+
+	allowed, err := gate.AllowFire(ctx, agent.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("AllowFire (null runtime timestamp): %v", err)
+	}
+	if !allowed {
+		t.Error("AllowFire (null runtime timestamp) = false, want true")
+	}
+}
+
+func TestHeartbeatAgentRuntime_AllowFire_RuntimeLookupErrorBlocks(t *testing.T) {
+	repo, database := newTestOfficeRepoForCron(t)
+	ctx := context.Background()
+	gate := &heartbeatAgentRuntime{office: repo}
+	agent := &models.AgentInstance{
+		ID:          "agent-cooldown-error",
+		WorkspaceID: "ws-1",
+		Name:        "lookup-error-worker",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+		CooldownSec: 60,
+	}
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `DROP TABLE office_agent_runtime`); err != nil {
+		t.Fatalf("drop runtime table: %v", err)
+	}
+
+	allowed, err := gate.AllowFire(ctx, agent.ID, time.Now().UTC())
+	if err == nil {
+		t.Fatal("AllowFire (runtime lookup error) returned nil error")
+	}
+	if allowed {
+		t.Error("AllowFire (runtime lookup error) = true, want false")
 	}
 }
 

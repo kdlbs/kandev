@@ -39,7 +39,6 @@ func TestSchedulerTick_AgentCompletedReleasesTaskCheckout(t *testing.T) {
 		t.Fatalf("register subscribers: %v", err)
 	}
 	beforePublish := time.Now().UTC()
-
 	agent := &models.AgentInstance{
 		ID:                 "profile-checkout-release",
 		WorkspaceID:        "ws-1",
@@ -127,7 +126,6 @@ func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 	if err := svc.RegisterEventSubscribers(eb); err != nil {
 		t.Fatalf("register subscribers: %v", err)
 	}
-	beforePublish := time.Now().UTC()
 
 	agent := &models.AgentInstance{
 		ID:                 "profile-checkout-fail",
@@ -174,6 +172,7 @@ func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 		"error_message":    "boom",
 		"agent_profile_id": agent.ID,
 	})
+	beforePublish := time.Now().UTC()
 	if err := eb.Publish(ctx, events.AgentFailed, event); err != nil {
 		t.Fatalf("publish agent failed: %v", err)
 	}

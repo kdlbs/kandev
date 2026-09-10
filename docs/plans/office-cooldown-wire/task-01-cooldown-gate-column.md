@@ -99,9 +99,10 @@ only on explicit user authorization.
 
 ## Risks
 
-- `GetAgentInstance` and `GetAgentRuntime` are two separate queries per `AllowFire` call (previously
-  one). This runs once per agent per heartbeat cron tick (`DefaultTickInterval`), not per-task —
-  negligible load; do not attempt to fold them into a JOIN as part of this fix.
+- `GetAgentInstance` and `GetAgentRuntime` are two separate queries per positive-cooldown
+  `AllowFire` call (previously one). The heartbeat handler calls the gate for each candidate task,
+  so the extra runtime query is per candidate task that reaches this gate. This remains a small
+  load for the heartbeat pass; do not attempt to fold the queries into a JOIN as part of this fix.
 - Do not touch `agent_profiles.last_run_finished_at` itself (no migration, no field removal) — out
   of scope per the plan; it's dead for Office cooldown purposes but may still round-trip harmlessly
   through the shared kanban settings store.
