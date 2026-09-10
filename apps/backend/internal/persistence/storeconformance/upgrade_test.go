@@ -223,6 +223,12 @@ func seedLegacyDynamicRouteFixtureRows(t *testing.T, engine testconformance.Engi
 	ctx := context.Background()
 	now := "2026-01-01 00:00:00"
 	if _, err := engine.DB.ExecContext(ctx, engine.DB.Rebind(`
+		INSERT INTO kandev_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`), "kandev_version", previousStableTag); err != nil {
+		t.Fatalf("seed legacy database version: %v", err)
+	}
+	if _, err := engine.DB.ExecContext(ctx, engine.DB.Rebind(`
 		INSERT INTO task_sessions (id, task_id, state, route_generation, route_state, started_at, updated_at)
 		VALUES (?, ?, 'IDLE', 1, 'starting', ?, ?)
 	`), "fixture-v0930-dynamic-session", "fixture-v0930-task", now, now); err != nil {

@@ -1,8 +1,12 @@
 package sqlite
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
@@ -19,6 +23,12 @@ import (
 // backfill having actually run.
 const dynamicRouteLegacyActiveBackfillColumn = "legacy_active_backfill_applied"
 
+// dynamicRouteLegacyActiveBackfillMaxVersion is the first stable release that
+// includes the active-route transition. Prerelease and unknown versions are
+// intentionally rejected because their route lifecycle cannot be proven from
+// the stored version alone.
+const dynamicRouteLegacyActiveBackfillMaxVersion = "0.94.0"
+
 // dynamicRouteLegacyActiveBackfillLockID serializes concurrent PostgreSQL
 // initializers. All instances must derive the same bigint so a second boot
 // waits for the first to finish the backfill instead of racing it.
@@ -27,14 +37,15 @@ const dynamicRouteLegacyActiveBackfillLockID int64 = 0x4B44_4452_4142 // "KDDRAB
 // backfillLegacyActiveDynamicRoutes is a one-time migration for databases
 // created before the durable "active" route status existed. Before that
 // status was introduced, a successfully-launched dynamic route was persisted
-// "starting" and never transitioned further, so on such a database every
-// currently-IDLE Office dynamic session's route is durably "starting" only
-// because the marking mechanism did not exist yet - not because anything is
-// stuck. The startup orphan sweep (isOrphanableDynamicSessionState,
-// internal/orchestrator) treats IDLE as orphanable, which is correct for a
-// route that becomes stranded after an upgrade, so without this backfill it
-// would also flip every one of these healthy legacy routes to
-// action_required on the first restart after upgrading.
+// "starting" and never transitioned further, so on a proven pre-active stable
+// database every currently-IDLE Office dynamic session's route is durably
+// "starting" only because the marking mechanism did not exist yet - not
+// because anything is stuck. The startup orphan sweep
+// (isOrphanableDynamicSessionState, internal/orchestrator) treats IDLE as
+// orphanable, which is correct for a route that becomes stranded after an
+// upgrade, so without this backfill it would also flip every one of these
+// healthy legacy routes to action_required on the first restart after
+// upgrading.
 //
 // The backfill runs once, gated on the marker column rather than on the
 // "starting"/IDLE row shape itself, because that shape recurs legitimately:
@@ -70,27 +81,44 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 	if exists {
 		return nil
 	}
-
-	if _, err := tx.Exec(`
-		UPDATE dynamic_route_states
-		SET state = 'active'
-		WHERE state = 'starting'
-			AND session_id IN (SELECT id FROM task_sessions WHERE state = 'IDLE')
-	`); err != nil {
-		return fmt.Errorf("dynamic route legacy backfill: backfill dynamic_route_states: %w", err)
+	eligible, err := legacyActiveBackfillVersionAllowed(tx)
+	if err != nil {
+		return fmt.Errorf("dynamic route legacy backfill: read stored version: %w", err)
 	}
-	// Scoped to sessions whose dynamic_route_states row is now 'active' (whether
-	// just backfilled or already active before this migration ran). A session whose
-	// authoritative route row is 'action_required' or 'waiting' (e.g.
-	// routeDynamicAgentFailure wrote the durable row but the projection write failed)
-	// must keep its projection untouched, or this backfill would erase a live Retry banner.
-	if _, err := tx.Exec(`
-		UPDATE task_sessions
-		SET route_state = 'active'
-		WHERE state = 'IDLE' AND route_state = 'starting'
-			AND id IN (SELECT session_id FROM dynamic_route_states WHERE state = 'active')
-	`); err != nil {
-		return fmt.Errorf("dynamic route legacy backfill: backfill task_sessions: %w", err)
+
+	if eligible {
+		if _, err := tx.Exec(`
+			UPDATE dynamic_route_states
+			SET state = 'active'
+			WHERE state = 'starting'
+				AND session_id IN (
+					SELECT ts.id
+					FROM task_sessions ts
+					WHERE ts.id = dynamic_route_states.session_id
+						AND ts.state = 'IDLE'
+						AND ts.route_state = 'starting'
+						AND ts.route_generation = dynamic_route_states.route_generation
+				)
+		`); err != nil {
+			return fmt.Errorf("dynamic route legacy backfill: backfill dynamic_route_states: %w", err)
+		}
+		// Scoped to sessions whose dynamic_route_states row is now 'active' and
+		// whose generation still matches. A session whose authoritative route row
+		// or generation differs must keep its projection available for recovery.
+		if _, err := tx.Exec(`
+			UPDATE task_sessions
+			SET route_state = 'active'
+			WHERE state = 'IDLE' AND route_state = 'starting'
+				AND id IN (
+					SELECT drs.session_id
+					FROM dynamic_route_states drs
+					WHERE drs.session_id = task_sessions.id
+						AND drs.state = 'active'
+						AND drs.route_generation = task_sessions.route_generation
+				)
+		`); err != nil {
+			return fmt.Errorf("dynamic route legacy backfill: backfill task_sessions: %w", err)
+		}
 	}
 	if _, err := tx.Exec(`ALTER TABLE dynamic_route_states ADD COLUMN ` +
 		dynamicRouteLegacyActiveBackfillColumn + ` INTEGER NOT NULL DEFAULT 1`); err != nil {
@@ -100,6 +128,42 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 		return fmt.Errorf("dynamic route legacy backfill: commit: %w", err)
 	}
 	return nil
+}
+
+func legacyActiveBackfillVersionAllowed(conn db.SchemaQuerier) (bool, error) {
+	exists, err := db.TableExists(conn, "kandev_meta")
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	var storedVersion string
+	err = conn.QueryRow(conn.Rebind(
+		`SELECT value FROM kandev_meta WHERE key = 'kandev_version'`,
+	)).Scan(&storedVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	storedVersion = strings.TrimSpace(storedVersion)
+	if len(storedVersion) > 0 && (storedVersion[0] == 'v' || storedVersion[0] == 'V') {
+		storedVersion = storedVersion[1:]
+	}
+	if strings.Count(strings.SplitN(storedVersion, "+", 2)[0], ".") != 2 {
+		return false, nil
+	}
+	parsed, err := semver.NewVersion(storedVersion)
+	if err != nil || parsed.Prerelease() != "" {
+		return false, nil
+	}
+	maxVersion, err := semver.NewVersion(dynamicRouteLegacyActiveBackfillMaxVersion)
+	if err != nil {
+		return false, fmt.Errorf("parse migration version boundary: %w", err)
+	}
+	return parsed.LessThan(maxVersion), nil
 }
 
 // acquireDynamicRouteLegacyActiveBackfillLock serializes concurrent

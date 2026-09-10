@@ -49,10 +49,21 @@ func openLegacyDynamicRouteDB(t *testing.T) *sqlx.DB {
 	if _, err := db.Exec(legacyDynamicRouteStatesDDL); err != nil {
 		t.Fatalf("seed legacy dynamic_route_states: %v", err)
 	}
+	setStoredKandevVersion(t, db, "v0.93.0")
 	return db
 }
 
 func seedLegacyDynamicRouteTaskAndSession(t *testing.T, db *sqlx.DB, taskID, sessionID, sessionState string, startedAt time.Time) {
+	seedLegacyDynamicRouteTaskAndSessionAtGeneration(t, db, taskID, sessionID, sessionState, startedAt, 1)
+}
+
+func seedLegacyDynamicRouteTaskAndSessionAtGeneration(
+	t *testing.T,
+	db *sqlx.DB,
+	taskID, sessionID, sessionState string,
+	startedAt time.Time,
+	generation int64,
+) {
 	t.Helper()
 	if _, err := db.Exec(db.Rebind(`
 		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
@@ -61,19 +72,52 @@ func seedLegacyDynamicRouteTaskAndSession(t *testing.T, db *sqlx.DB, taskID, ses
 	}
 	if _, err := db.Exec(db.Rebind(`
 		INSERT INTO task_sessions (id, task_id, state, route_generation, route_state, started_at, updated_at)
-		VALUES (?, ?, ?, 1, 'starting', ?, ?)`), sessionID, taskID, sessionState, startedAt, startedAt); err != nil {
+		VALUES (?, ?, ?, ?, 'starting', ?, ?)`), sessionID, taskID, sessionState, generation, startedAt, startedAt); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 }
 
 func seedLegacyDynamicRouteState(t *testing.T, db *sqlx.DB, sessionID, state string, updatedAt time.Time) {
+	seedLegacyDynamicRouteStateAtGeneration(t, db, sessionID, state, 1, updatedAt)
+}
+
+func seedLegacyDynamicRouteStateAtGeneration(
+	t *testing.T,
+	db *sqlx.DB,
+	sessionID, state string,
+	generation int64,
+	updatedAt time.Time,
+) {
 	t.Helper()
 	if _, err := db.Exec(db.Rebind(`
 		INSERT INTO dynamic_route_states (
 			session_id, logical_profile_id, execution_profile_id, route_generation, profile_version, state, updated_at
-		) VALUES (?, 'dynamic-logical', 'candidate-1', 1, 1, ?, ?)`),
-		sessionID, state, updatedAt); err != nil {
+		) VALUES (?, 'dynamic-logical', 'candidate-1', ?, 1, ?, ?)`),
+		sessionID, generation, state, updatedAt); err != nil {
 		t.Fatalf("seed dynamic_route_states: %v", err)
+	}
+}
+
+func setStoredKandevVersion(t *testing.T, db *sqlx.DB, version string) {
+	t.Helper()
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS kandev_meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("ensure kandev_meta: %v", err)
+	}
+	if version == "" {
+		if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key = 'kandev_version'`); err != nil {
+			t.Fatalf("delete kandev_version: %v", err)
+		}
+		return
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO kandev_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`), "kandev_version", version); err != nil {
+		t.Fatalf("set kandev_version: %v", err)
 	}
 }
 
@@ -249,5 +293,81 @@ func TestBackfillLegacyActiveDynamicRoutes_FreshInstallIsNoOp(t *testing.T) {
 
 	if got := dynamicRouteState(t, db, "session-fresh-orphan"); got != "starting" {
 		t.Fatalf("fresh-install orphan dynamic_route_states.state = %q, want unchanged starting", got)
+	}
+}
+
+func TestBackfillLegacyActiveDynamicRoutes_SkipsUnprovenancedRoutes(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+	}{
+		{name: "unknown", version: ""},
+		{name: "newer stable", version: "v0.94.0"},
+		{name: "nightly provenance", version: "0.93.1-nightly.sha123456789abc"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openLegacyDynamicRouteDB(t)
+			setStoredKandevVersion(t, db, tt.version)
+			now := time.Now().UTC().Truncate(time.Second)
+			seedLegacyDynamicRouteTaskAndSession(t, db, "task-unprovenanced", "session-unprovenanced", "IDLE", now)
+			seedLegacyDynamicRouteState(t, db, "session-unprovenanced", "starting", now)
+
+			if _, err := NewWithDB(db, db, nil); err != nil {
+				t.Fatalf("run legacy backfill migration: %v", err)
+			}
+			if got := dynamicRouteState(t, db, "session-unprovenanced"); got != "starting" {
+				t.Fatalf("dynamic_route_states.state = %q, want unchanged starting", got)
+			}
+			if got := taskSessionRouteState(t, db, "session-unprovenanced"); got != "starting" {
+				t.Fatalf("task_sessions.route_state = %q, want unchanged starting", got)
+			}
+			exists, err := dbutil.ColumnExists(db, "dynamic_route_states", dynamicRouteLegacyActiveBackfillColumn)
+			if err != nil {
+				t.Fatalf("probe marker column: %v", err)
+			}
+			if !exists {
+				t.Fatal("marker column missing after skipped migration")
+			}
+		})
+	}
+}
+
+func TestBackfillLegacyActiveDynamicRoutes_SkipsGenerationMismatch(t *testing.T) {
+	db := openLegacyDynamicRouteDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seedLegacyDynamicRouteTaskAndSessionAtGeneration(t, db, "task-generation-mismatch", "session-generation-mismatch", "IDLE", now, 2)
+	seedLegacyDynamicRouteStateAtGeneration(t, db, "session-generation-mismatch", "starting", 1, now)
+
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("run legacy backfill migration: %v", err)
+	}
+	if got := dynamicRouteState(t, db, "session-generation-mismatch"); got != "starting" {
+		t.Fatalf("dynamic_route_states.state = %q, want unchanged starting", got)
+	}
+	if got := taskSessionRouteState(t, db, "session-generation-mismatch"); got != "starting" {
+		t.Fatalf("task_sessions.route_state = %q, want unchanged starting", got)
+	}
+}
+
+func TestBackfillLegacyActiveDynamicRoutes_SkipsNonStartingProjection(t *testing.T) {
+	db := openLegacyDynamicRouteDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seedLegacyDynamicRouteTaskAndSession(t, db, "task-non-starting-projection", "session-non-starting-projection", "IDLE", now)
+	seedLegacyDynamicRouteState(t, db, "session-non-starting-projection", "starting", now)
+	if _, err := db.Exec(db.Rebind(
+		`UPDATE task_sessions SET route_state = ? WHERE id = ?`,
+	), "active", "session-non-starting-projection"); err != nil {
+		t.Fatalf("set non-starting projection: %v", err)
+	}
+
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("run legacy backfill migration: %v", err)
+	}
+	if got := dynamicRouteState(t, db, "session-non-starting-projection"); got != "starting" {
+		t.Fatalf("dynamic_route_states.state = %q, want unchanged starting", got)
+	}
+	if got := taskSessionRouteState(t, db, "session-non-starting-projection"); got != "active" {
+		t.Fatalf("task_sessions.route_state = %q, want unchanged active", got)
 	}
 }
