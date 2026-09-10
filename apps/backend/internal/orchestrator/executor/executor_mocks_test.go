@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/kandev/kandev/internal/task/repository"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -394,13 +395,18 @@ func newMockRepository() *mockRepository {
 // Implement required repository methods
 
 func (m *mockRepository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
-	// Return first matching repository for the task (matches sqlite implementation)
-	for _, tr := range m.taskRepositories {
-		if tr.TaskID == taskID {
-			return tr, nil
-		}
+	// Delegate to ListTaskRepositories, mirroring the sqlite implementation
+	// (GetPrimaryTaskRepository there is a thin wrapper over
+	// ListTaskRepositories()[0]) so the mock's primary selection agrees with
+	// its own ordering instead of raw map iteration order.
+	repos, err := m.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, err
 	}
-	return nil, nil
+	if len(repos) == 0 {
+		return nil, nil
+	}
+	return repos[0], nil
 }
 
 func (m *mockRepository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
@@ -821,12 +827,19 @@ func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string
 			out = append(out, tr)
 		}
 	}
-	// Stable order by Position so callers (and tests) see deterministic results.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].Position < out[j-1].Position; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
+	// Order by Position, then CreatedAt, then ID, mirroring the production
+	// ORDER BY position ASC, created_at ASC, id ASC: map iteration order is
+	// random, so ties left unbroken would make tests flaky rather than
+	// deterministic.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Position != out[j].Position {
+			return out[i].Position < out[j].Position
 		}
-	}
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 func (m *mockRepository) ListTaskWorkspaceFolders(context.Context, string) ([]*models.TaskWorkspaceFolder, error) {

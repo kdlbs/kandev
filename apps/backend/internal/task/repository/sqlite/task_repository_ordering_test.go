@@ -69,3 +69,55 @@ func TestListTaskRepositoriesOrdersByIDWhenPositionAndCreatedAtTie(t *testing.T)
 		t.Fatalf("GetPrimaryTaskRepository = %+v, want task-repository-b (the same row ListTaskRepositories[0] returns)", primary)
 	}
 }
+
+// TestListTaskRepositoriesByTaskIDsOrdersByIDWhenPositionAndCreatedAtTie is the
+// batch counterpart to TestListTaskRepositoriesOrdersByIDWhenPositionAndCreatedAtTie:
+// ListTaskRepositoriesByTaskIDs has its own ORDER BY and must resolve the same
+// tie the same way, or a caller that switches between the single-task and
+// batch reads would see a different primary for the identical attachment set.
+func TestListTaskRepositoriesByTaskIDsOrdersByIDWhenPositionAndCreatedAtTie(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-batch-ordering-tiebreak")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-batch-ordering-tiebreak", WorkspaceID: "ws-batch-ordering-tiebreak", Name: "Workflow",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-batch-ordering-tiebreak", WorkspaceID: "ws-batch-ordering-tiebreak",
+		WorkflowID: "wf-batch-ordering-tiebreak", Title: "Task",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, repository := range []*models.Repository{
+		{ID: "repo-batch-ordering-a", WorkspaceID: "ws-batch-ordering-tiebreak", Name: "a"},
+		{ID: "repo-batch-ordering-b", WorkspaceID: "ws-batch-ordering-tiebreak", Name: "b"},
+	} {
+		if err := repo.CreateRepository(ctx, repository); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tiedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, row := range []struct{ id, repositoryID string }{
+		{"task-repository-batch-c", "repo-batch-ordering-a"},
+		{"task-repository-batch-b", "repo-batch-ordering-b"},
+	} {
+		if _, err := repo.db.Exec(repo.db.Rebind(`
+			INSERT INTO task_repositories (id, task_id, repository_id, position, created_at, updated_at)
+			VALUES (?, ?, ?, 0, ?, ?)
+		`), row.id, "task-batch-ordering-tiebreak", row.repositoryID, tiedAt, tiedAt); err != nil {
+			t.Fatalf("insert tied task repository %s: %v", row.id, err)
+		}
+	}
+
+	got, err := repo.ListTaskRepositoriesByTaskIDs(ctx, []string{"task-batch-ordering-tiebreak"})
+	if err != nil {
+		t.Fatalf("ListTaskRepositoriesByTaskIDs: %v", err)
+	}
+	rows := got["task-batch-ordering-tiebreak"]
+	if len(rows) != 2 || rows[0].ID != "task-repository-batch-b" || rows[1].ID != "task-repository-batch-c" {
+		t.Fatalf("expected id-ascending tiebreak [task-repository-batch-b task-repository-batch-c], got %+v", rows)
+	}
+}

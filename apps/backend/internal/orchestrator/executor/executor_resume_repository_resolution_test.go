@@ -6,6 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -48,6 +53,67 @@ func TestApplyResumeRepoConfig_ResolvesPrimaryFromAttachmentSetWhenSessionHasNoP
 	if gotID != "repo-1" {
 		t.Fatalf("resolved repositoryID = %q, want repo-1", gotID)
 	}
+}
+
+// TestApplyResumeRepoConfig_LogsInfoOnlyWhenFallingBackToAttachmentSet covers
+// the design's Observability requirement: a resume that falls back to the
+// task attachment set because the session carried no preference must log an
+// info line with the task id, session id, and resolved repository id, so the
+// repaired-session population is distinguishable in logs from a session that
+// always had a preference — which must not log anything.
+func TestApplyResumeRepoConfig_LogsInfoOnlyWhenFallingBackToAttachmentSet(t *testing.T) {
+	newSetup := func(sessionRepositoryID string) (*mockRepository, *v1.Task, *models.TaskSession) {
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo"}
+		repo.taskRepositories["tr-1"] = &models.TaskRepository{
+			ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0, BaseBranch: "main",
+		}
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		return repo, &v1.Task{ID: "task-1"}, &models.TaskSession{ID: "sess-1", TaskID: "task-1", RepositoryID: sessionRepositoryID}
+	}
+
+	t.Run("empty preference logs the fallback", func(t *testing.T) {
+		repo, task, session := newSetup("")
+		core, logs := observer.New(zapcore.InfoLevel)
+		log, err := logger.NewFromZap(zap.New(core))
+		if err != nil {
+			t.Fatalf("NewFromZap: %v", err)
+		}
+		exec := NewExecutor(&mockAgentManager{}, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
+		exec.SetCapabilities(&mockCapabilities{})
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+		entries := logs.FilterMessage("resolved resume repository from task attachment set").All()
+		if len(entries) != 1 {
+			t.Fatalf("info entries = %d, want 1; all=%v", len(entries), logs.All())
+		}
+		fields := entries[0].ContextMap()
+		if fields["task_id"] != "task-1" || fields["session_id"] != "sess-1" || fields["repository_id"] != "repo-1" {
+			t.Fatalf("log fields = %+v, want task_id=task-1 session_id=sess-1 repository_id=repo-1", fields)
+		}
+	})
+
+	t.Run("present preference logs nothing", func(t *testing.T) {
+		repo, task, session := newSetup("repo-1")
+		core, logs := observer.New(zapcore.InfoLevel)
+		log, err := logger.NewFromZap(zap.New(core))
+		if err != nil {
+			t.Fatalf("NewFromZap: %v", err)
+		}
+		exec := NewExecutor(&mockAgentManager{}, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
+		exec.SetCapabilities(&mockCapabilities{})
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+		if n := logs.FilterMessage("resolved resume repository from task attachment set").Len(); n != 0 {
+			t.Fatalf("info entries = %d, want 0 for a session with a present preference; all=%v", n, logs.All())
+		}
+	})
 }
 
 // TestApplyResumeRepoConfig_KeepsSessionPreferenceWhenPresentInAttachmentSet
@@ -117,6 +183,159 @@ func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutor(t *
 	if req.UseWorktree {
 		t.Fatalf("expected UseWorktree=false for the ssh executor")
 	}
+}
+
+// TestApplyResumeRepoConfig_StampsRepositoryPathAndNameOnLocalExecutor covers
+// a regression found in review round 1: the unconditional req.RepositoryID
+// stamp above made LaunchRequest.RepoSpecs() synthesize a non-nil spec for
+// the "local"/"local_pc" executor (previously RepoSpecs() returned nil there
+// since neither RepositoryID nor RepositoryPath were ever set on resume).
+// reconcileWorkspaceRepositories rejects a spec whose RepoName/RepositoryPath
+// are empty as "invalid durable workspace repository", so every local-executor
+// resume that resolves a primary now failed the launch outright. RepositoryPath
+// and RepoName must get the same unconditional treatment RepositoryID did,
+// mirroring the initial-launch path (applyRepositoryConfig,
+// executor_execute.go:1954), which sets them together with no executor-type
+// conjunct.
+func TestApplyResumeRepoConfig_StampsRepositoryPathAndNameOnLocalExecutor(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", Name: "repo-1", LocalPath: "/tmp/repo"}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0, BaseBranch: "main",
+	}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:           "sess-1",
+		TaskID:       "task-1",
+		RepositoryID: "repo-1", // present preference: the previously-working case that also broke.
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "local"}
+
+	if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v", err)
+	}
+	if req.RepositoryID != "repo-1" {
+		t.Fatalf("req.RepositoryID = %q, want repo-1", req.RepositoryID)
+	}
+	if req.RepositoryPath != "/tmp/repo" {
+		t.Fatalf("req.RepositoryPath = %q, want /tmp/repo: reconcileWorkspaceRepositories needs a non-empty path for the local executor", req.RepositoryPath)
+	}
+	if req.RepoName == "" {
+		t.Fatalf("req.RepoName is empty, want a filesystem-safe name: reconcileWorkspaceRepositories rejects an empty RepoName")
+	}
+}
+
+// TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutorWithPresentPreference
+// covers test-supervisor's must-fix: AC-001.4's non-worktree arm was only
+// tested with an EMPTY session preference. The unconditional stamp added in
+// review round 1 also changes behavior for a session that carries a PRESENT
+// preference on a non-worktree executor — previously req.RepositoryID was
+// never stamped there either (same worktree-only gate), so no inventory row
+// was ever produced for that population. This is newly reachable behavior,
+// not just the newly-fixed empty-preference population.
+func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutorWithPresentPreference(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo"}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0, BaseBranch: "main",
+	}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:           "sess-1",
+		TaskID:       "task-1",
+		RepositoryID: "repo-1", // present preference, not the empty-preference population.
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "ssh"}
+
+	if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v", err)
+	}
+	if req.RepositoryID != "repo-1" {
+		t.Fatalf("req.RepositoryID = %q, want repo-1: a present preference on a non-worktree executor must also carry the identity", req.RepositoryID)
+	}
+}
+
+// TestApplyResumeRepoConfig_EmptyAttachmentSetAndEmptyPreferenceLaunchesWithNoRepoConfig
+// covers AC-...-001.5: a genuinely repository-less task whose session carries
+// no preference must launch with no repository configuration and no
+// req.Repositories, not an error. Flagged as untested by test-supervisor: this
+// is the Empty shadow path of resolveResumeRepoIDAndBranch/applyResumeRepoConfig,
+// the exact function this diff rewrote, and every other existing call site sets
+// a non-empty session.RepositoryID.
+func TestApplyResumeRepoConfig_EmptyAttachmentSetAndEmptyPreferenceLaunchesWithNoRepoConfig(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{ID: "sess-1", TaskID: "task-1"}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+
+	gotID, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil)
+	if err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v", err)
+	}
+	if gotID != "" {
+		t.Fatalf("resolved repositoryID = %q, want empty for a repository-less task", gotID)
+	}
+	if req.RepositoryID != "" {
+		t.Fatalf("req.RepositoryID = %q, want empty", req.RepositoryID)
+	}
+	if req.Repositories != nil {
+		t.Fatalf("req.Repositories = %+v, want nil", req.Repositories)
+	}
+}
+
+// TestApplyResumeRepoConfig_WorktreeBuiltInDefaultAppliesOnlyOnWorktreeExecutor
+// covers AC-...-002.2's boundary, flagged untested by test-supervisor: before
+// this diff, an empty-preference resume returned early before
+// applyResumeWorktreeConfig could ever run, so its built-in "main" fallback
+// never fired for the repaired population. It fires now. The built-in default
+// must still apply only to the worktree executor's single-repository fields,
+// never to any other executor type.
+func TestApplyResumeRepoConfig_WorktreeBuiltInDefaultAppliesOnlyOnWorktreeExecutor(t *testing.T) {
+	newSetup := func() (*mockRepository, *v1.Task, *models.TaskSession) {
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo"}
+		repo.taskRepositories["tr-1"] = &models.TaskRepository{
+			ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0,
+			// BaseBranch empty and repository DefaultBranch empty: every rung
+			// of the branch-precedence chain is empty except the session,
+			// which also carries none.
+		}
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		return repo, &v1.Task{ID: "task-1"}, &models.TaskSession{ID: "sess-1", TaskID: "task-1"}
+	}
+
+	t.Run("worktree gets the built-in main default", func(t *testing.T) {
+		repo, task, session := newSetup()
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+		if req.BaseBranch != "main" {
+			t.Fatalf("BaseBranch = %q, want main (worktree built-in default)", req.BaseBranch)
+		}
+	})
+
+	t.Run("non-worktree leaves base branch unset", func(t *testing.T) {
+		repo, task, session := newSetup()
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "ssh"}
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+		if req.BaseBranch != "" {
+			t.Fatalf("BaseBranch = %q, want empty: the worktree built-in default must not leak to other executor types", req.BaseBranch)
+		}
+	})
 }
 
 // TestApplyResumeRepoConfig_StampsRepositoryIdentityWithEmptyLocalPath covers

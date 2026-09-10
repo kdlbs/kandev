@@ -205,7 +205,7 @@ func (r *Repository) ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs 
 			position, metadata, created_at, updated_at
 		FROM task_repositories
 		WHERE task_id IN (%s)
-		ORDER BY position ASC, created_at ASC
+		ORDER BY position ASC, created_at ASC, id ASC
 	`, strings.Join(placeholders, ","))
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)

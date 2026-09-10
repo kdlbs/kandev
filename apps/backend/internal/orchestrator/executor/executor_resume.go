@@ -1709,12 +1709,26 @@ func (e *Executor) applyResumeRepoConfig(
 	if repositoryID == "" {
 		return "", nil
 	}
+	if session.RepositoryID == "" {
+		e.logger.Info("resolved resume repository from task attachment set",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.String("repository_id", repositoryID))
+	}
 	// Stamp the resolved primary's identity on every executor type, whether or
 	// not it has a local clone: environmentReposForLaunch's single-repository
 	// fallback projects an inventory row from req.RepositoryID alone, and a
 	// task with exactly one attachment on a non-worktree executor reaches it
 	// with nothing else populated.
 	req.RepositoryID = repositoryID
+	// Clone-URL executors need BaseBranch for validateReuseEnvironmentInventory's
+	// branch identity slug even when workspace reuse is required: applyResumeCloneURL
+	// is the only other writer of req.BaseBranch outside the worktree path, and it
+	// skips clone-URL setup entirely once reuse is required. Local executors are
+	// excluded so LocalPreparer keeps using the current on-disk branch.
+	if baseBranch != "" && e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType) {
+		req.BaseBranch = baseBranch
+	}
 
 	var repository *models.Repository
 	for _, info := range allRepos {
@@ -1741,7 +1755,7 @@ func (e *Executor) applyResumeRepoConfig(
 	}
 
 	repositoryPath := repository.LocalPath
-	applyResumeRepoBasics(req, repository, repositoryPath)
+	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
 		if info != nil && info.RepositoryID == repositoryID {
 			req.ContributionDestination = info.ContributionDestination
@@ -1808,12 +1822,26 @@ func resolveResumeBaseBranch(repositoryID, sessionBaseBranch string, repos []*re
 	return sessionBaseBranch
 }
 
-// applyResumeRepoBasics copies the repository's local path and setup script
-// onto the request. Pulled out of applyResumeRepoConfig so the parent's
-// cyclomatic complexity stays inside the lint budget.
-func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repository, repositoryPath string) {
+// applyResumeRepoBasics copies the repository's local path, name, and setup
+// script onto the request. RepositoryPath/RepoName are stamped unconditionally
+// on every executor type, mirroring the initial-launch path
+// (applyRepositoryConfig): reconcileWorkspaceRepositories rejects a synthesized
+// spec whose RepositoryPath or RepoName is empty, and RepoSpecs() now
+// synthesizes a spec for any executor once req.RepositoryID is set. Pulled out
+// of applyResumeRepoConfig so the parent's cyclomatic complexity stays inside
+// the lint budget.
+func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repository, repositoryPath string, useWorktree bool) {
 	if repositoryPath != "" {
 		req.RepositoryURL = repositoryPath
+		req.RepositoryPath = repositoryPath
+	}
+	if useWorktree {
+		req.RepoName = repository.Name
+	} else {
+		req.RepoName = worktree.SanitizeRepoDirName(repository.Name)
+		if req.RepoName == "" {
+			req.RepoName = worktree.SanitizeRepoDirName(req.RepositoryID)
+		}
 	}
 	if repository.SetupScript != "" {
 		if req.Metadata == nil {

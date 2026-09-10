@@ -78,4 +78,13 @@ func TestPostgresListTaskRepositoriesOrdersByIDWhenPositionAndCreatedAtTie(t *te
 	if primary == nil || primary.ID != "task-repository-pg-b" {
 		t.Fatalf("GetPrimaryTaskRepository = %+v, want task-repository-pg-b (the same row ListTaskRepositories[0] returns)", primary)
 	}
+
+	batch, err := repo.ListTaskRepositoriesByTaskIDs(ctx, []string{"task-pg-ordering-tiebreak"})
+	if err != nil {
+		t.Fatalf("ListTaskRepositoriesByTaskIDs: %v", err)
+	}
+	batchRows := batch["task-pg-ordering-tiebreak"]
+	if len(batchRows) != 2 || batchRows[0].ID != "task-repository-pg-b" || batchRows[1].ID != "task-repository-pg-c" {
+		t.Fatalf("ListTaskRepositoriesByTaskIDs expected id-ascending tiebreak [task-repository-pg-b task-repository-pg-c], got %+v", batchRows)
+	}
 }
