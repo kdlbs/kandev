@@ -1,6 +1,6 @@
 "use client";
 
-import type { Message } from "@/lib/types/http";
+import type { Message, TaskPendingAction } from "@/lib/types/http";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 import { extractKandevStem } from "./messages/kandev/parse";
 
@@ -113,6 +113,23 @@ export function hasProjectedShellOutput(output: ShellExecOutputSummary | undefin
     (output?.stdout_bytes ?? 0) > 0 ||
     (output?.stderr_bytes ?? 0) > 0
   );
+}
+
+/** Shared composer eligibility predicates belong to the chat domain, not a rendering surface. */
+export function shouldShowProceed(
+  nextStepName: string | null,
+  isAgentBusy: boolean,
+  hasPendingClarification: boolean,
+): boolean {
+  return !!nextStepName && !isAgentBusy && !hasPendingClarification;
+}
+
+/** Uses the durable session projection until message hydration can supply its fallback. */
+export function hasPendingClarification(
+  hasPendingClarificationMessage: boolean,
+  pendingAction: TaskPendingAction | null | undefined,
+): boolean {
+  return hasPendingClarificationMessage || pendingAction === "clarification";
 }
 
 export type ShellExecPayload = {
