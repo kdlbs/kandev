@@ -83,9 +83,16 @@ type TaskBranchInfo struct {
 // TaskBranchProvider lists tasks that should have PR watches and resolves branches.
 type TaskBranchProvider interface {
 	ListTasksNeedingPRWatch(ctx context.Context) ([]TaskBranchInfo, error)
-	// ResolveBranchForSession returns the current branch for a task+session pair.
-	// Used to detect branch renames and update stale PR watches.
-	ResolveBranchForSession(ctx context.Context, taskID, sessionID string) string
+	// ResolveBranchForRepository returns the current branch for a task's
+	// repository, independent of which session (if any) created the watch.
+	// Used to detect branch renames and update stale PR watches without
+	// risking a still-searching watch on one repository being overwritten
+	// with another repository's branch.
+	ResolveBranchForRepository(ctx context.Context, taskID, repositoryID string) string
+}
+
+type multiBranchTaskBranchProvider interface {
+	ResolveBranchesForRepository(ctx context.Context, taskID, repositoryID string) []string
 }
 
 // Poller runs background loops for PR monitoring and review queue checking.
@@ -94,6 +101,10 @@ type Poller struct {
 	eventBus           bus.EventBus
 	logger             *logger.Logger
 	taskBranchProvider TaskBranchProvider
+
+	// circuits tracks per-workspace auth/config backoff for the PR-monitor
+	// loop only (see poller_circuit.go). Safe for concurrent use; never nil.
+	circuits *pollerCircuits
 
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -106,6 +117,7 @@ func NewPoller(svc *Service, eventBus bus.EventBus, log *logger.Logger) *Poller 
 		service:  svc,
 		eventBus: eventBus,
 		logger:   log,
+		circuits: newPollerCircuits(),
 	}
 }
 
@@ -172,6 +184,16 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 		p.logger.Error("failed to list PR watches", zap.Error(err))
 		return
 	}
+	if cardinality, metricErr := p.service.PRWatchCardinality(ctx); metricErr != nil {
+		p.logger.Debug("failed to observe PR watch cardinality", zap.Error(metricErr))
+	} else {
+		recordPRWatchCardinality(cardinality)
+	}
+	if len(watches) == 0 {
+		return
+	}
+
+	watches = p.filterOpenCircuitWatches(ctx, watches)
 	if len(watches) == 0 {
 		return
 	}
@@ -183,8 +205,56 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 	if p.tryBatchedPRWatchCheck(ctx, watches) {
 		return
 	}
+	watches = p.filterOpenCircuitWatches(ctx, watches)
 	for _, watch := range watches {
 		p.checkSinglePRWatch(ctx, watch)
+	}
+}
+
+// filterOpenCircuitWatches refreshes each present workspace's credential
+// fingerprint at most once per cycle (resetting an open circuit on
+// rotate/reconnect/re-auth) and excludes every watch belonging to a
+// workspace whose circuit is still open afterward — so a broken automation
+// credential does not cost a GitHub call every poll cycle, only one
+// exploratory probe per backoff window (see authcircuit.PermanentBackoff).
+func (p *Poller) filterOpenCircuitWatches(ctx context.Context, watches []*PRWatch) []*PRWatch {
+	now := time.Now().UTC()
+	refreshed := make(map[string]bool, len(watches))
+	filtered := make([]*PRWatch, 0, len(watches))
+	for _, watch := range watches {
+		if watch == nil || watch.WorkspaceID == "" {
+			filtered = append(filtered, watch)
+			continue
+		}
+		if !refreshed[watch.WorkspaceID] {
+			refreshed[watch.WorkspaceID] = true
+			p.refreshWorkspaceCircuitFingerprint(ctx, watch.WorkspaceID)
+		}
+		if p.circuits.open(watch.WorkspaceID, now) {
+			incAuthCircuitSkip()
+			continue
+		}
+		filtered = append(filtered, watch)
+	}
+	return filtered
+}
+
+// refreshWorkspaceCircuitFingerprint resets workspaceID's circuit when its
+// GitHub connection's non-secret fingerprint ("status:generation") has
+// changed since last observed. A lookup error or empty fingerprint (no
+// connection, or the connection was just deleted) is treated as "unknown"
+// and never resets an open circuit — see
+// authcircuit.State.ResetIfFingerprintChanged.
+func (p *Poller) refreshWorkspaceCircuitFingerprint(ctx context.Context, workspaceID string) {
+	if p.service == nil {
+		return
+	}
+	fingerprint, err := p.service.WorkspaceConnectionFingerprint(ctx, workspaceID)
+	if err != nil || fingerprint == "" {
+		return
+	}
+	if p.circuits.resetIfFingerprintChanged(workspaceID, fingerprint) {
+		incAuthCircuitReset()
 	}
 }
 
@@ -205,7 +275,15 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 	}
 	results := make([]PRWatchSyncResult, 0, len(watches))
 	for workspaceID, workspaceWatches := range byWorkspace {
+		incCanonicalPollRequests(len(workspaceWatches))
 		workspaceResults, err := p.service.SyncWorkspaceWatchesBatched(ctx, workspaceID, workspaceWatches)
+		// A client without GraphQL support deliberately falls back to the
+		// per-watch REST path below. It is not an authentication failure, so
+		// it must not open the workspace circuit and filter that fallback out.
+		if errors.Is(err, errGraphQLUnsupported) {
+			return false
+		}
+		p.circuits.recordOutcome(workspaceID, classifyPollErr(err), time.Now().UTC())
 		if err != nil {
 			p.logger.Debug("batched PR watch check failed",
 				zap.String("workspace_id", workspaceID), zap.Error(err))
@@ -268,6 +346,7 @@ func splitPRWatches(watches []*PRWatch) (numbered, searching []*PRWatch) {
 }
 
 func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
+	incCanonicalPollRequests(1)
 	// PRWatch with pr_number=0 means we're still searching for a PR on this branch.
 	if watch.PRNumber == 0 {
 		p.detectPRForWatch(ctx, watch)
@@ -275,6 +354,7 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 	}
 
 	status, hasNew, err := p.service.CheckPRWatchForWorkspace(ctx, watch)
+	p.circuits.recordOutcome(watch.WorkspaceID, classifyPollErr(err), time.Now().UTC())
 	if err != nil {
 		p.logger.Debug("failed to check PR watch",
 			zap.String("id", watch.ID), zap.Error(err))
@@ -350,6 +430,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 	pr, err := p.service.FindPRByBranchForWorkspace(
 		ctx, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Branch,
 	)
+	p.circuits.recordOutcome(watch.WorkspaceID, classifyPollErr(err), time.Now().UTC())
 	if err != nil {
 		p.logger.Debug("failed to search for PR by branch",
 			zap.String("watch_id", watch.ID),
@@ -462,8 +543,11 @@ func (p *Poller) refreshStaleBranches(ctx context.Context) {
 		if watch.PRNumber != 0 {
 			continue // already found a PR, branch is correct
 		}
-		currentBranch := p.taskBranchProvider.ResolveBranchForSession(
-			ctx, watch.TaskID, watch.SessionID,
+		if branchSetPreservesWatch(ctx, p.taskBranchProvider, watch) {
+			continue
+		}
+		currentBranch := p.taskBranchProvider.ResolveBranchForRepository(
+			ctx, watch.TaskID, watch.RepositoryID,
 		)
 		if currentBranch == "" || currentBranch == watch.Branch {
 			continue
@@ -477,6 +561,27 @@ func (p *Poller) refreshStaleBranches(ctx context.Context) {
 				zap.String("watch_id", watch.ID), zap.Error(updateErr))
 		}
 	}
+}
+
+func branchSetPreservesWatch(ctx context.Context, provider TaskBranchProvider, watch *PRWatch) bool {
+	multiBranchProvider, ok := provider.(multiBranchTaskBranchProvider)
+	if !ok {
+		return false
+	}
+	branches := multiBranchProvider.ResolveBranchesForRepository(ctx, watch.TaskID, watch.RepositoryID)
+	if len(branches) == 0 {
+		return false
+	}
+	return branchListContains(branches, watch.Branch)
+}
+
+func branchListContains(branches []string, branch string) bool {
+	for _, candidate := range branches {
+		if candidate == branch {
+			return true
+		}
+	}
+	return false
 }
 
 // reviewQueueLoop polls review watches for new PRs.

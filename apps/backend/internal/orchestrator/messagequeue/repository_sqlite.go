@@ -1790,6 +1790,34 @@ func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string)
 	return n, err
 }
 
+func (r *sqliteRepository) CountQueueDepth(ctx context.Context) (int, error) {
+	rows, err := r.ro.QueryxContext(ctx, `SELECT metadata_json FROM queued_messages`)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		var metadataJSON string
+		if err := rows.Scan(&metadataJSON); err != nil {
+			return 0, err
+		}
+		metadata := make(map[string]interface{})
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+				return 0, fmt.Errorf("unmarshal queue depth metadata: %w", err)
+			}
+		}
+		if reserved, _ := metadata[MetadataLifecycleReserved].(bool); !reserved {
+			count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // CountPendingByTaskIDs counts pending entries per task, excluding durable
 // lifecycle rows reserved in flight (filtered in Go via IsReservedInFlight).
 func (r *sqliteRepository) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {

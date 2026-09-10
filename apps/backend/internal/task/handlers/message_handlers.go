@@ -263,6 +263,20 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "message not found")
 		return
 	}
+	if message.PayloadDigest != "" {
+		// Large output was externalized at write time (see
+		// externalizeMessagePayload) and message.Metadata currently holds
+		// only the small has_output/stdout_bytes/... summary
+		// ProjectMessageMetadata produces - not the full body. This route is
+		// the explicit, authorized single-message load that resolves it
+		// back before extraction.
+		if err := h.service.RehydrateMessagePayload(c.Request.Context(), message); err != nil {
+			h.logger.Error("failed to rehydrate message payload",
+				zap.String("message_id", message.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load shell output"})
+			return
+		}
+	}
 	output, ok := models.ExtractShellExecOutput(message.Metadata)
 	if !ok || message.TaskSessionID != c.Param("id") {
 		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
@@ -290,7 +304,6 @@ type listMessagesParams struct {
 	sort       string
 	authorType string
 	limit      int
-	paginated  bool
 }
 
 const (
@@ -344,6 +357,13 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		}
 		limit = parsed
 	}
+	if !limitProvided && before == "" && after == "" && sort == "" {
+		// No pagination parameters at all: default to a bounded first page
+		// instead of an unbounded full-session read. See
+		// service.DefaultMessagesPageSize and wsListMessages's matching
+		// default for the WebSocket path.
+		limit = service.DefaultMessagesPageSize
+	}
 	return listMessagesParams{
 		before:     before,
 		after:      after,
@@ -351,7 +371,6 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		sort:       sort,
 		authorType: authorType,
 		limit:      limit,
-		paginated:  limitProvided || before != "" || after != "" || aroundProvided || sort != "" || authorTypeProvided,
 	}, true
 }
 
@@ -360,15 +379,7 @@ func (h *MessageHandlers) fetchMessages(
 	sessionID string,
 	params listMessagesParams,
 ) (dto.ListMessagesResponse, error) {
-	if params.paginated {
-		return h.fetchMessagesPaginated(ctx, sessionID, params)
-	}
-	messages, err := h.service.ListMessages(ctx, sessionID)
-	if err != nil {
-		return dto.ListMessagesResponse{}, err
-	}
-	result := messagesToAPI(messages)
-	return dto.ListMessagesResponse{Messages: result, Total: len(result)}, nil
+	return h.fetchMessagesPaginated(ctx, sessionID, params)
 }
 
 // fetchMessagesPaginated loads a filtered or around-window message page.
@@ -1357,6 +1368,11 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 	}
 	if req.Sort != "" && req.Sort != messageSortAsc && req.Sort != messageSortDesc {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc", nil)
+	}
+	if req.Limit <= 0 && req.Before == "" && req.After == "" && req.Sort == "" {
+		// No pagination parameters at all: default to a bounded first page,
+		// matching httpListMessages's parseListMessageParams default.
+		req.Limit = service.DefaultMessagesPageSize
 	}
 
 	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{

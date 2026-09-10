@@ -60,6 +60,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0050 | [Plugins provide OIDC/SAML login via a capability-gated, host-minted session](0050-plugin-external-auth-capability.md)               | accepted   | backend, security, protocol | 2026-07-26 |
 | 0051 | [PR agent notifications extend task PR automation](0051-pr-agent-notifications-extend-task-pr-automation.md)                          | accepted   | backend, frontend, workflow, GitHub, MCP | 2026-07-23 |
 | 0052 | [Plugins reconcile pending agent interactions through a dedicated Host contract](0052-plugin-host-interaction-api.md)                | accepted   | backend, protocol                        | 2026-08-22 |
+| 2026-08-31-task-owned-pr-watch-identity | [Keep PR watches task owned](2026-08-31-task-owned-pr-watch-identity.md) | accepted | backend, GitHub, workflow | 2026-08-31 |
 | 2026-07-23-opencode-review-evidence-trust | [Trusted OpenCode Review Evidence](2026-07-23-opencode-review-evidence-trust.md) | accepted | workflow, infra | 2026-07-23 |
 | 2026-07-23-planner-direct-small-work | [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md) | superseded by 2026-07-26 | workflow | 2026-07-23 |
 | 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | superseded by 2026-07-26 | workflow | 2026-07-23 |

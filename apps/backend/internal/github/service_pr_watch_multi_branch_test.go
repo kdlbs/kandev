@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -140,7 +141,7 @@ func TestUpdatePRWatchBranchIfSearching_NoCollision_UpdatesBranch(t *testing.T) 
 
 // TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource locks
 // the fix for the UNIQUE-constraint collision: when a sibling watch already
-// owns the destination (session, repo, branch) triple, the source row is
+// owns the destination (task, repo, branch) triple, even from another session, the source row is
 // deleted instead of triggering a UNIQUE constraint error.
 func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
@@ -151,7 +152,7 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testi
 	if err != nil {
 		t.Fatalf("create source watch: %v", err)
 	}
-	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-2", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
 	if err != nil {
 		t.Fatalf("create sibling watch: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testi
 		t.Fatalf("UpdatePRWatchBranchIfSearching must not error on sibling collision: %v", err)
 	}
 
-	all, err := store.ListPRWatchesBySession(ctx, "session-1")
+	all, err := store.ListPRWatchesByTask(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("list watches: %v", err)
 	}
@@ -216,6 +217,153 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSiblingHasPR_DropsSource(t *
 	}
 	if all[0].PRNumber != 99 {
 		t.Errorf("sibling PR number must be preserved (99), got %d", all[0].PRNumber)
+	}
+}
+
+func TestResetPRWatch_CollidesWithCanonicalSibling_DropsSource(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	source, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create source watch: %v", err)
+	}
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-2", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	if err != nil {
+		t.Fatalf("create sibling watch: %v", err)
+	}
+
+	if err := svc.ResetPRWatch(ctx, source.ID, "feature/B"); err != nil {
+		t.Fatalf("ResetPRWatch must merge task-owned branch collisions: %v", err)
+	}
+
+	all, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected source watch dropped, got %d remaining", len(all))
+	}
+	if all[0].ID != sibling.ID {
+		t.Fatalf("expected sibling watch %q to survive, got %q", sibling.ID, all[0].ID)
+	}
+	if all[0].Branch != "feature/B" || all[0].PRNumber != 0 {
+		t.Fatalf("sibling watch changed unexpectedly: %+v", all[0])
+	}
+}
+
+func TestResetPRWatch_CollidesWithDiscoveredSibling_DropsSource(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	source, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create source watch: %v", err)
+	}
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-2", "task-1", "repo-1", "owner", "repo", 99, "feature/B")
+	if err != nil {
+		t.Fatalf("create sibling watch: %v", err)
+	}
+
+	if err := svc.ResetPRWatch(ctx, source.ID, "feature/B"); err != nil {
+		t.Fatalf("ResetPRWatch must merge with a task-owned discovered branch sibling: %v", err)
+	}
+
+	all, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected source watch dropped, got %d remaining", len(all))
+	}
+	if all[0].ID != sibling.ID {
+		t.Fatalf("expected sibling watch %q to survive, got %q", sibling.ID, all[0].ID)
+	}
+	if all[0].Branch != "feature/B" || all[0].PRNumber != 99 {
+		t.Fatalf("discovered sibling watch changed unexpectedly: %+v", all[0])
+	}
+}
+
+func TestResetPRWatch_ConcurrentSessionsCoalesceDestination(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	first, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-A", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create session A watch: %v", err)
+	}
+	second, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-B", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	if err != nil {
+		t.Fatalf("create session B watch: %v", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, id := range []string{first.ID, second.ID} {
+		wg.Add(1)
+		go func(watchID string) {
+			defer wg.Done()
+			<-start
+			errs <- svc.ResetPRWatch(ctx, watchID, "feature/B")
+		}(id)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent ResetPRWatch: %v", err)
+		}
+	}
+
+	watches, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 1 {
+		t.Fatalf("expected one coalesced destination watch, got %d", len(watches))
+	}
+	if watches[0].Branch != "feature/B" || watches[0].PRNumber != 0 {
+		t.Fatalf("unexpected coalesced watch: %+v", watches[0])
+	}
+}
+
+func TestResetPRWatch_CollisionDoesNotSwitchBackToSource(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	source, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-A", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create source watch: %v", err)
+	}
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-B", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	if err != nil {
+		t.Fatalf("create sibling watch: %v", err)
+	}
+
+	if err := svc.ResetPRWatch(ctx, source.ID, sibling.Branch); err != nil {
+		t.Fatalf("ResetPRWatch must coalesce the source into the canonical branch: %v", err)
+	}
+	// A delayed reset from the source session must be a no-op after its row
+	// was merged, rather than recreating or switching the canonical watch.
+	if err := svc.ResetPRWatch(ctx, source.ID, source.Branch); err != nil {
+		t.Fatalf("stale source reset must remain a no-op: %v", err)
+	}
+
+	watches, err := store.ListPRWatchesByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(watches) != 1 || watches[0].ID != sibling.ID {
+		t.Fatalf("expected only canonical sibling after stale reset, got %+v", watches)
+	}
+	if watches[0].Branch != sibling.Branch || watches[0].PRNumber != 0 {
+		t.Fatalf("canonical sibling switched unexpectedly: %+v", watches[0])
 	}
 }
 

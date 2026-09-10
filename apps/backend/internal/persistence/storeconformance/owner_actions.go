@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/canvas"
+	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/delivery"
 	"github.com/kandev/kandev/internal/github"
@@ -2926,7 +2927,7 @@ func workflowSyncAction() apiAction {
 		if err != nil {
 			return nil, err
 		}
-		if err := store.(*workflowsync.Store).RecordSyncStatus(s.Context, id, enabled, "", nil, "hash", time.Now().UTC()); err != nil {
+		if err := store.(*workflowsync.Store).RecordSyncStatus(s.Context, id, enabled, "", nil, "hash", time.Now().UTC(), authcircuit.State{}); err != nil {
 			return nil, err
 		}
 		return readConfig(s, store.(*workflowsync.Store), id)

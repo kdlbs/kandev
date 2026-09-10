@@ -58,10 +58,12 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
 	normalizedPath := normalizeSQLitePath(dbPath)
 
-	// Reader DSN: read-only mode, FK enforcement, shared cache.
+	// Reader DSN: read-only mode and FK enforcement.
+	// Do not enable SQLite shared-cache mode: an active reader in that cache
+	// can make a later reader observe its stale snapshot after a writer commits.
 	// journal_mode and synchronous are database-level (set by the writer).
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=ro&_busy_timeout=%d&_cache=shared",
+		"file:%s?_foreign_keys=on&mode=ro&_busy_timeout=%d",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)

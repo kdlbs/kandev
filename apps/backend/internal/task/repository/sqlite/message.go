@@ -37,13 +37,9 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 		messageType = string(models.MessageTypeMessage)
 	}
 
-	metadataJSON := "{}"
-	if message.Metadata != nil {
-		metadataBytes, err := json.Marshal(message.Metadata)
-		if err != nil {
-			return fmt.Errorf("failed to serialize message metadata: %w", err)
-		}
-		metadataJSON = string(metadataBytes)
+	metadataJSON, err := r.externalizeMessagePayload(ctx, message)
+	if err != nil {
+		return err
 	}
 
 	if message.AuthorType == models.MessageAuthorUser {
@@ -71,9 +67,9 @@ func (r *Repository) insertMessageRow(
 	messageType, metadataJSON string,
 ) error {
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at, prompt_seq)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt, message.PromptIndex)
+		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at, prompt_seq, payload_digest, payload_size)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt, message.PromptIndex, message.PayloadDigest, message.PayloadSize)
 	return err
 }
 
@@ -114,9 +110,9 @@ func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message
 	var messageType string
 	var metadataJSON string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at, payload_digest, payload_size
 		FROM task_session_messages WHERE id = ?
-	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
+	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt, &message.PayloadDigest, &message.PayloadSize)
 	if err != nil {
 		return nil, err
 	}
@@ -865,9 +861,9 @@ func (r *Repository) CompletePendingToolCallsForTurn(ctx context.Context, turnID
 
 // UpdateMessage updates an existing message
 func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message) error {
-	metadataJSON, err := json.Marshal(message.Metadata)
+	metadataJSON, err := r.externalizeMessagePayload(ctx, message)
 	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
+		return err
 	}
 
 	requestsInput := 0
@@ -877,9 +873,9 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 
 	message.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ?
+		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, payload_digest = ?, payload_size = ?, updated_at = ?
 		WHERE id = ?
-	`), message.Content, requestsInput, string(message.Type), string(metadataJSON), message.UpdatedAt, message.ID)
+	`), message.Content, requestsInput, string(message.Type), metadataJSON, message.PayloadDigest, message.PayloadSize, message.UpdatedAt, message.ID)
 	if err != nil {
 		return err
 	}

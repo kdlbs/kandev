@@ -98,6 +98,9 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
 	service.SetAutoMergePolicy(true, 0)
+	if provider, ok := repo.(queueDepthCounter); ok {
+		registerQueueDepthProvider(provider)
+	}
 	return service
 }
 
