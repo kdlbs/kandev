@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -60,6 +66,64 @@ func newTrackedSSHSession(exec *SSHExecutor, instanceID string, client *ssh.Clie
 	return state
 }
 
+// newObservedSSHExecutor builds an SSHExecutor whose logger records every
+// Warn-and-above entry, so a test can assert on the transport-loss warning
+// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.9 requires instead of only on the
+// in-memory transportLost marker.
+func newObservedSSHExecutor(t *testing.T) (*SSHExecutor, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("observer logger: %v", err)
+	}
+	return NewSSHExecutor(nil, nil, nil, log), logs
+}
+
+// newTrackedSSHSessionWithForwarder inserts a session with both a real
+// session SSH client and a real local port forward — the same pair
+// CreateInstance/ResumeRemoteInstance record — and starts its watchdog in the
+// same critical section as the record. Unlike newTrackedSSHSession, this lets
+// a test observe the forwarder half of transport teardown
+// (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.5/-001.6).
+func newTrackedSSHSessionWithForwarder(exec *SSHExecutor, instanceID string, client *ssh.Client, fwd *SSHPortForwarder) *sshSessionState {
+	state := &sshSessionState{
+		target:        &SSHTarget{Host: "build.example", User: "deploy", PinnedFingerprint: "SHA256:x"},
+		client:        client,
+		forwarder:     fwd,
+		pid:           4242,
+		remoteDir:     "/remote/session",
+		remoteTaskDir: "/remote/task",
+	}
+	exec.mu.Lock()
+	exec.sessions[instanceID] = state
+	exec.startWatchdogLocked(instanceID, state)
+	exec.mu.Unlock()
+	return state
+}
+
+// dialForwarder reports whether a new TCP connection to fwd's local port is
+// currently accepted, closing it immediately if so.
+func dialForwarder(fwd *SSHPortForwarder) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(fwd.LocalPort())), time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// waitClosedWithin blocks until ch is closed, failing the test if timeout
+// elapses first.
+func waitClosedWithin(t *testing.T, ch <-chan struct{}, timeout time.Duration, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(timeout):
+		t.Fatalf("%s did not happen within %s", what, timeout)
+	}
+}
+
 func TestSSHKeepaliveTuningValid(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -82,8 +146,14 @@ func TestSSHKeepaliveTuningValid(t *testing.T) {
 	}
 }
 
+// TestSSHKeepaliveWatchdogDeclaresLossOnDeadline exercises the raw watchdog's
+// own decision timing in isolation from SSHExecutor — its onLost callback
+// here is a test channel, not the production transportTeardown, so it does
+// not exercise AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.9's warning log (see
+// TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime for that,
+// wired through the real executor).
+//
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.3
-// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.9
 func TestSSHKeepaliveWatchdogDeclaresLossOnDeadline(t *testing.T) {
 	server := newFakeSSHServer(t, nil)
 	client := server.dial(t)
@@ -140,6 +210,164 @@ func TestSSHKeepaliveWatchdogDeclaresLossOnProbeError(t *testing.T) {
 	}
 	w.stopAndAwaitLoop()
 	w.awaitProbeExit()
+}
+
+// TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime is the
+// capability this card exists for: a session whose transport falls silent is
+// torn down automatically, within a bounded time, with no disposal call
+// (StopInstance/Close) driving it. It ends without stopping the session — per
+// the system design's Testing section — so goleak.VerifyTestMain proves the
+// prober's own error exit (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.12) rather
+// than a disposal call retiring it first.
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.5
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.6
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.9
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.12
+func TestSSHKeepaliveDeadlineTearsDownTrackedSessionWithinBoundedTime(t *testing.T) {
+	withSSHKeepaliveTuning(t, 5*time.Millisecond, 20*time.Millisecond)
+
+	exec, logs := newObservedSSHExecutor(t)
+	server := newFakeSSHServer(t, nil)
+	client := server.dial(t)
+	fwd, err := StartPortForward(client, 41234, newTestLogger())
+	if err != nil {
+		t.Fatalf("StartPortForward: %v", err)
+	}
+	state := newTrackedSSHSessionWithForwarder(exec, "instance-1", client, fwd)
+
+	if !dialForwarder(fwd) {
+		t.Fatal("forwarder port must accept connections before teardown")
+	}
+
+	server.setSilent(true) // every probe goes unanswered from here on
+
+	waitClosedWithin(t, state.watchdog.loopDone, 2*time.Second, "the watchdog loop declaring transport loss")
+	waitClosedWithin(t, state.watchdog.proberDone, 2*time.Second, "the prober exiting after teardown closed the client")
+
+	if !exec.isTransportLost(state) {
+		t.Fatal("isTransportLost = false, want true after an internally-triggered teardown")
+	}
+	if dialForwarder(fwd) {
+		t.Fatal("forwarder port still accepts connections after teardown, want it refused")
+	}
+
+	var warnings []observer.LoggedEntry
+	for _, entry := range logs.All() {
+		if entry.Message == "ssh session transport lost" {
+			warnings = append(warnings, entry)
+		}
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("transport-loss warnings = %d, want exactly 1 (entries: %v)", len(warnings), logs.All())
+	}
+	fields := warnings[0].ContextMap()
+	if fields["instance_id"] != "instance-1" {
+		t.Fatalf("warning instance_id = %v, want instance-1", fields["instance_id"])
+	}
+	if fields["host"] != "build.example" {
+		t.Fatalf("warning host = %v, want build.example", fields["host"])
+	}
+	if _, ok := fields["silence_interval"]; !ok {
+		t.Fatal("warning missing silence_interval field")
+	}
+	if _, ok := fields["forwarder_close_error"]; ok {
+		t.Fatalf("warning unexpectedly named a forwarder_close_error: %v", fields)
+	}
+	if _, ok := fields["client_close_error"]; ok {
+		t.Fatalf("warning unexpectedly named a client_close_error: %v", fields)
+	}
+}
+
+// TestSSHKeepaliveProbeErrorTearsDownTrackedSessionWithinBoundedTime exercises
+// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.4's real teardown path — the
+// session's transport terminating on its own — through the full production
+// wiring (a real SSHExecutor and forwarder), not just the raw watchdog struct
+// TestSSHKeepaliveWatchdogDeclaresLossOnProbeError exercises in isolation. It
+// also ends without stopping the session.
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.4
+func TestSSHKeepaliveProbeErrorTearsDownTrackedSessionWithinBoundedTime(t *testing.T) {
+	withSSHKeepaliveTuning(t, 5*time.Millisecond, 2*time.Second) // deadline kept out of reach: only a probe error should trip this
+
+	exec, logs := newObservedSSHExecutor(t)
+	server := newFakeSSHServer(t, nil)
+	client := server.dial(t)
+	fwd, err := StartPortForward(client, 41234, newTestLogger())
+	if err != nil {
+		t.Fatalf("StartPortForward: %v", err)
+	}
+	state := newTrackedSSHSessionWithForwarder(exec, "instance-1", client, fwd)
+
+	time.Sleep(15 * time.Millisecond) // let at least one probe complete normally
+	_ = client.Close()                // simulate the transport terminating on its own
+
+	waitClosedWithin(t, state.watchdog.loopDone, 2*time.Second, "the watchdog loop declaring transport loss")
+	waitClosedWithin(t, state.watchdog.proberDone, 2*time.Second, "the prober exiting after the probe error")
+
+	if !exec.isTransportLost(state) {
+		t.Fatal("isTransportLost = false, want true after a probe-error teardown")
+	}
+	if dialForwarder(fwd) {
+		t.Fatal("forwarder port still accepts connections after teardown, want it refused")
+	}
+	found := false
+	for _, entry := range logs.All() {
+		if entry.Message == "ssh session transport lost" && entry.ContextMap()["reason"] == sshTransportLostReasonProbeError {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no transport-loss warning recorded with reason=%q, entries: %v", sshTransportLostReasonProbeError, logs.All())
+	}
+}
+
+// TestSSHKeepaliveHealthyTransportKeepsAnsweringPastTwiceTheInterval pins
+// reply accounting: state.lastProbeReply only advances because
+// startWatchdogLocked's recordReply callback runs on every completed probe
+// reply (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.2/-001.3). A regression that
+// stops recording replies leaves lastProbeReply frozen at session start,
+// which classifySSHTransportLocked misreads as "unresponsive" once twice the
+// probe interval has elapsed — even though the transport is healthy — and
+// StopInstance would then skip its remote cleanup/stop calls entirely. This
+// test sleeps well past that threshold on an answering server and asserts
+// the remote calls still ran, so it fails under that regression even though
+// isTransportLost alone would not catch it (classification, not the
+// transport-lost marker, is what a regression here corrupts).
+//
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.2
+// @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.3
+func TestSSHKeepaliveHealthyTransportKeepsAnsweringPastTwiceTheInterval(t *testing.T) {
+	withSSHKeepaliveTuning(t, 5*time.Millisecond, 200*time.Millisecond) // unresponsive threshold 10ms, deadline far out of reach
+
+	server := newFakeSSHServer(t, nil)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	cleanupCalls, stopCalls := 0, 0
+	exec.cleanupScript = func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error {
+		cleanupCalls++
+		return nil
+	}
+	exec.stopRemote = func(context.Context, *ssh.Client, string, int) error {
+		stopCalls++
+		return nil
+	}
+	client := server.dial(t)
+	state := newTrackedSSHSession(exec, "instance-1", client)
+
+	time.Sleep(30 * time.Millisecond) // several times the 10ms unresponsive threshold; the server stays healthy throughout
+
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "instance-1",
+		StopReason: StopReasonTaskDeleted, // triggers the cleanup script
+	}, false); err != nil {
+		t.Fatalf("StopInstance: %v", err)
+	}
+	if cleanupCalls != 1 || stopCalls != 1 {
+		t.Fatalf("cleanup calls = %d, stop calls = %d, want both 1 — a healthy transport must still classify as answering", cleanupCalls, stopCalls)
+	}
+	if exec.isTransportLost(state) {
+		t.Fatal("a deliberate stop on a healthy transport must not declare transport loss")
+	}
 }
 
 func TestSSHExecutorCreateInstanceRefusesATransportLostSession(t *testing.T) {
