@@ -409,19 +409,32 @@ func TestPostgresListStuckParentsChildSetKeyMatchesGo(t *testing.T) {
 	}
 }
 
-// TestPostgresListStuckParentsExcludesCoveredParent drives the two predicates
-// that the remaining dialect-sensitive constructs sit inside: the receipt
-// comparison (IS DISTINCT FROM) and the in-flight-run check (JSON extraction).
-// A parent whose receipt already matches its child set, and which has a queued
-// wake run, must not come back.
+// TestPostgresListStuckParentsExcludesCoveredParent drives the three
+// predicates the receipt-coverage OR sits inside: the receipt comparison
+// (IS DISTINCT FROM), the child-generation comparison (this branch's third
+// arm), and the in-flight-run check (JSON extraction). A parent whose
+// receipt already matches its child set and generation, and which has a
+// queued wake run, must not come back.
 func TestPostgresListStuckParentsExcludesCoveredParent(t *testing.T) {
 	repo, ctx := newPostgresWakeRepo(t)
 
 	key := seedPostgresStuckParent(t, ctx, repo, "pg-parent-3", "pg-ws-3")
+
+	// Read the candidate's generation before recording the receipt: the
+	// generation arm compares against this value, so a receipt recorded
+	// without it (e.g. a hand-written INSERT defaulting child_generation to
+	// '') would never match and the parent would never be excluded.
+	preReceipt, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (pre-receipt): %v", err)
+	}
+	if len(preReceipt) != 1 || preReceipt[0].ParentTaskID != "pg-parent-3" {
+		t.Fatalf("ListStuckParents (pre-receipt) = %#v, want exactly [pg-parent-3]", preReceipt)
+	}
 	execPostgres(t, ctx, repo, `
-		INSERT INTO parent_child_wake_receipts (parent_task_id, child_set_key, delivery_operation_id, delivered_at)
-		VALUES (?, ?, 'op-1', ?)
-	`, "pg-parent-3", key, time.Now().UTC())
+		INSERT INTO parent_child_wake_receipts (parent_task_id, child_set_key, delivery_operation_id, child_generation, delivered_at)
+		VALUES (?, ?, 'op-1', ?, ?)
+	`, "pg-parent-3", key, preReceipt[0].NewestChildUpdatedAt, time.Now().UTC())
 
 	rows, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
 	if err != nil {
