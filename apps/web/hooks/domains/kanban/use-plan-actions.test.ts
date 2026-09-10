@@ -16,6 +16,9 @@ const mockAppState = vi.hoisted(() => ({
     setTaskPlan: vi.fn(),
   } as Record<string, unknown>,
 }));
+const WORKFLOW_ID = "workflow-1";
+const SESSION_ID = "session-1";
+const TASK_ID = "task-1";
 const mockContextFilesStore = vi.hoisted(() => ({
   value: {
     removeFile: vi.fn(),
@@ -73,6 +76,7 @@ import {
   buildImplementPlanContent,
   collectImplementPlanInput,
   readContextFilesMeta,
+  useNextWorkflowStep,
   usePlanActions,
 } from "./use-plan-actions";
 
@@ -163,7 +167,7 @@ function setUpPlanActionsState() {
   mockAppState.value = {
     ...mockAppState.value,
     kanban: {
-      workflowId: "workflow-1",
+      workflowId: WORKFLOW_ID,
       steps: [
         {
           id: "plan-step",
@@ -178,10 +182,72 @@ function setUpPlanActionsState() {
           events: { on_enter: [{ type: "auto_start_agent" }] },
         },
       ],
-      tasks: [{ id: "task-1", workflowStepId: "plan-step" }],
+      tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
     },
   };
 }
+
+describe("useNextWorkflowStep visibility", () => {
+  beforeEach(setUpPlanActionsState);
+
+  it("exposes the next step for an idle signal-gated turn-complete move", () => {
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [
+          {
+            id: "plan-step",
+            title: "Plan",
+            position: 1,
+            auto_advance_requires_signal: true,
+            events: { on_turn_complete: [{ type: "move_to_next" }] },
+          },
+          {
+            id: "work-step",
+            title: "Work",
+            position: 2,
+            events: { on_enter: [{ type: "auto_start_agent" }] },
+          },
+        ],
+        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBe("Work");
+  });
+
+  it("suppresses the next step for an ungated turn-complete move", () => {
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [
+          {
+            id: "plan-step",
+            title: "Plan",
+            position: 1,
+            auto_advance_requires_signal: false,
+            events: { on_turn_complete: [{ type: "move_to_next" }] },
+          },
+          {
+            id: "work-step",
+            title: "Work",
+            position: 2,
+            events: { on_enter: [{ type: "auto_start_agent" }] },
+          },
+        ],
+        tasks: [{ id: TASK_ID, workflowStepId: "plan-step" }],
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBeNull();
+  });
+});
 
 describe("usePlanActions", () => {
   beforeEach(setUpPlanActionsState);
@@ -197,8 +263,8 @@ describe("usePlanActions", () => {
 
     const { result } = renderHook(() =>
       usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
         planModeEnabled: true,
         handlePlanModeChange: vi.fn(),
         chatInputRef: chatInputRef as never,
@@ -211,8 +277,8 @@ describe("usePlanActions", () => {
   it("routes implement through the next auto-start work step", async () => {
     const { result } = renderHook(() =>
       usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
         planModeEnabled: true,
         handlePlanModeChange: vi.fn(),
         chatInputRef: { current: null },
@@ -223,12 +289,12 @@ describe("usePlanActions", () => {
       await result.current.implementPlanHandler?.(false);
     });
 
-    expect(mockMoveTask).toHaveBeenCalledWith("task-1", {
-      workflow_id: "workflow-1",
+    expect(mockMoveTask).toHaveBeenCalledWith(TASK_ID, {
+      workflow_id: WORKFLOW_ID,
       workflow_step_id: "work-step",
       position: 0,
     });
-    expect(mockAppState.value.setPlanMode).toHaveBeenCalledWith("session-1", false);
+    expect(mockAppState.value.setPlanMode).toHaveBeenCalledWith(SESSION_ID, false);
   });
 
   it("keeps plan mode enabled when moving to the work step fails", async () => {
@@ -236,8 +302,8 @@ describe("usePlanActions", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { result } = renderHook(() =>
       usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
         planModeEnabled: true,
         handlePlanModeChange: vi.fn(),
         chatInputRef: { current: null },
@@ -255,8 +321,8 @@ describe("usePlanActions", () => {
   it("does not expose the implement handler outside plan mode", () => {
     const { result } = renderHook(() =>
       usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
         planModeEnabled: false,
         handlePlanModeChange: vi.fn(),
         chatInputRef: { current: null },
@@ -277,8 +343,8 @@ describe("usePlanActions proceed failures", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { result } = renderHook(() =>
       usePlanActions({
-        resolvedSessionId: "session-1",
-        taskId: "task-1",
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
         planModeEnabled: true,
         handlePlanModeChange: vi.fn(),
         chatInputRef: { current: null },

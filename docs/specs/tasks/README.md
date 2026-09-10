@@ -166,6 +166,7 @@ signals, and task-scoped scheduling contracts.
 - [Task priority visibility](system-design/task-priority-visibility.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow completion-signal payload delivery](system-design/workflow-completion-signal-payload-delivery.md)
+- [Signal-Gated Manual Move Visibility](system-design/workflow-signal-gated-manual-move-visibility.md)
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)

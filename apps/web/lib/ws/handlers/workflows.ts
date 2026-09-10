@@ -20,6 +20,7 @@ function stepFromPayload(step: any) {
     events: step.events,
     show_in_command_panel: step.show_in_command_panel,
     allow_manual_move: step.allow_manual_move,
+    auto_advance_requires_signal: step.auto_advance_requires_signal,
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,

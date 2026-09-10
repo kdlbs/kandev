@@ -52,9 +52,11 @@ export function useNextWorkflowStep(taskId: string | null) {
 
   const currentStepAutoTransitions = useMemo(
     () =>
-      currentStep?.events?.on_turn_complete?.some((a) =>
+      currentStep?.auto_advance_requires_signal !== true &&
+      (currentStep?.events?.on_turn_complete?.some((a) =>
         AUTO_TRANSITION_ACTIONS.includes(a.type),
-      ) ?? false,
+      ) ??
+        false),
     [currentStep],
   );
 

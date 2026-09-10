@@ -62,6 +62,7 @@ export type KanbanUpdatePayload = {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
     show_in_command_panel?: boolean;
+    auto_advance_requires_signal?: boolean;
     wip_limit?: number;
     pull_from_step_id?: string | null;
   }>;
@@ -285,6 +286,7 @@ export type StepPayload = {
   is_start_step?: boolean;
   allow_manual_move?: boolean;
   show_in_command_panel?: boolean;
+  auto_advance_requires_signal?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
