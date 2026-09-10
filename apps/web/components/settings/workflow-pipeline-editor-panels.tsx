@@ -12,6 +12,7 @@ type StepConfigPanelProps = {
   steps: WorkflowStep[];
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   onRemove: () => void;
+  onRestoreSourceStep?: (sourceStepId: string) => void;
   readOnly?: boolean;
   onSessionConfigResolutionPendingChange?: (pending: boolean) => void;
 };
@@ -22,11 +23,13 @@ export function StepConfigPanel({
   steps,
   onUpdate,
   onRemove,
+  onRestoreSourceStep,
   readOnly = false,
   onSessionConfigResolutionPendingChange,
 }: StepConfigPanelProps) {
   const [activeTab, setActiveTab] = useState<WorkflowInspectorTab>("agent");
   const { isMobile } = useResponsiveBreakpoint();
+  const sourceTarget = step.session_target?.kind === "step" ? step.session_target : undefined;
 
   return (
     <div
@@ -44,6 +47,11 @@ export function StepConfigPanel({
         onTabChange={setActiveTab}
         onUpdate={onUpdate}
         onRemove={onRemove}
+        onRestoreSource={
+          sourceTarget && onRestoreSourceStep
+            ? () => onRestoreSourceStep(sourceTarget.step_id)
+            : undefined
+        }
         mobile={isMobile}
         onSessionConfigResolutionPendingChange={onSessionConfigResolutionPendingChange}
       />

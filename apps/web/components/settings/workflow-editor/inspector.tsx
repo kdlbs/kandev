@@ -41,6 +41,7 @@ export type WorkflowInspectorProps = {
   onTabChange: (tab: WorkflowInspectorTab) => void;
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   onRemove?: () => void;
+  onRestoreSource?: () => void;
   focusedAction?: WorkflowActionSelection | null;
   mobile?: boolean;
   onSessionConfigResolutionPendingChange?: (pending: boolean) => void;
@@ -56,6 +57,7 @@ export function WorkflowInspector({
   onTabChange,
   onUpdate,
   onRemove,
+  onRestoreSource,
   focusedAction,
   mobile = false,
   onSessionConfigResolutionPendingChange,
@@ -83,6 +85,7 @@ export function WorkflowInspector({
             steps={steps}
             readOnly={readOnly}
             onUpdate={onUpdate}
+            onRestoreSource={onRestoreSource}
             onSessionConfigResolutionPendingChange={onSessionConfigResolutionPendingChange}
           />
         )}
@@ -239,6 +242,7 @@ function AgentTab({
   steps,
   readOnly,
   onUpdate,
+  onRestoreSource,
   onSessionConfigResolutionPendingChange,
 }: Pick<
   WorkflowInspectorProps,
@@ -247,6 +251,7 @@ function AgentTab({
   | "steps"
   | "readOnly"
   | "onUpdate"
+  | "onRestoreSource"
   | "onSessionConfigResolutionPendingChange"
 >) {
   const [localPrompt, setLocalPrompt] = useState(step.prompt ?? "");
@@ -263,7 +268,9 @@ function AgentTab({
       <WorkflowStepAgentProfileSelector
         step={step}
         savedStep={savedStep}
+        steps={steps}
         onUpdate={onUpdate}
+        onRestoreSource={onRestoreSource}
         readOnly={readOnly}
       />
       <StepAgentBehaviorControls

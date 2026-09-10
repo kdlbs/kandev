@@ -102,6 +102,12 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
+	// the first session identity used by workflow session targeting.
+	MetaKeyWorkflowInitialSession = "workflow_initial_session"
+	// MetaKeyWorkflowSessionRoute stores the bounded prepared/committed route
+	// identity used to retry an explicit workflow session selection.
+	MetaKeyWorkflowSessionRoute = "workflow_session_route"
 	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
 	// source-step on_exit side effect is not yet complete. Its value records the
 	// source step so recovery can resume the work after a restart.
@@ -222,6 +228,83 @@ const (
 	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
 	MetaKeyStepHandoffCarry = "step_handoff_carry"
 )
+
+// WorkflowInitialSessionSnapshot identifies the immutable task-initial
+// conversation and the logical profile selected when it was created.
+type WorkflowInitialSessionSnapshot struct {
+	SessionID      string `json:"session_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+}
+
+// WorkflowSessionRoute records one in-flight or committed explicit recipient
+// selection. It is replaced by the next route operation rather than growing a
+// task history.
+type WorkflowSessionRoute struct {
+	OperationID       string `json:"operation_id"`
+	DestinationStepID string `json:"destination_step_id"`
+	TargetKind        string `json:"target_kind"`
+	TargetStepID      string `json:"target_step_id,omitempty"`
+	AgentProfileID    string `json:"agent_profile_id,omitempty"`
+	SourceSessionID   string `json:"source_session_id,omitempty"`
+	DestinationID     string `json:"destination_session_id,omitempty"`
+	Phase             string `json:"phase"`
+}
+
+// LoadWorkflowSessionRoute decodes the bounded route record stored in task
+// metadata. Invalid or incomplete values are ignored so a stale record cannot
+// redirect a workflow entry to an unrelated session.
+func LoadWorkflowSessionRoute(metadata map[string]interface{}) (WorkflowSessionRoute, bool) {
+	value, ok := metadata[MetaKeyWorkflowSessionRoute]
+	if !ok {
+		return WorkflowSessionRoute{}, false
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	var route WorkflowSessionRoute
+	if err := json.Unmarshal(payload, &route); err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	if route.OperationID == "" || route.DestinationStepID == "" || route.TargetKind == "" || route.Phase == "" {
+		return WorkflowSessionRoute{}, false
+	}
+	return route, true
+}
+
+// WorkflowSessionBinding records the latest session selected when a direct
+// profile workflow step was entered. The session pointer is nullable because
+// deleting a session must preserve the logical profile for a later fresh
+// fallback.
+type WorkflowSessionBinding struct {
+	TaskID         string    `json:"task_id"`
+	TargetKey      string    `json:"target_key"`
+	WorkflowID     string    `json:"workflow_id"`
+	AgentProfileID string    `json:"agent_profile_id"`
+	SessionID      string    `json:"session_id,omitempty"`
+	OperationID    string    `json:"operation_id"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// LoadWorkflowInitialSessionSnapshot decodes the write-once task metadata
+// value. Invalid or incomplete values are treated as unavailable so callers
+// can apply the conservative legacy fallback.
+func LoadWorkflowInitialSessionSnapshot(metadata map[string]interface{}) (WorkflowInitialSessionSnapshot, bool) {
+	value, ok := metadata[MetaKeyWorkflowInitialSession]
+	if !ok {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	object, ok := value.(map[string]interface{})
+	if !ok {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	sessionID, _ := object["session_id"].(string)
+	profileID, _ := object["agent_profile_id"].(string)
+	if sessionID == "" {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	return WorkflowInitialSessionSnapshot{SessionID: sessionID, AgentProfileID: profileID}, true
+}
 
 // StepHandoffCarryToken is the JSON shape stored under
 // tasks.metadata[MetaKeyStepHandoffCarry]. Stamp is a fresh unique value
@@ -1100,10 +1183,10 @@ const (
 // and unknown workflow step session-end policy values.
 func NormalizeWorkflowProfileSessionEndPolicy(value string) WorkflowProfileSessionEndPolicy {
 	value = strings.TrimSpace(value)
-	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyPark {
-		return WorkflowProfileSessionEndPolicyPark
+	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyComplete {
+		return WorkflowProfileSessionEndPolicyComplete
 	}
-	return WorkflowProfileSessionEndPolicyComplete
+	return WorkflowProfileSessionEndPolicyPark
 }
 
 // WorkflowSource values are persisted in workflows.source and record where a

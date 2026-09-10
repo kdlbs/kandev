@@ -125,6 +125,19 @@ function createRemoveWorkflowStepHandler(
   const isNewWorkflow = params.isNewWorkflow ?? workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   return async (stepId: string) => {
     if (readOnly) return;
+    const dependentStep = workflowSteps.find(
+      (step) => step.session_target?.kind === "step" && step.session_target.step_id === stepId,
+    );
+    if (dependentStep) {
+      toast({
+        title: t("workflows:sessionTargetDependentMustBeRepaired"),
+        description: t("workflows:sessionTargetDependentRepairDescription", {
+          stepName: dependentStep.name,
+        }),
+        variant: "error",
+      });
+      return;
+    }
     const proposedSteps = workflowSteps
       .filter((step) => step.id !== stepId)
       .map((step, position) => ({ ...step, position }));
@@ -342,6 +355,7 @@ async function createMissingSteps(
       profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
         step.profile_session_end_policy,
       ),
+      session_target: undefined,
       auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     });
     mappings.set(step.id, created.id);
@@ -350,11 +364,52 @@ async function createMissingSteps(
 
 async function updateChangedSteps(remapped: WorkflowStep[], savedSteps: WorkflowStep[]) {
   const savedById = new Map(savedSteps.map((step) => [step.id, step]));
-  for (const step of remapped) {
+  const changed = remapped.filter((step) => {
     const saved = savedById.get(step.id);
-    if (!saved || !areStepDraftsEqual(step, saved)) {
+    return !saved || !areStepDraftsEqual(step, saved);
+  });
+
+  const targetChanged = (step: WorkflowStep, saved: WorkflowStep) =>
+    JSON.stringify(step.session_target ?? null) !== JSON.stringify(saved.session_target ?? null);
+  const targetNeedsSourceProfileFirst = (step: WorkflowStep) => {
+    const target = step.session_target;
+    if (target?.kind !== "step") return false;
+    const sourceDraft = remapped.find((candidate) => candidate.id === target.step_id);
+    const sourceSaved = sourceDraft ? savedById.get(sourceDraft.id) : undefined;
+    return sourceSaved?.agent_profile_id === "" && sourceDraft?.agent_profile_id !== "";
+  };
+
+  // Existing targets must be detached before their source profile is removed.
+  // A replacement target also clears the mutually-exclusive direct profile in
+  // the same request, so the controller never observes an invalid half-state.
+  for (const step of changed) {
+    const saved = savedById.get(step.id);
+    if (!saved || !targetChanged(step, saved) || saved.session_target == null) continue;
+    const attachAfterSourceProfile = targetNeedsSourceProfileFirst(step);
+    await updateWorkflowStepAction(step.id, {
+      session_target: attachAfterSourceProfile ? null : (step.session_target ?? null),
+      ...(!attachAfterSourceProfile && step.session_target != null ? { agent_profile_id: "" } : {}),
+    });
+  }
+
+  // A newly attached target can refer to a source whose direct profile is also
+  // being enabled in this save. Persist all other changes first, then attach
+  // those targets once the source profile is valid on the server.
+  const targetAdditions = changed.filter((step) => {
+    const saved = savedById.get(step.id);
+    return (
+      (saved?.session_target == null && step.session_target != null) ||
+      targetNeedsSourceProfileFirst(step)
+    );
+  });
+  const targetAdditionIDs = new Set(targetAdditions.map((step) => step.id));
+  for (const step of changed) {
+    if (!targetAdditionIDs.has(step.id)) {
       await updateWorkflowStepAction(step.id, stepUpdatePayload(step));
     }
+  }
+  for (const step of targetAdditions) {
+    await updateWorkflowStepAction(step.id, stepUpdatePayload(step));
   }
 }
 
@@ -387,6 +442,10 @@ function remapDraftStep(
     workflow_id: persistedWorkflowId as WorkflowStep["workflow_id"],
     position,
     pull_from_step_id: remapId(step.pull_from_step_id),
+    session_target:
+      step.session_target?.kind === "step"
+        ? { kind: "step", step_id: remapId(step.session_target.step_id)! }
+        : (step.session_target ?? null),
     events: remapStepReferences(step.events, mappings),
   };
 }

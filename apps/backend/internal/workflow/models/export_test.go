@@ -34,7 +34,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 
 		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, nil)
 
-		require.Equal(t, ExportVersion, export.Version)
+		require.Equal(t, LegacyExportVersion, export.Version)
 		require.Equal(t, ExportType, export.Type)
 		require.Len(t, export.Workflows, 1)
 
@@ -100,6 +100,24 @@ func TestBuildWorkflowExport(t *testing.T) {
 		require.NotNil(t, export.Workflows[0].Steps[1].PullFromStepPosition)
 		assert.Equal(t, 0, *export.Workflows[0].Steps[1].PullFromStepPosition)
 	})
+
+	t.Run("exports explicit target as version two portable position", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Targeted Workflow"}
+		steps := []*WorkflowStep{
+			{ID: "source", Name: "Source", Position: 0, AgentProfileID: "profile-a"},
+			{ID: "target", Name: "Target", Position: 1, SessionTarget: &WorkflowSessionTarget{Kind: WorkflowSessionTargetStep, StepID: "source"}},
+		}
+
+		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps}, func(profileID string) *AgentProfilePortable {
+			return &AgentProfilePortable{AgentName: profileID}
+		})
+		require.Equal(t, ExportVersion, export.Version)
+		require.NotNil(t, export.Workflows[0].Steps[1].SessionTarget)
+		assert.Equal(t, WorkflowSessionTargetStep, export.Workflows[0].Steps[1].SessionTarget.Kind)
+		require.NotNil(t, export.Workflows[0].Steps[1].SessionTarget.StepPosition)
+		assert.Equal(t, 0, *export.Workflows[0].Steps[1].SessionTarget.StepPosition)
+		require.NoError(t, export.Validate())
+	})
 }
 
 func TestValidate(t *testing.T) {
@@ -121,6 +139,19 @@ func TestValidate(t *testing.T) {
 
 	t.Run("valid export passes", func(t *testing.T) {
 		assert.NoError(t, validExport().Validate())
+	})
+
+	t.Run("version two export passes", func(t *testing.T) {
+		e := validExport()
+		e.Version = 2
+		assert.NoError(t, e.Validate())
+	})
+
+	t.Run("legacy version rejects explicit targets", func(t *testing.T) {
+		e := validExport()
+		e.Version = LegacyExportVersion
+		e.Workflows[0].Steps[1].SessionTarget = &WorkflowSessionTargetPortable{Kind: WorkflowSessionTargetInitial}
+		require.ErrorContains(t, e.Validate(), "requires export version")
 	})
 
 	t.Run("wrong version fails", func(t *testing.T) {
