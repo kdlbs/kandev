@@ -15,6 +15,7 @@ import {
   CommandList,
 } from "@kandev/ui/command";
 import { BranchRefreshButton } from "@/components/branch-refresh-button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import { usePillTooltipSuppression } from "@/hooks/use-pill-tooltip-suppression";
 import { useTooltipMountGate } from "@/hooks/use-tooltip-mount-gate";
@@ -280,7 +281,10 @@ function PillPopoverContent({
                     action.onSelect();
                     setOpen(false);
                   }}
-                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+                  className={controlSizingClassName(
+                    "icon",
+                    "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer",
+                  )}
                 >
                   {action.icon}
                 </button>

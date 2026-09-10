@@ -100,6 +100,24 @@ describe("useRepositories", () => {
     expect(mockSetRepositories).toHaveBeenCalledWith("ws-1", [{ id: "r1", name: "Repo One" }]);
   });
 
+  it("keeps a cached workspace loading until its refresh completes", async () => {
+    setup(true);
+    let complete!: (response: { repositories: Repos }) => void;
+    mockListRepositories.mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(() => useRepositories("ws-1"));
+    const pending = result.current.refresh();
+    mockState.repositories.loadingByWorkspaceId["ws-1"] = true;
+    rerender();
+    expect(mockSetRepositoriesLoading).not.toHaveBeenCalledWith("ws-1", false);
+    complete({ repositories: [{ id: "r2", name: "Refreshed" }] });
+    await pending;
+    expect(mockSetRepositoriesLoading).toHaveBeenLastCalledWith("ws-1", false);
+  });
+
   it("keeps cached repositories when a manual refresh fails", async () => {
     setup(/* loaded */ true);
     mockListRepositories.mockRejectedValue(new Error("Network unavailable"));

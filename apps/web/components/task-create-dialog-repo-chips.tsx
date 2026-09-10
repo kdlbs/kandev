@@ -232,6 +232,7 @@ export function RepoChipsRow({
           onOpenChange={handleCreationOpenChange}
           workspaceId={workspaceId}
           executorSelection={localRepositoryCreation.executorSelection}
+          context={fs.repositories.length > 1 ? "task-create-multi" : "task-create"}
           onCreated={(repository) => {
             if (creatingForRowKey) localRepositoryCreation.onCreated(creatingForRowKey, repository);
           }}

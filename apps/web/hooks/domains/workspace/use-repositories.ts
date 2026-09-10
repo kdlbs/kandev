@@ -58,13 +58,6 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     }
   }, [enabled, setRepositories, setRepositoriesLoading, workspaceId]);
 
-  useEffect(() => {
-    if (!enabled || !workspaceId) return;
-    if (isLoaded && isLoading) {
-      setRepositoriesLoading(workspaceId, false);
-    }
-  }, [enabled, isLoaded, isLoading, setRepositoriesLoading, workspaceId]);
-
   // Force-refresh: pull a fresh list once per workspace, bypassing the
   // isLoaded cache. forcedRef is set only on success so a failed fetch retries.
   useEffect(() => {

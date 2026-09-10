@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   IconAlertCircle,
   IconFolder,
@@ -60,7 +60,7 @@ export type CreateLocalRepositorySurfaceProps = {
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   executorSelection: DirectLocalExecutorSelection | null;
-  context?: "task-create" | "workspace";
+  context?: "task-create" | "task-create-multi" | "workspace";
   onCreated: (repository: Repository) => void;
 };
 
@@ -71,7 +71,7 @@ function executorNotice(
   selection: DirectLocalExecutorSelection | null,
   context: NonNullable<CreateLocalRepositorySurfaceProps["context"]>,
 ): string {
-  if (context === "workspace") {
+  if (!requiresDirectLocalExecutor(context)) {
     return t("common:createsAnEmptyGitRepository");
   }
   if (!selection) {
@@ -178,7 +178,7 @@ function RepositoryFormDetails({
       </div>
       <div
         className={
-          executorSelection || context === "workspace"
+          executorSelection || !requiresDirectLocalExecutor(context)
             ? "flex items-start gap-2 text-xs text-muted-foreground"
             : "flex items-start gap-2 text-xs text-destructive"
         }
@@ -221,6 +221,18 @@ function CreateRepositoryFooter({
   );
 }
 
+function requiresDirectLocalExecutor(context: CreateLocalRepositorySurfaceProps["context"]) {
+  return context === "task-create";
+}
+
+function useCreatedRepositoryCallback(onCreated: CreateLocalRepositorySurfaceProps["onCreated"]) {
+  const callback = useRef(onCreated);
+  useEffect(() => {
+    callback.current = onCreated;
+  }, [onCreated]);
+  return callback;
+}
+
 function CreateRepositoryForm({
   open,
   workspaceId,
@@ -249,7 +261,7 @@ function CreateRepositoryForm({
   const nameError = validateLocalRepositoryName(name);
   const targetPath =
     parentPath && !nameError ? buildLocalRepositoryTargetPath(parentPath, name) : "";
-  const executorReady = Boolean(executorSelection || context === "workspace");
+  const executorReady = Boolean(executorSelection || !requiresDirectLocalExecutor(context));
   const canSubmit = !!workspaceId && executorReady && !!parentPath && !nameError && !submitting;
 
   const handleSubmit = async (event: FormEvent) => {
@@ -332,8 +344,15 @@ function CreateRepositoryForm({
 export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurfaceProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
+  const onCreatedRef = useCreatedRepositoryCallback(props.onCreated);
   const handleOpenChange = (open: boolean) => props.onOpenChange(open);
-  const form = <CreateRepositoryForm {...props} onDismiss={() => handleOpenChange(false)} />;
+  const form = (
+    <CreateRepositoryForm
+      {...props}
+      onCreated={(repository) => onCreatedRef.current(repository)}
+      onDismiss={() => handleOpenChange(false)}
+    />
+  );
 
   if (isMobile) {
     return (
