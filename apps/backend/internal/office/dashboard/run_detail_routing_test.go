@@ -108,3 +108,21 @@ func TestBuildRunRouting_PopulatesAttemptsAndSnapshot(t *testing.T) {
 		t.Errorf("attempts = %+v", out.Attempts)
 	}
 }
+
+func TestBuildRunRouting_IncludesSessionRecoveryReference(t *testing.T) {
+	blockID := "block-1"
+	reason := "native_state_missing"
+	blocked := models.RoutingBlockedSessionRecoveryRequired
+	out, err := buildRunRouting(context.Background(), &fakeRunDetailRepo{}, &models.Run{
+		ID:                     "recovery-run",
+		RoutingBlockedStatus:   &blocked,
+		SessionRecoveryBlockID: &blockID,
+		SessionRecoveryReason:  &reason,
+	})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out == nil || out.SessionRecoveryBlockID != blockID || out.SessionRecoveryReason != reason {
+		t.Fatalf("session recovery projection = %+v", out)
+	}
+}

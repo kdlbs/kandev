@@ -110,3 +110,6 @@ const RoutingBlockedWaitingForCapacity = runsmodels.RoutingBlockedWaitingForCapa
 
 // Deprecated: Use internal/runs/models.RoutingBlockedActionRequired.
 const RoutingBlockedActionRequired = runsmodels.RoutingBlockedActionRequired
+
+// Deprecated: Use internal/runs/models.RoutingBlockedSessionRecoveryRequired.
+const RoutingBlockedSessionRecoveryRequired = runsmodels.RoutingBlockedSessionRecoveryRequired

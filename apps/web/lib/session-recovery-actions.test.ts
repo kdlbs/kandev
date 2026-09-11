@@ -4,7 +4,7 @@ import { sessionRecoveryAction } from "@/components/task/chat/messages/action-me
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.12
 // The projection must keep the existing transport actions distinct.
 describe("recovery operation identity", () => {
-  it.each(["resume", "fresh_start", "runtime_retry", "resume_new_branch"])(
+  it.each(["resume", "fresh_start", "runtime_retry", "resume_new_branch", "continue_from_history"])(
     "preserves %s",
     (action) => {
       expect(

@@ -395,7 +395,7 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" && req.Action != "relocate_and_resume" && req.Action != "repair_workspace_inventory" {
+	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" && req.Action != "relocate_and_resume" && req.Action != "repair_workspace_inventory" && req.Action != "continue_from_history" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported session recovery action", nil)
 	}
 	if req.Action == "relocate_and_resume" && req.ErrorStamp == "" {

@@ -46,10 +46,12 @@ function useStoppedRecoveryChoices(
   const {
     recoveryError,
     branchDetails,
+    continuationDetails,
     handleRecover,
     handleRetry,
     handleRestore,
     handleNewBranch,
+    handleContinueFromHistory,
   } = props.actions;
   const completed = props.mode === "completed";
 
@@ -103,6 +105,13 @@ function useStoppedRecoveryChoices(
       label: t("task:continueOnNewBranch"),
       testId: "recovery-new-branch-button",
       onClick: () => void handleNewBranch(),
+    });
+  if (continuationDetails)
+    choices.push({
+      kind: "continue_from_history",
+      label: t("task:continueFromHistory"),
+      testId: "recovery-continue-from-history-button",
+      onClick: () => void handleContinueFromHistory(),
     });
   return choices;
 }

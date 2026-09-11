@@ -8,12 +8,14 @@ import type { TaskSession } from "@/lib/types/http";
 import {
   asRecoveryError,
   branchRecoveryDetails,
+  contextContinuationDetails,
   managedCloneRelocationRecoveryDetails,
   requestSessionRecover,
   restoreSessionWorkspace,
   sessionRecoveryGuardDetails,
   sessionRecoveryGuardMessage,
   type BranchRecoveryDetails,
+  type ContextContinuationDetails,
   type SessionRecoveryAction,
   type SessionRecoveryGuardDetails,
 } from "@/lib/services/session-recovery-service";
@@ -216,6 +218,9 @@ export function useSessionRecoveryActions({
   const [restoreError, setRestoreError] = useState<Error | null>(null);
   const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
   const [guardDetails, setGuardDetails] = useState<SessionRecoveryGuardDetails | null>(null);
+  const [continuationDetails, setContinuationDetails] = useState<ContextContinuationDetails | null>(
+    null,
+  );
   const [managedCloneRecoveryStamp, setManagedCloneRecoveryStamp] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
@@ -229,6 +234,7 @@ export function useSessionRecoveryActions({
     setRestoreError(null);
     setBranchDetails(null);
     setGuardDetails(null);
+    setContinuationDetails(null);
     setManagedCloneRecoveryStamp(null);
     setLastFailedAction(null);
     setRecoveryNotice(null);
@@ -266,6 +272,7 @@ export function useSessionRecoveryActions({
       setRestoreError(null);
       setBranchDetails(guard ? null : branchRecoveryDetails(cause));
       setGuardDetails(guard);
+      setContinuationDetails(contextContinuationDetails(cause));
       setLastFailedAction(action);
       setRecoveryNotice(null);
       setManualRecoveryFailure({
@@ -325,6 +332,7 @@ export function useSessionRecoveryActions({
         setRestoreError(null);
         setBranchDetails(null);
         setGuardDetails(null);
+        setContinuationDetails(null);
         setManagedCloneRecoveryStamp(null);
         setLastFailedAction(null);
         setRecoveryNotice(null);
@@ -366,6 +374,7 @@ export function useSessionRecoveryActions({
       setRestoreError(null);
       setBranchDetails(null);
       setGuardDetails(null);
+      setContinuationDetails(null);
       setManagedCloneRecoveryStamp(null);
       setLastFailedAction(null);
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
@@ -429,11 +438,16 @@ export function useSessionRecoveryActions({
     return handleRecover("relocate_and_resume");
   }, [handleRecover]);
 
+  const handleContinueFromHistory = useCallback(() => {
+    return handleRecover("continue_from_history");
+  }, [handleRecover]);
+
   return {
     busyAction: sharedBusyAction ?? busyAction,
     recoveryError,
     branchDetails: localResultIsCurrent ? branchDetails : null,
     guardDetails: localResultIsCurrent ? guardDetails : null,
+    continuationDetails: localResultIsCurrent ? continuationDetails : null,
     managedCloneRecoveryStamp: localResultIsCurrent ? managedCloneRecoveryStamp : null,
     lastFailedAction: localResultIsCurrent ? lastFailedAction : null,
     recoveryNotice: localResultIsCurrent ? recoveryNotice : null,
@@ -444,6 +458,7 @@ export function useSessionRecoveryActions({
     handleRetry,
     handleNewBranch,
     handleManagedCloneRelocation,
+    handleContinueFromHistory,
   };
 }
 

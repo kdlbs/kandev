@@ -119,8 +119,9 @@ func TestInitializeSession_CustomACPAgentRestoresStoredSession(t *testing.T) {
 	}
 }
 
-// The capability-mismatch case is also the positive control for the
-// unrecognized-failure case: with the same setup, session/new is reachable.
+// A capability mismatch blocks automatic replacement just like every other
+// unsupported native restore outcome. Starting a new harness conversation
+// requires an explicit recovery action from the user.
 //
 // @covers AC-AGENTS-CUSTOM-ACP-002.2
 // @covers AC-AGENTS-CUSTOM-ACP-002.3
@@ -131,9 +132,9 @@ func TestInitializeSession_CustomACPAgentRestoreFailures(t *testing.T) {
 		wantReplacement bool
 	}{
 		{
-			name:            "agent advertises no restore capability",
+			name:            "agent advertises no restore capability and replacement is blocked",
 			loadError:       "agent does not support session loading (LoadSession capability is false)",
-			wantReplacement: true,
+			wantReplacement: false,
 		},
 		{
 			name:            "unrecognized restore failure",

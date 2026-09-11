@@ -4,7 +4,10 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SessionRecoveryNotice } from "@/components/task/ensure-session-error";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
-import type { SessionRecoveryAction } from "@/lib/services/session-recovery-service";
+import type {
+  ContextContinuationDetails,
+  SessionRecoveryAction,
+} from "@/lib/services/session-recovery-service";
 import type { MessageAction } from "@/components/task/chat/types";
 import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery-actions";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
@@ -21,6 +24,7 @@ export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAct
   switch (recoveryAction) {
     case "resume":
     case "resume_new_branch":
+    case "continue_from_history":
     case "fresh_start":
     case "runtime_retry":
     case "relocate_and_resume":
@@ -38,6 +42,7 @@ function recoveryActionLabel(
   if (action === "fresh_start") return t("task:startFreshSession");
   if (action === "resume_new_branch") return t("task:continueOnNewBranch");
   if (action === "relocate_and_resume") return t("task:managedCloneRelocateResume");
+  if (action === "continue_from_history") return t("task:continueFromHistory");
   return t("chat:managedRuntimeRetry");
 }
 
@@ -61,9 +66,11 @@ function buildRecoveryChoices({
   providerRestoredResumeEligible,
   recoveryError,
   branchDetails,
+  continuationDetails,
   onRecoveryAction,
   onRestore,
   onNewBranch,
+  onContinueFromHistory,
   onRelocationConfirm,
 }: {
   actions: MessageAction[];
@@ -72,9 +79,11 @@ function buildRecoveryChoices({
   providerRestoredResumeEligible: boolean;
   recoveryError: Error | null;
   branchDetails: unknown;
+  continuationDetails: ContextContinuationDetails | null;
   onRecoveryAction: (action: SessionRecoveryAction) => void;
   onRestore: () => void;
   onNewBranch: () => void;
+  onContinueFromHistory: () => void;
   onRelocationConfirm: () => void;
 }): RecoveryChoice[] {
   const choices: RecoveryChoice[] = managedCloneRecoveryStamp
@@ -122,6 +131,13 @@ function buildRecoveryChoices({
       testId: "recovery-new-branch-button",
       onClick: onNewBranch,
     });
+  if (!managedCloneRecoveryStamp && continuationDetails)
+    choices.push({
+      kind: "continue_from_history",
+      label: t("task:continueFromHistory"),
+      testId: "recovery-continue-from-history-button",
+      onClick: onContinueFromHistory,
+    });
   return choices;
 }
 
@@ -144,12 +160,14 @@ export function SessionRecoveryActionButtons({
     recoveryError,
     branchDetails,
     guardDetails,
+    continuationDetails,
     recoveryNotice,
     managedCloneRecoveryStamp,
     providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
     handleNewBranch,
+    handleContinueFromHistory,
     handleManagedCloneRelocation,
   } = useSessionRecoveryActions({ taskId, sessionId, errorStamp });
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
@@ -167,10 +185,15 @@ export function SessionRecoveryActionButtons({
     providerRestoredResumeEligible,
     recoveryError,
     branchDetails,
+    continuationDetails,
     onRecoveryAction: (action) => void onRecoveryAction(action),
     onRestore: () => void handleRestore(),
     onNewBranch: () =>
       void handleNewBranch().then((success) => {
+        if (success) onRecoveryRequested();
+      }),
+    onContinueFromHistory: () =>
+      void handleContinueFromHistory().then((success) => {
         if (success) onRecoveryRequested();
       }),
     onRelocationConfirm: () => setRelocationConfirmationOpen(true),

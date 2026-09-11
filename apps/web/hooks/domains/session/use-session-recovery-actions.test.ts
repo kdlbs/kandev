@@ -45,6 +45,7 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
   managedCloneRelocationRecoveryDetails: mocks.managedCloneRelocationRecoveryDetails,
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
+  contextContinuationDetails: () => null,
   requestSessionRecover: mocks.requestSessionRecover,
   restoreSessionWorkspace: mocks.restoreSessionWorkspace,
 }));

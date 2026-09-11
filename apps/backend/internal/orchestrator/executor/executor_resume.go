@@ -1050,6 +1050,11 @@ type ResumeOptions struct {
 	// automatic and logs the omission — it is never silently treated as a
 	// manual override.
 	Origin string
+	// ForceContextContinuation starts a new native conversation using the
+	// explicit, bounded continuation prompt rather than the persisted native
+	// session identity.
+	ForceContextContinuation bool
+	ContinuationPrompt       string
 }
 
 type cancellableResumeContextKey struct{}
@@ -1750,6 +1755,9 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	options ResumeOptions,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
 	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
+		return nil, "", executorConfig{}, nil, nil, err
+	}
 	existingRunning, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
 		return nil, "", executorConfig{}, nil, nil,
@@ -1833,6 +1841,10 @@ func newResumeLaunchRequest(
 		IsPassthrough:                session.IsPassthrough,
 		TaskEnvironmentID:            session.TaskEnvironmentID,
 		AllowBranchReplacement:       options.AllowBranchReplacement,
+		ForceContextContinuation:     options.ForceContextContinuation,
+	}
+	if options.ForceContextContinuation {
+		req.TaskDescription = options.ContinuationPrompt
 	}
 
 	metadata := map[string]interface{}{}
@@ -1849,6 +1861,46 @@ func newResumeLaunchRequest(
 	}
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 	return req, metadata
+}
+
+// ContextContinuation is the bounded, provider-neutral context used by the
+// explicit continue_from_history recovery action.
+type ContextContinuation struct {
+	Prompt          string
+	SourceMessageID string
+	ByteCount       int
+	OmittedMessages int
+	Truncated       bool
+	ContentHash     string
+}
+
+// BuildContextContinuation returns the bounded, provider-neutral context used
+// by the explicit continue_from_history recovery action.
+func BuildContextContinuation(
+	taskObjective, plan, workspace string, messages []*models.Message,
+) ContextContinuation {
+	snapshot := lifecycle.BuildContinuationSnapshot(lifecycle.ContinuationSnapshotInput{
+		TaskObjective:     taskObjective,
+		Plan:              plan,
+		OriginalWorkspace: workspace,
+		Messages:          messages,
+	})
+	return ContextContinuation{
+		Prompt:          snapshot.Content,
+		SourceMessageID: snapshot.SourceMessageID,
+		ByteCount:       snapshot.ByteCount,
+		OmittedMessages: snapshot.OmittedMessages,
+		Truncated:       snapshot.Truncated,
+		ContentHash:     snapshot.ContentHash,
+	}
+}
+
+// BuildContextContinuationPrompt returns only the prompt text for callers that
+// do not need to persist the continuation checkpoint.
+func BuildContextContinuationPrompt(
+	taskObjective, plan, workspace string, messages []*models.Message,
+) string {
+	return BuildContextContinuation(taskObjective, plan, workspace, messages).Prompt
 }
 
 func (e *Executor) prepareResumeRepositorySettings(
@@ -2154,6 +2206,9 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			(session.State == models.TaskSessionStateFailed &&
 				req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored)
 		if startAgent && noAutoPromptState {
+			if req.ForceContextContinuation {
+				return nil
+			}
 			if token := persistedSessionResumeToken(session); token != "" {
 				req.ACPSessionID = token
 				req.TaskDescription = ""
@@ -2188,7 +2243,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 		}
 	}
 
-	if token := resumeTokenForExecutionProfile(running, req.AgentProfileID); token != "" && startAgent {
+	if token := resumeTokenForExecutionProfile(running, req.AgentProfileID); token != "" && startAgent && !req.ForceContextContinuation {
 		req.ACPSessionID = token
 		// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
 		// The session context is restored via ACP session/load; sending a prompt here would
@@ -2198,7 +2253,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
-	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
+	} else if startAgent && !req.ForceContextContinuation && (session.State == models.TaskSessionStateWaitingForInput ||
 		isRecoverableCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
 		// description. Also covers completed and system-cancelled sessions whose

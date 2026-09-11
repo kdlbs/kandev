@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -94,8 +95,13 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected session/load failure")
 			}
-			if !strings.Contains(err.Error(), tt.message) {
-				t.Fatalf("error = %q, want cause %q", err, tt.message)
+			cause := err
+			var restoreErr *RestoreRequiredError
+			if errors.As(err, &restoreErr) {
+				cause = restoreErr.Unwrap()
+			}
+			if cause == nil || !strings.Contains(cause.Error(), tt.message) {
+				t.Fatalf("restore cause = %v, want cause containing %q", cause, tt.message)
 			}
 
 			for _, action := range mock.getActionLog() {
@@ -107,7 +113,7 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 	}
 }
 
-func TestInitializeSession_LoadCompatibilityFailureCreatesReplacement(t *testing.T) {
+func TestInitializeSession_LoadCompatibilityFailureBlocksAutomaticReplacement(t *testing.T) {
 	tests := []struct {
 		name    string
 		message string
@@ -166,7 +172,7 @@ func TestInitializeSession_LoadCompatibilityFailureCreatesReplacement(t *testing
 				},
 			}
 
-			result, err := sessionManager.InitializeSession(
+			_, err := sessionManager.InitializeSession(
 				context.Background(),
 				client,
 				agentConfig,
@@ -174,11 +180,12 @@ func TestInitializeSession_LoadCompatibilityFailureCreatesReplacement(t *testing
 				"/workspace",
 				nil,
 			)
-			if err != nil {
-				t.Fatalf("InitializeSession: %v", err)
+			if err == nil {
+				t.Fatal("expected native restore failure to require an explicit recovery action")
 			}
-			if result.SessionID != "test-session-123" {
-				t.Fatalf("session ID = %q, want replacement session", result.SessionID)
+			var restoreErr *RestoreRequiredError
+			if !errors.As(err, &restoreErr) {
+				t.Fatalf("error = %v, want RestoreRequiredError", err)
 			}
 
 			actions := mock.getActionLog()
@@ -191,8 +198,8 @@ func TestInitializeSession_LoadCompatibilityFailureCreatesReplacement(t *testing
 					newCalls++
 				}
 			}
-			if loadCalls != 1 || newCalls != 1 {
-				t.Fatalf("load/new calls = %d/%d, want 1/1; actions: %v", loadCalls, newCalls, actions)
+			if loadCalls != 1 || newCalls != 0 {
+				t.Fatalf("load/new calls = %d/%d, want 1/0; actions: %v", loadCalls, newCalls, actions)
 			}
 		})
 	}
