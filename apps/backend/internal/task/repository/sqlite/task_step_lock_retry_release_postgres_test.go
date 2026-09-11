@@ -5,8 +5,12 @@ package sqlite
 // prove lockTaskStepForWrite's confirm-and-retry loop releases a stale step's
 // FOR UPDATE lock (via ROLLBACK TO SAVEPOINT) on both outcomes of a mismatch —
 // the task moved to a different step, or it left its step entirely — before
-// returning or retrying, so it never holds more than one workflow_steps row
-// lock at a time. Every other site in this package that locks two steps in
+// returning or retrying. Each loop iteration's lock-then-confirm-then-release
+// sequence is identical regardless of attempt number, so this reasoning
+// generalizes, but the two tests below only instrument attempts 1 and 2:
+// verified directly that it never holds more than one workflow_steps row lock
+// across a single retry, not exhaustively for attempt 3 and beyond. Every
+// other site in this package that locks two steps in
 // one transaction sorts them ascending first (see lockWorkflowStepsForAdmission),
 // specifically to avoid an AB-BA deadlock against another such locker. Before
 // this fix, either outcome kept the stale step's lock held — Postgres has no
@@ -312,8 +316,10 @@ func TestPostgresLockTaskStepForWriteRetryLeavesNoLockForConcurrentCrossStepMove
 			t.Fatalf("cross-step move of Y: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatalf("cross-step move of Y did not complete within 5s — Op1 holds no lock at this point, " +
-			"so this indicates a hang unrelated to Postgres's own deadlock detection, not a captured 40P01")
+		t.Fatalf("cross-step move of Y did not complete within 5s — prime suspect is a savepoint-rollback " +
+			"regression leaving Op1 still holding stepB's lock (Op1 is supposed to hold none at this " +
+			"point); it is not a captured 40P01, since Op1 never reaches its second lock request while " +
+			"parked on this harness's own pause channel")
 	}
 
 	release2()

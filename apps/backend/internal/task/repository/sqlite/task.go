@@ -565,12 +565,32 @@ func rollbackTaskStepLockSavepoint(ctx context.Context, tx taskStepLockSavepoint
 	return nil
 }
 
+// resolveTaskStepIDForLock resolves the step lockTaskStepForWrite's current
+// attempt should lock: a plain read of taskID's workflow_step_id, falling
+// back to lockTaskRowIfStepless when that read finds none. found reports
+// whether there is a step to lock at all; when it does not,
+// lockTaskRowIfStepless has already secured the task's own row instead, and
+// the caller should return success rather than treat the missing step as an
+// error.
+func (r *Repository) resolveTaskStepIDForLock(ctx context.Context, tx interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, usePostgres bool, taskID string) (stepID string, found bool, err error) {
+	stepID, found, err = r.readTaskWorkflowStepID(ctx, tx, taskID, false)
+	if err != nil || found {
+		return stepID, found, err
+	}
+	return r.lockTaskRowIfStepless(ctx, tx, usePostgres, taskID)
+}
+
 // lockTaskStepForWrite locks the workflow step taskID currently belongs to
 // (see lockWorkflowStepForWrite), so a caller hiding or removing the task
 // (archive, delete, unarchive) cannot straddle a concurrent ReorderStepTasks
 // of that same step: whichever acquires the step's row lock first runs to
-// completion before the other proceeds. A task with no step (a config task,
-// or one whose row no longer exists) has no step to lock against.
+// completion before the other proceeds. A task with no step has no step to
+// lock against, but lockTaskRowIfStepless still locks the task's own row in
+// that case (unless the row itself no longer exists), so a concurrent
+// reattachment cannot slip the task into a step behind the caller's back.
 //
 // The step to lock is resolved with a plain read and re-confirmed with a
 // second, locked read taken only after that step's lock is held - not with
@@ -603,9 +623,12 @@ func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 	const maxAttempts = 10
 	usePostgres := dialect.IsPostgres(r.db.DriverName())
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		stepID, found, err := r.readTaskWorkflowStepID(ctx, tx, taskID, false)
-		if err != nil || !found {
+		stepID, found, err := r.resolveTaskStepIDForLock(ctx, tx, usePostgres, taskID)
+		if err != nil {
 			return err
+		}
+		if !found {
+			return nil
 		}
 		if r.taskStepLockBeforeAcquireHook != nil {
 			r.taskStepLockBeforeAcquireHook(stepID)
@@ -622,11 +645,15 @@ func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 		}
 		if !found {
 			// The task left its step entirely (workflow_step_id cleared, or
-			// the row is gone) while we waited for stepID's lock — there is
-			// no current step left to protect. The caller's own mutation
-			// does not depend on stepID, so release its now-irrelevant lock
-			// and return rather than retrying.
-			return rollbackTaskStepLockSavepoint(ctx, tx, usePostgres)
+			// the row is gone) while we waited for stepID's lock.
+			hasNewStep, err := r.releaseStaleStepAndRecheckStepless(ctx, tx, usePostgres, taskID)
+			if err != nil {
+				return err
+			}
+			if !hasNewStep {
+				return nil
+			}
+			continue
 		}
 		if confirmedStepID == stepID {
 			return releaseTaskStepLockSavepoint(ctx, tx, usePostgres)
@@ -639,6 +666,78 @@ func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 		}
 	}
 	return fmt.Errorf("lockTaskStepForWrite: task %s kept changing steps", taskID)
+}
+
+// releaseStaleStepAndRecheckStepless handles lockTaskStepForWrite's
+// confirming read finding the task no longer in the step it just locked. It
+// releases that now-stale step's lock, then re-verifies under
+// lockTaskRowIfStepless rather than trusting the confirming read's snapshot:
+// see that function's doc for why a naked rollback here would leave the
+// caller's subsequent mutation unprotected against a concurrent
+// reattachment. hasNewStep reports whether the task has since gained a
+// different step to retry the loop against, as opposed to having none at
+// all (in which case lockTaskRowIfStepless has already secured the task's
+// own row, and the caller should return success).
+func (r *Repository) releaseStaleStepAndRecheckStepless(ctx context.Context, tx interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, usePostgres bool, taskID string) (hasNewStep bool, err error) {
+	if err := rollbackTaskStepLockSavepoint(ctx, tx, usePostgres); err != nil {
+		return false, err
+	}
+	_, found, err := r.lockTaskRowIfStepless(ctx, tx, usePostgres, taskID)
+	if err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+// lockTaskRowIfStepless is called whenever lockTaskStepForWrite's read of
+// taskID - the unlocked first read of an attempt, or the confirming read
+// after a step lock turned out stale - finds no current step. Releasing a
+// stale step's savepoint (ROLLBACK TO SAVEPOINT) frees every lock taken
+// since that savepoint, not only the step: the confirming read's own FOR
+// UPDATE on the task's row goes with it, so returning success right after
+// that rollback would leave the caller's subsequent mutation (archive,
+// delete, unarchive) racing a concurrent reattachment with nothing locked
+// at all.
+//
+// This re-verifies under its own savepoint, locking ONLY the task's own
+// row - never a step, so this cannot invert lockTaskStepForWrite's
+// documented step-lock-before-task-row-lock order. If the task still has
+// no step, the savepoint is released and that row lock kept for the rest
+// of the transaction: nothing can reattach the task without first taking
+// it, so the caller's mutation is protected even though there is no step
+// left to lock. If the task has gained a step since the read that led
+// here - a reattachment landing in this exact gap - the savepoint is
+// rolled back (releasing this function's own row lock, so the retry it
+// triggers never stacks a task-row lock underneath the step lock it is
+// about to request) and the new step id is returned so
+// lockTaskStepForWrite's loop can lock it the normal way instead.
+func (r *Repository) lockTaskRowIfStepless(ctx context.Context, tx interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, usePostgres bool, taskID string) (string, bool, error) {
+	if r.taskRowReconfirmHook != nil {
+		r.taskRowReconfirmHook()
+	}
+	if err := beginTaskStepLockSavepoint(ctx, tx, usePostgres); err != nil {
+		return "", false, err
+	}
+	stepID, found, err := r.readTaskWorkflowStepID(ctx, tx, taskID, true)
+	if err != nil {
+		return "", false, err
+	}
+	if found {
+		if err := rollbackTaskStepLockSavepoint(ctx, tx, usePostgres); err != nil {
+			return "", false, err
+		}
+		return stepID, true, nil
+	}
+	if err := releaseTaskStepLockSavepoint(ctx, tx, usePostgres); err != nil {
+		return "", false, err
+	}
+	return "", false, nil
 }
 
 // readTaskWorkflowStepID reads taskID's current workflow_step_id. forUpdate
