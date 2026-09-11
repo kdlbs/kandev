@@ -166,6 +166,11 @@ KANDEV_E2E_CONTAINERS=1 \
 pnpm e2e:run --host --project kubernetes-compat tests/kubernetes-compat
 ```
 
+The fixture application image uses the immutable `KUBERNETES_E2E_BASE_IMAGE`
+pin from `kubernetes-pins.ts`. CI pre-pulls this prebuilt GHCR runtime image
+with bounded retries. The per-run image build only copies the current backend
+and web artifacts, so it does not contact an Ubuntu package mirror.
+
 The compatibility fixture uses the same exact-name ownership marker, narrow
 teardown, foreign-image refusal, and credential-redacted diagnostics as the full
 suite. Unsupported version selectors fail before provisioning.
