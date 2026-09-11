@@ -15,6 +15,7 @@ import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { CopyMoveMode, SecretDestination } from "./copy-move-secret-dialog";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 /** Renders the Copy/Move dialog body: mode selector, destination picker, target name, and footer actions. */
 export function CopyMoveDialogBody({
@@ -137,7 +138,7 @@ function TransferDialogFooter({
         variant="outline"
         onClick={onClose}
         disabled={busy}
-        className="min-h-11 cursor-pointer"
+        className={controlSizingClassName("standard", "cursor-pointer")}
       >
         {t("settings:cancel")}
       </Button>
@@ -145,7 +146,7 @@ function TransferDialogFooter({
         type="button"
         onClick={onSubmit}
         disabled={!canSubmit}
-        className="min-h-11 cursor-pointer"
+        className={controlSizingClassName("standard", "cursor-pointer")}
       >
         {mode === "copy" ? t("settings:copySecretAction") : t("settings:moveSecretAction")}
       </Button>
@@ -155,7 +156,7 @@ function TransferDialogFooter({
           size="icon"
           aria-label={t("common:close")}
           disabled={busy}
-          className="absolute top-2 right-2 min-h-11 min-w-11 cursor-pointer"
+          className={controlSizingClassName("icon", "absolute top-2 right-2 cursor-pointer")}
         >
           <IconX className="h-4 w-4" />
         </Button>
@@ -199,7 +200,7 @@ function TargetNameField({
         disabled={disabled}
         aria-invalid={invalid}
         aria-describedby={invalid ? "copy-move-name-error" : undefined}
-        className="min-h-11"
+        className={controlSizingClassName("standard")}
       />
       {invalid && (
         <p id="copy-move-name-error" className="text-xs text-destructive break-words">
@@ -290,9 +291,8 @@ function DestinationField({
           <p className="text-xs text-destructive">{t("settings:destinationsLoadFailed")}</p>
           <Button
             variant="outline"
-            size="sm"
             onClick={onRetryDestinations}
-            className="min-h-11 cursor-pointer"
+            className={controlSizingClassName("standard", "cursor-pointer")}
           >
             {t("settings:retryDestinations")}
           </Button>
@@ -315,7 +315,7 @@ function DestinationField({
           <SelectTrigger
             id="copy-move-destination"
             disabled={disabled}
-            className="min-h-11 w-full cursor-pointer"
+            className={controlSizingClassName("standard", "w-full cursor-pointer")}
           >
             <SelectValue />
           </SelectTrigger>

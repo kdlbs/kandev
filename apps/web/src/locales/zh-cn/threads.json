@@ -1,5 +1,9 @@
 {
   "columnLabel": "{{title}} 的智能体对话",
+  "chooseThread": "选择对话",
+  "chooseThreadLabel": "选择对话。当前：{{title}}",
+  "chooseThreadDescription": "跳转到此视图中的对话。",
+  "threadPosition": "{{position}}/{{total}}",
   "emptyBody": "对话流把所有正在运行的智能体并排展示。在某个任务上启动智能体，它的对话就会作为一列出现在这里。",
   "emptyTitle": "当前没有智能体在工作",
   "loading": "正在加载对话...",

@@ -141,7 +141,7 @@ function StatusChip({ draft, onUpdate }: Props) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+        <Button variant="outline" className="cursor-pointer text-xs">
           <IconCircleDot className={`h-3.5 w-3.5 mr-1 ${current?.className ?? ""}`} />
           {current?.label ?? draft.status}
         </Button>
@@ -176,7 +176,7 @@ function PriorityChip({ draft, onUpdate }: Props) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+        <Button variant="outline" className="cursor-pointer text-xs">
           <PriorityIcon className={`h-3.5 w-3.5 mr-1 ${current?.className ?? ""}`} />
           {current?.label ?? draft.priority}
         </Button>
@@ -207,13 +207,13 @@ export function NewTaskBottomBar({ draft, onUpdate }: Props) {
     <div className="flex items-center gap-2 pt-2 border-t border-border">
       <StatusChip draft={draft} onUpdate={onUpdate} />
       <PriorityChip draft={draft} onUpdate={onUpdate} />
-      <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+      <Button variant="outline" className="cursor-pointer text-xs">
         <IconUpload className="h-3.5 w-3.5 mr-1" />
         {t("office:upload")}
       </Button>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
+          <Button variant="ghost" size="icon" className="cursor-pointer">
             <IconDotsVertical className="h-4 w-4" />
           </Button>
         </TooltipTrigger>

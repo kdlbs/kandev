@@ -6,6 +6,7 @@ import type {
   TaskState as TaskStatus,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { BeginTaskRemovalInput, TaskRemovalState } from "@/lib/state/task-removal";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -129,6 +130,9 @@ export type KanbanState = {
     parkedRevision?: number;
     /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
     parkedEpoch?: number;
+    /** True when this task inherits an archived parent's workspace and can no
+     *  longer materialize or start. */
+    workspaceOrphaned?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;
@@ -243,6 +247,8 @@ export type KanbanSliceState = {
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   tasks: TaskState;
+  /** Browser-local removal intent. It is deliberately excluded from hydration. */
+  taskRemoval: TaskRemovalState;
 };
 
 export type KanbanSliceActions = {
@@ -251,6 +257,8 @@ export type KanbanSliceActions = {
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
+  /** Automatic task selection that must not invalidate a user navigation revision. */
+  setActiveTaskAuto: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
   // setActiveSessionAuto updates the active session without creating or
   // clearing a user pin. Callers that intentionally override a pin must clear
@@ -262,6 +270,14 @@ export type KanbanSliceActions = {
   // the live session row with typed store access), so a stale status response
   // can never leave a Start button while the agent is actually running.
   setResumeSkipped: (sessionId: string, skipped: boolean) => void;
+  beginTaskRemoval: (input: Omit<BeginTaskRemovalInput, "token">) => string | null;
+  recordTaskRemovalResult: (
+    token: string,
+    taskIds: string[],
+    outcome: "succeeded" | "failed" | "unknown",
+  ) => void;
+  releaseTaskRemoval: (token: string) => void;
+  advanceTaskNavigationRevision: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;

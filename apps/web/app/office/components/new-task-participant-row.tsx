@@ -56,7 +56,7 @@ export function ParticipantRow({
       <span className="w-16 shrink-0">{t(copy.label)}</span>
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+          <Button variant="outline" className="cursor-pointer text-xs">
             {selectedIds.length > 0
               ? t("office:participantsSelected", { count: selectedIds.length })
               : t(copy.add)}
@@ -80,7 +80,7 @@ export function ParticipantRow({
       </Popover>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-6 w-6 cursor-pointer" onClick={onHide}>
+          <Button variant="ghost" size="icon" className="cursor-pointer" onClick={onHide}>
             <IconX className="h-3 w-3" />
           </Button>
         </TooltipTrigger>

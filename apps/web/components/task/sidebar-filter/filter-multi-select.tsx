@@ -12,6 +12,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@kandev/ui/command";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { cn } from "@/lib/utils";
 import { buildOptionGroups, hasGroupedOptions } from "./filter-option-groups";
 import { useTranslation } from "react-i18next";
@@ -57,7 +58,7 @@ export function FilterMultiSelect({
           type="button"
           data-testid="filter-value-multi"
           className={cn(
-            "flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md border border-input bg-transparent px-2 text-xs transition-colors hover:bg-accent/40",
+            `${controlSizingClassName("standard")} flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md border border-input bg-transparent px-2 text-xs transition-colors hover:bg-accent/40`,
             className,
           )}
         >

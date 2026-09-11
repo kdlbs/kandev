@@ -1,10 +1,50 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 
 const PLAN_CONTEXT_PATH = "plan:context";
+
+export function useAutoDisableUnsupportedPlanMode({
+  planModeEnabled,
+  hasAgentProfile,
+  planModeAvailable,
+  resolvedSessionId,
+}: {
+  planModeEnabled: boolean;
+  hasAgentProfile: boolean;
+  planModeAvailable: boolean;
+  resolvedSessionId: string | null;
+}) {
+  const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const removeContextFile = useContextFilesStore((state) => state.removeFile);
+  const hasAutoDisabled = useRef(false);
+
+  useEffect(() => {
+    if (
+      planModeEnabled &&
+      hasAgentProfile &&
+      !planModeAvailable &&
+      resolvedSessionId &&
+      !hasAutoDisabled.current
+    ) {
+      hasAutoDisabled.current = true;
+      setPlanMode(resolvedSessionId, false);
+      removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
+    }
+    if (!planModeEnabled) hasAutoDisabled.current = false;
+  }, [
+    planModeEnabled,
+    hasAgentProfile,
+    planModeAvailable,
+    resolvedSessionId,
+    setPlanMode,
+    removeContextFile,
+  ]);
+}
 
 // --- Auto-disable plan mode ---
 

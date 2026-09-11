@@ -821,10 +821,10 @@ interface PluginRegistry {
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
   // presentation }`, where presentation is "desktop" or "mobile". On a phone,
-  // contributions join the horizontally scrollable middle action strip between
-  // the fixed Kandev link and menu button. Documented host ui.Button icon
-  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
-  // desktop contribution sizing is unchanged. It is the app-wide,
+  // listing contributions live inside the topbar menu with 44px touch targets
+  // and 16px SVG icons. Slots own their controls and disclosure state; the host
+  // does not dismiss the menu on arbitrary plugin interactions. Desktop
+  // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
   // ids.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
