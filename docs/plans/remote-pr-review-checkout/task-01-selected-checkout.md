@@ -93,6 +93,9 @@ Implementation completed on 2026-09-10.
 Fixup follow-up on 2026-09-10 moved explicit checkout before repository setup for built-in remote templates, made retained-checkout detection ownership-safe, and documented the negative PR-number fail-closed guard.
 The focused lifecycle selection suite passed after these changes, including setup-order and simulated different-owner regressions.
 
+Fixup follow-up on 2026-09-11 persists the selected branch/ref across resumes, invalidates preservation when the selected branch or PR changes, and strips GitHub tokens, broker leases, and helper paths from fork-PR agent environments across remote executors. Docker and Kubernetes bootstrap paths scrub the same values before agentctl starts; Kubernetes also removes its temporary auth file.
+The focused lifecycle selection, remote request, bootstrap, and credential-isolation tests passed. `python3 scripts/lint-spec-files.py --all` and `git diff --check` passed.
+
 The new `selected_checkout.go` owns typed metadata projection and the shared strict checkout wrapper.
 Tests live in `selected_checkout_prepare_test.go` and `selected_checkout_contract_test.go`.
 The real-Git fixtures cover shallow saved clones, fork and same-repository PRs, explicit branches, missing refs, and recreated compute.
@@ -102,4 +105,4 @@ Contribution coverage executes the existing Sprites contribution path and checks
 
 Public docs updated: `docs/public/git-operations.md` (reference).
 The earlier origin-reference correction remains intact.
-No live task mutation, deployment, commit, push, PR creation, or delegation occurred.
+No live task mutation or deployment occurred. The implementation was committed and pushed in PR #3591.
