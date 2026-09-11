@@ -661,6 +661,227 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             )
             self.assertNotIn("inputs.backfill_tag == ''", block)
 
+    def test_signpath_readiness_guard_runs_in_ci_and_locally(self) -> None:
+        # The Makefile target is the local entry point; CI runs the release
+        # helper tests from lint-action-pinning.yml. A guard that only the
+        # Makefile knows about is a guard nothing enforces on a pull request.
+        self.assertIn(
+            "run: bash scripts/release/signpath-signing-ready.test.sh",
+            LINT_WORKFLOW,
+        )
+        makefile = (REPO_ROOT / "Makefile").read_text()
+        self.assertIn("bash scripts/release/signpath-signing-ready.test.sh", makefile)
+
+    def test_windows_bundle_signing_gates_on_complete_signpath_inputs(self) -> None:
+        detect = step_block("Detect SignPath signing inputs")
+
+        self.assertIn("if: matrix.goos == 'windows'", detect)
+        self.assertIn("bash scripts/release/signpath-signing-ready.sh", detect)
+        for binding in (
+            "SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}",
+            "SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}",
+            "SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}",
+            "SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}",
+        ):
+            self.assertIn(binding, detect)
+
+        self.assertIn('SIGNPATH_SIGNING_ENABLED=true" >> "$GITHUB_ENV"', detect)
+        self.assertIn('SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"', detect)
+        # An unconfigured repository publishes an unsigned bundle rather than
+        # failing the release, matching how the desktop job treats its own
+        # certificate today.
+        self.assertIn("::notice::", detect)
+        self.assertNotIn("::error::", detect)
+
+    def test_test_signing_policy_is_confined_to_validation_runs(self) -> None:
+        detect = step_block("Detect SignPath signing inputs")
+
+        # The guard decides by purpose: stable and nightly publish the bundle,
+        # desktop_validation_only publishes nothing. A test-signing policy is
+        # only acceptable in the second case, and its refusal has to stand out
+        # from an incomplete configuration, hence a warning rather than a notice.
+        self.assertIn(
+            "${{ needs.nightly-prepare.result == 'success' && 'nightly' || inputs.desktop_validation_only && 'validate' || 'publish' }}",
+            detect,
+        )
+        self.assertIn('bash scripts/release/signpath-signing-ready.sh "$purpose"', detect)
+        self.assertIn("::warning::", detect)
+        self.assertIn("::notice::", detect)
+        self.assertNotIn("::error::", detect)
+        self.assertIn('SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"', detect)
+
+    def test_signing_is_best_effort_and_never_fails_the_release(self) -> None:
+        bundles = job_block("build-bundles")
+        upload = step_block("Upload unsigned Windows binaries")
+        sign = step_block("Sign Windows runtime binaries")
+        report = step_block("Report incomplete signing")
+
+        def lines(block: str) -> list[str]:
+            return [line.strip() for line in block.splitlines()]
+
+        # The Foundation approves every release signing request by hand, so a
+        # request can outlive any timeout. Neither the upload nor the signing
+        # step may fail the job: the tag is already pushed by then, and an
+        # unsigned bundle is the documented fallback, not a broken release.
+        self.assertIn("continue-on-error: true", lines(upload))
+        self.assertIn("continue-on-error: true", lines(sign))
+        self.assertIn("id: signpath", lines(sign))
+        self.assertIn("wait-for-completion-timeout-in-seconds: 3600", lines(sign))
+        self.assertIn("steps.unsigned-windows-binaries.outcome == 'success'", sign)
+
+        self.assertIn("steps.signpath.outcome != 'success'", report)
+        self.assertIn("env.SIGNPATH_SIGNING_ENABLED == 'true'", report)
+        self.assertIn("::warning::", report)
+        self.assertNotIn("::error::", report)
+
+        signed = "- name: Sign Windows runtime binaries"
+        reported = "- name: Report incomplete signing"
+        package = "- name: Package bundle"
+        self.assertLess(bundles.index(signed), bundles.index(reported))
+        self.assertLess(bundles.index(reported), bundles.index(package))
+
+    def test_windows_bundle_is_signed_before_it_is_packaged(self) -> None:
+        bundles = job_block("build-bundles")
+        build = "- name: Build backend binaries"
+        upload = "- name: Upload unsigned Windows binaries"
+        sign = "- name: Sign Windows runtime binaries"
+        package = "- name: Package bundle"
+
+        for step in (build, upload, sign, package):
+            self.assertIn(step, bundles)
+
+        # Signing has to land between the build and the archive. `Package
+        # bundle` copies apps/backend/bin into dist/ and immediately tars and
+        # zips it, so a signature applied after that step never reaches the
+        # tarball Homebrew and Scoop serve or the zip winget would.
+        self.assertLess(bundles.index(build), bundles.index(upload))
+        self.assertLess(bundles.index(upload), bundles.index(sign))
+        self.assertLess(bundles.index(sign), bundles.index(package))
+
+    def test_windows_signing_submits_the_binaries_the_bundle_ships(self) -> None:
+        upload = step_block("Upload unsigned Windows binaries")
+        sign = step_block("Sign Windows runtime binaries")
+        package = step_block("Package bundle")
+        gate = "if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'"
+
+        self.assertIn(gate, upload)
+        self.assertIn(gate, sign)
+
+        # The bundle's only two PE files. The remaining agentctl helpers are
+        # built for linux and darwin and carry no Authenticode signature.
+        self.assertIn("id: unsigned-windows-binaries", upload)
+        self.assertIn("apps/backend/bin/kandev.exe", upload)
+        self.assertIn("apps/backend/bin/agentctl.exe", upload)
+
+        self.assertIn("uses: signpath/github-action-submit-signing-request@", sign)
+        self.assertIn(
+            "github-artifact-id: "
+            "${{ steps.unsigned-windows-binaries.outputs.artifact-id }}",
+            sign,
+        )
+        self.assertIn("wait-for-completion: true", sign)
+        # The signed binaries are written back over the unsigned ones, so the
+        # packaging step stays identical across all five platforms.
+        self.assertIn(
+            "output-artifact-directory: apps/backend/bin",
+            [line.strip() for line in sign.splitlines()],
+        )
+        self.assertIn("cp apps/backend/bin/kandev${EXT} dist/kandev/bin/", package)
+        self.assertIn("cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/", package)
+
+    def test_windows_archives_keep_the_layout_package_managers_resolve(self) -> None:
+        package = step_block("Package bundle")
+
+        # Scoop's manifest declares `extract_dir: "kandev"` and a winget
+        # manifest would declare `RelativeFilePath: kandev\bin\kandev.exe`.
+        # Both read a path out of the archive rather than searching it, so the
+        # `kandev/` root and the `bin/` subdirectory are a published contract,
+        # not an implementation detail of this step.
+        # Whole lines, not substrings: archiving `kandev/bin` instead of
+        # `kandev` still contains the shorter command and would slip past a
+        # substring check while breaking every consumer.
+        commands = [line.strip() for line in package.splitlines()]
+
+        self.assertIn("mkdir -p dist/kandev/bin", commands)
+        self.assertIn("cp apps/backend/bin/kandev${EXT} dist/kandev/bin/", commands)
+        self.assertIn("cd dist", commands)
+
+        for archive in (
+            'tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev',
+            'zip -qr "kandev-${{ matrix.platform }}.zip" kandev',
+        ):
+            self.assertIn(archive, commands)
+            self.assertLess(commands.index("cd dist"), commands.index(archive))
+
+        # The zip is additional, not a replacement: Homebrew and the npm
+        # runtime packages still read the tarball.
+        self.assertIn("if [ \"${{ matrix.goos }}\" = \"windows\" ]; then", package)
+
+    def test_signed_windows_binaries_regain_execute_bits_before_packaging(self) -> None:
+        bundles = job_block("build-bundles")
+        sign = "- name: Sign Windows runtime binaries"
+        restore = "- name: Restore execute bits on signed binaries"
+        package = "- name: Package bundle"
+
+        # upload-artifact stores files without their mode bits, so the signed
+        # binaries come back 0644. package-bundle.sh rejects a launcher that is
+        # not executable, which would fail the first signed release inside the
+        # packaging step. The restore has to sit between signing and packaging.
+        for step in (sign, restore, package):
+            self.assertIn(step, bundles)
+        self.assertLess(bundles.index(sign), bundles.index(restore))
+        self.assertLess(bundles.index(restore), bundles.index(package))
+
+        step = step_block("Restore execute bits on signed binaries")
+        self.assertIn(
+            "if: matrix.goos == 'windows' && steps.signpath.outcome == 'success'",
+            step,
+        )
+        self.assertIn(
+            "run: chmod +x apps/backend/bin/kandev.exe apps/backend/bin/agentctl.exe",
+            [line.strip() for line in step.splitlines()],
+        )
+
+    def test_release_workflow_documents_the_signpath_configuration(self) -> None:
+        # The documentation block a maintainer reads before configuring the
+        # release: every other signing input is listed there.
+        header = "".join(
+            line for line in WORKFLOW.splitlines(keepends=True)
+            if line.startswith("#")
+        )
+
+        for name in (
+            "SIGNPATH_API_TOKEN",
+            "SIGNPATH_ORGANIZATION_ID",
+            "SIGNPATH_PROJECT_SLUG",
+            "SIGNPATH_SIGNING_POLICY_SLUG",
+        ):
+            self.assertIn(name, header)
+
+    def test_release_documentation_declares_the_windows_bundle_signing_contract(
+        self,
+    ) -> None:
+        for requirement in (
+            "SIGNPATH_API_TOKEN",
+            "SIGNPATH_ORGANIZATION_ID",
+            "SIGNPATH_PROJECT_SLUG",
+            "SIGNPATH_SIGNING_POLICY_SLUG",
+            # A maintainer has to be able to tell the desktop installer's
+            # certificate apart from the runtime bundle's, and to know that a
+            # partial configuration degrades rather than fails.
+            "runtime bundle",
+            "unsigned",
+            # Nightlies build the same bundle, so the configured policy
+            # signs them too. A maintainer picking a policy has to know.
+            "nightlies",
+            "test-signing policy",
+            "desktop_validation_only",
+            "one hour",
+            "manual approval",
+            "not trusted by Windows",
+        ):
+            self.assertIn(requirement, RELEASE_PROCESS)
+
     def test_updater_signing_validation_uses_workflow_control_revision(self) -> None:
         build_desktop = job_block("build-desktop")
         self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", build_desktop)
