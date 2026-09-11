@@ -148,8 +148,25 @@ func ValidateDistribution(pkg *Package) error {
 	return nil
 }
 
+// ValidateCanvasSourcePath applies the authoring-transfer policy to every
+// workspace-relative source entry. Directories are allowed after component
+// exclusions; regular files must use the retained-source extension allowlist.
+func ValidateCanvasSourcePath(name string, isDir bool) error {
+	clean, err := normalizePackagePath(name, MaxPathBytes)
+	if err != nil {
+		return err
+	}
+	if sourcePathForbidden(clean) {
+		return fmt.Errorf("%w: %s", ErrUnsafeSource, clean)
+	}
+	if !isDir && !sourceFileExtensionAllowed(clean) {
+		return fmt.Errorf("%w: %s", ErrUnsupportedFile, clean)
+	}
+	return nil
+}
+
 // ValidateDistributionSourcePath applies the source subtree policy during
-// authoring transfer. It rejects an unsafe path instead of silently dropping
+// package validation. It rejects an unsafe path instead of silently dropping
 // it, so a retained project cannot appear complete when it is not.
 func ValidateDistributionSourcePath(name string) error {
 	clean, err := normalizePackagePath(name, MaxPathBytes)
@@ -159,13 +176,7 @@ func ValidateDistributionSourcePath(name string) error {
 	if !strings.HasPrefix(clean, "distribution/source/") {
 		return nil
 	}
-	if sourcePathForbidden(clean) {
-		return fmt.Errorf("%w: %s", ErrUnsafeSource, clean)
-	}
-	if !sourceFileExtensionAllowed(clean) {
-		return fmt.Errorf("%w: %s", ErrUnsupportedFile, clean)
-	}
-	return nil
+	return ValidateCanvasSourcePath(clean, false)
 }
 
 func validateSourceMode(sourceMode string, files map[string][]byte) error {
@@ -211,22 +222,24 @@ func parseChecksums(checksums []byte, fileCount int) (map[string]string, error) 
 	want := make(map[string]string, fileCount)
 	scanner := bufio.NewScanner(bytes.NewReader(checksums))
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		rawLine := scanner.Text()
+		if strings.TrimSpace(rawLine) == "" {
 			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) != 2 || len(fields[0]) != sha256.Size*2 {
+		digest, rawName, found := strings.Cut(rawLine, "  ")
+		digest = strings.TrimSpace(digest)
+		rawName = strings.TrimSpace(rawName)
+		if !found || rawName == "" || len(digest) != sha256.Size*2 {
 			return nil, fmt.Errorf("%w: malformed %s", ErrChecksumMismatch, distributionChecksumsFile)
 		}
-		name, err := normalizePackagePath(fields[1], MaxPathBytes)
-		if err != nil || name == distributionChecksumsFile || !isLowerHex(fields[0]) {
+		name, err := normalizePackagePath(rawName, MaxPathBytes)
+		if err != nil || name == distributionChecksumsFile || !isLowerHex(digest) {
 			return nil, fmt.Errorf("%w: malformed %s", ErrChecksumMismatch, distributionChecksumsFile)
 		}
 		if _, exists := want[name]; exists {
 			return nil, fmt.Errorf("%w: duplicate %s", ErrChecksumMismatch, name)
 		}
-		want[name] = strings.ToLower(fields[0])
+		want[name] = strings.ToLower(digest)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("%w: read %s: %v", ErrChecksumMismatch, distributionChecksumsFile, err)

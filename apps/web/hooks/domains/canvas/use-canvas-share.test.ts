@@ -76,4 +76,31 @@ describe("useCanvasShare", () => {
     expect(triggerBlobDownload.mock.calls[0]?.[1]).toBe("canvas-1-1.0.0.tar.gz");
     expect(triggerBlobDownload.mock.calls[1]?.[1]).toBe("canvas-1-1.0.0.zip");
   });
+
+  it("does not let a stale download update state after the review is reset", async () => {
+    let resolveDownload: (value: Blob) => void = () => undefined;
+    downloadCanvasExport.mockReturnValueOnce(
+      new Promise<Blob>((resolve) => {
+        resolveDownload = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useCanvasShare(canvas));
+    await act(async () => {
+      await result.current.prepare();
+    });
+
+    let download: Promise<void> | undefined;
+    await act(async () => {
+      download = result.current.download("bundle");
+    });
+    await act(async () => {
+      result.current.reset();
+      resolveDownload(new Blob(["stale"]));
+      await download;
+    });
+
+    expect(triggerBlobDownload).not.toHaveBeenCalled();
+    expect(result.current.review).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
 });

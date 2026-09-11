@@ -83,16 +83,17 @@ type ExportDownload struct {
 }
 
 type DistributionService struct {
-	canvases     CanvasReader
-	releases     ReleaseReader
-	artifacts    ArtifactReader
-	authorize    WorkspaceAuthorizer
-	preparations *PreparationStore
-	installMu    sync.Mutex
-	receipts     map[string]InstallReceipt
-	receiptStore InstallReceiptStore
-	httpClient   *http.Client
-	catalog      CatalogResolver
+	canvases      CanvasReader
+	releases      ReleaseReader
+	artifacts     ArtifactReader
+	authorize     WorkspaceAuthorizer
+	preparations  *PreparationStore
+	installMu     sync.Mutex
+	receipts      map[string]InstallReceipt
+	receiptStore  InstallReceiptStore
+	httpClient    *http.Client
+	catalog       CatalogResolver
+	kandevVersion string
 }
 
 func NewDistributionService(canvases CanvasReader, releases ReleaseReader, artifacts ArtifactReader, authorize WorkspaceAuthorizer, preparations *PreparationStore) *DistributionService {
@@ -105,6 +106,17 @@ func (s *DistributionService) SetInstallReceiptStore(store InstallReceiptStore) 
 	}
 	s.installMu.Lock()
 	s.receiptStore = store
+	s.installMu.Unlock()
+}
+
+// SetKandevVersion supplies the stamped server version used by the same
+// compatibility gate as native plugin installation.
+func (s *DistributionService) SetKandevVersion(version string) {
+	if s == nil {
+		return
+	}
+	s.installMu.Lock()
+	s.kandevVersion = version
 	s.installMu.Unlock()
 }
 

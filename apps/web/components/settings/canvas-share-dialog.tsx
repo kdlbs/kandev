@@ -37,15 +37,17 @@ export function CanvasShareDialog({
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const share = useCanvasShare(canvas);
+  const { reset, cancel } = share;
 
   useEffect(() => {
-    if (!open) share.reset();
-  }, [open]);
+    if (!open) reset();
+  }, [open, reset]);
 
-  const close = () => {
-    void share.cancel();
-    onOpenChange(false);
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) void cancel();
+    onOpenChange(nextOpen);
   };
+  const close = () => handleOpenChange(false);
   const prepare = () => void share.prepare();
   const body = (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
@@ -90,7 +92,7 @@ export function CanvasShareDialog({
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
+      <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerContent className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden">
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">
             <DrawerTitle>{t("canvases:shareCanvas")}</DrawerTitle>
@@ -103,7 +105,7 @@ export function CanvasShareDialog({
     );
   }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="shrink-0 px-4 pb-1 pt-3 text-left">
           <DialogTitle>{t("canvases:shareCanvas")}</DialogTitle>

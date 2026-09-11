@@ -1213,13 +1213,17 @@ func (s *Store) ApproveRelease(ctx context.Context, instanceID, releaseID, appro
 	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(releaseID) == "" || strings.TrimSpace(approvedBy) == "" {
 		return ErrInvalidRelease
 	}
-	s.admission.Lock()
-	defer s.admission.Unlock()
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
+	return s.WithTransaction(ctx, func(tx *sqlx.Tx) error {
+		return s.ApproveReleaseTx(ctx, tx, instanceID, releaseID, approvedBy, grants)
+	})
+}
+
+// ApproveReleaseTx applies explicit permission grants and activates a pending
+// release inside a caller-owned lifecycle transaction.
+func (s *Store) ApproveReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, releaseID, approvedBy string, grants []Grant) error {
+	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(releaseID) == "" || strings.TrimSpace(approvedBy) == "" {
+		return ErrInvalidRelease
 	}
-	defer func() { _ = tx.Rollback() }()
 	release, err := loadPendingReleaseTx(ctx, tx, instanceID, releaseID)
 	if err != nil {
 		return err
@@ -1251,7 +1255,7 @@ func (s *Store) ApproveRelease(ctx context.Context, instanceID, releaseID, appro
 	if err := activateReleaseTx(ctx, tx, instanceID, releaseID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 type pendingReleaseRow struct {

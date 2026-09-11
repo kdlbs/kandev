@@ -14,9 +14,11 @@
 // focused parser reads it without pulling a YAML library into CI.
 //
 // Robustness: one bad entry (missing release, deleted asset, API hiccup) never
-// fails the whole build — its error is logged to stderr and it is skipped. A
-// repo whose star lookup fails is emitted with `stars: null`, never `0`, so a
-// transient outage can't corrupt the catalog's ranking.
+// fails a scheduled build — its error is logged to stderr and it is skipped. A
+// pull request fails when it introduces an invalid canvas entry, so registry
+// validation cannot silently omit a reviewed canvas. A repo whose star lookup
+// fails is emitted with `stars: null`, never `0`, so a transient outage can't
+// corrupt the catalog's ranking.
 //
 // Auth: GitHub API calls use GITHUB_TOKEN when present (in CI, secrets.GITHUB_TOKEN).
 // That works for the public repos here; at larger scale a PAT with `public_repo`
@@ -46,6 +48,7 @@ const PLUGINS_YAML = path.join(HERE, "plugins.yaml");
 const OUTPUT_JSON = path.join(HERE, "index.json");
 const execFile = promisify(execFileCallback);
 const MAX_CANVAS_PACKAGE_BYTES = 10 * 1024 * 1024;
+const CANVAS_INSPECTOR_TIMEOUT_MS = 30_000;
 
 // --- Minimal plugins.yaml parser --------------------------------------------
 
@@ -64,6 +67,7 @@ export function parsePluginsYaml(text) {
   let inPlugins = false;
   let inPreviews = false;
   let currentPreview = null;
+  let previewItemIndent = 0;
 
   for (const rawLine of text.split("\n")) {
     const line = stripComment(rawLine);
@@ -80,11 +84,13 @@ export function parsePluginsYaml(text) {
         currentPreview = {};
         current.previews ??= [];
         current.previews.push(currentPreview);
+        previewItemIndent = item[1].length;
         assignField(currentPreview, item[2]);
         continue;
       }
       inPreviews = false;
       currentPreview = null;
+      previewItemIndent = 0;
       current = {};
       specs.push(current);
       assignField(current, item[2]);
@@ -96,14 +102,16 @@ export function parsePluginsYaml(text) {
         current.previews = [];
         inPreviews = true;
         currentPreview = null;
+        previewItemIndent = 0;
         continue;
       }
-      if (inPreviews && currentPreview && line.search(/\S/) > 2) {
+      if (inPreviews && currentPreview && line.search(/\S/) > previewItemIndent) {
         assignField(currentPreview, value);
         continue;
       }
       inPreviews = false;
       currentPreview = null;
+      previewItemIndent = 0;
       assignField(current, value);
     }
   }
@@ -327,19 +335,26 @@ export async function buildEntry(spec) {
     packageSHA256 = inspected.digest;
   }
 
+  const canonicalRepoURL = `https://github.com/${repo}`;
+  if (kind === "canvas" && inspectedDescriptor.repo_url) {
+    if (canonicalizeRepoURL(inspectedDescriptor.repo_url) !== canonicalizeRepoURL(canonicalRepoURL)) {
+      return { error: `${pluginId}: inspected package repository does not match the registry entry` };
+    }
+  }
+  const presentation = kind === "canvas" ? { ...manifest, ...inspectedDescriptor } : manifest;
   const record = {
     id: pluginId,
     kind,
-    // Presentation prefers the plugin's manifest, then id-derived / release /
-    // plugins.yaml fallbacks, so the contract shape is stable even on a miss.
-    name: manifest.display_name || humanize(pluginId),
-    description: manifest.description || release.name || "",
-    author: manifest.author || meta.author,
+    // Canvas presentation comes from the inspected archive. Plugins retain
+    // the existing manifest-first projection and fallback behavior.
+    name: presentation.display_name || humanize(pluginId),
+    description: presentation.description || release.name || "",
+    author: presentation.author || meta.author,
     categories: manifest.categories || spec.categories || [],
     icon_url: iconUrl,
-    repo_url: `https://github.com/${repo}`,
+    repo_url: presentation.repo_url || canonicalRepoURL,
     version: version || null,
-    min_kandev_version: manifest.min_kandev_version ?? null,
+    min_kandev_version: presentation.min_kandev_version ?? null,
     ...(kind === "canvas" ? { license: inspectedDescriptor.license } : {}),
     package_url: asset.browser_download_url,
     package_sha256: packageSHA256,
@@ -371,14 +386,21 @@ async function inspectCanvasAsset(assetURL, pluginId) {
     return { error: `canvas package download failed (${error.message})` };
   }
   if (!response.ok) return { error: `canvas package download returned ${response.status}` };
-  const body = Buffer.from(await response.arrayBuffer());
-  if (body.length > MAX_CANVAS_PACKAGE_BYTES) return { error: "canvas package exceeds the package size limit" };
+  let body;
+  try {
+    body = await readBoundedResponse(response, MAX_CANVAS_PACKAGE_BYTES);
+  } catch {
+    return { error: "canvas package exceeds the package size limit" };
+  }
   const digest = createHash("sha256").update(body).digest("hex");
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-canvas-registry-"));
   const packagePath = path.join(directory, `${pluginId}.tar.gz`);
   try {
     await fs.writeFile(packagePath, body, { mode: 0o600 });
-    const result = await execFile(inspector, ["--file", packagePath], { maxBuffer: 1024 * 1024 });
+    const result = await execFile(inspector, ["--file", packagePath], {
+      maxBuffer: 1024 * 1024,
+      timeout: CANVAS_INSPECTOR_TIMEOUT_MS,
+    });
     let descriptor;
     try {
       descriptor = JSON.parse(result.stdout);
@@ -390,6 +412,38 @@ async function inspectCanvasAsset(assetURL, pluginId) {
     return { error: "canvas package inspection failed" };
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function readBoundedResponse(response, limit) {
+  if (!response.body?.getReader) throw new Error("response body stream unavailable");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return Buffer.concat(chunks);
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > limit) {
+        await reader.cancel();
+        throw new Error("response exceeds limit");
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function canonicalizeRepoURL(value) {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.username || parsed.password || parsed.search || parsed.hash) return "";
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return "";
   }
 }
 
@@ -413,10 +467,12 @@ async function fetchRepoMeta(repo, pluginId) {
 export async function buildIndex(specs) {
   const records = [];
   const errors = [];
+  const canvasErrors = [];
   for (const spec of specs) {
     const { record, error } = await buildEntry(spec);
     if (error) {
       errors.push(error);
+      if ((spec.kind || "plugin") === "canvas") canvasErrors.push(error);
       console.error(`skip: ${error}`);
       continue;
     }
@@ -428,7 +484,7 @@ export async function buildIndex(specs) {
     source: { name: SOURCE_NAME, url: SOURCE_URL },
     plugins: records,
   };
-  return { document, errors };
+  return { document, errors, canvasErrors };
 }
 
 async function main() {
@@ -437,7 +493,7 @@ async function main() {
   // An empty list is expected at launch (no plugin repos yet) — it produces a
   // valid, empty index.json and is NOT an error. Only a non-empty list that
   // resolves to zero entries (below) indicates a real failure.
-  const { document, errors } = await buildIndex(specs);
+  const { document, errors, canvasErrors } = await buildIndex(specs);
   await fs.writeFile(OUTPUT_JSON, `${JSON.stringify(document, null, 2)}\n`, "utf8");
 
   console.error(
@@ -448,6 +504,10 @@ async function main() {
   // or total outage — fail so CI never publishes an empty catalog over a good one.
   if (specs.length > 0 && document.plugins.length === 0) {
     console.error("error: no entries could be built; refusing to publish empty index");
+    process.exitCode = 1;
+  }
+  if (process.env.GITHUB_EVENT_NAME === "pull_request" && canvasErrors.length > 0) {
+    console.error("error: pull-request validation found invalid canvas entries");
     process.exitCode = 1;
   }
 }

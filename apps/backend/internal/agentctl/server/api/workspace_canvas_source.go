@@ -186,7 +186,7 @@ func (c *canvasSourceCollector) visit(currentPath string, entry fs.DirEntry, wal
 	if relativePath == ".canvas-root" {
 		return nil
 	}
-	if err := webapp.ValidateDistributionSourcePath(relativePath); err != nil {
+	if err := webapp.ValidateCanvasSourcePath(relativePath, info.IsDir()); err != nil {
 		code := "source_contains_unsupported_file"
 		if errors.Is(err, webapp.ErrUnsafeSource) {
 			code = "source_contains_excluded_file"

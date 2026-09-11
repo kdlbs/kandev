@@ -114,3 +114,8 @@ Verification: the canvas installation/export race selection passed 3 tests, the
 full relevant backend suite passed 1,587 tests across 8 packages, and SQL guard
 passed. Existing native plugin installation paths remained covered by the
 16-test plugin E2E regression.
+
+Review remediation: production confirmation now uses the canvas service's
+single transaction for instance, release, grants, and receipt ownership. It
+also reauthorizes retry paths, fails closed on receipt-store errors, and
+compensates a newly-created artifact when the transaction cannot commit.

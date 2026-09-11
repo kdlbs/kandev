@@ -168,3 +168,6 @@ screenshot input and keeps previews separate from package permissions.
 Verification: the focused frontend suite passed 21 tests, desktop sharing E2E
 passed, mobile sharing E2E passed, and the export/preparation backend race tests
 passed 3 tests.
+
+Review remediation: share-dialog dismissal now cancels prepared exports, and
+stale asynchronous downloads cannot overwrite the current dialog state.

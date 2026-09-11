@@ -61,10 +61,12 @@ export function CanvasInstallDialog({
     install.reset();
   }, [entry, open]);
 
-  const close = () => {
-    void install.cancel();
-    onOpenChange(false);
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) void install.cancel();
+    onOpenChange(nextOpen);
   };
+
+  const close = () => handleOpenChange(false);
 
   const inspect = async () => {
     if (entry) {
@@ -205,7 +207,7 @@ export function CanvasInstallDialog({
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
+      <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerContent className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden">
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">
             <DrawerTitle>{t("plugins:installCanvasTitle")}</DrawerTitle>
@@ -218,7 +220,7 @@ export function CanvasInstallDialog({
     );
   }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="shrink-0 px-4 pb-1 pt-3 text-left">
           <DialogTitle>{t("plugins:installCanvasTitle")}</DialogTitle>

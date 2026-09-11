@@ -18,6 +18,7 @@ var (
 	ErrInstallNotApproved     = errors.New("canvas installation approval is required")
 	ErrInstallUnavailable     = errors.New("canvas installation is unavailable")
 	ErrInstallReceiptNotFound = errors.New("canvas installation receipt not found")
+	ErrInstallIncompatible    = errors.New("canvas package requires a newer Kandev version")
 )
 
 const (
@@ -30,11 +31,30 @@ type ArtifactWriter interface {
 	Put(*webapp.Package) (webapp.Artifact, error)
 }
 
+type artifactWriterWithCreated interface {
+	PutWithCreated(*webapp.Package) (webapp.Artifact, bool, error)
+}
+
+type artifactRemover interface {
+	Remove(webapp.Artifact) error
+}
+
 type CanvasInstaller interface {
 	CanvasReader
-	CreateCanvas(context.Context, CreateCanvasRequest) (*Canvas, error)
-	PublishPackage(context.Context, PublishRequest) (*PublishResult, error)
-	ApproveRelease(context.Context, string, string, string) (*Canvas, error)
+	InstallCanvasPackage(context.Context, InstallCanvasPackageRequest) (*InstallResult, error)
+}
+
+// InstallCanvasPackageRequest is the trusted, already-inspected input for the
+// single database transaction used by the production canvas service.
+type InstallCanvasPackageRequest struct {
+	WorkspaceID     string
+	Title           string
+	Package         *webapp.Package
+	Artifact        webapp.Artifact
+	SourceActorKind string
+	SourceUserID    string
+	Approved        bool
+	Receipt         InstallReceipt
 }
 
 type InstallReceiptStore interface {
@@ -152,7 +172,23 @@ func (s *DistributionService) PrepareInstall(ctx context.Context, request Instal
 	if err != nil {
 		return InstallReview{}, err
 	}
+	if err := s.validateInstallCompatibility(pkg); err != nil {
+		return InstallReview{}, err
+	}
 	return s.stageInstall(ctx, request, origin, archive, pkg)
+}
+
+func (s *DistributionService) validateInstallCompatibility(pkg *webapp.Package) error {
+	if pkg == nil || pkg.Manifest == nil {
+		return ErrInstallInvalid
+	}
+	s.installMu.Lock()
+	runningVersion := s.kandevVersion
+	s.installMu.Unlock()
+	if err := manifest.CheckMinimumKandevVersion(pkg.Manifest.MinKandevVersion, runningVersion); err != nil {
+		return fmt.Errorf("%w: %v", ErrInstallIncompatible, err)
+	}
+	return nil
 }
 
 func (s *DistributionService) validateInstallRequest(ctx context.Context, request InstallRequest) error {
@@ -196,9 +232,6 @@ func validateInstallExpectations(request InstallRequest, origin string, pkg *web
 		return ErrPackageDigestMismatch
 	}
 	if request.ExpectedArchiveDigest != "" && request.ExpectedArchiveDigest != archive {
-		return ErrPackageDigestMismatch
-	}
-	if origin == installOriginRegistry && request.ExpectedDigest != "" && request.ExpectedDigest != archive {
 		return ErrPackageDigestMismatch
 	}
 	return nil
@@ -275,31 +308,92 @@ func (s *DistributionService) ConfirmInstall(ctx context.Context, userID, prepar
 	if !confirmation.Approved {
 		return InstallResult{}, ErrInstallNotApproved
 	}
-	if result, ok := s.lookupReceipt(ctx, userID, preparationID); ok {
-		return result, nil
+	if result, ok, err := s.lookupReceipt(ctx, userID, preparationID); err != nil {
+		return InstallResult{}, err
+	} else if ok {
+		return s.authorizeInstallReceipt(ctx, result)
 	}
 	s.installMu.Lock()
 	defer s.installMu.Unlock()
-	if result, ok := s.lookupReceiptLocked(ctx, userID, preparationID); ok {
-		return result, nil
+	if result, ok, err := s.lookupReceiptLocked(ctx, userID, preparationID); err != nil {
+		return InstallResult{}, err
+	} else if ok {
+		return s.authorizeInstallReceipt(ctx, result)
 	}
 	preparation, err := s.preparations.Get(ctx, userID, preparationID)
 	if err != nil {
+		return InstallResult{}, err
+	}
+	if err := s.authorizeWorkspace(ctx, preparation.WorkspaceID); err != nil {
 		return InstallResult{}, err
 	}
 	pkg, err := s.openInstallPackage(ctx, userID, preparation, confirmation.ExpectedDigest)
 	if err != nil {
 		return InstallResult{}, err
 	}
-	installed, err := s.installPreparedPackage(ctx, userID, preparation, pkg)
+	receipt := InstallReceipt{PreparationID: preparation.ID, UserID: userID, WorkspaceID: preparation.WorkspaceID, PackageID: preparation.PackageID, Version: preparation.PackageVersion, Digest: preparation.PackageDigest, SourceID: preparation.SourceID, RepositoryURL: sanitizeRepositoryURL(preparation.RepositoryURL), OriginKind: preparation.OriginKind, CreatedAt: time.Now().UTC()}
+	return s.installPreparedPackage(ctx, userID, preparation, pkg, receipt)
+}
+
+func (s *DistributionService) authorizeInstallReceipt(ctx context.Context, result InstallResult) (InstallResult, error) {
+	if err := s.authorizeWorkspace(ctx, result.Receipt.WorkspaceID); err != nil {
+		return InstallResult{}, err
+	}
+	return result, nil
+}
+
+func (s *DistributionService) installPreparedPackage(ctx context.Context, userID string, preparation Preparation, pkg *webapp.Package, receipt InstallReceipt) (InstallResult, error) {
+	installer, ok := s.canvases.(CanvasInstaller)
+	if !ok {
+		return InstallResult{}, ErrInstallUnavailable
+	}
+	if err := s.authorizeWorkspace(ctx, preparation.WorkspaceID); err != nil {
+		return InstallResult{}, err
+	}
+	writer, ok := s.artifacts.(ArtifactWriter)
+	if !ok {
+		return InstallResult{}, ErrInstallUnavailable
+	}
+	artifact, created, err := putInstallArtifact(writer, pkg)
 	if err != nil {
 		return InstallResult{}, err
 	}
-	receipt := InstallReceipt{PreparationID: preparation.ID, UserID: userID, CanvasID: installed.ID, WorkspaceID: preparation.WorkspaceID, PackageID: preparation.PackageID, Version: preparation.PackageVersion, Digest: preparation.PackageDigest, SourceID: preparation.SourceID, RepositoryURL: sanitizeRepositoryURL(preparation.RepositoryURL), OriginKind: preparation.OriginKind, CreatedAt: time.Now().UTC()}
-	if err := s.saveInstallReceipt(ctx, userID, preparation.ID, receipt); err != nil {
+	result, err := installer.InstallCanvasPackage(ctx, InstallCanvasPackageRequest{WorkspaceID: preparation.WorkspaceID, Title: pkg.Manifest.DisplayName, Package: pkg, Artifact: artifact, SourceActorKind: "canvas-install:" + preparation.OriginKind, SourceUserID: userID, Approved: true, Receipt: receipt})
+	if err != nil {
+		return s.handleInstallFailure(ctx, userID, preparation.ID, writer, artifact, created, result, err)
+	}
+	if !validInstallResult(result) {
+		return InstallResult{}, ErrInstallUnavailable
+	}
+	if err := s.cacheInstallReceipt(ctx, userID, preparation.ID, result.Receipt); err != nil {
 		return InstallResult{}, err
 	}
-	return InstallResult{Canvas: installed, Receipt: receipt}, nil
+	return *result, nil
+}
+
+func (s *DistributionService) handleInstallFailure(ctx context.Context, userID, preparationID string, writer ArtifactWriter, artifact webapp.Artifact, created bool, result *InstallResult, installErr error) (InstallResult, error) {
+	existing, found, lookupErr := s.lookupReceiptLocked(ctx, userID, preparationID)
+	if lookupErr != nil {
+		return InstallResult{}, errors.Join(installErr, lookupErr)
+	}
+	if found {
+		return s.authorizeInstallReceipt(ctx, existing)
+	}
+	if !created || validInstallResult(result) {
+		return InstallResult{}, installErr
+	}
+	remover, ok := writer.(artifactRemover)
+	if !ok {
+		return InstallResult{}, installErr
+	}
+	if cleanupErr := remover.Remove(artifact); cleanupErr != nil {
+		return InstallResult{}, errors.Join(installErr, cleanupErr)
+	}
+	return InstallResult{}, installErr
+}
+
+func validInstallResult(result *InstallResult) bool {
+	return result != nil && result.Canvas != nil && result.Receipt.CanvasID != ""
 }
 
 func (s *DistributionService) openInstallPackage(ctx context.Context, userID string, preparation Preparation, expectedDigest string) (*webapp.Package, error) {
@@ -320,42 +414,7 @@ func (s *DistributionService) openInstallPackage(ctx context.Context, userID str
 	return pkg, nil
 }
 
-func (s *DistributionService) installPreparedPackage(ctx context.Context, userID string, preparation Preparation, pkg *webapp.Package) (*Canvas, error) {
-	installer, ok := s.canvases.(CanvasInstaller)
-	if !ok {
-		return nil, ErrInstallUnavailable
-	}
-	writer, ok := s.artifacts.(ArtifactWriter)
-	if !ok {
-		return nil, ErrInstallUnavailable
-	}
-	artifact, err := writer.Put(pkg)
-	if err != nil {
-		return nil, err
-	}
-	item, err := installer.CreateCanvas(ctx, CreateCanvasRequest{WorkspaceID: preparation.WorkspaceID, Title: pkg.Manifest.DisplayName, PluginID: CanvasPluginID})
-	if err != nil {
-		return nil, err
-	}
-	published, err := installer.PublishPackage(ctx, PublishRequest{CanvasID: item.ID, Package: pkg, Artifact: artifact, SourceActorKind: "canvas-install:" + preparation.OriginKind, SourceUserID: userID})
-	if err != nil || published == nil {
-		if err == nil {
-			err = ErrInstallUnavailable
-		}
-		return nil, err
-	}
-	if published.Activated {
-		return published.Canvas, nil
-	}
-	return installer.ApproveRelease(ctx, item.ID, published.Release.ID, userID)
-}
-
-func (s *DistributionService) saveInstallReceipt(ctx context.Context, userID, preparationID string, receipt InstallReceipt) error {
-	if s.receiptStore != nil {
-		if err := s.receiptStore.CreateInstallReceipt(ctx, receipt); err != nil {
-			return err
-		}
-	}
+func (s *DistributionService) cacheInstallReceipt(ctx context.Context, userID, preparationID string, receipt InstallReceipt) error {
 	if s.receipts == nil {
 		s.receipts = make(map[string]InstallReceipt)
 	}
@@ -363,29 +422,42 @@ func (s *DistributionService) saveInstallReceipt(ctx context.Context, userID, pr
 	return s.preparations.Delete(ctx, userID, preparationID)
 }
 
-func (s *DistributionService) lookupReceipt(ctx context.Context, userID, preparationID string) (InstallResult, bool) {
+func (s *DistributionService) lookupReceipt(ctx context.Context, userID, preparationID string) (InstallResult, bool, error) {
 	s.installMu.Lock()
 	defer s.installMu.Unlock()
 	return s.lookupReceiptLocked(ctx, userID, preparationID)
 }
 
-func (s *DistributionService) lookupReceiptLocked(ctx context.Context, userID, preparationID string) (InstallResult, bool) {
+func (s *DistributionService) lookupReceiptLocked(ctx context.Context, userID, preparationID string) (InstallResult, bool, error) {
 	receipt, ok := s.receipts[preparationID]
 	if !ok && s.receiptStore != nil {
 		stored, err := s.receiptStore.GetInstallReceipt(ctx, preparationID, userID)
 		if err == nil {
 			receipt, ok = stored, true
 			s.receipts[preparationID] = stored
+		} else if !errors.Is(err, ErrInstallReceiptNotFound) {
+			return InstallResult{}, false, err
 		}
 	}
 	if !ok || receipt.UserID != userID {
-		return InstallResult{}, false
+		return InstallResult{}, false, nil
 	}
 	item, err := s.canvases.Get(ctx, receipt.CanvasID)
-	if err != nil || item == nil || item.WorkspaceID != receipt.WorkspaceID {
-		return InstallResult{}, false
+	if errors.Is(err, ErrCanvasNotFound) || item == nil || item.WorkspaceID != receipt.WorkspaceID {
+		return InstallResult{}, false, nil
 	}
-	return InstallResult{Canvas: item, Receipt: receipt}, true
+	if err != nil {
+		return InstallResult{}, false, err
+	}
+	return InstallResult{Canvas: item, Receipt: receipt}, true, nil
+}
+
+func putInstallArtifact(writer ArtifactWriter, pkg *webapp.Package) (webapp.Artifact, bool, error) {
+	if withCreated, ok := writer.(artifactWriterWithCreated); ok {
+		return withCreated.PutWithCreated(pkg)
+	}
+	artifact, err := writer.Put(pkg)
+	return artifact, false, err
 }
 
 func installMetadata(m *manifest.Manifest) InstallMetadata {

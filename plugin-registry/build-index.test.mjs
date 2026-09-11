@@ -34,7 +34,16 @@ const jsonResponse = (body, ok = body !== null) => ({
   text: async () => JSON.stringify(body ?? {}),
 });
 const textResponse = (text) => ({ ok: text !== "", status: text ? 200 : 404, text: async () => text });
-const binaryResponse = (body) => ({ ok: true, status: 200, arrayBuffer: async () => body });
+const binaryResponse = (body) => ({
+  ok: true,
+  status: 200,
+  body: new ReadableStream({
+    start(controller) {
+      controller.enqueue(body);
+      controller.close();
+    },
+  }),
+});
 
 test("parsePluginsYaml reads the constrained pointer list", () => {
   const specs = parsePluginsYaml(
@@ -66,12 +75,14 @@ test("parsePluginsYaml reads ordered canvas previews", () => {
       "        alt: Board cover",
       "      - url: https://cdn.example/detail.webp",
       "        alt: Board detail",
+      "    featured: true",
     ].join("\n"),
   );
   assert.deepEqual(specs[0].previews, [
     { url: "https://cdn.example/cover.webp", alt: "Board cover" },
     { url: "https://cdn.example/detail.webp", alt: "Board detail" },
   ]);
+  assert.equal(specs[0].featured, true);
 });
 
 test("parseManifestFields extracts presentation keys and ignores the rest", () => {
@@ -149,12 +160,12 @@ test("buildEntry keeps stars null (never 0) when repo metadata lookup fails", as
   assert.equal(record.icon_url, null); // no manifest icon
 });
 
-test("buildEntry inspects an exact canvas asset and preserves preview order", async () => {
+test("buildEntry uses inspected canvas presentation metadata and preserves preview order", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-registry-test-"));
   const inspector = path.join(directory, "inspector.mjs");
   await fs.writeFile(
     inspector,
-    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({id:"board",version:"1.0.0",kind:"canvas"}));\n`,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({id:"board",version:"1.0.0",kind:"canvas",display_name:"Inspected Board",description:"From archive",author:"archive-author",min_kandev_version:"2.0.0",repo_url:"https://github.com/acme/board",license:"MIT"}));\n`,
     { mode: 0o755 },
   );
   const previousInspector = process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
@@ -182,8 +193,49 @@ test("buildEntry inspects an exact canvas asset and preserves preview order", as
     });
     assert.equal(result.error, undefined);
     assert.equal(result.record.kind, "canvas");
+    assert.equal(result.record.name, "Inspected Board");
+    assert.equal(result.record.description, "From archive");
+    assert.equal(result.record.author, "archive-author");
+    assert.equal(result.record.min_kandev_version, "2.0.0");
     assert.deepEqual(result.record.previews, [{ url: "https://cdn.example/cover.webp", alt: "Board cover" }]);
     assert.equal(result.record.package_sha256, createHash("sha256").update(packageBytes).digest("hex"));
+  } finally {
+    if (previousInspector === undefined) delete process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+    else process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = previousInspector;
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("buildEntry bounds streamed canvas package responses", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-registry-stream-test-"));
+  const inspector = path.join(directory, "inspector.mjs");
+  await fs.writeFile(inspector, `process.stdout.write(JSON.stringify({id:"board",version:"1.0.0",kind:"canvas"}));`, { mode: 0o755 });
+  const previousInspector = process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+  process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = inspector;
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.includes("/releases/latest")) return jsonResponse({ tag_name: "v1.0.0", assets: [{ name: "board-1.0.0.tar.gz", browser_download_url: "https://dl.example/board.tar.gz" }] });
+    if (value.includes("/manifest.yaml")) return textResponse("");
+    if (value.includes("/repos/")) return jsonResponse({ stargazers_count: 1, owner: { login: "acme" } });
+    if (value === "https://dl.example/board.tar.gz") {
+      return {
+        ok: true,
+        status: 200,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(5 * 1024 * 1024));
+            controller.enqueue(new Uint8Array(5 * 1024 * 1024 + 1));
+            controller.close();
+          },
+        }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    }
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+  try {
+    const result = await buildEntry({ id: "board", repo: "acme/board", kind: "canvas", previews: [{ url: "https://cdn.example/cover.webp", alt: "Board" }] });
+    assert.match(result.error, /exceeds the package size limit/);
   } finally {
     if (previousInspector === undefined) delete process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
     else process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = previousInspector;
@@ -227,5 +279,6 @@ test("buildIndex skips bad entries but still builds the good ones", async () => 
   assert.equal(document.plugins.length, 1);
   assert.equal(document.plugins[0].id, "a");
   assert.equal(errors.length, 1);
+  assert.equal((await buildIndex([{ id: "bad-canvas", repo: "o/bad-canvas", kind: "canvas" }])).canvasErrors.length, 1);
   assert.equal(document.schema_version, 1);
 });

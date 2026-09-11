@@ -249,8 +249,10 @@ func canvasDistributionErrorStatus(err error) (int, string) {
 		return http.StatusConflict, "review_stale"
 	case errors.Is(err, canvasservice.ErrExportInvalid):
 		return http.StatusBadRequest, "invalid_request"
-	case errors.Is(err, canvasservice.ErrInstallInvalid), errors.Is(err, canvasservice.ErrInstallNotApproved), errors.Is(err, canvasservice.ErrPackageDigestMismatch), errors.Is(err, canvasservice.ErrInstallURLInvalid):
+	case isCanvasInvalidInstallError(err):
 		return http.StatusBadRequest, "invalid_install"
+	case errors.Is(err, canvasservice.ErrInstallIncompatible):
+		return http.StatusConflict, "incompatible_install"
 	case errors.Is(err, canvasservice.ErrInstallURLBlocked):
 		return http.StatusBadRequest, "install_url_blocked"
 	case errors.Is(err, webapp.ErrCompressedTooLarge):
@@ -261,11 +263,20 @@ func canvasDistributionErrorStatus(err error) (int, string) {
 		return http.StatusNotFound, "install_not_found"
 	case errors.Is(err, canvasservice.ErrPreparationLimit):
 		return http.StatusConflict, "storage_limit_reached"
-	case errors.Is(err, webapp.ErrSourceUnavailable):
-		return http.StatusConflict, "source_unavailable"
-	case errors.Is(err, webapp.ErrArtifactUnavailable):
+	case isCanvasSourceUnavailableError(err):
 		return http.StatusConflict, "source_unavailable"
 	default:
-		return http.StatusNotFound, "canvas_not_found"
+		return http.StatusInternalServerError, "internal_error"
 	}
+}
+
+func isCanvasInvalidInstallError(err error) bool {
+	return errors.Is(err, canvasservice.ErrInstallInvalid) ||
+		errors.Is(err, canvasservice.ErrInstallNotApproved) ||
+		errors.Is(err, canvasservice.ErrPackageDigestMismatch) ||
+		errors.Is(err, canvasservice.ErrInstallURLInvalid)
+}
+
+func isCanvasSourceUnavailableError(err error) bool {
+	return errors.Is(err, webapp.ErrSourceUnavailable) || errors.Is(err, webapp.ErrArtifactUnavailable)
 }

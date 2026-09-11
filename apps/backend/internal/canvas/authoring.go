@@ -95,9 +95,11 @@ type authoringInstanceStore interface {
 type transactionalAuthoringStore interface {
 	authoringInstanceStore
 	WithTransaction(context.Context, func(*sqlx.Tx) error) error
+	CreateTx(context.Context, *sqlx.Tx, plugininstances.Instance) error
 	CreateReleaseTx(context.Context, *sqlx.Tx, plugininstances.Release) error
 	SetPluginIDTx(context.Context, *sqlx.Tx, string, string) error
 	ActivateReleaseTx(context.Context, *sqlx.Tx, string, string) error
+	ApproveReleaseTx(context.Context, *sqlx.Tx, string, string, string, []plugininstances.Grant) error
 }
 
 type reviewedPromotionStore interface {
@@ -174,6 +176,104 @@ func (s *Service) PublishPackage(ctx context.Context, request PublishRequest) (*
 	return result, nil
 }
 
+// InstallCanvasPackage commits the canvas instance, its first release, and
+// the durable installation receipt in the same lifecycle transaction. The
+// artifact is written before entering the transaction and is owned by the
+// release row only after this method commits.
+func (s *Service) InstallCanvasPackage(ctx context.Context, request InstallCanvasPackageRequest) (*InstallResult, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	store, createRequest, err := s.prepareCanvasInstall(request)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	result, event, err := s.installCanvasPackageLocked(ctx, store, createRequest, request)
+	publisher := s.publisher
+	s.mu.Unlock()
+	if err != nil {
+		return result, err
+	}
+	publishEvent(ctx, publisher, event)
+	return result, nil
+}
+
+func (s *Service) prepareCanvasInstall(request InstallCanvasPackageRequest) (transactionalAuthoringStore, CreateCanvasRequest, error) {
+	if request.Package == nil || request.Package.Manifest == nil || request.Artifact.Digest == "" || s.repo == nil {
+		return nil, CreateCanvasRequest{}, fmt.Errorf("%w: package and artifact are required", ErrInvalidCanvas)
+	}
+	if !request.Approved || strings.TrimSpace(request.Receipt.UserID) == "" {
+		return nil, CreateCanvasRequest{}, ErrInstallNotApproved
+	}
+	store, ok := s.instances.(transactionalAuthoringStore)
+	if !ok {
+		return nil, CreateCanvasRequest{}, ErrCanvasNotConfigured
+	}
+	createRequest, err := normalizeCreateRequest(CreateCanvasRequest{WorkspaceID: request.WorkspaceID, Title: request.Title, PluginID: CanvasPluginID})
+	if err != nil {
+		return nil, CreateCanvasRequest{}, err
+	}
+	return store, createRequest, nil
+}
+
+func (s *Service) installCanvasPackageLocked(ctx context.Context, store transactionalAuthoringStore, createRequest CreateCanvasRequest, request InstallCanvasPackageRequest) (*InstallResult, LifecycleEvent, error) {
+	now := s.nowUTC()
+	metadata := CanvasMetadata{ID: uuid.NewString(), PluginInstanceID: uuid.NewString(), WorkspaceID: createRequest.WorkspaceID, Title: createRequest.Title, CreatedAt: now, UpdatedAt: now}
+	instance := plugininstances.Instance{ID: metadata.PluginInstanceID, PluginID: createRequest.PluginID, SourceKind: plugininstances.SourceLocalCanvas, ScopeKind: ScopeWorkspace, WorkspaceID: createRequest.WorkspaceID, Status: plugininstances.StatusPending, CreatedAt: now, UpdatedAt: now}
+	publishRequest := PublishRequest{CanvasID: metadata.ID, Package: request.Package, Artifact: request.Artifact, SourceActorKind: request.SourceActorKind, SourceUserID: request.SourceUserID}
+	preparedInstance, release, activated, err := s.preparePublishedReleaseForInstance(ctx, store, instance, publishRequest)
+	if err != nil {
+		return nil, LifecycleEvent{}, err
+	}
+	if preparedInstance.ID != instance.ID {
+		return nil, LifecycleEvent{}, ErrInvalidCanvas
+	}
+	receipt := request.Receipt
+	receipt.CanvasID = metadata.ID
+	receipt.WorkspaceID = metadata.WorkspaceID
+	if receipt.CreatedAt.IsZero() {
+		receipt.CreatedAt = now
+	}
+	if err := s.commitCanvasInstallation(ctx, store, instance, metadata, release, activated, receipt, request.Package.Manifest); err != nil {
+		return nil, LifecycleEvent{}, err
+	}
+	installed, err := s.Get(ctx, metadata.ID)
+	if err != nil {
+		return &InstallResult{Receipt: receipt}, LifecycleEvent{}, err
+	}
+	return &InstallResult{Canvas: installed, Receipt: receipt}, lifecycleEvent(EventReleaseActivated, *installed), nil
+}
+
+func (s *Service) commitCanvasInstallation(ctx context.Context, store transactionalAuthoringStore, instance plugininstances.Instance, metadata CanvasMetadata, release plugininstances.Release, activated bool, receipt InstallReceipt, canvasManifest *manifest.Manifest) error {
+	return store.WithTransaction(ctx, func(tx *sqlx.Tx) error {
+		if err := store.CreateTx(ctx, tx, instance); err != nil {
+			return err
+		}
+		if err := s.repo.CreateTx(ctx, tx, metadata); err != nil {
+			return err
+		}
+		if err := store.CreateReleaseTx(ctx, tx, release); err != nil {
+			return err
+		}
+		if err := activateOrApproveCanvasRelease(ctx, store, tx, instance.ID, release, activated, receipt.UserID, canvasManifest); err != nil {
+			return err
+		}
+		return s.repo.CreateInstallReceiptTx(ctx, tx, receipt)
+	})
+}
+
+func activateOrApproveCanvasRelease(ctx context.Context, store transactionalAuthoringStore, tx *sqlx.Tx, instanceID string, release plugininstances.Release, activated bool, userID string, canvasManifest *manifest.Manifest) error {
+	if !activated {
+		return store.ApproveReleaseTx(ctx, tx, instanceID, release.ID, userID, grantsForManifest(ManifestPermissions(canvasManifest), userID, ScopeWorkspace))
+	}
+	if err := store.SetPluginIDTx(ctx, tx, instanceID, release.PluginID); err != nil {
+		return err
+	}
+	return store.ActivateReleaseTx(ctx, tx, instanceID, release.ID)
+}
+
 func (s *Service) preparePublishedRelease(ctx context.Context, store authoringInstanceStore, request PublishRequest) (plugininstances.Instance, plugininstances.Release, bool, CreationAuthority, []plugininstances.Grant, error) {
 	if err := validatePublishRequest(request); err != nil {
 		return plugininstances.Instance{}, plugininstances.Release{}, false, CreationAuthority{}, nil, err
@@ -203,6 +303,35 @@ func (s *Service) preparePublishedRelease(ctx context.Context, store authoringIn
 		return plugininstances.Instance{}, plugininstances.Release{}, false, CreationAuthority{}, nil, err
 	}
 	return instance, release, activated, creationAuthority, initialGrants, nil
+}
+
+func (s *Service) preparePublishedReleaseForInstance(ctx context.Context, store authoringInstanceStore, instance plugininstances.Instance, request PublishRequest) (plugininstances.Instance, plugininstances.Release, bool, error) {
+	if request.Package == nil || request.Package.Manifest == nil || request.Artifact.Digest == "" {
+		return plugininstances.Instance{}, plugininstances.Release{}, false, fmt.Errorf("%w: package and artifact are required", ErrInvalidCanvas)
+	}
+	if instance.Status == StatusRemoved || instance.Status == StatusArchived {
+		return plugininstances.Instance{}, plugininstances.Release{}, false, fmt.Errorf("%w: canvas is %s", ErrInvalidCanvasState, instance.Status)
+	}
+	if !request.ExpectedAuthority.IsZero() && request.ExpectedAuthority != instance.PublishAuthority() {
+		return plugininstances.Instance{}, plugininstances.Release{}, false, ErrStaleCanvasPublish
+	}
+	if request.Artifact.Digest != request.Package.Digest {
+		return plugininstances.Instance{}, plugininstances.Release{}, false, fmt.Errorf("%w: artifact digest does not match package", ErrInvalidCanvas)
+	}
+	if err := request.Package.Manifest.Validate(); err != nil {
+		return plugininstances.Instance{}, plugininstances.Release{}, false, fmt.Errorf("%w: invalid manifest: %v", ErrInvalidCanvas, err)
+	}
+	permissions := ManifestPermissions(request.Package.Manifest)
+	grants, err := store.ListGrants(ctx, instance.ID)
+	if err != nil {
+		return plugininstances.Instance{}, plugininstances.Release{}, false, err
+	}
+	activated := permissionsFit(permissions, instance.ScopeKind, grants)
+	release, err := s.buildPublishedRelease(request, instance.ID, permissions, activated)
+	if err != nil {
+		return plugininstances.Instance{}, plugininstances.Release{}, false, err
+	}
+	return instance, release, activated, nil
 }
 
 func validatePublishRequest(request PublishRequest) error {
