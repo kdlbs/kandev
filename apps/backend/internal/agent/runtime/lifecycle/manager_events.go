@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -388,6 +389,9 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // lease is held by the event dispatcher. Direct test and legacy callers use
 // handleCompleteEvent, which acquires that lease before entering here.
 func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+	}
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -706,11 +710,16 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 
 		var claimed bool
 		var updated *AgentExecution
+		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
 		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 			if current != execution || current.promptGeneration != promptGeneration {
 				return
 			}
 			current.Status = v1.AgentStatusFailed
+			if uncertainSubmissionID != "" {
+				current.FailureCode = "DURABLE_DELIVERY_UNCERTAIN"
+				current.FailureDetails = uncertainSubmissionID
+			}
 			updated = current
 			claimed = true
 		})
@@ -759,11 +768,22 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 	startupGeneration uint64,
 ) {
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		signalError := "agent stream disconnected: " + err.Error()
+		if uncertainSubmissionID != "" {
+			signalError = fmt.Sprintf(
+				"%s: %s; reconcile submission %q before retrying",
+				ErrUncertainPromptDelivery,
+				err,
+				uncertainSubmissionID,
+			)
+		}
 		if !execution.signalPromptCompletionForStartupGenerationLeased(
 			startupGeneration,
 			PromptCompletionSignal{
 				IsError:          true,
-				Error:            "agent stream disconnected: " + err.Error(),
+				Uncertain:        uncertainSubmissionID != "",
+				Error:            signalError,
 				PromptGeneration: promptGeneration,
 			},
 		) {
@@ -799,9 +819,17 @@ func (m *Manager) publishStreamDisconnectErrorWithAttempt(
 	err error,
 	attemptID string,
 ) {
+	message := "agent stream disconnected: " + err.Error()
+	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" {
+		message = fmt.Sprintf(
+			"%s: agent stream disconnected; reconcile submission %q before retrying",
+			ErrUncertainPromptDelivery,
+			submissionID,
+		)
+	}
 	m.eventPublisher.PublishAgentctlEvent(
 		WithResumeAttemptID(context.Background(), attemptID), events.AgentctlError, execution,
-		"agent stream disconnected: "+err.Error(),
+		message,
 	)
 }
 

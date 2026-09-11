@@ -186,6 +186,80 @@ func TestClearAllParkedRoutingForWorkspace_NoParkedRuns(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-HARNESS-SESSION-CONTINUITY-006.1
+func TestParkRunForSessionRecoveryPreservesPendingWork(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, db, "agent-recovery", "ws-recovery")
+	run := &models.Run{
+		AgentProfileID: "agent-recovery",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"task-recovery"}`,
+		Status:         "claimed",
+		CoalescedCount: 1,
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := repo.ParkRunForSessionRecovery(
+		ctx, run.ID, "block-recovery", "native_state_missing",
+	); err != nil {
+		t.Fatalf("park run: %v", err)
+	}
+
+	got, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "queued" {
+		t.Fatalf("status = %q, want queued", got.Status)
+	}
+	if got.RoutingBlockedStatus == nil ||
+		*got.RoutingBlockedStatus != models.RoutingBlockedSessionRecoveryRequired {
+		t.Fatalf("routing block = %v, want session recovery", got.RoutingBlockedStatus)
+	}
+	if got.SessionRecoveryBlockID == nil || *got.SessionRecoveryBlockID != "block-recovery" {
+		t.Fatalf("recovery block id = %v, want block-recovery", got.SessionRecoveryBlockID)
+	}
+	if got.SessionRecoveryReason == nil || *got.SessionRecoveryReason != "native_state_missing" {
+		t.Fatalf("recovery reason = %v, want native_state_missing", got.SessionRecoveryReason)
+	}
+	if got.EarliestRetryAt != nil || got.ScheduledRetryAt != nil {
+		t.Fatalf("recovery run has retry schedule: earliest=%v scheduled=%v", got.EarliestRetryAt, got.ScheduledRetryAt)
+	}
+
+	pending, err := repo.ListPendingProviderCapacityRuns(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list timed provider runs: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("recovery run was eligible for timed unpark: %#v", pending)
+	}
+	if err := repo.ClearRoutingBlock(ctx, run.ID); err != nil {
+		t.Fatalf("clear generic routing block: %v", err)
+	}
+	stillBlocked, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload after generic clear: %v", err)
+	}
+	if stillBlocked.RoutingBlockedStatus == nil ||
+		*stillBlocked.RoutingBlockedStatus != models.RoutingBlockedSessionRecoveryRequired {
+		t.Fatalf("generic clear released recovery run: %v", stillBlocked.RoutingBlockedStatus)
+	}
+	if err := repo.ClearSessionRecoveryPark(ctx, run.ID, "block-recovery"); err != nil {
+		t.Fatalf("clear resolved recovery park: %v", err)
+	}
+	released, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload after recovery clear: %v", err)
+	}
+	if released.RoutingBlockedStatus != nil || released.SessionRecoveryBlockID != nil || released.Status != "queued" {
+		t.Fatalf("resolved recovery park = %+v", released)
+	}
+}
+
 // TestListRunsWaitingOnProvider_MatchesParkedRunForProvider is the
 // happy-path sanity check that the LIKE join over logical_provider_order
 // still finds parked runs after the wildcard escape was added — without

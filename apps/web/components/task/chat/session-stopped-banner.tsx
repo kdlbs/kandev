@@ -25,6 +25,7 @@ import {
 import type {
   BranchRecoveryDetails,
   SessionRecoveryGuardDetails,
+  ContextContinuationDetails,
 } from "@/lib/services/session-recovery-service";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
@@ -49,20 +50,24 @@ function StoppedRecoveryFeedback({
   recoveryNotice,
   branchDetails,
   guardDetails,
+  continuationDetails,
   busyAction,
   onRetry,
   onRestore,
   onNewBranch,
+  onContinueFromHistory,
 }: {
   workspaceId?: string | null;
   recoveryError: Error | null;
   recoveryNotice: string | null;
   branchDetails: BranchRecoveryDetails | null;
   guardDetails: SessionRecoveryGuardDetails | null;
+  continuationDetails: ContextContinuationDetails | null;
   busyAction: SessionRecoveryBusyAction;
   onRetry: () => void;
   onRestore: () => void;
   onNewBranch: () => void;
+  onContinueFromHistory: () => void;
 }) {
   const { t } = useTranslation();
   if (!recoveryError && !recoveryNotice) return null;
@@ -75,19 +80,25 @@ function StoppedRecoveryFeedback({
     testId: "recovery-restore-workspace-button",
     disabled: busyAction !== null || guardBlocksRetry,
   };
-  // A guard refusal has no alternative action: showing "restore" beside it would
-  // just reproduce the same refusal, so only branch-loss gets an alternative.
-  let primaryAction: typeof restoreAction | undefined = restoreAction;
-  if (branchDetails) {
-    primaryAction = {
-      label: t("task:continueOnNewBranch"),
-      onClick: onNewBranch,
-      testId: "recovery-new-branch-button",
-      disabled: busyAction !== null,
-    };
-  } else if (guardDetails) {
-    primaryAction = undefined;
-  }
+  const continuationAction = {
+    label: t("task:continueFromHistory"),
+    onClick: onContinueFromHistory,
+    testId: "recovery-continue-from-history-button",
+    disabled: busyAction !== null,
+  };
+  const newBranchAction = {
+    label: t("task:continueOnNewBranch"),
+    onClick: onNewBranch,
+    testId: "recovery-new-branch-button",
+    disabled: busyAction !== null,
+  };
+  let primaryAction = restoreAction;
+  if (branchDetails) primaryAction = newBranchAction;
+  if (continuationDetails) primaryAction = continuationAction;
+  const secondaryAction = continuationDetails || branchDetails ? restoreAction : undefined;
+  // A guard refusal has no alternative action: showing a recovery action beside
+  // it would only reproduce the same refusal.
+  if (guardDetails) primaryAction = undefined;
   return (
     <>
       {recoveryError ? (
@@ -98,7 +109,7 @@ function StoppedRecoveryFeedback({
           workspaceId={workspaceId}
           compact
           action={primaryAction}
-          secondaryAction={branchDetails ? restoreAction : undefined}
+          secondaryAction={secondaryAction}
           testId="session-recovery-error"
         />
       ) : null}
@@ -147,11 +158,13 @@ function RecoverableSessionActions({
     recoveryError,
     branchDetails,
     guardDetails,
+    continuationDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,
     handleRetry,
     handleNewBranch,
+    handleContinueFromHistory,
   } = recoveryActions ?? localRecoveryActions;
 
   const profileExists = useSessionProfileExists(sessionId);
@@ -175,10 +188,12 @@ function RecoverableSessionActions({
         recoveryNotice={recoveryNotice}
         branchDetails={branchDetails}
         guardDetails={guardDetails}
+        continuationDetails={continuationDetails}
         busyAction={busyAction}
         onRetry={handleRetry}
         onRestore={() => void handleRestore()}
         onNewBranch={handleNewBranch}
+        onContinueFromHistory={() => void handleContinueFromHistory()}
       />
       <RecoverableSessionButtons
         taskId={taskId}
@@ -214,11 +229,13 @@ function CompletedSessionActions({
     recoveryError,
     branchDetails,
     guardDetails,
+    continuationDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,
     handleRetry,
     handleNewBranch,
+    handleContinueFromHistory,
   } = recoveryActions ?? localRecoveryActions;
   const profileExists = useSessionProfileExists(sessionId);
 
@@ -234,10 +251,12 @@ function CompletedSessionActions({
         recoveryNotice={recoveryNotice}
         branchDetails={branchDetails}
         guardDetails={guardDetails}
+        continuationDetails={continuationDetails}
         busyAction={busyAction}
         onRetry={handleRetry}
         onRestore={() => void handleRestore()}
         onNewBranch={handleNewBranch}
+        onContinueFromHistory={() => void handleContinueFromHistory()}
       />
       <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
         {sessionId && taskId && (

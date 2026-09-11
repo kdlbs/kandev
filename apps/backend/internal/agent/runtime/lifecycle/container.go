@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -72,10 +73,15 @@ type ContainerConfig struct {
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
 	// diff stats against the task-recorded base.
-	BaseBranches             map[string]string
-	RemoteContributions      map[string]models.RemoteContribution
-	ContributionDestinations map[string]models.ContributionDestination
-	ComparisonTargets        map[string]models.ComparisonTarget
+	BaseBranches                map[string]string
+	RemoteContributions         map[string]models.RemoteContribution
+	ContributionDestinations    map[string]models.ContributionDestination
+	ComparisonTargets           map[string]models.ComparisonTarget
+	DurableJournalHostPath      string
+	DurableJournalContainerPath string
+	DeliveryStreamID            string
+	DeliveryIncarnationID       string
+	DeliveryHarnessGeneration   uint64
 	// OnProgress streams preparation progress for this launch. The remote
 	// runtime seeds container inputs during the launch rather than before it,
 	// so its warnings reach the user through the launch's own callback rather
@@ -146,6 +152,10 @@ func buildContainerCreateInstanceRequest(
 		RemoteContributions:        config.RemoteContributions,
 		ContributionDestinations:   config.ContributionDestinations,
 		ComparisonTargets:          config.ComparisonTargets,
+		DurableJournalPath:         config.DurableJournalContainerPath,
+		DeliveryStreamID:           config.DeliveryStreamID,
+		DeliveryIncarnationID:      config.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  config.DeliveryHarnessGeneration,
 	}
 }
 
@@ -588,6 +598,13 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 		})
 		cm.logger.Debug("added local clone source mount",
 			zap.String("path", config.LocalClonePath))
+	}
+	if config.DurableJournalHostPath != "" && config.DurableJournalContainerPath != "" {
+		mounts = append(mounts, docker.MountConfig{
+			Source:   filepath.Dir(config.DurableJournalHostPath),
+			Target:   filepath.Dir(config.DurableJournalContainerPath),
+			ReadOnly: false,
+		})
 	}
 
 	// Mount the host agentctl linux binary into the container so user-built

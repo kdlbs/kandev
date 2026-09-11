@@ -234,12 +234,15 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 	}
 
 	payload := ACPSessionCreatedPayload{
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentProfileID:   execution.ID,
-		AgentExecutionID: execution.ID,
-		AttemptID:        attemptID,
-		ACPSessionID:     sessionID,
+		TaskID:                    execution.TaskID,
+		SessionID:                 execution.SessionID,
+		AgentProfileID:            execution.ID,
+		AgentExecutionID:          execution.ID,
+		AttemptID:                 attemptID,
+		ACPSessionID:              sessionID,
+		DeliveryStreamID:          execution.DeliveryStreamID,
+		DeliveryIncarnationID:     execution.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: execution.DeliveryHarnessGeneration,
 	}
 
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)

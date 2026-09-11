@@ -15,7 +15,7 @@ const TERMINAL_STATES = new Set<TaskSessionState>(["COMPLETED", "FAILED", "CANCE
  * Reads from the global store (populated by WS handlers) and subscribes to
  * real-time updates via useSession + useTaskFocus.
  */
-export function useAdvancedSession(taskId: string) {
+export function useAdvancedSession(taskId: string, preferredSessionId?: string) {
   const sessionsForTask = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
@@ -28,6 +28,12 @@ export function useAdvancedSession(taskId: string) {
   // Prefer the globally active session if it belongs to this task, otherwise
   // pick the newest non-terminal session for the task.
   const resolvedSessionId = useMemo(() => {
+    if (
+      preferredSessionId &&
+      sessionsForTask.some((session) => session.id === preferredSessionId)
+    ) {
+      return preferredSessionId;
+    }
     if (activeSession && activeSession.task_id === taskId) {
       return activeSession.id;
     }
@@ -39,7 +45,7 @@ export function useAdvancedSession(taskId: string) {
     }
     // Fall back to the newest session even if terminal
     return sessionsForTask[sessionsForTask.length - 1]?.id ?? null;
-  }, [activeSession, sessionsForTask, taskId]);
+  }, [activeSession, preferredSessionId, sessionsForTask, taskId]);
 
   const { session, isActive } = useSession(resolvedSessionId);
   useTaskFocus(resolvedSessionId);

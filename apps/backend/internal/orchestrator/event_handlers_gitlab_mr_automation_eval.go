@@ -149,6 +149,9 @@ func (s *Service) evalTaskMRLifecycleAtCheckpoint(
 	if errors.Is(err, errTaskMRAgentInactive) {
 		return false, nil
 	}
+	if isSessionRecoveryRequiredError(err) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("dispatch %s prompt: %w", decision.Event, err)
 	}

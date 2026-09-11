@@ -1035,6 +1035,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
 	}
+	journalOwnerID := reqWithWorktree.TaskEnvironmentID
+	if journalOwnerID == "" {
+		// Quick-chat sessions do not have a task environment. The durable
+		// delivery owner still needs a stable identity across agentctl
+		// replacement, so use the Kandev session rather than an execution ID.
+		journalOwnerID = reqWithWorktree.SessionID
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -1063,10 +1070,16 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		SessionID:                      launchInventorySessionID(reqWithWorktree),
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
+		ForceContextContinuation:       reqWithWorktree.ForceContextContinuation,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
+		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
+		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
+		DurableJournalHostRoot:         m.dataDir,
+		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,

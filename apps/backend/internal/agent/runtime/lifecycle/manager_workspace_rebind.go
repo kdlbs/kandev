@@ -200,10 +200,12 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 	}
 	if err := m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousModelID, previousMode); err != nil {
 		execution.SetModelState(previousModel)
-		return err
+		execution.SetModeState(previousMode)
+		return fmt.Errorf("configure rebound ACP session: %w", err)
 	}
-	// The replacement ACP ID becomes externally visible only after its saved
-	// session configuration, including a strict model, has been restored.
+	// Publish the candidate only after model, mode, and configuration-option
+	// restoration succeeds. A failed candidate must leave the prior native
+	// identity authoritative for rollback and operator recovery.
 	execution.ACPSessionID = newSessionID
 	execution.setSessionInitialized(true)
 	execution.resumeContextInjected = false
@@ -259,15 +261,21 @@ func (m *Manager) reapplyReboundSessionConfig(
 			err := client.SetConfigOption(ctx, option.ID, option.CurrentValue)
 			releaseClient()
 			if err != nil {
-				m.logger.Warn("failed to re-apply config option after workspace rebind",
-					zap.String("execution_id", execution.ID),
-					zap.String("config_id", option.ID),
-					zap.Error(err))
+				return fmt.Errorf("failed to re-apply config option %q: %w", option.ID, err)
 			}
 		}
 	}
-	m.reapplySessionModeAfterReset(ctx, execution, sessionID, mode)
+	if err := m.applySessionModeAfterReset(ctx, execution, sessionID, m.effectiveSessionMode(ctx, execution, modeID(mode))); err != nil {
+		return err
+	}
 	return nil
+}
+
+func modeID(mode *CachedModeState) string {
+	if mode == nil {
+		return ""
+	}
+	return mode.CurrentModeID
 }
 
 func waitForReboundAgentReady(ctx context.Context, execution *AgentExecution) error {

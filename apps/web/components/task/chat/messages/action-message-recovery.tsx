@@ -26,6 +26,7 @@ export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAct
   switch (recoveryAction) {
     case "resume":
     case "resume_new_branch":
+    case "continue_from_history":
     case "fresh_start":
     case "runtime_retry":
       return recoveryAction;
@@ -50,11 +51,13 @@ export function SessionRecoveryActionButtons({
     busyAction,
     recoveryError,
     branchDetails,
+    continuationDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,
     handleRetry,
     handleNewBranch,
+    handleContinueFromHistory,
   } = useSessionRecoveryActions({ taskId, sessionId });
 
   const onRecoveryAction = useCallback(
@@ -72,6 +75,28 @@ export function SessionRecoveryActionButtons({
     testId: "recovery-restore-workspace-button",
     disabled: busyAction !== null,
   };
+  const continuationAction = {
+    label: t("task:continueFromHistory"),
+    onClick: () =>
+      void handleContinueFromHistory().then((success) => {
+        if (success) onRecoveryRequested();
+      }),
+    testId: "recovery-continue-from-history-button",
+    disabled: busyAction !== null,
+  };
+  const newBranchAction = {
+    label: t("task:continueOnNewBranch"),
+    onClick: () =>
+      void handleNewBranch().then((success) => {
+        if (success) onRecoveryRequested();
+      }),
+    testId: "recovery-new-branch-button",
+    disabled: busyAction !== null,
+  };
+  let primaryAction = restoreAction;
+  if (branchDetails) primaryAction = newBranchAction;
+  if (continuationDetails) primaryAction = continuationAction;
+  const secondaryAction = continuationDetails || branchDetails ? restoreAction : undefined;
 
   return (
     <>
@@ -81,20 +106,8 @@ export function SessionRecoveryActionButtons({
           onRetry={() => void onRetry()}
           retryDisabled={busyAction !== null}
           compact
-          action={
-            branchDetails
-              ? {
-                  label: t("task:continueOnNewBranch"),
-                  onClick: () =>
-                    void handleNewBranch().then((success) => {
-                      if (success) onRecoveryRequested();
-                    }),
-                  testId: "recovery-new-branch-button",
-                  disabled: busyAction !== null,
-                }
-              : restoreAction
-          }
-          secondaryAction={branchDetails ? restoreAction : undefined}
+          action={primaryAction}
+          secondaryAction={secondaryAction}
           testId="session-recovery-error"
         />
       ) : null}

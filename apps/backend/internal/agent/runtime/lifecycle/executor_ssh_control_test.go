@@ -218,6 +218,7 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 		Metadata: map[string]interface{}{
 			MetadataKeyBaseBranches: map[string]string{"repo-a": "develop"},
 		},
+		DurableJournalOwnerID: "environment-9",
 	}
 
 	got := buildSSHCreateInstanceRequest(req, "/remote/task", "/remote/agentctl")
@@ -227,6 +228,9 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 	}
 	if got.WorkspacePath != "/remote/task" {
 		t.Fatalf("WorkspacePath = %q", got.WorkspacePath)
+	}
+	if got.DurableJournalPath != "/remote/task/.kandev/agentctl-journals/environment-9/delivery.bbolt" {
+		t.Fatalf("DurableJournalPath = %q", got.DurableJournalPath)
 	}
 	if got.AgentType != "opencode" {
 		t.Fatalf("AgentType = %q", got.AgentType)

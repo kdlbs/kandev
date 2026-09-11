@@ -13,6 +13,7 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
   branchRecoveryDetails: () => null,
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
+  contextContinuationDetails: () => null,
   requestSessionRecover: mocks.requestSessionRecover,
   restoreSessionWorkspace: mocks.restoreSessionWorkspace,
 }));

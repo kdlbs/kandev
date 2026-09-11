@@ -2200,6 +2200,7 @@
   "sessionBootstrapCauseUnknown": "The startup operation could not be completed.",
   "resumeFailedWorkspaceReadOnly": "Workspace restored in read-only mode",
   "continueOnNewBranch": "Continue on a new branch",
+  "continueFromHistory": "Continue from saved history",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",
   "sessionRecoveryGuardInProgress": "This session's agent is still being reconciled after the backend restarted. This clears automatically; try again in a few seconds.",
   "sessionRecoveryGuardUnstoppable": "This session's previous agent process couldn't be stopped after the backend restarted. Restart the backend to clear this, then try again.",

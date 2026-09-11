@@ -112,6 +112,7 @@ import (
 	officeskills "github.com/kandev/kandev/internal/office/skills"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Runs queue (Phase 3 of task-model-unification)
@@ -127,6 +128,7 @@ import (
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	repoerrors "github.com/kandev/kandev/internal/task/repository/repoerrors"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -150,6 +152,7 @@ import (
 	"github.com/kandev/kandev/internal/delivery"
 
 	"github.com/kandev/kandev/internal/common/ports"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Build-time variables are set by cmd/kandev before Run is called. Defaults
@@ -640,6 +643,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
 	}
+	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -2500,6 +2504,18 @@ func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
 	return a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
 		executorID, executorProfileID, priority, prompt,
 		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
+}
+
+func (a *officeOrchestratorTaskStarter) GetOpenSessionRecoveryBlock(
+	ctx context.Context, sessionID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetOpenSessionRecoveryBlock(ctx, sessionID)
+}
+
+func (a *officeOrchestratorTaskStarter) GetSessionRecoveryBlock(
+	ctx context.Context, blockID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetSessionRecoveryBlock(ctx, blockID)
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
