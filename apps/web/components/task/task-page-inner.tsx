@@ -22,7 +22,11 @@ import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
-import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
+import {
+  TaskLaunchErrorProvider,
+  useTaskLaunchErrorContext,
+} from "@/components/task/task-launch-error-context";
+import { ownsSessionRecoveryChat } from "@/lib/session-recovery-presentation";
 import {
   buildDebugEntries,
   buildArchivedValue,
@@ -223,6 +227,33 @@ function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDe
   return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
 }
 
+function TaskPageRecoveryFeedback({
+  sessionId,
+  resumption,
+  workspaceId,
+}: {
+  sessionId: string | null;
+  resumption: TaskPageInnerProps["resumption"];
+  workspaceId: string | null;
+}) {
+  const launchErrorContext = useTaskLaunchErrorContext();
+  if (ownsSessionRecoveryChat(launchErrorContext?.statusSummary?.active_error, sessionId)) {
+    return null;
+  }
+  return (
+    <SessionRecoveryFeedback
+      error={resumption.error}
+      notice={resumption.notice}
+      recoveryFailure={resumption.recoveryFailure}
+      onRetry={() => void resumption.resumeSession()}
+      retryDisabled={
+        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+      }
+      workspaceId={workspaceId}
+    />
+  );
+}
+
 /**
  * Derives everything the task page renders from its inputs: the resolved task
  * props plus the three prop bundles handed to the debug overlay, top bar, and
@@ -354,17 +385,6 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 workspaceId={task?.workspace_id ?? null}
               />
             )}
-            <SessionRecoveryFeedback
-              error={props.resumption.error}
-              notice={props.resumption.notice}
-              recoveryFailure={props.resumption.recoveryFailure}
-              onRetry={() => void props.resumption.resumeSession()}
-              retryDisabled={
-                props.resumption.resumptionState === "checking" ||
-                props.resumption.resumptionState === "resuming"
-              }
-              workspaceId={task?.workspace_id ?? null}
-            />
             <TaskArchivedProvider value={archivedValue}>
               <TaskLaunchErrorProvider
                 value={{
@@ -372,8 +392,14 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                   workspaceId: task.workspace_id,
                   statusSummary: task.status_summary,
                   repositories: task.repositories,
+                  automaticRecovery: props.resumption,
                 }}
               >
+                <TaskPageRecoveryFeedback
+                  sessionId={effectiveSessionId}
+                  resumption={props.resumption}
+                  workspaceId={task?.workspace_id ?? null}
+                />
                 <TaskLayout {...layoutProps} />
               </TaskLaunchErrorProvider>
             </TaskArchivedProvider>

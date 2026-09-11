@@ -1908,6 +1908,10 @@ type launchRegistrationGateReader struct {
 	release          chan struct{}
 }
 
+func (r *launchRegistrationGateReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	return &models.Task{ID: id}, nil
+}
+
 type launchRegistrationWriter struct {
 	upserted  chan struct{}
 	deleted   atomic.Int32
@@ -2158,6 +2162,10 @@ type staleLaunchAdmissionReader struct {
 	reads atomic.Int32
 }
 
+func (*staleLaunchAdmissionReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	return &models.Task{ID: id}, nil
+}
+
 func (r *staleLaunchAdmissionReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
 	state := models.TaskSessionStateStarting
 	if r.reads.Add(1) > 1 {
@@ -2183,7 +2191,7 @@ func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T
 	reader := &staleLaunchAdmissionReader{}
 	mgr.SetExecutorProfileReader(reader)
 
-	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race")
+	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race", executionAdmissionAgent)
 	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
 		t.Fatalf("ensureLaunchSessionStillActive error = %v, want terminal-session validation", err)
 	}

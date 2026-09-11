@@ -1640,6 +1640,7 @@ func NewService(
 		return nil
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
+	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
 	exec.SetOnSessionStarting(func(
 		ctx context.Context,
 		taskID string,

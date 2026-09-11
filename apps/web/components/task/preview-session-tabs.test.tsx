@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- preview lifecycle and Plan-tab contracts share one store harness. */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import {
   act,
   cleanup,
@@ -18,6 +19,7 @@ import type { TaskPlan } from "@/lib/types/http-agents";
 
 const mocks = vi.hoisted(() => ({
   taskChatPanelProps: null as null | Record<string, unknown>,
+  taskLaunchErrorProviderValue: null as null | Record<string, unknown>,
   sessions: [] as TaskSession[],
   agentProfiles: [] as AgentProfileOption[],
   primarySessionId: null as string | null,
@@ -47,11 +49,26 @@ vi.mock("./task-chat-panel", () => ({
     return <div data-testid="preview-chat" />;
   },
 }));
+vi.mock("./task-launch-error-context", () => ({
+  TaskLaunchErrorProvider: ({
+    value,
+    children,
+  }: {
+    value: Record<string, unknown>;
+    children: ReactNode;
+  }) => {
+    mocks.taskLaunchErrorProviderValue = value;
+    return <>{children}</>;
+  },
+}));
 vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: mocks.useTaskSessions,
 }));
 vi.mock("@/hooks/domains/session/use-session-resumption", () => ({
   useSessionResumption: mocks.useSessionResumption,
+}));
+vi.mock("@/hooks/domains/task/use-task-status-summary", () => ({
+  useTaskStatusSummary: () => undefined,
 }));
 vi.mock("@/lib/api/domains/plan-api", () => ({
   getTaskPlan: mocks.getTaskPlan,
@@ -278,6 +295,7 @@ const session: TaskSession = {
 afterEach(() => {
   cleanup();
   mocks.taskChatPanelProps = null;
+  mocks.taskLaunchErrorProviderValue = null;
   mocks.sessions = [];
   mocks.agentProfiles = [];
   mocks.primarySessionId = null;
@@ -314,6 +332,24 @@ describe("PreviewSessionBody delivery", () => {
       hideSessionsDropdown: true,
     });
     expect(mocks.taskChatPanelProps).not.toHaveProperty("onSend");
+  });
+
+  it("passes automatic recovery results to the session-owned preview provider", () => {
+    const recovery = {
+      resumptionState: "error" as const,
+      error: "Session recovery failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed" as const,
+        resumeError: "raw resume failure",
+        restoreError: "raw restore failure",
+      },
+      resumeSession: vi.fn(),
+    };
+
+    render(<PreviewSessionBody session={session} taskId={TASK_ID} resumption={recovery} />);
+
+    expect(mocks.taskLaunchErrorProviderValue?.automaticRecovery).toBe(recovery);
   });
 });
 

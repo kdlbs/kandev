@@ -414,12 +414,9 @@ func newTerminalSessionManager(t *testing.T, state models.TaskSessionState) (*Ma
 	return mgr, backend
 }
 
-// A shell terminal left open on a terminal session reconnects on a timer, and
-// the file, git, LSP and port panels poll their own session-keyed path. Every
-// entry point must be rejected from the session state alone: creating the
-// runtime instance first and rolling it back turned an idle panel into a
-// spawn/teardown loop for as long as the tab stayed open.
-func TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance(t *testing.T) {
+// Workspace surfaces can reconnect a retained runtime for a terminal session,
+// but they must not promote it to an agent launch.
+func TestEnsureExecutionAllowsWorkspaceRestoreForTerminalSession(t *testing.T) {
 	entryPoints := []struct {
 		name string
 		call func(*Manager) error
@@ -447,17 +444,19 @@ func TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance(t *testing
 			t.Run(entryPoint.name+"/"+string(state), func(t *testing.T) {
 				mgr, backend := newTerminalSessionManager(t, state)
 
-				if err := entryPoint.call(mgr); !errors.Is(err, ErrSessionTerminal) {
-					t.Fatalf("%s error = %v, want ErrSessionTerminal", entryPoint.name, err)
+				if err := entryPoint.call(mgr); err != nil {
+					t.Fatalf("%s returned error: %v", entryPoint.name, err)
 				}
-				if got := backend.createCount.Load(); got != 0 {
-					t.Fatalf("CreateInstance calls = %d, want 0", got)
+				if got := backend.createCount.Load(); got != 1 {
+					t.Fatalf("CreateInstance calls = %d, want 1", got)
 				}
 				if got := backend.stopCount.Load(); got != 0 {
 					t.Fatalf("StopInstance calls = %d, want 0", got)
 				}
-				if _, exists := mgr.executionStore.GetBySessionID(terminalSessionID); exists {
-					t.Fatal("terminal session must not register an execution")
+				if execution, exists := mgr.executionStore.GetBySessionID(terminalSessionID); !exists {
+					t.Fatal("workspace restore did not register an execution")
+				} else if execution.AgentCommand != "" {
+					t.Fatalf("workspace restore promoted an agent command: %q", execution.AgentCommand)
 				}
 			})
 		}

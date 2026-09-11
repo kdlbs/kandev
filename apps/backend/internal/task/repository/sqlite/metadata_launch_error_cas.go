@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type metadataCASMode uint8
@@ -18,6 +19,11 @@ type metadataCASMode uint8
 const (
 	metadataCASExpected metadataCASMode = iota
 	metadataCASDifferent
+)
+
+const (
+	postgresMetadataObject = "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+	sqliteMetadataObject   = "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
 )
 
 // SetSessionMetadataKeyIfStamp replaces one session metadata value only when
@@ -162,9 +168,9 @@ func metadataRecordStamp(metadataJSON, key string) (string, error) {
 
 func metadataKeyUpdateQuery(table, driver string) string {
 	if dialect.IsPostgres(driver) {
-		return "UPDATE " + table + " SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ?"
+		return "UPDATE " + table + " SET metadata = jsonb_set(" + postgresMetadataObject + ", ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ?"
 	}
-	return "UPDATE " + table + " SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?"
+	return "UPDATE " + table + " SET metadata = json_set(" + sqliteMetadataObject + ", ?, json(?)), updated_at = ? WHERE id = ?"
 }
 
 func metadataKeyUpdateArgs(driver, key, payload string, updatedAt time.Time, entityID string) []interface{} {
@@ -173,4 +179,84 @@ func metadataKeyUpdateArgs(driver, key, payload string, updatedAt time.Time, ent
 		path = jsonPath(key)
 	}
 	return []interface{}{path, payload, updatedAt, entityID}
+}
+
+// CommitBootstrapFailureIfCurrentExecution atomically stores the correlated
+// bootstrap error and transitions the session to FAILED. The session state,
+// execution-row identity, and absent-or-stamped metadata condition are all
+// predicates of the same write, so a successor cannot be installed between
+// an ownership read and the failure mutation.
+func (r *Repository) CommitBootstrapFailureIfCurrentExecution(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (bool, time.Time, error) {
+	payload, err := json.Marshal(errorValue)
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("failed to serialize bootstrap failure: %w", err)
+	}
+	now := r.nowUTC()
+	completedAt := now
+	query, args := bootstrapFailureCommitQuery(r.db.DriverName(), string(payload), errorValue.Message, now, completedAt,
+		taskID, sessionID, agentExecutionID, string(expectedState), expectedStamp)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows > 0, now, nil
+}
+
+func bootstrapFailureCommitQuery(
+	driver, payload, errorMessage string, now, completedAt time.Time,
+	taskID, sessionID, agentExecutionID, expectedState, expectedStamp string,
+) (string, []interface{}) {
+	if dialect.IsPostgres(driver) {
+		base := postgresMetadataObject
+		stamp := "COALESCE(NULLIF(jsonb_extract_path_text(" + base + ", 'last_agent_error', 'stamp'), ''), jsonb_extract_path_text(" + base + ", 'last_agent_error', 'occurred_at') || ':' || jsonb_extract_path_text(" + base + ", 'last_agent_error', 'message'))"
+		query := `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(` + base + `, '{last_agent_error}', ?::jsonb, true)::text,
+				state = ?, error_message = ?, completed_at = ?, updated_at = ?
+			WHERE id = ? AND task_id = ? AND state = ?
+				AND EXISTS (
+					SELECT 1 FROM executors_running
+					WHERE session_id = ? AND agent_execution_id = ?
+				)
+				AND (
+					(? = '' AND (jsonb_extract_path(` + base + `, 'last_agent_error') IS NULL OR jsonb_extract_path(` + base + `, 'last_agent_error') = 'null'::jsonb))
+					OR (? <> '' AND ` + stamp + ` = ?)
+				)
+		`
+		args := []interface{}{payload, models.TaskSessionStateFailed, errorMessage, completedAt, now,
+			sessionID, taskID, expectedState, sessionID, agentExecutionID,
+			expectedStamp, expectedStamp, expectedStamp}
+		return query, args
+	}
+
+	base := sqliteMetadataObject
+	stamp := "COALESCE(NULLIF(json_extract(" + base + ", '$.last_agent_error.stamp'), ''), json_extract(" + base + ", '$.last_agent_error.occurred_at') || ':' || json_extract(" + base + ", '$.last_agent_error.message'))"
+	query := `
+		UPDATE task_sessions
+		SET metadata = json_set(` + base + `, '$.last_agent_error', json(?)),
+			state = ?, error_message = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND state = ?
+			AND EXISTS (
+				SELECT 1 FROM executors_running
+				WHERE session_id = ? AND agent_execution_id = ?
+			)
+			AND (
+				(? = '' AND (json_type(` + base + `, '$.last_agent_error') IS NULL OR json_type(` + base + `, '$.last_agent_error') = 'null'))
+				OR (? <> '' AND ` + stamp + ` = ?)
+			)
+	`
+	args := []interface{}{payload, models.TaskSessionStateFailed, errorMessage, completedAt, now,
+		sessionID, taskID, expectedState, sessionID, agentExecutionID,
+		expectedStamp, expectedStamp, expectedStamp}
+	return query, args
 }

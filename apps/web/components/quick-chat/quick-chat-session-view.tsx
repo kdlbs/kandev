@@ -4,8 +4,11 @@ import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { useTask } from "@/hooks/use-task";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
+import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
 import { useTranslation } from "react-i18next";
@@ -57,6 +60,10 @@ export function QuickChatSessionView({
   const taskArchiveState = resolveTaskArchiveState(taskId, task, quickChatTaskId);
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState);
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
+  const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
+  const bootstrapRecoveryError = taskId
+    ? selectSessionRecoveryError(statusSummary?.active_error, session.sessionId)
+    : null;
   const recoveryFeedback = (
     <SessionRecoveryFeedback
       error={resumption.error}
@@ -81,7 +88,17 @@ export function QuickChatSessionView({
   const isConfig = session.kind === "config";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {recoveryFeedback}
+      {bootstrapRecoveryError ? (
+        <SessionBootstrapRecoveryCard
+          taskId={taskId!}
+          sessionId={session.sessionId}
+          workspaceId={task?.workspaceId ?? null}
+          error={bootstrapRecoveryError}
+          automaticRecovery={resumption}
+        />
+      ) : (
+        recoveryFeedback
+      )}
       <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
           sessionId={session.sessionId}

@@ -34,6 +34,13 @@ var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 // will never recover an execution.
 var ErrSessionTerminal = errors.New("session is terminal")
 
+type executionAdmissionPurpose uint8
+
+const (
+	executionAdmissionAgent executionAdmissionPurpose = iota
+	executionAdmissionWorkspaceOnly
+)
+
 // ResolveSessionRuntime returns the runtime selected for a session without
 // creating or resuming its execution. Session-scoped handlers can use this to
 // reject unsupported runtimes before GetOrEnsureExecution starts resources.
@@ -97,6 +104,9 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 
 	// Fast path: execution already in memory
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionWorkspaceOnly); err != nil {
+			return nil, err
+		}
 		return execution, nil
 	}
 
@@ -135,6 +145,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	}
 
 	if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
+		if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionWorkspaceOnly); err != nil {
+			return nil, err
+		}
 		return execution, nil
 	}
 
@@ -163,15 +176,26 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if info.SessionID == "" {
 		return nil, fmt.Errorf("task environment %s has no task session", taskEnvironmentID)
 	}
+	if check := m.execAccessCheck(); check != nil {
+		if err := check(ctx, info.SessionID); err != nil {
+			return nil, err
+		}
+	}
 
 	// Share the sessionID-keyed bucket so we deduplicate against any concurrent
 	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
 	// the same session.
 	value, err := m.doCoalescedExecution(ctx, info.SessionID, func(sharedCtx context.Context) (interface{}, error) {
 		if execution, exists := m.executionStore.GetBySessionID(info.SessionID); exists {
+			if err := m.ensureLaunchSessionStillActive(sharedCtx, info.SessionID, executionAdmissionWorkspaceOnly); err != nil {
+				return nil, err
+			}
 			return execution, nil
 		}
 		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
+			if err := m.ensureLaunchSessionStillActive(sharedCtx, execution.SessionID, executionAdmissionWorkspaceOnly); err != nil {
+				return nil, err
+			}
 			return execution, nil
 		}
 		// createExecution publishes AgentctlStarting before spawning the
@@ -202,9 +226,17 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
+	if check := m.execAccessCheck(); check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return nil, err
+		}
+	}
 
 	// Fast path: execution already in memory
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionWorkspaceOnly); err != nil {
+			return nil, err
+		}
 		return execution, nil
 	}
 
@@ -294,10 +326,15 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
 	if taskID == "" {
 		taskID = info.TaskID
+	} else if info.TaskID == "" || info.TaskID != taskID {
+		return nil, fmt.Errorf("session %s is not owned by task %s", sessionID, taskID)
 	}
 
 	if info.TaskEnvironmentID != "" {
 		if execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
+			if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionWorkspaceOnly); err != nil {
+				return nil, err
+			}
 			m.logger.Info("reusing existing execution for task environment",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -636,7 +673,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	// a timer; without this every retry paid for a full instance creation that
 	// the post-creation check below tore straight back down. That check stays —
 	// it guards the session that terminalizes *during* creation.
-	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID, executionAdmissionWorkspaceOnly); err != nil {
 		return nil, err
 	}
 	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
@@ -673,7 +710,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	execution := m.initializeCreatedExecution(ctx, taskID, info, executionID, rt, runtimeInstance, preparation)
 
-	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID, executionAdmissionWorkspaceOnly); err != nil {
 		m.rollbackLaunchExecution(ctx, rt, runtimeInstance, execution, "session ended during runtime creation")
 		return nil, err
 	}
@@ -707,7 +744,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		m.rollbackRegisteredLaunchAfterPersistFailure(rt, runtimeInstance, execution)
 		return nil, errors.Join(fmt.Errorf("persist execution registration: %w", err), secretCleanupErr)
 	}
-	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID, executionAdmissionWorkspaceOnly); err != nil {
 		if errors.Is(err, errTaskCleanupActive) {
 			m.rollbackRegisteredLaunchForTaskCleanup(rt, runtimeInstance, execution)
 		} else {

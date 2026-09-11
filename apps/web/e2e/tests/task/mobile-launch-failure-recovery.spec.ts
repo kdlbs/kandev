@@ -9,6 +9,7 @@ import {
 } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 async function waitForLaunchError(apiClient: ApiClient, workspaceId: string, taskId: string) {
@@ -232,5 +233,91 @@ test.describe("mobile task launch failure recovery", () => {
       restoreSeedRepositoryOrigin(seedData);
       resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     }
+  });
+
+  test("renders the bootstrap recovery card with stacked touch controls", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      `Mobile bootstrap recovery presentation ${Date.now()}`,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("mobile bootstrap recovery fixture has no session");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "Waiting for mobile bootstrap recovery fixture to settle",
+    );
+
+    await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: task.session_id,
+      agentProfileId: seedData.agentProfileId,
+      metadata: {
+        last_agent_error: {
+          message: "The agent could not start.",
+          occurred_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          agent_execution_id: "mobile-bootstrap-execution-e2e",
+          execution_id: "mobile-bootstrap-execution-e2e",
+          phase: "bootstrap",
+          attempt_id: "mobile-bootstrap-execution-e2e",
+          code: "generic_launch_failure",
+          details: "agent_bootstrap; cause=permission_denied",
+          stamp: "mobile-bootstrap-presentation-e2e",
+          causes: [
+            {
+              operation: "resume",
+              code: "permission_denied",
+              detail: "The required contribution access was denied.",
+            },
+          ],
+        },
+      },
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const card = testPage.getByTestId("session-bootstrap-recovery-card");
+    await expect(card).toHaveCount(1, { timeout: 30_000 });
+    await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(0);
+    await expect(testPage.getByTestId("session-recovery-error")).toHaveCount(0);
+
+    for (const testId of [
+      "recovery-resume-button",
+      "recovery-restore-workspace-button",
+      "recovery-fresh-button",
+    ]) {
+      const button = card.getByTestId(testId);
+      await expect(button).toBeVisible();
+      await expect(button).toBeInViewport();
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+
+    const details = card.getByTestId("session-bootstrap-recovery-details");
+    await expect(details).not.toHaveAttribute("open");
+    await details.getByText("Recovery details").tap();
+    await expect(details).toHaveAttribute("open", "");
+    await expect(card).toContainText("The required contribution access was denied.");
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile bootstrap recovery presentation");
+
+    await testPage.screenshot({
+      path: testInfo.outputPath("bootstrap-recovery-presentation-mobile.png"),
+      fullPage: true,
+    });
   });
 });

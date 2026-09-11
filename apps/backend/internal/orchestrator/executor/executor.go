@@ -110,6 +110,38 @@ type sessionMetadataKeyStateSetter interface {
 	) (bool, error)
 }
 
+// sessionMetadataErrorCASWriter is the optional persistence seam for
+// execution-scoped bootstrap errors. Production repositories implement both
+// operations atomically; legacy test stores can fall back to the ordinary
+// metadata setter after the executor's current-execution fence.
+type sessionMetadataErrorCASWriter interface {
+	SetSessionMetadataKeyIfAbsent(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+	) (bool, error)
+	SetSessionMetadataKeyIfStamp(
+		ctx context.Context,
+		sessionID, key, expectedStamp string,
+		value interface{},
+	) (bool, error)
+}
+
+// bootstrapFailureCommitter is the atomic repository boundary for an
+// asynchronous process-start failure. The expected state and error stamp are
+// captured immediately before the commit; the repository must also require
+// the execution row to still carry agentExecutionID before changing either
+// metadata or session state.
+type bootstrapFailureCommitter interface {
+	CommitBootstrapFailureIfCurrentExecution(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
+}
+
 // officeTaskSessionCreator lets repositories make Office-session origin
 // selection part of the insert transaction. Test and legacy stores can omit
 // it; the executor keeps a per-task fallback lock for those implementations.
@@ -768,6 +800,18 @@ type SessionStateTransitionFunc func(
 	onChanged func(),
 ) (changed bool, finalState models.TaskSessionState, err error)
 
+// BootstrapFailureTransitionFunc atomically commits a bootstrap error and
+// its FAILED session transition, then publishes the accepted transition.
+// expectedState and expectedStamp come from the executor's final ownership
+// read and are checked again by the repository commit.
+type BootstrapFailureTransitionFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (changed bool, finalState models.TaskSessionState, err error)
+
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
 // session-row updates such as metadata. expectedState is the state observed
@@ -904,6 +948,11 @@ type Executor struct {
 	// Strict session-state callback used by operations that need to distinguish
 	// accepted writes from terminal/no-op races.
 	onSessionStateTransition SessionStateTransitionFunc
+
+	// Atomic bootstrap-failure callback used by the orchestrator to commit the
+	// typed error, FAILED state, and corresponding publication as one ownership
+	// decision.
+	onBootstrapFailureTransition BootstrapFailureTransitionFunc
 
 	// Callback for STARTING writes that carry full session-row changes. Set by
 	// the orchestrator so launch/resume/model-switch transitions serialize with
@@ -1200,6 +1249,12 @@ func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 // detailed lifecycle operations.
 func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 	e.onSessionStateTransition = fn
+}
+
+// SetOnBootstrapFailureTransition wires the atomic bootstrap-failure commit
+// used by asynchronous agent-process start failures.
+func (e *Executor) SetOnBootstrapFailureTransition(fn BootstrapFailureTransitionFunc) {
+	e.onBootstrapFailureTransition = fn
 }
 
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.
