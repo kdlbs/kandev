@@ -97,4 +97,8 @@ pnpm exec vitest run lib/api/domains/repository-sets-api.test.ts lib/ws/handlers
 - Kept application additive and idempotent, blocked unavailable copied bases,
   and preserved separate local base and checkout payload values.
 - Updated Save as set to send ordered member objects with effective bases.
+- Review follow-up: Save as set reports duplicate rows separately from
+  non-workspace rows. It explains that the first row and its base choice win.
+  Focused tests cover singular/plural counts, mixed exclusions, unchanged drafts,
+  and first-row bases in worktree, local, and fresh-branch modes.
 - Verification: the work-order Vitest command passed 6 files and 82 tests.

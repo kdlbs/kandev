@@ -269,6 +269,28 @@ describe("selectedRepositoryIdsForSet", () => {
 });
 
 describe("selectedRepositoryMembersForSet", () => {
+  // Reviewer-requested coverage of the existing first-row-wins contract.
+  it.each([
+    { isLocalExecutor: false, freshBranchEnabled: false, expected: "saved-base" },
+    { isLocalExecutor: true, freshBranchEnabled: false, expected: "saved-base" },
+    { isLocalExecutor: true, freshBranchEnabled: true, expected: "develop" },
+  ])("keeps the first duplicate's effective base: %o", (mode) => {
+    const rows = [
+      { ...row(ROW_0, REPO_WEB, "develop"), baseBranch: "saved-base" },
+      row("row-1", REPO_WEB, "feature/x"),
+      row("row-2", REPO_GATEWAY, "develop"),
+    ];
+    expect(
+      selectedRepositoryMembersForSet(rows, [], mode.isLocalExecutor, mode.freshBranchEnabled),
+    ).toEqual([
+      { repositoryId: REPO_WEB, baseBranch: mode.expected },
+      {
+        repositoryId: REPO_GATEWAY,
+        baseBranch: mode.isLocalExecutor && !mode.freshBranchEnabled ? "" : "develop",
+      },
+    ]);
+  });
+
   it("captures the selected fork base while fresh-branch mode is enabled", () => {
     const repository = {
       ...AVAILABLE[0],

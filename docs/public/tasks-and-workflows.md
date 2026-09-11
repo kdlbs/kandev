@@ -209,6 +209,10 @@ Define a set in either place:
 - **New Task → Sets → Save as set**, which captures the repositories currently selected in the form
   without disturbing the task you are creating.
 
+Each set contains a repository only once. If the form contains several rows for one repository,
+**Save as set** keeps the first row and its base choice. The dialog reports additional rows separately
+from rows that are not workspace repositories. The task draft keeps all its rows.
+
 Apply one from the **Sets** control beside **add repository** in **New Task** and **New subtask**.
 Applying a set adds one row per repository, in the set's order. It is additive and repeatable:
 

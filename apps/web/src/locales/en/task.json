@@ -1,4 +1,6 @@
 {
+  "repositorySetsSaveDuplicateRows_one": "{{count}} additional row is not included. Only the first row for each repository is saved, including its base choice.",
+  "repositorySetsSaveDuplicateRows_other": "{{count}} additional rows are not included. Only the first row for each repository is saved, including its base choice.",
   "agentCliNotInstalled": "Agent CLI not installed",
   "agentProbeFailed": "Agent probe failed",
   "aPullRequestAlreadyExistsFor": "A pull request already exists for this task",

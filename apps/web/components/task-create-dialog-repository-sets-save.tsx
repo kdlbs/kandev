@@ -70,6 +70,7 @@ export function SaveRepositorySetDialog({
   // A row that names a discovered local path, a remote URL, or nothing at all is
   // not a workspace repository, so it cannot be a member.
   const excludedRowCount = rows.filter((row) => !row.repositoryId).length;
+  const duplicateRowCount = rows.length - excludedRowCount - repositoryIds.length;
 
   const handleSubmit = async () => {
     const trimmed = name.trim();
@@ -110,6 +111,7 @@ export function SaveRepositorySetDialog({
             description={description}
             memberCount={repositoryIds.length}
             excludedRowCount={excludedRowCount}
+            duplicateRowCount={duplicateRowCount}
             error={error}
             onNameChange={setName}
             onDescriptionChange={setDescription}
@@ -138,6 +140,7 @@ type SaveRepositorySetFieldsProps = {
   description: string;
   memberCount: number;
   excludedRowCount: number;
+  duplicateRowCount: number;
   error: string | null;
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
@@ -149,6 +152,7 @@ function SaveRepositorySetFields({
   description,
   memberCount,
   excludedRowCount,
+  duplicateRowCount,
   error,
   onNameChange,
   onDescriptionChange,
@@ -181,6 +185,11 @@ function SaveRepositorySetFields({
       {excludedRowCount > 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="repository-set-save-excluded">
           {t("task:repositorySetsSaveExcludedRows", { count: excludedRowCount })}
+        </p>
+      ) : null}
+      {duplicateRowCount > 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="repository-set-save-duplicates">
+          {t("task:repositorySetsSaveDuplicateRows", { count: duplicateRowCount })}
         </p>
       ) : null}
       {error ? (

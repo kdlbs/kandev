@@ -130,6 +130,9 @@ do not select every branch for each task.
   workspace repositories and effective bases shown in the task form. The dialog
   shall state that it saves base choices. A `Task default` choice shall remain
   an empty saved base.
+  When a repository appears on several rows, saving shall keep the first row and
+  its effective base. The dialog shall explain this rule and report additional
+  rows separately from rows that are not workspace repositories.
 - **AC-WORKSPACES-REPOSITORY-SETS-003.10:** The control shall remain absent from
   Quick Chat, Remote URL, and No repository modes. Executor capability shall not
   hide or disable the control.

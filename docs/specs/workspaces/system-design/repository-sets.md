@@ -212,6 +212,10 @@ copied base so normal task-form branch autoselection runs again.
 repository and the effective base in the draft. A `Task default` choice sends
 an empty base. The visible summary states that base choices are included.
 
+Saving keeps the first row for each workspace repository, including its effective
+base. The dialog counts additional rows separately from non-workspace rows and
+explains that only the first row is saved. Neither exclusion changes the draft.
+
 ## Local executor semantics
 
 The task draft keeps these values separate:

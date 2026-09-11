@@ -1,4 +1,6 @@
 {
+  "repositorySetsSaveDuplicateRows_one": "{{count}} àďďĩţĩōńàĺ ŕōŵ ĩś ńōţ ĩńćĺũďēď. Ōńĺŷ ţĥē ƒĩŕśţ ŕōŵ ƒōŕ ēàćĥ ŕēƥōśĩţōŕŷ ĩś śàvēď, ĩńćĺũďĩńĝ ĩţś ƀàśē ćĥōĩćē.",
+  "repositorySetsSaveDuplicateRows_other": "{{count}} àďďĩţĩōńàĺ ŕōŵś àŕē ńōţ ĩńćĺũďēď. Ōńĺŷ ţĥē ƒĩŕśţ ŕōŵ ƒōŕ ēàćĥ ŕēƥōśĩţōŕŷ ĩś śàvēď, ĩńćĺũďĩńĝ ĩţś ƀàśē ćĥōĩćē.",
   "agentCliNotInstalled": "Àĝēńţ ĆĹĨ ńōţ ĩńśţàĺĺēď",
   "agentProbeFailed": "Àĝēńţ ƥŕōƀē ƒàĩĺēď",
   "aPullRequestAlreadyExistsFor": "À ƥũĺĺ ŕēqũēśţ àĺŕēàďŷ ēxĩśţś ƒōŕ ţĥĩś ţàśķ",

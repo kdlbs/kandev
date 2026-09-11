@@ -1,4 +1,6 @@
 {
+  "repositorySetsSaveDuplicateRows_one": "{{count}} linha adicional não é incluída. Só é guardada a primeira linha de cada repositório, incluindo a escolha da base.",
+  "repositorySetsSaveDuplicateRows_other": "{{count}} linhas adicionais não são incluídas. Só é guardada a primeira linha de cada repositório, incluindo a escolha da base.",
   "agentCliNotInstalled": "CLI do agente não instalado",
   "agentProbeFailed": "A sondagem do agente falhou",
   "aPullRequestAlreadyExistsFor": "Já existe um pull request para esta tarefa",

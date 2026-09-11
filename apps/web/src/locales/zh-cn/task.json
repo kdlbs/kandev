@@ -1,4 +1,6 @@
 {
+  "repositorySetsSaveDuplicateRows_one": "不包含另外 {{count}} 行。每个仓库只保存第一行及其基准分支选择。",
+  "repositorySetsSaveDuplicateRows_other": "不包含另外 {{count}} 行。每个仓库只保存第一行及其基准分支选择。",
   "agentCliNotInstalled": "未安装智能体 CLI",
   "agentProbeFailed": "智能体探测失败",
   "aPullRequestAlreadyExistsFor": "此任务已存在拉取请求",

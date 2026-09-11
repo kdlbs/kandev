@@ -1,4 +1,6 @@
 {
+  "repositorySetsSaveDuplicateRows_one": "不包含另外 {{count}} 行。每個儲存庫只儲存第一行及其基準分支選擇。",
+  "repositorySetsSaveDuplicateRows_other": "不包含另外 {{count}} 行。每個儲存庫只儲存第一行及其基準分支選擇。",
   "agentCliNotInstalled": "未安裝代理程式 CLI",
   "agentProbeFailed": "代理程式探測失敗",
   "aPullRequestAlreadyExistsFor": "此任務已存在提取要求",
