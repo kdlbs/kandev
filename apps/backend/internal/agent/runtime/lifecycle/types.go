@@ -1144,6 +1144,10 @@ type WorkspaceInfo struct {
 	TaskID            string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
+	// used to guard host worktree recovery across inherited environments.
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
 	// ValidatedTaskEnvironmentID and ValidatedExecutorType identify the
 	// environment and executor ownership used during workspace admission. They
 	// are populated from the durable task environment, not from a session path.

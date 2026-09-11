@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const recoveryGitDirName = ".git"
@@ -44,6 +46,17 @@ type recoveryRecord struct {
 // can make the path change atomic with their row update.
 type CompareAndSwapWorktreeStore interface {
 	CompareAndSwapWorktree(ctx context.Context, expected, replacement *Worktree) (bool, error)
+}
+
+// CompareAndSwapWorktreeWithRecoveryClaim is the production publication
+// boundary. The store must validate the environment owner, generation, and
+// durable claim in the same transaction as the worktree pointer update.
+type CompareAndSwapWorktreeWithRecoveryClaimStore interface {
+	CompareAndSwapWorktreeWithRecoveryClaim(
+		ctx context.Context,
+		expected, replacement *Worktree,
+		claim *models.TaskEnvironmentRecoveryClaim,
+	) (bool, error)
 }
 
 var errRecoveryOperationClaimed = errors.New("recovery operation is currently claimed")
@@ -89,8 +102,12 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
 		return nil, fmt.Errorf("%w: recovery ownership validation failed: %w", ErrWorktreeCorrupted, err)
 	}
+	if err := m.validateRecordedRecoveryBranch(ctx, wt, req.RepositoryPath); err != nil {
+		return nil, err
+	}
+	branch := strings.TrimSpace(wt.Branch)
 	jobPath := wt.Path + ".kandev-recovery.json"
-	record, snapshotPath, claim, err := beginRecovery(wt, jobPath)
+	record, snapshotPath, claim, err := beginRecoveryWithOperation(wt, jobPath, req.RecoveryOperationID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,13 +122,6 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	if err := writeRecoveryRecord(jobPath, record); err != nil {
 		return nil, err
 	}
-	branch := wt.Branch
-	if branch == "" {
-		branch = wt.BaseBranch
-	}
-	if branch == "" {
-		return nil, blockRecovery(jobPath, record, fmt.Errorf("cannot rematerialize without a validated branch"))
-	}
 	replacementPath := wt.Path + ".recovered-" + record.OperationID[:8]
 	replacementBranch := branch + "-recovered-" + record.OperationID[:8]
 	if err := m.ensureRecoveryReplacementWorktree(ctx, req.RepositoryPath, replacementBranch, replacementPath, branch); err != nil {
@@ -125,7 +135,26 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	replacement.Path = replacementPath
 	replacement.Branch = replacementBranch
 	replacement.UpdatedAt = time.Now().UTC()
-	if cas, ok := m.store.(CompareAndSwapWorktreeStore); ok {
+	if req.RecoveryClaim != nil {
+		cas, ok := m.store.(CompareAndSwapWorktreeWithRecoveryClaimStore)
+		if !ok {
+			return nil, blockRecovery(jobPath, record, fmt.Errorf("durable recovery claim publication is unavailable"))
+		}
+		swapped, casErr := cas.CompareAndSwapWorktreeWithRecoveryClaim(ctx, wt, &replacement, req.RecoveryClaim)
+		if casErr != nil {
+			return nil, fmt.Errorf("%w: recovery compare-and-swap failed: %w", ErrWorktreeCorrupted, casErr)
+		}
+		if !swapped {
+			persisted, lookupErr := m.persistedRecoveryReplacement(ctx, wt, &replacement)
+			if lookupErr != nil {
+				return nil, fmt.Errorf("%w: inspect recovery compare-and-swap result: %w", ErrWorktreeCorrupted, lookupErr)
+			}
+			if persisted == nil {
+				return nil, blockRecovery(jobPath, record, fmt.Errorf("recovery compare-and-swap rejected"))
+			}
+			return m.completeRecovery(jobPath, record, wt, persisted)
+		}
+	} else if cas, ok := m.store.(CompareAndSwapWorktreeStore); ok {
 		swapped, casErr := cas.CompareAndSwapWorktree(ctx, wt, &replacement)
 		if casErr != nil {
 			return nil, fmt.Errorf("%w: recovery compare-and-swap failed: %w", ErrWorktreeCorrupted, casErr)
@@ -144,6 +173,34 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 		return nil, blockRecovery(jobPath, record, err)
 	}
 	return m.completeRecovery(jobPath, record, wt, &replacement)
+}
+
+func (m *Manager) validateRecordedRecoveryBranch(ctx context.Context, wt *Worktree, repositoryPath string) error {
+	branch := strings.TrimSpace(wt.Branch)
+	if branch == "" {
+		return &WorktreeRecoveryError{
+			TaskID: wt.TaskID, Checkout: wt.Path,
+			Reason: "cannot recover checkout without its recorded branch",
+		}
+	}
+	branchRef := branch
+	if !strings.HasPrefix(branchRef, "refs/") {
+		branchRef = "refs/heads/" + branchRef
+	}
+	branchExists, branchErr := m.branchExists(ctx, repositoryPath, branchRef)
+	if branchErr != nil {
+		return &WorktreeRecoveryError{
+			TaskID: wt.TaskID, Checkout: wt.Path,
+			Reason: fmt.Sprintf("cannot validate recorded branch %q: %v", branch, branchErr),
+		}
+	}
+	if !branchExists {
+		return &WorktreeRecoveryError{
+			TaskID: wt.TaskID, Checkout: wt.Path,
+			Reason: fmt.Sprintf("recorded branch %q is unavailable; explicit branch replacement is required", branch),
+		}
+	}
+	return nil
 }
 
 func (m *Manager) persistedRecoveryReplacement(ctx context.Context, expected, replacement *Worktree) (*Worktree, error) {
@@ -198,6 +255,10 @@ func (m *Manager) ensureRecoveryReplacementWorktree(ctx context.Context, reposit
 }
 
 func beginRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, *recoveryLock, error) {
+	return beginRecoveryWithOperation(wt, jobPath, "")
+}
+
+func beginRecoveryWithOperation(wt *Worktree, jobPath, requestedOperationID string) (recoveryRecord, string, *recoveryLock, error) {
 	// The advisory lock is the first durable boundary. Its inode may survive a
 	// crash before the record is created, so taking the lock must never depend
 	// on the claim path being absent.
@@ -205,7 +266,7 @@ func beginRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, *recov
 	if err != nil {
 		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, err.Error())
 	}
-	record, snapshotPath, err := loadOrClaimRecovery(wt, jobPath)
+	record, snapshotPath, err := loadOrClaimRecoveryWithOperation(wt, jobPath, requestedOperationID)
 	if err != nil {
 		_ = claim.Close()
 		return recoveryRecord{}, "", nil, err
@@ -214,13 +275,24 @@ func beginRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, *recov
 }
 
 func loadOrClaimRecovery(wt *Worktree, jobPath string) (recoveryRecord, string, error) {
+	return loadOrClaimRecoveryWithOperation(wt, jobPath, "")
+}
+
+func loadOrClaimRecoveryWithOperation(wt *Worktree, jobPath, requestedOperationID string) (recoveryRecord, string, error) {
 	snapshotPath := wt.Path + ".kandev-recovery-" + uuid.NewString()
+	operationID := requestedOperationID
+	if operationID == "" {
+		operationID = uuid.NewString()
+	}
 	record := recoveryRecord{
-		OperationID: uuid.NewString(), TaskID: wt.TaskID, WorktreeID: wt.ID,
+		OperationID: operationID, TaskID: wt.TaskID, WorktreeID: wt.ID,
 		Original: wt.Path, Snapshot: snapshotPath, State: RecoveryStateSnapshotting,
 		UpdatedAt: time.Now().UTC(),
 	}
 	if existing, err := readRecoveryRecord(jobPath); err == nil {
+		if requestedOperationID != "" && existing.OperationID != requestedOperationID {
+			return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record operation ID does not match the durable claim")
+		}
 		return adoptRecoveryRecord(wt, existing)
 	} else if !os.IsNotExist(err) {
 		return recoveryRecord{}, "", recoveryAlreadyClaimedError(wt, "recovery record is unreadable")

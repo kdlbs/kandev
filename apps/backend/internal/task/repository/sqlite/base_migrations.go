@@ -381,6 +381,26 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plan_revisions.workflow_step_id", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
+
+	// Automatic worktree recovery holds one durable authority per task
+	// environment from preflight through workspace publication. Keep this as a
+	// replayable table migration because older installations already have the
+	// task-environment tables but must gain the same recovery boundary.
+	_ = r.migrate.Apply("task_environment_recovery_claims.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_claims (
+			task_environment_id TEXT PRIMARY KEY,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`)
+	_ = r.migrate.Apply("task_environment_recovery_claims.operation_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_claims_operation
+			ON task_environment_recovery_claims(operation_id)`)
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required task migration: %w", err)
 	}

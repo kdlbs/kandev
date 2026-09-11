@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -837,11 +838,15 @@ type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID 
 // lookups; an error omits the action without blocking failure persistence.
 type LaunchFailureReviewEligibilityFunc func(ctx context.Context, taskID string) (bool, error)
 
-// WorktreeRecoveryAdmissionFunc decides whether a task may create or launch a
-// session. A recovery implementation uses this seam to coalesce a task-owned
-// repair operation and to keep a known-broken checkout away from setup scripts
-// and agent processes.
+// WorktreeRecoveryAdmissionFunc is the legacy task-scoped recovery seam. It is
+// retained for lightweight adapters; production wiring uses the selected
+// environment callback below.
 type WorktreeRecoveryAdmissionFunc func(ctx context.Context, taskID string) error
+
+// SelectedWorktreeRecoveryAdmissionFunc decides whether the already-selected
+// task environment may launch. The returned admission remains held through the
+// external workspace-start boundary and is released by the executor.
+type SelectedWorktreeRecoveryAdmissionFunc func(context.Context, worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error)
 
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the
@@ -947,10 +952,10 @@ type Executor struct {
 	onLaunchFailed LaunchFailedFunc
 	// Optional resolver for the mark-review-done recovery action.
 	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
-	// Optional task-scoped gate for linked-worktree recovery. It is checked
-	// before session persistence and again immediately before launch so a
-	// recovery that begins between those boundaries cannot boot an agent.
+	// Optional compatibility gate for legacy adapters.
 	worktreeRecoveryAdmission WorktreeRecoveryAdmissionFunc
+	// Selected environment gate used by production worktree recovery.
+	selectedWorktreeRecoveryAdmission SelectedWorktreeRecoveryAdmissionFunc
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
@@ -1203,6 +1208,12 @@ func (e *Executor) SetOnEarlyLaunchTaskStateReconcile(fn TaskRuntimeStateReconci
 // admission gate. Nil disables the optional integration for legacy callers.
 func (e *Executor) SetWorktreeRecoveryAdmission(fn WorktreeRecoveryAdmissionFunc) {
 	e.worktreeRecoveryAdmission = fn
+}
+
+// SetSelectedWorktreeRecoveryAdmission installs the environment-scoped
+// recovery gate used after executor and workspace selection.
+func (e *Executor) SetSelectedWorktreeRecoveryAdmission(fn SelectedWorktreeRecoveryAdmissionFunc) {
+	e.selectedWorktreeRecoveryAdmission = fn
 }
 
 // SetOnSessionStateChange sets a callback for session state changes.

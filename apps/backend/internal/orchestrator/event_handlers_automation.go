@@ -231,7 +231,7 @@ func (s *Service) SetWorktreeManager(mgr *worktree.Manager) {
 	s.worktreeReaper = mgr
 	s.taskLaunchRecoveryWorktree = mgr
 	if s.executor != nil {
-		s.executor.SetWorktreeRecoveryAdmission(mgr.AdmitTaskRecovery)
+		s.executor.SetSelectedWorktreeRecoveryAdmission(mgr.AdmitRecovery)
 	}
 }
 

@@ -356,6 +356,25 @@ func TestManager_RecoverWorktreeDoesNotBlockOnTransientCompareAndSwapError(t *te
 	}
 }
 
+func TestManager_RecoverWorktreeRequiresRecordedBranch(t *testing.T) {
+	cfg, repoPath, original := newBrokenRecoveryFixture(t, "missing-recorded-branch")
+	original.Branch = ""
+	store := &recoveryCASStore{mockStore: newMockStore()}
+	store.worktrees[original.ID] = original
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	_, err = mgr.RecoverWorktree(context.Background(), original, CreateRequest{
+		TaskID: original.TaskID, RepositoryID: original.RepositoryID,
+		RepositoryPath: repoPath, BaseBranch: "main",
+	})
+	if err == nil || !strings.Contains(err.Error(), "recorded branch") {
+		t.Fatalf("RecoverWorktree() error = %v, want missing recorded branch refusal", err)
+	}
+}
+
 func TestManager_RecoverWorktreeInvalidatesEveryMatchingSessionCacheEntry(t *testing.T) {
 	cfg, repoPath, original := newBrokenRecoveryFixture(t, "cache-invalidation")
 	store := &recoveryCASStore{mockStore: newMockStore()}
