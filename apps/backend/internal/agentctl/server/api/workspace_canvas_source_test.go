@@ -129,3 +129,14 @@ func TestCanvasSourceTransfer_RejectsFileDataLimit(t *testing.T) {
 	response := canvasSourceRequest(t, server, "source", true)
 	require.Equal(t, http.StatusRequestEntityTooLarge, response.Code)
 }
+
+func TestCanvasSourceTransfer_RejectsExcludedProjectSource(t *testing.T) {
+	server, workDir := newCanvasSourceTestServer(t)
+	root := filepath.Join(workDir, "source", "distribution", "source")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=secret"), 0o600))
+
+	response := canvasSourceRequest(t, server, "source", true)
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.NotContains(t, response.Body.String(), "secret")
+}

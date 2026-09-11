@@ -323,6 +323,24 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize canvas service: %w", err)
 	}
+	var canvasDistributionSvc *canvasservice.DistributionService
+	if cfg.Features.Canvases {
+		preparations, prepErr := canvasservice.NewPreparationStore(filepath.Join(cfg.ResolvedHomeDir(), "canvas-preparations"))
+		if prepErr != nil {
+			return nil, nil, fmt.Errorf("initialize canvas preparations: %w", prepErr)
+		}
+		canvasDistributionSvc = canvasservice.NewDistributionService(
+			canvasSvc,
+			pluginsSvc.Instances(),
+			pluginsSvc.WebArtifacts(),
+			taskSvc.AuthorizeWorkspaceAccess,
+			preparations,
+		)
+		canvasDistributionSvc.SetInstallReceiptStore(canvasRepo)
+		if pluginsSvc != nil {
+			canvasDistributionSvc.SetCatalogResolver(pluginsSvc.Marketplace())
+		}
+	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
@@ -415,6 +433,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
 		Canvas:                   canvasSvc,
+		CanvasDistribution:       canvasDistributionSvc,
 		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.

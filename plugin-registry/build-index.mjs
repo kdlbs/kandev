@@ -23,7 +23,11 @@
 // scope set as GITHUB_TOKEN gives higher, more predictable rate limits.
 
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const GITHUB_API = "https://api.github.com";
@@ -40,6 +44,8 @@ const SOURCE_URL = "";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGINS_YAML = path.join(HERE, "plugins.yaml");
 const OUTPUT_JSON = path.join(HERE, "index.json");
+const execFile = promisify(execFileCallback);
+const MAX_CANVAS_PACKAGE_BYTES = 10 * 1024 * 1024;
 
 // --- Minimal plugins.yaml parser --------------------------------------------
 
@@ -56,6 +62,8 @@ export function parsePluginsYaml(text) {
   const specs = [];
   let current = null;
   let inPlugins = false;
+  let inPreviews = false;
+  let currentPreview = null;
 
   for (const rawLine of text.split("\n")) {
     const line = stripComment(rawLine);
@@ -66,14 +74,38 @@ export function parsePluginsYaml(text) {
       continue;
     }
 
-    const item = line.match(/^\s*-\s*(.*)$/);
+    const item = line.match(/^(\s*)-\s*(.*)$/);
     if (item) {
+      if (inPreviews && current && item[1].length > 2) {
+        currentPreview = {};
+        current.previews ??= [];
+        current.previews.push(currentPreview);
+        assignField(currentPreview, item[2]);
+        continue;
+      }
+      inPreviews = false;
+      currentPreview = null;
       current = {};
       specs.push(current);
-      assignField(current, item[1]);
+      assignField(current, item[2]);
       continue;
     }
-    if (current && /^\s+\S/.test(line)) assignField(current, line.trim());
+    if (current && /^\s+\S/.test(line)) {
+      const value = line.trim();
+      if (value === "previews:") {
+        current.previews = [];
+        inPreviews = true;
+        currentPreview = null;
+        continue;
+      }
+      if (inPreviews && currentPreview && line.search(/\S/) > 2) {
+        assignField(currentPreview, value);
+        continue;
+      }
+      inPreviews = false;
+      currentPreview = null;
+      assignField(current, value);
+    }
   }
   return specs;
 }
@@ -213,6 +245,37 @@ function pickPackageAsset(assets, pluginId, version) {
   return { asset: exact || tarballs[0] };
 }
 
+function pickCanvasPackageAsset(assets, pluginId, version) {
+  const exactName = `${pluginId}-${version}.tar.gz`;
+  const exact = assets.find((asset) => asset.name === exactName);
+  return exact ? { asset: exact } : { error: `release has no exact ${exactName} asset` };
+}
+
+function validatePreviews(previews, required) {
+  if (required && (!Array.isArray(previews) || previews.length === 0)) {
+    return "canvas entries require at least one preview image";
+  }
+  if (previews === undefined) return undefined;
+  if (!Array.isArray(previews) || previews.length > 8) return "preview image count must be between 1 and 8";
+  for (const preview of previews) {
+    if (!preview || typeof preview.url !== "string" || typeof preview.alt !== "string") {
+      return "preview images require url and alt";
+    }
+    const alt = preview.alt.trim();
+    let parsed;
+    try {
+      parsed = new URL(preview.url);
+    } catch {
+      return "preview URLs must be absolute HTTPS URLs";
+    }
+    if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password || parsed.hash || preview.url.length > 2048) {
+      return "preview URLs must be HTTPS without credentials or fragments";
+    }
+    if (alt.length < 1 || alt.length > 300) return "preview alt text must be 1 to 300 characters";
+  }
+  return undefined;
+}
+
 /** "agent-stats" -> "Agent Stats", the fallback when no manifest name is known. */
 function humanize(pluginId) {
   return pluginId
@@ -230,6 +293,10 @@ export async function buildEntry(spec) {
   const pluginId = spec.id;
   const repo = spec.repo;
   if (!pluginId || !repo) return { error: `entry missing id/repo: ${JSON.stringify(spec)}` };
+  const kind = spec.kind || "plugin";
+  const previewError = validatePreviews(spec.previews, kind === "canvas");
+  if (previewError) return { error: `${pluginId}: ${previewError}` };
+  if (kind !== "plugin" && kind !== "canvas") return { error: `${pluginId}: unsupported kind ${kind}` };
 
   let release;
   try {
@@ -240,15 +307,29 @@ export async function buildEntry(spec) {
 
   const tag = release.tag_name || "";
   const version = normalizeVersion(tag);
-  const { asset, error: assetError } = pickPackageAsset(release.assets || [], pluginId, version);
+  const picker = kind === "canvas" ? pickCanvasPackageAsset : pickPackageAsset;
+  const { asset, error: assetError } = picker(release.assets || [], pluginId, version);
   if (assetError) return { error: `${pluginId}: ${assetError}` };
 
   const manifest = tag ? await fetchManifest(repo, tag) : {};
   const iconUrl = manifest.icon && tag ? rawUrl(repo, tag, manifest.icon) : null;
   const meta = await fetchRepoMeta(repo, pluginId);
 
+  let packageSHA256 = null;
+  let inspectedDescriptor = null;
+  if (kind === "canvas") {
+    const inspected = await inspectCanvasAsset(asset.browser_download_url, pluginId);
+    if (inspected.error) return { error: `${pluginId}: ${inspected.error}` };
+    if (inspected.descriptor.id !== pluginId || inspected.descriptor.version !== version || inspected.descriptor.kind !== "canvas") {
+      return { error: `${pluginId}: inspected package identity does not match the registry entry` };
+    }
+    inspectedDescriptor = inspected.descriptor;
+    packageSHA256 = inspected.digest;
+  }
+
   const record = {
     id: pluginId,
+    kind,
     // Presentation prefers the plugin's manifest, then id-derived / release /
     // plugins.yaml fallbacks, so the contract shape is stable even on a miss.
     name: manifest.display_name || humanize(pluginId),
@@ -259,13 +340,57 @@ export async function buildEntry(spec) {
     repo_url: `https://github.com/${repo}`,
     version: version || null,
     min_kandev_version: manifest.min_kandev_version ?? null,
+    ...(kind === "canvas" ? { license: inspectedDescriptor.license } : {}),
     package_url: asset.browser_download_url,
-    // Advisory provenance digest; null is a valid, documented value.
-    package_sha256: null,
+    package_sha256: packageSHA256,
+    ...(kind === "canvas"
+      ? {
+          permissions: {
+            reads: inspectedDescriptor.api_read || [],
+            writes: inspectedDescriptor.api_write || [],
+            events: inspectedDescriptor.events || [],
+            shared_state: Boolean(inspectedDescriptor.state),
+            external_origins: inspectedDescriptor.network_origins || [],
+          },
+        }
+      : {}),
+    ...(spec.previews ? { previews: spec.previews } : {}),
     stars: meta.stars,
     updated_at: meta.updatedAt || release.published_at || null,
   };
   return { record };
+}
+
+async function inspectCanvasAsset(assetURL, pluginId) {
+  const inspector = process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+  if (!inspector) return { error: "canvas package inspector is not configured" };
+  let response;
+  try {
+    response = await fetchWithTimeout(assetURL, { headers: { Accept: "application/gzip", "User-Agent": USER_AGENT } });
+  } catch (error) {
+    return { error: `canvas package download failed (${error.message})` };
+  }
+  if (!response.ok) return { error: `canvas package download returned ${response.status}` };
+  const body = Buffer.from(await response.arrayBuffer());
+  if (body.length > MAX_CANVAS_PACKAGE_BYTES) return { error: "canvas package exceeds the package size limit" };
+  const digest = createHash("sha256").update(body).digest("hex");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-canvas-registry-"));
+  const packagePath = path.join(directory, `${pluginId}.tar.gz`);
+  try {
+    await fs.writeFile(packagePath, body, { mode: 0o600 });
+    const result = await execFile(inspector, ["--file", packagePath], { maxBuffer: 1024 * 1024 });
+    let descriptor;
+    try {
+      descriptor = JSON.parse(result.stdout);
+    } catch {
+      return { error: "canvas package inspector returned invalid JSON" };
+    }
+    return { descriptor, digest };
+  } catch {
+    return { error: "canvas package inspection failed" };
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 }
 
 /** Repo metadata → stars (null on failure, never 0), last-push time, owner. */
