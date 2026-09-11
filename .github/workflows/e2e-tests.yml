@@ -38,6 +38,11 @@ permissions:
   # pull the kandev-ci image from GHCR via GITHUB_TOKEN.
   packages: read
 
+env:
+  # Container jobs may override HOME. Keep Corepack pointed at the pnpm cache
+  # prepared in the CI image so setup does not require an npm registry request.
+  COREPACK_HOME: /root/.cache/node/corepack
+
 jobs:
   runner_plan:
     name: Plan external runner allocation
