@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -36,6 +37,22 @@ type PermissionOperationError struct {
 	Message string
 }
 
+// SessionRestoreOperationError preserves the typed restore outcome returned
+// by agentctl so lifecycle can distinguish missing native state from a
+// transport or provider failure.
+type SessionRestoreOperationError struct {
+	Code    string
+	Message string
+	Details map[string]interface{}
+}
+
+func (e *SessionRestoreOperationError) Error() string {
+	if e == nil || e.Message == "" {
+		return "session restore failed"
+	}
+	return e.Message
+}
+
 func (e *PermissionOperationError) Error() string { return e.Message }
 
 func (e *PermissionOperationError) PermissionCode() string { return e.Code }
@@ -48,9 +65,10 @@ type AgentInfo struct {
 
 // InitializeResponse from agentctl
 type InitializeResponse struct {
-	Success   bool       `json:"success"`
-	AgentInfo *AgentInfo `json:"agent_info,omitempty"`
-	Error     string     `json:"error,omitempty"`
+	Success         bool                 `json:"success"`
+	AgentInfo       *AgentInfo           `json:"agent_info,omitempty"`
+	DurableDelivery *DurableDeliveryInfo `json:"durable_delivery,omitempty"`
+	Error           string               `json:"error,omitempty"`
 }
 
 // Initialize sends the ACP initialize request via the agent WebSocket stream.
@@ -80,6 +98,7 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 	if err := resp.ParsePayload(&result); err != nil {
 		return nil, fmt.Errorf("failed to parse initialize response: %w", err)
 	}
+	c.setDurableDelivery(result.DurableDelivery)
 	if !result.Success {
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
 	}
@@ -157,6 +176,13 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return fmt.Errorf("load session failed: unable to parse error")
+		}
+		if errPayload.Code == "SESSION_RESTORE_REQUIRED" || errPayload.Code == "SESSION_RESTORE_BLOCKED" {
+			return &SessionRestoreOperationError{
+				Code:    errPayload.Code,
+				Message: errPayload.Message,
+				Details: errPayload.Details,
+			}
 		}
 		return fmt.Errorf("load session failed: %s", errPayload.Message)
 	}
@@ -275,7 +301,19 @@ func (c *Client) Prompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 ) error {
-	return c.prompt(ctx, text, attachments, promptGeneration, false)
+	return c.prompt(ctx, text, attachments, promptGeneration, false, "")
+}
+
+// PromptWithSubmissionID sends a prompt with a backend-owned durable delivery
+// identity. Empty IDs retain the ordinary request-correlation behavior.
+func (c *Client) PromptWithSubmissionID(
+	ctx context.Context,
+	text string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+	submissionID string,
+) error {
+	return c.prompt(ctx, text, attachments, promptGeneration, false, submissionID)
 }
 
 // PromptSteer sends a prompt with the steer flag set, asking agentctl to deliver
@@ -288,7 +326,18 @@ func (c *Client) PromptSteer(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 ) error {
-	return c.prompt(ctx, text, attachments, promptGeneration, true)
+	return c.prompt(ctx, text, attachments, promptGeneration, true, "")
+}
+
+// PromptSteerWithSubmissionID is the durable-identity variant of PromptSteer.
+func (c *Client) PromptSteerWithSubmissionID(
+	ctx context.Context,
+	text string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+	submissionID string,
+) error {
+	return c.prompt(ctx, text, attachments, promptGeneration, true, submissionID)
 }
 
 func (c *Client) prompt(
@@ -297,13 +346,19 @@ func (c *Client) prompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 	steer bool,
+	submissionID string,
 ) error {
+	c.setLastDeliverySubmissionID("")
 	payload := struct {
-		Text             string                 `json:"text"`
-		Attachments      []v1.MessageAttachment `json:"attachments,omitempty"`
-		PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
-		Steer            bool                   `json:"steer,omitempty"`
-	}{Text: text, Attachments: attachments, PromptGeneration: promptGeneration, Steer: steer}
+		Text                 string                 `json:"text"`
+		Attachments          []v1.MessageAttachment `json:"attachments,omitempty"`
+		PromptGeneration     uint64                 `json:"prompt_generation,omitempty"`
+		DeliverySubmissionID string                 `json:"delivery_submission_id,omitempty"`
+		Steer                bool                   `json:"steer,omitempty"`
+	}{
+		Text: text, Attachments: attachments, PromptGeneration: promptGeneration,
+		DeliverySubmissionID: submissionID, Steer: steer,
+	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.prompt", payload)
 	if err != nil {
@@ -319,8 +374,9 @@ func (c *Client) prompt(
 	}
 
 	var result struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error,omitempty"`
+		Success      bool   `json:"success"`
+		SubmissionID string `json:"submission_id,omitempty"`
+		Error        string `json:"error,omitempty"`
 	}
 	if err := resp.ParsePayload(&result); err != nil {
 		return fmt.Errorf("failed to parse prompt response: %w", err)
@@ -328,6 +384,9 @@ func (c *Client) prompt(
 	if !result.Success {
 		c.logger.Warn("prompt returned failure response", zap.String("error", result.Error))
 		return fmt.Errorf("prompt failed: %s", result.Error)
+	}
+	if result.SubmissionID != "" {
+		c.setLastDeliverySubmissionID(result.SubmissionID)
 	}
 	return nil
 }
@@ -346,7 +405,16 @@ type MCPHandler interface {
 // If mcpHandler is provided, MCP requests from agentctl will be dispatched to it and responses sent back.
 // If onDisconnect is provided, it is called when the WebSocket read goroutine exits (e.g., on error or close).
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
+	return c.StreamUpdatesFrom(ctx, handler, mcpHandler, onDisconnect, 0)
+}
+
+// StreamUpdatesFrom opens the updates stream after a committed delivery
+// sequence. A zero cursor preserves the original first-connect behavior.
+func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error), after uint64) error {
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
+	if after > 0 {
+		wsURL += "?after=" + strconv.FormatUint(after, 10)
+	}
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
 	if err != nil {
@@ -383,7 +451,7 @@ func (c *Client) HasAgentStream() bool {
 //
 // Agent events (message_chunk, tool_call, complete, ...) are NOT run inline on
 // this loop. They are handed, in order, to a single dispatchAgentEvents worker
-// goroutine through an unbounded reader-side queue. This keeps the read loop
+// goroutine through a bounded reader-side queue. This keeps the read loop
 // free to deliver request/response frames (e.g. the agent.cancel response) even
 // while an event handler is blocked.
 //
@@ -398,11 +466,10 @@ func (c *Client) HasAgentStream() bool {
 // immediately, the cancel returns, the guard releases, and the deferred
 // handleAgentReady then safely no-ops.
 //
-// The queue is unbounded on purpose: a fixed buffered channel would let a burst
-// of events pile up behind a blocked handler and then backpressure the read
-// loop on send, re-wedging response-frame delivery exactly as the inline
-// version did. enqueue never blocks the read loop, so no volume of events can
-// starve the cancel response.
+// The queue is bounded so a permanently blocked handler cannot exhaust the
+// backend process. A full queue closes the stream; committed events remain
+// recoverable through the agentctl journal on the next connection. enqueue
+// never blocks the read loop, so a burst cannot starve a cancel response.
 func (c *Client) readUpdatesStream(
 	ctx context.Context,
 	conn *websocket.Conn,
@@ -498,9 +565,12 @@ func (c *Client) readUpdatesStream(
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
 		// Hand off to the ordered worker rather than running handler inline.
-		// enqueue never blocks the read loop, so a burst of events behind a
-		// blocked handler can't backpressure delivery of response frames.
-		events.enqueue(event)
+		// A full bounded queue closes the stream so retained events can be
+		// replayed instead of growing process memory without limit.
+		if !events.enqueue(event) {
+			lastErr = errAgentEventQueueFull
+			return
+		}
 	}
 }
 
@@ -519,28 +589,33 @@ func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEven
 	}
 }
 
-// agentEventQueue is an unbounded FIFO queue decoupling the stream read loop
+// agentEventQueue is a bounded FIFO queue decoupling the stream read loop
 // (producer) from the ordered event-dispatch worker (consumer). enqueue never
-// blocks, so no volume of events can backpressure the read loop and starve
-// response-frame delivery. A single-slot notify channel wakes the worker
-// without accumulating a signal per event.
+// blocks, so a full queue closes the stream instead of starving response-frame
+// delivery. A single-slot notify channel wakes the worker without accumulating
+// a signal per event.
 type agentEventQueue struct {
 	mu     sync.Mutex
 	items  []AgentEvent
+	limit  int
 	notify chan struct{}
 	closed bool
 }
 
+const maxAgentEventQueueItems = 4096
+
+var errAgentEventQueueFull = errors.New("agent event dispatch queue is full")
+
 func newAgentEventQueue() *agentEventQueue {
-	return &agentEventQueue{notify: make(chan struct{}, 1)}
+	return &agentEventQueue{limit: maxAgentEventQueueItems, notify: make(chan struct{}, 1)}
 }
 
 // enqueue appends an event and wakes the worker. It is a no-op after close.
-func (q *agentEventQueue) enqueue(event AgentEvent) {
+func (q *agentEventQueue) enqueue(event AgentEvent) bool {
 	q.mu.Lock()
-	if q.closed {
+	if q.closed || len(q.items) >= q.limit {
 		q.mu.Unlock()
-		return
+		return false
 	}
 	q.items = append(q.items, event)
 	q.mu.Unlock()
@@ -548,6 +623,7 @@ func (q *agentEventQueue) enqueue(event AgentEvent) {
 	case q.notify <- struct{}{}:
 	default:
 	}
+	return true
 }
 
 // close marks the queue closed and wakes the worker so it can drain any

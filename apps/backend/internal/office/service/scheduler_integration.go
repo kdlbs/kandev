@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -112,6 +113,7 @@ func (si *SchedulerIntegration) Tick(ctx context.Context) { si.tick(ctx) }
 
 // tick drains up to maxRunsPerTick runs from the queue.
 func (si *SchedulerIntegration) tick(ctx context.Context) {
+	si.liftResolvedSessionRecoveryRuns(ctx)
 	si.liftParkedRoutingRuns(ctx)
 	for i := 0; i < maxRunsPerTick; i++ {
 		run, err := si.svc.ClaimNextRun(ctx)
@@ -130,6 +132,55 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 	}
 	si.recoverStaleClaimedRuns(ctx)
 	si.reapStaleCheckouts(ctx)
+}
+
+type sessionRecoveryRunStore interface {
+	ListSessionRecoveryRuns(context.Context) ([]models.Run, error)
+	ClearSessionRecoveryPark(context.Context, string, string) error
+}
+
+// liftResolvedSessionRecoveryRuns releases only runs whose task-owned block is
+// already resolved. Missing or unreadable blocks stay parked, which keeps a
+// projection gap fail closed across restart.
+func (si *SchedulerIntegration) liftResolvedSessionRecoveryRuns(ctx context.Context) {
+	store, ok := any(si.svc.repo).(sessionRecoveryRunStore)
+	if !ok {
+		return
+	}
+	lookup, ok := si.svc.taskStarter.(SessionRecoveryBlockLookup)
+	if !ok {
+		return
+	}
+	runs, err := store.ListSessionRecoveryRuns(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("list session recovery runs failed", zap.Error(err))
+		}
+		return
+	}
+	for _, run := range runs {
+		if run.SessionRecoveryBlockID == nil || *run.SessionRecoveryBlockID == "" {
+			continue
+		}
+		block, lookupErr := lookup.GetSessionRecoveryBlock(ctx, *run.SessionRecoveryBlockID)
+		if lookupErr != nil {
+			if ctx.Err() == nil {
+				si.logger.Warn("session recovery block lookup failed",
+					zap.String("run_id", run.ID), zap.Error(lookupErr))
+			}
+			continue
+		}
+		if block == nil || block.State != taskmodels.RecoveryBlockResolved {
+			continue
+		}
+		if err := store.ClearSessionRecoveryPark(ctx, run.ID, *run.SessionRecoveryBlockID); err != nil {
+			si.logger.Warn("clear resolved session recovery run failed",
+				zap.String("run_id", run.ID), zap.Error(err))
+			continue
+		}
+		si.logger.Info("released Office run after explicit session recovery",
+			zap.String("run_id", run.ID), zap.String("block_id", *run.SessionRecoveryBlockID))
+	}
 }
 
 // liftParkedRoutingRuns clears routing-block status on runs whose
@@ -616,6 +667,10 @@ func (si *SchedulerIntegration) launchAgent(
 			launch.Prompt, "", false, nil)
 	}
 	if err != nil {
+		if si.parkSessionRecoveryRun(ctx, run, err) {
+			si.releaseCheckoutIfNeeded(ctx, run)
+			return false
+		}
 		si.logger.Error("agent launch failed",
 			zap.String("run_id", runID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
@@ -626,6 +681,64 @@ func (si *SchedulerIntegration) launchAgent(
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
+	return true
+}
+
+type sessionRecoveryRequiredSignal interface {
+	RecoveryReason() string
+}
+
+func sessionRecoveryDetails(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	var signal sessionRecoveryRequiredSignal
+	if !errors.As(err, &signal) {
+		return "", false
+	}
+	reason := signal.RecoveryReason()
+	if reason == "" {
+		reason = "unknown_failure"
+	}
+	return reason, true
+}
+
+// parkSessionRecoveryRun is the autonomous boundary for Office launch
+// failures. It preserves the run and skips HandleRunFailure, whose retry
+// schedule would otherwise dispatch the same native session again.
+func (si *SchedulerIntegration) parkSessionRecoveryRun(
+	ctx context.Context, run *models.Run, launchErr error,
+) bool {
+	reason, required := sessionRecoveryDetails(launchErr)
+	if !required || run == nil || run.SessionID == "" {
+		return false
+	}
+	blockID := "session:" + run.SessionID
+	if reader, ok := si.svc.taskStarter.(SessionRecoveryBlockReader); ok {
+		block, err := reader.GetOpenSessionRecoveryBlock(ctx, run.SessionID)
+		if err != nil {
+			si.logger.Warn("failed to load canonical session recovery block; parking with session reference",
+				zap.String("run_id", run.ID), zap.String("session_id", run.SessionID), zap.Error(err))
+		} else if block != nil {
+			blockID = block.ID
+			if block.Reason != "" {
+				reason = block.Reason
+			}
+		}
+	}
+	if err := si.svc.repo.ParkRunForSessionRecovery(ctx, run.ID, blockID, reason); err != nil {
+		si.logger.Error("failed to park Office run for session recovery",
+			zap.String("run_id", run.ID), zap.String("session_id", run.SessionID), zap.Error(err))
+		return false
+	}
+	si.svc.AppendRunEvent(ctx, run.ID, "session.recovery_required", "warning", map[string]interface{}{
+		"session_id": run.SessionID,
+		"block_id":   blockID,
+		"reason":     reason,
+	})
+	si.logger.Warn("Office run parked for explicit session recovery",
+		zap.String("run_id", run.ID), zap.String("session_id", run.SessionID),
+		zap.String("block_id", blockID), zap.String("reason", reason))
 	return true
 }
 
@@ -753,6 +866,10 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	}
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
+		if si.parkSessionRecoveryRun(ctx, run, err) {
+			si.releaseCheckoutIfNeeded(ctx, run)
+			return true, false
+		}
 		si.logger.Error("routing dispatch failed",
 			zap.String("run_id", run.ID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{

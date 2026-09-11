@@ -92,5 +92,17 @@
     "workflow-sync",
     "office-config-sync",
     "automation"
-  ]
+  ],
+  "known_missing_required_tables": {
+    "task": [
+      "agent_delivery_cursors",
+      "agent_delivery_effects",
+      "agent_delivery_inbox",
+      "agent_delivery_submissions",
+      "harness_session_generations",
+      "session_continuation_snapshots",
+      "session_recovery_blocks",
+      "session_restore_attempts"
+    ]
+  }
 }

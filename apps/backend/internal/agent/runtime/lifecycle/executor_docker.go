@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -277,6 +278,22 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 	if err != nil {
 		return ContainerConfig{}, err
 	}
+	var journalHostPath, journalContainerPath string
+	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
+		location, locationErr := resolveDurableJournal(req)
+		if locationErr != nil {
+			return ContainerConfig{}, fmt.Errorf("resolve retained delivery journal: %w", locationErr)
+		}
+		capability := journal.CheckStorage(req.DurableJournalHostRoot, req.DurableJournalOwnerID)
+		if !capability.Durable {
+			return ContainerConfig{}, fmt.Errorf("retained delivery journal unavailable: %s", capability.Reason)
+		}
+		journalHostPath = location.Path
+		journalContainerPath, err = durableJournalContainerPath(req)
+		if err != nil {
+			return ContainerConfig{}, err
+		}
+	}
 	return ContainerConfig{
 		AgentConfig:                    req.AgentConfig,
 		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
@@ -300,7 +317,12 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		RemoteContributions:            req.RemoteContributions,
 		ContributionDestinations:       req.ContributionDestinations,
 		ComparisonTargets:              req.ComparisonTargets,
+		DeliveryStreamID:               req.DeliveryStreamID,
+		DeliveryIncarnationID:          req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:      req.DeliveryHarnessGeneration,
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
+		DurableJournalHostPath:         journalHostPath,
+		DurableJournalContainerPath:    journalContainerPath,
 	}, nil
 }
 
@@ -578,7 +600,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			stripEnv = rt.StripEnv
 		}
 	}
-	return &agentctl.CreateInstanceRequest{
+	createReq := &agentctl.CreateInstanceRequest{
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
 		AgentType:     agentType,
@@ -604,7 +626,16 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 	}
+	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
+		if path, err := durableJournalContainerPath(req); err == nil {
+			createReq.DurableJournalPath = path
+		}
+	}
+	return createReq
 }
 
 // healthChecker is the narrow interface waitForAgentctlHealth needs from the

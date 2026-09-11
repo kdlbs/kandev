@@ -20,11 +20,16 @@ const OfficeDockviewLayout = dynamic(
 type TaskAdvancedModeProps = {
   task: Task;
   onToggleSimple: () => void;
+  preferredSessionId?: string;
 };
 
-export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps) {
+export function TaskAdvancedMode({
+  task,
+  onToggleSimple,
+  preferredSessionId,
+}: TaskAdvancedModeProps) {
   const { t } = useTranslation();
-  const { sessionId, isSessionEnded } = useAdvancedSession(task.id);
+  const { sessionId, isSessionEnded } = useAdvancedSession(task.id, preferredSessionId);
 
   useOfficeTopbar({
     title: task.title,

@@ -1915,6 +1915,7 @@
   "sessionRecoveryRestoreAttempt": "Tentativa de restaurar o workspace",
   "resumeFailedWorkspaceReadOnly": "Workspace restaurado em modo só de leitura",
   "continueOnNewBranch": "Continuar numa nova branch",
+  "continueFromHistory": "Continuar a partir do histórico guardado",
   "restoreReadOnlyWorkspace": "Restaurar workspace só de leitura",
   "gitOperationFailedGeneric": "A operação falhou",
   "invalidGitHubUrl": "URL do GitHub inválido - esperava-se github.com/owner/repo ou .../pull/123",

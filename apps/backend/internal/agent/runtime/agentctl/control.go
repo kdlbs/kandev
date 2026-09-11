@@ -90,6 +90,16 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// DurableJournalPath is an owner-scoped path on retained executor storage.
+	// Empty means the instance uses legacy delivery semantics.
+	DurableJournalPath string `json:"durable_journal_path,omitempty"`
+	// DeliveryStreamID is the generation-scoped stream identity retained across
+	// replacement of the agentctl process.
+	DeliveryStreamID string `json:"delivery_stream_id,omitempty"`
+	// DeliveryIncarnationID fences events to the owning Kandev session lifetime.
+	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
+	// DeliveryHarnessGeneration fences events to one native harness conversation.
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

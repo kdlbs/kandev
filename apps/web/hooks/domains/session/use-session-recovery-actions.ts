@@ -4,9 +4,11 @@ import { useTranslation } from "react-i18next";
 import {
   asRecoveryError,
   branchRecoveryDetails,
+  contextContinuationDetails,
   requestSessionRecover,
   restoreSessionWorkspace,
   type BranchRecoveryDetails,
+  type ContextContinuationDetails,
   type SessionRecoveryAction,
 } from "@/lib/services/session-recovery-service";
 
@@ -16,6 +18,28 @@ type SessionRecoveryActionsOptions = {
   taskId: string;
   sessionId: string;
 };
+
+type RecoveryViewState = {
+  busyAction: SessionRecoveryBusyAction;
+  resumeError: Error | null;
+  restoreError: Error | null;
+  branchDetails: BranchRecoveryDetails | null;
+  continuationDetails: ContextContinuationDetails | null;
+  lastFailedAction: SessionRecoveryAction | null;
+  recoveryNotice: string | null;
+};
+
+function createInitialRecoveryState(): RecoveryViewState {
+  return {
+    busyAction: null,
+    resumeError: null,
+    restoreError: null,
+    branchDetails: null,
+    continuationDetails: null,
+    lastFailedAction: null,
+    recoveryNotice: null,
+  };
+}
 
 function combineRecoveryErrors(
   resumeError: Error | null,
@@ -41,26 +65,16 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
     activeRequestKeyRef.current = requestKey;
     operationGenerationRef.current += 1;
   }
-  const [busyAction, setBusyAction] = useState<SessionRecoveryBusyAction>(null);
-  const [resumeError, setResumeError] = useState<Error | null>(null);
-  const [restoreError, setRestoreError] = useState<Error | null>(null);
-  const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
-  const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
-  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const [state, setState] = useState<RecoveryViewState>(createInitialRecoveryState);
 
   useEffect(() => {
-    setBusyAction(null);
-    setResumeError(null);
-    setRestoreError(null);
-    setBranchDetails(null);
-    setLastFailedAction(null);
-    setRecoveryNotice(null);
+    setState(createInitialRecoveryState);
   }, [requestKey]);
 
   const beginOperation = useCallback(
     (action: SessionRecoveryBusyAction) => {
       const operationId = ++operationGenerationRef.current;
-      setBusyAction(action);
+      setState((current) => ({ ...current, busyAction: action }));
       return { requestKey, operationId };
     },
     [requestKey],
@@ -73,7 +87,7 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
     [],
   );
 
-  const recoveryError = combineRecoveryErrors(resumeError, restoreError, t);
+  const recoveryError = combineRecoveryErrors(state.resumeError, state.restoreError, t);
 
   const handleRecover = useCallback(
     async (action: SessionRecoveryAction) => {
@@ -81,21 +95,20 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
       try {
         await requestSessionRecover(taskId, sessionId, action, t("task:failedToResumeSession"));
         if (!isCurrentOperation(operation)) return false;
-        setResumeError(null);
-        setRestoreError(null);
-        setBranchDetails(null);
-        setLastFailedAction(null);
-        setRecoveryNotice(null);
+        setState(createInitialRecoveryState);
       } catch (cause) {
         if (!isCurrentOperation(operation)) return false;
-        setResumeError(asRecoveryError(cause, t("task:failedToResumeSession")));
-        setRestoreError(null);
-        setBranchDetails(branchRecoveryDetails(cause));
-        setLastFailedAction(action);
-        setRecoveryNotice(null);
+        setState({
+          ...createInitialRecoveryState(),
+          resumeError: asRecoveryError(cause, t("task:failedToResumeSession")),
+          branchDetails: branchRecoveryDetails(cause),
+          continuationDetails: contextContinuationDetails(cause),
+          lastFailedAction: action,
+        });
         return false;
       } finally {
-        if (isCurrentOperation(operation)) setBusyAction(null);
+        if (isCurrentOperation(operation))
+          setState((current) => ({ ...current, busyAction: null }));
       }
       return true;
     },
@@ -104,41 +117,48 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
 
   const handleRestore = useCallback(async () => {
     const operation = beginOperation("restore");
-    setRestoreError(null);
+    setState((current) => ({ ...current, restoreError: null }));
     try {
       await restoreSessionWorkspace(taskId, sessionId, t("task:failedToRestoreWorkspace"));
       if (!isCurrentOperation(operation)) return;
-      setResumeError(null);
-      setRestoreError(null);
-      setBranchDetails(null);
-      setLastFailedAction(null);
-      setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
+      setState({
+        ...createInitialRecoveryState(),
+        recoveryNotice: t("task:resumeFailedWorkspaceReadOnly"),
+      });
     } catch (cause) {
       if (!isCurrentOperation(operation)) return;
-      setRestoreError(asRecoveryError(cause, t("task:failedToRestoreWorkspace")));
-      setRecoveryNotice(null);
+      setState({
+        ...createInitialRecoveryState(),
+        restoreError: asRecoveryError(cause, t("task:failedToRestoreWorkspace")),
+      });
     } finally {
-      if (isCurrentOperation(operation)) setBusyAction(null);
+      if (isCurrentOperation(operation)) setState((current) => ({ ...current, busyAction: null }));
     }
   }, [beginOperation, isCurrentOperation, sessionId, taskId, t]);
 
   const handleRetry = useCallback(() => {
-    return handleRecover(lastFailedAction ?? "resume");
-  }, [handleRecover, lastFailedAction]);
+    return handleRecover(state.lastFailedAction ?? "resume");
+  }, [handleRecover, state.lastFailedAction]);
 
   const handleNewBranch = useCallback(() => {
     return handleRecover("resume_new_branch");
   }, [handleRecover]);
 
+  const handleContinueFromHistory = useCallback(() => {
+    return handleRecover("continue_from_history");
+  }, [handleRecover]);
+
   return {
-    busyAction,
+    busyAction: state.busyAction,
     recoveryError,
-    branchDetails,
-    recoveryNotice,
+    branchDetails: state.branchDetails,
+    continuationDetails: state.continuationDetails,
+    recoveryNotice: state.recoveryNotice,
     handleRecover,
     handleRestore,
     handleRetry,
     handleNewBranch,
+    handleContinueFromHistory,
   };
 }
 

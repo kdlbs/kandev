@@ -4,6 +4,7 @@ package process
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
@@ -100,6 +102,19 @@ const processStderrDrainTimeout = time.Second
 type Manager struct {
 	cfg    *config.InstanceConfig
 	logger *logger.Logger
+
+	// deliveryJournal is opened before any agent process starts. A configured
+	// but unreadable journal is an admission error, never a legacy fallback.
+	deliveryJournal            *journal.Journal
+	deliveryJournalErr         error
+	deliveryJournalMu          sync.RWMutex
+	deliveryJournalClose       sync.Once
+	deliveryJournalCloseErr    error
+	deliverySubmissionMu       sync.Mutex
+	deliveryActiveMu           sync.RWMutex
+	deliveryActiveID           string
+	deliveryPromptMu           sync.Mutex
+	deliveryPromptByGeneration map[uint64]string
 
 	// Process state
 	cmd                *exec.Cmd
@@ -372,14 +387,18 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	cfg.WorkDir = resolveExistingWorkDir(cfg.WorkDir, log.WithFields(zap.String("component", "process-manager")))
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		cfg:                  cfg,
-		logger:               log.WithFields(zap.String("component", "process-manager")),
-		updatesCh:            make(chan adapter.AgentEvent, 100),
-		pendingPermissions:   make(map[string]*PendingPermission),
-		lifetimeCtx:          lifetimeCtx,
-		lifetimeCancel:       lifetimeCancel,
-		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
-		trackerGitEnv:        append([]string(nil), cfg.AgentEnv...),
+		cfg:                        cfg,
+		logger:                     log.WithFields(zap.String("component", "process-manager")),
+		updatesCh:                  make(chan adapter.AgentEvent, 100),
+		pendingPermissions:         make(map[string]*PendingPermission),
+		lifetimeCtx:                lifetimeCtx,
+		lifetimeCancel:             lifetimeCancel,
+		deliveryPromptByGeneration: make(map[uint64]string),
+		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
+	}
+	if cfg.DurableJournalPath != "" {
+		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -398,6 +417,167 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// DeliveryJournal returns the owner-scoped journal and its initialization
+// result. A configured storage failure is returned to admission callers so it
+// cannot be misreported as a legacy-compatible peer.
+func (m *Manager) DeliveryJournal() (*journal.Journal, error) {
+	if m == nil {
+		return nil, fmt.Errorf("process manager is nil")
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	if m.deliveryJournalErr != nil {
+		return nil, m.deliveryJournalErr
+	}
+	if m.deliveryJournal == nil {
+		return nil, journal.ErrJournalCorrupt
+	}
+	return m.deliveryJournal, nil
+}
+
+// DeliveryCapability is the initialization-time protocol advertisement. A
+// manager without an explicitly retained journal remains a genuine legacy
+// peer; a configured journal failure is reported as unavailable instead.
+func (m *Manager) DeliveryCapability() journal.StorageCapability {
+	if m == nil || m.cfg == nil || m.cfg.DurableJournalPath == "" {
+		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_not_durable"}
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	if m.deliveryJournalErr != nil || m.deliveryJournal == nil {
+		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
+	}
+	unresolved, err := m.deliveryJournal.HasUnresolvedWork(context.Background())
+	if err != nil {
+		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
+	}
+	return journal.StorageCapability{Version: journal.CurrentVersion, Durable: true, Unresolved: unresolved}
+}
+
+// DeliveryStreamID returns the stable transport stream identity. Agentctl
+// instance IDs identify a process incarnation and may change during executor
+// replacement; the Kandev session owns the retained event stream.
+func (m *Manager) DeliveryStreamID() string {
+	if m == nil || m.cfg == nil {
+		return ""
+	}
+	if m.cfg.DeliveryStreamID != "" {
+		return m.cfg.DeliveryStreamID
+	}
+	if m.cfg.SessionID != "" {
+		return m.cfg.SessionID
+	}
+	return m.cfg.InstanceID
+}
+
+// DeliveryIncarnationID returns the durable Kandev session lifetime that owns
+// this agentctl instance. The stream ID fallback preserves legacy test and
+// standalone configurations that do not provide continuity metadata.
+func (m *Manager) DeliveryIncarnationID() string {
+	if m == nil || m.cfg == nil {
+		return ""
+	}
+	if m.cfg.DeliveryIncarnationID != "" {
+		return m.cfg.DeliveryIncarnationID
+	}
+	return m.DeliveryStreamID()
+}
+
+// DeliveryHarnessGeneration returns the native conversation generation for
+// durable owner fencing. A missing value is the first generation for legacy
+// configurations and is never treated as an unknown owner.
+func (m *Manager) DeliveryHarnessGeneration() uint64 {
+	if m == nil || m.cfg == nil || m.cfg.DeliveryHarnessGeneration == 0 {
+		return 1
+	}
+	return m.cfg.DeliveryHarnessGeneration
+}
+
+// AdmitDeliverySubmission records a submission and advances it to accepted
+// before the caller acknowledges admission. Dispatch is a separate operation
+// because an accepted record can safely wait for reconciliation.
+func (m *Manager) AdmitDeliverySubmission(ctx context.Context, submission journal.Submission) (journal.Submission, error) {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return journal.Submission{}, err
+	}
+	return (&SubmissionDelivery{Journal: deliveryJournal}).Admit(ctx, submission)
+}
+
+// DispatchDeliverySubmission reconciles the immutable submission before it
+// invokes the harness. The manager-level lock prevents two requests in this
+// process from both observing accepted and dispatching the same prompt.
+func (m *Manager) DispatchDeliverySubmission(
+	ctx context.Context,
+	id string,
+	call func(context.Context) error,
+) (journal.Submission, error) {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return journal.Submission{}, err
+	}
+	m.deliverySubmissionMu.Lock()
+	defer m.deliverySubmissionMu.Unlock()
+	m.deliveryActiveMu.Lock()
+	m.deliveryActiveID = id
+	m.deliveryActiveMu.Unlock()
+	defer func() {
+		m.deliveryActiveMu.Lock()
+		m.deliveryActiveID = ""
+		m.deliveryActiveMu.Unlock()
+	}()
+	return (&SubmissionDelivery{Journal: deliveryJournal}).Dispatch(ctx, id, call)
+}
+
+func (m *Manager) activeDeliverySubmissionID() string {
+	m.deliveryActiveMu.RLock()
+	defer m.deliveryActiveMu.RUnlock()
+	return m.deliveryActiveID
+}
+
+// TrackDeliverySubmission associates a prompt generation with its immutable
+// submission. The ACP prompt call returns before the terminal event is
+// emitted, so the active-dispatch marker cannot be the only source of that
+// association.
+func (m *Manager) TrackDeliverySubmission(submissionID string, promptGeneration uint64) {
+	if m == nil || submissionID == "" {
+		return
+	}
+	m.deliveryPromptMu.Lock()
+	if m.deliveryPromptByGeneration == nil {
+		m.deliveryPromptByGeneration = make(map[uint64]string)
+	}
+	m.deliveryPromptByGeneration[promptGeneration] = submissionID
+	m.deliveryPromptMu.Unlock()
+}
+
+func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string {
+	active := m.activeDeliverySubmissionID()
+	m.deliveryPromptMu.Lock()
+	defer m.deliveryPromptMu.Unlock()
+	mapped := m.deliveryPromptByGeneration[update.PromptGeneration]
+	if update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError {
+		delete(m.deliveryPromptByGeneration, update.PromptGeneration)
+	}
+	if update.DeliverySubmissionID != "" {
+		return update.DeliverySubmissionID
+	}
+	if active != "" {
+		return active
+	}
+	return mapped
+}
+
+// DeliverySubmissionIdentity returns the durable owner identity used by
+// prompt submissions. The instance ID changes with a replacement agentctl;
+// the Kandev session remains the stable conversation identity.
+func (m *Manager) DeliverySubmissionIdentity() (sessionID, incarnationID string, generation uint64) {
+	if m == nil || m.cfg == nil {
+		return "", "", 0
+	}
+	return m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration()
 }
 
 // getBaseBranches returns a snapshot of cfg.BaseBranches under the
@@ -1248,6 +1428,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return fmt.Errorf("agent is already running")
 	}
+	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
+		m.status.Store(StatusError)
+		return fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
+	}
 
 	// A previous lifecycle may still be live: an agent that exited on its own
 	// never ran teardown, and Start is reachable without an intervening Stop.
@@ -1815,6 +1999,16 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			if !ok {
 				return
 			}
+			persisted, err := m.persistDeliveryEvent(update)
+			if err != nil {
+				m.logger.Error("failed to commit durable delivery event", zap.Error(err))
+				// A configured journal is the commit-before-publish boundary. Stop
+				// forwarding when it cannot commit so the backend never observes an
+				// event that cannot be replayed after a disconnect.
+				m.status.Store(StatusError)
+				return
+			}
+			update = persisted
 			select {
 			case m.updatesCh <- update:
 			case <-stopCh:
@@ -1824,6 +2018,66 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			return
 		}
 	}
+}
+
+// persistDeliveryEvent establishes the journal commit-before-publish barrier.
+// The normalized event is kept as an opaque payload here; backend projection
+// remains the owner of canonical task messages and workflow effects.
+func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	m.deliveryJournalMu.RLock()
+	deliveryJournal := m.deliveryJournal
+	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
+	m.deliveryJournalMu.RUnlock()
+	if !configured || deliveryJournal == nil {
+		return update, nil
+	}
+	payload, err := json.Marshal(update)
+	if err != nil {
+		return update, err
+	}
+	sessionID := ""
+	if m.cfg != nil {
+		sessionID = m.cfg.SessionID
+	}
+	if sessionID == "" {
+		sessionID = update.SessionID
+	}
+	streamID := m.DeliveryStreamID()
+	incarnationID := streamID
+	harnessGeneration := m.DeliveryHarnessGeneration()
+	if m.DeliveryIncarnationID() != "" {
+		incarnationID = m.DeliveryIncarnationID()
+	}
+	if streamID == "" {
+		return update, fmt.Errorf("durable delivery stream identity is missing")
+	}
+	if sessionID == "" {
+		sessionID = streamID
+	}
+	committed, err := deliveryJournal.Append(context.Background(), journal.Event{
+		SessionID:         sessionID,
+		IncarnationID:     incarnationID,
+		HarnessGeneration: harnessGeneration,
+		StreamID:          streamID,
+		SubmissionID:      m.deliverySubmissionIDForEvent(update),
+		Type:              update.Type,
+		Payload:           payload,
+		Terminal:          update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError,
+	})
+	if err != nil {
+		m.deliveryJournalMu.Lock()
+		if m.deliveryJournalErr == nil {
+			m.deliveryJournalErr = err
+		}
+		m.deliveryJournalMu.Unlock()
+		return update, err
+	}
+	update.DeliveryStreamID = committed.StreamID
+	update.DeliveryIncarnationID = committed.IncarnationID
+	update.DeliveryHarnessGeneration = committed.HarnessGeneration
+	update.DeliverySequence = committed.Sequence
+	update.DeliverySubmissionID = committed.SubmissionID
+	return update, nil
 }
 
 // GetUpdates returns the channel for agent event notifications
@@ -1845,13 +2099,20 @@ func (m *Manager) SendErrorEventWithProviderError(
 	promptGeneration uint64,
 	providerError *streams.ProviderError,
 ) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	event := adapter.AgentEvent{
 		Type:             adapter.EventTypeError,
 		Error:            errorMessage,
 		PromptGeneration: promptGeneration,
 		ProviderError:    providerError,
-	}:
+	}
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable error event", zap.Error(err))
+		return
+	} else {
+		event = persisted
+	}
+	select {
+	case m.updatesCh <- event:
 	default:
 		m.logger.Warn("updates channel full, could not send error event")
 	}
@@ -1861,11 +2122,18 @@ func (m *Manager) SendErrorEventWithProviderError(
 // existing agent update stream. Diagnostics are best effort: an overloaded
 // consumer must never delay the agent process or create a second stream.
 func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	event := adapter.AgentEvent{
 		Type:          streams.EventTypeMCPAttachment,
 		MCPAttachment: &evidence,
-	}:
+	}
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable MCP attachment event", zap.Error(err))
+		return
+	} else {
+		event = persisted
+	}
+	select {
+	case m.updatesCh <- event:
 	default:
 		m.logger.Warn("updates channel full, dropping MCP attachment evidence",
 			zap.String("attempt_id", evidence.AttemptID),
@@ -1877,11 +2145,18 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 // PublishMCPAttachmentAttempt starts an attachment-evidence timeline through
 // the existing non-blocking agent update stream.
 func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	event := adapter.AgentEvent{
 		Type:                 streams.EventTypeMCPAttachment,
 		MCPAttachmentAttempt: &attempt,
-	}:
+	}
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable MCP attachment attempt", zap.Error(err))
+		return
+	} else {
+		event = persisted
+	}
+	select {
+	case m.updatesCh <- event:
 	default:
 		m.logger.Warn("updates channel full, dropping MCP attachment attempt",
 			zap.String("attempt_id", attempt.AttemptID))
@@ -1921,7 +2196,24 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 	if err := m.WaitForAdmission(ctx); err != nil {
 		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err))
 	}
-	return errors.Join(previewErr, m.stop(ctx))
+	stopErr := m.stop(ctx)
+	return errors.Join(previewErr, stopErr, m.closeDeliveryJournal())
+}
+
+func (m *Manager) closeDeliveryJournal() error {
+	if m == nil {
+		return nil
+	}
+	m.deliveryJournalClose.Do(func() {
+		m.deliveryJournalMu.Lock()
+		defer m.deliveryJournalMu.Unlock()
+		if m.deliveryJournal == nil {
+			return
+		}
+		m.deliveryJournalCloseErr = m.deliveryJournal.Close()
+		m.deliveryJournal = nil
+	})
+	return m.deliveryJournalCloseErr
 }
 
 func (m *Manager) stop(ctx context.Context) error {
@@ -2551,17 +2843,23 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 		if len(recentStderr) > 0 {
 			errorMsg = fmt.Sprintf("%s: %s", errorMsg, strings.Join(recentStderr, "; "))
 		}
-		select {
-		case m.updatesCh <- adapter.AgentEvent{
+		event := adapter.AgentEvent{
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
 				"exit_code":     exitCode,
 				"recent_stderr": recentStderr,
 			},
-		}:
-		default:
-			m.logger.Warn("updates channel full, could not send exit error event")
+		}
+		if persisted, persistErr := m.persistDeliveryEvent(event); persistErr != nil {
+			m.logger.Error("failed to commit durable exit error event", zap.Error(persistErr))
+		} else {
+			event = persisted
+			select {
+			case m.updatesCh <- event:
+			default:
+				m.logger.Warn("updates channel full, could not send exit error event")
+			}
 		}
 	default:
 		m.exitCode.Store(0)
@@ -2756,6 +3054,16 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 	m.logger.Info("sending permission notification via updates channel",
 		zap.String("pending_id", pending.ID),
 		zap.String("action_type", pending.Request.ActionType))
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable permission notification", zap.Error(err))
+		select {
+		case pending.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
+		return
+	} else {
+		event = persisted
+	}
 
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -2786,6 +3094,12 @@ func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission
 	m.logger.Info("sending permission cancelled notification",
 		zap.String("pending_id", pending.ID),
 		zap.String("session_id", pending.Request.SessionID))
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable permission cancellation", zap.Error(err))
+		return
+	} else {
+		event = persisted
+	}
 
 	select {
 	case m.updatesCh <- event:

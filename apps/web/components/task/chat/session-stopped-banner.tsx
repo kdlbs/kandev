@@ -22,7 +22,10 @@ import {
   type SessionRecoveryBusyAction,
   type SessionRecoveryActions,
 } from "@/hooks/domains/session/use-session-recovery-actions";
-import type { BranchRecoveryDetails } from "@/lib/services/session-recovery-service";
+import type {
+  BranchRecoveryDetails,
+  ContextContinuationDetails,
+} from "@/lib/services/session-recovery-service";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
 
@@ -45,19 +48,23 @@ function StoppedRecoveryFeedback({
   recoveryError,
   recoveryNotice,
   branchDetails,
+  continuationDetails,
   busyAction,
   onRetry,
   onRestore,
   onNewBranch,
+  onContinueFromHistory,
 }: {
   workspaceId?: string | null;
   recoveryError: Error | null;
   recoveryNotice: string | null;
   branchDetails: BranchRecoveryDetails | null;
+  continuationDetails: ContextContinuationDetails | null;
   busyAction: SessionRecoveryBusyAction;
   onRetry: () => void;
   onRestore: () => void;
   onNewBranch: () => void;
+  onContinueFromHistory: () => void;
 }) {
   const { t } = useTranslation();
   if (!recoveryError && !recoveryNotice) return null;
@@ -67,6 +74,22 @@ function StoppedRecoveryFeedback({
     testId: "recovery-restore-workspace-button",
     disabled: busyAction !== null,
   };
+  const continuationAction = {
+    label: t("task:continueFromHistory"),
+    onClick: onContinueFromHistory,
+    testId: "recovery-continue-from-history-button",
+    disabled: busyAction !== null,
+  };
+  const newBranchAction = {
+    label: t("task:continueOnNewBranch"),
+    onClick: onNewBranch,
+    testId: "recovery-new-branch-button",
+    disabled: busyAction !== null,
+  };
+  let primaryAction = restoreAction;
+  if (branchDetails) primaryAction = newBranchAction;
+  if (continuationDetails) primaryAction = continuationAction;
+  const secondaryAction = continuationDetails || branchDetails ? restoreAction : undefined;
   return (
     <>
       {recoveryError ? (
@@ -76,17 +99,8 @@ function StoppedRecoveryFeedback({
           retryDisabled={busyAction !== null}
           workspaceId={workspaceId}
           compact
-          action={
-            branchDetails
-              ? {
-                  label: t("task:continueOnNewBranch"),
-                  onClick: onNewBranch,
-                  testId: "recovery-new-branch-button",
-                  disabled: busyAction !== null,
-                }
-              : restoreAction
-          }
-          secondaryAction={branchDetails ? restoreAction : undefined}
+          action={primaryAction}
+          secondaryAction={secondaryAction}
           testId="session-recovery-error"
         />
       ) : null}
@@ -134,11 +148,13 @@ function RecoverableSessionActions({
     busyAction,
     recoveryError,
     branchDetails,
+    continuationDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,
     handleRetry,
     handleNewBranch,
+    handleContinueFromHistory,
   } = recoveryActions ?? localRecoveryActions;
 
   const profileExists = useSessionProfileExists(sessionId);
@@ -161,10 +177,12 @@ function RecoverableSessionActions({
         recoveryError={recoveryError}
         recoveryNotice={recoveryNotice}
         branchDetails={branchDetails}
+        continuationDetails={continuationDetails}
         busyAction={busyAction}
         onRetry={handleRetry}
         onRestore={() => void handleRestore()}
         onNewBranch={handleNewBranch}
+        onContinueFromHistory={() => void handleContinueFromHistory()}
       />
       <RecoverableSessionButtons
         taskId={taskId}
@@ -199,11 +217,13 @@ function CompletedSessionActions({
     busyAction,
     recoveryError,
     branchDetails,
+    continuationDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,
     handleRetry,
     handleNewBranch,
+    handleContinueFromHistory,
   } = recoveryActions ?? localRecoveryActions;
   const profileExists = useSessionProfileExists(sessionId);
 
@@ -218,10 +238,12 @@ function CompletedSessionActions({
         recoveryError={recoveryError}
         recoveryNotice={recoveryNotice}
         branchDetails={branchDetails}
+        continuationDetails={continuationDetails}
         busyAction={busyAction}
         onRetry={handleRetry}
         onRestore={() => void handleRestore()}
         onNewBranch={handleNewBranch}
+        onContinueFromHistory={() => void handleContinueFromHistory()}
       />
       <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
         {sessionId && taskId && (

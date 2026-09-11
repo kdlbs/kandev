@@ -132,6 +132,15 @@ func TestToAgentExecutionRecordsHistoryForWorkspaceRebindFallback(t *testing.T) 
 	require.True(t, execution.historyEnabled)
 }
 
+func TestToAgentExecutionRecordsHistoryForContextContinuation(t *testing.T) {
+	instance := &ExecutorInstance{InstanceID: "execution"}
+	execution := instance.ToAgentExecution(&ExecutorCreateRequest{
+		ForceContextContinuation: true,
+	})
+
+	require.True(t, execution.historyEnabled)
+}
+
 func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 	reqEnv := map[string]string{
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",

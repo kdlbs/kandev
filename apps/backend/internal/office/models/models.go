@@ -480,8 +480,15 @@ type Run struct {
 	RouteCycleBaselineSeq int `json:"route_cycle_baseline_seq" db:"route_cycle_baseline_seq"`
 	// RoutingBlockedStatus is set when every provider candidate is
 	// unavailable; values: 'waiting_for_provider_capacity' |
-	// 'blocked_provider_action_required'.
+	// 'blocked_provider_action_required' | 'session_recovery_required'.
 	RoutingBlockedStatus *RoutingBlockedStatus `json:"routing_blocked_status,omitempty" db:"routing_blocked_status"`
+	// SessionRecoveryBlockID links a parked Office run to the canonical task
+	// session recovery block. It is retained until the operator settles the
+	// block and the run is explicitly admitted again.
+	SessionRecoveryBlockID *string `json:"session_recovery_block_id,omitempty" db:"session_recovery_block_id"`
+	// SessionRecoveryReason is the stable recovery classification shown to an
+	// operator. It is not a retry reason and must not wake the run by itself.
+	SessionRecoveryReason *string `json:"session_recovery_reason,omitempty" db:"session_recovery_reason"`
 	// EarliestRetryAt is the earliest moment a parked run should be re-
 	// resolved. Set only when at least one degraded route is auto-retryable.
 	EarliestRetryAt *time.Time `json:"earliest_retry_at,omitempty" db:"earliest_retry_at"`

@@ -2553,6 +2553,10 @@ type pendingSendNowClaimRepository interface {
 	DeletePendingSendNowClaim(context.Context, *SendNowClaim) error
 }
 
+type pendingSendNowClaimDeliveryRepository interface {
+	SetPendingSendNowClaimDelivery(context.Context, *SendNowClaim, string, string, string) error
+}
+
 // PendingSendNowClaimPersistenceAvailable reports whether ordinary claimed
 // prompts can be recovered after the owning process exits.
 func (s *Service) PendingSendNowClaimPersistenceAvailable() bool {
@@ -2602,10 +2606,40 @@ func (s *Service) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowC
 	})
 }
 
+// SetPendingSendNowClaimDelivery records the negotiated protocol and immutable
+// submission hash before the replacement prompt reaches the harness.
+func (s *Service) SetPendingSendNowClaimDelivery(
+	ctx context.Context,
+	claim *SendNowClaim,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingSendNowClaimDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending Send Now claim delivery persistence unavailable")
+	}
+	if claim == nil {
+		return ErrSendNowClaimChanged
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return err
+	}
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingSendNowClaimDelivery(admittedCtx, claim, protocol, submissionID, payloadHash)
+	})
+}
+
 type pendingQueueDispatchRepository interface {
 	ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error)
 	MarkPendingQueueDispatchAccepted(context.Context, *QueuedMessage) error
 	DeletePendingQueueDispatch(context.Context, *QueuedMessage) error
+}
+
+type pendingQueueDispatchDeliveryRepository interface {
+	SetPendingQueueDispatchDelivery(context.Context, *QueuedMessage, string, string, string) error
 }
 
 // PendingQueueDispatchPersistenceAvailable reports whether ordinary dequeues
@@ -2633,6 +2667,28 @@ func (s *Service) MarkPendingQueueDispatchAccepted(
 	}
 	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
 		return repo.MarkPendingQueueDispatchAccepted(admittedCtx, msg)
+	})
+}
+
+// SetPendingQueueDispatchDelivery records the negotiated protocol and
+// immutable submission hash before the ordinary prompt reaches the harness.
+func (s *Service) SetPendingQueueDispatchDelivery(
+	ctx context.Context,
+	msg *QueuedMessage,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingQueueDispatchDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending queue dispatch delivery persistence unavailable")
+	}
+	if msg == nil {
+		return ErrQueueDispatchClaimChanged
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingQueueDispatchDelivery(admittedCtx, msg, protocol, submissionID, payloadHash)
 	})
 }
 

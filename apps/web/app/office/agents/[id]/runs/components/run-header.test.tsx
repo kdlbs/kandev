@@ -157,4 +157,22 @@ describe("RunHeader routing strip", () => {
     render(<RunHeader run={blocked} />);
     expect(screen.getByTestId("run-routing-blocked")).toBeTruthy();
   });
+
+  it("renders an actionable session recovery route for parked runs", () => {
+    const parked: RunDetail = {
+      ...withRouting({
+        logical_provider_order: [],
+        blocked_status: "session_recovery_required",
+        session_recovery_block_id: "block-1",
+        session_recovery_reason: "native_state_missing",
+        attempts: [],
+      }),
+      status: "queued",
+    };
+    render(<RunHeader run={parked} />);
+    expect(screen.getByTestId("run-session-recovery-required")).toBeTruthy();
+    const link = screen.getByTestId("run-session-recovery-link");
+    expect(link.getAttribute("href")).toBe("/office/tasks/task-1?advanced&session_id=sess-1");
+    expect(link.textContent).toContain("Open session recovery");
+  });
 });

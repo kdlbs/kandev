@@ -118,6 +118,7 @@ import (
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	repoerrors "github.com/kandev/kandev/internal/task/repository/repoerrors"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -139,6 +140,7 @@ import (
 	"github.com/kandev/kandev/internal/delivery"
 
 	"github.com/kandev/kandev/internal/common/ports"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Build-time variables are set by cmd/kandev before Run is called. Defaults
@@ -592,6 +594,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
 	}
+	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -2063,16 +2066,59 @@ func backfillAgentDefaultSkills(
 // newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnvAndSkills in the
 // officeservice.TaskStarterWithLaunchContextFunc adapter. Extracted from
 // initOfficeServices to keep that function under the funlen cap.
+type officeTaskStarterAdapter struct {
+	orch *orchestrator.Service
+}
+
+func (a *officeTaskStarterAdapter) StartTask(
+	ctx context.Context, taskID, agentProfileID, executorID, executorProfileID string,
+	priority, prompt, workflowStepID string, planMode bool, attachments []v1.MessageAttachment,
+) error {
+	return a.StartTaskWithLaunchContext(ctx, taskID, agentProfileID, officeservice.LaunchContext{
+		ExecutorID:        executorID,
+		ExecutorProfileID: executorProfileID,
+		Priority:          priority,
+		Prompt:            prompt,
+		WorkflowStepID:    workflowStepID,
+		PlanMode:          planMode,
+		Attachments:       attachments,
+	})
+}
+
+func (a *officeTaskStarterAdapter) StartTaskWithLaunchContext(
+	ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext,
+) error {
+	_, err := a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
+		launch.WorkflowStepID, launch.PlanMode, false, launch.Attachments, launch.Env,
+		launch.AdditionalSkillSlugs)
+	return err
+}
+
+func (a *officeTaskStarterAdapter) StartTaskWithEnv(
+	ctx context.Context, taskID, agentProfileID, executorID, executorProfileID string,
+	priority, prompt, workflowStepID string, planMode bool, attachments []v1.MessageAttachment,
+	env map[string]string,
+) error {
+	_, err := a.orch.StartTaskWithEnv(ctx, taskID, agentProfileID, executorID, executorProfileID,
+		priority, prompt, workflowStepID, planMode, false, attachments, env)
+	return err
+}
+
+func (a *officeTaskStarterAdapter) GetOpenSessionRecoveryBlock(
+	ctx context.Context, sessionID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetOpenSessionRecoveryBlock(ctx, sessionID)
+}
+
+func (a *officeTaskStarterAdapter) GetSessionRecoveryBlock(
+	ctx context.Context, blockID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetSessionRecoveryBlock(ctx, blockID)
+}
+
 func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.TaskStarter {
-	return officeservice.TaskStarterWithLaunchContextFunc(
-		func(ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext) error {
-			_, err := orchestratorSvc.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
-				launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
-				launch.WorkflowStepID, launch.PlanMode, false, launch.Attachments, launch.Env,
-				launch.AdditionalSkillSlugs)
-			return err
-		},
-	)
+	return &officeTaskStarterAdapter{orch: orchestratorSvc}
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when

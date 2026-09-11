@@ -262,3 +262,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-08-domain-owned-settings-catalog | [Discover settings through domain-owned contracts](2026-09-08-domain-owned-settings-catalog.md) | accepted | backend, frontend, protocol | 2026-09-08 |
 | 2026-09-09-task-completion-conversation-availability | [Separate task completion from conversation availability](2026-09-09-task-completion-conversation-availability.md) | accepted | workflow | 2026-09-09 |
 | 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |
+| 2026-09-10-durable-harness-session-boundaries | [Durable sessions across harness generations](2026-09-10-durable-harness-session-boundaries.md) | accepted (implementation pending) | agents, platform, executors | 2026-09-10 |

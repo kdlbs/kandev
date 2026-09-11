@@ -53,6 +53,20 @@ type TaskStarterWithLaunchContext interface {
 	StartTaskWithLaunchContext(ctx context.Context, taskID string, agentProfileID string, launch LaunchContext) error
 }
 
+// SessionRecoveryBlockReader exposes the task-owned recovery record to Office
+// after an autonomous launch fails. Office keeps only a durable run reference;
+// the task repository remains authoritative for block identity and settlement.
+type SessionRecoveryBlockReader interface {
+	GetOpenSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
+}
+
+// SessionRecoveryBlockLookup reads a block by stable identity so the Office
+// scheduler can distinguish an unresolved block from an explicitly settled
+// one after a restart.
+type SessionRecoveryBlockLookup interface {
+	GetSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing

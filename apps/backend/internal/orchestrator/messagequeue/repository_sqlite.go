@@ -3395,6 +3395,7 @@ func (r *sqliteRepository) claimSendNow(ctx context.Context, identity *QueueSess
 		SourceGenerations: generations,
 		SessionGeneration: sessionGeneration,
 	}
+	claim.setDeliverySubmission(DeliveryProtocolPending, "send-now:"+claim.ClaimID, "")
 
 	if err := r.applySQLiteSendNowClaim(ctx, tx, identity, sessionID, sources, storedByID); err != nil {
 		return nil, err

@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -48,9 +50,19 @@ type AgentInfoResponse struct {
 
 // InitializeResponse is the response to an initialize call
 type InitializeResponse struct {
-	Success   bool               `json:"success"`
-	AgentInfo *AgentInfoResponse `json:"agent_info,omitempty"`
-	Error     string             `json:"error,omitempty"`
+	Success         bool                 `json:"success"`
+	AgentInfo       *AgentInfoResponse   `json:"agent_info,omitempty"`
+	DurableDelivery *DurableDeliveryInfo `json:"durable_delivery,omitempty"`
+	Error           string               `json:"error,omitempty"`
+}
+
+// DurableDeliveryInfo is separate from ACP capabilities. It describes the
+// authenticated agentctl-to-backend delivery journal only.
+type DurableDeliveryInfo struct {
+	Version    uint32 `json:"version"`
+	Durable    bool   `json:"durable"`
+	Unresolved bool   `json:"unresolved,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // NewSessionRequest is a request to create a new ACP session
@@ -86,6 +98,10 @@ type PromptRequest struct {
 	Text             string                 `json:"text"`                  // Simple text prompt
 	Attachments      []v1.MessageAttachment `json:"attachments,omitempty"` // Optional image attachments
 	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	// DeliverySubmissionID lets a backend-owned queue claim preserve its
+	// immutable submission identity across the transport boundary. It is not
+	// part of the payload hash and is ignored by legacy peers.
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
 	// Steer asks for delivery into a turn that is still generating rather than
 	// waiting for it to end. Honored only when the adapter implements
 	// SteerablePrompter and the connected agent advertised the capability;
@@ -96,9 +112,10 @@ type PromptRequest struct {
 
 // PromptResponse is the response to a prompt call
 type PromptResponse struct {
-	Success    bool   `json:"success"`
-	StopReason string `json:"stop_reason,omitempty"`
-	Error      string `json:"error,omitempty"`
+	Success      bool   `json:"success"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	SubmissionID string `json:"submission_id,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // PermissionRespondRequest is a request to respond to a permission request
@@ -153,9 +170,21 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 
 	s.logger.Info("agent stream WebSocket connected")
 	streamID := uuid.NewString()
+	after, err := parseDeliveryUint(c.Query("after"))
+	if err != nil {
+		s.logger.Warn("invalid agent stream delivery cursor", zap.Error(err))
+		_ = conn.Close()
+		return
+	}
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
+	replay, err := s.loadAgentStreamReplay(ctx, after)
+	if err != nil {
+		s.logger.Error("failed to load agent stream replay", zap.Error(err))
+		_ = conn.Close()
+		return
+	}
 
 	// Use a mutex for writing to the WebSocket
 	var writeMu sync.Mutex
@@ -178,7 +207,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	wg.Add(1)
 	go s.runAgentStreamReader(ctx, conn, writeMessage, cancel, &wg)
 	wg.Add(1)
-	go s.runAgentStreamWriter(ctx, conn, streamID, updatesCh, mcpRequestCh, writeMessage, &wg)
+	go s.runAgentStreamWriterWithReplay(ctx, conn, streamID, replay, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg)
 	wg.Wait()
 	if s.mcpBackendClient != nil {
 		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
@@ -229,12 +258,33 @@ func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn,
 
 // runAgentStreamWriter sends agent events and MCP requests to the backend connection.
 func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn, streamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
+	s.runAgentStreamWriterWithReplay(ctx, conn, streamID, nil, 0, "", updatesCh, mcpRequestCh, writeMessage, wg)
+}
+
+// runAgentStreamWriterWithReplay sends committed replay events before it
+// selects the live channel. The public wrapper above keeps isolated tests and
+// embedders on the original writer contract.
+func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *websocket.Conn, streamID string, replay []adapter.AgentEvent, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() {
 		if err := conn.Close(); err != nil {
 			s.logger.Debug("failed to close agent stream websocket", zap.Error(err))
 		}
 	}()
+	for _, notification := range replay {
+		if !s.writeAgentStreamNotification(notification, writeMessage, true) {
+			return
+		}
+	}
+	for _, notification := range replay {
+		if notification.DeliverySequence > after {
+			after = notification.DeliverySequence
+		}
+	}
+	s.runAgentStreamWriterLoop(ctx, conn, streamID, after, deliveryStreamID, updatesCh, mcpRequestCh, writeMessage)
+}
+
+func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -243,13 +293,10 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 			if !ok {
 				return
 			}
-			data, err := json.Marshal(notification)
-			if err != nil {
-				s.logger.Error("failed to marshal notification", zap.Error(err))
+			if deliveryStreamID != "" && notification.DeliveryStreamID == deliveryStreamID && notification.DeliverySequence > 0 && notification.DeliverySequence <= after {
 				continue
 			}
-			if err := writeMessage(data); err != nil {
-				s.logger.Debug("failed to write notification", zap.Error(err))
+			if !s.writeAgentStreamNotification(notification, writeMessage, false) {
 				return
 			}
 		case mcpReq, ok := <-mcpRequestCh:
@@ -257,26 +304,46 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 				mcpRequestCh = nil
 				continue
 			}
-			data, err := json.Marshal(mcpReq)
-			if err != nil {
-				s.logger.Error("failed to marshal MCP request", zap.Error(err))
-				continue
-			}
-			if err := writeMessage(data); err != nil {
-				s.logger.Warn("failed to write MCP request",
-					zap.String("request_id", mcpReq.ID),
-					zap.String("action", mcpReq.Action),
-					zap.Error(err))
-				if s.mcpBackendClient != nil {
-					s.mcpBackendClient.FailRequest(mcpReq.ID, fmt.Errorf("failed to write MCP request to agent stream: %w", err))
-				}
+			if !s.writeAgentStreamMCPRequest(mcpReq, streamID, writeMessage) {
 				return
-			}
-			if s.mcpBackendClient != nil {
-				s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID)
 			}
 		}
 	}
+}
+
+func (s *Server) writeAgentStreamNotification(notification adapter.AgentEvent, writeMessage func([]byte) error, replay bool) bool {
+	data, err := json.Marshal(notification)
+	if err != nil {
+		s.logger.Error("failed to marshal agent notification", zap.Bool("replay", replay), zap.Error(err))
+		return true
+	}
+	if err := writeMessage(data); err != nil {
+		s.logger.Debug("failed to write agent notification", zap.Bool("replay", replay), zap.Error(err))
+		return false
+	}
+	return true
+}
+
+func (s *Server) writeAgentStreamMCPRequest(mcpReq *ws.Message, streamID string, writeMessage func([]byte) error) bool {
+	data, err := json.Marshal(mcpReq)
+	if err != nil {
+		s.logger.Error("failed to marshal MCP request", zap.Error(err))
+		return true
+	}
+	if err := writeMessage(data); err != nil {
+		s.logger.Warn("failed to write MCP request",
+			zap.String("request_id", mcpReq.ID),
+			zap.String("action", mcpReq.Action),
+			zap.Error(err))
+		if s.mcpBackendClient != nil {
+			s.mcpBackendClient.FailRequest(mcpReq.ID, fmt.Errorf("failed to write MCP request to agent stream: %w", err))
+		}
+		return false
+	}
+	if s.mcpBackendClient != nil {
+		s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID)
+	}
+	return true
 }
 
 // handleAgentStreamRequest dispatches agent operation requests received on the WebSocket stream.
@@ -413,6 +480,14 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
+	deliveryCapability := s.procMgr.DeliveryCapability()
+	if s.cfg.DurableJournalPath != "" && !deliveryCapability.Durable {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "durable delivery storage is unavailable", map[string]interface{}{
+			"kind":   "durable_delivery_blocked",
+			"reason": deliveryCapability.Reason,
+		})
+		return resp
+	}
 
 	if err := adapter.Initialize(ctx); err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
@@ -432,6 +507,12 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, InitializeResponse{
 		Success:   true,
 		AgentInfo: agentInfoResp,
+		DurableDelivery: &DurableDeliveryInfo{
+			Version:    deliveryCapability.Version,
+			Durable:    deliveryCapability.Durable,
+			Unresolved: deliveryCapability.Unresolved,
+			Reason:     deliveryCapability.Reason,
+		},
 	})
 	return resp
 }
@@ -626,7 +707,24 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
 		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 		s.logger.Error("load session failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		code := ws.ErrorCodeInternalError
+		details := map[string]interface{}(nil)
+		var restoreErr *acptransport.SessionRestoreError
+		if errors.As(err, &restoreErr) {
+			details = map[string]interface{}{
+				"kind":       "session_restore_blocked",
+				"reason":     restoreErr.Reason,
+				"session_id": req.SessionID,
+			}
+			switch restoreErr.Reason {
+			case acptransport.SessionRestoreReasonNativeStateMissing,
+				acptransport.SessionRestoreReasonNativeResumeUnsupported:
+				code = "SESSION_RESTORE_REQUIRED"
+				details["kind"] = "session_restore_required"
+				details["recovery_action"] = "continue_from_history"
+			}
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), details)
 		return resp
 	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
@@ -662,6 +760,27 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// the user to approve a previous tool call while processing the new prompt.
 	s.procMgr.CancelPendingPermissions()
 
+	deliveryCapability := s.procMgr.DeliveryCapability()
+	if s.cfg.DurableJournalPath != "" && !deliveryCapability.Durable {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "durable delivery storage is unavailable", map[string]interface{}{
+			"kind":   "durable_delivery_blocked",
+			"reason": deliveryCapability.Reason,
+		})
+		return resp
+	}
+	if resp := unresolvedDeliveryResponse(msg, deliveryCapability); resp != nil {
+		return resp
+	}
+	submissionID := ""
+	if deliveryCapability.Durable {
+		var resp *ws.Message
+		submissionID, resp = s.admitDurablePrompt(ctx, msg, req)
+		if resp != nil {
+			return resp
+		}
+	}
+	durableDelivery := deliveryCapability.Durable
+
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.
 	// Use context.Background() so the prompt is NOT tied to the WebSocket connection
@@ -670,7 +789,16 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// The prompt completes naturally when the agent process exits (stdin/stdout close),
 	// the user cancels, or agentctl shuts down.
 	go func() {
-		if err := promptOrSteer(context.Background(), adapter, req); err != nil {
+		prompt := func(promptCtx context.Context) error {
+			return promptOrSteer(promptCtx, adapter, req)
+		}
+		var err error
+		if durableDelivery {
+			_, err = s.procMgr.DispatchDeliverySubmission(context.Background(), submissionID, prompt)
+		} else {
+			err = prompt(context.Background())
+		}
+		if err != nil {
 			if acptransport.IsPromptAbandonedAfterCancel(err) {
 				s.logger.Info("async prompt abandoned after cancel; suppressing stale error event",
 					zap.Error(err))
@@ -699,8 +827,99 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	s.logger.Info("prompt accepted (async)", zap.Int("attachments", len(req.Attachments)))
 
 	// Return immediately — completion comes via WebSocket complete event
-	resp, _ := ws.NewResponse(msg.ID, msg.Action, PromptResponse{Success: true})
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, PromptResponse{Success: true, SubmissionID: submissionID})
 	return resp
+}
+
+func unresolvedDeliveryResponse(msg *ws.Message, capability journal.StorageCapability) *ws.Message {
+	if !capability.Durable || !capability.Unresolved {
+		return nil
+	}
+	resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "durable delivery requires reconciliation before a new prompt", map[string]interface{}{
+		"kind":   "durable_delivery_reconciliation_required",
+		"reason": "unresolved_durable_work",
+	})
+	return resp
+}
+
+func promptSubmissionID(req PromptRequest, messageID string) string {
+	submissionID := req.DeliverySubmissionID
+	if submissionID == "" {
+		submissionID = messageID
+	}
+	if submissionID == "" {
+		submissionID = uuid.NewString()
+	}
+	if !strings.HasPrefix(submissionID, "prompt:") {
+		submissionID = "prompt:" + submissionID
+	}
+	return submissionID
+}
+
+func (s *Server) admitDurablePrompt(
+	ctx context.Context,
+	msg *ws.Message,
+	req PromptRequest,
+) (string, *ws.Message) {
+	payload, err := promptSubmissionPayload(req)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "prompt submission could not be recorded", nil)
+		return "", resp
+	}
+	submissionID := promptSubmissionID(req, msg.ID)
+	sessionID, incarnationID, generation := s.procMgr.DeliverySubmissionIdentity()
+	submission, err := s.procMgr.AdmitDeliverySubmission(ctx, journal.Submission{
+		ID:                submissionID,
+		SessionID:         sessionID,
+		IncarnationID:     incarnationID,
+		HarnessGeneration: generation,
+		Hash:              journal.SubmissionHash(payload),
+		Payload:           payload,
+	})
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "prompt submission could not be admitted", nil)
+		return "", resp
+	}
+	s.procMgr.TrackDeliverySubmission(submission.ID, req.PromptGeneration)
+	if resp := durableSubmissionResponse(msg, submission); resp != nil {
+		return "", resp
+	}
+	return submission.ID, nil
+}
+
+func durableSubmissionResponse(msg *ws.Message, submission journal.Submission) *ws.Message {
+	switch submission.State {
+	case journal.SubmissionDispatching, journal.SubmissionInterruptedUnknown:
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "prompt outcome is uncertain; reconcile before retrying", map[string]interface{}{
+			"submission_id": submission.ID,
+			"state":         submission.State,
+		})
+		return resp
+	case journal.SubmissionCompleted:
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, PromptResponse{Success: true, SubmissionID: submission.ID})
+		return resp
+	case journal.SubmissionFailed, journal.SubmissionCancelled:
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "prompt submission is already settled", map[string]interface{}{
+			"submission_id": submission.ID,
+			"state":         submission.State,
+		})
+		return resp
+	default:
+		return nil
+	}
+}
+
+// promptSubmissionPayload excludes transport correlation fields from the
+// immutable submission hash. A reconnect can allocate a new prompt generation
+// while preserving the same prompt, attachments, and steering intent.
+func promptSubmissionPayload(req PromptRequest) ([]byte, error) {
+	return json.Marshal(struct {
+		Text        string                 `json:"text"`
+		Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
+		Steer       bool                   `json:"steer,omitempty"`
+	}{
+		Text: req.Text, Attachments: req.Attachments, Steer: req.Steer,
+	})
 }
 
 func (s *Server) handleWSCancel(ctx context.Context, msg *ws.Message) *ws.Message {

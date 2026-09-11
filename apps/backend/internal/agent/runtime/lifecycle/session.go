@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -93,8 +94,9 @@ type InitialPromptFailure struct {
 }
 
 type sendPromptCallbacks struct {
-	onDispatched func()
-	onFailure    func(InitialPromptFailure)
+	onDispatched         func()
+	onFailure            func(InitialPromptFailure)
+	deliverySubmissionID string
 }
 
 // NewSessionManager creates a new SessionManager
@@ -177,6 +179,35 @@ func (sm *SessionManager) InitializeSession(
 		result.AgentName = agentInfo.Name
 		result.AgentVersion = agentInfo.Version
 	}
+	peerDelivery, advertised := client.DurableDeliveryCapability()
+	peerVersion := uint32(0)
+	peerDurable := false
+	peerUnresolved := false
+	if advertised {
+		peerVersion = peerDelivery.Version
+		peerDurable = peerDelivery.Durable
+		peerUnresolved = peerDelivery.Unresolved
+		if !peerDurable && peerDelivery.Reason == "storage_not_durable" {
+			// A supported peer can explicitly report that its executor has no
+			// retained volume. That is genuine legacy compatibility, unlike a
+			// configured journal that failed to open.
+			peerVersion = 0
+		}
+	}
+	deliveryDecision := NegotiateDurableDelivery(
+		journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
+		peerVersion,
+		peerDurable,
+		peerUnresolved,
+	)
+	if deliveryDecision.Mode == DurableDeliveryBlocked {
+		return nil, fmt.Errorf("durable delivery negotiation blocked: %s", deliveryDecision.Reason)
+	}
+	sm.logger.Info("agentctl delivery capability negotiated",
+		zap.String("agent_type", agentConfig.ID()),
+		zap.String("mode", string(deliveryDecision.Mode)),
+		zap.String("reason", deliveryDecision.Reason),
+		zap.Bool("capability_advertised", advertised))
 
 	sm.logger.Info("ACP initialize response received",
 		zap.String("agent_type", agentConfig.ID()),
@@ -209,41 +240,57 @@ func (sm *SessionManager) createOrLoadSession(
 		zap.String("existing_session_id", existingSessionID),
 		zap.Bool("will_attempt_load", rt.SessionConfig.NativeSessionResume && existingSessionID != ""))
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
-		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers)
-		if err == nil {
-			return sessionID, nil
-		}
-		// If the underlying ACP connection is dead (peer disconnected, context
-		// cancelled), session/new on the same client will return the same
-		// transport error — falling back just emits a noisy duplicate failure
-		// and delays the FAILED transition. Short-circuit so the caller can
-		// rebuild the connection (next resume cycle gets a fresh agentctl
-		// instance and a fresh ACP connection).
-		if isTransportDeadErr(err) {
-			sm.logger.Warn("session/load failed at transport layer, not retrying with session/new",
-				zap.String("agent_type", agentConfig.ID()),
-				zap.String("existing_session_id", existingSessionID),
-				zap.String("reason", err.Error()))
-			return "", err
-		}
-		// session/load can fail for reasons that don't justify aborting the
-		// session: agent doesn't support the method (capability mismatch /
-		// method not found), the upstream agent CLI no longer recognises the
-		// stored token (expired / version drift / agent-side GC), etc. In all
-		// those cases we want to start a fresh ACP session — the kandev-side
-		// row identity is still preserved, only the agent CLI's conversation
-		// memory is reset. The caller (executor) overwrites the stored token
-		// when the new session ID flows back through the events pipeline.
-		sm.logger.Warn("session/load failed, falling back to session/new",
-			zap.String("agent_type", agentConfig.ID()),
-			zap.String("existing_session_id", existingSessionID),
-			zap.String("reason", err.Error()),
-			zap.Bool("method_not_found", isMethodNotFoundErr(err)),
-			zap.Bool("capability_mismatch", strings.Contains(err.Error(), "LoadSession capability is false")),
-			zap.Bool("session_unknown", isSessionUnknownErr(err)))
-		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+		return sm.restoreExistingSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers)
 	}
 	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+}
+
+// restoreExistingSession keeps native restore as the only automatic recovery
+// action. The coordinator owns the typed outcome and metrics; transport-dead
+// failures retain their original error so the caller can rebuild the connection
+// instead of recording a native-state recovery block.
+func (sm *SessionManager) restoreExistingSession(
+	ctx context.Context,
+	client *agentctl.Client,
+	agentConfig agents.Agent,
+	existingSessionID string,
+	workspacePath string,
+	mcpServers []agentctltypes.McpServer,
+) (string, error) {
+	var loadErr error
+	result, err := (&RestoreCoordinator{}).Restore(ctx, RestoreCoordinatorRequest{
+		Identity: RestoreIdentity{
+			NativeSessionID: existingSessionID,
+			TargetWorkspace: workspacePath,
+		},
+		AgentType:       agentConfig.ID(),
+		Action:          RestoreActionNativeResume,
+		TargetWorkspace: workspacePath,
+		Capabilities:    RestoreCapabilities{SupportsNativeLoad: true, SupportsNativeResume: true},
+	}, RestoreCoordinatorHooks{
+		LoadNative: func(loadCtx context.Context, nativeSessionID string) error {
+			_, loadErr = sm.loadSession(loadCtx, client, agentConfig, nativeSessionID, mcpServers)
+			return loadErr
+		},
+	})
+	if err != nil {
+		if isTransportDeadErr(loadErr) {
+			sm.logger.Warn("session/load failed at transport layer, not recording native recovery block",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("existing_session_id", existingSessionID),
+				zap.String("reason", loadErr.Error()))
+			return "", loadErr
+		}
+		sm.logger.Warn("session/load blocked native replacement",
+			zap.String("agent_type", agentConfig.ID()),
+			zap.String("existing_session_id", existingSessionID),
+			zap.String("reason", string(result.Decision.Reason)))
+		return "", err
+	}
+	if !result.DispatchAllowed || result.NativeSessionID == "" {
+		return "", &RestoreRequiredError{Decision: result.Decision}
+	}
+	return result.NativeSessionID, nil
 }
 
 // shouldInjectResumeContext determines if we should inject resume context for this session.
@@ -938,7 +985,9 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				zap.String("execution_id", execution.ID),
 				zap.String("session_id", execution.SessionID),
 				zap.Int("original_length", len(taskDescription)),
-				zap.Int("effective_length", len(effectivePrompt)))
+				zap.Int("effective_length", len(effectivePrompt)),
+				zap.String("original_hash", continuationPromptHash(taskDescription)),
+				zap.String("effective_hash", continuationPromptHash(effectivePrompt)))
 		}
 		acpAttachments := convertAttachments(attachments)
 		go func() {
@@ -1014,14 +1063,18 @@ func (sm *SessionManager) buildEffectivePrompt(execution *AgentExecution, prompt
 				zap.String("execution_id", execution.ID),
 				zap.String("session_id", execution.SessionID),
 				zap.Int("original_length", len(prompt)),
-				zap.Int("effective_length", len(effectivePrompt)))
-			sm.logger.Info("resume context prompt content",
-				zap.String("execution_id", execution.ID),
-				zap.String("resume_prompt", effectivePrompt))
+				zap.Int("effective_length", len(effectivePrompt)),
+				zap.String("original_hash", continuationPromptHash(prompt)),
+				zap.String("effective_hash", continuationPromptHash(effectivePrompt)))
 		}
 	}
 	execution.resumeContextInjected = true
 	return effectivePrompt
+}
+
+func continuationPromptHash(prompt string) string {
+	hash := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(hash[:])
 }
 
 // waitForPromptDone waits for the prompt to complete, checking for stalls periodically.
@@ -1074,6 +1127,9 @@ func (sm *SessionManager) waitForPromptDone(
 				// hitting a real agent failure.
 				if isCancelReleaseError(signal.Error) {
 					return nil, fmt.Errorf("%w: %s: %w", ErrAgentReported, signal.Error, ErrCancelEscalated)
+				}
+				if signal.Uncertain {
+					return nil, fmt.Errorf("%w: %s", ErrUncertainPromptDelivery, signal.Error)
 				}
 				return nil, fmt.Errorf("%w: %s", ErrAgentReported, signal.Error)
 			}
@@ -1194,6 +1250,23 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
+	return sm.SendPromptWithDispatchCallbackAndSubmissionID(
+		ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched, "",
+	)
+}
+
+// SendPromptWithDispatchCallbackAndSubmissionID is the queue-delivery variant
+// that preserves a backend-owned submission identity through reconnects.
+func (sm *SessionManager) SendPromptWithDispatchCallbackAndSubmissionID(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	submissionID string,
+) (*PromptResult, error) {
 	return sm.sendPrompt(
 		ctx,
 		execution,
@@ -1201,7 +1274,10 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 		validateStatus,
 		attachments,
 		dispatchOnly,
-		sendPromptCallbacks{onDispatched: onDispatched},
+		sendPromptCallbacks{
+			onDispatched:         onDispatched,
+			deliverySubmissionID: submissionID,
+		},
 		false,
 	)
 }
@@ -1389,7 +1465,7 @@ func (sm *SessionManager) dispatchSteerLocked(
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
 	dispatchCtx, cancel := context.WithTimeout(ctx, steerDispatchTimeout)
 	defer cancel()
-	if err := sm.callAgentctlPrompt(dispatchCtx, execution, effectivePrompt, attachments, generation, true); err != nil {
+	if err := sm.callAgentctlPrompt(dispatchCtx, execution, effectivePrompt, attachments, generation, true, ""); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1474,7 +1550,10 @@ func (sm *SessionManager) sendPrompt(
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
 	}
-	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration, steer); err != nil {
+	if err := sm.triggerPrompt(
+		preparedCtx, execution, effectivePrompt, materializedAttachments,
+		promptGeneration, steer, callbacks.deliverySubmissionID,
+	); err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
@@ -1651,8 +1730,9 @@ func (sm *SessionManager) triggerPrompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 	steer bool,
+	submissionID string,
 ) error {
-	err := sm.dispatchPrompt(ctx, execution, prompt, attachments, promptGeneration, steer)
+	err := sm.dispatchPrompt(ctx, execution, prompt, attachments, promptGeneration, steer, submissionID)
 	if err == nil {
 		return nil
 	}
@@ -1724,16 +1804,31 @@ func (sm *SessionManager) callAgentctlPrompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 	steer bool,
+	submissionID string,
 ) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
+	var err error
 	if steer {
-		return client.PromptSteer(ctx, prompt, attachments, promptGeneration)
+		if submissionID != "" {
+			err = client.PromptSteerWithSubmissionID(ctx, prompt, attachments, promptGeneration, submissionID)
+		} else {
+			err = client.PromptSteer(ctx, prompt, attachments, promptGeneration)
+		}
+	} else {
+		if submissionID != "" {
+			err = client.PromptWithSubmissionID(ctx, prompt, attachments, promptGeneration, submissionID)
+		} else {
+			err = client.Prompt(ctx, prompt, attachments, promptGeneration)
+		}
 	}
-	return client.Prompt(ctx, prompt, attachments, promptGeneration)
+	if err == nil {
+		execution.setDeliverySubmissionID(client.LastDeliverySubmissionID())
+	}
+	return err
 }
 
 func (sm *SessionManager) dispatchPrompt(
@@ -1743,15 +1838,16 @@ func (sm *SessionManager) dispatchPrompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 	steer bool,
+	submissionID string,
 ) error {
-	err := sm.callAgentctlPrompt(ctx, execution, prompt, attachments, promptGeneration, steer)
+	err := sm.callAgentctlPrompt(ctx, execution, prompt, attachments, promptGeneration, steer, submissionID)
 	if err == nil || !isAgentStreamNotConnectedErr(err) || sm.streamManager == nil {
 		return err
 	}
 
 	sm.logger.Warn("agent stream not connected, reconnecting and retrying prompt once",
 		zap.String("execution_id", execution.ID))
-	retryErr := sm.retryPromptAfterReconnect(ctx, execution, prompt, attachments, promptGeneration, steer)
+	retryErr := sm.retryPromptAfterReconnect(ctx, execution, prompt, attachments, promptGeneration, steer, submissionID)
 	if retryErr == nil {
 		return nil
 	}
@@ -1779,6 +1875,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 	steer bool,
+	submissionID string,
 ) error {
 	reconnectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -1813,7 +1910,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 		releaseClient()
 		if hasAgentStream {
 			if err := sm.callAgentctlPrompt(
-				reconnectCtx, execution, prompt, attachments, promptGeneration, steer,
+				reconnectCtx, execution, prompt, attachments, promptGeneration, steer, submissionID,
 			); err == nil {
 				return nil
 			} else if !isAgentStreamNotConnectedErr(err) {

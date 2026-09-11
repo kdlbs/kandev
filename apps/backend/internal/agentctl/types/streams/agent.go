@@ -123,6 +123,26 @@ type AgentEvent struct {
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 
+	// DeliveryStreamID identifies the durable agentctl event stream. It is
+	// present only when the event crossed the retained delivery journal.
+	DeliveryStreamID string `json:"delivery_stream_id,omitempty"`
+
+	// DeliveryIncarnationID identifies the Kandev session incarnation that owns
+	// the durable stream. It fences events from a replaced session owner.
+	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
+
+	// DeliveryHarnessGeneration identifies the native harness conversation that
+	// produced the durable event. It fences late events after continuation.
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+
+	// DeliverySequence is the committed sequence within DeliveryStreamID.
+	// Consumers use it as a reconnect cursor, never as a product message ID.
+	DeliverySequence uint64 `json:"delivery_sequence,omitempty"`
+
+	// DeliverySubmissionID links an event to the immutable prompt submission
+	// when agentctl can establish that association.
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
+
 	// OperationID identifies an operation when the agent exposes an operation ID.
 	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`

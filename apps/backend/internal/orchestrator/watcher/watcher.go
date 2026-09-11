@@ -38,6 +38,7 @@ type AgentEventData struct {
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
 	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
+	TurnID             string                 `json:"turn_id,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	ErrorMessage       string                 `json:"error_message,omitempty"`
 	FailureCode        string                 `json:"failure_code,omitempty"`
@@ -63,10 +64,13 @@ type AgentEventData struct {
 
 // ACPSessionEventData contains data from ACP session events
 type ACPSessionEventData struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	ACPSessionID     string `json:"acp_session_id"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentExecutionID          string `json:"agent_execution_id"`
+	ACPSessionID              string `json:"acp_session_id"`
+	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events

@@ -248,8 +248,9 @@ type RoutingBlockedStatus string
 
 // Routing blocked-status values.
 const (
-	RoutingBlockedWaitingForCapacity RoutingBlockedStatus = "waiting_for_provider_capacity"
-	RoutingBlockedActionRequired     RoutingBlockedStatus = "blocked_provider_action_required"
+	RoutingBlockedWaitingForCapacity      RoutingBlockedStatus = "waiting_for_provider_capacity"
+	RoutingBlockedActionRequired          RoutingBlockedStatus = "blocked_provider_action_required"
+	RoutingBlockedSessionRecoveryRequired RoutingBlockedStatus = "session_recovery_required"
 )
 
 // String implements fmt.Stringer.

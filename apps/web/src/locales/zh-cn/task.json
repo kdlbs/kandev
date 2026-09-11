@@ -1915,6 +1915,7 @@
   "sessionRecoveryRestoreAttempt": "工作区还原尝试",
   "resumeFailedWorkspaceReadOnly": "工作区已以只读模式还原",
   "continueOnNewBranch": "在新分支上继续",
+  "continueFromHistory": "从已保存的历史记录继续",
   "restoreReadOnlyWorkspace": "还原只读工作区",
   "gitOperationFailedGeneric": "操作失败",
   "invalidGitHubUrl": "GitHub 链接无效 - 应为 github.com/owner/repo 或 .../pull/123",

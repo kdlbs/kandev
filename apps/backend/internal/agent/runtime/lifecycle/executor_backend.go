@@ -580,13 +580,25 @@ type ExecutorCreateRequest struct {
 	// WorkspaceReuseRequired means this runtime must attach to the supplied
 	// environment handle and must never fall back to provisioning a replacement.
 	WorkspaceReuseRequired bool
-	AgentProfileID         string
-	OfficeAgentProfileID   string
-	PromptTurnID           string
-	WorkspacePath          string
-	WorkspaceSourceRoots   []string
-	Protocol               string
-	Env                    map[string]string
+	// ForceContextContinuation records that the explicit recovery path started
+	// a new native conversation from a bounded Kandev context snapshot.
+	ForceContextContinuation bool
+	AgentProfileID           string
+	OfficeAgentProfileID     string
+	PromptTurnID             string
+	WorkspacePath            string
+	// DurableJournalHostRoot is the retained storage root owned by the
+	// executor. Providers map it to their own stable environment path.
+	DurableJournalHostRoot string
+	DurableJournalOwnerID  string
+	// DeliveryStreamID is stable across agentctl replacement within one
+	// harness generation. The incarnation and generation fence stale events.
+	DeliveryStreamID          string
+	DeliveryIncarnationID     string
+	DeliveryHarnessGeneration uint64
+	WorkspaceSourceRoots      []string
+	Protocol                  string
+	Env                       map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -696,30 +708,34 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 				rt.SessionConfig.NewSessionOnWorkspaceRebind
 		}
 	}
+	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
-		ID:                   ri.InstanceID,
-		RunID:                req.Env["KANDEV_RUN_ID"],
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskEnvironmentID:    req.TaskEnvironmentID,
-		AgentProfileID:       req.AgentProfileID,
-		OfficeAgentProfileID: req.OfficeAgentProfileID,
-		promptTurnID:         req.PromptTurnID,
-		AgentID:              agentID,
-		ContainerID:          ri.ContainerID,
-		ContainerIP:          ri.ContainerIP,
-		WorkspacePath:        workspacePath,
-		WorkspaceSourceRoots: append([]string(nil), req.WorkspaceSourceRoots...),
-		RuntimeName:          ri.RuntimeName,
-		Status:               v1.AgentStatusRunning,
-		StartedAt:            time.Now(),
-		metadata:             metadata,
-		agentctl:             ri.Client,
-		standaloneInstanceID: ri.StandaloneInstanceID,
-		standalonePort:       ri.StandalonePort,
-		historyEnabled:       historyEnabled,
-		promptDoneCh:         make(chan PromptCompletionSignal, 1),
+		ID:                        ri.InstanceID,
+		RunID:                     req.Env["KANDEV_RUN_ID"],
+		TaskID:                    req.TaskID,
+		SessionID:                 req.SessionID,
+		TaskEnvironmentID:         req.TaskEnvironmentID,
+		AgentProfileID:            req.AgentProfileID,
+		OfficeAgentProfileID:      req.OfficeAgentProfileID,
+		promptTurnID:              req.PromptTurnID,
+		AgentID:                   agentID,
+		ContainerID:               ri.ContainerID,
+		ContainerIP:               ri.ContainerIP,
+		WorkspacePath:             workspacePath,
+		WorkspaceSourceRoots:      append([]string(nil), req.WorkspaceSourceRoots...),
+		DeliveryStreamID:          req.DeliveryStreamID,
+		DeliveryIncarnationID:     req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: req.DeliveryHarnessGeneration,
+		RuntimeName:               ri.RuntimeName,
+		Status:                    v1.AgentStatusRunning,
+		StartedAt:                 time.Now(),
+		metadata:                  metadata,
+		agentctl:                  ri.Client,
+		standaloneInstanceID:      ri.StandaloneInstanceID,
+		standalonePort:            ri.StandalonePort,
+		historyEnabled:            historyEnabled,
+		promptDoneCh:              make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
 	return execution

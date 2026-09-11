@@ -368,6 +368,10 @@ func TestInitialize_Success(t *testing.T) {
 				"name":    "test-agent",
 				"version": "1.0.0",
 			},
+			"durable_delivery": map[string]interface{}{
+				"version": 1,
+				"durable": true,
+			},
 		})
 		return resp
 	})
@@ -390,6 +394,10 @@ func TestInitialize_Success(t *testing.T) {
 		if info.Version != "1.0.0" {
 			t.Errorf("expected version '1.0.0', got %q", info.Version)
 		}
+	}
+	capability, advertised := c.DurableDeliveryCapability()
+	if !advertised || !capability.Durable || capability.Version != 1 {
+		t.Fatalf("durable delivery capability = %#v, advertised=%v", capability, advertised)
 	}
 }
 
@@ -545,7 +553,8 @@ func TestPrompt_Success(t *testing.T) {
 			t.Errorf("expected prompt generation 42, got %d", payload.PromptGeneration)
 		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-			"success": true,
+			"success":       true,
+			"submission_id": "prompt:req-1",
 		})
 		return resp
 	})
@@ -558,6 +567,9 @@ func TestPrompt_Success(t *testing.T) {
 	err := c.Prompt(ctx, "hello agent", nil, 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := c.LastDeliverySubmissionID(); got != "prompt:req-1" {
+		t.Fatalf("last delivery submission ID = %q", got)
 	}
 }
 

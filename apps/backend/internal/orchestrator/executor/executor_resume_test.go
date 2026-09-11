@@ -322,6 +322,32 @@ func TestBuildResumeRequestWithOptions_ForwardsBranchReplacementPermission(t *te
 	}
 }
 
+func TestBuildResumeRequestWithOptions_ForwardsContextContinuation(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req, _, _, _, _, err := exec.buildResumeRequestAtCredentialBoundaryWithOptions(
+		context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true, nil,
+		ResumeOptions{
+			ForceContextContinuation: true,
+			ContinuationPrompt:       "continue from this saved context",
+		},
+	)
+	if err != nil {
+		t.Fatalf("buildResumeRequestWithOptions returned error: %v", err)
+	}
+	if !req.ForceContextContinuation {
+		t.Fatal("resume request lost context continuation permission")
+	}
+	if req.TaskDescription != "continue from this saved context" {
+		t.Fatalf("TaskDescription = %q, want continuation prompt", req.TaskDescription)
+	}
+	if req.ACPSessionID != "" {
+		t.Fatalf("ACP session ID = %q, want empty for a new native session", req.ACPSessionID)
+	}
+}
+
 type resumeCredentialStateIssuer struct {
 	repo          *mockRepository
 	observedState models.TaskSessionState
@@ -1001,6 +1027,31 @@ func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *
 	}
 	if req.ACPSessionID != "" {
 		t.Fatalf("failed-session ACP session ID = %q, want empty", req.ACPSessionID)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_ContextContinuationSkipsNativeToken(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskDescription:          "continue from saved context",
+		ForceContextContinuation: true,
+	}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{ID: "sess-1", State: models.TaskSessionStateWaitingForInput}
+	running := &models.ExecutorRunning{
+		SessionID:   "sess-1",
+		TaskID:      "task-1",
+		ResumeToken: "native-session-that-must-not-load",
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, running)
+
+	if req.ACPSessionID != "" {
+		t.Fatalf("ACP session ID = %q, want empty for context continuation", req.ACPSessionID)
+	}
+	if req.TaskDescription != "continue from saved context" {
+		t.Fatalf("TaskDescription = %q, want continuation prompt", req.TaskDescription)
 	}
 }
 

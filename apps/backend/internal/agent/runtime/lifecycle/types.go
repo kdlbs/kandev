@@ -43,23 +43,26 @@ type AgentExecution struct {
 	AgentProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID string
-	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	ContainerID          string
-	ContainerIP          string               // IP address of the container for agentctl communication
-	WorkspacePath        string               // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID         string               // ACP session ID to resume, if available
-	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
-	AgentArgs            []string             // Structured argv for AgentCommand
-	ContinueArgs         []string             // Structured argv for ContinueCommand
-	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
-	Status               v1.AgentStatus
-	StartedAt            time.Time
-	FinishedAt           *time.Time
-	ExitCode             *int
-	ErrorMessage         string
+	OfficeAgentProfileID      string
+	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	ContainerID               string
+	ContainerIP               string               // IP address of the container for agentctl communication
+	WorkspacePath             string               // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots      []string             // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID              string               // ACP session ID to resume, if available
+	DeliveryStreamID          string               // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID     string               // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration uint64               // Native harness generation owning the stream
+	AgentCommand              string               // Command to start the agent subprocess
+	ContinueCommand           string               // Command for follow-up prompts (one-shot agents)
+	AgentArgs                 []string             // Structured argv for AgentCommand
+	ContinueArgs              []string             // Structured argv for ContinueCommand
+	RuntimeName               agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
+	Status                    v1.AgentStatus
+	StartedAt                 time.Time
+	FinishedAt                *time.Time
+	ExitCode                  *int
+	ErrorMessage              string
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
@@ -221,6 +224,13 @@ type AgentExecution struct {
 	promptFinished   chan struct{}
 	promptFinishedMu sync.Mutex
 
+	// deliverySubmissionID identifies the accepted durable prompt currently
+	// associated with this execution. It is advisory until agentctl confirms
+	// the submission state, but it prevents a stream disconnect from being
+	// mistaken for a completed or failed prompt without reconciliation.
+	deliverySubmissionID string
+	deliverySubmissionMu sync.RWMutex
+
 	// Last time an agent event was received (for stall detection)
 	lastActivityAt time.Time
 	// agentEventSincePrompt is armed (false) on each prompt dispatch and set
@@ -251,6 +261,35 @@ type AgentExecution struct {
 	startupAttemptGeneration uint64
 	startupRecoveryStarted   bool
 	startupLifecycleMu       sync.Mutex
+}
+
+func (e *AgentExecution) setDeliverySubmissionID(id string) {
+	if e == nil {
+		return
+	}
+	e.deliverySubmissionMu.Lock()
+	e.deliverySubmissionID = id
+	e.deliverySubmissionMu.Unlock()
+}
+
+func (e *AgentExecution) deliverySubmissionIDSnapshot() string {
+	if e == nil {
+		return ""
+	}
+	e.deliverySubmissionMu.RLock()
+	defer e.deliverySubmissionMu.RUnlock()
+	return e.deliverySubmissionID
+}
+
+func (e *AgentExecution) clearDeliverySubmissionID(id string) {
+	if e == nil {
+		return
+	}
+	e.deliverySubmissionMu.Lock()
+	if id == "" || e.deliverySubmissionID == id {
+		e.deliverySubmissionID = ""
+	}
+	e.deliverySubmissionMu.Unlock()
 }
 
 func (e *AgentExecution) isSessionInitialized() bool {
@@ -349,6 +388,7 @@ func (e *AgentExecution) officeProfileID() string {
 type PromptCompletionSignal struct {
 	StopReason        string
 	IsError           bool
+	Uncertain         bool
 	Error             string
 	PromptGeneration  uint64
 	StartupGeneration uint64
@@ -910,7 +950,10 @@ type LaunchRequest struct {
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
 	// Normal resume leaves it false so a missing branch remains a visible error.
 	AllowBranchReplacement bool
-	TaskTitle              string // Human-readable task title for semantic worktree naming
+	// ForceContextContinuation starts a new native conversation with the
+	// bounded continuation prompt instead of loading a native session.
+	ForceContextContinuation bool
+	TaskTitle                string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
 	AgentProfileID string
@@ -938,9 +981,14 @@ type LaunchRequest struct {
 	// over this snapshot.
 	EnvironmentFinalized bool
 	ACPSessionID         string // ACP session ID to resume, if available
-	Metadata             map[string]interface{}
-	ModelOverride        string         // If set, use this model instead of the profile's model
-	RouteOverride        *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
+	// Durable delivery identity is resolved by the orchestrator from the
+	// persisted session incarnation and harness generation.
+	DeliveryStreamID          string
+	DeliveryIncarnationID     string
+	DeliveryHarnessGeneration uint64
+	Metadata                  map[string]interface{}
+	ModelOverride             string         // If set, use this model instead of the profile's model
+	RouteOverride             *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
 
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.

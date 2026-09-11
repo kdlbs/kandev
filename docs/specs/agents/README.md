@@ -45,6 +45,7 @@ surface shared by task and Office consumers.
 - [Agent Git permission boundary](requirements/git-operations-permission-boundary.md)
 - [Agent Creation Governance](requirements/governance.md)
 - [Granular Agent Permissions](requirements/granular-permissions.md)
+- [Harness session continuity](requirements/harness-session-continuity.md) (draft)
 - [Hide Disabled Agent Profiles from Left Panel Navigation](requirements/hide-disabled-profiles-nav.md)
 - [Injected Skill Naming](requirements/injected-skill-naming.md)
 - [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
@@ -72,6 +73,7 @@ surface shared by task and Office consumers.
 
 - [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
 - [Google Antigravity ACP Agent](system-design/antigravity-acp-agent.md)
+- [Harness session continuity](system-design/harness-session-continuity.md) (draft)
 - [Injected Skill Naming](system-design/injected-skill-naming.md)
 - [Injected Skill Naming Migration](system-design/injected-skill-naming-migration.md)
 - [Dynamic Agent Routing System Design Part 1](system-design/dynamic-agent-routing-01.md)

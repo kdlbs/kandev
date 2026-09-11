@@ -96,6 +96,19 @@ type RunDispatcher interface {
 	) error
 }
 
+// RunDispatchDeferred marks an error that must leave the admitted run open
+// for an explicit recovery action. The automation package deliberately keeps
+// this contract generic so the orchestrator can classify native-session
+// recovery without creating an import cycle.
+type RunDispatchDeferred interface {
+	DispatchDeferred() string
+}
+
+func isRunDispatchDeferred(err error) bool {
+	var deferred RunDispatchDeferred
+	return errors.As(err, &deferred)
+}
+
 func validateContinuationSettings(policy ContinuationPolicy, maxRuns int) error {
 	if policy == "" {
 		policy = ContinuationPolicyNewTask
@@ -1145,6 +1158,9 @@ func (s *Service) DispatchRun(
 
 	dispatchResult, err := dispatch()
 	if err != nil {
+		if isRunDispatchDeferred(err) {
+			return err
+		}
 		return s.markDispatchFailed(ctx, runID, err)
 	}
 	if dispatchResult.TaskID == "" || dispatchResult.SessionID == "" || dispatchResult.TurnID == "" {

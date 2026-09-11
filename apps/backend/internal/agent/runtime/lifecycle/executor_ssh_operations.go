@@ -666,7 +666,7 @@ func buildSSHCreateInstanceRequest(
 	workspacePath string,
 	agentctlBin string,
 ) agentctl.CreateInstanceRequest {
-	return agentctl.CreateInstanceRequest{
+	createRequest := agentctl.CreateInstanceRequest{
 		ID:            req.InstanceID,
 		WorkspacePath: workspacePath,
 		SessionID:     req.SessionID,
@@ -688,8 +688,20 @@ func buildSSHCreateInstanceRequest(
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		Env:                        sshRemoteContributionEnv(req, agentctlBin),
 	}
+	if req.DurableJournalOwnerID != "" {
+		// The SSH task directory is the stable remote environment. Keep the
+		// journal below it so agentctl replacement does not move delivery state
+		// with the process or session directory.
+		createRequest.DurableJournalPath = filepath.Join(
+			workspacePath, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt",
+		)
+	}
+	return createRequest
 }
 
 // createRemoteAgentInstance creates a per-session agent instance on the
