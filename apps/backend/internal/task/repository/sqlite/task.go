@@ -511,6 +511,13 @@ func lockWorkflowStepForWrite(ctx context.Context, tx interface {
 	return err
 }
 
+// lockTaskStepForWriteSavepoint is the name of the per-attempt Postgres
+// savepoint lockTaskStepForWrite wraps each lock attempt in, so a retry can
+// release a stale step's lock (see the function doc) via ROLLBACK TO
+// SAVEPOINT. Reused across attempts: each SAVEPOINT re-establishes it after
+// the previous attempt released or rolled back to it.
+const lockTaskStepForWriteSavepoint = "lock_task_step_for_write"
+
 // lockTaskStepForWrite locks the workflow step taskID currently belongs to
 // (see lockWorkflowStepForWrite), so a caller hiding or removing the task
 // (archive, delete, unarchive) cannot straddle a concurrent ReorderStepTasks
@@ -530,10 +537,24 @@ func lockWorkflowStepForWrite(ctx context.Context, tx interface {
 // (safe to take FOR UPDATE here, since the step lock already held orders it
 // correctly) detects the mismatch and this retries against the task's real
 // current step.
+//
+// A retry must not simply move on to the new step while still holding the
+// stale one: this package's other multi-step lockers (lockWorkflowStepsForAdmission)
+// always acquire two step locks in ascending sorted order specifically to
+// avoid an AB-BA deadlock against each other, and on Postgres a row lock is
+// held until end of transaction with no in-place unlock — so accumulating
+// stale-then-new locks here would deadlock against a concurrent sorted-order
+// locker taking the same two steps in the opposite order. Each attempt
+// therefore runs inside its own savepoint: a mismatch rolls back to it
+// (releasing that attempt's step lock, per Postgres subtransaction
+// semantics) before the next attempt locks a different step, so this
+// function never holds more than one step lock at a time.
 func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, taskID string) error {
 	const maxAttempts = 10
+	usePostgres := dialect.IsPostgres(r.db.DriverName())
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		stepID, found, err := r.readTaskWorkflowStepID(ctx, tx, taskID, false)
 		if err != nil || !found {
@@ -541,6 +562,11 @@ func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 		}
 		if r.taskStepLockBeforeAcquireHook != nil {
 			r.taskStepLockBeforeAcquireHook(stepID)
+		}
+		if usePostgres {
+			if _, err := tx.ExecContext(ctx, "SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
+				return fmt.Errorf("lockTaskStepForWrite: savepoint: %w", err)
+			}
 		}
 		if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
 			return err
@@ -550,10 +576,21 @@ func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 			return err
 		}
 		if confirmedStepID == stepID {
+			if usePostgres {
+				if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
+					return fmt.Errorf("lockTaskStepForWrite: release savepoint: %w", err)
+				}
+			}
 			return nil
 		}
 		// The task moved to a different step while we waited for stepID's
-		// lock; loop and lock the step it actually belongs to now.
+		// lock. Roll back to the savepoint to release that now-stale step's
+		// lock before retrying against the task's real current step.
+		if usePostgres {
+			if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
+				return fmt.Errorf("lockTaskStepForWrite: rollback to savepoint: %w", err)
+			}
+		}
 	}
 	return fmt.Errorf("lockTaskStepForWrite: task %s kept changing steps", taskID)
 }
