@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -7,7 +8,10 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const HANDOFF_SUMMARY = "Handoff summary: completed the prior session work.";
 
 async function mockSummarizeUtility(testPage: import("@playwright/test").Page) {
+  let summarizeRequestCount = 0;
   await testPage.route("**/api/v1/utility/execute", async (route) => {
+    const request = route.request().postDataJSON() as { utility_agent_id?: string };
+    if (request.utility_agent_id === "builtin-summarize-session") summarizeRequestCount += 1;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -17,6 +21,7 @@ async function mockSummarizeUtility(testPage: import("@playwright/test").Page) {
       }),
     });
   });
+  return () => summarizeRequestCount;
 }
 
 async function createProfiles(
@@ -43,7 +48,7 @@ test.describe("Session handoff", () => {
     test.setTimeout(120_000);
 
     const { profileA, profileB } = await createProfiles(apiClient);
-    await mockSummarizeUtility(testPage);
+    const getSummarizeRequestCount = await mockSummarizeUtility(testPage);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -83,14 +88,44 @@ test.describe("Session handoff", () => {
 
     await session.openHandoffDialog(session1Id, profileB.id);
 
-    await expect(session.handoffDialog()).toBeVisible({ timeout: 5_000 });
-    await expect(session.handoffDialog()).toContainText("Hand off to");
-    await expect(session.handoffDialog()).toContainText("Handoff Profile B");
+    const handoffDialog = session.handoffDialog();
+    await expect(handoffDialog).toBeVisible({ timeout: 5_000 });
+    await expect(handoffDialog).toContainText("Hand off to");
+    await expect(handoffDialog).toContainText("Handoff Profile B");
 
     const prompt = session.newSessionPromptInput();
-    await expect(prompt).toHaveValue(HANDOFF_SUMMARY, { timeout: 15_000 });
+    const contextTrigger = handoffDialog.locator("button").filter({ hasText: "Blank" });
+    await expect(contextTrigger).toBeVisible();
+    await expect(prompt).toHaveValue("");
+    await expect(session.newSessionStartButton()).toBeDisabled();
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "prove opening a handoff does not invoke the summary utility",
+    );
+    expect(getSummarizeRequestCount()).toBe(0);
 
-    await prompt.fill(`${HANDOFF_SUMMARY}\n/e2e:simple-message`);
+    await contextTrigger.click();
+    const summaryOption = testPage.getByRole("option", {
+      name: /Handoff Profile A/,
+    });
+    await expect(summaryOption).toBeVisible();
+    await summaryOption.click();
+    await expect(prompt).toHaveValue(HANDOFF_SUMMARY, { timeout: 15_000 });
+    await expect.poll(getSummarizeRequestCount).toBe(1);
+
+    await handoffDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(handoffDialog).not.toBeVisible({ timeout: 5_000 });
+
+    await session.openHandoffDialog(session1Id, profileB.id);
+    await expect(session.handoffDialog()).toBeVisible({ timeout: 5_000 });
+    await expect(session.newSessionPromptInput()).toHaveValue("");
+    await expect(
+      session.handoffDialog().locator("button").filter({ hasText: "Blank" }),
+    ).toBeVisible();
+
+    await prompt.fill("/e2e:simple-message");
     await session.newSessionStartButton().click();
     await expect(session.handoffDialog()).not.toBeVisible({ timeout: 15_000 });
 

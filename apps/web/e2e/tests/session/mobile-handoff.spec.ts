@@ -1,7 +1,26 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+const HANDOFF_SUMMARY = "Mobile handoff summary: completed the prior session work.";
+
+async function mockSummarizeUtility(testPage: import("@playwright/test").Page) {
+  let summarizeRequestCount = 0;
+  await testPage.route("**/api/v1/utility/execute", async (route) => {
+    const request = route.request().postDataJSON() as { utility_agent_id?: string };
+    if (request.utility_agent_id === "builtin-summarize-session") summarizeRequestCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        response: HANDOFF_SUMMARY,
+      }),
+    });
+  });
+  return () => summarizeRequestCount;
+}
 
 async function createProfiles(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
@@ -27,6 +46,7 @@ test.describe("Session handoff on mobile", () => {
     test.setTimeout(120_000);
 
     const { profileA, profileB, agentName } = await createProfiles(apiClient);
+    const getSummarizeRequestCount = await mockSummarizeUtility(testPage);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -65,8 +85,62 @@ test.describe("Session handoff on mobile", () => {
 
     await session.openMobileHandoffDialog(session1Id, profileB.id);
 
+    const handoffDialog = session.handoffDialog();
+    await expect(handoffDialog).toBeVisible({ timeout: 5_000 });
+    await expect(handoffDialog).toContainText("Hand off to");
+    await expect(handoffDialog).toContainText("Mobile Handoff B");
+
+    const prompt = session.newSessionPromptInput();
+    const contextTrigger = handoffDialog.locator("button").filter({ hasText: "Blank" });
+    await expect(contextTrigger).toBeVisible();
+    await expect(prompt).toHaveValue("");
+    await expect(session.newSessionStartButton()).toBeDisabled();
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "prove opening a mobile handoff does not invoke the summary utility",
+    );
+    expect(getSummarizeRequestCount()).toBe(0);
+
+    await contextTrigger.tap();
+    const summaryOption = testPage.getByRole("option", { name: /Mobile Handoff A/ });
+    await expect(summaryOption).toBeVisible();
+    await summaryOption.tap();
+    await expect(prompt).toHaveValue(HANDOFF_SUMMARY, { timeout: 15_000 });
+    await expect.poll(getSummarizeRequestCount).toBe(1);
+
+    await handoffDialog.getByRole("button", { name: "Cancel" }).tap();
+    await expect(handoffDialog).not.toBeVisible({ timeout: 5_000 });
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByRole("dialog", { name: "Sessions" })).not.toBeVisible();
+
+    await session.openMobileHandoffDialog(session1Id, profileB.id);
     await expect(session.handoffDialog()).toBeVisible({ timeout: 5_000 });
-    await expect(session.handoffDialog()).toContainText("Hand off to");
-    await expect(session.handoffDialog()).toContainText("Mobile Handoff B");
+    await expect(session.newSessionPromptInput()).toHaveValue("");
+    await expect(
+      session.handoffDialog().locator("button").filter({ hasText: "Blank" }),
+    ).toBeVisible();
+
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().tap();
+    await expect(session.handoffDialog()).not.toBeVisible({ timeout: 15_000 });
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions: updated } = await apiClient.listTaskSessions(task.id);
+          return updated.length;
+        },
+        { timeout: 30_000, message: "Waiting for mobile handoff session to be created" },
+      )
+      .toBe(2);
   });
 });

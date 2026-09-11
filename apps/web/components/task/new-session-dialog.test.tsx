@@ -14,7 +14,10 @@ const mockRecordRecentUse = vi.fn();
 let mockAgentSelectorValue: string | undefined;
 let mockAgentSelectorOnChange: ((value: string) => void) | undefined;
 let mockExecutorProfile: ExecutorProfile | null = null;
+let mockContextSelectValue: string | undefined;
 const PLUGIN_COMPOSER_LABEL = "Plugin composer action";
+const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
+const TYPED_HANDOFF_PROMPT = "typed handoff prompt";
 
 const BASE_PROFILE: AgentProfileOption = {
   id: "profile-1",
@@ -144,7 +147,7 @@ vi.mock("@/components/task-create-dialog-selectors", async () => {
       React.Fragment,
       null,
       React.createElement("textarea", {
-        "data-testid": "task-description-input",
+        "data-testid": DESCRIPTION_INPUT_TEST_ID,
         placeholder: "Describe what you want the agent to do... (@ to insert a saved prompt)",
         value,
         onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -224,13 +227,29 @@ vi.mock("@/components/enhance-prompt-button", () => ({
 vi.mock("./session-dialog-shared", () => ({
   EnvironmentBadges: () => null,
   AttachButton: () => null,
-  ContextSelect: ({ onValueChange }: { onValueChange: (value: string) => void }) => (
-    <div>
-      <button type="button" onClick={() => void onValueChange("copy_prompt")}>
-        Copy initial prompt
-      </button>
-    </div>
-  ),
+  ContextSelect: ({
+    value,
+    onValueChange,
+  }: {
+    value: string;
+    onValueChange: (value: string) => void;
+  }) => {
+    mockContextSelectValue = value;
+    return (
+      <div>
+        <span data-testid="context-value">{value}</span>
+        <button type="button" onClick={() => void onValueChange("copy_prompt")}>
+          Copy initial prompt
+        </button>
+        <button type="button" onClick={() => void onValueChange("summarize:session-9")}>
+          Summarize source session
+        </button>
+        <button type="button" onClick={() => void onValueChange("summarize:session-10")}>
+          Summarize alternate session
+        </button>
+      </div>
+    );
+  },
   useDialogAttachments: () => ({
     attachments: [],
     isDragging: false,
@@ -257,6 +276,7 @@ describe("NewSessionDialog", () => {
     mockExecutorProfile = null;
     mockAgentSelectorValue = undefined;
     mockAgentSelectorOnChange = undefined;
+    mockContextSelectValue = undefined;
   });
 
   beforeEach(() => {
@@ -274,13 +294,13 @@ describe("NewSessionDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy initial prompt" }));
 
     await waitFor(() =>
-      expect((screen.getByTestId("task-description-input") as HTMLTextAreaElement).value).toBe(
+      expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
         "seed prompt",
       ),
     );
   });
 
-  it("writes the handoff summary into the fresh-open dialog prompt", async () => {
+  it("opens handoff with blank context without summarizing", () => {
     render(
       <NewSessionDialog
         open={true}
@@ -290,12 +310,106 @@ describe("NewSessionDialog", () => {
       />,
     );
 
+    expect(mockContextSelectValue).toBe("blank");
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe("");
+    expect(
+      (screen.getByRole("button", { name: "Start Agent" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getByText("Profile 1")).toBeTruthy();
+    expect(mockSummarize).not.toHaveBeenCalled();
+  });
+
+  it("summarizes only after an explicit session selection", async () => {
+    render(
+      <NewSessionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Summarize source session" }));
+
     await waitFor(() => expect(mockSummarize).toHaveBeenCalledWith("session-9"));
     await waitFor(() =>
-      expect((screen.getByTestId("task-description-input") as HTMLTextAreaElement).value).toBe(
+      expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
         "summary text",
       ),
     );
+    expect(mockContextSelectValue).toBe("summarize:session-9");
+  });
+
+  it("resets handoff context to blank when reopened", async () => {
+    const props = {
+      onOpenChange: vi.fn(),
+      taskId: "task-1",
+      handoff: { sourceSessionId: "session-9", targetProfileId: "profile-1" },
+    } as const;
+    const { rerender } = render(<NewSessionDialog open={true} {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Summarize source session" }));
+    await waitFor(() =>
+      expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+        "summary text",
+      ),
+    );
+
+    rerender(<NewSessionDialog open={false} {...props} />);
+    rerender(<NewSessionDialog open={true} {...props} />);
+
+    expect(mockContextSelectValue).toBe("blank");
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe("");
+    expect(mockSummarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a typed handoff draft across ordinary rerenders", () => {
+    const { rerender } = render(
+      <NewSessionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
+      />,
+    );
+    const prompt = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID);
+    fireEvent.change(prompt, { target: { value: TYPED_HANDOFF_PROMPT } });
+
+    rerender(
+      <NewSessionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
+      />,
+    );
+
+    expect((prompt as HTMLTextAreaElement).value).toBe(TYPED_HANDOFF_PROMPT);
+    expect(mockSummarize).not.toHaveBeenCalled();
+  });
+
+  it("launches a typed handoff prompt without summarizing", async () => {
+    render(
+      <NewSessionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
+      />,
+    );
+    fireEvent.change(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID), {
+      target: { value: TYPED_HANDOFF_PROMPT },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Agent" }));
+
+    await waitFor(() => expect(mockLaunchSession).toHaveBeenCalledTimes(1));
+    expect(mockBuildStartRequest).toHaveBeenCalledWith(
+      "task-1",
+      "profile-1",
+      expect.objectContaining({ prompt: TYPED_HANDOFF_PROMPT }),
+    );
+    expect(mockSummarize).not.toHaveBeenCalled();
   });
 
   it("submits text a plugin composer action inserted into a blank composer", async () => {
