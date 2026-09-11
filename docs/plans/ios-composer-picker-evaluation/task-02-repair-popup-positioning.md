@@ -201,6 +201,43 @@ positioning mock, hidden-element query, or increased timeout.
   23 passed after the test-only correction.
 - Changed-file ESLint, web typecheck, and whitespace check: passed.
 
-This correction changes no production behavior or public contract. The
-container-shard SSH teardown failure remains under investigation, and remote
-CI must pass before the PR fixup is complete.
+This frontend correction changes no production behavior or public contract.
+
+The container-shard failure exposed a separate SSH recovery defect. Replaying
+the exact 23-test CI shard without retries reproduced its teardown timeout.
+A disposable probe forced recovery after a second backend restart and captured
+the same failure: authenticated health requests used the intermediate local
+execution ID, while the remote controller still expected its original launch
+ID. Readiness retries held a lifecycle read lock long enough to block task
+deletion past its cleanup deadline.
+
+SSH now persists the remote controller's launch identity independently of
+replacement local execution IDs. Same-session recovery retains it; sibling
+sessions and replacement controllers do not inherit it. Legacy rows keep the
+existing previous-execution fallback and record that identity for subsequent
+recovery. The existing browser test now verifies two successive reconnects.
+The [SSH recovery design](../../specs/executors/system-design/ssh-executor.md#recovery-after-backend-restart)
+records this internal contract. Public executor instructions remain unchanged:
+this restores their documented live-controller reuse, with no new setting or
+operator action.
+
+- New Go regression failed on recovery 2 before the fix, for both client
+  construction paths. Fresh-controller identity and metadata lifecycle tests
+  also failed before the fix.
+- `go test ./internal/agent/runtime/lifecycle -run 'Test(SSH|ResumedSSH|ShouldPersist|FilterPersistent)' -count=1`:
+  passed after the fix.
+- `go test ./internal/agent/runtime/lifecycle -count=1`: passed (53.481 seconds).
+- `golangci-lint run ./internal/agent/runtime/lifecycle/... --new-from-rev=origin/main --timeout=5m`:
+  passed with zero issues.
+- Web typecheck, changed-file ESLint, specification lint, and whitespace check:
+  passed.
+
+- The disposable forced-order SSH probe passed after the repair (27.9 seconds),
+  then its fixture instrumentation and temporary ordering code were removed.
+- `CI=true KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --no-build --project containers tests/ssh/add-workspace-sources.spec.ts -- --retries=0 --trace=retain-on-failure`:
+  the permanent two-restart test passed (26.9 seconds), using CI's Node 24.20.0
+  and freshly rebuilt backend/helper/plugin artifacts on the CI-equivalent
+  merge tree with the repair applied.
+
+The final remote CI/review gate and current-base integration validation remain
+pending until the SSH correction is delivered and checked.

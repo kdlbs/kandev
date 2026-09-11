@@ -552,6 +552,7 @@ func (r *SSHExecutor) buildInstance(
 		MetadataKeySSHRemoteSessionDir:   sessionDir,
 		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(pid),
+		MetadataKeySSHAgentctlInstanceID: req.InstanceID,
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
@@ -595,6 +596,7 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 		MetadataKeySSHRemoteSessionDir:   state.remoteDir,
 		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(state.pid),
+		MetadataKeySSHAgentctlInstanceID: resumedSSHAgentctlInstanceID(req),
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
@@ -840,6 +842,10 @@ func (r *SSHExecutor) newResumedAgentctlClient(
 }
 
 func resumedSSHAgentctlInstanceID(req *ExecutorCreateRequest) string {
+	// The remote controller keeps its launch identity across local execution replacements.
+	if instanceID := getMetadataString(req.Metadata, MetadataKeySSHAgentctlInstanceID); instanceID != "" {
+		return instanceID
+	}
 	if req.PreviousExecutionID != "" {
 		return req.PreviousExecutionID
 	}
@@ -930,6 +936,7 @@ func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
 		MetadataKeySSHRemoteSessionDir,
 		MetadataKeySSHRemoteAgentctlPort,
 		MetadataKeySSHRemoteAgentctlPID,
+		MetadataKeySSHAgentctlInstanceID,
 		MetadataKeySSHLocalForwardPort,
 		MetadataKeySSHRemoteAgentctlURL,
 		MetadataKeySSHRuntimeAPIRemotePort,
