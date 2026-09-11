@@ -77,6 +77,13 @@ type AgentExecution struct {
 	FinishedAt                *time.Time
 	ExitCode                  *int
 	ErrorMessage              string
+	// OriginalWorkspacePath is the first agent-visible CWD for this native
+	// session. It is retained separately from the current target so restore
+	// policy can classify relocation before touching native state.
+	OriginalWorkspacePath string
+	// ForceContextContinuation records that this execution was explicitly
+	// authorized to replace native context with a bounded Kandev snapshot.
+	ForceContextContinuation bool
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
@@ -1246,19 +1253,23 @@ type LaunchRequest struct {
 	// ForceContextContinuation starts a new native conversation with the
 	// bounded continuation prompt instead of loading a native session.
 	ForceContextContinuation bool
-	TaskTitle                string // Human-readable task title for semantic worktree naming
+	// RecoveryAction is a server-authorized recovery settlement. It remains
+	// internal to the lifecycle launch boundary and is never client-controlled.
+	RecoveryAction string
+	TaskTitle      string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
 	AgentProfileID string
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
-	ExecutionProfileID string
-	StartAgent         bool                // Transfer launch activity through initial startup/prompt
-	TurnID             string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath      string              // Host path to workspace (original repository path)
-	TaskDescription    string              // Task description to send via ACP prompt
-	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                map[string]string   // Additional env vars
+	ExecutionProfileID    string
+	StartAgent            bool                // Transfer launch activity through initial startup/prompt
+	TurnID                string              // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath         string              // Host path to workspace (original repository path)
+	OriginalWorkspacePath string              // First agent-visible path for native restore policy
+	TaskDescription       string              // Task description to send via ACP prompt
+	Attachments           []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env                   map[string]string   // Additional env vars
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

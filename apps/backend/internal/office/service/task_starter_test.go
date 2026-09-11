@@ -12,14 +12,16 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // mockTaskStarter records calls to StartTask and returns a configurable error.
 type mockTaskStarter struct {
-	mu    sync.Mutex
-	calls []startTaskCall
-	err   error
+	mu             sync.Mutex
+	calls          []startTaskCall
+	err            error
+	recoveryBlocks map[string]*taskmodels.SessionRecoveryBlock
 }
 
 type fakeAgentTokenMinter struct {
@@ -72,10 +74,103 @@ func (m *mockTaskStarter) callCount() int {
 	return len(m.calls)
 }
 
+// GetSessionRecoveryBlock lets scheduler tests model the task-owned recovery
+// record that the orchestrator settles after an operator chooses continuation.
+func (m *mockTaskStarter) GetSessionRecoveryBlock(
+	_ context.Context, blockID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	block := m.recoveryBlocks[blockID]
+	if block == nil {
+		return nil, nil
+	}
+	copy := *block
+	return &copy, nil
+}
+
+func (m *mockTaskStarter) resolveRecoveryBlock(blockID, action string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if block := m.recoveryBlocks[blockID]; block != nil {
+		block.State = taskmodels.RecoveryBlockResolved
+		block.AuthorizedAction = action
+	}
+}
+
 func (m *mockTaskStarter) lastCall() startTaskCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.calls[len(m.calls)-1]
+}
+
+func TestSchedulerTick_ResolvedRecoveryRunReentersAdmissionWithSameIdentity(t *testing.T) {
+	mock := &mockTaskStarter{
+		recoveryBlocks: map[string]*taskmodels.SessionRecoveryBlock{
+			"office-recovery-block": {
+				ID:    "office-recovery-block",
+				State: taskmodels.RecoveryBlockOpen,
+			},
+		},
+	}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+	agent := &models.AgentInstance{
+		ID:                 "recovery-agent-1",
+		WorkspaceID:        "ws-1",
+		Name:               "recovery-worker",
+		Role:               models.AgentRoleWorker,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	insertTestTask(t, svc, "task-recovery-1", "ws-1")
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-recovery-1","session_id":"session-recovery-1"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("list queued runs: count=%d err=%v", len(runs), err)
+	}
+	runID := runs[0].ID
+	if err := svc.RepoForTest().ParkRunForSessionRecovery(
+		ctx, runID, "office-recovery-block", "native_state_missing",
+	); err != nil {
+		t.Fatalf("park run for recovery: %v", err)
+	}
+
+	// This is the durable effect of the operator's explicit continue action.
+	// The scheduler, rather than the recovery handler, owns the next launch.
+	mock.resolveRecoveryBlock("office-recovery-block", "continue_from_history")
+	blockedPolicy := &models.PreLaunchPolicyResult{
+		PolicyID:      "policy-recovery-limit",
+		LimitExceeded: true,
+	}
+	svc.SetBudgetChecker(&fakeBudgetEvaluator{
+		preLaunchResult: models.PreLaunchResult{
+			Decision:       models.PreLaunchDecisionBlockedByLimit,
+			DecidingPolicy: blockedPolicy,
+		},
+	})
+
+	service.RunSchedulerTick(svc, ctx)
+
+	got, err := svc.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("load recovered run: %v", err)
+	}
+	if got.ID != runID {
+		t.Fatalf("run identity changed: got %q, want %q", got.ID, runID)
+	}
+	if got.Status != service.RunStatusFinished || got.Outcome == nil || *got.Outcome != service.RunOutcomeBudgetBlocked {
+		t.Fatalf("run after denied recovery admission = %+v, want budget-blocked finished", got)
+	}
+	if mock.callCount() != 0 {
+		t.Fatalf("scheduler launched despite denied admission: %d calls", mock.callCount())
+	}
 }
 
 func TestSchedulerTick_LaunchesAgent(t *testing.T) {

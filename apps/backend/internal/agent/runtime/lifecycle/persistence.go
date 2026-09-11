@@ -80,6 +80,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		}
 		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
 	}
+	if execution.OriginalWorkspacePath != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOriginalWorkspacePath] = execution.OriginalWorkspacePath
+	}
 	running := &models.ExecutorRunning{
 		ID:                 executionInventorySessionID(execution),
 		SessionID:          executionInventorySessionID(execution),

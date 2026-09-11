@@ -5816,6 +5816,11 @@ type promptTaskOptions struct {
 	// configModeOverride preserves the launch-time mode for a deferred
 	// workflow prompt whose raw queue content is intentionally empty.
 	configModeOverride *bool
+	// expectedDeliveryGeneration fences an explicitly prepared continuation to
+	// the generation whose native candidate passed admission. A successor that
+	// rotates the session before the durable submission is created must force
+	// recovery instead of sending the snapshot to the wrong harness.
+	expectedDeliveryGeneration int64
 	// promptAlreadyComposed and fallbackRetryPrompt mirror the composed-prompt
 	// seam autoStartStepPrompt's own ErrExecutionNotFound branch uses (see
 	// fallbackFreshLaunchOnMissingExecution). When promptAlreadyComposed is

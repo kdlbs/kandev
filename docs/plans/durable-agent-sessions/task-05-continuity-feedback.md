@@ -104,4 +104,6 @@ Preserve existing user edits and unrelated changes.
 
 ## Results
 
-Implemented typed recovery service actions, localized desktop/mobile feedback, stale-action handling, and touch/overflow E2E coverage. Focused web tests and i18n/lint gates pass.
+Implemented typed recovery service actions, backend WS mapping for bounded
+`session_restore_required` continuation details, localized desktop/mobile feedback, stale-action
+handling, and touch/overflow E2E coverage. Focused web tests and i18n/lint gates pass.

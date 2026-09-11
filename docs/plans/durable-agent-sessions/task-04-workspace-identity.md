@@ -100,4 +100,8 @@ Preserve existing user edits and unrelated changes.
 
 ## Results
 
-Implemented workspace identity checks and candidate-session publication fencing in lifecycle rebind/resume paths. Regression tests cover changed roots, source restoration, inherited executor state, and branch replacement safety.
+Implemented workspace identity checks and candidate-session publication fencing in lifecycle
+rebind/resume paths. Live restore reads original and target agent-visible CWD plus native-state
+identity, rejects incompatible relocation with typed recovery, and no longer replaces native
+sessions automatically during workspace rebind. Regression tests cover changed roots, source
+restoration, inherited executor state, and branch replacement safety.

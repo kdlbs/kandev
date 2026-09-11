@@ -28,22 +28,14 @@ func (e *Executor) applyDeliveryIdentity(
 	if incarnationID == "" {
 		incarnationID = session.ID
 	}
-	generation := int64(0)
-	var current *models.HarnessSessionGeneration
-	if reader, ok := e.repo.(harnessSessionGenerationReader); ok {
-		loaded, err := reader.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
-		switch {
-		case err == nil && loaded != nil:
-			current = loaded
-			generation = loaded.Generation
-		case err == nil:
-		case errors.Is(err, models.ErrTaskSessionNotFound):
-		default:
-			return fmt.Errorf("load current harness generation for delivery: %w", err)
-		}
+	current, generation, err := e.loadDeliveryGeneration(ctx, session.ID, incarnationID)
+	if err != nil {
+		return err
 	}
-	if generation <= 0 {
-		generation = 1
+	if current != nil && current.OriginalWorkspace != "" {
+		req.OriginalWorkspacePath = current.OriginalWorkspace
+	} else if req.OriginalWorkspacePath == "" {
+		req.OriginalWorkspacePath = session.WorkspacePath
 	}
 	if req.ForceContextContinuation && current != nil {
 		generation++
@@ -52,4 +44,30 @@ func (e *Executor) applyDeliveryIdentity(
 	req.DeliveryHarnessGeneration = uint64(generation)
 	req.DeliveryStreamID = fmt.Sprintf("%s:g%d", incarnationID, generation)
 	return nil
+}
+
+func (e *Executor) loadDeliveryGeneration(
+	ctx context.Context,
+	sessionID, incarnationID string,
+) (*models.HarnessSessionGeneration, int64, error) {
+	generation := int64(0)
+	var current *models.HarnessSessionGeneration
+	reader, ok := e.repo.(harnessSessionGenerationReader)
+	if !ok {
+		return nil, 1, nil
+	}
+	loaded, err := reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, incarnationID)
+	switch {
+	case err == nil && loaded != nil:
+		current = loaded
+		generation = loaded.Generation
+	case err == nil:
+	case errors.Is(err, models.ErrTaskSessionNotFound):
+	default:
+		return nil, 0, fmt.Errorf("load current harness generation for delivery: %w", err)
+	}
+	if generation <= 0 {
+		generation = 1
+	}
+	return current, generation, nil
 }

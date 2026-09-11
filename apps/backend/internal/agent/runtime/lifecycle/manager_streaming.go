@@ -342,6 +342,45 @@ func (m *Manager) publishStreamingContentNow(
 	if attemptID == "" {
 		attemptID = execution.currentStartupAttemptID()
 	}
+	m.publishStreamingContentNowWithProjection(
+		execution, eventType, messageID, content, isAppend, attemptID, false, diagnostic, promptGeneration,
+	)
+}
+
+func (m *Manager) publishCanonicalStreamingContentNow(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+) {
+	m.publishStreamingContentNowWithProjection(
+		execution,
+		eventType,
+		messageID,
+		content,
+		isAppend,
+		execution.currentStartupAttemptID(),
+		true,
+		false,
+		0,
+	)
+}
+
+func (m *Manager) publishStreamingContentNowWithProjection(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+	attemptID string,
+	canonicalProjection bool,
+	diagnostic bool,
+	promptGeneration uint64,
+) {
+	if attemptID == "" {
+		attemptID = execution.currentStartupAttemptID()
+	}
 	event := AgentStreamEventData{
 		Type:                        eventType,
 		Text:                        content,
@@ -349,6 +388,7 @@ func (m *Manager) publishStreamingContentNow(
 		IsAppend:                    isAppend,
 		ProviderDiagnosticCandidate: diagnostic,
 		PromptGeneration:            promptGeneration,
+		CanonicalProjection:         canonicalProjection,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"

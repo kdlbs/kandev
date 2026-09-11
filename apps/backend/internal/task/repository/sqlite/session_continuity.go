@@ -54,6 +54,8 @@ func (r *Repository) initSessionContinuitySchema() error {
 			id TEXT PRIMARY KEY,
 			attempt_id TEXT NOT NULL,
 			session_id TEXT NOT NULL,
+			target_generation BIGINT NOT NULL DEFAULT 0,
+			submission_id TEXT NOT NULL DEFAULT '',
 			source_message_id TEXT NOT NULL DEFAULT '',
 			content TEXT NOT NULL,
 			byte_count INTEGER NOT NULL,
@@ -163,6 +165,22 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	// A context continuation publishes a replacement generation while the
+	// operator's recovery block is still the admission fence. Move that fence
+	// with the generation in the same transaction so a successful commit cannot
+	// leave an open block stranded on the predecessor generation.
+	if generation.Generation == expectedGeneration+1 {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE session_recovery_blocks
+			SET expected_generation = ?, updated_at = ?
+			WHERE session_id = ? AND incarnation_id = ?
+			  AND expected_generation = ? AND state = ?`),
+			generation.Generation, generation.CommittedAt,
+			generation.SessionID, generation.IncarnationID,
+			expectedGeneration, models.RecoveryBlockOpen); err != nil {
+			return false, fmt.Errorf("move open recovery blocks with generation: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
@@ -240,10 +258,10 @@ func (r *Repository) CreateContinuationSnapshot(ctx context.Context, snapshot *m
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO session_continuation_snapshots
-		(id, attempt_id, session_id, source_message_id, content, byte_count,
+		(id, attempt_id, session_id, target_generation, submission_id, source_message_id, content, byte_count,
 		 omitted_messages, truncated, content_hash, status, created_at, resolved_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		snapshot.ID, snapshot.AttemptID, snapshot.SessionID, snapshot.SourceMessageID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		snapshot.ID, snapshot.AttemptID, snapshot.SessionID, snapshot.TargetGeneration, snapshot.SubmissionID, snapshot.SourceMessageID,
 		snapshot.Content, snapshot.ByteCount, snapshot.OmittedMessages, boolToInt(snapshot.Truncated),
 		snapshot.ContentHash, snapshot.Status, snapshot.CreatedAt, snapshot.ResolvedAt)
 	return err
@@ -251,13 +269,13 @@ func (r *Repository) CreateContinuationSnapshot(ctx context.Context, snapshot *m
 
 func (r *Repository) GetContinuationSnapshot(ctx context.Context, id string) (*models.ContinuationSnapshot, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, attempt_id, session_id, source_message_id, content, byte_count,
+		SELECT id, attempt_id, session_id, target_generation, submission_id, source_message_id, content, byte_count,
 		       omitted_messages, truncated, content_hash, status, created_at, resolved_at
 		FROM session_continuation_snapshots WHERE id = ?`), id)
 	var snapshot models.ContinuationSnapshot
 	var truncated int
 	if err := row.Scan(&snapshot.ID, &snapshot.AttemptID, &snapshot.SessionID,
-		&snapshot.SourceMessageID, &snapshot.Content, &snapshot.ByteCount,
+		&snapshot.TargetGeneration, &snapshot.SubmissionID, &snapshot.SourceMessageID, &snapshot.Content, &snapshot.ByteCount,
 		&snapshot.OmittedMessages, &truncated, &snapshot.ContentHash, &snapshot.Status,
 		&snapshot.CreatedAt, &snapshot.ResolvedAt); err != nil {
 		return nil, err

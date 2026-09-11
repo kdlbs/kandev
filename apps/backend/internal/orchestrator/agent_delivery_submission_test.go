@@ -117,3 +117,52 @@ func TestPrepareAgentDeliverySubmissionBlocksUnresolvedPeer(t *testing.T) {
 		t.Fatalf("recovery block = %#v, want %s", block, durableDeliveryUnresolvedReason)
 	}
 }
+
+func TestPrepareAgentDeliverySubmissionRejectsRotatedContinuationGeneration(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-delivery-generation", "session-delivery-generation", "step-1")
+	session, err := repo.GetTaskSession(ctx, "session-delivery-generation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	if err := repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID:         session.ID,
+		IncarnationID:     incarnationID,
+		Generation:        1,
+		NativeSessionID:   "native-generation-1",
+		CreationReason:    "test",
+		OriginalWorkspace: session.WorkspacePath,
+		CurrentWorkspace:  session.WorkspacePath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := createTestServiceWithAgent(
+		repo, newMockStepGetter(), newMockTaskRepo(), &durableDeliveryTestAgentManager{
+			mockAgentManager: &mockAgentManager{},
+			advertised:       true,
+			capability: agentruntime.DurableDeliveryCapability{
+				Version: journal.CurrentVersion,
+				Durable: true,
+			},
+		},
+	)
+	_, err = service.prepareAgentDeliverySubmission(
+		ctx, session, "execution-1", "hello", nil,
+		promptTaskOptions{
+			deliveryProtocol:           messagequeue.DeliveryProtocolPending,
+			deliverySubmissionID:       "prompt:continuation",
+			expectedDeliveryGeneration: 2,
+		},
+	)
+	if !errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("error = %v, want session recovery required", err)
+	}
+	if _, err := repo.GetAgentDeliverySubmission(ctx, "prompt:continuation"); err == nil {
+		t.Fatal("rotated continuation unexpectedly created a durable submission")
+	}
+}

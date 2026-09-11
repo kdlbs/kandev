@@ -59,12 +59,14 @@ func TestContinuationCheckpointCrashSafety(t *testing.T) {
 		t.Fatalf("CreateRestoreAttempt: %v", err)
 	}
 	snapshot := &models.ContinuationSnapshot{
-		AttemptID:   attempt.ID,
-		SessionID:   attempt.SessionID,
-		Content:     "canonical history",
-		ByteCount:   len("canonical history"),
-		ContentHash: "hash",
-		Status:      models.ContinuitySnapshotPrepared,
+		AttemptID:        attempt.ID,
+		SessionID:        attempt.SessionID,
+		TargetGeneration: 1,
+		SubmissionID:     "prompt:continuity",
+		Content:          "canonical history",
+		ByteCount:        len("canonical history"),
+		ContentHash:      "hash",
+		Status:           models.ContinuitySnapshotPrepared,
 	}
 	if err := repo.CreateContinuationSnapshot(ctx, snapshot); err != nil {
 		t.Fatalf("CreateContinuationSnapshot: %v", err)
@@ -73,7 +75,8 @@ func TestContinuationCheckpointCrashSafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetContinuationSnapshot: %v", err)
 	}
-	if got.Content != snapshot.Content || got.Status != models.ContinuitySnapshotPrepared {
+	if got.Content != snapshot.Content || got.Status != models.ContinuitySnapshotPrepared ||
+		got.TargetGeneration != snapshot.TargetGeneration || got.SubmissionID != snapshot.SubmissionID {
 		t.Fatalf("snapshot after checkpoint = %+v", got)
 	}
 	if _, err := repo.GetContinuationSnapshot(ctx, "missing"); err == nil {
@@ -110,6 +113,57 @@ func TestSessionRecoveryBlockLookupPreservesResolvedState(t *testing.T) {
 	}
 	if got.State != models.RecoveryBlockResolved || got.AuthorizedAction != "continue_from_history" {
 		t.Fatalf("resolved block = %+v", got)
+	}
+}
+
+func TestCommitHarnessGenerationMovesOpenRecoveryBlock(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-recovery-generation", Title: "Recovery"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-recovery-generation", TaskID: "task-recovery-generation",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	block := &models.SessionRecoveryBlock{
+		ID:                 "block-recovery-generation",
+		SessionID:          "session-recovery-generation",
+		IncarnationID:      "incarnation-1",
+		ExpectedGeneration: 0,
+		Reason:             "native_state_missing",
+		State:              models.RecoveryBlockOpen,
+	}
+	if err := repo.UpsertSessionRecoveryBlock(ctx, block); err != nil {
+		t.Fatalf("UpsertSessionRecoveryBlock: %v", err)
+	}
+	now := time.Now().UTC()
+	committed, err := repo.CommitHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID:             block.SessionID,
+		IncarnationID:         block.IncarnationID,
+		Generation:            1,
+		PredecessorGeneration: 0,
+		NativeSessionID:       "native-recovery-generation",
+		CreationReason:        "context_continued",
+		CreatedAt:             now,
+		CommittedAt:           now,
+	}, 0)
+	if err != nil {
+		t.Fatalf("CommitHarnessSessionGeneration: %v", err)
+	}
+	if !committed {
+		t.Fatal("generation commit was rejected")
+	}
+	got, err := repo.GetOpenSessionRecoveryBlock(ctx, block.SessionID, block.IncarnationID, 1)
+	if err != nil {
+		t.Fatalf("GetOpenSessionRecoveryBlock at new generation: %v", err)
+	}
+	if got.ID != block.ID {
+		t.Fatalf("moved block ID = %q, want %q", got.ID, block.ID)
+	}
+	if _, err := repo.GetOpenSessionRecoveryBlock(ctx, block.SessionID, block.IncarnationID, 0); err == nil {
+		t.Fatal("old-generation recovery block remained open")
 	}
 }
 

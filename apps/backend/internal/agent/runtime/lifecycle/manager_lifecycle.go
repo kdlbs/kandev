@@ -203,6 +203,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
+			originalWorkspacePath := getMetadataString(ri.Metadata, MetadataKeyOriginalWorkspacePath)
+			if originalWorkspacePath == "" {
+				originalWorkspacePath = ri.WorkspacePath
+			}
 			execution := &AgentExecution{
 				ID:        ri.InstanceID,
 				TaskID:    ri.TaskID,
@@ -211,19 +215,20 @@ func (m *Manager) Start(ctx context.Context) error {
 				// declared source is the recovery-inventory record's
 				// execution-profile column, carried onto ri by
 				// buildRecoveredInstances -- never the adopted instance.
-				AgentProfileID:       ri.AgentProfileID,
-				ExecutorType:         getMetadataString(ri.Metadata, MetadataKeyExecutorType),
-				ContainerID:          ri.ContainerID,
-				ContainerIP:          ri.ContainerIP,
-				WorkspacePath:        ri.WorkspacePath,
-				RuntimeName:          ri.RuntimeName,
-				Status:               v1.AgentStatusRunning,
-				StartedAt:            time.Now(),
-				metadata:             ri.Metadata,
-				agentctl:             ri.Client,
-				standaloneInstanceID: ri.StandaloneInstanceID,
-				standalonePort:       ri.StandalonePort,
-				promptDoneCh:         make(chan PromptCompletionSignal, 1),
+				AgentProfileID:        ri.AgentProfileID,
+				ExecutorType:          getMetadataString(ri.Metadata, MetadataKeyExecutorType),
+				ContainerID:           ri.ContainerID,
+				ContainerIP:           ri.ContainerIP,
+				WorkspacePath:         ri.WorkspacePath,
+				OriginalWorkspacePath: originalWorkspacePath,
+				RuntimeName:           ri.RuntimeName,
+				Status:                v1.AgentStatusRunning,
+				StartedAt:             time.Now(),
+				metadata:              ri.Metadata,
+				agentctl:              ri.Client,
+				standaloneInstanceID:  ri.StandaloneInstanceID,
+				standalonePort:        ri.StandalonePort,
+				promptDoneCh:          make(chan PromptCompletionSignal, 1),
 				// AC-EXECUTORS-SURVIVAL-002.14: run identity is re-derived from
 				// the runtime environment, which is itself read back from the
 				// adopted instance rather than the database (both deliberately

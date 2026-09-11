@@ -68,7 +68,6 @@
     }
   ],
   "known_missing_required_stores": [
-	"task",
 	"system-settings",
     "auth-hostnames",
     "organizations",
@@ -103,7 +102,8 @@
       "harness_session_generations",
       "session_continuation_snapshots",
       "session_recovery_blocks",
-      "session_restore_attempts"
+      "session_restore_attempts",
+      "task_workflow_session_bindings"
     ]
   }
 }

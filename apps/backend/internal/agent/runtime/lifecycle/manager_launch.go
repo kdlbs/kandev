@@ -1075,6 +1075,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
+		OriginalWorkspacePath:          reqWithWorktree.OriginalWorkspacePath,
 		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
 		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
