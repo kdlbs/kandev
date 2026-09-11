@@ -31,7 +31,7 @@ const hostRuntimeBootstrap = `(() => {
       result: outcome.result,
     };
     if (outcome.code) message.code = outcome.code;
-    window.parent.postMessage(message, "*");
+    window.parent.postMessage(message, "*"); // Sandboxed iframes have a null origin, so "*" is the only viable target.
   };
 
   const finish = (result, code) => {

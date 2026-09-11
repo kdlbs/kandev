@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/theme/app-theme";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
@@ -60,7 +60,7 @@ function useWebAppFrameLifecycle({
     sendAppearanceRef.current = sendAppearance;
   }, [onError, onLoad, sendAppearance]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     frameReadyRef.current = false;
     setFrameState(runtimeUrl ? "loading" : "unavailable");
     attemptRef.current = null;
@@ -93,7 +93,7 @@ function useWebAppFrameLifecycle({
     });
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!runtimeUrl) return;
     const attempt = {
       nonce: createWebAppStartupNonce(),

@@ -209,8 +209,9 @@ WHERE a.canvas_id = ?`,
 }
 
 // ConsumeCreationAuthorityTx atomically consumes the single-use authority
-// while rechecking its owner, session, task, policy, and current task scope.
-func (r *Repository) ConsumeCreationAuthorityTx(ctx context.Context, tx *sqlx.Tx, authority CreationAuthority, ownerUserID, sessionID, taskID string) error {
+// while rechecking its owner, session, task, policy, task scope, and current
+// workspace ownership.
+func (r *Repository) ConsumeCreationAuthorityTx(ctx context.Context, tx *sqlx.Tx, authority CreationAuthority, ownerUserID, sessionID, taskID string, allowUnownedWorkspace bool) error {
 	if authority.CanvasID == "" || ownerUserID == "" || sessionID == "" || taskID == "" {
 		return ErrStaleCanvasPublish
 	}
@@ -218,10 +219,17 @@ func (r *Repository) ConsumeCreationAuthorityTx(ctx context.Context, tx *sqlx.Tx
 	result, err := tx.ExecContext(ctx, tx.Rebind(
 		`UPDATE canvas_creation_authority
 SET consumed_at = ?
-WHERE canvas_id = ? AND owner_user_id = ? AND creating_session_id = ?
+WHERE canvas_creation_authority.canvas_id = ? AND owner_user_id = ? AND creating_session_id = ?
   AND policy_version = ? AND consumed_at = ''
-  AND EXISTS (SELECT 1 FROM canvas_lifecycle_metadata m WHERE m.id = canvas_id AND m.task_id = ?)`,
-	), now, authority.CanvasID, ownerUserID, sessionID, CreationAuthorityPolicyVersion, taskID)
+	AND EXISTS (
+		SELECT 1
+		FROM canvas_lifecycle_metadata m
+		JOIN workspaces w ON w.id = m.workspace_id
+		WHERE m.id = canvas_creation_authority.canvas_id
+		  AND m.task_id = ?
+		  AND (w.owner_id = ? OR (? AND COALESCE(w.owner_id, '') = ''))
+	)`,
+	), now, authority.CanvasID, ownerUserID, sessionID, CreationAuthorityPolicyVersion, taskID, ownerUserID, allowUnownedWorkspace)
 	if err != nil {
 		return err
 	}

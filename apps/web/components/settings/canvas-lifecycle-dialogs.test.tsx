@@ -437,6 +437,7 @@ describe("CanvasReleaseDialog actions", () => {
 
     await waitFor(() => expect((approveButton as HTMLButtonElement).disabled).toBe(true));
     expect((rejectButton as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox") as HTMLSelectElement).disabled).toBe(true);
 
     mutation.resolve({ ...canvas, active_release_id: pendingRelease.id });
     await waitFor(() => expect(mockListCanvasReleases).toHaveBeenCalledTimes(2));

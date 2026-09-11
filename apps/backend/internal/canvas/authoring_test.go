@@ -261,6 +261,107 @@ func TestCanvasCreationAuthorityDoesNotApproveLaterIncrease(t *testing.T) {
 	}
 }
 
+func TestCanvasCreationAuthorityRejectsUnsupportedCapabilities(t *testing.T) {
+	tests := []struct {
+		name   string
+		digest string
+		setup  func(*manifest.Manifest)
+	}{
+		{
+			name:   "unknown read",
+			digest: "unsupported-unknown-read",
+			setup: func(m *manifest.Manifest) {
+				m.Capabilities.APIRead = []string{"sessions"}
+			},
+		},
+		{
+			name:   "wildcard event",
+			digest: "unsupported-wildcard-event",
+			setup: func(m *manifest.Manifest) {
+				m.Capabilities.Events = []string{"task.*"}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, instanceStore, _ := newCanvasService(t)
+			created := createCanvas(t, service, CreateCanvasRequest{
+				WorkspaceID:        "workspace-1",
+				TaskID:             "task-1",
+				Title:              "Unsupported capability",
+				CreatedBySessionID: "session-1",
+				OwnerUserID:        "owner-1",
+			})
+			instance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+			if err != nil {
+				t.Fatalf("get instance: %v", err)
+			}
+			pkg := testCanvasPackage(tt.digest, nil)
+			tt.setup(pkg.Manifest)
+			_, err = service.PublishPackage(context.Background(), PublishRequest{
+				CanvasID:          created.ID,
+				Package:           pkg,
+				Artifact:          webapp.Artifact{Digest: pkg.Digest, RelativePath: "releases/" + pkg.Digest, Bytes: 1},
+				ExpectedAuthority: instance.PublishAuthority(),
+				SourceActorKind:   "agent",
+				SourceUserID:      "owner-1",
+				SourceTaskID:      "task-1",
+				SourceSessionID:   "session-1",
+			})
+			if !errors.Is(err, ErrInvalidCanvas) {
+				t.Fatalf("publish error = %v, want ErrInvalidCanvas", err)
+			}
+		})
+	}
+}
+
+func TestCanvasCreationAuthorityRechecksWorkspaceOwner(t *testing.T) {
+	service, instanceStore, pool := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID:        "workspace-1",
+		TaskID:             "task-1",
+		Title:              "Transferred workspace",
+		CreatedBySessionID: "session-1",
+		OwnerUserID:        "owner-1",
+	})
+	instance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	if _, err := pool.Writer().Exec(`UPDATE workspaces SET owner_id = 'owner-2' WHERE id = 'workspace-1'`); err != nil {
+		t.Fatalf("transfer workspace owner: %v", err)
+	}
+
+	_, err = service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID:          created.ID,
+		Package:           testCanvasPackage("transferred-workspace", []string{"tasks"}),
+		Artifact:          webapp.Artifact{Digest: "transferred-workspace", RelativePath: "releases/transferred-workspace", Bytes: 1},
+		ExpectedAuthority: instance.PublishAuthority(),
+		SourceActorKind:   "agent",
+		SourceUserID:      "owner-1",
+		SourceTaskID:      "task-1",
+		SourceSessionID:   "session-1",
+	})
+	if !errors.Is(err, ErrStaleCanvasPublish) {
+		t.Fatalf("publish after workspace transfer = %v, want ErrStaleCanvasPublish", err)
+	}
+	grants, err := instanceStore.ListGrants(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("list grants after workspace transfer: %v", err)
+	}
+	if len(grants) != 0 {
+		t.Fatalf("grants after workspace transfer = %+v, want none", grants)
+	}
+	authority, err := service.repo.GetCreationAuthority(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get authority after workspace transfer: %v", err)
+	}
+	if !authority.ConsumedAt.IsZero() {
+		t.Fatalf("authority after workspace transfer consumed at %s", authority.ConsumedAt)
+	}
+}
+
 func TestCanvasCreationAuthorityRollsBackOnActivationFailure(t *testing.T) {
 	service, instanceStore, _ := newCanvasService(t)
 	created := createCanvas(t, service, CreateCanvasRequest{

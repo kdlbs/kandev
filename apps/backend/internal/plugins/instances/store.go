@@ -1652,9 +1652,9 @@ func (s *Store) AddGrant(ctx context.Context, grant Grant) error {
 }
 
 // AddInitialGrantsTx inserts the exact grants delegated by a trusted local
-// canvas creation. It does not advance grant_generation because the caller's
-// activation transaction advances the generation once when it binds the
-// package identity. The empty-grant case is valid.
+// canvas creation. It does not advance grant_generation because SetPluginIDTx
+// increments it before the public ActivateReleaseTx call in the same
+// activation transaction. The empty-grant case is valid.
 func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID, approvedBy string, grants []Grant) error {
 	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(approvedBy) == "" {
 		return ErrInvalidScope

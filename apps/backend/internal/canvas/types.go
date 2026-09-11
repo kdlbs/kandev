@@ -47,6 +47,11 @@ const (
 	permissionKindEvents   = "events"
 	permissionKindNetwork  = "network"
 	permissionKindState    = "state"
+
+	canvasCapabilityTasks      = "tasks"
+	canvasCapabilityWorkflows  = "workflows"
+	canvasCapabilityMessages   = "messages"
+	canvasCapabilityTaskUpdate = "task.updated"
 )
 
 var (

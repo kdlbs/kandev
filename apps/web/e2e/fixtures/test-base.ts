@@ -246,7 +246,7 @@ export const test = backendFixture.extend<
   // discoveryRoots() allows branch listing (isPathAllowed check).
   seedData: [
     async ({ apiClient, backend }, use) => {
-      const workspace = await apiClient.createWorkspace("E2E Workspace", "e2e-owner");
+      const workspace = await apiClient.createWorkspace("E2E Workspace");
       const workflow = await apiClient.createWorkflow(workspace.id, "E2E Workflow", "simple");
 
       const { steps } = await apiClient.listWorkflowSteps(workflow.id);

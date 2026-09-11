@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCanvasPermissionGroups,
   canvasReleaseStatusLabel,
+  canvasSourceActorLabel,
   canvasSourceLabel,
   formatCanvasReleaseDate,
 } from "./canvas-permission-copy";
@@ -76,9 +77,15 @@ describe("canvas permission review copy", () => {
   });
 
   it("formats valid dates and uses a safe fallback for invalid dates", () => {
-    expect(formatCanvasReleaseDate("2026-01-02T03:04:05.000Z", translate)).not.toBe(
+    expect(formatCanvasReleaseDate("2026-01-02T03:04:05.000Z", "en-US", translate)).not.toBe(
       "canvases:dateUnavailable",
     );
-    expect(formatCanvasReleaseDate("not-a-date", translate)).toBe("canvases:dateUnavailable");
+    expect(formatCanvasReleaseDate("not-a-date", "en-US", translate)).toBe(
+      "canvases:dateUnavailable",
+    );
+  });
+
+  it("labels the persisted agent source actor", () => {
+    expect(canvasSourceActorLabel("agent", translate)).toBe("canvases:sourceActorTaskAgent");
   });
 });

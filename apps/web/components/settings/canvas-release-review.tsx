@@ -19,7 +19,6 @@ import {
   rejectCanvasRelease,
   rollbackCanvas,
   type Canvas,
-  type CanvasPermissionReview,
   type CanvasRelease,
 } from "@/lib/api/domains/canvas-api";
 import { canvasErrorCodeMessage, canvasErrorMessage } from "@/lib/api/domains/canvas-error-copy";
@@ -30,60 +29,13 @@ import {
   canvasSourceActorLabel,
   canvasSourceLabel,
   formatCanvasReleaseDate,
-  type CanvasPermissionGroup,
 } from "@/lib/canvas-permission-copy";
+import { CanvasPermissionSummary, hasUnsupportedPermissions } from "./canvas-permission-summary";
 
 const CANVAS_ACTION_FAILED_KEY = "canvases:actionFailed";
 const canvasActionClassName = controlSizingClassName("standard", "cursor-pointer");
 
 export type CanvasReleaseAction = "approve" | "reject" | "rollback";
-
-function hasUnsupportedPermissions(groups: CanvasPermissionGroup[]): boolean {
-  return groups.some((group) => group.rows.some((row) => row.isUnsupported));
-}
-
-function CanvasPermissionSummary({
-  permissions,
-  missingPermissions,
-}: {
-  permissions: CanvasPermissionReview | undefined;
-  missingPermissions?: string[];
-}) {
-  const { t } = useTranslation();
-  const groups = buildCanvasPermissionGroups(permissions, missingPermissions, t);
-  if (groups.length === 0) return null;
-
-  return (
-    <div
-      className="space-y-3 rounded-md border bg-muted/20 p-3"
-      data-testid="canvas-permission-summary"
-    >
-      <p className="font-medium">{t("canvases:permissionDeclaration")}</p>
-      {groups.map((group) => (
-        <section key={group.id}>
-          <h3 className="font-medium">{group.label}</h3>
-          <ul className="mt-1 space-y-2">
-            {group.rows.map((row) => (
-              <li key={row.id} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className={row.isUnsupported ? "text-destructive" : undefined}>
-                  {row.label}
-                </span>
-                {row.detail && (
-                  <code className="break-all text-xs text-muted-foreground">{row.detail}</code>
-                )}
-                {row.isNew && (
-                  <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                    {t("canvases:newPermission")}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
 
 function CanvasReleaseValidationError({ code }: { code: string }) {
   const { t } = useTranslation();
@@ -131,7 +83,7 @@ function CanvasReleaseReview({
   release: CanvasRelease;
   activeReleaseId?: string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const permissionGroups = buildCanvasPermissionGroups(
     release.permissions,
     release.missing_permissions,
@@ -143,7 +95,7 @@ function CanvasReleaseReview({
         <div>
           <dt className="text-muted-foreground">{t("canvases:releaseDate")}</dt>
           <dd data-testid={`canvas-release-created-at-${release.id}`}>
-            {formatCanvasReleaseDate(release.created_at, t)}
+            {formatCanvasReleaseDate(release.created_at, i18n?.language, t)}
           </dd>
         </div>
         <div>
@@ -202,20 +154,23 @@ function CanvasReleaseSelector({
   releases,
   selectedReleaseId,
   activeReleaseId,
+  disabled,
   onChange,
 }: {
   releases: CanvasRelease[];
   selectedReleaseId: string | null;
   activeReleaseId?: string;
+  disabled: boolean;
   onChange: (releaseId: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   if (releases.length === 0) return null;
   return (
     <label className="mt-3 grid gap-1">
       <span className="text-muted-foreground">{t("canvases:selectRelease")}</span>
       <select
         aria-label={t("canvases:selectRelease")}
+        disabled={disabled}
         className="min-h-10 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8"
         value={selectedReleaseId ?? ""}
         onChange={(event) => onChange(event.target.value)}
@@ -223,7 +178,7 @@ function CanvasReleaseSelector({
         {releases.map((release) => (
           <option key={release.id} value={release.id}>
             {t("canvases:releaseOption", {
-              date: formatCanvasReleaseDate(release.created_at, t),
+              date: formatCanvasReleaseDate(release.created_at, i18n?.language, t),
               status: canvasReleaseStatusLabel(
                 release.validation_status,
                 release.id,
@@ -454,6 +409,7 @@ export function CanvasReleaseDialog({
             releases={releases}
             selectedReleaseId={selectedReleaseId}
             activeReleaseId={canvas?.active_release_id}
+            disabled={busyId !== null}
             onChange={setSelectedReleaseId}
           />
         </DialogHeader>
@@ -469,7 +425,7 @@ export function CanvasReleaseDialog({
           selectedRelease={selectedRelease}
           pending={pending}
           canRollback={canRollback}
-          selectedBusy={selectedRelease ? busyId === selectedRelease.id : false}
+          selectedBusy={busyId !== null}
           mutationsDisabled={canvas?.status === "archived" || canvas?.status === "disabled"}
           unsupportedPermissions={hasUnsupportedPermissions(selectedPermissionGroups)}
           onClose={() => onOpenChange(false)}

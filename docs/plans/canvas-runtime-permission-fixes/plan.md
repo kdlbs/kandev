@@ -272,9 +272,7 @@ Design validation on 2026-09-10:
 - `git status --short -- docs/plans/canvas-runtime-permission-fixes`: confirmed
   the new manifest and all four work orders are present for staging.
 
-Product implementation and tasks 03 through 04 remain pending. Task 01
-implementation verification
-completed on 2026-09-10:
+Task 01 implementation verification completed on 2026-09-10:
 
 - `(cd apps/backend && go test ./internal/plugins/webapp/...)`: passed, 30 tests.
 - `(cd apps/web && pnpm e2e:run --project chromium tests/canvas/canvas-host-origins.spec.ts -- --retries=0)`: passed, 1 test.
@@ -290,6 +288,14 @@ Task 02 implementation verification completed on 2026-09-10:
 - `(cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/canvas/plugin-canvas.spec.ts -- --retries=0)`: passed, 2 tests.
 - `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/canvas/mobile-plugin-canvas.spec.ts -- --retries=0)`: passed, 3 tests.
 - Public-doc tests/validator, specification lint, and `git diff --check`: passed.
+
+Tasks 03 and 04 implementation verification completed on 2026-09-11:
+
+- `(cd apps/backend && go test ./internal/canvas ./internal/plugins/webapp ./internal/backendapp ./internal/plugins/instances)`: passed, 955 tests.
+- `(cd apps/web && pnpm exec vitest run components/plugins/web-app-frame.test.tsx components/plugins/web-app-startup.test.ts components/settings/canvas-lifecycle-dialogs.test.tsx lib/canvas-permission-copy.test.ts)`: passed, 30 tests.
+- `(cd apps/web && pnpm run typecheck)`: passed.
+- `(cd apps/web && pnpm run i18n:check)`: passed.
+- Scoped frontend ESLint and `git diff --check`: passed.
 
 ## Risks
 

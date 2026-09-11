@@ -53,7 +53,7 @@ test.describe("Canvas runtime host origins", () => {
         `${originFixture.aliases.foreign.origin}/__kandev_canvas_origin_test__?src=${encodeURIComponent(foreignRuntimeURL)}`,
         { waitUntil: "domcontentloaded" },
       );
-      await foreignRuntimeRequest;
+      expect(await foreignRuntimeRequest).toBe(200);
       await expect.poll(() => runtimeFrameContentCount(testPage)).toBe(0);
 
       const nestedForeignURL = `${originFixture.aliases.nestedForeign.origin}${
@@ -67,7 +67,7 @@ test.describe("Canvas runtime host origins", () => {
         `${originFixture.aliases.foreign.origin}/__kandev_canvas_origin_test__?src=${encodeURIComponent(nestedForeignURL)}`,
         { waitUntil: "domcontentloaded" },
       );
-      await nestedRuntimeRequest;
+      expect(await nestedRuntimeRequest).toBe(200);
       await expect.poll(() => runtimeFrameContentCount(testPage)).toBe(0);
     } finally {
       await originFixture.close();

@@ -24,53 +24,13 @@ import {
   buildCanvasPermissionGroups,
   canvasSourceActorLabel,
   canvasSourceLabel,
-  type CanvasPermissionGroup,
 } from "@/lib/canvas-permission-copy";
+import { CanvasPermissionSummary, hasUnsupportedPermissions } from "./canvas-permission-summary";
 
 export { CanvasReleaseDialog } from "./canvas-release-review";
 
 const CANVAS_ACTION_FAILED_KEY = "canvases:actionFailed";
 const canvasActionClassName = controlSizingClassName("standard", "cursor-pointer");
-
-function hasUnsupportedPermissions(groups: CanvasPermissionGroup[]): boolean {
-  return groups.some((group) => group.rows.some((row) => row.isUnsupported));
-}
-
-function CanvasPermissionSummary({
-  permissions,
-}: {
-  permissions: CanvasPromotionPreview["permissions"];
-}) {
-  const { t } = useTranslation();
-  const groups = buildCanvasPermissionGroups(permissions, undefined, t);
-  if (groups.length === 0) return null;
-
-  return (
-    <div
-      className="space-y-3 rounded-md border bg-muted/20 p-3"
-      data-testid="canvas-permission-summary"
-    >
-      <p className="font-medium">{t("canvases:permissionDeclaration")}</p>
-      {groups.map((group) => (
-        <section key={group.id}>
-          <h3 className="font-medium">{group.label}</h3>
-          <ul className="mt-1 space-y-2">
-            {group.rows.map((row) => (
-              <li key={row.id} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className={row.isUnsupported ? "text-destructive" : undefined}>
-                  {row.label}
-                </span>
-                {row.detail && (
-                  <code className="break-all text-xs text-muted-foreground">{row.detail}</code>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
 
 function useCanvasPromotion(
   canvas: Canvas | null,

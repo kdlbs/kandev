@@ -43,6 +43,7 @@ type PublishRequest struct {
 	ExpectedBaseReleaseID string
 	SourceActorKind       string
 	SourceUserID          string
+	SourceUserSynthetic   bool
 	SourceTaskID          string
 	SourceSessionID       string
 }
@@ -112,7 +113,7 @@ type initialGrantStore interface {
 }
 
 type creationAuthorityStore interface {
-	ConsumeCreationAuthorityTx(context.Context, *sqlx.Tx, CreationAuthority, string, string, string) error
+	ConsumeCreationAuthorityTx(context.Context, *sqlx.Tx, CreationAuthority, string, string, string, bool) error
 }
 
 type legacyConditionalReleaseStore interface {
@@ -146,7 +147,7 @@ func (s *Service) PublishPackage(ctx context.Context, request PublishRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	persisted, err := persistPublishedRelease(ctx, store, s.repo, request.CanvasID, instance.ID, release, activated, request.ExpectedAuthority, request.ExpectedBaseReleaseID, creationAuthority, initialGrants, request.SourceUserID, request.SourceSessionID, request.SourceTaskID)
+	persisted, err := persistPublishedRelease(ctx, store, s.repo, request.CanvasID, instance.ID, release, activated, request.ExpectedAuthority, request.ExpectedBaseReleaseID, creationAuthority, initialGrants, request.SourceUserID, request.SourceUserSynthetic, request.SourceSessionID, request.SourceTaskID)
 	if err != nil {
 		if persisted {
 			return &PublishResult{Release: release, Activated: activated, PermissionRequired: !activated, ReleasePersisted: true}, err
@@ -281,7 +282,7 @@ func (s *Service) buildPublishedRelease(request PublishRequest, instanceID strin
 	}, nil
 }
 
-func persistPublishedRelease(ctx context.Context, store authoringInstanceStore, authorityStore creationAuthorityStore, canvasID, instanceID string, release plugininstances.Release, activated bool, expectedAuthority plugininstances.PublishAuthority, expectedBaseReleaseID string, creationAuthority CreationAuthority, initialGrants []plugininstances.Grant, ownerUserID, sessionID, taskID string) (bool, error) {
+func persistPublishedRelease(ctx context.Context, store authoringInstanceStore, authorityStore creationAuthorityStore, canvasID, instanceID string, release plugininstances.Release, activated bool, expectedAuthority plugininstances.PublishAuthority, expectedBaseReleaseID string, creationAuthority CreationAuthority, initialGrants []plugininstances.Grant, ownerUserID string, allowUnownedWorkspace bool, sessionID, taskID string) (bool, error) {
 	if !expectedAuthority.IsZero() {
 		if expectedBaseReleaseID != "" && expectedBaseReleaseID != expectedAuthority.ActiveReleaseID {
 			return false, ErrStaleCanvasEdit
@@ -291,7 +292,7 @@ func persistPublishedRelease(ctx context.Context, store authoringInstanceStore, 
 		if !ok || !supportsConditional {
 			return false, ErrStaleCanvasPublish
 		}
-		err := persistAuthorityRelease(ctx, transactional, conditional, authorityStore, canvasID, instanceID, release, activated, expectedAuthority, creationAuthority, initialGrants, ownerUserID, sessionID, taskID)
+		err := persistAuthorityRelease(ctx, transactional, conditional, authorityStore, canvasID, instanceID, release, activated, expectedAuthority, creationAuthority, initialGrants, ownerUserID, allowUnownedWorkspace, sessionID, taskID)
 		return err == nil, err
 	}
 	if expectedBaseReleaseID != "" {
@@ -317,7 +318,7 @@ func persistPublishedRelease(ctx context.Context, store authoringInstanceStore, 
 	return persistActivatedReleaseFallback(ctx, store, instanceID, release)
 }
 
-func persistAuthorityRelease(ctx context.Context, transactional transactionalAuthoringStore, conditional conditionalReleaseStore, authorityStore creationAuthorityStore, canvasID, instanceID string, release plugininstances.Release, activated bool, expectedAuthority plugininstances.PublishAuthority, creationAuthority CreationAuthority, initialGrants []plugininstances.Grant, ownerUserID, sessionID, taskID string) error {
+func persistAuthorityRelease(ctx context.Context, transactional transactionalAuthoringStore, conditional conditionalReleaseStore, authorityStore creationAuthorityStore, canvasID, instanceID string, release plugininstances.Release, activated bool, expectedAuthority plugininstances.PublishAuthority, creationAuthority CreationAuthority, initialGrants []plugininstances.Grant, ownerUserID string, allowUnownedWorkspace bool, sessionID, taskID string) error {
 	return transactional.WithTransaction(ctx, func(tx *sqlx.Tx) error {
 		if err := conditional.CreateReleaseIfAuthorityTx(ctx, tx, instanceID, expectedAuthority, release); err != nil {
 			return err
@@ -333,7 +334,7 @@ func persistAuthorityRelease(ctx context.Context, transactional transactionalAut
 			if err := grantStore.AddInitialGrantsTx(ctx, tx, instanceID, ownerUserID, initialGrants); err != nil {
 				return err
 			}
-			if err := authorityStore.ConsumeCreationAuthorityTx(ctx, tx, creationAuthority, ownerUserID, sessionID, taskID); err != nil {
+			if err := authorityStore.ConsumeCreationAuthorityTx(ctx, tx, creationAuthority, ownerUserID, sessionID, taskID, allowUnownedWorkspace); err != nil {
 				return err
 			}
 		}
@@ -849,7 +850,32 @@ func localCanvasIntegrationsAreValid(m *manifest.Manifest) bool {
 }
 
 func localCanvasCapabilitiesAreValid(m *manifest.Manifest) bool {
-	return !m.Capabilities.Secrets && !m.Capabilities.AgentInvoke && !m.Capabilities.Auth && !m.Capabilities.UserState
+	return !m.Capabilities.Secrets && !m.Capabilities.AgentInvoke && !m.Capabilities.Auth && !m.Capabilities.UserState &&
+		supportedCanvasCapabilityValues(m.Capabilities.APIRead, permissionKindAPIRead) &&
+		supportedCanvasCapabilityValues(m.Capabilities.APIWrite, permissionKindAPIWrite) &&
+		supportedCanvasCapabilityValues(m.Capabilities.Events, permissionKindEvents)
+}
+
+func supportedCanvasCapabilityValues(values []string, kind string) bool {
+	for _, value := range values {
+		if !supportedCanvasCapability(kind, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func supportedCanvasCapability(kind, value string) bool {
+	switch kind {
+	case permissionKindAPIRead:
+		return value == canvasCapabilityTasks || value == canvasCapabilityWorkflows
+	case permissionKindAPIWrite:
+		return value == canvasCapabilityTasks || value == canvasCapabilityMessages
+	case permissionKindEvents:
+		return value == canvasCapabilityTaskUpdate
+	default:
+		return false
+	}
 }
 
 func invalidLocalCanvasManifest() error {

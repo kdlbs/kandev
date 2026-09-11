@@ -41,6 +41,12 @@ func newCanvasService(t *testing.T) (*Service, *plugininstances.Store, *db.Pool)
 	if err != nil {
 		t.Fatalf("new canvas repository: %v", err)
 	}
+	if _, err := pool.Writer().Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY, owner_id TEXT DEFAULT '')`); err != nil {
+		t.Fatalf("create workspace fixture: %v", err)
+	}
+	if _, err := pool.Writer().Exec(`INSERT INTO workspaces (id, owner_id) VALUES ('workspace-1', 'owner-1')`); err != nil {
+		t.Fatalf("insert workspace fixture: %v", err)
+	}
 	return NewService(repo, instanceStore), instanceStore, pool
 }
 

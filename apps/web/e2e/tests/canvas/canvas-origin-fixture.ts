@@ -25,7 +25,7 @@ type ProxyResponse = {
 type RuntimeRequestWaiter = {
   runtimePath: string;
   refererOrigin: string;
-  resolve: () => void;
+  resolve: (status: number) => void;
 };
 
 export type CanvasOriginFixture = {
@@ -36,7 +36,7 @@ export type CanvasOriginFixture = {
     nestedForeign: OriginAlias;
   };
   install: (page: Page) => Promise<void>;
-  waitForRuntimeRequest: (runtimePath: string, refererOrigin: string) => Promise<void>;
+  waitForRuntimeRequest: (runtimePath: string, refererOrigin: string) => Promise<number>;
   close: () => Promise<void>;
 };
 
@@ -141,8 +141,9 @@ export async function startCanvasOriginFixture(backendURL: string): Promise<Canv
         async (route) => {
           const requestURL = new URL(route.request().url());
           const requestReferer = route.request().headers().referer ?? "";
+          let status = 0;
           try {
-            await handleCanvasOriginRoute(route, origins, port);
+            status = await handleCanvasOriginRoute(route, origins, port);
           } finally {
             const waiterIndex = runtimeRequestWaiters.findIndex(
               (waiter) =>
@@ -150,14 +151,14 @@ export async function startCanvasOriginFixture(backendURL: string): Promise<Canv
                 requestReferer.startsWith(waiter.refererOrigin),
             );
             if (waiterIndex >= 0) {
-              runtimeRequestWaiters.splice(waiterIndex, 1)[0]?.resolve();
+              runtimeRequestWaiters.splice(waiterIndex, 1)[0]?.resolve(status);
             }
           }
         },
       );
     },
     waitForRuntimeRequest: (runtimePath, refererOrigin) =>
-      new Promise<void>((resolve) => {
+      new Promise<number>((resolve) => {
         runtimeRequestWaiters.push({ runtimePath, refererOrigin, resolve });
       }),
     close: async () => {
@@ -175,20 +176,20 @@ async function handleCanvasOriginRoute(
   route: Route,
   origins: string[],
   port: number,
-): Promise<void> {
+): Promise<number> {
   const requestURL = new URL(route.request().url());
   if (requestURL.pathname === virtualPagePath) {
     const source = requestURL.searchParams.get("src");
     if (!source || !origins.some((origin) => source.startsWith(origin))) {
       await route.fulfill({ status: 400, body: "missing test frame source" });
-      return;
+      return 400;
     }
     await route.fulfill({
       status: 200,
       contentType: "text/html",
       body: canvasWrapperHTML(source),
     });
-    return;
+    return 200;
   }
   // The origin test verifies document policy, not long-lived event delivery.
   // Complete the stream locally so navigation between aliases does not reset
@@ -202,7 +203,7 @@ async function handleCanvasOriginRoute(
       },
       body: ": origin fixture stream\n\n",
     });
-    return;
+    return 200;
   }
 
   const response = await requestThroughTLSProxy({
@@ -218,6 +219,7 @@ async function handleCanvasOriginRoute(
     headers: response.headers,
     body: response.body,
   });
+  return response.status;
 }
 
 function canvasWrapperHTML(source: string): string {

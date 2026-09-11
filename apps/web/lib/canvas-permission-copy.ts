@@ -178,14 +178,16 @@ export function canvasReleaseStatusLabel(
 
 export function formatCanvasReleaseDate(
   createdAt: string | undefined,
+  locale: string | undefined,
   t: CanvasPermissionTranslator,
 ): string {
   if (!createdAt) return t("canvases:dateUnavailable");
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) return t("canvases:dateUnavailable");
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-    date,
-  );
+  return new Intl.DateTimeFormat(locale || undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 export function canvasSourceLabel(
@@ -200,6 +202,7 @@ export function canvasSourceActorLabel(
   t: CanvasPermissionTranslator,
 ): string {
   const labels: Record<string, string> = {
+    agent: t("canvases:sourceActorTaskAgent"),
     task_agent: t("canvases:sourceActorTaskAgent"),
     user: t("canvases:sourceActorUser"),
     system: t("canvases:sourceActorSystem"),

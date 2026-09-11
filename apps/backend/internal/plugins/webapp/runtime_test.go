@@ -201,6 +201,45 @@ func TestRuntimeStartupBootstrapPreservesArtifact(t *testing.T) {
 	}
 }
 
+func TestRuntimeBootstrapFailureDoesNotKeepArtifactContentLength(t *testing.T) {
+	archive := canvasArchive(t, map[string]string{
+		"manifest.yaml": staticManifestYAML,
+		"ui/index.html": "<!doctype html><html><head></head><body>entry</body></html>",
+	})
+	pkg, err := ValidatePackage(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatalf("ValidatePackage: %v", err)
+	}
+	artifacts, err := NewArtifactStore(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	artifact, err := artifacts.Put(pkg)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifacts.Path(artifact), "ui", "index.html"), []byte("<html><head><script"), 0o600); err != nil {
+		t.Fatalf("corrupt stored entry: %v", err)
+	}
+	manager := NewTokenManager(nil)
+	token, err := manager.Issue(CapabilityBinding{
+		UserID: "user-1", InstanceID: "instance-1", ReleaseID: "release-1", WebAppKey: "main",
+		Placement: "task-canvas", Artifact: artifact, Entry: "ui/index.html",
+	}, 0)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	runtime := NewRuntime(manager, artifacts, nil, nil)
+	response := httptest.NewRecorder()
+	runtime.Serve(response, httptest.NewRequest(http.MethodGet, "/", nil), token, "")
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", response.Code)
+	}
+	if got := response.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want no stale artifact length", got)
+	}
+}
+
 func TestInjectRuntimeBootstrapRejectsMalformedAndOversizedEntry(t *testing.T) {
 	if _, err := injectRuntimeBootstrap([]byte("<html><head><script")); !errors.Is(err, ErrRuntimeBootstrapUnavailable) {
 		t.Fatalf("malformed entry error = %v, want %v", err, ErrRuntimeBootstrapUnavailable)

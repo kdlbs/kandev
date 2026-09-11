@@ -173,4 +173,4 @@ Implemented and verified.
 - `(cd apps/web && pnpm run typecheck)`: passed.
 - `(cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet)`: passed.
 - Managed desktop and mobile Canvas E2E suites passed, including release
-  recovery and the mobile focused canvas route.
+  recovery and the mobile-focused canvas route.
