@@ -67,6 +67,8 @@
     {"file": "internal/office/repository/sqlite/dashboard.go", "symbol": "QueryRunActivity", "rule": "sqlite-date-function", "reason": "The Office repository is explicitly SQLite-only"},
     {"file": "internal/office/repository/sqlite/labels.go", "symbol": "GetOrCreateLabel", "rule": "conflict-syntax", "reason": "The Office repository is explicitly SQLite-only"},
     {"file": "internal/office/repository/sqlite/labels.go", "symbol": "AddLabelToTask", "rule": "conflict-syntax", "reason": "The Office repository is explicitly SQLite-only"},
+    {"file": "internal/office/repository/sqlite/loop_health.go", "symbol": "CountEligibleTriggers", "rule": "boolean-integer", "reason": "The Office SQLite schema stores trigger enabled as an INTEGER flag"},
+    {"file": "internal/office/repository/sqlite/loop_health.go", "symbol": "ListOverdueOrStrandedTriggers", "rule": "boolean-integer", "reason": "The Office SQLite schema stores trigger enabled as an INTEGER flag"},
     {"file": "internal/office/repository/sqlite/tasks.go", "symbol": "hasFTSTable", "rule": "sqlite-catalog", "reason": "SQLite-only FTS inspection"},
     {"file": "internal/office/repository/sqlite/tasks.go", "symbol": "CheckoutTask", "rule": "sqlite-date-function", "reason": "The Office repository is explicitly SQLite-only"},
     {"file": "internal/office/repository/sqlite/tasks.go", "symbol": "CheckoutTaskForRun", "rule": "sqlite-date-function", "reason": "The Office repository is explicitly SQLite-only"},
