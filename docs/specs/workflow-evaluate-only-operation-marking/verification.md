@@ -20,10 +20,10 @@ here.
   precedents `spec.md` § Why dissects.
 
 **What we do differently** (displaced from `spec.md` § Prior art, which is at its size ceiling):
-neither precedent generalizes — `reevaluateGuardedTransitions` holds the invariant only because it
-commits in-call, `processOnChildrenCompleted` only by declining to use the engine's marker. This spec
-makes it a property of `HandleTrigger` itself and hands the caller an explicit signal, so the next
-`EvaluateOnly` caller inherits it.
+neither precedent generalizes — `reevaluateGuardedTransitions` commits in-call, while
+`processOnChildrenCompleted` uses the explicit caller-owned deferral path (`OperationID` plus
+`DeferOperationMark`). This spec makes the result signal part of `HandleTrigger`, so both current
+callers carry a visible commit-to-mark obligation.
 
 ## Measurement receipts
 
@@ -161,7 +161,7 @@ New file — `event_handlers_agent_error*_test.go` is already at six test files 
 | AC-EO-13 | two concurrent `dispatchKanbanAgentErrorTrigger` calls with the same `(SessionID, AgentExecutionID)` → exactly one commit. Run under `-race`. Assert against the **new** per-operation-id helper, not `lockChildCompletionOperation` — AC-EO-13 requires a separate map, so a test that reaches into `childCompletionLocks` is testing the wrong thing |
 | AC-EO-13 | **lock SPAN through the commit, the case "exactly one commit" cannot see.** `TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThroughCommit` (`event_handlers_agent_error_evaluate_only_test.go`) blocks the first dispatch **inside** its `UpdateTaskWithWorkflowStepAdmission` commit call (via `agentErrorBlockingCommitRepo`) and asserts the second, concurrent dispatch has not yet re-read `GetTaskSession` or observed the operation as applied while the first is still inside its own commit — pinning that the lock is held from before state load through the commit→mark window, not just up to the engine call. Mutation-verified: releasing the lock right after `HandleTrigger` returns (before `applyEngineTransition`/mark) made the *old* one-commit-only assertion fail just 1-in-20 runs at `-count=20`; this test fails deterministically (5/5) under the same mutation, closing the gap a scheduler-dependent assertion could not |
 | AC-EO-14 | after a failed commit (task still on the **source** step), re-delivery re-executes that step's callbacks — assert the callback ran twice. Pins at-least-once as intended, so a later reader does not "fix" it |
-| AC-EO-16 | `TestProcessOnChildrenCompleted_StillIdempotentOnRedelivery` (`event_handlers_children_completed_test.go`): a 3-step chain where the target step **also** declares an `OnChildrenCompleted` action, so the marker check is load-bearing — without it, redelivery would re-fire that action and advance a second time. Asserts `IsOperationApplied` is true after the first delivery and that redelivery neither transitions again nor moves the parent past its post-first-delivery step. Mutation-verified: deleting `childCompletionAlreadyApplied`'s short-circuit makes this test fail. `on_turn_start` / `on_turn_complete` callers pass no `OperationID` at all, so they never match the `HandleInput{EvaluateOnly: true, OperationID: <non-empty>}` shape the AC-EO-15 pin test (`evaluate_only_operation_marking_pin_test.go`) scans for — that pin test would flag either caller the moment it started pairing the two fields, which is the structural guarantee this row relies on rather than a dedicated behavioral test per caller |
+| AC-EO-16 | `TestProcessOnChildrenCompleted_StillIdempotentOnRedelivery` (`event_handlers_children_completed_test.go`): a 3-step chain where the target step **also** declares an `OnChildrenCompleted` action, so the marker check is load-bearing — without it, redelivery would re-fire that action and advance a second time. Asserts `IsOperationApplied` is true after the first delivery and that redelivery neither transitions again nor moves the parent past its post-first-delivery step. Mutation-verified: deleting `childCompletionAlreadyApplied`'s short-circuit makes this test fail. The child-completion caller passes `OperationID` with `DeferOperationMark: true` and remains in the AC-EO-15 registered set; the `on_turn_start` / `on_turn_complete` callers pass no `OperationID`, so the pin test flags either if it later pairs the two fields. |
 | AC-EO-17 | commit succeeds, marker left absent → re-delivery evaluates the **target** step's actions, not the source step's. Assert the step id the second evaluation loaded, and that a mark lands by the end of it (via AC-EO-10 or AC-EO-2) so a third delivery short-circuits. Drive the missing mark from the test rather than by panicking, and do not assert a specific second transition — the AC permits one, it does not require one |
 
 The AC-EO-11 rows are the ones that would have caught the original defect. Prefer the credential
@@ -181,7 +181,8 @@ a `go/parser` walk rooted at `apps/backend`, skipping `_test.go`, keyed
 - **Detection predicate:** a `HandleInput` composite literal with both an `EvaluateOnly:` key whose
   value is the literal `true` and an `OperationID:` key whose value is not the empty-string literal.
   Nothing more; runtime non-emptiness is not inferable and must not be attempted.
-- **Seed the set with one entry:** `internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger`.
+- **Seed the set with two entries:** `internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger` and
+  `internal/orchestrator/Service.evaluateChildrenCompleted` (the explicit `DeferOperationMark` path).
 - **Put it in a new file** rather than extending `agent_error_fire_site_pin_test.go`. Either satisfies
   every AC-EO-15 observable, so this is a steer, not a requirement: the two guards pin unrelated
   predicates, and a shared walk helper couples their lifetimes for no gain.

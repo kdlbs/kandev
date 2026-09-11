@@ -451,6 +451,15 @@ func waitForAgentErrorLockRefs(t *testing.T, svc *Service, operationID string, w
 	t.Fatalf("timed out waiting for agent-error lock refs = %d", want)
 }
 
+func waitForAgentErrorTestGoroutine(t *testing.T, name string, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Errorf("timed out waiting for %s during cleanup", name)
+	}
+}
+
 func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationExactlyOneCommits(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -477,6 +486,21 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationExactlyOneCommit
 	operationID := agentErrorOperationID("s1", "exec-1")
 
 	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	secondStarted := false
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(decisions.release) })
+	}
+	// Release every blocking path and join every goroutine that this test has
+	// started, including when an assertion below calls t.Fatal.
+	t.Cleanup(func() {
+		release()
+		waitForAgentErrorTestGoroutine(t, "first dispatch", firstDone)
+		if secondStarted {
+			waitForAgentErrorTestGoroutine(t, "second dispatch", secondDone)
+		}
+	})
 	go func() {
 		svc.dispatchKanbanAgentErrorTrigger(ctx, data)
 		close(firstDone)
@@ -495,7 +519,7 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationExactlyOneCommit
 		t.Fatalf("GetTaskSession calls = %d, want 1 before the second dispatch starts", got)
 	}
 
-	secondDone := make(chan struct{})
+	secondStarted = true
 	go func() {
 		svc.dispatchKanbanAgentErrorTrigger(ctx, data)
 		close(secondDone)
@@ -520,7 +544,7 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationExactlyOneCommit
 		t.Fatalf("GetTaskSession calls = %d, want 1 while the first dispatch still holds the operation-id lock", got)
 	}
 
-	close(decisions.release)
+	release()
 
 	select {
 	case <-firstDone:
@@ -635,6 +659,21 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThrough
 	operationID := agentErrorOperationID("s1", "exec-1")
 
 	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	secondStarted := false
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(blockingRepo.release) })
+	}
+	// Release every blocking path and join every goroutine that this test has
+	// started, including when an assertion below calls t.Fatal.
+	t.Cleanup(func() {
+		release()
+		waitForAgentErrorTestGoroutine(t, "first dispatch", firstDone)
+		if secondStarted {
+			waitForAgentErrorTestGoroutine(t, "second dispatch", secondDone)
+		}
+	})
 	go func() {
 		svc.dispatchKanbanAgentErrorTrigger(ctx, data)
 		close(firstDone)
@@ -646,7 +685,7 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThrough
 		t.Fatal("timed out waiting for the first dispatch to enter its commit call")
 	}
 
-	secondDone := make(chan struct{})
+	secondStarted = true
 	go func() {
 		svc.dispatchKanbanAgentErrorTrigger(ctx, data)
 		close(secondDone)
@@ -673,7 +712,7 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThrough
 		t.Fatalf("IsOperationApplied = %v, %v, want false, nil (the first dispatch has not committed or marked yet)", operationApplied, err)
 	}
 
-	close(blockingRepo.release)
+	release()
 
 	select {
 	case <-firstDone:
@@ -711,10 +750,21 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThrough
 func TestLockAgentErrorOperationKeepsEntryUntilWaitersExit(t *testing.T) {
 	svc := &Service{}
 	unlockFirst := svc.lockAgentErrorOperation("op")
+	var unlockFirstOnce sync.Once
+	releaseFirst := func() { unlockFirstOnce.Do(unlockFirst) }
 
 	secondAcquired := make(chan struct{})
 	releaseSecond := make(chan struct{})
+	var releaseSecondOnce sync.Once
+	releaseSecondLock := func() { releaseSecondOnce.Do(func() { close(releaseSecond) }) }
 	done := make(chan struct{})
+	// Release both lock holders and join the waiter even when an assertion
+	// below calls t.Fatal before the normal release sequence.
+	t.Cleanup(func() {
+		releaseFirst()
+		releaseSecondLock()
+		waitForAgentErrorTestGoroutine(t, "second lock holder", done)
+	})
 	go func() {
 		unlockSecond := svc.lockAgentErrorOperation("op")
 		close(secondAcquired)
@@ -724,14 +774,14 @@ func TestLockAgentErrorOperationKeepsEntryUntilWaitersExit(t *testing.T) {
 	}()
 
 	waitForAgentErrorLockRefs(t, svc, "op", 2)
-	unlockFirst()
+	releaseFirst()
 	select {
 	case <-secondAcquired:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for second lock holder")
 	}
 	waitForAgentErrorLockRefs(t, svc, "op", 1)
-	close(releaseSecond)
+	releaseSecondLock()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

@@ -47,29 +47,26 @@ marks an outcome it did not determine. Quoted and dissected in
 
 ### Corrections to the reported scope
 
-The originating comment lists four affected call sites. Measured, only one is live. `markOperationApplied`
-returns `nil` immediately when `OperationID` is empty, so a caller that passes no operation id is
-unaffected by construction. Verified by `grep -rn "OperationID:" --include=*.go apps/backend`
-(non-test) cross-referenced against every `EvaluateOnly: true` site:
+The originating comment lists four call sites. Two pass an operation id and use the marker. The two
+turn callbacks omit one, so `markOperationApplied` returns `nil` for them by construction. Verified by
+cross-referencing every non-test `EvaluateOnly: true` site with `OperationID:`:
 
 | Call site | `EvaluateOnly` | `OperationID` passed | Affected today |
 |---|---|---|---|
-| `event_handlers_agent_error.go:227` (`dispatchKanbanAgentErrorTrigger`) | true | **yes** (`agentErrorOperationID`) | **yes** |
-| `event_handlers_workflow.go:5039` (`on_turn_complete`) | true | no | no — mark is a no-op |
-| `event_handlers_workflow.go:5620` (`on_turn_start`) | true | no | no — mark is a no-op |
-| `event_handlers_children_completed.go:228` (`on_children_completed`) | true | no | no — see below |
+| `event_handlers_agent_error.go:284` (`dispatchKanbanAgentErrorTrigger`) | true | **yes** (`agentErrorOperationID`) | **yes** |
+| `event_handlers_workflow.go:6074` (`on_turn_complete`) | true | no | no — mark is a no-op |
+| `event_handlers_workflow.go:6662` (`on_turn_start`) | true | no | no — mark is a no-op |
+| `event_handlers_children_completed.go:228` (`on_children_completed`) | true | **yes** (`operationID`) | **yes — explicit `DeferOperationMark` path** |
 | `office/engine_dispatcher/dispatcher.go:166` | false | yes | no — engine commits, then marks |
 | `orchestrator/workflow_callbacks.go:142` (`switchWorkflowDispatcher`) | false | yes | no — engine commits, then marks |
 
-`on_children_completed` is the informative case: it passes **no** operation id and runs the two-phase
-protocol by hand against the same store — `childCompletionAlreadyApplied` before the engine call,
-`markChildCompletionApplied` only after the commit returns true. Its author opted out of the engine's
-idempotency entirely to get the ordering this spec makes the default, which is the evidence that the
-engine's contract is wrong.
+`on_children_completed` is the explicit exception: it passes `operationID` with
+`DeferOperationMark: true`, then keeps its two-phase bracket — `childCompletionAlreadyApplied`
+before the engine call and `markChildCompletionApplied` after the commit. The outer caller owns the
+marker; this path is registered in AC-EO-15.
 
-So this is a **latent contract defect with one live instance**. The ACs are written against the engine
-contract, not the single caller, because `HandleInput` today permits `EvaluateOnly: true` with a
-non-empty `OperationID` and gives no signal that the resulting marker is a lie.
+This is a latent contract defect with one default engine-deferral caller and one explicit caller-owned
+deferral. The ACs target the engine contract and require both paths to preserve commit-then-mark order.
 
 ### Blast radius, measured rather than assumed
 
@@ -273,20 +270,20 @@ consistent rather than quietly contradictory.
     in place — assigning fields on a variable, or receiving one from a helper — is not detected
     either. Accepted: no live site does it, and widening the walk to chase assignments reintroduces
     the data-flow analysis this AC exists to avoid.
-  - **Registered set seeded with exactly one entry**,
-    `internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger`, per the scope table in
-    [Corrections to the reported scope](#corrections-to-the-reported-scope).
+  - **Registered set has two entries:**
+    `internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger` and
+    `internal/orchestrator/Service.evaluateChildrenCompleted`. The latter is the explicit
+    `DeferOperationMark` path in the scope table above.
   - **Remediation when it fires:** add the new call site to the registered set, in the same commit
     that makes that caller honour `OperationMarkDeferred` per AC-EO-10 and serialize per AC-EO-13.
     Editing the set is the intended remediation, not a workaround — it is the review gate. The failure
     message SHALL cite AC-EO-10, AC-EO-13 and AC-EO-15 so the next author reads the obligations before
     editing the set rather than after.
 
-- **AC-EO-16:** The three `EvaluateOnly` callers that pass no operation id — `on_turn_complete`,
-  `on_turn_start`, `on_children_completed` — SHALL be unchanged by this work. In particular
-  `processOnChildrenCompleted` SHALL keep its own `IsOperationApplied` / `MarkOperationApplied`
-  bracket; it is correct, and rewriting it to pass an operation id through the engine is a
-  behavior-neutral refactor this spec does not authorize.
+- **AC-EO-16:** The two `EvaluateOnly` callers that pass no operation id — `on_turn_complete` and
+  `on_turn_start` — SHALL remain unchanged. `processOnChildrenCompleted` is the explicit deferral
+  exception: it passes `operationID` with `DeferOperationMark: true`, and SHALL keep its own
+  `IsOperationApplied` / `MarkOperationApplied` bracket around the outer commit. AC-EO-15 pins it.
 
 - **AC-EO-17:** WHERE a deferred transition's commit succeeded but the operation was left unmarked,
   a re-delivery of that operation id SHALL evaluate the task's **current** step — which is now the
@@ -391,7 +388,8 @@ it is untouched here.
 Each case names the AC that governs it; the ACs are authoritative.
 
 - Empty `OperationID`: no store calls at all (AC-EO-7), `OperationMarkDeferred` is `false` (AC-EO-4).
-  This is the current behavior of three of the four `EvaluateOnly` callers and must keep working.
+  This is the current behavior of the two no-id callers and must keep working. Child completion is
+  the explicit deferred-mark exception.
 - `processActions` error: no mark, zero `HandleResult` (AC-EO-5). Every caller already discards the
   result on a non-nil error; this spec introduces no partial result.
 - `MarkOperationApplied` error in the engine (AC-EO-2/3 paths): returned as `HandleTrigger`'s error
@@ -458,9 +456,9 @@ Named exclusions, each with what a follow-up would need to know.
   do it together with the persistence work above, which is what makes the branch reachable and the
   test worth having.
 
-- **Migrating `on_children_completed` onto the engine's operation id.** AC-EO-16 pins it unchanged. A
-  behavior-neutral simplification once the engine's contract is correct, but a refactor of a working
-  path — it belongs to whoever next has reason to touch it.
+- **Changing child-completion marker ownership or lifecycle.** Its `operationID` plus
+  `DeferOperationMark` path is an explicit caller-owned exception. This spec does not change the
+  outer commit-to-mark bracket.
 
 - **Frontend, API and documentation surfaces.** Not observable from any user-facing surface. See
   [E2E decision](#e2e-decision).

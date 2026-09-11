@@ -111,9 +111,9 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 
 // TestProcessOnChildrenCompleted_StillIdempotentOnRedelivery is the AC-EO-16
 // pin for docs/specs/workflow-evaluate-only-operation-marking: this trigger
-// passes no OperationID through the engine and keeps bracketing its own
-// marker by hand (childCompletionAlreadyApplied / markChildCompletionApplied),
-// unchanged by that spec's EvaluateOnly deferred-mark contract.
+// passes its operation ID with DeferOperationMark and keeps the outer
+// commit-to-mark bracket (childCompletionAlreadyApplied /
+// markChildCompletionApplied), unchanged by that spec's runtime contract.
 //
 // step_done also declares an OnChildrenCompleted action (unlike the sibling
 // TransitionsParentWhenAllActiveChildrenTerminal test's terminal step_done,
@@ -171,8 +171,8 @@ func TestProcessOnChildrenCompleted_StillIdempotentOnRedelivery(t *testing.T) {
 	operationID := childCompletionOperationID("parent", rows)
 	applied, err := svc.workflowStore.IsOperationApplied(ctx, operationID)
 	if err != nil || !applied {
-		t.Fatalf("IsOperationApplied = %v, %v, want true, nil (on_children_completed marks its own "+
-			"operation id through its own bracket, unaffected by this spec's EvaluateOnly change)", applied, err)
+		t.Fatalf("IsOperationApplied = %v, %v, want true, nil (on_children_completed defers the engine "+
+			"mark and its outer handler marks after commit)", applied, err)
 	}
 
 	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
