@@ -1,7 +1,7 @@
 ---
 id: "03-runtime-startup"
 title: "Detect canvas startup"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "02-initial-owner-publication"
@@ -136,4 +136,26 @@ identity. No capability URL or context payload belongs in a startup message.
 
 ## Results
 
-Pending.
+Implemented and verified.
+
+- Added a bounded, capability-scoped host bootstrap that injects only into the
+  served entry representation. It reports document failures and successful
+  context access with a versioned, nonce-correlated presentation message while
+  preserving stored artifact bytes, nested entry paths, token checks, and the
+  opaque sandbox.
+- Replaced URL/load readiness with current-frame startup acknowledgement.
+  Loading mounts the frame, appearance is synchronized before reveal, and a
+  15-second deadline tears down the frame into a recoverable unavailable state.
+  Retry obtains a fresh capability and nonce, and stale messages/listeners are
+  ignored.
+- Added unit coverage for the startup wire shape, invalid messages, iframe
+  failure/deadline handling, and retained runtime behavior. Added desktop
+  startup-failure/retry coverage and the HTTPS-origin browser regression.
+- Updated public and bundled canvas authoring/runtime guidance.
+- `(cd apps/backend && go test ./internal/plugins/webapp/...)`: passed.
+- `(cd apps/web && pnpm exec vitest run components/plugins/web-app-startup.test.ts components/plugins/web-app-frame.test.tsx components/plugins/canvas-page.test.tsx components/settings/canvas-host-route.test.tsx components/settings/canvas-host-components.test.tsx)`: passed.
+- `(cd apps/web && pnpm run typecheck)`: passed.
+- `(cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet)`: passed.
+- Managed desktop and mobile Canvas E2E suites passed, including same-origin
+  HTTPS aliases, startup recovery/retry, owner-created publication, and the
+  mobile canvas flow.

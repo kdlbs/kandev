@@ -1,7 +1,7 @@
 ---
 id: "02-initial-owner-publication"
 title: "Authorize initial owner publication"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-same-origin-embedding"
@@ -137,4 +137,21 @@ authorized deliberately; later grant expansion must remain separate.
 
 ## Results
 
-Pending.
+Implemented and verified.
+
+- Added recorded, single-use creation authority for owner-created local canvas
+  drafts. The first eligible publication consumes the authority and atomically
+  creates the exact task-scoped grants, assigns the approving owner, and
+  activates the release. Existing drafts, imports, source/task/session
+  mismatches, unsupported manifests, and later permission increases remain on
+  the review path.
+- Made owner resolution fail closed in the authoring adapter and returned the
+  additive initial permission policy in the create response. Updated public and
+  bundled authoring/security guidance and E2E fixtures to distinguish trusted
+  first publication from manual approval.
+- Added rollback and cleanup coverage for authority, release, identity, and
+  grant state, plus backend and database-store regressions.
+- Targeted verification passed: Canvas/instance Go packages (49 tests),
+  Canvas backendapp tests (23), canvas MCP/handler tests (12), desktop Canvas
+  E2E (2), mobile Canvas E2E (3), public-doc tests (62), public-doc validator
+  (46 pages), specification lint, and `git diff --check`.

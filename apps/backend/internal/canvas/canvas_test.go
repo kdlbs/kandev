@@ -77,6 +77,26 @@ func TestGetExposesPendingFirstRelease(t *testing.T) {
 	}
 }
 
+func TestRemoveDeletesCreationAuthority(t *testing.T) {
+	service, _, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID:        "workspace-1",
+		TaskID:             "task-1",
+		Title:              "Authority cleanup",
+		CreatedBySessionID: "session-1",
+		OwnerUserID:        "owner-1",
+	})
+	if _, err := service.repo.GetCreationAuthority(context.Background(), created.ID); err != nil {
+		t.Fatalf("get creation authority before remove: %v", err)
+	}
+	if err := service.Remove(context.Background(), created.ID); err != nil {
+		t.Fatalf("remove canvas: %v", err)
+	}
+	if _, err := service.repo.GetCreationAuthority(context.Background(), created.ID); !errors.Is(err, ErrCreationAuthorityNotFound) {
+		t.Fatalf("get creation authority after remove = %v, want ErrCreationAuthorityNotFound", err)
+	}
+}
+
 func TestPendingReleaseLeavesRuntimeIdentityAndGenerationUntouched(t *testing.T) {
 	service, store, _ := newCanvasService(t)
 	created := createCanvas(t, service, CreateCanvasRequest{

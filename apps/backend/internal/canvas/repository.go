@@ -42,6 +42,15 @@ CREATE INDEX IF NOT EXISTS idx_canvas_lifecycle_workspace
   ON canvas_lifecycle_metadata(workspace_id, updated_at, id);
 CREATE INDEX IF NOT EXISTS idx_canvas_lifecycle_task
   ON canvas_lifecycle_metadata(task_id, updated_at, id);
+CREATE TABLE IF NOT EXISTS canvas_creation_authority (
+  canvas_id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  creating_session_id TEXT NOT NULL,
+  policy_version INTEGER NOT NULL,
+  consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_creation_authority_owner
+  ON canvas_creation_authority(owner_user_id, consumed_at);
 CREATE TABLE IF NOT EXISTS canvas_lifecycle_admission (
   id INTEGER PRIMARY KEY,
   version INTEGER NOT NULL
@@ -147,6 +156,77 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 	)
 	if err != nil {
 		return err
+	}
+	if metadata.CreationOwnerUserID != "" {
+		if metadata.TaskID == "" || metadata.CreatedBySessionID == "" {
+			return ErrInvalidCanvas
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(
+			`INSERT INTO canvas_creation_authority (canvas_id, owner_user_id, creating_session_id, policy_version, consumed_at) VALUES (?, ?, ?, ?, '')`,
+		), metadata.ID, metadata.CreationOwnerUserID, metadata.CreatedBySessionID, CreationAuthorityPolicyVersion); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetCreationAuthority returns the recorded first-publication authority. A
+// missing row is expected for legacy drafts and imported instances.
+func (r *Repository) GetCreationAuthority(ctx context.Context, canvasID string) (CreationAuthority, error) {
+	var row struct {
+		CanvasID          string `db:"canvas_id"`
+		OwnerUserID       string `db:"owner_user_id"`
+		CreatingSessionID string `db:"creating_session_id"`
+		TaskID            string `db:"task_id"`
+		PolicyVersion     int    `db:"policy_version"`
+		ConsumedAt        string `db:"consumed_at"`
+	}
+	err := r.ro.GetContext(ctx, &row, r.ro.Rebind(
+		`SELECT a.canvas_id, a.owner_user_id, a.creating_session_id, m.task_id, a.policy_version, a.consumed_at
+FROM canvas_creation_authority a
+JOIN canvas_lifecycle_metadata m ON m.id = a.canvas_id
+WHERE a.canvas_id = ?`,
+	), canvasID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreationAuthority{}, ErrCreationAuthorityNotFound
+	}
+	if err != nil {
+		return CreationAuthority{}, err
+	}
+	consumedAt, err := parseOptionalTime(row.ConsumedAt)
+	if err != nil {
+		return CreationAuthority{}, fmt.Errorf("canvas: parse creation authority consumed_at: %w", err)
+	}
+	result := CreationAuthority{
+		CanvasID: row.CanvasID, OwnerUserID: row.OwnerUserID,
+		CreatingSessionID: row.CreatingSessionID, TaskID: row.TaskID,
+		PolicyVersion: row.PolicyVersion,
+	}
+	if consumedAt != nil {
+		result.ConsumedAt = *consumedAt
+	}
+	return result, nil
+}
+
+// ConsumeCreationAuthorityTx atomically consumes the single-use authority
+// while rechecking its owner, session, task, policy, and current task scope.
+func (r *Repository) ConsumeCreationAuthorityTx(ctx context.Context, tx *sqlx.Tx, authority CreationAuthority, ownerUserID, sessionID, taskID string) error {
+	if authority.CanvasID == "" || ownerUserID == "" || sessionID == "" || taskID == "" {
+		return ErrStaleCanvasPublish
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE canvas_creation_authority
+SET consumed_at = ?
+WHERE canvas_id = ? AND owner_user_id = ? AND creating_session_id = ?
+  AND policy_version = ? AND consumed_at = ''
+  AND EXISTS (SELECT 1 FROM canvas_lifecycle_metadata m WHERE m.id = canvas_id AND m.task_id = ?)`,
+	), now, authority.CanvasID, ownerUserID, sessionID, CreationAuthorityPolicyVersion, taskID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrStaleCanvasPublish
 	}
 	return nil
 }
@@ -256,6 +336,10 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 
 // DeleteTx removes metadata in an existing lifecycle transaction.
 func (r *Repository) DeleteTx(ctx context.Context, tx *sqlx.Tx, id string) error {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM canvas_creation_authority WHERE canvas_id = ?`), id); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(
 		`DELETE FROM canvas_lifecycle_metadata WHERE id = ?`), id)
 	if err != nil {

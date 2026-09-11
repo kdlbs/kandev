@@ -67,6 +67,257 @@ func TestPublishPackageFirstReleaseRequiresMatchingGrants(t *testing.T) {
 	}
 }
 
+func TestCanvasCreationAuthorityFirstPublish(t *testing.T) {
+	service, instanceStore, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID:        "workspace-1",
+		TaskID:             "task-1",
+		Title:              "Owner-authorized canvas",
+		CreatedBySessionID: "session-1",
+		OwnerUserID:        "owner-1",
+	})
+
+	authority, err := service.repo.GetCreationAuthority(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get creation authority: %v", err)
+	}
+	instance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	pkg := testCanvasPackage("owner-first", []string{"tasks"})
+	pkg.Manifest.Capabilities.APIWrite = []string{"messages"}
+	pkg.Manifest.Capabilities.Events = []string{"task.updated"}
+	pkg.Manifest.Capabilities.State = true
+	pkg.Manifest.UI.WebApps[0].NetworkOrigins = []string{"https://api.example.test"}
+	result, err := service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID:          created.ID,
+		Package:           pkg,
+		Artifact:          webapp.Artifact{Digest: "owner-first", RelativePath: "releases/owner-first", Bytes: 1},
+		ExpectedAuthority: instance.PublishAuthority(),
+		SourceActorKind:   "agent",
+		SourceUserID:      "owner-1",
+		SourceTaskID:      "task-1",
+		SourceSessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("publish owner-authorized canvas: %v", err)
+	}
+	if !result.Activated || result.PermissionRequired {
+		t.Fatalf("publish result = %+v, want activated without review", result)
+	}
+
+	updated, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get updated instance: %v", err)
+	}
+	if updated.ActiveReleaseID != result.Release.ID || updated.PluginID != result.Release.PluginID {
+		t.Fatalf("updated instance = %+v, want active release and package identity", updated)
+	}
+	grants, err := instanceStore.ListGrants(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("list initial grants: %v", err)
+	}
+	if len(grants) != 5 {
+		t.Fatalf("initial grants = %+v, want five declared grants", grants)
+	}
+	wantGrants := map[string]bool{
+		"api_read:tasks":                   false,
+		"api_write:messages":               false,
+		"events:task.updated":              false,
+		"state:":                           false,
+		"network:https://api.example.test": false,
+	}
+	for _, grant := range grants {
+		key := grant.PermissionKind + ":"
+		if grant.PermissionKind == "api_read" || grant.PermissionKind == "api_write" || grant.PermissionKind == "events" {
+			key += grant.Resource
+		}
+		if grant.PermissionKind == "network" {
+			key += grant.NetworkOrigin
+		}
+		if _, ok := wantGrants[key]; !ok || grant.ScopeCeiling != ScopeTask || grant.ApprovedBy != "owner-1" {
+			t.Fatalf("initial grant = %+v, want task-scoped owner grant", grant)
+		}
+		wantGrants[key] = true
+	}
+	for key, found := range wantGrants {
+		if !found {
+			t.Fatalf("initial grant %q missing from %+v", key, grants)
+		}
+	}
+
+	consumed, err := service.repo.GetCreationAuthority(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get consumed authority: %v", err)
+	}
+	if consumed.PolicyVersion != authority.PolicyVersion || consumed.ConsumedAt.IsZero() {
+		t.Fatalf("consumed authority = %+v, want policy %d and consumed timestamp", consumed, authority.PolicyVersion)
+	}
+}
+
+func TestCanvasCreationAuthorityRejectsMismatchedSource(t *testing.T) {
+	service, instanceStore, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID:        "workspace-1",
+		TaskID:             "task-1",
+		Title:              "Mismatched owner",
+		CreatedBySessionID: "session-1",
+		OwnerUserID:        "owner-1",
+	})
+	instance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	result, err := service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID:          created.ID,
+		Package:           testCanvasPackage("mismatched-owner", []string{"tasks"}),
+		Artifact:          webapp.Artifact{Digest: "mismatched-owner", RelativePath: "releases/mismatched-owner", Bytes: 1},
+		ExpectedAuthority: instance.PublishAuthority(),
+		SourceActorKind:   "agent",
+		SourceUserID:      "foreign-owner",
+		SourceTaskID:      "task-1",
+		SourceSessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("publish mismatched owner: %v", err)
+	}
+	if result.Activated || !result.PermissionRequired {
+		t.Fatalf("mismatched owner result = %+v, want manual review", result)
+	}
+	grants, err := instanceStore.ListGrants(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("list mismatched-owner grants: %v", err)
+	}
+	if len(grants) != 0 {
+		t.Fatalf("mismatched-owner grants = %+v, want none", grants)
+	}
+	authority, err := service.repo.GetCreationAuthority(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get unconsumed authority: %v", err)
+	}
+	if !authority.ConsumedAt.IsZero() {
+		t.Fatalf("mismatched owner consumed authority at %s", authority.ConsumedAt)
+	}
+}
+
+func TestCanvasCreationAuthorityDoesNotApproveLaterIncrease(t *testing.T) {
+	service, instanceStore, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID:        "workspace-1",
+		TaskID:             "task-1",
+		Title:              "Later review",
+		CreatedBySessionID: "session-1",
+		OwnerUserID:        "owner-1",
+	})
+	firstInstance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get first instance: %v", err)
+	}
+	first, err := service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID:          created.ID,
+		Package:           testCanvasPackage("owner-base", []string{"tasks"}),
+		Artifact:          webapp.Artifact{Digest: "owner-base", RelativePath: "releases/owner-base", Bytes: 1},
+		ExpectedAuthority: firstInstance.PublishAuthority(),
+		SourceActorKind:   "agent",
+		SourceUserID:      "owner-1",
+		SourceTaskID:      "task-1",
+		SourceSessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("publish first owner release: %v", err)
+	}
+	if !first.Activated {
+		t.Fatalf("first owner release = %+v, want active", first)
+	}
+
+	secondInstance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get second instance: %v", err)
+	}
+	secondPackage := testCanvasPackage("owner-increase", []string{"tasks", "workflows"})
+	second, err := service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID:          created.ID,
+		Package:           secondPackage,
+		Artifact:          webapp.Artifact{Digest: "owner-increase", RelativePath: "releases/owner-increase", Bytes: 1},
+		ExpectedAuthority: secondInstance.PublishAuthority(),
+		SourceActorKind:   "agent",
+		SourceUserID:      "owner-1",
+		SourceTaskID:      "task-1",
+		SourceSessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("publish later owner release: %v", err)
+	}
+	if second.Activated || !second.PermissionRequired {
+		t.Fatalf("later owner release = %+v, want pending review", second)
+	}
+	current, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get current instance: %v", err)
+	}
+	if current.ActiveReleaseID != first.Release.ID {
+		t.Fatalf("active release after later increase = %q, want %q", current.ActiveReleaseID, first.Release.ID)
+	}
+}
+
+func TestCanvasCreationAuthorityRollsBackOnActivationFailure(t *testing.T) {
+	service, instanceStore, _ := newCanvasService(t)
+	created := createCanvas(t, service, CreateCanvasRequest{
+		WorkspaceID:        "workspace-1",
+		TaskID:             "task-1",
+		Title:              "Rollback authority",
+		CreatedBySessionID: "session-1",
+		OwnerUserID:        "owner-1",
+	})
+	instance, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get instance: %v", err)
+	}
+	service.instances = &activationFailureStore{Store: instanceStore}
+	_, err = service.PublishPackage(context.Background(), PublishRequest{
+		CanvasID:          created.ID,
+		Package:           testCanvasPackage("rollback-authority", []string{"tasks"}),
+		Artifact:          webapp.Artifact{Digest: "rollback-authority", RelativePath: "releases/rollback-authority", Bytes: 1},
+		ExpectedAuthority: instance.PublishAuthority(),
+		SourceActorKind:   "agent",
+		SourceUserID:      "owner-1",
+		SourceTaskID:      "task-1",
+		SourceSessionID:   "session-1",
+	})
+	if err == nil {
+		t.Fatal("publish with activation failure succeeded, want rollback")
+	}
+	releases, err := instanceStore.ListReleases(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("list releases after rollback: %v", err)
+	}
+	if len(releases) != 0 {
+		t.Fatalf("releases after rollback = %+v, want none", releases)
+	}
+	grants, err := instanceStore.ListGrants(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("list grants after rollback: %v", err)
+	}
+	if len(grants) != 0 {
+		t.Fatalf("grants after rollback = %+v, want none", grants)
+	}
+	current, err := instanceStore.Get(context.Background(), created.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("get instance after rollback: %v", err)
+	}
+	if current.ActiveReleaseID != "" || current.PluginID != CanvasPluginID {
+		t.Fatalf("instance after rollback = %+v, want pending synthetic instance", current)
+	}
+	authority, err := service.repo.GetCreationAuthority(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get authority after rollback: %v", err)
+	}
+	if !authority.ConsumedAt.IsZero() {
+		t.Fatalf("authority after rollback consumed at %s", authority.ConsumedAt)
+	}
+}
+
 func TestFirstTaskReleaseCanBeReviewedAndApproved(t *testing.T) {
 	service, instanceStore, _ := newCanvasService(t)
 	canvas := createCanvas(t, service, CreateCanvasRequest{
@@ -448,6 +699,14 @@ type publishTransactionBarrier struct {
 	entered       chan struct{}
 	continueFirst chan struct{}
 	once          sync.Once
+}
+
+type activationFailureStore struct {
+	*plugininstances.Store
+}
+
+func (s *activationFailureStore) ActivateReleaseTx(context.Context, *sqlx.Tx, string, string) error {
+	return errors.New("injected activation failure")
 }
 
 func (s *publishTransactionBarrier) WithTransaction(ctx context.Context, fn func(*sqlx.Tx) error) error {

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-10
-status: draft
+status: done
 requirements:
   - REQ-PLUGINS-ISOLATED-WEB-APPS-007
   - REQ-PLUGINS-ISOLATED-WEB-APPS-012
@@ -244,10 +244,10 @@ before stimuli; use causal waits and fake clocks for deadline tests.
 
 ## Work orders
 
-- [ ] [Task 01: Support same-origin canvas embedding](task-01-same-origin-embedding.md)
-- [ ] [Task 02: Authorize initial owner publication](task-02-initial-owner-publication.md)
-- [ ] [Task 03: Detect canvas startup](task-03-runtime-startup.md)
-- [ ] [Task 04: Make release review readable](task-04-release-review.md)
+- [x] [Task 01: Support same-origin canvas embedding](task-01-same-origin-embedding.md)
+- [x] [Task 02: Authorize initial owner publication](task-02-initial-owner-publication.md)
+- [x] [Task 03: Detect canvas startup](task-03-runtime-startup.md)
+- [x] [Task 04: Make release review readable](task-04-release-review.md)
 
 ## Related delivery records
 
@@ -272,9 +272,24 @@ Design validation on 2026-09-10:
 - `git status --short -- docs/plans/canvas-runtime-permission-fixes`: confirmed
   the new manifest and all four work orders are present for staging.
 
-Product implementation and all four work orders remain pending. Product tests
-were not run for this design-only change. Do not reuse earlier package test
-counts as evidence for this repair.
+Product implementation and tasks 03 through 04 remain pending. Task 01
+implementation verification
+completed on 2026-09-10:
+
+- `(cd apps/backend && go test ./internal/plugins/webapp/...)`: passed, 30 tests.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/canvas/canvas-host-origins.spec.ts -- --retries=0)`: passed, 1 test.
+- `node --test scripts/validate-public-docs.test.mjs`: passed, 62 tests.
+- `node scripts/validate-public-docs.mjs`: passed, 46 published docs pages.
+- `git diff --check`: passed.
+
+Task 02 implementation verification completed on 2026-09-10:
+
+- `(cd apps/backend && go test ./internal/canvas/... ./internal/plugins/instances/...)`: passed, 49 tests.
+- `(cd apps/backend && go test ./internal/backendapp -run 'Canvas' -count=1)`: passed, 23 tests.
+- `(cd apps/backend && go test ./internal/mcp/canvasskill ./internal/mcp/handlers -run 'Canvas|Bundle|Scaffold' -count=1)`: passed, 12 tests.
+- `(cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/canvas/plugin-canvas.spec.ts -- --retries=0)`: passed, 2 tests.
+- `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/canvas/mobile-plugin-canvas.spec.ts -- --retries=0)`: passed, 3 tests.
+- Public-doc tests/validator, specification lint, and `git diff --check`: passed.
 
 ## Risks
 

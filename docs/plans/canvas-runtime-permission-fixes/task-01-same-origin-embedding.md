@@ -1,7 +1,7 @@
 ---
 id: "01-same-origin-embedding"
 title: "Support same-origin canvas embedding"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -95,4 +95,18 @@ browser contexts. Cross-alias embedding is not same-origin embedding.
 
 ## Results
 
-Pending.
+Implemented and verified on 2026-09-10.
+
+- `BuildContentSecurityPolicy` now adds `frame-ancestors 'self'` while
+  retaining exact localhost and Tauri exceptions.
+- Added a disposable HTTPS browser fixture with two same-origin aliases,
+  direct and nested foreign ancestors, and a spoofed forwarded-host header.
+- Same-origin entry content executes through both aliases. Direct and nested
+  foreign framing stays blocked.
+- Updated public canvas and security guidance. No production DNS setting or
+  request-header trust was added.
+- `(cd apps/backend && go test ./internal/plugins/webapp/...)`: passed, 30 tests.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/canvas/canvas-host-origins.spec.ts -- --retries=0)`: passed, 1 test.
+- `node --test scripts/validate-public-docs.test.mjs`: passed, 62 tests.
+- `node scripts/validate-public-docs.mjs`: passed, 46 published docs pages.
+- `git diff --check`: passed.

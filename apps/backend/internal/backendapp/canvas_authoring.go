@@ -22,7 +22,6 @@ import (
 	"github.com/kandev/kandev/internal/plugins/webapp"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	userstore "github.com/kandev/kandev/internal/user/store"
 	"go.uber.org/zap"
 )
 
@@ -137,11 +136,15 @@ func (s *canvasAuthoringService) CreateCanvas(ctx context.Context, request mcpha
 	} else if editSession {
 		return nil, canvasOperationError("canvas_edit_restricted", "canvas edit sessions can only modify their target canvas", nil)
 	}
-	ownerID := s.workspaceOwner(ctx, task.WorkspaceID)
+	ownerID, err := s.workspaceOwner(ctx, task.WorkspaceID)
+	if err != nil {
+		return nil, canvasOperationError("workspace_owner_unavailable", "the workspace owner could not be verified", err)
+	}
 	created, err := s.canvases.CreateCanvas(ctx, canvas.CreateCanvasRequest{
 		WorkspaceID: task.WorkspaceID, TaskID: task.ID,
 		OriginTaskID: task.ID, Title: request.Title,
 		CreatedBySessionID: taskSessionID(request.Agent),
+		OwnerUserID:        ownerID,
 	})
 	if err != nil {
 		return nil, canvasOperationError(canvasErrorCode(err), "canvas could not be created", err)
@@ -179,6 +182,13 @@ func canvasCreateResponse(created *canvas.Canvas, root, ownerID string, scaffold
 		"source_path": root,
 		"source_root": root,
 		"owner_id":    ownerID,
+		"initial_permission_policy": map[string]any{
+			"version":                    canvas.CreationAuthorityPolicyVersion,
+			"eligible":                   ownerID != "" && created.TaskID != "" && created.CreatedBySessionID != "",
+			"scope":                      canvas.ScopeTask,
+			"supported_permission_kinds": []string{"api_read", "api_write", "events", "state", "network"},
+			"exact_https_origins":        true,
+		},
 		"skill": map[string]any{
 			"slug": canvasskill.Slug, "version": canvasskill.Version,
 			"read_tool": "read_canvas_authoring_skill_kandev",
@@ -369,6 +379,10 @@ func (s *canvasAuthoringService) publishCanvasSource(ctx context.Context, execut
 	if artifacts == nil || store == nil {
 		return nil, canvasOperationError("runtime_unavailable", "canvas release storage is unavailable", nil)
 	}
+	ownerID, err := s.workspaceOwner(ctx, task.WorkspaceID)
+	if err != nil {
+		return nil, canvasOperationError("workspace_owner_unavailable", "the workspace owner could not be verified", err)
+	}
 	// Reserve the maximum expanded artifact size before reading agentctl. The
 	// exact package size is not known until the bounded stream validates, and
 	// this reservation prevents concurrent publishers from bypassing the
@@ -405,7 +419,7 @@ func (s *canvasAuthoringService) publishCanvasSource(ctx context.Context, execut
 	}()
 	result, err := s.canvases.PublishPackage(ctx, canvas.PublishRequest{
 		CanvasID: item.ID, Package: pkg, Artifact: artifact, ExpectedAuthority: expectedAuthority, ExpectedBaseReleaseID: expectedBaseReleaseID,
-		SourceActorKind: canvasSourceActor, SourceUserID: s.workspaceOwner(ctx, task.WorkspaceID),
+		SourceActorKind: canvasSourceActor, SourceUserID: ownerID,
 		SourceTaskID: task.ID, SourceSessionID: request.Agent.SessionID,
 	})
 	if result != nil && result.ReleasePersisted {
@@ -606,13 +620,18 @@ func canvasEditTargetMatches(target canvasEditSessionTarget, taskID, canvasID st
 		target.ReleaseID != ""
 }
 
-func (s *canvasAuthoringService) workspaceOwner(ctx context.Context, workspaceID string) string {
-	if s.tasks != nil {
-		if workspace, err := s.tasks.GetWorkspace(ctx, workspaceID); err == nil && workspace != nil && workspace.OwnerID != "" {
-			return workspace.OwnerID
-		}
+func (s *canvasAuthoringService) workspaceOwner(ctx context.Context, workspaceID string) (string, error) {
+	if s.tasks == nil || strings.TrimSpace(workspaceID) == "" {
+		return "", errors.New("task service is unavailable")
 	}
-	return userstore.DefaultUserID
+	workspace, err := s.tasks.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if workspace == nil || strings.TrimSpace(workspace.OwnerID) == "" {
+		return "", errors.New("workspace has no persisted owner")
+	}
+	return strings.TrimSpace(workspace.OwnerID), nil
 }
 
 func (s *canvasAuthoringService) beginPublish(sessionID, canvasID string) error {

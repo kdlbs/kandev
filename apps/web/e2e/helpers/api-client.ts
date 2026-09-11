@@ -411,8 +411,11 @@ export class ApiClient {
     await this.request("GET", "/health");
   }
 
-  async createWorkspace(name: string): Promise<Workspace> {
-    return this.request("POST", "/api/v1/workspaces", { name });
+  async createWorkspace(name: string, ownerId?: string): Promise<Workspace> {
+    return this.request("POST", "/api/v1/workspaces", {
+      name,
+      ...(ownerId ? { owner_id: ownerId } : {}),
+    });
   }
 
   async deleteWorkspace(workspaceId: string, confirmName: string): Promise<void> {

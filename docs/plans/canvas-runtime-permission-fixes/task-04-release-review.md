@@ -1,7 +1,7 @@
 ---
 id: "04-release-review"
 title: "Make release review readable"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "03-runtime-startup"
@@ -151,4 +151,26 @@ module into cohesive helpers/components rather than increasing its complexity.
 
 ## Results
 
-Pending.
+Implemented and verified.
+
+- Added authorized task/session source-label projections to release and
+  promotion responses. Inaccessible, deleted, or mismatched sources return a
+  localized unavailable label without exposing identifiers.
+- Replaced UUID-led repeated release cards with a selected-release review.
+  Pending releases are selected first, followed by the active release, with
+  readable date/status labels, grouped permission summaries, new-permission
+  markers, exact HTTPS destination details, and explicit unsupported-permission
+  blocking.
+- Split the review surface into fixed header/footer and one internal scroll
+  region. Desktop uses a wider bounded dialog; phone uses a full-height,
+  safe-area-aware surface with touch-sized actions. Existing approval,
+  rejection, rollback, promotion, and error semantics remain intact.
+- Added backend projection tests, permission-copy tests, release-dialog tests,
+  all supported locale keys, and public release/security guidance.
+- `(cd apps/backend && go test ./internal/backendapp ./internal/canvas ./internal/plugins/instances ./internal/plugins/webapp ./internal/mcp/canvasskill)`: passed.
+- `(cd apps/web && pnpm exec vitest run ... nine canvas/runtime files ...)`: 45
+  tests passed.
+- `(cd apps/web && pnpm run typecheck)`: passed.
+- `(cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet)`: passed.
+- Managed desktop and mobile Canvas E2E suites passed, including release
+  recovery and the mobile focused canvas route.
