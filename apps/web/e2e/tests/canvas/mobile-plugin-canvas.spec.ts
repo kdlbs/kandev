@@ -117,6 +117,25 @@ test.describe("Plugin-backed canvases on mobile", () => {
         localProfile!.name,
       );
 
+      const tasksBeforeCancel = await apiClient.listTasks(seedData.workspaceId);
+      await dialog.getByTestId("task-title-input").fill("Cancelled canvas task");
+      await dialog
+        .getByTestId("task-description-input")
+        .fill("This draft must not create a task or canvas.");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+      await expect(dialog).toBeHidden();
+      const tasksAfterCancel = await apiClient.listTasks(seedData.workspaceId);
+      expect(tasksAfterCancel.tasks.map((task) => task.id)).toEqual(
+        tasksBeforeCancel.tasks.map((task) => task.id),
+      );
+
+      await testPage.getByTestId("settings-create-canvas").tap();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("task-title-input")).toHaveValue("Create a canvas");
+      await expect(dialog.getByTestId("task-description-input")).toHaveValue(
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
+
       const agentSelector = dialog.getByTestId("agent-profile-selector");
       await expect(agentSelector).toBeEnabled();
       await agentSelector.tap();
@@ -157,11 +176,70 @@ test.describe("Plugin-backed canvases on mobile", () => {
         })})`,
         'e2e:message("Canvas created from settings.")',
         "Create a canvas that shows the current task list.",
+        ...Array.from(
+          { length: 20 },
+          (_, index) =>
+            `Canvas detail ${index + 1}: keep this longer edited goal inside the form scroll area.`,
+        ),
         "",
         "@create-canvas",
       ].join("\n");
       await dialog.getByTestId("task-title-input").fill(taskTitle);
       await dialog.getByTestId("task-description-input").fill(description);
+      await dialog.getByTestId("task-create-advanced-settings-trigger").tap();
+
+      const formBody = dialog.getByTestId("task-create-form-body");
+      const formGeometry = await testPage.evaluate(() => {
+        const readRect = (testId: string) => {
+          const rect = document.querySelector(`[data-testid="${testId}"]`)?.getBoundingClientRect();
+          if (!rect) return null;
+          return {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            height: rect.height,
+          };
+        };
+        const viewport = window.visualViewport;
+        return {
+          viewport: {
+            left: viewport?.offsetLeft ?? 0,
+            top: viewport?.offsetTop ?? 0,
+            right: (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth),
+            bottom: (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight),
+          },
+          dialog: readRect("create-task-dialog"),
+          body: readRect("task-create-form-body"),
+          footer: readRect("task-create-dialog-footer"),
+          cancel: readRect("submit-cancel"),
+          start: readRect("submit-start-agent"),
+        };
+      });
+      expect(formGeometry.dialog).not.toBeNull();
+      expect(formGeometry.body).not.toBeNull();
+      expect(formGeometry.footer).not.toBeNull();
+      expect(formGeometry.cancel?.height).toBeGreaterThanOrEqual(44);
+      expect(formGeometry.start?.height).toBeGreaterThanOrEqual(44);
+      expect(formGeometry.dialog!.left).toBeGreaterThanOrEqual(formGeometry.viewport.left - 1);
+      expect(formGeometry.dialog!.top).toBeGreaterThanOrEqual(formGeometry.viewport.top - 1);
+      expect(formGeometry.dialog!.right).toBeLessThanOrEqual(formGeometry.viewport.right + 1);
+      expect(formGeometry.dialog!.bottom).toBeLessThanOrEqual(formGeometry.viewport.bottom + 1);
+      expect(formGeometry.body!.bottom).toBeLessThanOrEqual(formGeometry.footer!.top + 1);
+      expect(formGeometry.footer!.bottom).toBeLessThanOrEqual(formGeometry.dialog!.bottom + 1);
+
+      const scrollMetrics = await formBody.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop,
+      }));
+      expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+      await formBody.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect
+        .poll(() => formBody.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(scrollMetrics.scrollTop);
 
       let failNextTaskCreate = true;
       await testPage.route("**/api/v1/tasks", async (route) => {
