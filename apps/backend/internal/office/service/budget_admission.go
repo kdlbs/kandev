@@ -203,11 +203,21 @@ func (si *SchedulerIntegration) cancelBudgetRun(
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 
-	if _, err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := si.svc.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
-	} else {
-		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
+		return false
 	}
+	if !cancelled {
+		// Another writer already moved the run out of claimed between the
+		// admission decision and this write; it did not actually end via
+		// this cancellation, so there is nothing to classify, publish, or
+		// log.
+		return false
+	}
+
+	si.svc.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
+	si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 
 	fields := map[string]string{activityFieldCeiling: ceilingNotDetermined}
 	for k, v := range extraFields {
@@ -389,11 +399,17 @@ func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, 
 	incBudgetCancelledNoWorkspace(provenance)
 	si.cleanupWorkspaceLookupRun(ctx, run)
 
-	if _, err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace"); err != nil {
+	cancelled, err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace")
+	if err != nil {
 		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
-	} else {
-		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
+		return
 	}
+	if !cancelled {
+		return
+	}
+
+	si.svc.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
+	si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	si.svc.LogActivityWithRun(ctx, "", "scheduler", "office-scheduler",
 		"run_budget_workspace_unresolvable", "run", run.ID,
 		mustJSON(map[string]string{activityFieldCeiling: ceilingNotDetermined}), run.ID, "")

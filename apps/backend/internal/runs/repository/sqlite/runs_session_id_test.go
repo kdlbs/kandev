@@ -62,6 +62,40 @@ func TestSetRunSessionID_UnknownRunIsNoop(t *testing.T) {
 	}
 }
 
+// A cancel that lands between claim and this write already recorded a
+// terminal shape off the run's session id at that instant; letting this
+// write land anyway would make the persisted row disagree with the
+// classification that was already counted for it.
+func TestSetRunSessionID_LostRaceAgainstConcurrentCancelIsNoop(t *testing.T) {
+	repo := newTestRepo(t)
+	run := &models.Run{ID: "run-session-4", AgentProfileID: "agent-1", Status: "claimed"}
+	mustCreateRun(t, repo, run)
+
+	cancelled, err := repo.CancelRun(context.Background(), run.ID, "lost_race")
+	if err != nil {
+		t.Fatalf("CancelRun: %v", err)
+	}
+	if !cancelled {
+		t.Fatal("expected CancelRun to cancel the still-claimed run")
+	}
+
+	wrote, err := repo.SetRunSessionID(context.Background(), run.ID, "sess-late")
+	if err != nil {
+		t.Fatalf("SetRunSessionID: %v", err)
+	}
+	if wrote {
+		t.Fatal("expected wrote=false once the run is no longer claimed")
+	}
+
+	got := mustGetRun(t, repo, run.ID)
+	if got.SessionID != "" {
+		t.Fatalf("session_id = %q, want unchanged empty string on the cancelled row", got.SessionID)
+	}
+	if got.Status != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", got.Status)
+	}
+}
+
 // AC-OFFICE-LOOP-LIVENESS-002.10: a later, non-empty write overwrites an
 // earlier one — "last non-empty wins" for the relaunch-keeps-latest case.
 func TestSetRunSessionID_LaterWriteOverwritesEarlier(t *testing.T) {

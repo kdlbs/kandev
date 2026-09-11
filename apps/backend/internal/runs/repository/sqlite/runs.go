@@ -104,15 +104,16 @@ func (r *Repository) UpdateRunRuntimeSnapshot(
 	return err
 }
 
-// SetRunSessionID persists the session id a launch produced
-// (AC-OFFICE-LOOP-LIVENESS-002.7/.8/.10). A no-op when sessionID is
-// empty — the caller counts that as a without-session launch rather
-// than clobbering whatever the column already held. Given the single-
-// launch-in-flight invariant, an unconditional write on a non-empty id
-// is "last non-empty wins" by construction: nothing else writes this
-// column between a claim and its terminal outcome. Returns whether the
-// row existed so the caller can distinguish a real write from a stale
-// run id.
+// SetRunSessionID persists the session id a launch produced. A no-op
+// when sessionID is empty — the caller counts that as a without-session
+// launch rather than clobbering whatever the column already held.
+// Guarded to status = 'claimed' so a launch that loses a race against a
+// concurrent cancel or terminal write cannot mutate an already-terminal
+// row's session id after the fact: without the guard, a terminal-shape
+// classification already recorded off the empty session id would drift
+// from what the row shows on a later read. Returns whether the row was
+// still claimed so the caller can distinguish a real write from a
+// stale run id or a lost race.
 func (r *Repository) SetRunSessionID(
 	ctx context.Context, runID, sessionID string,
 ) (bool, error) {
@@ -120,7 +121,7 @@ func (r *Repository) SetRunSessionID(
 		return false, nil
 	}
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs SET session_id = ? WHERE id = ?
+		UPDATE runs SET session_id = ? WHERE id = ? AND status = 'claimed'
 	`), sessionID, runID)
 	if err != nil {
 		return false, err

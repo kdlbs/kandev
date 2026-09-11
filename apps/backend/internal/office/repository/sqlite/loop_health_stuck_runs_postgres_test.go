@@ -34,7 +34,10 @@ func TestPostgresListStuckRuns(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	now := time.Now().UTC()
+	// Postgres timestamp columns store microsecond precision; truncate
+	// before the round-trip so the later Equal() comparisons aren't
+	// comparing against nanosecond digits the column never persisted.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// Two distinct agent profiles: sharing one would put the queued run
 	// behind a claimed sibling on the same agent_profile_id, excluding
