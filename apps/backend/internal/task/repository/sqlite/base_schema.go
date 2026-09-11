@@ -42,6 +42,7 @@ func (r *Repository) initSchema() error {
 		r.healBuiltinWorkflowStepParticipantSeats,
 		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
+		r.ensureTaskEnvironmentRecoveryClaimsSchema,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
@@ -54,6 +55,35 @@ func (r *Repository) initSchema() error {
 		if err := step(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ensureTaskEnvironmentRecoveryClaimsSchema creates the durable authority used
+// by automatic worktree recovery. It runs after the legacy worktree ownership
+// cutover because that cutover replaces task_environments on PostgreSQL.
+func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
+	if err := r.migrate.Apply("task_environment_recovery_claims.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_claims (
+			task_environment_id TEXT PRIMARY KEY,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create task environment recovery claim table: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_claims.operation_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_claims_operation
+			ON task_environment_recovery_claims(operation_id)`); err != nil {
+		return fmt.Errorf("create task environment recovery claim index: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task recovery claim migration: %w", err)
 	}
 	return nil
 }

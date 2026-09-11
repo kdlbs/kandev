@@ -120,6 +120,13 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
+	// (immediately applied) workflow move whose target-step entry has not yet
+	// run. Its value records the source step, the move ID, and the encoded
+	// entry options. The public task.moved event carries only the move ID; the
+	// instructions and profile choice ride on this transient marker and are
+	// cleared once the target entry is dispatched.
+	MetaKeyWorkflowMovePending = "workflow_move_pending"
 	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
 	// task.moved lifecycle must finish before feeder reconciliation. Its value
 	// records the source step so stale deliveries cannot run the wrong exit.
@@ -2332,6 +2339,30 @@ type TaskEnvironmentRepo struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 	MergedAt          *time.Time `json:"merged_at,omitempty"`
 	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
+}
+
+// TaskEnvironmentRecoveryClaimRequest identifies the environment authority
+// required while an automatic host-worktree recovery is in progress.
+type TaskEnvironmentRecoveryClaimRequest struct {
+	TaskEnvironmentID   string
+	OwnerTaskID         string
+	OwnershipGeneration int64
+	SessionID           string
+	OperationID         string
+	ExecutorType        string
+}
+
+// TaskEnvironmentRecoveryClaim is the durable authority held from recovery
+// preflight through the external workspace-start boundary.
+type TaskEnvironmentRecoveryClaim struct {
+	TaskEnvironmentID   string    `json:"task_environment_id"`
+	OwnerTaskID         string    `json:"owner_task_id"`
+	OwnershipGeneration int64     `json:"ownership_generation"`
+	SessionID           string    `json:"session_id"`
+	OperationID         string    `json:"operation_id"`
+	ExecutorType        string    `json:"executor_type"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // ToAPI converts internal TaskEnvironment to API map.

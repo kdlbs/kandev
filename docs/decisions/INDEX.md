@@ -235,6 +235,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-31-generic-plugin-host-boundary | [Generic plugin Host boundary](2026-08-31-generic-plugin-host-boundary.md) | proposed | backend, frontend, protocol, security, workflow | 2026-08-31 |
 | 2026-08-30-environment-owned-git-status | [Persist Current Git Status with the Task Environment](2026-08-30-environment-owned-git-status.md) | accepted | backend, frontend, protocol | 2026-08-31 |
 | 2026-08-31-explicit-new-branch-session-recovery | [Require Explicit User Action Before Continuing a Session on a Replacement Branch](2026-08-31-explicit-new-branch-session-recovery.md) | accepted | backend, frontend, protocol | 2026-08-31 |
+| 2026-09-10-worktree-metadata-recovery-boundary | [Bound Automatic Worktree Metadata Recovery](2026-09-10-worktree-metadata-recovery-boundary.md) | proposed | backend | 2026-09-10 |
 | 2026-08-31-local-worktree-refresh-best-effort | [Local Worktree Refresh Is Best Effort](2026-08-31-local-worktree-refresh-best-effort.md) | accepted | backend, security, operations | 2026-08-31 |
 | 2026-08-31-revoke-merge-approval-after-untrusted-push | [Revoke merge approval after an untrusted pull-request push](2026-08-31-revoke-merge-approval-after-untrusted-push.md) | accepted | workflow, security | 2026-08-31 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |

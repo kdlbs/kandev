@@ -10,6 +10,9 @@ export function TaskMoveItems({
   steps,
   isDeleting,
   onMoveToStep,
+  onMoveToStepWithOptions,
+  onSubmitWithOptions,
+  moveOptionsBusy,
   actingIds,
   actingOnSelection,
   onBulkMove,
@@ -64,6 +67,13 @@ export function TaskMoveItems({
       disabled={isDeleting || task.isArchived}
       showSeparator={false}
       onMoveToStep={moveToStep}
+      onMoveToStepWithOptions={
+        actingIds.length === 1 && onMoveToStepWithOptions ? onMoveToStepWithOptions : undefined
+      }
+      onSubmitWithOptions={
+        actingIds.length === 1 && onSubmitWithOptions ? onSubmitWithOptions : undefined
+      }
+      isMoving={moveOptionsBusy}
       onSendToWorkflow={(targetWorkflowId, stepId) => {
         if (actingOnSelection) {
           runSelectionMove(targetWorkflowId, stepId, "workflow");

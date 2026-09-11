@@ -382,6 +382,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plan_revisions.workflow_step_id", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
+
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required task migration: %w", err)
 	}
