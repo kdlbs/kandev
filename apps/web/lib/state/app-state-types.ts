@@ -20,7 +20,6 @@ import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type { WorkspaceRestorationActions } from "./slices/session-runtime/workspace-restoration";
 import type {
   AgentUpdateJob,
   InstallJob,
@@ -166,7 +165,6 @@ export type AppState = KanbanSlice & {
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
   embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
-  workspaceRestoration: (typeof defaultSessionRuntimeState)["workspaceRestoration"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -650,8 +648,7 @@ export type AppState = KanbanSlice & {
   AuthSliceActions &
   AutomationsSliceActions &
   PluginsSliceActions &
-  ReviewSliceActions &
-  WorkspaceRestorationActions;
+  ReviewSliceActions;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
