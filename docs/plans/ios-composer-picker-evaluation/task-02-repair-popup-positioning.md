@@ -239,5 +239,19 @@ operator action.
   and freshly rebuilt backend/helper/plugin artifacts on the CI-equivalent
   merge tree with the repair applied.
 
-The final remote CI/review gate and current-base integration validation remain
-pending until the SSH correction is delivered and checked.
+Remote CI/review status and the final current-base integration evidence are
+tracked on [PR #3596](https://github.com/kdlbs/kandev/pull/3596).
+
+## CodeRabbit recovery-assertion follow-up
+
+A fresh SSH listener does not guarantee a different numeric port. The recovery
+test now waits for `workspace.file.get` to read the attached remote fixture
+through Kandev after each restart, retaining the direct remote-content and UI
+file-tree assertions. A disposable probe that reported the original port after
+recovery reproduced the old assertion's 60-second false failure. This changes
+only test evidence, not the SSH runtime or its recovery contract.
+
+The same probe passed with the new assertion (30.1 seconds). After removing the
+probe, the permanent SSH E2E passed (30.9 seconds), with Node 24.20.0, one worker,
+and no retries. Changed-file ESLint, typecheck, specification lint, and
+whitespace checks also passed.

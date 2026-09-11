@@ -125,8 +125,8 @@ test.describe("SSH executor — attach workspace sources", () => {
       const row = rows.find((candidate) => candidate.task_id === task.id);
       expect(row?.remote_task_dir).toBeTruthy();
       expect(row?.local_forward_port).toBeGreaterThan(0);
-      let previousForwardPort = row!.local_forward_port;
-      const sibling = `${row!.remote_task_dir}/fixture-ssh-second-source-main/remote-source.txt`;
+      const siblingPath = "fixture-ssh-second-source-main/remote-source.txt";
+      const sibling = `${row!.remote_task_dir}/${siblingPath}`;
       expect(remotePathExists(seedData.sshTarget, sibling)).toBe(true);
       expect(readRemoteFile(seedData.sshTarget, sibling)).toBe("ssh-second-source fixture\n");
       const agentctlLog = readRemoteFile(
@@ -150,20 +150,22 @@ test.describe("SSH executor — attach workspace sources", () => {
         await expect
           .poll(
             async () => {
-              const forwardPort = (await apiClient.listSSHSessions(seedData.sshExecutorId)).find(
-                (item) => item.task_id === task.id,
-              )?.local_forward_port;
-              return Boolean(forwardPort && forwardPort !== previousForwardPort);
+              try {
+                const response = await apiClient.wsRequest<{ content: string }>(
+                  "workspace.file.get",
+                  { session_id: row!.session_id, path: siblingPath },
+                );
+                return response.content;
+              } catch {
+                return undefined;
+              }
             },
             {
               timeout: 60_000,
-              message: "Waiting for SSH backend reconnect",
+              message: "Waiting for restored SSH workspace file access",
             },
           )
-          .toBe(true);
-        previousForwardPort = (await apiClient.listSSHSessions(seedData.sshExecutorId)).find(
-          (item) => item.task_id === task.id,
-        )!.local_forward_port;
+          .toBe("ssh-second-source fixture\n");
         expect(remotePathExists(seedData.sshTarget, sibling)).toBe(true);
         expect(readRemoteFile(seedData.sshTarget, sibling)).toBe("ssh-second-source fixture\n");
         await session.clickTab("Files");
