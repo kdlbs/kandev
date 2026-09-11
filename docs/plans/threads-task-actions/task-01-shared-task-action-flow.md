@@ -201,3 +201,17 @@ improvements also pass. The exact commands in the plan's CI correction section
 passed 141 focused unit/component tests, eight desktop browser tests and nine
 phone browser tests with one browser worker and no retries. Typecheck, affected
 ESLint and locale checks passed. No public contract or product copy changed.
+
+### Main removal-coordinator integration (2026-09-11)
+
+The sidebar and Threads now share the landed removal coordinator for both
+archive and delete. Listing requests record pending ownership without a detail
+departure; stale global selection cannot cause destination loading or recovery
+navigation. Four new real-store integration cases cover that boundary, with
+three failing before the compatibility fix. All 201 focused tests in 25 files
+passed afterward, including the landed coordinator, menu flow and existing
+desktop/phone component coverage. Typecheck, affected-file ESLint, formatting,
+specification and harness checks passed. Managed browser runs passed 10 desktop
+and seven phone cases with one worker and no retries. The plan's main-integration
+section records exact commands, fresh-build evidence and the remaining remote
+verification.

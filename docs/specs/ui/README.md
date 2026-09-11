@@ -11,7 +11,9 @@ owners:
 
 ## Scope
 
-UI owns responsive behavior; other systems own behavior/state.
+UI owns responsive behavior and reusable presentation preferences, including
+task-listing modes and Home destination choices. Other systems retain task,
+runtime, and workspace lifecycle/state ownership.
 
 ## Map
 
@@ -132,7 +134,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
 - [Threads Deck](requirements/threads-conversation-deck.md)
-- [Task listing](requirements/task-listing-display-preferences.md)
+- [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
 - [Task Surface Refresh](requirements/task-surface-refresh.md)
@@ -204,6 +206,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Saved Task View Deletion Confirmation](system-design/saved-task-view-deletion-confirmation.md)
 - [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Task Listing Display Preferences](system-design/task-listing-display-preferences.md)
 - [Task surface](system-design/task-surface-render-isolation.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
 - [Threads Deck](system-design/threads-conversation-deck.md)

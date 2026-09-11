@@ -120,11 +120,15 @@ anchor falls back to the surviving trigger without changing the captured task.
 Delete closes the menu and opens `TaskDeleteConfirmDialog` for the captured
 task. Keep existing cascade/discard options and backend dirty-worktree errors.
 
-The domain APIs remain in `useTaskActions`. Reuse `useTaskRemoval` for cleanup
-of successful archive/delete operations and cascade trees. Its explicit
-`stayOnListing` option suppresses
-task-detail routing and session loading, not shared cache cleanup. Defaults
-preserve existing sidebar/task-detail navigation, including archive rollback.
+The domain APIs remain in `useTaskActions`. Both menu operations use the
+archive/delete wrappers around `useTaskRemoval` and its shared
+[removal coordinator](removal-navigation.md). Its explicit `stayOnListing`
+option records pending targets without a detail/preview departure, even when
+global selection remembers that task. It retains duplicate suppression,
+cascade cleanup and one success notification, while preventing destination
+loads and failure-recovery navigation. Direct successful-removal cleanup
+also honors this option. Defaults preserve sidebar/task-detail departure
+protection and conditional recovery.
 Threads must not call `useArchiveAndSwitchTask` with its task-detail navigation
 behavior or temporarily rewrite global selection to suppress that behavior.
 Capture descendants before a cascade can prune the snapshots. Reuse existing

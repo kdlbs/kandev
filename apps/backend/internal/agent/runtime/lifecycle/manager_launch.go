@@ -1701,10 +1701,11 @@ func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, w
 	}
 	for index, repository := range repositories {
 		candidate := workspacePath
+		entry := workspaceRepositoryEntryName(repository.RepoName)
 		if index > 0 {
-			candidate = filepath.Join(workspacePath, repository.RepoName)
+			candidate = filepath.Join(workspacePath, entry)
 		} else if len(repositories) > 1 && validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath) != nil {
-			candidate = filepath.Join(workspacePath, repository.RepoName)
+			candidate = filepath.Join(workspacePath, entry)
 		}
 		// A missing worktree during ACP resume must reach WorktreePreparer.
 		// It classifies a deleted branch and returns the typed recovery error
@@ -1718,6 +1719,19 @@ func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, w
 		}
 	}
 	return nil
+}
+
+// workspaceRepositoryEntryName returns the directory segment below the task
+// root that holds a repository's checkout. A launch spec carries the
+// repository's display name, which may contain path separators or a drive
+// letter; the worktree manager sanitizes it before creating the directory, so
+// admission has to resolve the same segment or it inspects a path that was
+// never written. An unusable name is left as-is for the caller to reject.
+func workspaceRepositoryEntryName(repoName string) string {
+	if sanitized := worktree.SanitizeRepoDirName(repoName); sanitized != "" {
+		return sanitized
+	}
+	return repoName
 }
 
 func shouldDeferMissingWorktreeResumeValidation(req *LaunchRequest, workspacePath string) bool {

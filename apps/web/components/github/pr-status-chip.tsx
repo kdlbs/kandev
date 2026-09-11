@@ -47,6 +47,7 @@ import {
 import type { AutomationFlags } from "@/components/github/pr-status-automation-badges";
 import type { TaskPR } from "@/lib/types/github";
 import type { TFunction } from "i18next";
+import { getTaskPRWorkflowAttention } from "./pr-workflow-attention";
 
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 150;
@@ -63,6 +64,7 @@ type ChipStatus =
   | "waiting"
   | "queued"
   | "in_progress"
+  | "attention"
   | "neutral";
 type TriggerRef = { current: HTMLButtonElement | null };
 type SingleChipProps = {
@@ -96,6 +98,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   // getPRStatusColor + PRStatusIcon (dirty = red, behind = amber).
   if (pr.mergeable_state === "dirty") return "conflict";
   if (pr.mergeable_state === "behind") return "behind";
+  if (getTaskPRWorkflowAttention(pr)) return "attention";
   // Pending checks / pending review must beat checks_state === "success" so a
   // PR with all checks green but reviewers still outstanding renders as
   // in-progress, not passed. Without this order, the chip flips to green the
@@ -121,6 +124,7 @@ const CHIP_STATUS_RANK: Record<ChipStatus, number> = {
   blocked: 4,
   behind: 3,
   queued: 2.5,
+  attention: 2.25,
   draft: 0.5,
   in_progress: 2,
   waiting: 1.5,
@@ -483,6 +487,14 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
       return (
         <IconLoader2
           className="h-3.5 w-3.5 text-yellow-500 animate-spin [animation-duration:3s]"
+          aria-hidden="true"
+        />
+      );
+    case "attention":
+      return (
+        <IconAlertTriangleFilled
+          data-testid="pr-status-glyph-attention"
+          className="h-3.5 w-3.5 text-yellow-500"
           aria-hidden="true"
         />
       );

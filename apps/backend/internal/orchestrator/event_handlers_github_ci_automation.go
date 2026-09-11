@@ -834,6 +834,9 @@ func ciAutomationReadyToMerge(pr *github.TaskPR) bool {
 	if pr == nil || pr.State != githubPRStateOpen {
 		return false
 	}
+	if github.HasActiveWorkflowAttention(pr) {
+		return false
+	}
 	if pr.ChecksState != ciAutomationCheckSuccess || pr.MergeableState != "clean" {
 		return false
 	}

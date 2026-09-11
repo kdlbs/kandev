@@ -41,6 +41,7 @@ signals, and task-scoped scheduling contracts.
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
+- [Task removal navigation](requirements/removal-navigation.md)
 - [Attach Workspace Sources](requirements/attach-workspace-sources.md)
 - [Task Autopilot Mode](requirements/autopilot-mode.md)
 - [Blocked Task Escalation](requirements/blocked-task-escalation.md)
@@ -68,6 +69,7 @@ signals, and task-scoped scheduling contracts.
 - [Parent-Child Task Stop](requirements/parent-child-task-stop.md)
 - [Passthrough Queued Prompt Dispatch](requirements/passthrough-queued-prompt-dispatch.md)
 - [Task plan content size limit](requirements/plan-content-size-limit.md)
+- [Task Plan Comments](requirements/plan-comments.md)
 - [Task plan write consistency](requirements/plan-write-consistency.md)
 - [Passthrough Initial Prompt Turn Boundary](requirements/passthrough-initial-prompt-turn-boundary.md)
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
@@ -156,7 +158,9 @@ signals, and task-scoped scheduling contracts.
 - [Prompt attachments](system-design/prompt-attachments.md)
 - [Task Actions Menu on Preview and Detail Surfaces](system-design/task-actions-menu.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
+- [Task removal navigation](system-design/removal-navigation.md)
 - [Task plan content size limit](system-design/plan-content-size-limit.md)
+- [Task Plan Comments](system-design/plan-comments.md)
 - [Task plan write consistency](system-design/plan-write-consistency.md)
 - [Task plan write lifecycle](system-design/plan-write-lifecycle.md)
 - [Task plan append-mode write](system-design/plan-write-append-mode.md)
@@ -187,10 +191,8 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. The seven requirements above now have
-authoritative, wrapper-free requirement/design pairs. Other migrated files still
-need the same extraction before this system can return to a complete migration
-state.
+Migration remains in progress. Files that retain migration wrappers still need
+extraction before this system can return to a complete migration state.
 
 ## Related systems
 

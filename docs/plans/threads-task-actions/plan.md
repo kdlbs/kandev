@@ -445,6 +445,45 @@ These changes preserve the approved contract and rendered layout. Remote CI
 and current-head review are rechecked after pushing, not assumed from local
 results.
 
+## Main integration follow-up (2026-09-11)
+
+Resolved conflicts with the landed task-removal navigation coordinator in the
+sidebar, action wrappers and removal hook. Both shared menu operations now use
+that coordinator. Threads records pending targets without a detail departure,
+so remembered global selection cannot trigger destination loading or failure
+recovery navigation. Default detail/preview protection, cascade cleanup,
+per-task duplicate guards and localized success/error feedback remain shared.
+
+Four added integration cases cover archive/delete pending ownership, successful
+cleanup and failed removal with a remembered active session. Three failed on
+the initial mechanical merge: archive acquired a detail departure, deletion
+did not register a coordinated operation, and failed archive redirected to the
+overview. The focused checks passed after the compatibility fixes: 201 tests
+across 25 files, including the landed coordinator and all existing menu/Threads
+regressions. The new cases can be rerun from `apps/web` with:
+
+```sh
+pnpm exec vitest run --maxWorkers=2 hooks/use-task-menu-actions.test.ts hooks/use-task-removal-listing.test.ts hooks/use-task-actions.test.ts hooks/use-task-removal-coordinator.test.ts hooks/use-task-removal.test.ts hooks/use-task-removal-session-loading.test.ts hooks/use-task-management-flow.test.ts components/task/task-session-sidebar-selection.test.ts lib/state/task-removal.test.ts
+pnpm exec vitest run --maxWorkers=2 hooks/use-task-workflow-move.test.ts hooks/use-update-task-priority.test.ts hooks/use-task-crud.test.ts hooks/use-sidebar-multi-select.test.ts components/task/task-management-menu.test.tsx components/task/task-management-surface.test.tsx components/task/task-management-drawer.test.tsx components/task/task-switcher-context-menu.test.tsx components/task/task-session-sidebar-link-actions.test.ts components/task/task-session-sidebar-move.test.ts components/task/task-archive-confirmation.test.tsx components/task/task-delete-confirm-dialog.test.tsx components/threads/thread-task-actions.test.tsx components/threads/threads-board.test.tsx lib/tasks/task-menu-target.test.ts lib/threads/thread-selection-fallback.test.ts
+```
+
+Typecheck, affected-file ESLint, formatting, locale checks, specification lint,
+harness validation and public-doc validation passed. The incoming canvas fixture required only `gofmt`
+normalization; its whitespace-insensitive diff against main is empty.
+The system design now names the coordinator. Public documentation and the
+existing static menu screenshots still describe the same user workflow and
+layout. Managed browser verification passed all 10 desktop and seven phone
+cases, with one worker and no retries. The first command rebuilt the backend,
+web assets and packaged plugin fixture; the second reused that same build.
+Fresh 320px menu and 360px confirmation captures were inspected for containment.
+
+```sh
+pnpm e2e:run --host --project chromium tests/task/threads-task-actions.spec.ts tests/task/archive-task-redirect.spec.ts tests/task/delete-task-redirect.spec.ts -- --retries=0
+pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/task/mobile-archive-task-redirect.spec.ts tests/task/mobile-delete-task-redirect.spec.ts -- --retries=0
+```
+
+Remote CI/review confirmation remains pending until the merged branch is pushed.
+
 ## Risks
 
 - Parent files and archive-confirmation work can change before integration;

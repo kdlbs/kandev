@@ -3,10 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { useTaskMenuActions } from "./use-task-menu-actions";
 
-const api = vi.hoisted(() => ({ archiveTask: vi.fn(), deleteTask: vi.fn(), toast: vi.fn() }));
+const api = vi.hoisted(() => ({
+  archiveTask: vi.fn(),
+  deleteTask: vi.fn(),
+  toast: vi.fn(),
+  softNavigate: vi.fn(),
+}));
 let store: ReturnType<typeof createAppStore>;
 vi.mock("@/components/state-provider", () => ({ useAppStoreApi: () => store }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: api.toast }) }));
+vi.mock("@/lib/routing/client-router", () => ({ softNavigate: api.softNavigate }));
 vi.mock("@/lib/api", () => ({
   archiveTask: api.archiveTask,
   deleteTask: api.deleteTask,
@@ -124,6 +130,62 @@ describe("concurrent shared task menu removal", () => {
 });
 
 describe("shared task menu removal", () => {
+  // @covers AC-TASKS-THREADS-ACTIONS-002.4, AC-TASKS-REMOVAL-NAVIGATION-002.3
+  it.each(["runArchive", "runDelete"] as const)(
+    "%s coordinates a listing removal without departing the remembered task",
+    async (method) => {
+      store.getState().setActiveSession("A", "session-A");
+      const selection = store.getState().tasks;
+      let release!: () => void;
+      const request = method === "runArchive" ? api.archiveTask : api.deleteTask;
+      request.mockReturnValueOnce(new Promise<void>((resolve) => (release = resolve)));
+      const { result } = renderHook(() => useTaskMenuActions({ stayOnListing: true }));
+      let outcome!: Promise<boolean>;
+      act(() => {
+        outcome = result.current[method]("A");
+      });
+      try {
+        const operations = Object.values(store.getState().taskRemoval.operationsByToken);
+        expect(operations).toHaveLength(1);
+        expect(operations[0]).toMatchObject({ taskIds: ["A"], departure: null });
+        expect(store.getState().kanban.tasks).toEqual(tasks);
+        expect(api.toast).not.toHaveBeenCalled();
+      } finally {
+        await act(async () => {
+          release();
+          expect(await outcome).toBe(true);
+        });
+      }
+      expect(store.getState().tasks).toEqual(selection);
+      expect(store.getState().kanban.tasks.map(({ id }) => id)).toEqual(["B"]);
+      expect(store.getState().taskRemoval.operationsByToken).toEqual({});
+      expect(api.softNavigate).not.toHaveBeenCalled();
+      expect(api.toast).toHaveBeenCalledOnce();
+      expect(api.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "success" }));
+    },
+  );
+
+  // @covers AC-TASKS-THREADS-ACTIONS-002.5, AC-TASKS-THREADS-ACTIONS-003.4
+  it.each(["runArchive", "runDelete"] as const)(
+    "%s failure on a listing never navigates back to the remembered task",
+    async (method) => {
+      store.getState().setActiveSession("A", "session-A");
+      const selection = store.getState().tasks;
+      const request = method === "runArchive" ? api.archiveTask : api.deleteTask;
+      request.mockRejectedValueOnce(new Error("offline"));
+      const { result } = renderHook(() => useTaskMenuActions({ stayOnListing: true }));
+      await act(async () => {
+        expect(await result.current[method]("A")).toBe(false);
+      });
+      expect(store.getState().tasks).toEqual(selection);
+      expect(store.getState().kanban.tasks).toEqual(tasks);
+      expect(store.getState().taskRemoval.operationsByToken).toEqual({});
+      expect(api.softNavigate).not.toHaveBeenCalled();
+      expect(api.toast).toHaveBeenCalledOnce();
+      expect(api.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+    },
+  );
+
   // @covers AC-TASKS-THREADS-ACTIONS-002.2, AC-TASKS-THREADS-ACTIONS-002.4, AC-TASKS-THREADS-ACTIONS-002.6
   it.each(["runArchive", "runDelete"] as const)(
     "%s retains A while selection changes to B and rejects duplicate submits",
