@@ -169,3 +169,13 @@ the default 60 seconds. Assertion and causal-wait timeouts were unchanged.
 The frontend was rebuilt after each production correction; `--no-build` reused
 those fresh assets and the verified host backend. Isolated runtimes were torn down,
 and the owned temporary compile/Playwright caches were removed after verification.
+
+PR fixup scope: bind each asynchronous creation completion to its submission target
+and keep repository loading markers correct when cancelled or concurrent requests
+overlap. Focused Vitest coverage now includes stale-surface dismissal and shared
+request ownership; all changes remain within the existing local repository flow.
+
+Post-fixup validation passed on 2026-09-11: focused Vitest (8 files, 130 tests),
+typecheck, i18n checks, targeted ESLint, fresh frontend build, desktop E2E (3),
+mobile E2E (2), public-doc validators (62 tests and 46 pages), specification
+validators (36 tests), and `git diff --check`.

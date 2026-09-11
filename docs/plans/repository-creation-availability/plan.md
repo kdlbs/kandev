@@ -165,6 +165,13 @@ Design validation:
 Desktop and phone checks cover the assigned toolbar order, touch sizing, creation
 surface, preserved repository rows and executor, refresh loading, and task submission.
 
+Post-PR fixup validation (2026-09-11) also covers submission-bound completion
+callbacks and shared repository request ownership: the focused Vitest suite passed
+130 tests, `pnpm run typecheck`, `pnpm run i18n:check`, targeted ESLint, the fresh
+frontend build, desktop E2E (3 passed), mobile E2E (2 passed), public documentation
+validation (62 tests and 46 pages), specification validation (36 tests), and
+`git diff --check` all passed.
+
 ## Risks
 
 - A direct-local switch after creation would invalidate a multi-row draft.

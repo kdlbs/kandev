@@ -130,3 +130,48 @@ describe("useRepositories", () => {
     expect(mockSetRepositoriesLoading).toHaveBeenLastCalledWith("ws-1", false);
   });
 });
+
+describe("useRepositories request ownership", () => {
+  beforeEach(() => {
+    mockListRepositories.mockResolvedValue({ repositories: [{ id: "r1", name: "Repo One" }] });
+  });
+
+  it("clears loading when a force refresh is cancelled", async () => {
+    setup(/* loaded */ true);
+    let complete!: (response: { repositories: Repos }) => void;
+    mockListRepositories.mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useRepositories("ws-1", true, true));
+    await waitFor(() => expect(mockSetRepositoriesLoading).toHaveBeenCalledWith("ws-1", true));
+    unmount();
+
+    expect(mockSetRepositoriesLoading).toHaveBeenLastCalledWith("ws-1", false);
+    complete({ repositories: [{ id: "stale", name: "Stale" }] });
+    await Promise.resolve();
+    expect(mockSetRepositories).not.toHaveBeenCalled();
+  });
+
+  it("keeps loading while another workspace request is active", async () => {
+    setup(/* loaded */ true);
+    let completeFirst!: (response: { repositories: Repos }) => void;
+    let completeSecond!: (response: { repositories: Repos }) => void;
+    mockListRepositories
+      .mockReturnValueOnce(new Promise((resolve) => (completeFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (completeSecond = resolve)));
+
+    const first = renderHook(() => useRepositories("ws-1", true, true));
+    const second = renderHook(() => useRepositories("ws-1", true, true));
+    await waitFor(() => expect(mockListRepositories).toHaveBeenCalledTimes(2));
+    first.unmount();
+    expect(mockSetRepositoriesLoading).toHaveBeenLastCalledWith("ws-1", true);
+
+    completeSecond({ repositories: [{ id: "fresh", name: "Fresh" }] });
+    await waitFor(() => expect(mockSetRepositoriesLoading).toHaveBeenLastCalledWith("ws-1", false));
+    completeFirst({ repositories: [{ id: "stale", name: "Stale" }] });
+    second.unmount();
+  });
+});

@@ -209,8 +209,8 @@ describe("CreateLocalRepositorySurface async creation", () => {
     await waitFor(() => expect(mocks.initialize).toHaveBeenCalledOnce());
     rerender(<CreateLocalRepositorySurface {...props} onCreated={currentHandler} />);
     complete(createdRepository);
-    await waitFor(() => expect(currentHandler).toHaveBeenCalledWith(createdRepository));
-    expect(previousHandler).not.toHaveBeenCalled();
+    await waitFor(() => expect(previousHandler).toHaveBeenCalledWith(createdRepository));
+    expect(currentHandler).not.toHaveBeenCalled();
   });
 
   it("creates for a multi-row task without a direct-local profile", async () => {
@@ -221,6 +221,19 @@ describe("CreateLocalRepositorySurface async creation", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
     await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith(createdRepository));
+  });
+
+  it("keeps the surface open when the completion is no longer current", async () => {
+    mocks.initialize.mockResolvedValue(createdRepository);
+    const onOpenChange = vi.fn();
+    const onCreated = vi.fn(() => false);
+    renderSurface({ onOpenChange, onCreated });
+    fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {
+      target: { value: REPOSITORY_NAME },
+    });
+    fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(createdRepository));
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });
 

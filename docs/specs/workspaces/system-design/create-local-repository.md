@@ -36,7 +36,10 @@ it does not change row selections. Preserve optional callbacks for other consume
 
 `useRepositories` leaves loading completion to the response/store update and request
 finalizer. Cached data is not evidence that an active refresh has finished. Remove
-the effect that clears loading solely because the workspace is already loaded.
+the effect that clears loading solely because the workspace is already loaded. Each
+automatic or manual request owns one loading marker; cancellation releases that
+marker immediately, while concurrent requests keep the workspace loading until the
+last request settles.
 
 ## Row selection and cache update
 
@@ -47,6 +50,9 @@ cache. Preserve every sibling row and unrelated draft field. Apply the normal
 repository-change clearing of stale branch-policy metadata to the target row.
 If the originating row disappears before completion, retain the created repository
 in the workspace cache but do not replace another row or change its executor.
+The creation surface captures the row callback at submission. A completion for an
+older request still updates that stable row/cache handler, but it does not dismiss a
+newer creation surface opened for another row.
 
 ## Executor handling
 

@@ -61,7 +61,7 @@ export type CreateLocalRepositorySurfaceProps = {
   workspaceId: string | null;
   executorSelection: DirectLocalExecutorSelection | null;
   context?: "task-create" | "task-create-multi" | "workspace";
-  onCreated: (repository: Repository) => void;
+  onCreated: (repository: Repository) => boolean | void;
 };
 
 // `context` and `requiresSwitch` stay logic; only the notices they select are
@@ -225,14 +225,9 @@ function requiresDirectLocalExecutor(context: CreateLocalRepositorySurfaceProps[
   return context === "task-create";
 }
 
-function useCreatedRepositoryCallback(onCreated: CreateLocalRepositorySurfaceProps["onCreated"]) {
-  const callback = useRef(onCreated);
-  useEffect(() => {
-    callback.current = onCreated;
-  }, [onCreated]);
-  return callback;
-}
-
+// Keep async submission ownership beside the form so stale completions cannot
+// mutate a newer request's state.
+// eslint-disable-next-line max-lines-per-function -- form coordinates submission and its full layout
 function CreateRepositoryForm({
   open,
   workspaceId,
@@ -247,6 +242,7 @@ function CreateRepositoryForm({
   const [editingParentPath, setEditingParentPath] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const submissionIdRef = useRef(0);
   const { listing, loading, error: listingError, load } = useDirectoryListing(open, "");
   useEffect(() => {
     if (!open) {
@@ -268,6 +264,8 @@ function CreateRepositoryForm({
     event.preventDefault();
     event.stopPropagation();
     if (!canSubmit || !workspaceId) return;
+    const submissionId = submissionIdRef.current + 1;
+    submissionIdRef.current = submissionId;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -275,13 +273,14 @@ function CreateRepositoryForm({
         name: name.trim(),
         parentPath,
       });
-      onCreated(repository);
+      const shouldDismiss = onCreated(repository);
+      if (shouldDismiss === false) return;
       setName("");
       onDismiss();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("common:failedToCreateRepository"));
     } finally {
-      setSubmitting(false);
+      if (submissionIdRef.current === submissionId) setSubmitting(false);
     }
   };
 
@@ -344,15 +343,8 @@ function CreateRepositoryForm({
 export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurfaceProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
-  const onCreatedRef = useCreatedRepositoryCallback(props.onCreated);
   const handleOpenChange = (open: boolean) => props.onOpenChange(open);
-  const form = (
-    <CreateRepositoryForm
-      {...props}
-      onCreated={(repository) => onCreatedRef.current(repository)}
-      onDismiss={() => handleOpenChange(false)}
-    />
-  );
+  const form = <CreateRepositoryForm {...props} onDismiss={() => handleOpenChange(false)} />;
 
   if (isMobile) {
     return (
