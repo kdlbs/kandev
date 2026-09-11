@@ -172,7 +172,12 @@ func (si *SchedulerIntegration) finishPolicyBlock(
 	} else {
 		incBudgetBlockedByLimit(provenance)
 	}
-	wrote, _ := si.svc.FinishRun(ctx, run.ID, outcome)
+	wrote, err := si.svc.FinishRun(ctx, run.ID, outcome)
+	if err != nil {
+		si.logger.Error("failed to finish policy-blocked run",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return false
+	}
 	if !wrote {
 		// Another writer already moved the run out of claimed between the
 		// admission decision and this write; it did not actually end via a

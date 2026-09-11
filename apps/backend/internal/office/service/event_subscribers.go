@@ -421,14 +421,6 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		}
 		return err
 	}
-	// Lifecycle: terminal "complete" event for the run detail Events log.
-	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
-		"task_id":    data.TaskID,
-		"session_id": data.SessionID,
-	})
-	s.markRoutingSuccess(ctx, run)
-	s.recordRunOutputSummary(ctx, run, *data)
-	s.warnIfReviewDecisionMissing(ctx, run)
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -450,9 +442,23 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		// point of view, so releasing it here would steal a live lock the
 		// same way an unconditional release would (Review round 3, R3-1).
 		// The agent may still be stuck "working" from the launch though.
+		// The completion side effects below (timeline event, routing
+		// health, output summary, review-decision warning) must not run
+		// either: this run did not actually complete from this call's
+		// point of view, so persisting them would attribute another
+		// writer's outcome (e.g. a cancel) with this one's evidence
+		// (CodeRabbit, PR fixup round 2).
 		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return nil
 	}
+	// Lifecycle: terminal "complete" event for the run detail Events log.
+	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
+		"task_id":    data.TaskID,
+		"session_id": data.SessionID,
+	})
+	s.markRoutingSuccess(ctx, run)
+	s.recordRunOutputSummary(ctx, run, *data)
+	s.warnIfReviewDecisionMissing(ctx, run)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
@@ -518,6 +524,12 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 	rd.MarkRunSuccessHealth(ctx, run, agent)
 }
 
+// runEventFieldAgentID is the run-event payload key for an agent id.
+// Named to avoid a duplicate-literal lint failure — "agent_id" also
+// appears as a JSON struct tag elsewhere in this file, and those two
+// uses are otherwise unrelated to each other.
+const runEventFieldAgentID = "agent_id"
+
 // handleTasklessAgentCompleted attributes a taskless run completion,
 // finishes the run, and refreshes the per-agent, per-scope continuation
 // summary so the next fire has bridge context. The
@@ -551,12 +563,6 @@ func (s *Service) handleTasklessAgentCompleted(
 		}
 		return err
 	}
-	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
-		"agent_id":   data.AgentID,
-		"session_id": data.SessionID,
-	})
-	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
-	s.recordRunOutputSummary(ctx, run, *data)
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
 	// actually launched. Taskless runs typically carry no task_id, so this
 	// is a no-op in the common case, but call it for the same reason as
@@ -570,9 +576,20 @@ func (s *Service) handleTasklessAgentCompleted(
 	}
 	if !wrote {
 		// Already terminal via another writer — see handleAgentCompleted's
-		// matching branch (Review round 3, R3-1).
+		// matching branch (Review round 3, R3-1). The completion side
+		// effects below must not run either: this run did not actually
+		// complete from this call's point of view, so recording them
+		// (timeline event, continuation summary, output summary) would
+		// attribute another writer's outcome with this one's evidence
+		// (CodeRabbit, PR fixup round 2).
 		return nil
 	}
+	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
+		runEventFieldAgentID: data.AgentID,
+		"session_id":         data.SessionID,
+	})
+	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
+	s.recordRunOutputSummary(ctx, run, *data)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil

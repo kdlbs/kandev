@@ -616,7 +616,18 @@ func (s *RoutineService) dispatchRoutineRun(
 	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, missedTicks); err != nil {
 		return run, err
 	}
-	disposition = string(models.RoutineRunStatusTaskCreated)
+	// A nil error only means materialiseRoutineRun's terminal write
+	// succeeded, not that the write it made was a success: the
+	// lightweight path finalizes with a nil error even when the wakeup
+	// enqueue itself failed, persisting run.Status=failed. Disposition
+	// must reflect that instead of assuming "task_created" (the
+	// dispatched-successfully label, shared by the heavy path and a
+	// lightweight done) whenever this call merely didn't error.
+	if run.Status == models.RoutineRunStatusFailed {
+		disposition = string(models.RoutineRunStatusFailed)
+	} else {
+		disposition = string(models.RoutineRunStatusTaskCreated)
+	}
 
 	s.logger.Info("routine run dispatched",
 		zap.String("routine", routine.Name),

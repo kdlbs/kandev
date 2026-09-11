@@ -229,7 +229,10 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		si.logger.Info("run skipped (agent not active)",
 			zap.String("run_id", runID),
 			zap.String("agent_status", string(agent.Status)))
-		_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive)
+		if _, err := si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive); err != nil {
+			si.logger.Error("failed to finish agent-inactive run",
+				zap.String("run_id", runID), zap.Error(err))
+		}
 		return
 	}
 
@@ -252,7 +255,12 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 			zap.String("run_id", runID),
 			zap.String("agent", agent.Name))
 		si.svc.clearAgentWorking(ctx, agent.ID, runID)
-		wrote, _ := si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
+		wrote, err := si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
+		if err != nil {
+			si.logger.Error("failed to finish idle-skipped run",
+				zap.String("run_id", runID), zap.Error(err))
+			return
+		}
 		if !wrote {
 			// Another writer already moved the run out of claimed; it did
 			// not actually end via an idle skip, so there is nothing to
@@ -553,7 +561,10 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 		zap.String("task_id", taskID),
 		zap.String("hold_id", hold.ID),
 		zap.String("mode", hold.Mode))
-	_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld)
+	if _, err := si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld); err != nil {
+		si.logger.Error("failed to finish tree-held run",
+			zap.String("run_id", runID), zap.String("task_id", taskID), zap.Error(err))
+	}
 	return true
 }
 
@@ -706,10 +717,6 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 func (si *SchedulerIntegration) failTasklessRun(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
 ) {
-	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
-	})
 	si.releaseCheckoutIfNeeded(ctx, run)
 	wrote, err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg)
 	if err != nil {
@@ -719,10 +726,15 @@ func (si *SchedulerIntegration) failTasklessRun(
 	}
 	if !wrote {
 		// Already terminal via another writer (e.g. a concurrent cancel)
-		// between the caller's read and this write — nothing to classify
-		// or publish (Review round 3, R3-1).
+		// between the caller's read and this write — nothing to classify,
+		// publish, or log as a scheduler-launch error on this run's
+		// timeline (Review round 3, R3-1).
 		return
 	}
+	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
+		"phase":         "scheduler.launch",
+		"error_message": msg,
+	})
 	si.svc.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	run.ErrorMessage = msg
 

@@ -205,6 +205,15 @@ func AdmitRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *
 	return si.admitRun(ctx, run, agent)
 }
 
+// FailTasklessRunForTest exposes failTasklessRun directly for external test
+// packages, so the lost-race path (another writer already made the run
+// terminal before this call runs) can be driven without the scheduler's
+// atomic claim+launch pipeline standing in the way.
+func FailTasklessRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.failTasklessRun(ctx, run, agent, msg)
+}
+
 // LogPolicyObservabilityForTest exposes logPolicyObservability for external
 // test packages, so the skip/degraded-admitted entries and their
 // per-policy-per-day dedup (AC-OFFICE-BUDGET-002.13/-004.8) can be tested

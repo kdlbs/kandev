@@ -111,6 +111,66 @@ func TestSchedulerTick_TasklessRunRecordsTerminalShape(t *testing.T) {
 	}
 }
 
+// TestFailTasklessRun_LostRaceDoesNotAppendSpuriousErrorEvent is the PR
+// fixup round 2 regression test (CodeRabbit). failTasklessRun used to
+// call AppendRunEvent before checking MarkRunFailed's wrote result, so a
+// run a concurrent writer (e.g. a cancel) already made terminal still
+// picked up a "scheduler.launch" error event on its timeline — a spurious
+// entry on a run whose actual outcome was decided by the other writer.
+// AppendRunEvent must only fire once wrote=true confirms this call won
+// the terminal-write race.
+func TestFailTasklessRun_LostRaceDoesNotAppendSpuriousErrorEvent(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-taskless-race",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-taskless-race",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v %v", run, err)
+	}
+
+	// Another writer wins the terminal-transition race before
+	// failTasklessRun below runs: the row is already finished, so
+	// MarkRunFailed's guarded UPDATE (status = 'claimed') matches nothing.
+	if _, err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
+		t.Fatalf("finish (simulating the winning writer): %v", err)
+	}
+
+	service.FailTasklessRunForTest(svc, ctx, run, agent, "scheduler cannot launch a taskless run")
+
+	events, err := svc.ListRunEventsForTest(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	for _, e := range events {
+		if e.EventType == "error" {
+			t.Fatalf("expected no error event appended for a lost taskless-fail race; got %+v", e)
+		}
+	}
+
+	survivor, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if survivor.Status != service.RunStatusFinished {
+		t.Fatalf("status = %q, want the winning writer's finished state to survive", survivor.Status)
+	}
+}
+
 // TestSchedulerTick_TaskBoundRunStillLaunches is the regression guard
 // alongside the taskless-failure fix above: an ordinary task-bound run with
 // a wired task starter must still launch normally and stay `claimed` (not
