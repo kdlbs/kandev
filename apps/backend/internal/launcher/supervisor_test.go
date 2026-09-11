@@ -11,6 +11,7 @@ import (
 func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	env := []string{
 		"KANDEV_SERVER_PORT=1234",
+		"KANDEV_SERVER_HOST=127.0.0.1,100.78.213.38",
 		"KANDEV_DESKTOP_HEALTH_TOKEN=health-token",
 		"KANDEV_CONSOLE_LOG_LEVEL=warn",
 		"KANDEV_WEB_TITLE_PREFIX=Debug",
@@ -29,6 +30,9 @@ func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	}
 	if manifest.Env["KANDEV_SERVER_PORT"] != "1234" {
 		t.Fatalf("KANDEV_SERVER_PORT = %q", manifest.Env["KANDEV_SERVER_PORT"])
+	}
+	if manifest.Env["KANDEV_SERVER_HOST"] != "127.0.0.1,100.78.213.38" {
+		t.Fatalf("KANDEV_SERVER_HOST = %q", manifest.Env["KANDEV_SERVER_HOST"])
 	}
 	if manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"] != "warn" {
 		t.Fatalf("KANDEV_CONSOLE_LOG_LEVEL = %q", manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"])
