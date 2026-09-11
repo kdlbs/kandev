@@ -16,17 +16,20 @@ var (
 	providerMessageIdentifierPattern = regexp.MustCompile(`(?i)\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
 )
 
-// SanitizeProviderMessage redacts likely credentials (via routingerr.Redact),
-// strips URLs, redacts workspace/session/run identifiers, collapses internal
-// whitespace, and trims trailing punctuation from a raw provider-supplied
-// error string, bounding it to MaxProviderMessageBytes. It is the single
-// sanitized-projection transform the ACP transport layer and the
-// recovery-evidence layer must observe identically, so both call this rather
-// than each keeping their own copy. A raw ACP RequestError.Message is
-// adapter-defined and may itself embed a credential the same way error.data
-// can, so credential redaction runs before any other transform.
+// SanitizeProviderMessage redacts likely credentials (via
+// routingerr.SanitizeFullUnbounded), strips URLs, redacts workspace/session/run
+// identifiers, collapses internal whitespace, and trims trailing punctuation
+// from a raw provider-supplied error string, bounding it to
+// MaxProviderMessageBytes. It is the single sanitized-projection transform the
+// ACP transport layer and the recovery-evidence layer must observe
+// identically, so both call this rather than each keeping their own copy. A
+// raw ACP RequestError.Message is adapter-defined and may itself embed a
+// credential the same way error.data can, so credential redaction runs before
+// any other transform. The unbounded tier is used because this function
+// applies its own MaxProviderMessageBytes cut below, on top of any redaction
+// the shared tier already performed.
 func SanitizeProviderMessage(message string) string {
-	message = routingerr.Redact(message)
+	message = routingerr.SanitizeFullUnbounded(message)
 	message = providerMessageURLPattern.ReplaceAllString(message, "")
 	message = providerMessageIdentifierPattern.ReplaceAllString(message, "[redacted]")
 	message = strings.Join(strings.Fields(message), " ")

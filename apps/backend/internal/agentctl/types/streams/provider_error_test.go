@@ -38,8 +38,8 @@ func TestSanitizeProviderMessageRedactsMixedCaseURLsAndIdentifiers(t *testing.T)
 // TestSanitizeProviderMessageRedactsCredentials pins that a raw ACP
 // RequestError.Message routed through providerErrorFromACPPrompt cannot leak
 // a credential embedded by an adapter-defined error shape: the message text
-// gets the same routingerr.Redact pass as error.data, not just URL/identifier
-// stripping.
+// gets the same routingerr.SanitizeFullUnbounded pass as error.data, not just
+// URL/identifier stripping.
 func TestSanitizeProviderMessageRedactsCredentials(t *testing.T) {
 	cases := []struct {
 		name           string
