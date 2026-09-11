@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	kandevdb "github.com/kandev/kandev/internal/db"
-	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -192,37 +190,6 @@ func (r *Repository) runnerSwitchApply(
 	task.Metadata[models.MetaKeyExecutorProfileID] = executorProfileID
 	task.UpdatedAt = now
 	return &models.RunnerSwitchResult{Task: task, Changed: true}, nil
-}
-
-// setTaskMetadataKeyWithExecutor is SetTaskMetadataKey's tx-capable sibling,
-// following the same shape as removeTaskMetadataKeyWithExecutor: every
-// existing single-key metadata writer executes on the shared handle and
-// none accepts a transaction, but the switch's write must happen inside the
-// serialized transaction or it would land even when the transaction rolls
-// back, defeating the guarantee that a rejected switch persists nothing.
-// updatedAt is supplied by the caller, rather than sampled here, so the
-// value written to the row and the value the caller carries forward (into
-// the returned task and the published event) are the same instant rather
-// than two independent clock reads either side of the write.
-func (r *Repository) setTaskMetadataKeyWithExecutor(
-	ctx context.Context, exec taskSessionExecutor, taskID, key string, value interface{}, updatedAt time.Time,
-) error {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	var query string
-	if dialect.IsPostgres(r.db.DriverName()) {
-		query = `UPDATE tasks SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ?`
-	} else {
-		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?`
-	}
-	path := key
-	if !dialect.IsPostgres(r.db.DriverName()) {
-		path = jsonPath(key)
-	}
-	_, err = exec.ExecContext(ctx, r.db.Rebind(query), path, string(payload), updatedAt, taskID)
-	return err
 }
 
 // runnerRepositoryLinkSnapshot reads through the reader pool (r.ro), not a

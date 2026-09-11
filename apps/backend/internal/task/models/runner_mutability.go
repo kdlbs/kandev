@@ -32,12 +32,12 @@ const RunnerConflictTargetCannotMaterializeRepository = "target_cannot_materiali
 
 // WorkspaceModeNewWorkspace and WorkspaceModeSharedGroup are the two
 // workspace-mode values EvaluateRunnerMutability's condition 10 inspects.
-// Any other value (including "inherit_parent" and the empty string) is
-// treated as "not new_workspace" for that condition's purposes.
+// Any other value (including WorkspaceModeInheritParent, defined in
+// workspace_orphan.go, and the empty string) is treated as "not
+// new_workspace" for that condition's purposes.
 const (
-	WorkspaceModeInheritParent = "inherit_parent"
-	WorkspaceModeNewWorkspace  = "new_workspace"
-	WorkspaceModeSharedGroup   = "shared_group"
+	WorkspaceModeNewWorkspace = "new_workspace"
+	WorkspaceModeSharedGroup  = "shared_group"
 )
 
 // RunnerMutabilitySignals is the raw, task-scoped state the ten ordered

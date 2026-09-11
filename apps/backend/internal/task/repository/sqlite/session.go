@@ -1103,6 +1103,16 @@ func (r *Repository) persistWorkflowSessionRouteTx(
 	return r.setTaskMetadataKeyWithExecutor(ctx, exec, taskID, models.MetaKeyWorkflowSessionRoute, prepared, time.Now().UTC())
 }
 
+// setTaskMetadataKeyWithExecutor is SetTaskMetadataKey's tx-capable sibling,
+// following the same shape as removeTaskMetadataKeyWithExecutor: every
+// existing single-key metadata writer executes on the shared handle and
+// none accepts a transaction, but a caller inside a serialized transaction
+// (workflow session route persistence, the runner switch) needs its write to
+// land only if that transaction commits. updatedAt is supplied by the
+// caller, rather than sampled here, so the value written to the row and the
+// value the caller carries forward (into a returned task or event) are the
+// same instant rather than two independent clock reads either side of the
+// write.
 func (r *Repository) setTaskMetadataKeyWithExecutor(
 	ctx context.Context,
 	exec taskSessionExecutor,
