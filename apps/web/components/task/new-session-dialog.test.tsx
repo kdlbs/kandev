@@ -340,6 +340,23 @@ describe("NewSessionDialog", () => {
     expect(mockContextSelectValue).toBe("summarize:session-9");
   });
 
+  it("summarizes the explicitly chosen alternate session", async () => {
+    render(
+      <NewSessionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-1" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Summarize alternate session" }));
+
+    await waitFor(() => expect(mockSummarize).toHaveBeenCalledWith("session-10"));
+    expect(mockSummarize).toHaveBeenCalledTimes(1);
+    expect(mockContextSelectValue).toBe("summarize:session-10");
+  });
+
   it("resets handoff context to blank when reopened", async () => {
     const props = {
       onOpenChange: vi.fn(),
