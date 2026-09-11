@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const httpsScheme = "https"
+
 // httpsCloneURLFromRepositoryURL converts GitHub GraphQL's Repository.url
 // field into the HTTPS clone identity used by task repository consumers. The
 // GraphQL schema exposes url, while cloneUrl is a gh CLI JSON field and is not
@@ -13,10 +15,10 @@ import (
 func httpsCloneURLFromRepositoryURL(repositoryURL string) string {
 	parsed, err := url.Parse(strings.TrimSpace(repositoryURL))
 	if err != nil || parsed.Host == "" || strings.Trim(parsed.Path, "/") == "" ||
-		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		(parsed.Scheme != "http" && parsed.Scheme != httpsScheme) {
 		return ""
 	}
-	parsed.Scheme = "https"
+	parsed.Scheme = httpsScheme
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	parsed.Path = strings.TrimRight(parsed.Path, "/")

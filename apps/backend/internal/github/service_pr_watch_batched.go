@@ -117,10 +117,11 @@ func (s *Service) syncWatchesBatchedWithClient(
 	leaderGroups := make([]*prWatchBatchGroup, 0, len(groups))
 	joinedGroups := make([]*prWatchBatchGroup, 0, len(groups))
 	for _, group := range groups {
-		// Register every live watch before the shared admission decision. A
-		// duplicate consumer must survive the provider fan-out even though it
-		// does not own a second transport attempt.
-		for _, watch := range group.watches {
+		// Register duplicate consumers before the representative performs the
+		// atomic admission decision. The representative is registered by
+		// beginPRDiscoveryWatch so another entry point cannot observe it as a
+		// consumer before it has joined an existing attempt.
+		for _, watch := range group.watches[1:] {
 			s.trackPRDiscoveryWatchConsumer(workspaceID, cacheScope, credentialGeneration, watch)
 		}
 		attempt, ok := s.beginPRDiscoveryWatch(

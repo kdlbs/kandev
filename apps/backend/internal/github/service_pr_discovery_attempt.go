@@ -163,16 +163,14 @@ func (s *Service) beginPRDiscoveryWatch(
 	if health == nil {
 		return attempt, true
 	}
-	invalidatedTargets := health.trackConsumer(
+	s.prDiscoveryAttemptsMu.Lock()
+	invalidatedTargets, number, admitted, joined, eventHealth := health.trackConsumerAndBegin(
 		workspaceID, cacheScope, credentialGeneration, prDiscoveryWatchID(watch), target,
 	)
-	s.invalidatePRDiscoveryAttempts(workspaceID, invalidatedTargets)
-	s.prDiscoveryAttemptsMu.Lock()
-	defer s.prDiscoveryAttemptsMu.Unlock()
+	s.invalidatePRDiscoveryAttemptsLocked(workspaceID, invalidatedTargets)
 	if s.prDiscoveryAttempts == nil {
 		s.prDiscoveryAttempts = make(map[string]*prDiscoveryAttemptResult)
 	}
-	number, admitted, joined := health.beginWithJoin(workspaceID, cacheScope, credentialGeneration, target)
 	attempt.number = number
 	if admitted && workspaceID != "" && cacheScope != "" {
 		key := prDiscoveryAttemptKey(workspaceID, cacheScope, credentialGeneration, target)
@@ -184,6 +182,10 @@ func (s *Service) beginPRDiscoveryWatch(
 			s.prDiscoveryAttempts[key] = result
 		}
 		attempt.result = result
+	}
+	s.prDiscoveryAttemptsMu.Unlock()
+	if eventHealth != nil {
+		health.publish(workspaceID, eventHealth)
 	}
 	return attempt, admitted
 }
@@ -199,6 +201,12 @@ func (h *prDiscoveryHealthStore) beginWithJoin(
 	scopeKey := prDiscoveryScopeKey(workspaceID, cacheScope)
 	delete(h.retired, scopeKey)
 	scope := h.scopeLocked(workspaceID, cacheScope, credentialGeneration)
+	return h.beginWithJoinScopeLocked(scope, target)
+}
+
+func (h *prDiscoveryHealthStore) beginWithJoinScopeLocked(
+	scope *prDiscoveryHealthScope, target prDiscoveryHealthTarget,
+) (uint64, bool, bool) {
 	if scope == nil {
 		return 0, false, false
 	}
@@ -224,6 +232,58 @@ func (h *prDiscoveryHealthStore) beginWithJoin(
 	state.attempt = scope.nextAttempt
 	state.active = true
 	return state.attempt, true, false
+}
+
+func (h *prDiscoveryHealthStore) trackConsumerAndBegin(
+	workspaceID, cacheScope string, credentialGeneration int64, watchID string, target prDiscoveryHealthTarget,
+) ([]string, uint64, bool, bool, *PRDiscoveryHealth) {
+	if h == nil || workspaceID == "" || cacheScope == "" || watchID == "" {
+		return nil, 0, true, false, nil
+	}
+	key := target.key()
+	invalidatedTargets := make([]string, 0, 1)
+	h.mu.Lock()
+	scopeKey := prDiscoveryScopeKey(workspaceID, cacheScope)
+	delete(h.retired, scopeKey)
+	scope := h.scopeLocked(workspaceID, cacheScope, credentialGeneration)
+	if scope == nil {
+		h.mu.Unlock()
+		return nil, 0, false, false, nil
+	}
+	oldKey := scope.watchTargets[watchID]
+	changed, removed := detachPRDiscoveryConsumerLocked(scope, watchID, oldKey, key)
+	if removed {
+		invalidatedTargets = append(invalidatedTargets, oldKey)
+	}
+	state, ok := h.targetStateLocked(scope, key)
+	if !ok {
+		var eventHealth *PRDiscoveryHealth
+		if changed {
+			snapshot := h.snapshotLocked(scope)
+			eventHealth = &snapshot
+		}
+		h.mu.Unlock()
+		return invalidatedTargets, 0, false, false, eventHealth
+	}
+	if state.consumers == nil {
+		state.consumers = make(map[string]struct{})
+	}
+	if _, exists := state.consumers[watchID]; !exists {
+		state.consumers[watchID] = struct{}{}
+		scope.watchTargets[watchID] = key
+		changed = true
+	}
+	if changed {
+		scope.revision++
+	}
+	number, admitted, joined := h.beginWithJoinScopeLocked(scope, target)
+	var eventHealth *PRDiscoveryHealth
+	if changed {
+		snapshot := h.snapshotLocked(scope)
+		eventHealth = &snapshot
+	}
+	h.mu.Unlock()
+	return invalidatedTargets, number, admitted, joined, eventHealth
 }
 
 func prDiscoveryAttemptKey(
@@ -331,6 +391,15 @@ func (s *Service) removePRDiscoveryWatchConsumer(watch *PRWatch) {
 }
 
 func (s *Service) invalidatePRDiscoveryAttempts(workspaceID string, targetKeys []string) {
+	if s == nil {
+		return
+	}
+	s.prDiscoveryAttemptsMu.Lock()
+	s.invalidatePRDiscoveryAttemptsLocked(workspaceID, targetKeys)
+	s.prDiscoveryAttemptsMu.Unlock()
+}
+
+func (s *Service) invalidatePRDiscoveryAttemptsLocked(workspaceID string, targetKeys []string) {
 	if s == nil || workspaceID == "" || len(targetKeys) == 0 {
 		return
 	}
@@ -343,7 +412,6 @@ func (s *Service) invalidatePRDiscoveryAttempts(workspaceID string, targetKeys [
 	if len(wanted) == 0 {
 		return
 	}
-	s.prDiscoveryAttemptsMu.Lock()
 	for key, result := range s.prDiscoveryAttempts {
 		if result.workspaceID != workspaceID {
 			continue
@@ -354,7 +422,6 @@ func (s *Service) invalidatePRDiscoveryAttempts(workspaceID string, targetKeys [
 		result.complete(nil, false, true, nil, true)
 		delete(s.prDiscoveryAttempts, key)
 	}
-	s.prDiscoveryAttemptsMu.Unlock()
 }
 
 func (s *Service) invalidateAllPRDiscoveryAttempts(workspaceID string) {
