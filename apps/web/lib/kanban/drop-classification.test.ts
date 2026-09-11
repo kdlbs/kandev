@@ -137,6 +137,29 @@ describe("classifyDrop", () => {
   });
 });
 
+describe("classifyDrop — band computed from position (AC.15)", () => {
+  it("classifies a same-band drop by position, not by stepTasks' array order", () => {
+    // stepTasks arrives in creation order (as it would after a prior reorder
+    // changed positions but arrival order stayed the same) — true step order
+    // by position is c(0), a(1), b(2), not the array's own a, b, c order.
+    const stepTasks = [admitted("a", 1), admitted("b", 2), admitted("c", 0)];
+
+    const result = classifyDrop({
+      draggedTaskId: "a",
+      overId: "b",
+      stepTasks,
+      allTasks: stepTasks,
+    });
+
+    expect(result).toEqual({
+      kind: "reorder",
+      stepId: STEP_A,
+      band: "admitted",
+      visibleOrderAfterMove: ["c", "b", "a"],
+    });
+  });
+});
+
 describe("classifyDrop — cross-step target resolution (AC.13)", () => {
   it("classifies a drop onto a card that belongs to a different step as cross-step, resolving the target from the whole board rather than the dragged task's own step", () => {
     // `stepTasks` is scoped to the dragged task's own step, exactly as the

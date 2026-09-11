@@ -48,8 +48,10 @@ export function partitionWipTasks<T extends WipQueueTask>(
 ): { admitted: T[]; queued: T[] } {
   const queuedEntries = getDestinationQueue(tasks, destinationStepId);
   const queuedIds = new Set(queuedEntries.map(({ task }) => task.id));
+  const admitted = tasks.filter((task) => !queuedIds.has(task.id));
+  admitted.sort(compareWipQueueTasks);
   return {
-    admitted: tasks.filter((task) => !queuedIds.has(task.id)),
+    admitted,
     queued: queuedEntries.map(({ task }) => task),
   };
 }

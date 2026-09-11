@@ -129,3 +129,24 @@ describe("wip queue helper", () => {
     expect(Number.isNaN(compareWipQueueTasks(left, right))).toBe(false);
   });
 });
+
+describe("partitionWipTasks — admitted band order (AC.15)", () => {
+  it("keeps partitioned admitted tasks in step order, not raw array order", () => {
+    // The admitted band must sort by compareStepOrder the same way the
+    // queued band already does, so a caller computing drag/keyboard reorder
+    // indices off partitionWipTasks sees the step's true order rather than
+    // whatever order tasks happened to arrive in (e.g. creation order after
+    // a prior reorder changed it).
+    const tasks = [
+      task({ id: "a", wipAdmitted: true, queuedForStepId: undefined, position: 1 }),
+      task({ id: "b", wipAdmitted: true, queuedForStepId: undefined, position: 2 }),
+      task({ id: "c", wipAdmitted: true, queuedForStepId: undefined, position: 0 }),
+    ];
+
+    expect(partitionWipTasks(tasks, "review").admitted.map((item) => item.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
+  });
+});

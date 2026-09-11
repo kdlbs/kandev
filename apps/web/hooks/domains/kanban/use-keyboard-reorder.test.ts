@@ -53,6 +53,19 @@ describe("useKeyboardReorder", () => {
     expect(result.current.announcement).toContain('"total":3');
   });
 
+  it("builds the draft order from position, not from the tasks array's own order (AC.15)", () => {
+    // tasks arrives in creation order while positions reflect a prior
+    // reorder: true step order by position is c(0), a(1), b(2).
+    const outOfOrderTasks = [admittedTask("a", 1), admittedTask("b", 2), admittedTask("c", 0)];
+    const { result } = renderHook(() => useKeyboardReorder(WORKFLOW_ID, outOfOrderTasks));
+
+    act(() => {
+      result.current.handleKeyDown(keyEvent(" "), outOfOrderTasks[0]);
+    });
+
+    expect(result.current.draftOrder).toEqual(["c", "a", "b"]);
+  });
+
   it("moves the picked-up card down one place on ArrowDown and re-announces", () => {
     const { result } = renderHook(() => useKeyboardReorder(WORKFLOW_ID, tasks));
 

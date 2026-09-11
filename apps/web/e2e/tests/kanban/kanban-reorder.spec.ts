@@ -73,11 +73,34 @@ test.describe("Kanban card reordering", () => {
       })
       .toEqual({ c: 0, a: 1, b: 2 });
 
+    // A second drag, without a reload in between: the board's fetched task
+    // array is still in creation order (A, B, C) while true step order is
+    // now C, A, B (REQ-TASKS-KANBAN-TASK-REORDERING-001.15) — this is
+    // exactly the case an unsorted band computation gets wrong (drags the
+    // card to the opposite end of where the gesture pointed).
+    const secondReorderResponse = waitForHttp(testPage, "PUT", REORDER_PATH);
+    await dragCardOntoCard(testPage, kanban.taskCard(taskB.id), kanban.taskCard(taskC.id));
+    await secondReorderResponse;
+
+    await expect
+      .poll(() => columnOrder(kanban, seedData.startStepId))
+      .toEqual(["Reorder drag B", "Reorder drag C", "Reorder drag A"]);
+    await expect
+      .poll(async () => {
+        const [a, b, c] = await Promise.all([
+          apiClient.getTask(taskA.id),
+          apiClient.getTask(taskB.id),
+          apiClient.getTask(taskC.id),
+        ]);
+        return { b: b.position, c: c.position, a: a.position };
+      })
+      .toEqual({ b: 0, c: 1, a: 2 });
+
     await testPage.reload();
     await kanban.board.waitFor({ state: "visible" });
     await expect
       .poll(() => columnOrder(kanban, seedData.startStepId))
-      .toEqual(["Reorder drag C", "Reorder drag A", "Reorder drag B"]);
+      .toEqual(["Reorder drag B", "Reorder drag C", "Reorder drag A"]);
   });
 
   test("keyboard reorder moves a card and persists the new order", async ({

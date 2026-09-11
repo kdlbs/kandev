@@ -493,7 +493,9 @@ func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx,
 // concurrent writer to serialize against either (nothing else can look it
 // up), so a missing row is not an error here — callers that need the step
 // to exist verify that separately.
-func lockWorkflowStepForWrite(ctx context.Context, tx *sql.Tx, driver string, rebind func(string) string, stepID string) error {
+func lockWorkflowStepForWrite(ctx context.Context, tx interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, driver string, rebind func(string) string, stepID string) error {
 	if !dialect.IsPostgres(driver) {
 		return nil
 	}
@@ -503,6 +505,26 @@ func lockWorkflowStepForWrite(ctx context.Context, tx *sql.Tx, driver string, re
 		return nil
 	}
 	return err
+}
+
+// lockTaskStepForWrite locks the workflow step taskID currently belongs to
+// (see lockWorkflowStepForWrite), so a caller hiding or removing the task
+// (archive, delete) cannot straddle a concurrent ReorderStepTasks of that
+// same step: whichever acquires the step's row lock first runs to
+// completion before the other proceeds. A task with no step (a config task,
+// or one whose row no longer exists) has no step to lock against.
+func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, taskID string) error {
+	var stepID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workflow_step_id FROM tasks WHERE id = ?`), taskID).Scan(&stepID)
+	if errors.Is(err, sql.ErrNoRows) || stepID == "" {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID)
 }
 
 // stepArrivalLockHeldKey marks, in a context, that the caller already holds
@@ -2341,7 +2363,15 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Serialize with session/worktree creation FIRST (task-row lock), then
+	// Lock the task's step first, so a concurrent ReorderStepTasks of that
+	// step cannot straddle this delete (see lockTaskStepForWrite): either the
+	// reorder's whole read-then-write runs first and sees this task still
+	// live, or it waits behind this transaction and then correctly excludes
+	// the now-deleted task instead of blindly renumbering a row that is gone.
+	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+		return "", err
+	}
+	// Serialize with session/worktree creation next (task-row lock), then
 	// capture the authoritative session set: a concurrent CreateTaskSession
 	// holds the same task-row barrier, so every session committed before this
 	// lock is visible to the capture and anything after blocks until the task
@@ -3092,6 +3122,9 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
 	if err != nil {
 		return err
@@ -3142,6 +3175,9 @@ func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
 		return "", false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+		return "", false, err
+	}
 	_, vacatedStepID, found, err := r.readTaskStepInTx(ctx, tx, id)
 	if err != nil {
 		return "", false, err
