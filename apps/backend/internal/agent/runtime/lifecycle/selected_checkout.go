@@ -1,6 +1,9 @@
 package lifecycle
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	metadataCheckoutBranch   = "selected_checkout_branch"
@@ -21,6 +24,7 @@ func setSelectedCheckoutMetadata(req *LaunchRequest, metadata map[string]interfa
 	if req.PRNumber > 0 {
 		ref = fmt.Sprintf("refs/pull/%d/head", req.PRNumber)
 	} else if req.PRNumber < 0 {
+		// Negative PR number is invalid caller input; an empty ref fails closed.
 		ref = ""
 	}
 	metadata[metadataCheckoutRef] = ref
@@ -40,11 +44,15 @@ func withBranchCheckout(req *ExecutorCreateRequest, script string) string {
 	preserve, _ := req.Metadata[metadataPreserveCheckout].(bool)
 	prefix := "\nkandev_existing_checkout=''\n"
 	if preserve {
-		prefix += "kandev_existing_checkout=$(git -C {{workspace.path}} rev-parse --verify HEAD 2>/dev/null || true)\n"
+		prefix += "kandev_existing_checkout=$(git -c safe.directory={{workspace.path}} -C {{workspace.path}} rev-parse --verify HEAD 2>/dev/null || true)\n"
 	}
 	selection := "\nkandev_checkout_branch=" + shellQuote(branch) +
 		"\nkandev_checkout_ref=" + shellQuote(getMetadataString(req.Metadata, metadataCheckoutRef)) + "\n"
-	return prefix + script + selection + selectedCheckoutPostlude
+	prepared := prefix + selection + script
+	if strings.Contains(prepared, "{{repository.setup_script}}") {
+		return strings.Replace(prepared, "{{repository.setup_script}}", selectedCheckoutPostlude+"\n{{repository.setup_script}}", 1)
+	}
+	return prepared + selectedCheckoutPostlude
 }
 
 const selectedCheckoutPostlude = `

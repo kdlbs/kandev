@@ -110,7 +110,8 @@ Explicit checkout errors must escape the current best-effort generated-branch po
 No selected-checkout path may use its `|| true` fallback or create a branch from an unrelated HEAD.
 Ensure completion precedes agent startup and that the existing launch failure path carries the error.
 Existing remote workspaces must not be reset during resume.
-The shared `withBranchCheckout` wrapper records whether HEAD exists before the prepare template runs.
+For built-in remote prepare templates, materialize the selected checkout immediately before `repository.setup_script` so dependency installation and generated files use the selected revision.
+The shared `withBranchCheckout` wrapper records whether HEAD exists before the prepare template runs, using an exact `safe.directory` override so retained workspaces owned by another UID are still detected.
 A recorded branch plus a pre-existing checkout selects resume preservation.
 A recorded branch without a pre-existing checkout still requires strict materialization for recreated compute.
 If fresh preparation encounters conflicting branch state, fail without overwriting it.

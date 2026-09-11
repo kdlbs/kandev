@@ -36,6 +36,42 @@ func TestSpritesPrepareScript_SelectedCheckout(t *testing.T) {
 	}
 }
 
+func TestSpritesPrepareScript_SelectedCheckoutBeforeRepositorySetup(t *testing.T) {
+	f := newBranchPrepareFixture(t)
+	head := seedSelectedCheckout(t, f, false)
+	script := DefaultPrepareScript("sprites")
+	for _, key := range []string{"git.identity_setup", "github.auth_setup",
+		"kandev.agents.install", "kandev.agentctl.install", "kandev.agentctl.start"} {
+		script = strings.ReplaceAll(script, "{{"+key+"}}", ":")
+	}
+	launch := &LaunchRequest{
+		BaseBranch: "main", CheckoutBranch: selectedTestBranch, PRNumber: 3527,
+		SetupScript: script,
+		Metadata: map[string]any{
+			"repository_clone_url":    f.origin,
+			"repository_setup_script": `test "$(git rev-parse HEAD)" = ` + head,
+		},
+	}
+	taskBranch := nonWorktreeTaskBranch(&EnvPrepareRequest{
+		TaskID: "abcdef", TaskTitle: "hello", CheckoutBranch: selectedTestBranch,
+	})
+	req := &ExecutorCreateRequest{Metadata: buildLaunchMetadata(launch, "", "", taskBranch)}
+	out, err := f.run(t, "bash", "-c", resolveSelectedSprites(t, f, req))
+	require.NoError(t, err, out)
+}
+
+func TestSpritesPrepareScript_SelectedCheckoutRetainedProbeUsesSafeDirectory(t *testing.T) {
+	f := newBranchPrepareFixture(t)
+	seedSelectedCheckout(t, f, false)
+	f.git(t, "clone", f.origin, f.workspace)
+	req := selectedCheckoutRequest(f, "current", selectedTestBranch, 3527, selectedTestBranch)
+	// Git's test hook simulates a retained checkout owned by another UID.
+	f.env = append(f.env, "GIT_TEST_ASSUME_DIFFERENT_OWNER=1")
+	out, err := f.run(t, "bash", "-c", resolveSelectedSprites(t, f, req))
+	require.NoError(t, err, out)
+	require.Equal(t, "main", f.git(t, "-C", f.workspace, "branch", "--show-current"))
+}
+
 // @covers AC-EXECUTORS-REPOSITORY-BRANCH-002.4
 func TestSpritesPrepareScript_SelectedCheckoutMissingRef(t *testing.T) {
 	for _, pr := range []int{0, 3527} {

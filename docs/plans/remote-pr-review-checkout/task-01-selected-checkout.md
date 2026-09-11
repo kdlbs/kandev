@@ -90,6 +90,9 @@ Implementation completed on 2026-09-10.
 - Public-doc validator tests: 62 passed. All 46 published pages passed validation.
 - `git diff --check`: passed.
 
+Fixup follow-up on 2026-09-10 moved explicit checkout before repository setup for built-in remote templates, made retained-checkout detection ownership-safe, and documented the negative PR-number fail-closed guard.
+The focused lifecycle selection suite passed after these changes, including setup-order and simulated different-owner regressions.
+
 The new `selected_checkout.go` owns typed metadata projection and the shared strict checkout wrapper.
 Tests live in `selected_checkout_prepare_test.go` and `selected_checkout_contract_test.go`.
 The real-Git fixtures cover shallow saved clones, fork and same-repository PRs, explicit branches, missing refs, and recreated compute.
