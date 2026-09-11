@@ -446,6 +446,34 @@ func TestCheckBudget_ConcurrentEvaluation_EmitsOnce(t *testing.T) {
 	}
 }
 
+// TestCheckBudgetAndEvaluateProjectBudget_ShareAlertClaim covers the two
+// callers that can evaluate a project policy. They must use the same durable
+// claim so a cost event followed by task reassignment emits one alert.
+func TestCheckBudgetAndEvaluateProjectBudget_ShareAlertClaim(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	policy := newIdempotencyTestPolicy("proj-shared-claim", 1000)
+	policy.ScopeType = "project"
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-shared-claim", "ws-1", "proj-shared-claim")
+	insertBudgetTestCostEvent(t, execSQL, "agent-shared-claim", "task-shared-claim", 850)
+
+	if _, err := svc.CheckBudget(ctx, "ws-1", "agent-shared-claim", "proj-shared-claim"); err != nil {
+		t.Fatalf("CheckBudget: %v", err)
+	}
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-shared-claim"); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	if got := spy.count("budget.alert"); got != 1 {
+		t.Fatalf("budget.alert submissions across callers = %d, want 1", got)
+	}
+}
+
 // TestCheckBudget_PeriodKeyMatchesSpendBoundary covers AC-OFFICE-COSTS-002.6a:
 // the claim recorded for a monthly policy is keyed to the same window
 // boundary the spend rollup used, rendered as RFC3339 UTC.

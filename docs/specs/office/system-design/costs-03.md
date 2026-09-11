@@ -28,8 +28,8 @@ Adjacent contracts this design uses but does not own:
   failed write is not observable to the caller. That constraint drives the
   claim-then-emit ordering below.
 - **Office inbox** (`dashboard.DashboardService.inboxBudgetAlertItems`,
-  `GetInboxCount`) is the user-visible surface that reads `budget.alert` rows.
-  It is unchanged; it simply stops receiving duplicates.
+  `GetInboxCount`) is the user-visible surface that reads both `budget.alert` and
+  `budget.exceeded` rows. It is unchanged; it simply stops receiving duplicates.
 - **Spend rollups** (`Repository.GetCostForAgentSince` /
   `GetCostForProjectSince` / `SumCostsSince`) define the spend window. This
   design reads the window boundary they are given; it does not redefine it.
@@ -39,24 +39,11 @@ Adjacent contracts this design uses but does not own:
 
 ## Prior art
 
-Three legs. Two of them are recorded as unavailable rather than skipped.
+### Other prior reasoning — unavailable
 
-### Our own prior reasoning (wiki) — searched, unavailable
-
-Receipt: resolved `OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`,
-`QMD_WIKI_COLLECTION=wiki` from `~/.obsidian-wiki/config` (`@henry`, pinned).
-Intended query: idempotent alerting, crossing-versus-level notification semantics.
-Neither leg could run — `obsidian-wiki`/`qmd` are not on `PATH` here and the grep
-fallback is sandbox-blocked (`ls: /Users/henry/Documents/: Operation not
-permitted`). Nothing retrieved, nothing claimed: re-run with vault access before
-treating the forks below as unopposed by prior positions.
-
-### What other products shipped (saas-kb) — unavailable
-
-Receipt: the `saas-kb` MCP server and its `search_fsm_docs` tool are absent from
-this session's tool list, with no tool discovery exposed. Intended query:
-`category: "ai_sdlc"`, budget and spend-limit alerting in agent platforms (Devin,
-OpenHands, Warp, Factory.ai, Augment). Nothing retrieved; not substituted.
+The repository's own prior reasoning and external product references were
+unavailable in this session. The in-repo prior art below provides the basis for
+the claim key and persistence choices.
 
 ### In-repo prior art — found, and it decides the key shape
 
@@ -130,8 +117,8 @@ requirement's `## Out of scope`.
   method is what makes AC-002.8 and AC-002.9 hold for every path, including the
   ones nobody remembers to update.
 
-Nothing changes in the frontend: the inbox, badge count and costs page read the
-same rows, just fewer of them.
+Nothing changes in the frontend: the inbox and badge count read both budget
+notification rows, and the costs page reads the same policy and activity data.
 
 ## Data and contracts
 
@@ -282,14 +269,10 @@ is phrased as an equality rather than as a calendar:
   because that reads as a real instant and would be silently reset by any future
   change that starts passing a real epoch-anchored floor.
 
-The consequence is deliberate. A `daily` or `yearly` policy today gets a lifetime
-spend window from `periodCutoff`, so it also gets a non-resetting claim: it
-notifies once, ever, consistent with a limit that never resets. A calendar-derived
-key would instead reset the claim daily against a spend total that never resets,
-re-firing forever on the same accumulated spend — this requirement's own defect,
-reintroduced through the back door. The divergence between the three period
-functions is real and is named in the requirement's `## Out of scope`; this design
-refuses to depend on resolving it.
+Daily and yearly policies use their calendar window starts, so their claims reset
+at the same boundaries as their spend rollups. Total policies use `lifetime`, so
+their claims do not reset. The cost evaluator and the separate cron handlers
+still have different period implementations; this design does not unify them.
 
 Because the key is the window start, a new window is automatically unclaimed
 (AC-002.7), and no scheduled job, cleanup pass, or reset trigger exists or is
@@ -352,37 +335,20 @@ and the limit would emit a `budget.alert` — a *new* notification describing a
 
 ### Call sites
 
-All three converge on `evaluatePolicy`, so all three inherit the behavior with
-no per-caller logic (AC-002.4):
+The post-event hook, the pre-execution budget API, and task reassignment converge
+on `evaluatePolicy`, so they inherit the behavior with no per-caller logic
+(AC-002.4):
 
 | Caller | Trigger | Path |
 | --- | --- | --- |
 | `Service.CheckBudget` (post-cost-event subscriber, `service/event_subscribers.go`) | every recorded cost event | `EvaluateBudget` → `CheckBudget` → `evaluatePolicy` |
-| `SchedulerIntegration.checkBudget` (pre-execution gate, `service/scheduler_integration.go`) | every run dispatch | `CheckPreExecutionBudget` → `CheckBudget` → `evaluatePolicy` |
-| `DashboardService` task reassignment (`dashboard/service_tasks.go`, added by PR #3276) | every reassignment into a project | `EvaluateProjectBudget` → `evaluatePolicy` |
+| `CostService.CheckPreExecutionBudget` (pre-execution budget API) | every direct pre-execution check | `CheckPreExecutionBudget` → `CheckBudget` → `evaluatePolicy` |
+| `DashboardService` task reassignment (`dashboard/service_tasks.go`) | every reassignment into a project | `EvaluateProjectBudget` → `evaluatePolicy` |
 
-`EvaluateProjectBudget` does not exist at this branch's merge base (`c51ec0a21`);
-PR #3276 is open against `main`. Apply the behavior at `evaluatePolicy`, which is
-present today, and add the reassignment coverage AC-002.4 names once that call
-site exists — the reassignment row above is the only deferred part of this design,
-and because the behavior lives at `evaluatePolicy` rather than per caller, that
-call site inherits it the moment it lands. The deferred item is the **test
-coverage**, not the behavior.
-
-The deferral has a named, auditable home (AC-002.4a): a heading in the **task
-plan** reading exactly
-
-```text
-## DEFERRED: AC-OFFICE-COSTS-002.4 reassignment coverage
-```
-
-naming the absent symbol (`EvaluateProjectBudget`) and the PR it waits on (#3276).
-The task plan is this board's running record — it is the Kandev artifact behind
-`get_task_plan_kandev` / `update_task_plan_kandev`, not a file in the repository,
-it survives context resets, and every later step reads it. A code comment is
-explicitly **not** sufficient: nothing on this board reads code comments, which is
-how a deferral becomes a silent drop. While that heading is present, AC-002.4 is
-not fully closed and no step may report it as such.
+The current scheduler admission path does not use `CheckPreExecutionBudget`.
+`SchedulerIntegration.admitRun` calls `EvaluatePreLaunch`, which is a pure read
+and does not emit `budget.alert` or `budget.exceeded`; its admission activity
+entries are owned by `admitRun` instead.
 
 ### Evaluation order
 

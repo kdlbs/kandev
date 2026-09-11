@@ -579,12 +579,17 @@ func TestEvaluateProjectBudget_AlertAtThreshold(t *testing.T) {
 	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
 	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(850))
 
-	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
-		t.Fatalf("EvaluateProjectBudget: %v", err)
+	for i := 0; i < 2; i++ {
+		if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+			t.Fatalf("EvaluateProjectBudget[%d]: %v", i, err)
+		}
 	}
 
 	if !hasBudgetActivity(spy.calls, "budget.alert", "proj-1") {
 		t.Errorf("expected budget.alert for proj-1, got calls=%+v", spy.calls)
+	}
+	if got := spy.count("budget.alert"); got != 1 {
+		t.Fatalf("budget.alert submissions = %d, want 1", got)
 	}
 }
 
@@ -609,12 +614,17 @@ func TestEvaluateProjectBudget_ExceededAtLimit(t *testing.T) {
 	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
 	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(600))
 
-	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
-		t.Fatalf("EvaluateProjectBudget: %v", err)
+	for i := 0; i < 2; i++ {
+		if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+			t.Fatalf("EvaluateProjectBudget[%d]: %v", i, err)
+		}
 	}
 
 	if !hasBudgetActivity(spy.calls, "budget.exceeded", "proj-1") {
 		t.Errorf("expected budget.exceeded for proj-1, got calls=%+v", spy.calls)
+	}
+	if got := spy.count("budget.exceeded"); got != 1 {
+		t.Fatalf("budget.exceeded submissions = %d, want 1", got)
 	}
 }
 
