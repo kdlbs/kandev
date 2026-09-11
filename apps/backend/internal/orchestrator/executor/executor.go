@@ -526,6 +526,9 @@ type LaunchAgentRequest struct {
 	// conversation with the bounded prompt in TaskDescription. It is set only
 	// by the explicit continue_from_history recovery action.
 	ForceContextContinuation bool
+	// RecoveryAction carries a server-side explicit recovery settlement through
+	// the launch boundary. It is never accepted from the client wire request.
+	RecoveryAction string
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -562,6 +565,7 @@ type LaunchAgentRequest struct {
 	McpProfile                *mcpprofile.Context // Backend-owned base surface and additive MCP capabilities
 	IsEphemeral               bool                // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath             string              // Optional host folder for repo-less tasks (overrides scratch fallback)
+	OriginalWorkspacePath     string              // First agent-visible path used for native restore policy
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so

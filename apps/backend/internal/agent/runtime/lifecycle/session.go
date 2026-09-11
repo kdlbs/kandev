@@ -155,10 +155,11 @@ func (sm *SessionManager) InitializeSession(
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	restoreIdentities ...RestoreIdentity,
 ) (*InitializeResult, error) {
 	return sm.InitializeSessionWithSettingsPolicy(
 		ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers,
-		SessionSettingsPolicyStrict,
+		SessionSettingsPolicyStrict, restoreIdentities...,
 	)
 }
 
@@ -172,6 +173,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 	settingsPolicy SessionSettingsPolicy,
+	restoreIdentities ...RestoreIdentity,
 ) (*InitializeResult, error) {
 	if settingsPolicy != SessionSettingsPolicyStrict && settingsPolicy != SessionSettingsPolicyProviderRestored {
 		return nil, fmt.Errorf("unsupported session settings policy: %d", settingsPolicy)
@@ -246,7 +248,20 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		zap.String("agent_version", result.AgentVersion))
 
 	// Step 2: Create or resume ACP session based on configuration
-	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, settingsPolicy)
+	var restoreIdentity RestoreIdentity
+	if len(restoreIdentities) > 0 {
+		restoreIdentity = restoreIdentities[0]
+	}
+	if restoreIdentity.NativeSessionID == "" {
+		restoreIdentity.NativeSessionID = existingSessionID
+	}
+	if restoreIdentity.TargetWorkspace == "" {
+		restoreIdentity.TargetWorkspace = workspacePath
+	}
+	if restoreIdentity.OriginalWorkspace == "" {
+		restoreIdentity.OriginalWorkspace = workspacePath
+	}
+	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, settingsPolicy, restoreIdentity)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +279,7 @@ func (sm *SessionManager) createOrLoadSession(
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 	settingsPolicy SessionSettingsPolicy,
+	restoreIdentity RestoreIdentity,
 ) (string, error) {
 	rt := agentConfig.Runtime()
 	sm.logger.Debug("createOrLoadSession decision",
@@ -272,18 +288,13 @@ func (sm *SessionManager) createOrLoadSession(
 		zap.String("existing_session_id", existingSessionID),
 		zap.Bool("will_attempt_load", rt.SessionConfig.NativeSessionResume && existingSessionID != ""))
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
-		if settingsPolicy == SessionSettingsPolicyProviderRestored {
-			sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers, settingsPolicy)
-			if err == nil {
-				return sessionID, nil
-			}
-			sm.logger.Warn("session/load failed during provider-restored recovery, preserving session identity",
-				zap.String("agent_type", agentConfig.ID()),
-				zap.String("existing_session_id", existingSessionID),
-				zap.Error(err))
+		sessionID, err := sm.restoreExistingSession(
+			ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, restoreIdentity, settingsPolicy,
+		)
+		if err != nil && settingsPolicy == SessionSettingsPolicyProviderRestored {
 			return "", fmt.Errorf("provider-restored recovery could not load the stored session: %w", err)
 		}
-		return sm.restoreExistingSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers)
+		return sessionID, err
 	}
 	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
 }
@@ -299,20 +310,38 @@ func (sm *SessionManager) restoreExistingSession(
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	identity RestoreIdentity,
+	settingsPolicy SessionSettingsPolicy,
 ) (string, error) {
+	identity.NativeSessionID = existingSessionID
+	identity.TargetWorkspace = workspacePath
+	if identity.OriginalWorkspace == "" {
+		identity.OriginalWorkspace = workspacePath
+	}
+	identity.NativeStateReference = existingSessionID
+	capabilities := RestoreCapabilities{
+		SupportsNativeLoad:    true,
+		SupportsNativeResume:  true,
+		SupportsDirectoryMove: !agentConfig.Runtime().SessionConfig.NewSessionOnWorkspaceRebind,
+		RequiresNativeState:   true,
+	}
+	identityFailure := EvaluateWorkspaceRestore(WorkspaceRestoreInput{
+		OriginalAgentCWD:      identity.OriginalWorkspace,
+		TargetAgentCWD:        workspacePath,
+		NativeStatePresent:    existingSessionID != "",
+		SupportsDirectoryMove: capabilities.SupportsDirectoryMove,
+	})
 	var loadErr error
 	result, err := (&RestoreCoordinator{}).Restore(ctx, RestoreCoordinatorRequest{
-		Identity: RestoreIdentity{
-			NativeSessionID: existingSessionID,
-			TargetWorkspace: workspacePath,
-		},
+		Identity:        identity,
 		AgentType:       agentConfig.ID(),
 		Action:          RestoreActionNativeResume,
 		TargetWorkspace: workspacePath,
-		Capabilities:    RestoreCapabilities{SupportsNativeLoad: true, SupportsNativeResume: true},
+		Capabilities:    capabilities,
+		Failure:         identityFailure,
 	}, RestoreCoordinatorHooks{
 		LoadNative: func(loadCtx context.Context, nativeSessionID string) error {
-			_, loadErr = sm.loadSession(loadCtx, client, agentConfig, nativeSessionID, mcpServers, SessionSettingsPolicyStrict)
+			_, loadErr = sm.loadSession(loadCtx, client, agentConfig, nativeSessionID, mcpServers, settingsPolicy)
 			return loadErr
 		},
 	})
@@ -696,9 +725,26 @@ func (sm *SessionManager) initializeACPConnection(
 		ctx = context.WithValue(ctx, requiredNativeConversationKey{}, execution.RequiredNativeConversationID)
 	}
 	result, err := sm.InitializeSessionWithSettingsPolicy(
-		ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers,
+		ctx,
+		client,
+		agentConfig,
+		execution.ACPSessionID,
+		execution.WorkspacePath,
+		mcpServers,
 		execution.sessionSettingsStartupPolicy(),
+		RestoreIdentity{
+			SessionID:            execution.SessionID,
+			NativeSessionID:      execution.ACPSessionID,
+			OriginalWorkspace:    execution.OriginalWorkspacePath,
+			TargetWorkspace:      execution.WorkspacePath,
+			NativeStateReference: execution.ACPSessionID,
+		},
 	)
+	if err == nil && execution.ForceContextContinuation {
+		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
+			err = retireErr
+		}
+	}
 	releaseClient()
 	if err != nil {
 		// loadSession already logged the root cause. context.Canceled is

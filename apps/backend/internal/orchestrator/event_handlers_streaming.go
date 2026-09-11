@@ -788,6 +788,9 @@ func (s *Service) handleStreamingEventKind(
 	if payload.Data.Text == "" || payload.SessionID == "" {
 		return
 	}
+	if payload.Data.CanonicalProjection {
+		return
+	}
 	if s.messageCreator == nil {
 		return
 	}

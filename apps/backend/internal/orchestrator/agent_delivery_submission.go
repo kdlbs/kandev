@@ -301,6 +301,9 @@ func (s *Service) prepareBackendDeliverySubmission(
 	if err != nil {
 		return nil, s.deliveryRecoveryError(ctx, session.ID, "harness_generation_unavailable")
 	}
+	if options.expectedDeliveryGeneration > 0 && generation != options.expectedDeliveryGeneration {
+		return nil, s.deliveryRecoveryError(ctx, session.ID, "harness_generation_changed")
+	}
 	submissionID := normalizeDeliverySubmissionID(options.deliverySubmissionID)
 	now := time.Now().UTC()
 	submission := &models.AgentDeliverySubmission{

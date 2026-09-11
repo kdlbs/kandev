@@ -94,6 +94,8 @@ Preserve existing user edits and unrelated changes.
 ## Results
 
 Implemented backend inbox receipt, duplicate conflict checks, received/projected cursors, lifecycle
-projection, durable effect intents, and acknowledgment only after projection. Projection retains
-message ordering and stale-generation auditability. Focused lifecycle/repository race tests, SQL
-guard, persistence conformance, and lint pass; PostgreSQL execution remains environment-dependent.
+projection, durable effect intents, and acknowledgment only after canonical message projection.
+Stable message identities coalesce newline-free chunks, and canonical message mutation plus the
+projected cursor commit in one SQL transaction. Projection retains message ordering and
+stale-generation auditability. Focused lifecycle/repository race tests, SQL guard, persistence
+conformance, and lint pass; PostgreSQL execution remains environment-dependent.

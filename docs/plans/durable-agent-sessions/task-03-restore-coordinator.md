@@ -91,7 +91,9 @@ Preserve existing user edits and unrelated changes.
 
 The typed `RestoreCoordinator` owns normal native `session/load`, explicit continuation, and
 workspace-rebind decisions while preserving the captured runtime configuration and committed
-native identity. Generation publication and recovery admission are wired through the lifecycle
-manager. Lifecycle/orchestrator race tests, lint, specification lint, and diff checks pass.
-Live harness relocation behavior remains version-dependent and is covered by the documented
-environment-dependent acceptance gate.
+native identity. Production context continuation now initializes its candidate synchronously,
+commits the generation before durable submission and prompt admission, and rolls back the
+candidate when the generation CAS fails. Open recovery blocks move with that generation commit
+in the same SQL transaction. Lifecycle/orchestrator race tests, lint, specification lint, and
+diff checks pass. Live harness relocation behavior remains version-dependent and is covered by
+the documented environment-dependent acceptance gate.
