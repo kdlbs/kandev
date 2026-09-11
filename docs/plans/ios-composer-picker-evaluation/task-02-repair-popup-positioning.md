@@ -235,7 +235,7 @@ operator action.
 - The disposable forced-order SSH probe passed after the repair (27.9 seconds),
   then its fixture instrumentation and temporary ordering code were removed.
 - `CI=true KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --no-build --project containers tests/ssh/add-workspace-sources.spec.ts -- --retries=0 --trace=retain-on-failure`:
-  the permanent two-restart test passed (26.9 seconds), using CI's Node 24.20.0
+  the permanent two-restart test passed (26.9 seconds), using local Node 24.0.0
   and freshly rebuilt backend/helper/plugin artifacts on the CI-equivalent
   merge tree with the repair applied.
 
