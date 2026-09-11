@@ -49,11 +49,13 @@ import { cn } from "@kandev/ui/lib/utils";
 import { useKanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { useCompactSwimlaneHeight } from "@/hooks/domains/kanban/use-compact-swimlane-height";
 
 const TASK_POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
 const TASK_TOUCH_SENSOR_OPTIONS = { activationConstraint: { delay: 250, tolerance: 5 } };
 
 export type SwimlaneKanbanContentProps = {
+  compactHeight?: boolean;
   workflowId: string;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
@@ -342,6 +344,8 @@ function MobileKanbanLayout({
 }
 
 function TabletKanbanLayout({
+  columnHeight,
+  onNaturalHeightChange,
   steps,
   moveTargetSteps,
   tasks,
@@ -367,6 +371,7 @@ function TabletKanbanLayout({
     <div
       className="flex h-full min-h-0 gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-hide"
       data-testid="tablet-kanban-layout"
+      style={{ height: columnHeight }}
     >
       {steps.map((step) => (
         <div
@@ -378,6 +383,7 @@ function TabletKanbanLayout({
           )}
         >
           <KanbanColumn
+            onNaturalHeightChange={onNaturalHeightChange}
             step={step}
             tasks={getTasksForStep(step.id)}
             presentation="desktop"
@@ -404,6 +410,8 @@ function TabletKanbanLayout({
 }
 
 function DesktopKanbanLayout({
+  columnHeight,
+  onNaturalHeightChange,
   steps,
   moveTargetSteps,
   tasks,
@@ -428,11 +436,13 @@ function DesktopKanbanLayout({
 
   return (
     <AdaptiveDesktopKanban
+      columnHeight={columnHeight}
       steps={steps}
       isDragging={isDragging}
       renderColumn={(step) => (
         <div className={cn("h-full", temporaryStepIds.has(step.id) && "opacity-70")}>
           <KanbanColumn
+            onNaturalHeightChange={onNaturalHeightChange}
             step={step}
             tasks={getTasksForStep(step.id)}
             presentation="desktop"
@@ -497,6 +507,7 @@ function renderKanbanLayout({
 }
 
 export function SwimlaneKanbanContent({
+  compactHeight = false,
   workflowId,
   steps,
   moveTargetSteps,
@@ -535,7 +546,13 @@ export function SwimlaneKanbanContent({
     moveTargetSteps,
     isMobile,
   });
+  const sizing = useCompactSwimlaneHeight(
+    compactHeight && !isMobile,
+    displaySteps,
+    !!drag.activeTask,
+  );
   const sharedProps = useSharedKanbanLayoutProps({
+    ...sizing,
     drag,
     moveTargetSteps,
     displayTasks,
