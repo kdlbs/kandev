@@ -123,7 +123,7 @@ func TestStorePRAutoFixOutcomeOrdinaryTurnHasNoSideEffects(t *testing.T) {
 			Signature: "foreign-feedback", CheckpointJSON: `{}`,
 			SessionID: "session-foreign", TurnID: "turn-foreign",
 			ProviderGeneration: "head-foreign", State: TaskCIAutoFixAttemptRunning,
-			IncrementRound: true, EnqueuedAt: time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC),
+			IncrementRound: true, EnqueuedAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
 		}); err != nil {
 			t.Fatalf("seed foreign attempt: %v", err)
 		}

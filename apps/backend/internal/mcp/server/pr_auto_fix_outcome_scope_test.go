@@ -25,7 +25,8 @@ func TestReportPRAutoFixOutcomeToolDescriptionScopesCurrentTurn(t *testing.T) {
 	assert.Contains(t, description, "exactly once")
 }
 
-func TestReportPRAutoFixOutcomeMCPClientPreservesUnmatchedScope(t *testing.T) {
+func TestReportPRAutoFixOutcomeServerSurfacesBackendError(t *testing.T) {
+	// Keep this transport fixture synchronized with handlers.taskPRAutoFixOutcomeUnmatchedMessage.
 	const explanation = "No matching unresolved GitHub PR auto-fix attempt exists for this turn. Finish ordinary work without retrying this report or enabling auto-fix."
 	backend := &testBackend{err: errors.New(explanation)}
 	s := newTaskModeServer(t, backend, "task-current")
