@@ -9,7 +9,7 @@ export async function withHeightWorkflows(
     workflowId: string;
     stepId: string;
     taskId: string;
-    firstTaskId: string;
+    seedWorkflowTaskId: string;
     stepIndex: number;
   }) => Promise<void>,
 ) {
@@ -31,7 +31,7 @@ export async function withHeightWorkflows(
       workflowId: workflow.id,
       stepId: step.id,
       taskId: second.id,
-      firstTaskId: first.id,
+      seedWorkflowTaskId: first.id,
       stepIndex: steps.findIndex((item) => item.id === step.id),
     });
   } finally {
@@ -45,7 +45,7 @@ export async function withHeightWorkflows(
         settings.workflow_ids_with_auto_hide_empty_steps ?? [],
       kanban_view_mode: settings.kanban_view_mode ?? "",
     });
-    expect(restored.ok).toBe(true);
+    expect.soft(restored.ok, "Restore user settings after swimlane height test").toBe(true);
   }
 }
 

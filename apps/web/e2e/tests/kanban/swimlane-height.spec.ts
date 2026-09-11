@@ -105,7 +105,7 @@ test("compact lanes survive collapse, workflow filters and preview resizing", as
     await expect.poll(async () => (await firstColumn.boundingBox())!.height).toBeGreaterThan(400);
     await selectHeightWorkflow(testPage, "All Workflows");
     await expectCompactColumn(secondColumn);
-    await kanban.taskCard(second.firstTaskId).click();
+    await kanban.taskCard(second.seedWorkflowTaskId).click();
     await expect(testPage.getByTestId("task-preview-panel")).toBeVisible();
     await expectCompactColumn(firstColumn);
     await expectCompactColumn(secondColumn);
@@ -137,13 +137,13 @@ test("dense and sparse workflows size independently and keep the final task reac
     await expect.poll(async () => (await sparse.boundingBox())?.height).toBe(200);
     await expectBoundedMountedCards(dense);
     await scrollColumnToBottom(dense.getByTestId("kanban-column-scroll"));
-    const oldest = dense.getByTestId(`task-card-${second.firstTaskId}`);
+    const oldest = dense.getByTestId(`task-card-${second.seedWorkflowTaskId}`);
     await expect(oldest).toBeInViewport();
     await expectBoundedMountedCards(dense);
     expect(await taskCards(dense).count()).toBeLessThan(50);
     await expectNoDocumentOverflow(testPage);
     await oldest.click();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${second.firstTaskId}`));
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.seedWorkflowTaskId}`));
   });
 });
 

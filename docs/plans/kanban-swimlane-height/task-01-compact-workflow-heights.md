@@ -167,4 +167,21 @@ The affected drag tests then passed without retries. No backend code changed.
 The final unit regression also rejected late reports after a column was hidden or compact mode was disabled.
 The first version failed both cases. The completed hook ignores reports outside the current visible-column scope.
 
-No acceptance criteria remain open. No commit, publication, or additional task was created.
+No acceptance criteria remain open. The implementation phase did not create a commit, publication, or additional task.
+
+### PR review remediation
+
+PR review clarified the helper field as `seedWorkflowTaskId` and changed the settings-restoration assertion to a named soft assertion.
+The cleanup failure still fails the test, but it does not replace an error from the test body.
+These changes affect test diagnostics only. Product behavior, screenshots, and durable requirements remain unchanged.
+
+The following commands passed after the helper changes (2026-09-11):
+
+```bash
+(cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/kanban/swimlane-height.spec.ts)
+(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/kanban/mobile-kanban.spec.ts -- --grep 'multiple workflows keep a full-height')
+(cd apps/web && pnpm exec eslint e2e/tests/kanban/swimlane-height-helpers.ts e2e/tests/kanban/swimlane-height.spec.ts)
+```
+
+All six Chromium scenarios and the affected phone scenario passed with zero retries.
+The runs reused the unchanged production assets. Remote CI and review completion remain pending until validation of the final PR head.
