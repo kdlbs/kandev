@@ -70,14 +70,14 @@ test.skip(
   process.env.KANDEV_E2E_ANIMATION_TRACE !== "1",
   "Run explicitly to capture the 8.34-second animation performance control.",
 );
-test.describe.configure({ retries: 1 });
+test.describe.configure({ retries: process.env.KANDEV_E2E_ANIMATION_TRACE === "1" ? 0 : 1 });
 
 test("attributes steady animation work for compositor and CSS fallback paths", async ({
   testPage,
   apiClient,
   seedData,
 }, testInfo) => {
-  test.setTimeout(240_000);
+  test.setTimeout(900_000);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Animation performance trace",
@@ -93,14 +93,15 @@ test("attributes steady animation work for compositor and CSS fallback paths", a
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await session.sendMessage("/slow 30s");
+  await session.sendMessage("/slow 300s");
 
   const glow = session.activeChat().getByTestId("chat-input-glow");
   await expect(glow).toBeVisible({ timeout: 30_000 });
   const dialog = await openQuickChatWithAgent(testPage);
-  await sendQuickChatMessage(dialog, testPage, "/slow 30s");
+  await sendQuickChatMessage(dialog, testPage, "/slow 300s");
   const cubes = dialog.locator(".spinner-grid-cube");
   await expect(cubes).toHaveCount(18);
+  await expectTraceTargetsPresent(testPage);
   await expectCompositorTargets(testPage);
 
   const normalInventory = await inspectAnimationInventory(testPage);
@@ -131,13 +132,29 @@ test("attributes steady animation work for compositor and CSS fallback paths", a
     const isolatedRuns = await captureMotionIsolationArms(testPage, testInfo);
     const allMotionPaused = isolatedRuns.find((run) => run.arm === "all-motion-paused");
     expect(allMotionPaused).toBeDefined();
-    expect(summarizeMetrics(allMotionPaused?.metrics ?? []).targetInvalidations.max).toBe(0);
-    if (cssFallbackSummary.targetInvalidations.max > 0) {
-      for (const run of isolatedRuns.filter((candidate) => candidate.arm !== "all-motion-paused")) {
-        expect(summarizeMetrics(run.metrics).targetInvalidations.median).toBeLessThan(
-          cssFallbackSummary.targetInvalidations.median,
-        );
-      }
+    expect(cssFallbackSummary.targetInvalidations.max).toBeGreaterThan(0);
+
+    const cssFallbackBaseline = isolatedRuns.find((run) => run.arm === "css-fallback-baseline");
+    expect(cssFallbackBaseline).toBeDefined();
+    if (!cssFallbackBaseline) throw new Error("Missing script-enabled CSS fallback baseline");
+    const cssFallbackBaselineSummary = summarizeMetrics(cssFallbackBaseline.metrics);
+    for (const [arm, group] of [
+      ["grid-paused", "grid"],
+      ["pulse-paused", "pulse"],
+    ] as const) {
+      const pausedRun = isolatedRuns.find((run) => run.arm === arm);
+      expect(pausedRun).toBeDefined();
+      if (!pausedRun) throw new Error(`Missing ${arm} isolation run`);
+      const pausedSummary = summarizeMetrics(pausedRun.metrics);
+      expect(pausedSummary.targetInvalidationsByGroup[group].median).toBeLessThan(
+        cssFallbackBaselineSummary.targetInvalidationsByGroup[group].median,
+      );
+    }
+    const allMotionPausedSummary = summarizeMetrics(allMotionPaused!.metrics);
+    for (const group of ["grid", "pulse"] as const) {
+      expect(allMotionPausedSummary.targetInvalidationsByGroup[group].median).toBeLessThan(
+        cssFallbackBaselineSummary.targetInvalidationsByGroup[group].median,
+      );
     }
 
     const finalInventory = await inspectAnimationInventory(testPage);
@@ -153,6 +170,7 @@ test("attributes steady animation work for compositor and CSS fallback paths", a
             compositor,
             cssFallback,
             cssFallbackSummary,
+            cssFallbackBaselineSummary,
             isolatedRuns,
             isolatedSummaries: isolatedRuns.map((run) => ({
               arm: run.arm,
@@ -173,6 +191,7 @@ test("attributes steady animation work for compositor and CSS fallback paths", a
         compositor,
         cssFallback,
         cssFallbackSummary,
+        cssFallbackBaselineSummary,
         isolatedRuns,
         isolatedSummaries: isolatedRuns.map((run) => ({
           arm: run.arm,
@@ -206,9 +225,15 @@ async function captureRepeatedTraces(
 ): Promise<TraceMetrics[]> {
   const metrics: TraceMetrics[] = [];
   for (let repeat = 1; repeat <= TRACE_REPEATS; repeat += 1) {
+    await expectTraceTargetsPresent(page);
     metrics.push(await captureTrace(page, testInfo, `${label}-${repeat}`, options));
   }
   return metrics;
+}
+
+async function expectTraceTargetsPresent(page: Page) {
+  await expect(page.locator(TARGET_SELECTORS.grid)).toHaveCount(18);
+  await expect(page.locator(TARGET_SELECTORS.pulse)).toHaveCount(1);
 }
 
 async function captureMotionIsolationArms(page: Page, testInfo: TestInfo): Promise<IsolationRun[]> {
@@ -220,13 +245,21 @@ async function captureMotionIsolationArms(page: Page, testInfo: TestInfo): Promi
   ];
   const runs: IsolationRun[] = [];
   for (const { arm, selectors } of arms) {
+    await expectTraceTargetsPresent(page);
     const restore =
       arm === "css-fallback-baseline"
         ? async () => undefined
         : await pauseMotion(page, selectors, arm === "all-motion-paused");
     try {
-      if (arm !== "css-fallback-baseline") {
+      if (arm === "css-fallback-baseline") {
+        await expectCssFallbackTargets(page);
+      } else {
         await expectMotionPaused(page, selectors, arm === "all-motion-paused");
+        if (arm === "grid-paused") {
+          await expectCssFallbackGroupRunning(page, TARGET_SELECTORS.pulse);
+        } else if (arm === "pulse-paused") {
+          await expectCssFallbackGroupRunning(page, TARGET_SELECTORS.grid);
+        }
       }
       const metrics = await captureRepeatedTraces(page, testInfo, arm, {
         disableScriptExecution: false,
@@ -245,15 +278,17 @@ async function expectCompositorTargets(page: Page) {
     .poll(() =>
       page
         .locator("[data-compositor-pulse], .spinner-grid-cube")
-        .evaluateAll((elements) =>
-          elements.every((element) =>
-            element
-              .getAnimations()
-              .some(
-                (animation) =>
-                  animation.constructor.name === "Animation" && animation.playState === "running",
-              ),
-          ),
+        .evaluateAll(
+          (elements) =>
+            elements.length > 0 &&
+            elements.every((element) =>
+              element
+                .getAnimations()
+                .some(
+                  (animation) =>
+                    animation.constructor.name === "Animation" && animation.playState === "running",
+                ),
+            ),
         ),
     )
     .toBe(true);
@@ -276,23 +311,7 @@ async function installCssFallbackControl(page: Page): Promise<() => Promise<void
       (element as HTMLElement).style.removeProperty("animation");
     }
   });
-  await expect
-    .poll(() =>
-      page
-        .locator("[data-compositor-pulse], .spinner-grid-cube")
-        .evaluateAll((elements) =>
-          elements.every((element) =>
-            element
-              .getAnimations()
-              .some(
-                (animation) =>
-                  animation.constructor.name === "CSSAnimation" &&
-                  animation.playState === "running",
-              ),
-          ),
-        ),
-    )
-    .toBe(true);
+  await expectCssFallbackTargets(page);
   return async () => {
     await style.evaluate((element) => element.remove()).catch(() => undefined);
   };
@@ -303,16 +322,40 @@ async function expectCssFallbackTargets(page: Page) {
     .poll(() =>
       page
         .locator("[data-compositor-pulse], .spinner-grid-cube")
-        .evaluateAll((elements) =>
-          elements.every((element) =>
-            element
-              .getAnimations()
-              .some(
-                (animation) =>
-                  animation.constructor.name === "CSSAnimation" &&
-                  animation.playState === "running",
-              ),
-          ),
+        .evaluateAll(
+          (elements) =>
+            elements.length > 0 &&
+            elements.every((element) =>
+              element
+                .getAnimations()
+                .some(
+                  (animation) =>
+                    animation.constructor.name === "CSSAnimation" &&
+                    animation.playState === "running",
+                ),
+            ),
+        ),
+    )
+    .toBe(true);
+}
+
+async function expectCssFallbackGroupRunning(page: Page, selector: string) {
+  await expect
+    .poll(() =>
+      page
+        .locator(selector)
+        .evaluateAll(
+          (elements) =>
+            elements.length > 0 &&
+            elements.every((element) =>
+              element
+                .getAnimations()
+                .some(
+                  (animation) =>
+                    animation.constructor.name === "CSSAnimation" &&
+                    animation.playState === "running",
+                ),
+            ),
         ),
     )
     .toBe(true);
@@ -323,7 +366,7 @@ async function expectMotionPaused(page: Page, selectors: string[], all: boolean)
     .poll(() =>
       page.evaluate(
         ({ selectors: targetSelectors, pauseAll }) => {
-          const animations = document.getAnimations({ subtree: true }).filter((animation) => {
+          const animations = document.getAnimations().filter((animation) => {
             if (pauseAll) return true;
             const target = animation.effect?.target;
             return (
@@ -331,7 +374,10 @@ async function expectMotionPaused(page: Page, selectors: string[], all: boolean)
               targetSelectors.some((selector) => target.matches(selector))
             );
           });
-          return animations.every((animation) => animation.playState !== "running");
+          return (
+            animations.length > 0 &&
+            animations.every((animation) => animation.playState !== "running")
+          );
         },
         { selectors, pauseAll: all },
       ),
@@ -348,7 +394,7 @@ async function pauseMotion(
     ({ selectors: targetSelectors, pauseAll }) => {
       const state = {
         animations: document
-          .getAnimations({ subtree: true })
+          .getAnimations()
           .filter((animation) => {
             if (pauseAll) return true;
             const target = animation.effect?.target;
@@ -419,7 +465,7 @@ async function inspectAnimationInventory(page: Page): Promise<AnimationInventory
       }
     }
     const webAnimations: AnimationInventory["webAnimations"] = [];
-    for (const animation of document.getAnimations({ subtree: true })) {
+    for (const animation of document.getAnimations()) {
       const target = animation.effect?.target;
       if (!(target instanceof Element)) continue;
       webAnimations.push({

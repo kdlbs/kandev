@@ -41,6 +41,18 @@ test("keeps the mobile composer pulse contained until the turn settles", async (
   await expectCompositorPulse(glow);
 
   await glow.evaluate((element) => {
+    (element as HTMLElement).style.transform = "translateY(200vh)";
+  });
+  await expectCompositorMotionPaused(glow);
+  await glow.evaluate((element) => {
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+  });
+  await expectCompositorPulse(glow);
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.removeProperty("transform");
+  });
+
+  await glow.evaluate((element) => {
     (element as HTMLElement).style.display = "none";
   });
   expect(

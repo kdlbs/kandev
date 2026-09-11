@@ -79,7 +79,9 @@ CSS-fallback, all-motion, and per-target pause/restore arms. It inventories CSS
 animations, pseudo-elements, and Web Animations, retains all configured
 repeats, and reports medians and ranges without adding nested event durations.
 
-The three-repeat Chromium run passed. The fixture identifies grid and composer
-pulse invalidations, but the supplied production trace's persistent Layerize
-work remains unattributed. See [evidence.md](evidence.md). Task 03 remains
-pending under its evidence gate.
+The three-repeat Chromium run passed after the trace-control remediation. The
+fixture identifies grid and composer pulse invalidations with targets kept
+present, compares selective pause arms against a matched script-enabled
+baseline, and verifies continued activity in the unpaused group. The supplied
+production trace's persistent Layerize work remains unattributed. See
+[evidence.md](evidence.md). Task 03 remains pending under its evidence gate.

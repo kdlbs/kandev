@@ -81,6 +81,7 @@ export function createPersistentMotionVisibility(
   let currentVisible = doc.visibilityState !== "hidden" && ownerVisible;
   let disposed = false;
   const registrations = new Set<Registration>();
+  const registeredElements = new Set<HTMLElement>();
   const notify = () => {
     if (disposed) return;
     const nextVisible = doc.visibilityState !== "hidden" && ownerVisible && intersectionVisible;
@@ -95,7 +96,10 @@ export function createPersistentMotionVisibility(
     observer = new IntersectionObserver((entries) => {
       const entry = entries[entries.length - 1];
       if (!entry) return;
-      intersectionVisible = entry.isIntersecting && entry.intersectionRatio > 0;
+      // The observer uses the default threshold of zero. At the viewport edge
+      // an intersecting target can have a zero intersection ratio, and it is
+      // still visible for threshold-zero motion control.
+      intersectionVisible = entry.isIntersecting;
       notify();
     });
     observer.observe(target);
@@ -105,6 +109,7 @@ export function createPersistentMotionVisibility(
     if (!registration.active) return;
     registration.active = false;
     registrations.delete(registration);
+    registeredElements.delete(registration.element);
     if (registration.cssPaused) {
       registration.element.style.animationPlayState = registration.previousPlayState;
       registration.cssPaused = false;
@@ -115,6 +120,10 @@ export function createPersistentMotionVisibility(
 
   return {
     register(element, animation = null) {
+      if (registeredElements.has(element)) {
+        throw new Error("An element can only be registered once per visibility controller");
+      }
+      registeredElements.add(element);
       const registration: Registration = {
         element,
         animation,
@@ -163,6 +172,8 @@ export function createPersistentMotionVisibility(
 function applyVisibility(registration: Registration, visible: boolean): void {
   if (!registration.active) return;
   if (!visible) {
+    // Only resume an effect that this controller paused; caller-paused and
+    // reduced-motion effects remain paused when the target becomes visible.
     if (registration.animation && registration.animation.playState === "running") {
       registration.resumeAnimation = true;
       pauseOwnedAnimation(registration.animation);

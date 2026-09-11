@@ -67,64 +67,6 @@ describe("getTaskStateIcon", () => {
   });
 });
 
-describe("CompositorSpin visibility", () => {
-  it("pauses and resumes the compositor spinner with document visibility", () => {
-    const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
-    const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
-    let playState: AnimationPlayState = "running";
-    const animation = {
-      get playState() {
-        return playState;
-      },
-      cancel: vi.fn(() => {
-        playState = "idle";
-      }),
-      pause: vi.fn(() => {
-        playState = "paused";
-      }),
-      play: vi.fn(() => {
-        playState = "running";
-      }),
-    } as unknown as Animation;
-    Object.defineProperty(HTMLElement.prototype, "animate", {
-      configurable: true,
-      value: vi.fn(() => animation),
-    });
-
-    try {
-      const { container } = render(
-        <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
-      );
-      const wrapper = container.querySelector(SPIN_SELECTOR) as HTMLElement;
-
-      Object.defineProperty(document, "visibilityState", {
-        configurable: true,
-        value: "hidden",
-      });
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(animation.pause).toHaveBeenCalledOnce();
-      expect(wrapper.style.animationPlayState).toBe("paused");
-
-      Object.defineProperty(document, "visibilityState", {
-        configurable: true,
-        value: "visible",
-      });
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(animation.play).toHaveBeenCalledOnce();
-      expect(wrapper.style.animationPlayState).toBe("");
-    } finally {
-      if (originalAnimate) {
-        Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
-      } else {
-        Reflect.deleteProperty(HTMLElement.prototype, "animate");
-      }
-      if (originalVisibilityState) {
-        Object.defineProperty(document, "visibilityState", originalVisibilityState);
-      }
-    }
-  });
-});
-
 describe("getTaskStateIcon", () => {
   it("animates an HTML wrapper while keeping the status SVG static", () => {
     const { container } = render(

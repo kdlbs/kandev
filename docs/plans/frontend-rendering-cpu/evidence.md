@@ -73,18 +73,34 @@ transition. Task 02 addresses that contract independently.
 
 ## Post-integration verification
 
-After the visibility helper was integrated into the spin, grid, and pulse
-primitives, the same three-repeat command passed again on 2026-09-10. The
-normal-page medians were 14 `UpdateLayoutTree` events, 12 `Layerize` events,
-and 228 matched target invalidations. The ranges were 11–23, 11–17, and
-209–482 respectively. The median target split was 216 grid and 12 pulse
-invalidations, with ranges of 198–462 and 11–20.
+An earlier post-integration run on 2026-09-10 recorded normal-page medians of
+14 `UpdateLayoutTree` events, 12 `Layerize` events, and 228 matched target
+invalidations. That run was retained as historical evidence; the controls were
+subsequently hardened to keep targets alive and compare each paused group with
+the matched script-enabled fallback baseline.
 
-The final run's CSS-fallback control emitted zero matching invalidations in all
-three windows. Because the fallback arm did not produce a running target
-stream, it is not used as new attribution evidence; the earlier fallback
-capture above remains the diagnostic comparison. The grid-paused,
-pulse-paused, and all-motion-paused arms each emitted zero matched target
-invalidations and zero `UpdateLayoutTree` and `Layerize` events in all three
-windows. This verifies the pause controls without identifying the supplied
-trace's production rendering trigger.
+## Review-remediation verification
+
+The three-repeat Chromium command passed on 2026-09-11 after the visibility and
+trace-control remediation. Every arm retained 18 grid targets and one pulse
+target. The normal compositor arm recorded zero target invalidations in all
+three windows. The disabled-script CSS-fallback control recorded 646 target
+invalidations at the median [608, 703], split into 612 grid [576, 666] and 34
+pulse [32, 37]. The matched script-enabled CSS-fallback baseline recorded 665
+target invalidations [627, 703], split into 630 grid [594, 666] and 35 pulse
+[33, 37].
+
+| Arm               | Target invalidations | Grid / pulse invalidations |
+| ----------------- | -------------------: | -------------------------: |
+| CSS fallback baseline | 665 [627, 703] | 630 [594, 666] / 35 [33, 37] |
+| Grid paused       | 12 [11, 17]          | 0 / 12 [11, 17]            |
+| Pulse paused      | 468 [414, 504]       | 468 [414, 504] / 0          |
+| All motion paused | 0 [0, 180]           | 0 [0, 180] / 0             |
+
+The paused group is suppressed against its matched script-enabled baseline in
+each selective arm. The unpaused group remains active: pulse invalidations
+continue in the grid-paused arm, and grid invalidations continue in the
+pulse-paused arm. Residual invalidations in one all-motion window are retained
+in the range rather than treated as a strict-zero gate; its median remains
+below both baseline group medians. This verifies the bounded attribution
+control without identifying the supplied trace's production rendering trigger.

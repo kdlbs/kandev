@@ -18,6 +18,8 @@ afterEach(() => {
   }
   if (originalVisibilityState) {
     Object.defineProperty(document, "visibilityState", originalVisibilityState);
+  } else {
+    Reflect.deleteProperty(document, "visibilityState");
   }
 });
 
@@ -127,6 +129,20 @@ describe("GridSpinner", () => {
     const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     expect(cubes).toHaveLength(9);
     expect(cubes.every((cube) => cube.style.animation === "")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "paused")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "")).toBe(true);
   });
 });
 
@@ -172,6 +188,20 @@ describe("GridSpinner lifecycle", () => {
     expect(animate).toHaveBeenCalledTimes(2);
     expect(firstAnimation.cancel).toHaveBeenCalledOnce();
     expect(cubes.every((cube) => cube.style.animation === "")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "paused")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "")).toBe(true);
   });
 
   it("cancels every compositor effect when it unmounts", () => {

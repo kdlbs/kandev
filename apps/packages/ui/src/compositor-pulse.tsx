@@ -18,11 +18,18 @@ function CompositorPulse({
 
   useCompositorEffect(() => {
     const element = elementRef.current;
-    if (!element || typeof element.animate !== "function") return;
+    if (!element) return;
 
     const inlineAnimation = element.style.animation;
     const visibility = createPersistentMotionVisibility(element);
     const registration = visibility.register(element);
+    if (typeof element.animate !== "function") {
+      return () => {
+        registration.unregister();
+        visibility.dispose();
+      };
+    }
+
     let animation: Animation | null = null;
     let reducedMotionQuery: MediaQueryList | null = null;
     try {
@@ -35,8 +42,8 @@ function CompositorPulse({
     const restoreAnimation = () => {
       animation?.cancel();
       animation = null;
-      registration.setAnimation(null);
       element.style.animation = inlineAnimation;
+      registration.setAnimation(null);
     };
 
     const startAnimation = () => {

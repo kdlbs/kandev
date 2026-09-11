@@ -5,7 +5,7 @@ type MockIntersectionObserverInstance = {
   callback: IntersectionObserverCallback;
   disconnect: ReturnType<typeof vi.fn>;
   observe: ReturnType<typeof vi.fn>;
-  emit: (isIntersecting: boolean) => void;
+  emit: (isIntersecting: boolean, intersectionRatio?: number) => void;
 };
 
 const intersectionObservers: MockIntersectionObserverInstance[] = [];
@@ -21,12 +21,12 @@ class MockIntersectionObserver {
     intersectionObservers.push(this);
   }
 
-  emit(isIntersecting: boolean) {
+  emit(isIntersecting: boolean, intersectionRatio = isIntersecting ? 1 : 0) {
     this.callback(
       [
         {
           isIntersecting,
-          intersectionRatio: isIntersecting ? 1 : 0,
+          intersectionRatio,
         } as IntersectionObserverEntry,
       ],
       this as unknown as IntersectionObserver,
@@ -62,6 +62,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   if (originalVisibilityState) {
     Object.defineProperty(document, "visibilityState", originalVisibilityState);
+  } else {
+    Reflect.deleteProperty(document, "visibilityState");
   }
   vi.restoreAllMocks();
 });
@@ -92,6 +94,7 @@ describe("createPersistentMotionVisibility", () => {
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
     const target = document.createElement("div");
     const element = document.createElement("span");
+    const hiddenElement = document.createElement("span");
     const firstAnimation = makeAnimation();
     const controller = createPersistentMotionVisibility(target);
     controller.register(element, firstAnimation);
@@ -100,7 +103,7 @@ describe("createPersistentMotionVisibility", () => {
     expect(firstAnimation.pause).toHaveBeenCalledOnce();
 
     const hiddenAnimation = makeAnimation();
-    controller.register(element, hiddenAnimation);
+    controller.register(hiddenElement, hiddenAnimation);
     expect(hiddenAnimation.pause).toHaveBeenCalledOnce();
 
     intersectionObservers[0]?.emit(true);
@@ -129,6 +132,40 @@ describe("createPersistentMotionVisibility", () => {
 
     controller.setOwnerVisible(true);
     expect(animation.play).toHaveBeenCalledTimes(2);
+    controller.dispose();
+  });
+
+  it("rejects duplicate registrations without changing the original CSS state", () => {
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    const target = document.createElement("div");
+    const element = document.createElement("span");
+    const controller = createPersistentMotionVisibility(target);
+    const registration = controller.register(element);
+
+    intersectionObservers[0]?.emit(false);
+    expect(element.style.animationPlayState).toBe("paused");
+    expect(() => controller.register(element)).toThrow();
+
+    intersectionObservers[0]?.emit(true);
+    expect(element.style.animationPlayState).toBe("");
+    registration.unregister();
+    controller.dispose();
+  });
+
+  it("treats an intersecting zero-ratio edge target as visible", () => {
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    const target = document.createElement("div");
+    const element = document.createElement("span");
+    const animation = makeAnimation();
+    const controller = createPersistentMotionVisibility(target);
+    controller.register(element, animation);
+
+    intersectionObservers[0]?.emit(false);
+    intersectionObservers[0]?.emit(true, 0);
+
+    expect(controller.isVisible()).toBe(true);
+    expect(animation.pause).toHaveBeenCalledOnce();
+    expect(animation.play).toHaveBeenCalledOnce();
     controller.dispose();
   });
 

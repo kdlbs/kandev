@@ -15,24 +15,42 @@ function CompositorSpin({ className, style, ...props }: React.ComponentProps<"sp
 
   useCompositorEffect(() => {
     const element = elementRef.current;
-    if (!element || typeof element.animate !== "function") return;
+    if (!element) return;
 
     const visibility = createPersistentMotionVisibility(element);
     const registration = visibility.register(element);
+    if (typeof element.animate !== "function") {
+      return () => {
+        registration.unregister();
+        visibility.dispose();
+      };
+    }
+
+    const inlineAnimation = element.style.animation;
+    const inlineTransform = element.style.transform;
     element.style.removeProperty("animation");
     const computedStyle = window.getComputedStyle(element);
     const duration = parseAnimationDuration(computedStyle.animationDuration);
     element.style.animation = "none";
     void window.getComputedStyle(element).animationName;
     element.style.transform = "translateZ(0)";
-    const animation = element.animate(
-      [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
-      {
-        duration,
-        easing: "linear",
-        iterations: Infinity,
-      },
-    );
+    let animation: Animation;
+    try {
+      animation = element.animate(
+        [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+        {
+          duration,
+          easing: "linear",
+          iterations: Infinity,
+        },
+      );
+    } catch {
+      element.style.animation = inlineAnimation;
+      element.style.transform = inlineTransform;
+      registration.unregister();
+      visibility.dispose();
+      return;
+    }
     registration.setAnimation(animation);
     setCompositorReady(true);
 

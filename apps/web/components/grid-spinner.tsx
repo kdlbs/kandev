@@ -31,9 +31,10 @@ export function GridSpinner({ className }: GridSpinnerProps) {
     const registrations = cubes.map((cube) => visibility.register(cube));
     const animations = startGridAnimations(cubes);
     if (!animations) {
-      for (const registration of registrations) registration.unregister();
-      visibility.dispose();
-      return;
+      return () => {
+        for (const registration of registrations) registration.unregister();
+        visibility.dispose();
+      };
     }
 
     for (let index = 0; index < cubes.length; index += 1) {

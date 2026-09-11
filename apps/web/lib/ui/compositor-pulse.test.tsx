@@ -21,6 +21,8 @@ afterEach(() => {
   }
   if (originalVisibilityState) {
     Object.defineProperty(document, "visibilityState", originalVisibilityState);
+  } else {
+    Reflect.deleteProperty(document, "visibilityState");
   }
 });
 
@@ -155,8 +157,22 @@ describe("CompositorPulse", () => {
     const { getByTestId } = render(
       <CompositorPulse data-testid="pulse" className="animate-pulse" />,
     );
+    const pulse = getByTestId("pulse");
 
-    expect(getByTestId("pulse").style.animation).toBe("");
+    expect(pulse.style.animation).toBe("");
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(pulse.style.animationPlayState).toBe("paused");
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(pulse.style.animationPlayState).toBe("");
   });
 
   it("does not override CSS reduced-motion suppression", () => {

@@ -39,14 +39,16 @@ export async function expectCompositorPulse(pulse: Locator) {
 
 export async function expectCompositorMotionPaused(target: Locator) {
   await expect
-    .poll(() =>
-      target.evaluate((element) => {
-        const animations = element.getAnimations();
-        return (
-          (element as HTMLElement).style.animationPlayState === "paused" &&
-          animations.every((animation) => animation.playState !== "running")
-        );
-      }),
+    .poll(
+      () =>
+        target.evaluate((element) => {
+          const animations = element.getAnimations();
+          return (
+            (element as HTMLElement).style.animationPlayState === "paused" &&
+            animations.every((animation) => animation.playState !== "running")
+          );
+        }),
+      { timeout: 5_000 },
     )
     .toBe(true);
 }

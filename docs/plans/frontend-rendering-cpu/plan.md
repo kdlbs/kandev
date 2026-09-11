@@ -174,9 +174,11 @@ and mobile browser tests.
 Task 03: remains pending because the fixture isolation did not reproduce the
 supplied trace's persistent Layerize cadence.
 Task 04: shared visibility lifecycle implemented for spin, grid, and pulse;
-focused unit tests, desktop/mobile persistent-motion tests, desktop/mobile
-Quick Chat tests, and a post-integration three-repeat trace passed. See
-[evidence.md](evidence.md).
+focused unit tests, desktop/mobile persistent-motion tests (including a real
+scroll across the intersection boundary), desktop/mobile Quick Chat tests, and
+the review-remediation three-repeat trace passed. The trace compares each
+paused group with a matched script-enabled baseline and keeps the unpaused
+group active. See [evidence.md](evidence.md).
 
 ## Risks
 

@@ -78,6 +78,7 @@ logic; the attribution work order produces diagnostic evidence first.
 - `apps/web/components/grid-spinner.tsx`
 - `apps/web/lib/ui/persistent-motion-visibility.test.tsx (new)`
 - `apps/web/lib/ui/compositor-pulse.test.tsx`
+- `apps/web/lib/ui/compositor-spin.test.tsx`
 - `apps/web/lib/ui/state-icons.test.tsx`
 - `apps/web/components/grid-spinner.test.tsx`
 - `apps/web/e2e/helpers/animation-assertions.ts`
@@ -114,10 +115,11 @@ the compositor spin, pulse, and grid primitives. It combines document and
 intersection visibility, pauses owned Web Animations and CSS fallbacks, resumes
 only active effects, and cleans up shared listeners and observers.
 
-Focused unit coverage passed with 86 tests, including the visibility helper,
+Focused unit coverage passed with 90 tests, including the visibility helper,
 spin, pulse, grid, and ring regressions. Desktop and mobile persistent-motion
-browser tests passed with 1 test each. Desktop and mobile Quick Chat indicator
-tests passed with 2 tests each. The post-integration three-repeat trace passed;
-its pause arms recorded zero matched target invalidations and zero
-`UpdateLayoutTree`/`Layerize` events. The supplied trace's production trigger
+browser tests passed with 1 test each, including a real scroll across the
+intersection boundary. Desktop and mobile Quick Chat indicator tests passed
+with 2 tests each. The review-remediation three-repeat trace passed with
+non-empty target assertions, a matched script-enabled fallback baseline, and
+group-specific suppression checks. The supplied trace's production trigger
 remains unidentified, so this work order does not claim to complete Task 03.
