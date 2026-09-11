@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -22,6 +23,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { useTranslation } from "react-i18next";
 
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import type { Repository } from "@/lib/types/http";
 import { RepositorySetMembersField } from "./workspace-repository-set-editor-members";
 import type { RepositorySetDraft } from "./use-workspace-repository-sets";
@@ -115,20 +117,23 @@ export function RepositorySetEditorDialog({
 }: RepositorySetEditorDialogProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
+  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   if (!draft) return null;
 
   const formId = "repository-set-editor-form";
   const canSave = draft.name.trim().length > 0 && draft.members.length > 0 && !saving;
   const body = (
-    <RepositorySetEditorBody
-      workspaceId={workspaceId}
-      draft={draft}
-      repositories={repositories}
-      error={error}
-      formId={formId}
-      onChange={onChange}
-      onSubmit={onSubmit}
-    />
+    <TaskCreateDialogPopoverContainerProvider container={popoverContainer}>
+      <RepositorySetEditorBody
+        workspaceId={workspaceId}
+        draft={draft}
+        repositories={repositories}
+        error={error}
+        formId={formId}
+        onChange={onChange}
+        onSubmit={onSubmit}
+      />
+    </TaskCreateDialogPopoverContainerProvider>
   );
   const footer = (
     <RepositorySetEditorFooter
@@ -143,7 +148,8 @@ export function RepositorySetEditorDialog({
     return (
       <Drawer open onOpenChange={(open) => !open && onClose()}>
         <DrawerContent
-          className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-[100dvh]"
+          ref={setPopoverContainer}
+          className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-visible data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-[100dvh]"
           data-testid="repository-set-editor-surface"
         >
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">
@@ -164,7 +170,8 @@ export function RepositorySetEditorDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        ref={setPopoverContainer}
+        className="flex max-h-[92dvh] flex-col gap-0 overflow-visible p-0 sm:max-w-2xl"
         data-testid="repository-set-editor-surface"
       >
         <DialogHeader className="shrink-0 px-4 pb-1 pt-3 text-left">

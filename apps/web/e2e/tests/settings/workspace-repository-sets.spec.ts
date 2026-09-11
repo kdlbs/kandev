@@ -26,6 +26,9 @@ test.describe("Workspace repository sets settings", () => {
     execSync("git init -b main", { cwd: dir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
     execSync("git branch develop", { cwd: dir, env: gitEnv });
+    for (let index = 0; index < 40; index++) {
+      execSync(`git branch scroll-test-${index}`, { cwd: dir, env: gitEnv });
+    }
     execSync(`git remote add origin "file://${remoteDir}"`, { cwd: dir, env: gitEnv });
     execSync("git push origin main", { cwd: dir, env: gitEnv });
     execSync("git update-ref refs/remotes/origin/main HEAD", { cwd: dir, env: gitEnv });
@@ -40,7 +43,7 @@ test.describe("Workspace repository sets settings", () => {
     const setName = `Settings set ${Date.now()}`;
     await testPage.getByTestId("repository-set-create").click();
     const membersHint = testPage.getByText(
-      "Add at least one. The order here is the order they are added to a task. Choose a saved base branch or use the task default for each repository.",
+      "Add repositories in task order. Base branches are optional.",
     );
     const addRepository = testPage.getByTestId("repository-set-add-repository");
     const [membersHintBox, addRepositoryBox] = await Promise.all([
@@ -86,6 +89,16 @@ test.describe("Workspace repository sets settings", () => {
     await expect(dropdown.getByRole("option", { name: /^main local/ })).toBeVisible();
     await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
     await expect(dropdown.getByText("origin", { exact: true })).toBeVisible();
+
+    const branchList = dropdown.getByRole("listbox");
+    await branchList.hover();
+    await testPage.mouse.wheel(0, 500);
+    await expect.poll(() => branchList.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await prCapture.screenshot("desktop-repository-set-branch-scroll", {
+      caption: "Mouse-wheel scrolling reaches branches beyond the initial list inside the dialog.",
+    });
+    await testPage.mouse.wheel(0, -500);
+    await expect.poll(() => branchList.evaluate((element) => element.scrollTop)).toBe(0);
 
     const search = dropdown.getByPlaceholder("Search branches...");
     await search.fill("origin");

@@ -105,6 +105,14 @@ pnpm run i18n:check
 
 ## Results
 
+- Scroll follow-up: the desktop wheel regression reproduced a branch list that
+  stayed at scrollTop zero. The editor now supplies its outer surface as the
+  shared picker portal container and allows popup overflow outside the form.
+  The member hint is shorter and remains visible on desktop and mobile.
+  Added desktop wheel and mobile touch regressions with 40 branches.
+  Validation passed: 47 focused component tests, 2 desktop and 3 mobile E2E
+  tests, TypeScript checking, changed-file ESLint, i18n checks, and spec lint.
+
 - UX follow-up: use the shared 28px desktop control sizing and responsive
   touch targets for add, base, reset, and row actions. Keep the existing
   full-height phone drawer and shared state. Portal the repository picker out

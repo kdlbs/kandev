@@ -142,6 +142,11 @@ option model supplies these behaviors:
 - The shared popover keeps search and refresh in one row, groups branches under
   `Branches`, and preserves the New Task keyboard, pointer, and portal behavior.
 
+The editor supplies its dialog or drawer surface as the shared picker portal
+container. Pickers remain inside the modal scroll-lock boundary but outside
+the scrolling form. The outer surface allows overflow so it does not clip
+the floating picker. Mouse-wheel and touch gestures scroll the option list.
+
 `Task default` is a synthetic first option for base pickers. It does not change
 the shared mapping, search terms, ordering, badges, or selected-branch display.
 

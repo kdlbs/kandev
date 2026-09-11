@@ -1,9 +1,74 @@
 import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("Mobile workspace repository sets", () => {
+  test("scrolls a long branch list by touch without dismissing the editor", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    const dir = path.join(backend.tmpDir, "repos", "mobile-set-scroll");
+    fs.mkdirSync(dir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync('git init -b main && git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
+    for (let index = 0; index < 40; index++) {
+      execSync(`git branch scroll-test-${index}`, { cwd: dir, env: gitEnv });
+    }
+    const repository = await apiClient.createRepository(seedData.workspaceId, dir, "main", {
+      name: "Mobile branch scrolling",
+    });
+    const set = await apiClient.createRepositorySet(seedData.workspaceId, "Touch scroll", [
+      repository.id,
+    ]);
+    try {
+      await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
+      await testPage.getByTestId(`repository-set-edit-${set.id}`).tap();
+      await testPage.getByTestId(`repository-set-base-${repository.id}`).tap();
+      const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${repository.id}`);
+      const list = dropdown.getByRole("listbox");
+      await expect(list.getByRole("option", { name: /scroll-test-39/ })).toBeAttached();
+      const box = await list.boundingBox();
+      expect(box).not.toBeNull();
+      const cdp = await testPage.context().newCDPSession(testPage);
+      try {
+        const x = box!.x + box!.width / 2;
+        const y = box!.y + box!.height - 20;
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+        for (let step = 1; step <= 6; step++) {
+          await cdp.send("Input.dispatchTouchEvent", {
+            type: "touchMove",
+            touchPoints: [{ x, y: y - step * 30 }],
+          });
+        }
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      } finally {
+        await cdp.detach();
+      }
+      await expect(testPage.getByTestId("repository-set-editor-surface")).toBeVisible();
+      await expect(dropdown).toBeVisible();
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile branch scroll");
+      await prCapture.screenshot("mobile-repository-set-branch-scroll", {
+        caption:
+          "Touch scrolling moves the branch list without dismissing the repository set editor.",
+      });
+      await dropdown.getByPlaceholder("Search branches...").fill("scroll-test-39");
+      await dropdown.getByRole("option", { name: /scroll-test-39/ }).tap();
+      await expect(testPage.getByTestId(`repository-set-base-${repository.id}`)).toContainText(
+        "scroll-test-39",
+      );
+    } finally {
+      await apiClient.deleteRepositorySet(set.id);
+      await apiClient.rawRequest("DELETE", `/api/v1/repositories/${repository.id}`);
+    }
+  });
+
   test("opens the inline editor as a contained full-height drawer", async ({
     testPage,
     apiClient,
@@ -28,7 +93,7 @@ test.describe("Mobile workspace repository sets", () => {
       /min-h-0.*overflow-y-auto/,
     );
     const membersHint = testPage.getByText(
-      "Add at least one. The order here is the order they are added to a task. Choose a saved base branch or use the task default for each repository.",
+      "Add repositories in task order. Base branches are optional.",
     );
     const addRepository = testPage.getByTestId("repository-set-add-repository");
     const [membersHintBox, addRepositoryBox] = await Promise.all([

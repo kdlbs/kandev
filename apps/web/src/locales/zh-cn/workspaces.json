@@ -151,7 +151,7 @@
   "repositorySetsNameLabel": "名称",
   "repositorySetsDescriptionLabel": "描述（可选）",
   "repositorySetsMembersLabel": "仓库",
-  "repositorySetsMembersHint": "请至少添加一个。此处的顺序即添加到任务时的顺序。为每个仓库选择保存的基础分支，或使用任务默认值。",
+  "repositorySetsMembersHint": "按任务顺序添加仓库。基础分支可选。",
   "repositorySetsMoveUp": "上移",
   "repositorySetsMoveDown": "下移",
   "repositorySetsRemove": "移除仓库",

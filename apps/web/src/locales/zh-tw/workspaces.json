@@ -151,7 +151,7 @@
   "repositorySetsNameLabel": "名稱",
   "repositorySetsDescriptionLabel": "描述（可選）",
   "repositorySetsMembersLabel": "儲存庫",
-  "repositorySetsMembersHint": "請至少新增一個。此處的順序即新增到任務時的順序。為每個儲存庫選擇儲存的基礎分支，或使用任務預設值。",
+  "repositorySetsMembersHint": "按任務順序新增儲存庫。基礎分支可選。",
   "repositorySetsMoveUp": "上移",
   "repositorySetsMoveDown": "下移",
   "repositorySetsRemove": "移除儲存庫",

@@ -151,7 +151,7 @@
   "repositorySetsNameLabel": "Name",
   "repositorySetsDescriptionLabel": "Description (optional)",
   "repositorySetsMembersLabel": "Repositories",
-  "repositorySetsMembersHint": "Add at least one. The order here is the order they are added to a task. Choose a saved base branch or use the task default for each repository.",
+  "repositorySetsMembersHint": "Add repositories in task order. Base branches are optional.",
   "repositorySetsMoveUp": "Move earlier",
   "repositorySetsMoveDown": "Move later",
   "repositorySetsRemove": "Remove repository",

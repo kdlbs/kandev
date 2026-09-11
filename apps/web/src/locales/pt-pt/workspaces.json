@@ -151,7 +151,7 @@
   "repositorySetsNameLabel": "Nome",
   "repositorySetsDescriptionLabel": "Descrição (opcional)",
   "repositorySetsMembersLabel": "Repositórios",
-  "repositorySetsMembersHint": "Adicione pelo menos um. Esta ordem é a ordem em que são adicionados a uma tarefa. Escolha um ramo base guardado ou use a predefinição da tarefa para cada repositório.",
+  "repositorySetsMembersHint": "Adicione repositórios pela ordem da tarefa. Os ramos base são opcionais.",
   "repositorySetsMoveUp": "Mover para cima",
   "repositorySetsMoveDown": "Mover para baixo",
   "repositorySetsRemove": "Remover repositório",
