@@ -185,11 +185,11 @@ function DroppableTaskRow({
       ref={mergedRef}
       data-index={index}
       className={cn(
-        "absolute left-0 top-0 w-full",
+        "absolute left-0 w-full",
         showIndicator && insertionEdge === "top" && "border-t-2 border-primary",
         showIndicator && insertionEdge === "bottom" && "border-b-2 border-primary",
       )}
-      style={{ transform: `translateY(${top}px)` }}
+      style={{ top: `${top}px` }}
       data-testid={showIndicator ? `kanban-insertion-indicator-${insertionEdge}` : undefined}
     >
       {children}
