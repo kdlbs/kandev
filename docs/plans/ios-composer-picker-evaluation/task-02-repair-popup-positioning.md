@@ -187,3 +187,20 @@ Post-review local checks:
 No public contract or rendered-UI behavior changed, so the owning design and
 published screenshots remain representative. Remote checks and review
 dispositions remain pending until the refinement commit's CI completes.
+
+## CI follow-up
+
+The full frontend job exposed two existing entity-reference menu assertions
+that queried accessible options synchronously, before asynchronous popup
+positioning made them visible. Both failures reproduced on the CI-equivalent
+merge tree. The assertions now await accessible options with `findByRole`;
+they still require visible options and successful selection, without a
+positioning mock, hidden-element query, or increased timeout.
+
+- `CI=true pnpm exec vitest run components/task/chat/entity-reference-menu.test.tsx components/task/chat/popup-menu.test.tsx`:
+  23 passed after the test-only correction.
+- Changed-file ESLint, web typecheck, and whitespace check: passed.
+
+This correction changes no production behavior or public contract. The
+container-shard SSH teardown failure remains under investigation, and remote
+CI must pass before the PR fixup is complete.
