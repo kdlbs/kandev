@@ -1,19 +1,34 @@
 package sqlite
 
 // TestPostgresLockTaskStepForWriteReleasesStaleStepLockOnRetry and
-// TestPostgresLockTaskStepForWriteRetryDoesNotDeadlockConcurrentCrossStepMove
-// prove lockTaskStepForWrite's confirm-and-retry loop never holds more than
-// one workflow_steps row lock at a time. Every other site in this package
-// that locks two steps in one transaction sorts them ascending first (see
-// lockWorkflowStepsForAdmission), specifically to avoid an AB-BA deadlock
-// against another such locker. Before this fix, a retry (triggered when the
-// task moves between the loop's unlocked read and its lock acquisition) kept
-// the stale step's FOR UPDATE lock held — Postgres has no per-row unlock
-// short of a savepoint rollback — while going on to lock the task's new
-// step, so the transaction could end up holding two step locks in discovery
-// order instead of sorted order. A concurrent updateTaskWithWorkflowStepAdmission
-// cross-step move over the same two steps (always sorted ascending) can then
-// deadlock against it: reproduced by hand and confirmed independently.
+// TestPostgresLockTaskStepForWriteReleasesStaleStepLockWhenTaskLeavesStep
+// prove lockTaskStepForWrite's confirm-and-retry loop releases a stale step's
+// FOR UPDATE lock (via ROLLBACK TO SAVEPOINT) on both outcomes of a mismatch —
+// the task moved to a different step, or it left its step entirely — before
+// returning or retrying, so it never holds more than one workflow_steps row
+// lock at a time. Every other site in this package that locks two steps in
+// one transaction sorts them ascending first (see lockWorkflowStepsForAdmission),
+// specifically to avoid an AB-BA deadlock against another such locker. Before
+// this fix, either outcome kept the stale step's lock held — Postgres has no
+// per-row unlock short of a savepoint rollback — so the transaction could end
+// up holding a step lock nothing still needed, in discovery order rather than
+// sorted order: a real deadlock risk against a concurrent
+// updateTaskWithWorkflowStepAdmission cross-step move over the same two steps.
+//
+// TestPostgresLockTaskStepForWriteRetryLeavesNoLockForConcurrentCrossStepMove
+// is a weaker, complementary check, not a literal deadlock reproduction: since
+// the fix above means the retry never holds more than one step lock, it can
+// never actually contend against a concurrent sorted-order locker in this
+// harness (the retry goroutine is deliberately paused holding zero locks at
+// the moment the concurrent move runs), so it cannot raise Postgres's own
+// SQLSTATE 40P01. What it shows instead is that the retry leaves no lock
+// behind for an unrelated, correctly-ordered mover to trip over: a genuine
+// cross-step move over the very same two steps completes promptly while the
+// retry sits paused. Run against the pre-fix code, the equivalent scenario
+// doesn't raise 40P01 either — it hangs, because the retry goroutine is
+// parked on this harness's own pause channel before it ever issues the second
+// lock request Postgres's cycle detector would need to see — so a pre-fix run
+// times out rather than surfacing a captured deadlock error.
 //
 // Skips unless KANDEV_TEST_POSTGRES_DSN is set.
 
@@ -135,7 +150,99 @@ func TestPostgresLockTaskStepForWriteReleasesStaleStepLockOnRetry(t *testing.T) 
 	}
 }
 
-func TestPostgresLockTaskStepForWriteRetryDoesNotDeadlockConcurrentCrossStepMove(t *testing.T) {
+// TestPostgresLockTaskStepForWriteReleasesStaleStepLockWhenTaskLeavesStep proves
+// the confirming re-read's third outcome — the task no longer belongs to any
+// step at all (workflow_step_id cleared, e.g. by a concurrent
+// RemoveTaskFromWorkflow) rather than having moved to a different one — also
+// releases the stale step lock instead of leaving it held for the rest of the
+// caller's transaction. This is the same savepoint-lifecycle bug class the
+// mismatch-retry path was already fixed for: readTaskWorkflowStepID maps both
+// "no such task" and "workflow_step_id is empty" to (found=false, err=nil), so
+// treating that only as "return, nothing more to do" without also rolling back
+// the just-opened savepoint left the lock dangling.
+func TestPostgresLockTaskStepForWriteReleasesStaleStepLockWhenTaskLeavesStep(t *testing.T) {
+	const stepA = "leaves-step-a"
+	repo := seedVisibilityLockFixture(t, "leaves-step-ws", "leaves-step-workflow", stepA)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ID: "leaves-step-task", WorkspaceID: "leaves-step-ws", WorkflowID: "leaves-step-workflow",
+		WorkflowStepID: stepA, Title: "Leaving", WIPAdmitted: true,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	paused := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseFn := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseFn)
+
+	calls := 0
+	repo.taskStepLockBeforeAcquireHook = func(candidateStepID string) {
+		calls++
+		if calls != 1 {
+			t.Errorf("expected exactly one lock attempt (no step to retry against once the "+
+				"task has left it), got attempt %d for %q", calls, candidateStepID)
+			return
+		}
+		if candidateStepID != stepA {
+			t.Errorf("candidate step = %q, want %q", candidateStepID, stepA)
+		}
+		close(paused)
+		<-release
+	}
+	t.Cleanup(func() { repo.taskStepLockBeforeAcquireHook = nil })
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- repo.lockTaskStepForWrite(ctx, tx, task.ID)
+	}()
+
+	<-paused // read stepA, about to lock it
+
+	// Simulate a concurrent RemoveTaskFromWorkflow: detach the task from its
+	// step entirely. Runs on a separate pooled connection and autocommits
+	// immediately, so it's fully visible once release() lets the paused
+	// goroutine proceed to its confirming FOR UPDATE read.
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE tasks SET workflow_step_id = '' WHERE id = ?`,
+	), task.ID); err != nil {
+		t.Fatalf("simulate concurrent detach: %v", err)
+	}
+	releaseFn()
+
+	if err := <-lockDone; err != nil {
+		t.Fatalf("lockTaskStepForWrite: %v", err)
+	}
+
+	// If stepA's lock was released (rolled back to the savepoint) once the
+	// confirming read found no step left to protect, a second connection can
+	// lock it immediately with FOR UPDATE NOWAIT. If it's still held, this
+	// errors instead of blocking indefinitely, so the assertion is immediate
+	// either way.
+	var lockedID string
+	probeErr := repo.db.QueryRowContext(ctx, repo.db.Rebind(
+		`SELECT id FROM workflow_steps WHERE id = ? FOR UPDATE NOWAIT`,
+	), stepA).Scan(&lockedID)
+	if probeErr != nil {
+		t.Fatalf("stepA should be free once the task left it, but a second connection could not "+
+			"acquire it NOWAIT (the stale lock is still held): %v", probeErr)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
+func TestPostgresLockTaskStepForWriteRetryLeavesNoLockForConcurrentCrossStepMove(t *testing.T) {
 	const stepA = "retry-deadlock-step-a"
 	const stepB = "retry-deadlock-step-b"
 	repo := seedVisibilityLockFixture(t, "retry-deadlock-ws", "retry-deadlock-workflow", stepA)
@@ -185,13 +292,14 @@ func TestPostgresLockTaskStepForWriteRetryDoesNotDeadlockConcurrentCrossStepMove
 	release1()
 
 	<-pause2 // Op1's retry read stepA, about to lock it; a fixed implementation
-	// has already released stepB by this point.
+	// has already released stepB by this point, so Op1 holds no lock here.
 
 	// Op2: a genuine cross-step move of a DIFFERENT task, which locks stepA
 	// then stepB (updateTaskWithWorkflowStepAdmission's own established
-	// ascending order). Pre-fix, Op1 would still be holding stepB here, so
-	// Op2 blocks on stepB while Op1's very next step is to block on stepA
-	// (which Op2 already holds) — the AB-BA deadlock this test targets.
+	// ascending order). Op1 holds nothing at this point (see above), so this
+	// is not contended and completing promptly is expected, not evidence of
+	// deadlock avoidance under real contention — see the file header for what
+	// this test does and doesn't prove.
 	moveDone := make(chan error, 1)
 	go func() {
 		_, moveErr := repo.UpdateTaskWithWorkflowStepAdmission(ctx, y, stepA, stepB, 0)
@@ -204,8 +312,8 @@ func TestPostgresLockTaskStepForWriteRetryDoesNotDeadlockConcurrentCrossStepMove
 			t.Fatalf("cross-step move of Y: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatalf("cross-step move of Y did not complete within 5s — consistent with a deadlock against " +
-			"lockTaskStepForWrite's retry")
+		t.Fatalf("cross-step move of Y did not complete within 5s — Op1 holds no lock at this point, " +
+			"so this indicates a hang unrelated to Postgres's own deadlock detection, not a captured 40P01")
 	}
 
 	release2()

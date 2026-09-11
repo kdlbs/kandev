@@ -514,9 +514,56 @@ func lockWorkflowStepForWrite(ctx context.Context, tx interface {
 // lockTaskStepForWriteSavepoint is the name of the per-attempt Postgres
 // savepoint lockTaskStepForWrite wraps each lock attempt in, so a retry can
 // release a stale step's lock (see the function doc) via ROLLBACK TO
-// SAVEPOINT. Reused across attempts: each SAVEPOINT re-establishes it after
-// the previous attempt released or rolled back to it.
+// SAVEPOINT. Reused across attempts: ROLLBACK TO SAVEPOINT does not destroy
+// the named savepoint, so a later SAVEPOINT with the same name nests rather
+// than replaces it. Each attempt still releases its own lock (via RELEASE or
+// ROLLBACK TO) before the next attempt locks a different step, bounded by
+// maxAttempts; every savepoint, nested or not, is discarded when the
+// surrounding transaction ends.
 const lockTaskStepForWriteSavepoint = "lock_task_step_for_write"
+
+// taskStepLockSavepointTx is the minimal transaction surface the three
+// lockTaskStepForWrite savepoint helpers below need.
+type taskStepLockSavepointTx interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// beginTaskStepLockSavepoint opens the per-attempt savepoint a Postgres
+// caller can later release or roll back to; a no-op on every other dialect.
+func beginTaskStepLockSavepoint(ctx context.Context, tx taskStepLockSavepointTx, usePostgres bool) error {
+	if !usePostgres {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
+		return fmt.Errorf("lockTaskStepForWrite: savepoint: %w", err)
+	}
+	return nil
+}
+
+// releaseTaskStepLockSavepoint keeps the attempt's step lock for the rest of
+// the transaction.
+func releaseTaskStepLockSavepoint(ctx context.Context, tx taskStepLockSavepointTx, usePostgres bool) error {
+	if !usePostgres {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
+		return fmt.Errorf("lockTaskStepForWrite: release savepoint: %w", err)
+	}
+	return nil
+}
+
+// rollbackTaskStepLockSavepoint releases the attempt's step lock: the task
+// moved to a different step, or left its step entirely, while the lock was
+// held, so this attempt's step is no longer the one to protect.
+func rollbackTaskStepLockSavepoint(ctx context.Context, tx taskStepLockSavepointTx, usePostgres bool) error {
+	if !usePostgres {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
+		return fmt.Errorf("lockTaskStepForWrite: rollback to savepoint: %w", err)
+	}
+	return nil
+}
 
 // lockTaskStepForWrite locks the workflow step taskID currently belongs to
 // (see lockWorkflowStepForWrite), so a caller hiding or removing the task
@@ -563,33 +610,32 @@ func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 		if r.taskStepLockBeforeAcquireHook != nil {
 			r.taskStepLockBeforeAcquireHook(stepID)
 		}
-		if usePostgres {
-			if _, err := tx.ExecContext(ctx, "SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
-				return fmt.Errorf("lockTaskStepForWrite: savepoint: %w", err)
-			}
+		if err := beginTaskStepLockSavepoint(ctx, tx, usePostgres); err != nil {
+			return err
 		}
 		if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
 			return err
 		}
 		confirmedStepID, found, err := r.readTaskWorkflowStepID(ctx, tx, taskID, true)
-		if err != nil || !found {
+		if err != nil {
 			return err
 		}
+		if !found {
+			// The task left its step entirely (workflow_step_id cleared, or
+			// the row is gone) while we waited for stepID's lock — there is
+			// no current step left to protect. The caller's own mutation
+			// does not depend on stepID, so release its now-irrelevant lock
+			// and return rather than retrying.
+			return rollbackTaskStepLockSavepoint(ctx, tx, usePostgres)
+		}
 		if confirmedStepID == stepID {
-			if usePostgres {
-				if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
-					return fmt.Errorf("lockTaskStepForWrite: release savepoint: %w", err)
-				}
-			}
-			return nil
+			return releaseTaskStepLockSavepoint(ctx, tx, usePostgres)
 		}
 		// The task moved to a different step while we waited for stepID's
-		// lock. Roll back to the savepoint to release that now-stale step's
-		// lock before retrying against the task's real current step.
-		if usePostgres {
-			if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT "+lockTaskStepForWriteSavepoint); err != nil {
-				return fmt.Errorf("lockTaskStepForWrite: rollback to savepoint: %w", err)
-			}
+		// lock. Release that now-stale step's lock before retrying against
+		// the task's real current step.
+		if err := rollbackTaskStepLockSavepoint(ctx, tx, usePostgres); err != nil {
+			return err
 		}
 	}
 	return fmt.Errorf("lockTaskStepForWrite: task %s kept changing steps", taskID)
