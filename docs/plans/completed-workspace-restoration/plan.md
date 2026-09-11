@@ -182,6 +182,12 @@ Implementation and regression tests completed on 2026-09-10:
   recovery keeps its single Resume request and ended sessions retain their
   terminal explanation. The affected desktop E2E checks passed 4/4 and the
   passthrough unit suite passed 31/31 locally.
+- PR review follow-up added identity-fenced cleanup for obsolete automatic
+  restores and migration-aware workspace settlement. Deferred navigation tests
+  cover success and rejection cleanup with the shared app store, while
+  fallback-to-environment migration tests cover complete, fail, clear, and
+  protection against a newer attempt. The focused frontend block passed 58/58
+  tests, changed-file lint passed, and web typecheck passed.
 
 Design validation before implementation on 2026-09-10:
 

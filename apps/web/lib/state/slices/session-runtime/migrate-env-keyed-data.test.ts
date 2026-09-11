@@ -41,6 +41,7 @@ function commit(sha: string): SessionCommit {
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- migration cases share one state fixture.
 describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
   it("setUserShells writes directly under the environmentId key (no session translation)", () => {
     const store = makeStore();
@@ -157,7 +158,42 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
       environmentId: "env-3",
       status: "pending",
     });
+    expect(state.workspaceRestoration.byEnvironmentId["env-3"]?.attemptId).toBe(attempt?.attemptId);
     expect(state.workspaceRestoration.byEnvironmentId["sess-3"]).toBeUndefined();
+
+    expect(store.getState().completeWorkspaceRestoration(attempt!)).toBe(true);
+    expect(store.getState().workspaceRestoration.byEnvironmentId["env-3"]).toMatchObject({
+      status: "ready",
+    });
+    const newerAttempt = store.getState().beginWorkspaceRestoration("task-3", "sess-3", "env-3");
+    expect(newerAttempt).toMatchObject({
+      taskId: "task-3",
+      sessionId: "sess-3",
+      environmentId: "env-3",
+      revision: 2,
+      status: "pending",
+    });
+    expect(store.getState().failWorkspaceRestoration(attempt!, "stale result")).toBe(false);
+    expect(store.getState().workspaceRestoration.byEnvironmentId["env-3"]).toMatchObject({
+      revision: 2,
+      status: "pending",
+    });
+  });
+
+  it("settles and clears a migrated failure with its original attempt token", () => {
+    const store = makeStore();
+    const attempt = store.getState().beginWorkspaceRestoration("task-4", "sess-4", "sess-4");
+    expect(attempt).not.toBeNull();
+
+    store.getState().registerSessionEnvironment("sess-4", "env-4");
+
+    expect(store.getState().failWorkspaceRestoration(attempt!, "restore failed")).toBe(true);
+    expect(store.getState().workspaceRestoration.byEnvironmentId["env-4"]).toMatchObject({
+      status: "error",
+      details: "restore failed",
+    });
+    expect(store.getState().clearWorkspaceRestoration(attempt!)).toBe(true);
+    expect(store.getState().workspaceRestoration.byEnvironmentId["env-4"]).toBeUndefined();
   });
 });
 

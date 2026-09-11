@@ -3,6 +3,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
+import { sanitizeWorkspaceRestorationDetails } from "@/lib/state/slices/session-runtime/workspace-restoration";
+import { createAppStore } from "@/lib/state/store";
 
 const mockRequest = vi.fn();
 const mockSetTaskSession = vi.fn();
@@ -52,6 +54,7 @@ import {
   type SessionRecoveryFailure,
 } from "./use-session-resumption";
 import { resumeViaLaunch } from "./use-session-resumption-operations";
+import { buildGuardedSetters } from "./use-session-resumption-request-guard";
 
 type SetterCalls = {
   resumptionStates: ResumptionState[];
@@ -880,6 +883,7 @@ describe("useSessionResumption resume-skipped clearing on running status", () =>
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- navigation and response races share one harness.
 describe("useSessionResumption stale-callback guard after navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -930,4 +934,72 @@ describe("useSessionResumption stale-callback guard after navigation", () => {
     expect(mockSetResumeSkipped).not.toHaveBeenCalled();
     expect(mockSetTaskSession).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["success", { success: true, state: "WAITING_FOR_INPUT" }],
+    ["rejection", new Error("obsolete restore rejected")],
+  ] as const)(
+    "cleans up an obsolete automatic restore when navigation A to B to A receives a %s response",
+    async (_outcome, response) => {
+      const workspaceStore = createAppStore();
+      const { setters } = createSetters();
+      setters.workspaceRestoration = {
+        begin: (taskId, sessionId) =>
+          workspaceStore.getState().beginWorkspaceRestoration(taskId, sessionId, "env-a"),
+        complete: (attempt) => workspaceStore.getState().completeWorkspaceRestoration(attempt),
+        fail: (attempt, details) =>
+          workspaceStore
+            .getState()
+            .failWorkspaceRestoration(attempt, sanitizeWorkspaceRestorationDetails(details)),
+        clear: (attempt) => workspaceStore.getState().clearWorkspaceRestoration(attempt),
+      };
+      const activeRequestRef = {
+        current: { key: "task-a/session-a", generation: 1 },
+      };
+      const capturedRequest = activeRequestRef.current;
+      const guardedSetters = buildGuardedSetters(activeRequestRef, capturedRequest, setters);
+      const launchResponse = Promise.withResolvers<unknown>();
+      mockRequest.mockReturnValueOnce(launchResponse.promise);
+
+      const restore = resumeViaLaunch(buildRestoreWorkspaceRequest, {
+        taskId: "task-a",
+        sessionId: "session-a",
+        session: null,
+        setters: guardedSetters,
+        canContinue: () =>
+          activeRequestRef.current.key === capturedRequest.key &&
+          activeRequestRef.current.generation === capturedRequest.generation,
+      });
+
+      await waitFor(() => {
+        expect(
+          workspaceStore.getState().workspaceRestoration.byEnvironmentId["env-a"],
+        ).toMatchObject({
+          taskId: "task-a",
+          sessionId: "session-a",
+          status: "pending",
+        });
+      });
+
+      // Navigate to B before A's workspace request settles.
+      activeRequestRef.current = { key: "task-b/session-b", generation: 2 };
+      if (response instanceof Error) launchResponse.reject(response);
+      else launchResponse.resolve(response);
+      await expect(restore).resolves.toBe(false);
+
+      // Returning to A must not find the obsolete pending attempt.
+      activeRequestRef.current = { key: "task-a/session-a", generation: 3 };
+      expect(
+        workspaceStore.getState().workspaceRestoration.byEnvironmentId["env-a"],
+      ).toBeUndefined();
+      const retry = workspaceStore
+        .getState()
+        .beginWorkspaceRestoration("task-a", "session-a", "env-a");
+      expect(retry).toMatchObject({
+        taskId: "task-a",
+        sessionId: "session-a",
+        status: "pending",
+      });
+    },
+  );
 });

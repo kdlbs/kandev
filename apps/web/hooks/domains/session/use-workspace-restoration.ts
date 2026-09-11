@@ -4,6 +4,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { restoreSessionWorkspace } from "@/lib/services/session-recovery-service";
 import type { SessionAgentctlStatus } from "@/lib/state/slices/session/types";
 import {
+  isWorkspaceRestorationAttemptCurrent,
   resolveWorkspaceRestorationKey,
   sanitizeWorkspaceRestorationDetails,
   type WorkspaceRestorationAttempt,
@@ -59,16 +60,9 @@ function settleWorkspaceRestoreResponse({
 
 function isCurrentWorkspaceAttempt(
   storeApi: ReturnType<typeof useAppStoreApi>,
-  environmentKey: string,
   attempt: WorkspaceRestorationAttempt,
 ): boolean {
-  const currentAttempt = storeApi.getState().workspaceRestoration.byEnvironmentId[environmentKey];
-  return Boolean(
-    currentAttempt &&
-    currentAttempt.revision === attempt.revision &&
-    currentAttempt.taskId === attempt.taskId &&
-    currentAttempt.sessionId === attempt.sessionId,
-  );
+  return isWorkspaceRestorationAttemptCurrent(storeApi.getState().workspaceRestoration, attempt);
 }
 
 export function useWorkspaceRestoration(
@@ -137,7 +131,7 @@ export function useWorkspaceRestoration(
       ) {
         return false;
       }
-      if (!isCurrentWorkspaceAttempt(storeApi, environmentKey, nextAttempt)) return false;
+      if (!isCurrentWorkspaceAttempt(storeApi, nextAttempt)) return false;
       // The response admits the workspace. A matching agentctl_ready event
       // settles the attempt when readiness is still in flight.
       return true;

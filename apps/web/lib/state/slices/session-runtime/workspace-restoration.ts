@@ -1,6 +1,10 @@
+import { generateUUID } from "@/lib/utils";
+
 export type WorkspaceRestorationStatus = "pending" | "ready" | "error";
 
 export type WorkspaceRestorationAttempt = {
+  /** Stable identity that survives migration from a session fallback key. */
+  attemptId?: string;
   taskId: string;
   sessionId: string;
   environmentId: string;
@@ -55,6 +59,7 @@ export function beginWorkspaceRestoration(
     return null;
   }
   const attempt: WorkspaceRestorationAttempt = {
+    attemptId: generateUUID(),
     ...input,
     revision: (current?.revision ?? 0) + 1,
     status: "pending",
@@ -63,26 +68,58 @@ export function beginWorkspaceRestoration(
   return attempt;
 }
 
-function matchesWorkspaceRestorationAttempt(
+function matchesAttemptFields(
+  current: WorkspaceRestorationAttempt | undefined,
+  attempt: WorkspaceRestorationAttempt,
+): boolean {
+  if (!current) return false;
+  if (
+    attempt.attemptId !== undefined &&
+    current.attemptId !== undefined &&
+    current.attemptId !== attempt.attemptId
+  ) {
+    return false;
+  }
+  return (
+    current.revision === attempt.revision &&
+    current.taskId === attempt.taskId &&
+    current.sessionId === attempt.sessionId
+  );
+}
+
+function findMatchingWorkspaceRestorationAttempt(
+  state: WorkspaceRestorationState,
+  attempt: WorkspaceRestorationAttempt,
+): [key: string, current: WorkspaceRestorationAttempt] | null {
+  const directMatch = state.byEnvironmentId[attempt.environmentId];
+  if (matchesAttemptFields(directMatch, attempt)) {
+    return [attempt.environmentId, directMatch];
+  }
+
+  for (const [key, current] of Object.entries(state.byEnvironmentId)) {
+    if (matchesAttemptFields(current, attempt)) {
+      return [key, current];
+    }
+  }
+  return null;
+}
+
+export function isWorkspaceRestorationAttemptCurrent(
   state: WorkspaceRestorationState,
   attempt: WorkspaceRestorationAttempt,
 ): boolean {
-  const current = state.byEnvironmentId[attempt.environmentId];
-  return Boolean(
-    current &&
-    current.revision === attempt.revision &&
-    current.taskId === attempt.taskId &&
-    current.sessionId === attempt.sessionId,
-  );
+  return findMatchingWorkspaceRestorationAttempt(state, attempt) !== null;
 }
 
 export function completeWorkspaceRestoration(
   state: WorkspaceRestorationState,
   attempt: WorkspaceRestorationAttempt,
 ): boolean {
-  if (!matchesWorkspaceRestorationAttempt(state, attempt)) return false;
-  state.byEnvironmentId[attempt.environmentId] = {
-    ...attempt,
+  const match = findMatchingWorkspaceRestorationAttempt(state, attempt);
+  if (!match) return false;
+  const [key, current] = match;
+  state.byEnvironmentId[key] = {
+    ...current,
     status: "ready",
     details: undefined,
   };
@@ -94,9 +131,11 @@ export function failWorkspaceRestoration(
   attempt: WorkspaceRestorationAttempt,
   details: string,
 ): boolean {
-  if (!matchesWorkspaceRestorationAttempt(state, attempt)) return false;
-  state.byEnvironmentId[attempt.environmentId] = {
-    ...attempt,
+  const match = findMatchingWorkspaceRestorationAttempt(state, attempt);
+  if (!match) return false;
+  const [key, current] = match;
+  state.byEnvironmentId[key] = {
+    ...current,
     status: "error",
     details,
   };
@@ -107,8 +146,10 @@ export function clearWorkspaceRestoration(
   state: WorkspaceRestorationState,
   attempt: WorkspaceRestorationAttempt,
 ): boolean {
-  if (!matchesWorkspaceRestorationAttempt(state, attempt)) return false;
-  delete state.byEnvironmentId[attempt.environmentId];
+  const match = findMatchingWorkspaceRestorationAttempt(state, attempt);
+  if (!match) return false;
+  const [key] = match;
+  delete state.byEnvironmentId[key];
   return true;
 }
 

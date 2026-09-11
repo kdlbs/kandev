@@ -116,6 +116,7 @@ describe("useWorkspaceRestoration attempt lifecycle", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- concurrency and mapping races share one harness.
 describe("useWorkspaceRestoration concurrency guards", () => {
   it("rejects a duplicate retry while the first restore is pending", async () => {
     let resolveRestore: (() => void) | undefined;
@@ -146,6 +147,52 @@ describe("useWorkspaceRestoration concurrency guards", () => {
     });
     rerender();
     expect(result.current.status).toBe("pending");
+  });
+
+  it("settles a fallback-key attempt after its environment mapping is registered", async () => {
+    let resolveRestore: (() => void) | undefined;
+    mockRestoreSessionWorkspace.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRestore = () =>
+          resolve({ success: true, agent_execution_id: agentExecutionId } as never);
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ currentEnvironmentId }) =>
+        useWorkspaceRestoration(taskId, sessionId, currentEnvironmentId),
+      { initialProps: { currentEnvironmentId: sessionId } },
+    );
+
+    let restorePromise: Promise<boolean> | undefined;
+    await act(async () => {
+      restorePromise = result.current.restore();
+    });
+    const fallbackAttempt = workspaceRestoration.byEnvironmentId[sessionId];
+    expect(fallbackAttempt).toMatchObject({
+      taskId,
+      sessionId,
+      environmentId: sessionId,
+      status: "pending",
+    });
+
+    workspaceRestoration.byEnvironmentId[environmentId] = {
+      ...fallbackAttempt!,
+      environmentId,
+    };
+    delete workspaceRestoration.byEnvironmentId[sessionId];
+    state.sessionAgentctl = {
+      itemsBySessionId: { [sessionId]: { status: "ready", agentExecutionId } },
+    };
+    rerender({ currentEnvironmentId: environmentId });
+
+    await act(async () => {
+      resolveRestore?.();
+      expect(await restorePromise).toBe(true);
+    });
+    expect(workspaceRestoration.byEnvironmentId[environmentId]).toMatchObject({
+      environmentId,
+      status: "ready",
+    });
   });
 
   it("does not let a restore from the previous task settle the current attempt", async () => {
