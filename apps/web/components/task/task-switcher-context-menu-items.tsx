@@ -178,7 +178,7 @@ function SingleSelectionMenuGroups(props: SingleSelectionMenuProps & SingleMenuS
         },
         {
           key: "remove",
-          visible: Boolean(props.onArchiveTask || props.onDeleteTask),
+          visible: hasSingleRemoveGroup(props),
           content: <SingleRemoveGroup {...props} onDeleteTask={props.onDelete} />,
         },
       ]}
@@ -207,6 +207,18 @@ function hasSingleMoveGroup({
     (workflow) => !workflow.hidden && workflow.id !== workflowId,
   );
   return hasSameWorkflowMove || hasCrossWorkflowMove;
+}
+
+function hasSingleRemoveGroup({
+  actingOnSelection,
+  onArchiveTask,
+  onBulkArchive,
+  onDeleteTask,
+}: Pick<
+  SingleSelectionMenuProps,
+  "actingOnSelection" | "onArchiveTask" | "onBulkArchive" | "onDeleteTask"
+>) {
+  return Boolean(onArchiveTask || onDeleteTask || (actingOnSelection && onBulkArchive));
 }
 
 function SingleMarkGroup({

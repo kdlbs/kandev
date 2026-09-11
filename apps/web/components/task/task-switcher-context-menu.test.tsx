@@ -199,6 +199,51 @@ describe("TaskItemWithContextMenu — grouped single-task actions", () => {
 });
 
 describe("TaskItemWithContextMenu — grouped bulk actions", () => {
+  it("keeps Archive for a one-row selection with only the bulk archive handler", async () => {
+    const onBulkArchive = vi.fn();
+    render(
+      <StateProvider>
+        <ToastProvider>
+          <TaskItemWithContextMenu
+            task={task()}
+            selectedTaskIds={new Set(["task-1"])}
+            onBulkArchive={onBulkArchive}
+          >
+            <ArchiveAwareRow />
+          </TaskItemWithContextMenu>
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("task-row"));
+    const archive = await screen.findByRole("menuitem", { name: "Archive" });
+
+    fireEvent.click(archive);
+
+    expect(onBulkArchive).toHaveBeenCalledWith(["task-1"]);
+  });
+
+  it("does not show a removal group for a non-selected row with only the bulk archive handler", async () => {
+    render(
+      <StateProvider>
+        <ToastProvider>
+          <TaskItemWithContextMenu
+            task={task()}
+            selectedTaskIds={new Set(["task-2"])}
+            onBulkArchive={vi.fn()}
+          >
+            <ArchiveAwareRow />
+          </TaskItemWithContextMenu>
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("task-row"));
+    const menu = await screen.findByRole("menu");
+
+    expect(within(menu).queryByRole("menuitem", { name: /archive/i })).toBeNull();
+  });
+
   it("keeps bulk actions in mark, movement, and removal groups", async () => {
     render(
       <StateProvider>
