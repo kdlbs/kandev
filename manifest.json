@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-09-11T10:07:48.780Z",
+  "assets": [
+    {
+      "name": "desktop-task-row-menu-grouping",
+      "type": "screenshot",
+      "format": "png",
+      "file": "task-menu-grouping--desktop-task-row-menu-grouping.png",
+      "test": "task-menu-grouping.spec.ts",
+      "caption": "Desktop task-row actions grouped by purpose"
+    },
+    {
+      "name": "mobile-task-row-menu-grouping",
+      "type": "screenshot",
+      "format": "png",
+      "file": "mobile-sidebar-task-actions--mobile-task-row-menu-grouping.png",
+      "test": "mobile-sidebar-task-actions.spec.ts",
+      "caption": "Phone task-row actions grouped inside the scrolling menu"
+    }
+  ]
+}
