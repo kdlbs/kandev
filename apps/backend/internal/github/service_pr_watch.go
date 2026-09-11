@@ -135,12 +135,24 @@ func (s *Service) DeletePRWatch(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	return s.store.DeletePRWatch(ctx, id)
+	if err := s.store.DeletePRWatch(ctx, id); err != nil {
+		return err
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0.
 func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
-	return s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch)
+	watch, err := s.store.GetPRWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch); err != nil {
+		return err
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
@@ -173,7 +185,15 @@ func (s *Service) rebindPRWatchRepository(ctx context.Context, watch *PRWatch, p
 // ResetPRWatch atomically resets a watch's branch and clears its pr_number so
 // the poller re-searches for a PR on the new branch. See Store.ResetPRWatch.
 func (s *Service) ResetPRWatch(ctx context.Context, id, branch string) error {
-	return s.store.ResetPRWatch(ctx, id, branch)
+	watch, err := s.store.GetPRWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.ResetPRWatch(ctx, id, branch); err != nil {
+		return err
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // CheckPRWatch fetches lightweight PR status for a watch and determines if there are changes.
@@ -1594,6 +1614,17 @@ func (s *Service) detectPRForWatchOnce(
 	// fires WHILE FindPRByBranch is running wins over our post-fetch
 	// classification — see Service.markRepoAsMissing for the rationale.
 	repoErrGen := s.repoErrorGenSnapshot()
+	credentialGeneration := int64(0)
+	if resolved.credential != nil {
+		credentialGeneration = resolved.credential.CredentialGeneration
+	}
+	attempt, admitted := s.beginPRDiscoveryWatch(
+		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch,
+	)
+	if !admitted {
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
+		return s.store.GetTaskPRByRepository(ctx, effectiveTaskID, watch.RepositoryID)
+	}
 	pr, err := s.findPRByBranchInForkNetwork(
 		ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
 	)
@@ -1603,6 +1634,15 @@ func (s *Service) detectPRForWatchOnce(
 		// to flag the WS response as permanent without re-running the
 		// classifier on the raw upstream error string.
 		err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
+	}
+	if err != nil {
+		s.finishPRDiscoveryWatchFailure(
+			watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt, err,
+		)
+	} else {
+		s.finishPRDiscoveryWatchSuccess(
+			watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt,
+		)
 	}
 	// Stamp last_checked_at regardless of outcome — including on error. The
 	// flood this fixes IS the error path (an unresolvable repo makes `gh` exit

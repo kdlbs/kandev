@@ -1,6 +1,6 @@
 ---
 created: 2026-09-11
-status: draft
+status: done
 requirements:
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-001
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001
@@ -14,9 +14,8 @@ legacy_specs: []
 ## Overview
 
 Restore valid discovery first, then add truthful failure reporting and bounded
-retry admission. Execute two work orders sequentially. This package is ready
-for review; production and permanent test changes require a later implementation
-request.
+retry admission. Execute two work orders sequentially. Both work orders are
+implemented and verified.
 
 ## Evidence and requirement conformance
 
@@ -77,7 +76,11 @@ Task 01 corrects `prFieldsBlock`, GraphQL decoding, and clone URL mapping, with
 query-contract and real service-path regression tests. Task 02 adds service-owned
 discovery health and admission shared by the poller and on-demand synchronization.
 It extends workspace status and scoped events, keeps quota observation independent,
-and updates the existing GitHub settings summary and limits disclosure.
+and updates the existing GitHub settings summary and limits disclosure. The
+completed remediation also shares duplicate target attempts, carries immutable
+completion tokens through fork rebinding, reconciles health consumers with watch
+lifecycle changes, orders projections by runtime epoch, and preserves provider
+retry deadlines.
 
 The [design](../../specs/integrations/system-design/github-pr-discovery-health.md)
 defines keys, generation/revision ordering, retry timing, mixed-target aggregation,
@@ -137,9 +140,10 @@ UI-01 covers health ACs .1, .2, .3, .5, and .6.
   `TestPRDiscoveryAssociationRecovery`. Validate generated fields, nullable/fork
   identity, persistence, event identity, and error-versus-empty outcomes.
 - Health ACs .1-.7: new `service_pr_discovery_health_test.go`,
-  `TestPRDiscoveryHealth`, covering full quota after failure, mixed targets,
-  monotonic recovery, credential replacement, HTTP-200 GraphQL errors, and
-  exact transport counts before/after deadlines.
+  `TestPRDiscoveryHealth`, covering full quota after failure, duplicate and
+  mixed targets, fork rebinding, watch lifecycle pruning, monotonic recovery,
+  credential replacement, HTTP-200 GraphQL errors, runtime epochs, and exact
+  transport counts before/after provider deadlines.
 - Health projection: extend `github-slice.test.ts` and `github.test.ts` for
   workspace/generation isolation and stale response rejection. Add
   `github-rate-limit.test.tsx` for retained warning with refreshed counters.
@@ -156,13 +160,22 @@ schema validation.
 
 ## Work orders
 
-- [ ] [Task 01: Restore valid PR discovery](task-01-valid-pr-discovery.md)
-- [ ] [Task 02: Preserve discovery failure evidence](task-02-discovery-health.md)
+- [x] [Task 01: Restore valid PR discovery](task-01-valid-pr-discovery.md) (done)
+- [x] [Task 02: Preserve discovery failure evidence](task-02-discovery-health.md) (done)
 
 ## Verification results
 
-Implementation checks: pending. Design-package validation is recorded in the
-handoff and task plan. No implementation checks have run during planning.
+Implementation checks passed:
+
+- `go test ./internal/github -count=1`: 1,769 passed.
+- `go test -race ./internal/github -count=1`: 1,769 passed.
+- Backend `make lint` and frontend `pnpm run lint`: passed.
+- Frontend typecheck, focused Vitest suite (33 tests), i18n check, and i18n
+  ratchet: passed.
+- Backend and Vite production builds: passed.
+- Chromium GitHub settings E2E: 5 passed. Mobile Chrome GitHub settings E2E:
+  3 passed.
+- Public-doc validators, specification lint, and `git diff --check`: passed.
 
 ## Risks
 

@@ -386,6 +386,9 @@ func (s *Service) invalidateWorkspaceCredential(workspaceID string) {
 	if s.resolver != nil {
 		s.resolver.InvalidateWorkspace(workspaceID)
 	}
+	if s.prDiscoveryHealth != nil {
+		s.prDiscoveryHealth.clearWorkspace(workspaceID)
+	}
 	// Existing caches are still global during the compatibility phase. Clear
 	// them on replacement until Task 05 prefixes every key by principal.
 	s.clearAuthCaches()

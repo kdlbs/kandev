@@ -1,8 +1,9 @@
 import type { StateCreator } from "zustand";
 import type { GitHubSlice, GitHubSliceState, TaskPRScope } from "./types";
+import type { GitHubPRDiscoveryHealth, GitHubPRDiscoveryHealthUpdate } from "@/lib/types/github";
 
 export const defaultGitHubState: GitHubSliceState = {
-  githubStatus: { byWorkspaceId: {} },
+  githubStatus: { byWorkspaceId: {}, pendingPRDiscoveryHealthByWorkspaceId: {} },
   githubAppRegistrations: { byWorkspaceId: {} },
   taskPRs: {
     byTaskId: {},
@@ -48,7 +49,35 @@ function createGitHubStatusActions(
       set((draft) => {
         const entry = draft.githubStatus.byWorkspaceId[workspaceId];
         if (!entry) return;
-        entry.status = status;
+        let nextStatus = status;
+        const currentHealth = entry.status?.pr_discovery_health;
+        if (
+          nextStatus &&
+          currentHealth &&
+          nextStatus.authenticated &&
+          nextStatus.pr_discovery_health &&
+          !shouldApplyDiscoveryHealth(nextStatus.pr_discovery_health, currentHealth)
+        ) {
+          nextStatus = {
+            ...nextStatus,
+            pr_discovery_health: currentHealth,
+          };
+        }
+        const pending = draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
+        if (
+          nextStatus &&
+          pending &&
+          !nextStatus.pr_discovery_health &&
+          nextStatus.authenticated &&
+          (!currentHealth || shouldApplyDiscoveryHealth(pending.health, currentHealth))
+        ) {
+          nextStatus = {
+            ...nextStatus,
+            pr_discovery_health: pending.health,
+          };
+        }
+        delete draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
+        entry.status = nextStatus;
         entry.loaded = true;
       }),
     setGitHubStatusLoading: (workspaceId, loading) =>
@@ -64,8 +93,23 @@ function createGitHubStatusActions(
           loaded: false,
           loading: false,
         };
+        delete draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
       }),
   };
+}
+
+function shouldApplyDiscoveryHealth(
+  incoming: GitHubPRDiscoveryHealth,
+  current: GitHubPRDiscoveryHealth | undefined,
+): boolean {
+  if (!current) return true;
+  const incomingEpoch = incoming.runtime_epoch ?? 0;
+  const currentEpoch = current.runtime_epoch ?? 0;
+  if (incomingEpoch !== currentEpoch) return incomingEpoch > currentEpoch;
+  if (incoming.credential_generation !== current.credential_generation) {
+    return incoming.credential_generation > current.credential_generation;
+  }
+  return incoming.revision > current.revision;
 }
 
 function createGitHubAppRegistrationActions(
@@ -390,7 +434,9 @@ function createTaskCIAutomationActions(
   };
 }
 
-function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
+function createRateLimitActions(
+  set: ImmerSet,
+): Pick<GitHubSlice, "applyGitHubRateLimitUpdate" | "applyGitHubPRDiscoveryHealthUpdate"> {
   return {
     applyGitHubRateLimitUpdate: (update) =>
       set((draft) => {
@@ -403,6 +449,25 @@ function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRa
           }
           entry.status = { ...existing, rate_limit: rateLimit };
         }
+      }),
+    applyGitHubPRDiscoveryHealthUpdate: (update: GitHubPRDiscoveryHealthUpdate) =>
+      set((draft) => {
+        if (!update?.workspace_id || !update.health) return;
+        const entry = draft.githubStatus.byWorkspaceId[update.workspace_id];
+        if (!entry?.status) {
+          const pending =
+            draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[update.workspace_id];
+          if (!pending || shouldApplyDiscoveryHealth(update.health, pending.health)) {
+            draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[update.workspace_id] = update;
+          }
+          return;
+        }
+        if (!shouldApplyDiscoveryHealth(update.health, entry.status.pr_discovery_health)) return;
+        entry.status = {
+          ...entry.status,
+          workspace_id: update.workspace_id,
+          pr_discovery_health: update.health,
+        };
       }),
   };
 }

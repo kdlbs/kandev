@@ -1,7 +1,7 @@
 ---
 id: "02-discovery-health"
 title: "Preserve discovery failure evidence"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-valid-pr-discovery"
@@ -153,4 +153,29 @@ this work order without a revised scope.
 
 ## Results
 
-Pending.
+- Added credential-scoped PR discovery health with bounded target retention,
+  classified GraphQL/rate-limit/unavailable failures, monotonic revisions,
+  coalesced admission, retry deadlines, and stale-completion protection.
+- Wired health through workspace status and workspace-scoped WebSocket events;
+  quota snapshots remain independent. Invalid and throttled batches do not fan
+  out the same request, while other provider failures retain the existing
+  per-watch fallback.
+- Added localized desktop and phone warnings, retained warning details in the
+  quota disclosure, bounded mobile drawer scrolling, and safe-area spacing.
+- Added store and WebSocket ordering/isolation tests, focused UI tests, and
+  desktop/mobile E2E fixtures for failure, full quota refresh, and recovery.
+- Added public integration troubleshooting guidance and synchronized all five
+  locale catalogs.
+- Review remediation now groups duplicate immutable targets behind one
+  provider attempt and fans persistence and feedback results to every watch.
+  Immutable attempt tokens survive fork-to-upstream rebinding, live consumer
+  pruning handles shared, archived, deleted, and branch-switched watches, and
+  active targets are never evicted for capacity.
+- Runtime epochs reject delayed events from an older backend incarnation, while
+  disconnected status clears stale connection health. HTTP Retry-After/reset
+  headers and HTTP-200 GraphQL rate-limit resetAt values now reach discovery
+  admission instead of being replaced by synthetic deadlines.
+- Verification passed: backend normal and race suites (1,769 tests each),
+  backend/frontend lint, frontend typecheck, 33 focused frontend tests, i18n
+  gates, backend and Vite builds, 5 Chromium E2E tests, 3 mobile Chrome E2E
+  tests, public-doc validators, specification lint, and `git diff --check`.

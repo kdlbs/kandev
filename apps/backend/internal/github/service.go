@@ -159,6 +159,7 @@ type Service struct {
 	forkParentCache      *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
+	prDiscoveryHealth    *prDiscoveryHealthStore
 	promptResolver       PromptResolver
 	tokenClientFactory   func(string) Client
 	ghAccountLister      func(context.Context) ([]GHAccount, error)
@@ -229,6 +230,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		forkParentCache:         newForkParentCache(),
 		protectionCache:         newBranchProtectionCache(),
 		rateTracker:             NewRateTracker(eventBus, log),
+		prDiscoveryHealth:       newPRDiscoveryHealth(eventBus, log),
 		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
 		ghAccountLister:         ListGHAccounts,
 		cleanupFailureCounts:    make(map[string]int),
@@ -269,6 +271,9 @@ func (s *Service) Stop() {
 	s.stopOnce.Do(func() {
 		s.stopCancel()
 		s.bgWG.Wait()
+		if s.prDiscoveryHealth != nil {
+			s.prDiscoveryHealth.clearAll()
+		}
 	})
 }
 

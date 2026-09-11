@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -646,6 +648,141 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 	}
 	if updated.ReviewState != "approved" {
 		t.Errorf("ReviewState = %q, want approved", updated.ReviewState)
+	}
+}
+
+func TestSyncWorkspaceWatchesBatched_DuplicatePRFansOutTaskAssociation(t *testing.T) {
+	_, service, client, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-duplicate-a", false)
+	seedTask(t, store, "task-duplicate-b", false)
+
+	watchA := withTestWorkspace(&PRWatch{
+		SessionID: "session-duplicate-a", TaskID: "task-duplicate-a", Owner: "o", Repo: "r",
+		PRNumber: 42, Branch: "feature/shared-pr", LastCheckStatus: "pending",
+	})
+	watchB := withTestWorkspace(&PRWatch{
+		SessionID: "session-duplicate-b", TaskID: "task-duplicate-b", Owner: "o", Repo: "r",
+		PRNumber: 42, Branch: "feature/shared-pr", LastCheckStatus: "pending",
+	})
+	for _, watch := range []*PRWatch{watchA, watchB} {
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create duplicate PR watch: %v", err)
+		}
+	}
+	client.prResponses = []string{`{"data":{"repo0":{"pr0":{
+		"state":"OPEN","title":"Shared PR","url":"https://x/42",
+		"headRefName":"feature/shared-pr","baseRefName":"main","headRefOid":"abc",
+		"author":{"login":"alice"},
+		"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z",
+		"reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},
+		"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}
+	}}}}`}
+
+	if _, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watchA, watchB}); err != nil {
+		t.Fatalf("sync duplicate PR watches: %v", err)
+	}
+	if got := len(client.prQueries); got != 1 {
+		t.Fatalf("duplicate PR transport calls = %d, want one", got)
+	}
+	for _, taskID := range []string{"task-duplicate-a", "task-duplicate-b"} {
+		pr, err := store.GetTaskPR(ctx, taskID)
+		if err != nil || pr == nil {
+			t.Fatalf("task %s association = %#v, err=%v; duplicate consumer was dropped", taskID, pr, err)
+		}
+		if pr.ChecksState != "success" {
+			t.Errorf("task %s checks state = %q, want success", taskID, pr.ChecksState)
+		}
+	}
+}
+
+func TestSyncWorkspaceWatchesBatched_ConcurrentEntryPointsShareDuplicateResult(t *testing.T) {
+	_, service, client, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-concurrent-a", false)
+	seedTask(t, store, "task-concurrent-b", false)
+	watchA := withTestWorkspace(&PRWatch{
+		SessionID: "session-concurrent-a", TaskID: "task-concurrent-a", Owner: "o", Repo: "r",
+		PRNumber: 43, Branch: "feature/concurrent",
+	})
+	watchB := withTestWorkspace(&PRWatch{
+		SessionID: "session-concurrent-b", TaskID: "task-concurrent-b", Owner: "o", Repo: "r",
+		PRNumber: 43, Branch: "feature/concurrent",
+	})
+	for _, watch := range []*PRWatch{watchA, watchB} {
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create concurrent watch: %v", err)
+		}
+	}
+	healthScope := testAutomationScope(t, service, testWorkspaceID)
+	client.prResponses = []string{`{"data":{"repo0":{"pr0":{
+		"state":"OPEN","title":"Concurrent PR","url":"https://x/43",
+		"headRefName":"feature/concurrent","baseRefName":"main","headRefOid":"def",
+		"author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},
+		"reviewRequests":{"totalCount":0},"commits":{"nodes":[]}
+	}}}}`}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	client.onExecute = func() {
+		once.Do(func() { close(started) })
+		<-release
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watchA})
+		firstDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first entry point never reached GraphQL")
+	}
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watchB})
+		secondDone <- err
+	}()
+
+	// The second entry point must register its consumer and join the active
+	// target before the leader is released. This is a bounded scheduler wait,
+	// not a timing sleep.
+	deadline := time.After(2 * time.Second)
+	for {
+		service.prDiscoveryHealth.mu.Lock()
+		scope := service.prDiscoveryHealth.scopes[prDiscoveryScopeKey(testWorkspaceID, healthScope)]
+		joined := false
+		if scope != nil {
+			state := scope.targets[prDiscoveryHealthTarget{Owner: "o", Repo: "r", PRNumber: 43}.key()]
+			joined = state != nil && state.active && len(state.consumers) == 2
+		}
+		service.prDiscoveryHealth.mu.Unlock()
+		if joined {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("second entry point did not join active discovery target")
+		default:
+			runtime.Gosched()
+		}
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first concurrent sync: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second concurrent sync: %v", err)
+	}
+	if got := len(client.prQueries); got != 1 {
+		t.Fatalf("concurrent duplicate transport calls = %d, want one", got)
+	}
+	for _, taskID := range []string{"task-concurrent-a", "task-concurrent-b"} {
+		pr, err := store.GetTaskPR(ctx, taskID)
+		if err != nil || pr == nil {
+			t.Fatalf("task %s association = %#v, err=%v; concurrent consumer was dropped", taskID, pr, err)
+		}
 	}
 }
 

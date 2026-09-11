@@ -1,7 +1,7 @@
 ---
 id: "01-valid-pr-discovery"
 title: "Restore valid PR discovery"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -87,4 +87,10 @@ do not merely snapshot today's production query.
 
 ## Results
 
-Pending.
+- Replaced the invalid GraphQL `headRepository.cloneUrl` selection with the
+  supported `url` field in both batched PR query builders.
+- Derived HTTPS clone identity from the GraphQL repository URL while keeping
+  target and head repository identities distinct, including nullable head data.
+- Added query-contract, identity, and query-recovery association/event tests.
+- TDD verification passed:
+  `go test ./internal/github -run 'TestPRDiscovery(HeadIdentity|QueryContract|AssociationAfterQueryRecovery)' -count=1`.

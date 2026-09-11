@@ -111,7 +111,86 @@ describe("registerGitHubHandlers CI options", () => {
   });
 });
 
+describe("registerGitHubHandlers PR discovery health", () => {
+  it("applies only newer workspace-scoped PR discovery health", () => {
+    const store = createAppStore();
+    store.getState().resetGitHubStatus(ACTIVE_WORKSPACE_ID);
+    store.getState().setGitHubStatus(ACTIVE_WORKSPACE_ID, {
+      ...baseStatus,
+      workspace_id: ACTIVE_WORKSPACE_ID,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "invalid_query",
+        revision: 2,
+        credential_generation: 1,
+      },
+    });
+    const handler = registerGitHubHandlers(store)["github.pr_discovery_health.updated"]!;
+
+    handler({
+      payload: {
+        workspace_id: ACTIVE_WORKSPACE_ID,
+        health: {
+          state: "healthy",
+          failed_target_count: 0,
+          revision: 1,
+          credential_generation: 1,
+        },
+      },
+    } as Parameters<typeof handler>[0]);
+    expect(
+      store.getState().githubStatus.byWorkspaceId[ACTIVE_WORKSPACE_ID]?.status?.pr_discovery_health
+        ?.state,
+    ).toBe("degraded");
+
+    handler({
+      payload: {
+        workspace_id: ACTIVE_WORKSPACE_ID,
+        health: {
+          state: "healthy",
+          failed_target_count: 0,
+          revision: 3,
+          credential_generation: 1,
+        },
+      },
+    } as Parameters<typeof handler>[0]);
+    expect(
+      store.getState().githubStatus.byWorkspaceId[ACTIVE_WORKSPACE_ID]?.status?.pr_discovery_health
+        ?.state,
+    ).toBe("healthy");
+  });
+});
+
 describe("registerGitHubHandlers", () => {
+  it("ignores discovery health events from another workspace", () => {
+    const store = createAppStore();
+    store.getState().setActiveWorkspace(ACTIVE_WORKSPACE_ID);
+    store.getState().resetGitHubStatus(FOREIGN_WORKSPACE_ID);
+    store.getState().setGitHubStatus(FOREIGN_WORKSPACE_ID, { ...baseStatus });
+    const handler = registerGitHubHandlers(store)["github.pr_discovery_health.updated"]!;
+
+    handler({
+      payload: {
+        workspace_id: FOREIGN_WORKSPACE_ID,
+        health: {
+          state: "degraded",
+          failed_target_count: 1,
+          category: "unavailable",
+          revision: 1,
+          credential_generation: 1,
+        },
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(
+      store.getState().githubStatus.byWorkspaceId[FOREIGN_WORKSPACE_ID]?.status
+        ?.pr_discovery_health,
+    ).toBeUndefined();
+  });
+});
+
+describe("registerGitHubHandlers task and quota events", () => {
   it("ignores a task PR update owned by another workspace", () => {
     const store = createAppStore();
     seedTaskPRScope(store);

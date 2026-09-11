@@ -33,6 +33,24 @@ func (s *Service) FindPRByBranchForWorkspace(
 	ctx context.Context,
 	workspaceID, owner, repo, branch string,
 ) (*PR, error) {
+	return s.findPRByBranchForWorkspace(ctx, workspaceID, owner, repo, branch, nil)
+}
+
+// findPRByBranchForWatch is the watch-owned variant used by the legacy poller.
+// Keeping the watch identity in the health admission lets a failed direct
+// probe be pruned when the watch is deleted, even when GraphQL batching is not
+// available.
+func (s *Service) findPRByBranchForWatch(ctx context.Context, watch *PRWatch) (*PR, error) {
+	if watch == nil {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	return s.findPRByBranchForWorkspace(ctx, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Branch, watch)
+}
+
+func (s *Service) findPRByBranchForWorkspace(
+	ctx context.Context,
+	workspaceID, owner, repo, branch string, watch *PRWatch,
+) (*PR, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return nil, err
 	}
@@ -40,7 +58,43 @@ func (s *Service) FindPRByBranchForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return s.findPRByBranchInForkNetwork(ctx, resolved.Client, resolved.CacheScope, owner, repo, branch)
+	credentialGeneration := int64(0)
+	if resolved.credential != nil {
+		credentialGeneration = resolved.credential.CredentialGeneration
+	}
+	tracked := watch != nil && watch.ID != ""
+	var attempt prDiscoveryWatchAttempt
+	if tracked {
+		var admitted bool
+		attempt, admitted = s.beginPRDiscoveryWatch(workspaceID, resolved.CacheScope, credentialGeneration, watch)
+		if !admitted {
+			return nil, nil
+		}
+	}
+	pr, err := s.findPRByBranchInForkNetwork(ctx, resolved.Client, resolved.CacheScope, owner, repo, branch)
+	if err != nil {
+		if tracked {
+			s.finishPRDiscoveryWatchFailure(workspaceID, resolved.CacheScope, credentialGeneration, attempt, err)
+		}
+		return nil, err
+	}
+	if tracked {
+		s.finishPRDiscoveryWatchSuccess(workspaceID, resolved.CacheScope, credentialGeneration, attempt)
+		if pr != nil {
+			// Finish the immutable source attempt first, then move the live
+			// consumer to the discovered repository/PR target. The caller still
+			// owns persistence, but a successful fork lookup must not leave the
+			// old fork key retaining the watch forever.
+			rebound := *watch
+			rebound.Owner = pr.RepoOwner
+			rebound.Repo = pr.RepoName
+			rebound.PRNumber = pr.Number
+			s.trackPRDiscoveryWatchConsumer(
+				workspaceID, resolved.CacheScope, credentialGeneration, &rebound,
+			)
+		}
+	}
+	return pr, nil
 }
 
 // findPRByBranchInForkNetwork first searches the requested repository. When
