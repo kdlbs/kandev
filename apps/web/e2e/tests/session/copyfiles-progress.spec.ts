@@ -82,10 +82,14 @@ test.describe("Copy ignored files prepare step", () => {
 
       const panel = testPage.getByTestId("prepare-progress-panel");
       await expect(panel).toBeVisible({ timeout: 30_000 });
-      await expect(panel).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
+      await expect(panel).toHaveAttribute("data-status", /^completed(?:_with_warnings)?$/, {
+        timeout: 30_000,
+      });
 
-      // Panel auto-collapses on a clean run — expand it so the step rows render.
-      await panel.getByTestId("prepare-progress-toggle").click();
+      // A remote-sync warning can keep the panel open without affecting file copying.
+      if ((await panel.getAttribute("data-expanded")) === "false") {
+        await panel.getByTestId("prepare-progress-toggle").click();
+      }
       await expect(panel).toHaveAttribute("data-expanded", "true");
 
       // Pluralized count is what proves the backend wired in CopiedFiles —
@@ -93,6 +97,9 @@ test.describe("Copy ignored files prepare step", () => {
       // step builder would land on "Copy ignored files" (no count) or skip
       // the step entirely.
       await expect(panel).toContainText("Copy 2 ignored files", { timeout: 5_000 });
+      await expect(panel.getByText("Copy 2 ignored files", { exact: true })).toHaveClass(
+        /line-through/,
+      );
     } finally {
       if (fs.existsSync(delayFile)) fs.unlinkSync(delayFile);
       await apiClient.updateRepository(seedData.repositoryId, { copy_files: "" }).catch(() => {

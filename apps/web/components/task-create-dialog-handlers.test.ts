@@ -62,6 +62,103 @@ function repository(id: string): Repository {
 }
 
 describe("local repository creation selection", () => {
+  it("accepts creation through the dialog handler when only a Worktree profile exists", () => {
+    const fs = {
+      repositories: [
+        { key: "first", repositoryId: "existing", branch: "main" },
+        { key: "second", branch: "" },
+      ],
+      executorProfileId: WORKTREE_PROFILE_ID,
+      updateRepository: vi.fn(),
+      setExecutorId: vi.fn(),
+      setExecutorProfileId: vi.fn(),
+    } as unknown as Parameters<typeof useDialogHandlers>[0];
+    const upsertWorkspaceRepository = vi.fn();
+    const { result } = renderHook(() =>
+      useDialogHandlers(fs, [], {
+        workspaceId: "ws-1",
+        upsertWorkspaceRepository,
+        executors: [
+          executor("worktree", "worktree", [{ id: WORKTREE_PROFILE_ID, name: "Worktree" }]),
+        ],
+      }),
+    );
+    const created = repository("new");
+    result.current.handleLocalRepositoryCreated("second", created);
+    expect(upsertWorkspaceRepository).toHaveBeenCalledWith("ws-1", created);
+    expect(fs.updateRepository).toHaveBeenCalledWith(
+      "second",
+      expect.objectContaining({ repositoryId: "new", branch: "main" }),
+    );
+    expect(fs.setExecutorId).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    {
+      executorId: "local",
+      executorProfileId: LOCAL_PROFILE_ID,
+      executorProfileName: "Local",
+      requiresSwitch: true,
+    },
+  ])(
+    "preserves executor and sibling rows when creating into a multi-row task (%j)",
+    (executorSelection) => {
+      const rows = [
+        { key: "first", repositoryId: "existing", branch: "develop" },
+        { key: "second", branch: "", branchPolicyId: "old-policy" },
+      ];
+      const fs = {
+        repositories: rows,
+        updateRepository: (key: string, patch: object) =>
+          Object.assign(rows.find((r) => r.key === key)!, patch),
+        setExecutorId: vi.fn(),
+        setExecutorProfileId: vi.fn(),
+      };
+      applyCreatedLocalRepository({
+        fs,
+        rowKey: "second",
+        repository: repository("new"),
+        workspaceId: "ws-1",
+        upsertWorkspaceRepository: vi.fn(),
+        executorSelection,
+      });
+      expect(rows[0]).toEqual({ key: "first", repositoryId: "existing", branch: "develop" });
+      expect(rows[1]).toMatchObject({
+        repositoryId: "new",
+        branch: "main",
+        branchPolicyId: undefined,
+      });
+      expect(fs.setExecutorId).not.toHaveBeenCalled();
+      expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains the created repository without changing another row after its target is removed", () => {
+    const fs = {
+      repositories: [{ key: "remaining", branch: "develop" }],
+      updateRepository: vi.fn(),
+      setExecutorId: vi.fn(),
+      setExecutorProfileId: vi.fn(),
+    };
+    const upsertWorkspaceRepository = vi.fn();
+    const created = repository("new");
+    applyCreatedLocalRepository({
+      fs,
+      rowKey: "removed",
+      repository: created,
+      workspaceId: "ws-1",
+      upsertWorkspaceRepository,
+      executorSelection: null,
+    });
+    expect(upsertWorkspaceRepository).toHaveBeenCalledWith("ws-1", created);
+    expect(fs.updateRepository).not.toHaveBeenCalled();
+    expect(fs.setExecutorId).not.toHaveBeenCalled();
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+  });
+});
+
+describe("local repository executor selection", () => {
   it("keeps the selected profile when it already runs directly on the local host", () => {
     const selection = findDirectLocalExecutorProfile(
       [
@@ -112,7 +209,12 @@ describe("local repository creation selection", () => {
     const created = repository("repo-new");
 
     applyCreatedLocalRepository({
-      fs: { updateRepository, setExecutorId, setExecutorProfileId },
+      fs: {
+        repositories: [{ key: "row-2", branch: "" }],
+        updateRepository,
+        setExecutorId,
+        setExecutorProfileId,
+      },
       rowKey: "row-2",
       repository: created,
       workspaceId: "ws-1",
@@ -129,6 +231,7 @@ describe("local repository creation selection", () => {
       repositoryId: "repo-new",
       localPath: undefined,
       branch: "main",
+      branchPolicyId: undefined,
     });
     expect(setExecutorId).toHaveBeenCalledWith("local");
     expect(setExecutorProfileId).toHaveBeenCalledWith(LOCAL_PROFILE_ID);

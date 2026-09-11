@@ -78,6 +78,7 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			// that the operator receives from runtime materialization.
 			runGit(t, repoDir, "config", "url."+originDir+".insteadOf", binding.SourceRepository.RemoteURL)
 			runGit(t, repoDir, "remote", "add", binding.ContributionRemoteName(), binding.SourceRepository.RemoteURL)
+			runGit(t, repoDir, "push", binding.ContributionRemoteName(), "HEAD:refs/heads/feature/contribution")
 
 			operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 			operator.setRemoteContribution(binding)
@@ -89,8 +90,8 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			if !preflight.Success {
 				t.Fatalf("PushPreflight failed: %+v", preflight)
 			}
-			if _, err := os.Stat(filepath.Join(originDir, "refs", "heads", "feature", "contribution")); !os.IsNotExist(err) {
-				t.Fatalf("preflight mutated source branch, stat error = %v", err)
+			if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution")); got != headSHA {
+				t.Fatalf("preflight changed source branch: %q != %q", got, headSHA)
 			}
 
 			forced, err := operator.Push(context.Background(), true, false)

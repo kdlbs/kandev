@@ -385,6 +385,8 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyAllowUserNamespaces:      true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
+	metadataCheckoutBranch:              true,
+	metadataCheckoutRef:                 true,
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,

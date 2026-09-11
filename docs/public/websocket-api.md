@@ -204,6 +204,27 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
+`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Moves requested by an active agent use the deferred MCP path and persist the complete options through turn completion, WIP promotion, and backend restart before the retained move is applied.
+
+```json
+{
+  "id": "move-1",
+  "type": "request",
+  "action": "task.move",
+  "payload": {
+    "id": "task-uuid",
+    "workflow_id": "workflow-uuid",
+    "workflow_step_id": "qa-step-uuid",
+    "position": 0,
+    "entry_options": {
+      "reset_context": true,
+      "instructions": "Run the checkout regression first.",
+      "skip_step_prompt": true
+    }
+  }
+}
+```
+
 ### Launch a session
 
 `session.launch` always requires `task_id`. Explicit `intent` values are `prepare`, `start`, `start_created`, `resume`, `workflow_step`, and `restore_workspace`. Other fields are `session_id`, `agent_profile_id`, `executor_id`, `executor_profile_id`, `prompt`, `plan_mode`, `workflow_step_id`, `priority`, `launch_workspace`, `skip_message_record`, `auto_start`, and `attachments`.

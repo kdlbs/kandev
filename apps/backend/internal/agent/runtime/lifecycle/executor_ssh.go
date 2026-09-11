@@ -478,11 +478,11 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 		// process. sshAgentctlLaunchEnv adds the bootstrap credentials
 		// required for the authenticated control handshake without
 		// forwarding profile secrets.
-		env := sshAgentctlLaunchEnv(
-			managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
-			nonce,
-			req.AgentctlStartupConfig,
-		)
+		brokerEnv := managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin))
+		if selectedCheckoutIsPullRequest(req.Metadata) {
+			brokerEnv = nil
+		}
+		env := sshAgentctlLaunchEnv(brokerEnv, nonce, req.AgentctlStartupConfig)
 		port, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 		if err != nil {
 			// Preserve port/pid so retryAgentctlHandshake's "if pid > 0"

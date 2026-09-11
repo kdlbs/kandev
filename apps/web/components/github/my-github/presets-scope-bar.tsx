@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption } from "./search-bar";
@@ -12,6 +12,7 @@ type PresetsScopeBarProps = {
   selected: SidebarSelection;
   onSelect: (request: SidebarSelectionRequest) => void;
   savedPresets: SavedPreset[];
+  savedStatus?: ReactNode;
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
@@ -30,7 +31,7 @@ const KINDS = [
 /**
  * Horizontal scope bar for the /github dashboard (desktop). Thin wrapper over
  * the shared {@link IntegrationScopeBar}; mobile keeps the vertical
- * PresetsSidebar in a sheet.
+ * PresetsSidebar in the Views drawer.
  */
 export function PresetsScopeBar({
   prPresets = PR_PRESETS,

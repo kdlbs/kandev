@@ -27,11 +27,12 @@ Before changing code:
 - Read the scoped `AGENTS.md` for the subtree you will touch, e.g. `apps/backend/AGENTS.md`, `apps/web/AGENTS.md`, or integration-specific guidance.
 - Use `rg` to find existing patterns before inventing one.
 - Read the file you will edit and nearby tests.
-- For product features, read `docs/specs/README.md`, the owning system index,
-  adjacent indexes with similar capability names, and only the relevant
+- For product features, read `docs/specs/README.md`, the owning system `README.md`,
+  adjacent system README files with similar capability names, and only the relevant
   requirement and system-design files. Choose the owner from the durable
-  contract, not the affected code layer. During migration, use
-  `docs/specs/INDEX.md` to find a legacy source.
+  contract, not the affected code layer. Use `python3 scripts/list-docs.py
+  specs --format paths` to find documents. During migration, add
+  `--kind legacy` to find a legacy source.
 - When implementing from a plan, read `plan.md` for orientation and only the
   current work order. Follow its `REQ-*`, `AC-*`, and system-design references.
 - Dependency, sibling, and stacked PR references are snapshots. Resolve the

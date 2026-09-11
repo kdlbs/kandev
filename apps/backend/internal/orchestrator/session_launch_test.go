@@ -631,6 +631,23 @@ func TestLaunchRestoreWorkspace_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchSessionTrimsPromptBeforeInferringResume(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{
+		repoForExecutionLookup: repo,
+	})
+
+	_, err := svc.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:    "task1",
+		SessionID: "session1",
+		Prompt:    " \n\t",
+	})
+	if err == nil || !strings.Contains(err.Error(), "session is completed and cannot be resumed") {
+		t.Fatalf("LaunchSession error = %v, want completed-session resume rejection", err)
+	}
+}
+
 // --- launchPrepare passthrough upgrade ---
 
 func TestIsPassthroughProfile(t *testing.T) {

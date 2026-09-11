@@ -32,6 +32,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -454,6 +455,26 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	return sessionID, nil
 }
 
+type initialPromptPreviewContextKey struct{}
+
+func withInitialPromptPreview(ctx context.Context, preview *models.InitialPromptPreview) context.Context {
+	if preview == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, initialPromptPreviewContextKey{}, preview)
+}
+
+func (s *Service) persistInitialPromptPreviewFromContext(ctx context.Context, taskID, sessionID string) error {
+	preview, ok := ctx.Value(initialPromptPreviewContextKey{}).(*models.InitialPromptPreview)
+	if !ok || preview == nil {
+		return nil
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyInitialPromptPreview, preview); err != nil {
+		return s.handleSessionLaunchFailure(ctx, taskID, sessionID, fmt.Errorf("persist initial prompt preview: %w", err))
+	}
+	return nil
+}
+
 func isInheritParentWorkspace(task *v1.Task) bool {
 	if task == nil {
 		return false
@@ -750,7 +771,7 @@ func (s *Service) startCreatedSession(
 		var generatedPromptReferenceContext string
 		effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContext(
 			ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-			planMode, task.IsEphemeral, session.IsPassthrough, promptReferenceContext,
+			planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
 		)
 		if generatedPromptReferenceContext != "" {
 			// The workflow helper preserves a direct message's acceptance-time
@@ -1069,6 +1090,12 @@ type startTaskOptions struct {
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
+	// EntryOptions carries one-shot workflow-move overrides for a fresh
+	// auto-started session. The profile override is applied via the profile
+	// argument (with ProfileExplicit); the instructions are appended once to the
+	// composed workflow prompt below because the prompt is rebuilt from the
+	// durable step by ID and cannot see a transient step overlay.
+	EntryOptions *workflowmove.EntryOptions
 	// WorkflowEntryID pins source bindings and explicit route retries to the
 	// immutable step-entry ledger row that initiated an automatic launch.
 	WorkflowEntryID int64
@@ -1441,10 +1468,25 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// wrapping and launch behavior.
 	isPassthrough = launchSession.IsPassthrough
 
+	skipStepPrompt := opts.EntryOptions != nil && opts.EntryOptions.SkipStepPrompt
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
-		planMode, task.IsEphemeral, isPassthrough,
+		planMode, task.IsEphemeral, isPassthrough, skipStepPrompt,
 	)
+
+	// Append one-shot workflow-move instructions to a fresh auto-started
+	// session. The prompt was rebuilt from the durable step by ID above, so a
+	// transient step overlay could not carry them; append the same sentinel
+	// block once here. The sentinel guards against a double append on retry.
+	if opts.EntryOptions != nil && opts.EntryOptions.Instructions != "" &&
+		!strings.Contains(effectivePrompt, workflowmove.InstructionsEnd) {
+		wrapped := workflowmove.WrapInstructions(opts.EntryOptions.Instructions)
+		if effectivePrompt == "" {
+			effectivePrompt = wrapped
+		} else {
+			effectivePrompt = effectivePrompt + "\n\n" + wrapped
+		}
+	}
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -1772,6 +1814,11 @@ func (s *Service) prepareSessionForStartWithWorkflowRoute(
 				zap.String("session_id", sessionID), zap.Error(deleteErr))
 		}
 		return "", false, err
+	}
+	if created {
+		if err := s.persistInitialPromptPreviewFromContext(ctx, task.ID, sessionID); err != nil {
+			return "", false, err
+		}
 	}
 	return sessionID, created, nil
 }
@@ -2157,10 +2204,11 @@ func (s *Service) applyWorkflowAndPlanMode(
 	planMode bool,
 	isEphemeral bool,
 	isPassthrough bool,
+	skipStepPrompt bool,
 ) (string, bool, string) {
 	return s.applyWorkflowAndPlanModeWithPromptContext(
 		ctx, prompt, taskID, sessionID, workflowStepID, planMode,
-		isEphemeral, isPassthrough, "",
+		isEphemeral, isPassthrough, skipStepPrompt, "",
 	)
 }
 
@@ -2178,6 +2226,7 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 	planMode bool,
 	isEphemeral bool,
 	isPassthrough bool,
+	skipStepPrompt bool,
 	trustedPromptContext string,
 ) (string, bool, string) {
 	effectivePrompt := prompt
@@ -2207,11 +2256,11 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 			if trustedPromptContext != "" {
 				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContext(
-					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, trustedPromptContext,
+					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, trustedPromptContext,
 				)
 			} else {
 				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
-					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
+					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
 				)
 			}
 		}
@@ -2289,7 +2338,7 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 // If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
 // Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
 func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string, isPassthrough bool) string {
-	prompt, _ := s.buildWorkflowPromptWithContext(ctx, basePrompt, step, taskID, sessionID, isPassthrough)
+	prompt, _ := s.buildWorkflowPromptWithContext(ctx, basePrompt, step, taskID, sessionID, isPassthrough, false)
 	return prompt
 }
 
@@ -2337,9 +2386,10 @@ func (s *Service) buildWorkflowPromptWithContext(
 	taskID string,
 	sessionID string,
 	isPassthrough bool,
+	skipStepPrompt bool,
 ) (string, string) {
 	return s.buildWorkflowPromptWithTrustedContext(
-		ctx, basePrompt, step, taskID, sessionID, isPassthrough, "",
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, "",
 	)
 }
 
@@ -2354,6 +2404,7 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 	taskID string,
 	sessionID string,
 	isPassthrough bool,
+	skipStepPrompt bool,
 	trustedPromptContext string,
 ) (string, string) {
 	_ = sessionID
@@ -2363,20 +2414,11 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 		parts = append(parts, block)
 	}
 
-	// Build the prompt from step.Prompt template and base prompt
-	if step.Prompt != "" {
-		interpolatedPrompt := sysprompt.InterpolatePlaceholders(step.Prompt, taskID)
-		if strings.Contains(interpolatedPrompt, "{{task_prompt}}") {
-			// Replace placeholder with base prompt
-			combined := strings.Replace(interpolatedPrompt, "{{task_prompt}}", basePrompt, 1)
-			parts = append(parts, combined)
-		} else {
-			// A step prompt without {{task_prompt}} is treated as the full visible prompt.
-			parts = append(parts, interpolatedPrompt)
-		}
-	} else {
-		// No step prompt, just use base prompt
-		parts = append(parts, basePrompt)
+	// skip_step_prompt suppresses the step prompt and its task-description
+	// fallback for this one entry; only the workflow-level block above (and any
+	// one-time move instructions appended by the caller) remain.
+	if !skipStepPrompt {
+		parts = append(parts, stepPromptBody(step, taskID, basePrompt))
 	}
 
 	joined := strings.Join(parts, "\n\n")
@@ -2388,6 +2430,22 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 		return joined, trustedPromptContext
 	}
 	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
+}
+
+// stepPromptBody renders the visible step prompt for one entry: the step's
+// prompt template with {{task_prompt}} resolved to basePrompt, a step prompt
+// without that placeholder used verbatim, or the base prompt when the step has
+// no prompt of its own.
+func stepPromptBody(step *wfmodels.WorkflowStep, taskID, basePrompt string) string {
+	if step.Prompt == "" {
+		return basePrompt
+	}
+	interpolatedPrompt := sysprompt.InterpolatePlaceholders(step.Prompt, taskID)
+	if strings.Contains(interpolatedPrompt, "{{task_prompt}}") {
+		return strings.Replace(interpolatedPrompt, "{{task_prompt}}", basePrompt, 1)
+	}
+	// A step prompt without {{task_prompt}} is treated as the full visible prompt.
+	return interpolatedPrompt
 }
 
 // workflowInstructionsBlock returns the visible "## Workflow instructions"
@@ -3480,6 +3538,11 @@ func (s *Service) populateEnvironmentWorkspaceInfo(ctx context.Context, session 
 	if session.TaskEnvironmentID != "" && env.ID != session.TaskEnvironmentID {
 		return
 	}
+	// WorkspacePath is the canonical task-root identity. A repository-less
+	// environment is still restorable, so do not require a repo row here.
+	if resp.WorktreePath == nil && env.WorkspacePath != "" {
+		resp.WorktreePath = &env.WorkspacePath
+	}
 	if len(env.Repos) == 0 {
 		return
 	}
@@ -3996,6 +4059,19 @@ func (s *Service) publishTaskSessionErrorEvent(
 		eventData["occurred_at"] = lastError.OccurredAt.Format(time.RFC3339Nano)
 		eventData["stamp"] = lastError.Stamp()
 		eventData["agent_execution_id"] = lastError.AgentExecutionID
+		eventData["execution_id"] = lastError.ExecutionID
+		if lastError.Phase != "" {
+			eventData["phase"] = lastError.Phase
+		}
+		if lastError.AttemptID != "" {
+			eventData["attempt_id"] = lastError.AttemptID
+		}
+		if len(lastError.Causes) > 0 {
+			eventData["causes"] = append([]models.AgentErrorCause(nil), lastError.Causes...)
+		}
+		if lastError.Details != "" {
+			eventData["details"] = lastError.Details
+		}
 		if lastError.TaskRepositoryID != "" {
 			eventData["task_repository_id"] = lastError.TaskRepositoryID
 		}
@@ -8058,6 +8134,31 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	return nil
 }
 
+// contextResetMessage is the synthetic status message the chat renders as a
+// "Context reset" divider. Both the manual reset path and the workflow-driven
+// on-enter reset emit this exact text so the two paths cannot drift.
+const contextResetMessage = "Context reset — new conversation started"
+
+// createContextResetMessage inserts the synthetic contextResetMessage status
+// row for a session. Callers must only invoke it when an actual reset occurred
+// (e.g. not for a never-started CREATED session, which has no prior
+// conversation to clear).
+func (s *Service) createContextResetMessage(ctx context.Context, taskID, sessionID string) {
+	if s.messageCreator == nil {
+		return
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx, taskID,
+		contextResetMessage,
+		sessionID, string(v1.MessageTypeStatus),
+		s.getActiveTurnID(sessionID),
+		nil, false,
+	); err != nil {
+		s.logger.Warn("failed to create context reset message",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
 // ResetAgentContext resets the agent's conversation context for a session,
 // clearing conversation history while preserving the workspace environment.
 func (s *Service) ResetAgentContext(ctx context.Context, sessionID string) error {
@@ -8088,18 +8189,7 @@ func (s *Service) ResetAgentContext(ctx context.Context, sessionID string) error
 	// Restore WAITING_FOR_INPUT — handleAgentReady ignores events during reset
 	s.setSessionWaitingForInput(ctx, session.TaskID, sessionID)
 
-	if s.messageCreator != nil {
-		if err := s.messageCreator.CreateSessionMessage(
-			ctx, session.TaskID,
-			"Context reset — new conversation started",
-			sessionID, string(v1.MessageTypeStatus),
-			s.getActiveTurnID(sessionID),
-			nil, false,
-		); err != nil {
-			s.logger.Warn("failed to create context reset message",
-				zap.String("session_id", sessionID), zap.Error(err))
-		}
-	}
+	s.createContextResetMessage(ctx, session.TaskID, sessionID)
 	return nil
 }
 

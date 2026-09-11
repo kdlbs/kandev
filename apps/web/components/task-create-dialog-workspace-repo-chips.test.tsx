@@ -107,7 +107,7 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     renderChips({ allowDuplicateRepositories: false });
     fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[1]);
 
-    expect(screen.queryByText("Create new repository")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create new repository" })).toBeNull();
   });
 
   it("routes repository creation to the only row", () => {
@@ -130,11 +130,30 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     expect(onRefreshRepositories).toHaveBeenCalledOnce();
   });
 
-  it("does not expose repository creation for multi-repository tasks", () => {
-    renderChips({ onCreateRepository: vi.fn() });
+  it("offers creation and refresh from a second repository row", () => {
+    const onCreateRepository = vi.fn();
+    const onRefreshRepositories = vi.fn();
+    renderChips({ onCreateRepository, onRefreshRepositories });
     fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[1]);
+    fireEvent.click(screen.getByTestId("repo-refresh-button"));
+    expect(onRefreshRepositories).toHaveBeenCalledOnce();
+    fireEvent.change(screen.getByPlaceholderText("Search repositories..."), {
+      target: { value: "no-matching-repository" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create new repository" }));
+    expect(onCreateRepository).toHaveBeenCalledWith("r1");
+  });
 
-    expect(screen.queryByText("Create new repository")).toBeNull();
+  it.each([0, 1])("keeps both actions in empty lists on row %i while refreshing", (rowIndex) => {
+    renderChips({
+      repositories: [],
+      onCreateRepository: vi.fn(),
+      onRefreshRepositories: vi.fn(),
+      repositoriesRefreshing: true,
+    });
+    fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[rowIndex]);
+    expect(screen.getByTestId("repo-refresh-button").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Create new repository" })).toBeTruthy();
   });
 });
 
@@ -152,6 +171,49 @@ describe("WorkspaceRepoChips branch policy preview", () => {
     expect(
       screen.getByTestId("branch-policy-option-info-policy-1").getAttribute("aria-label"),
     ).toContain("feature/{title}-{suffix}");
+  });
+});
+
+describe("WorkspaceRepoChips saved base display", () => {
+  it("shows the saved base separately from a local executor checkout branch", () => {
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+    });
+
+    expect(screen.getByTestId("repo-chip-base-branch").textContent).toContain("develop");
+    expect(screen.getByTestId("branch-chip-trigger").textContent).toContain("feature/task");
+  });
+
+  it("edits the local executor saved base without changing checkout state", () => {
+    const onRowBaseBranchChange = vi.fn();
+    const onRowBranchChange = vi.fn();
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+      onRowBaseBranchChange,
+      onRowBranchChange,
+    });
+
+    fireEvent.click(screen.getByTestId("repo-chip-base-branch"));
+    fireEvent.click(screen.getByRole("option", { name: /Task default/ }));
+
+    expect(onRowBaseBranchChange).toHaveBeenCalledWith("r0", "");
+    expect(onRowBranchChange).not.toHaveBeenCalledWith("r0", "");
   });
 });
 

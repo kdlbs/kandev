@@ -4,9 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
 let finePointer = true;
+let isMobile = false;
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer, isMobile }),
 }));
 
 import { SecretListItemRow } from "./secrets-list-item-row";
@@ -47,6 +48,7 @@ function renderRow(overrides: Partial<Parameters<typeof SecretListItemRow>[0]> =
 
 afterEach(() => {
   finePointer = true;
+  isMobile = false;
   cleanup();
 });
 
@@ -61,6 +63,18 @@ function copyMoveDisabled(): boolean {
 }
 
 describe("SecretListItemRow", () => {
+  it("uses a named phone sheet while keeping the original row controls mounted", async () => {
+    isMobile = true;
+    finePointer = false;
+    const { onDeleteCancel } = renderRow({ isDeleteConfirming: true });
+    const sheet = screen.getByRole("dialog", { name: "Delete secret API Key" });
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(screen.getByRole("button", { name: COPY_MOVE_BUTTON, hidden: true }).isConnected).toBe(
+      true,
+    );
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    expect(onDeleteCancel).toHaveBeenCalledTimes(1);
+  });
   it("keeps delete trigger target-aware and touch-sized", () => {
     const { onDelete } = renderRow();
     const deleteButton = screen.getByRole("button", { name: DELETE_BUTTON });

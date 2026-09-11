@@ -7595,6 +7595,35 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithoutWorktree(t *t
 	}
 }
 
+func TestGetTaskSessionStatus_NeedsWorkspaceRestore_RepositorylessEnvironment(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "local",
+		WorkspacePath: "/tmp/task1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=true for a repository-less retained environment")
+	}
+	if resp.WorktreePath == nil || *resp.WorktreePath != "/tmp/task1" {
+		t.Fatalf("WorktreePath = %v, want canonical workspace path", resp.WorktreePath)
+	}
+}
+
 // sessionUpdatingAgentManager wraps mockAgentManager to update session state
 // when StartAgentProcess is called, simulating the agent initialization flow.
 type sessionUpdatingAgentManager struct {

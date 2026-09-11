@@ -261,6 +261,29 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 	}
 }
 
+func TestBuildSSHCreateInstanceRequestStripsForkPRCredentials(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		Metadata:   map[string]interface{}{metadataCheckoutRef: "refs/pull/3527/head"},
+		Env: map[string]string{
+			"GITHUB_TOKEN":   "secret",
+			"GH_TOKEN":       "secret-2",
+			"OPENAI_API_KEY": "keep",
+		},
+	}
+
+	got := buildSSHCreateInstanceRequest(req, "/workspace", "/agentctl")
+	if _, ok := got.Env["GITHUB_TOKEN"]; ok {
+		t.Fatalf("fork PR agent env leaked GITHUB_TOKEN: %v", got.Env)
+	}
+	if _, ok := got.Env["GH_TOKEN"]; ok {
+		t.Fatalf("fork PR agent env leaked GH_TOKEN: %v", got.Env)
+	}
+	if got.Env["OPENAI_API_KEY"] != "keep" {
+		t.Fatalf("non-GitHub env was dropped: %v", got.Env)
+	}
+}
+
 func TestSSHRemoteAgentEnvForwardsOnlyScopedCredentials(t *testing.T) {
 	t.Run("nil request and nil env produce nil", func(t *testing.T) {
 		if got := sshRemoteAgentEnv(nil); got != nil {

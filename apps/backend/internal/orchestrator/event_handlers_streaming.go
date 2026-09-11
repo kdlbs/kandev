@@ -1305,6 +1305,97 @@ func (s *Service) transitionTaskSessionState(
 		// typed launch error can be durable but invisible in the task summary.
 		refreshed = s.refreshTaskSessionOr(ctx, sessionID, refreshed)
 	}
+	s.publishAcceptedTaskSessionState(
+		ctx,
+		taskID,
+		sessionID,
+		oldState,
+		nextState,
+		errorMessage,
+		authoritativeUpdatedAt,
+		refreshed,
+	)
+	return true, nextState, nil
+}
+
+// transitionBootstrapFailure commits the typed error and FAILED state through
+// the repository's execution-fenced boundary before publishing the accepted
+// transition. The prompt admission guard serializes this terminal settlement
+// with queued prompt dispatches just like the ordinary transition path.
+func (s *Service) transitionBootstrapFailure(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (bool, models.TaskSessionState, error) {
+	if s.messageQueue != nil {
+		heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string)
+		if heldSessionID != sessionID {
+			var changed bool
+			var finalState models.TaskSessionState
+			var err error
+			err = s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+				changed, finalState, err = s.transitionBootstrapFailure(
+					admittedCtx,
+					taskID,
+					sessionID,
+					agentExecutionID,
+					expectedState,
+					expectedStamp,
+					errorValue,
+				)
+				return err
+			})
+			return changed, finalState, err
+		}
+	}
+
+	committer, ok := s.repo.(bootstrapFailureCommitter)
+	if !ok {
+		return s.transitionTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message, nil)
+	}
+	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
+		ctx,
+		taskID,
+		sessionID,
+		agentExecutionID,
+		expectedState,
+		expectedStamp,
+		errorValue,
+	)
+	if err != nil || !changed {
+		return changed, expectedState, err
+	}
+	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
+	}
+	if refreshed == nil {
+		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
+	}
+	authoritativeUpdatedAt := updatedAt.UTC()
+	s.publishAcceptedTaskSessionState(
+		ctx,
+		taskID,
+		sessionID,
+		expectedState,
+		models.TaskSessionStateFailed,
+		errorValue.Message,
+		&authoritativeUpdatedAt,
+		refreshed,
+	)
+	return true, models.TaskSessionStateFailed, nil
+}
+
+func (s *Service) publishAcceptedTaskSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	oldState, nextState models.TaskSessionState,
+	errorMessage string,
+	authoritativeUpdatedAt *time.Time,
+	refreshed *models.TaskSession,
+) {
 	if isTerminalSessionState(nextState) {
 		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
 			s.logger.Error("failed to expire clarification on strict terminal transition; response claims remain quarantined",
@@ -1325,7 +1416,6 @@ func (s *Service) transitionTaskSessionState(
 	)
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
-	return true, nextState, nil
 }
 
 func (s *Service) persistStrictTaskSessionState(
@@ -1425,6 +1515,16 @@ func (s *Service) cancelActiveTaskSessionState(
 
 type activeTaskSessionCanceller interface {
 	CancelActiveTaskSession(ctx context.Context, sessionID, reason string) (bool, time.Time, error)
+}
+
+type bootstrapFailureCommitter interface {
+	CommitBootstrapFailureIfCurrentExecution(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
 }
 
 type conditionalTaskSessionStateUpdater interface {

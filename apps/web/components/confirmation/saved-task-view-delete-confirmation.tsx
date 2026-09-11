@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { ActionConfirmPopover } from "./action-confirm-popover";
 import { InlineConfirmActions } from "./inline-confirm-actions";
+import { MobileActionConfirmation } from "./mobile-action-confirmation";
 import type { SavedTaskViewDeleteTarget } from "./use-saved-task-view-delete-confirmation";
 
 export type { SavedTaskViewDeleteTarget } from "./use-saved-task-view-delete-confirmation";
@@ -38,53 +39,56 @@ export function SavedTaskViewDeleteConfirmation({
   const title = t("common:deleteSavedTaskViewTitle", { name: target.label });
   const description = t("common:deleteSavedTaskViewDescription");
 
-  if (presentation === "popover") {
-    return (
+  const actions = {
+    description,
+    cancelLabel: t("common:cancel"),
+    confirmLabel: t("common:delete"),
+    confirmAriaLabel: t("common:deleteSavedTaskViewAction", { name: target.label }),
+    confirmDisabled,
+    testId,
+    confirmTestId,
+    onConfirm: () => onConfirm(target.id),
+  };
+  const fallback =
+    presentation === "popover" ? (
       <ActionConfirmPopover
+        {...actions}
         open={open}
         anchorRef={anchorRef}
         focusBoundaryRef={focusBoundaryRef}
         title={title}
-        description={description}
-        cancelLabel={t("common:cancel")}
-        confirmLabel={t("common:delete")}
-        confirmAriaLabel={t("common:deleteSavedTaskViewAction", { name: target.label })}
-        confirmDisabled={confirmDisabled}
-        testId={testId}
-        confirmTestId={confirmTestId}
         confirmationBoundary
         onOpenChange={onOpenChange}
-        onConfirm={() => onConfirm(target.id)}
+      />
+    ) : (
+      <InlineConfirmActions
+        {...actions}
+        density="touch"
+        ariaLabel={title}
+        description={
+          <>
+            <span className="block font-medium text-foreground">{title}</span>
+            <span className="mt-1 block">{description}</span>
+          </>
+        }
+        onCancel={() => {
+          onOpenChange(false);
+          queueMicrotask(() => {
+            if (anchorRef.current?.isConnected) anchorRef.current.focus();
+          });
+        }}
+        onClose={() => onOpenChange(false)}
       />
     );
-  }
-
-  if (!open) return null;
-
   return (
-    <InlineConfirmActions
-      density="touch"
-      testId={testId}
-      ariaLabel={title}
-      description={
-        <>
-          <span className="block font-medium text-foreground">{title}</span>
-          <span className="mt-1 block">{description}</span>
-        </>
-      }
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t("common:delete")}
-      confirmAriaLabel={t("common:deleteSavedTaskViewAction", { name: target.label })}
-      confirmTestId={confirmTestId}
-      confirmDisabled={confirmDisabled}
-      onCancel={() => {
-        onOpenChange(false);
-        queueMicrotask(() => {
-          if (anchorRef.current?.isConnected) anchorRef.current.focus();
-        });
-      }}
-      onClose={() => onOpenChange(false)}
-      onConfirm={() => onConfirm(target.id)}
+    <MobileActionConfirmation
+      {...actions}
+      open={open}
+      title={title}
+      targetKey={target.id}
+      focusReturnRef={anchorRef}
+      onOpenChange={onOpenChange}
+      fallback={fallback}
     />
   );
 }

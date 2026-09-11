@@ -1,3 +1,8 @@
+import type {
+  WorkspaceRestorationAttempt,
+  WorkspaceRestorationState,
+} from "./workspace-restoration";
+
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
 };
@@ -461,6 +466,7 @@ export type SessionRuntimeSliceState = {
   sessionPollMode: SessionPollModeState;
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
+  workspaceRestoration: WorkspaceRestorationState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -542,6 +548,14 @@ export type SessionRuntimeSliceActions = {
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
+  beginWorkspaceRestoration: (
+    taskId: string,
+    sessionId: string,
+    environmentId: string,
+  ) => WorkspaceRestorationAttempt | null;
+  completeWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
+  failWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt, details: string) => boolean;
+  clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

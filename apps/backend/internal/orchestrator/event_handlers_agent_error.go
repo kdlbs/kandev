@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -28,6 +29,7 @@ const (
 	msgAgentErrorNoActions             = "on_agent_error dispatch: step declares no actions"
 	msgAgentErrorDispatchFailed        = "on_agent_error dispatch failed"
 	msgAgentErrorDispatchPanicked      = "on_agent_error dispatch panicked"
+	msgAgentErrorMarkFailed            = "on_agent_error dispatch: failed to mark deferred operation applied"
 
 	// defaultAgentFailedMessage backfills an empty AgentEventData.ErrorMessage
 	// (e.g. a synthetic start-failure event). Shared with the two other
@@ -60,6 +62,51 @@ func agentErrorOperationID(sessionID, agentExecutionID string) string {
 		return fmt.Sprintf("agent_error:session:%s", sessionID)
 	}
 	return fmt.Sprintf("agent_error:session:%s:%s", sessionID, agentExecutionID)
+}
+
+// agentErrorOperationLock is the ref-counted per-operation-id mutex entry
+// serializing dispatchKanbanAgentErrorTrigger's load -> evaluate -> commit ->
+// mark window for a given operation id. Same shape as
+// childCompletionOperationLock, but a separate type and a separate map on
+// Service: the two triggers' contention must not be coupled by sharing one
+// lock's lifetime.
+type agentErrorOperationLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockAgentErrorOperation serializes concurrent dispatchKanbanAgentErrorTrigger
+// calls carrying the same operation id. The returned unlock func must be
+// deferred immediately by the caller: dispatchKanbanAgentErrorTrigger runs
+// under dispatchKanbanAgentErrorTriggerRecovered's recover(), so a
+// non-deferred unlock would leak the lock on panic.
+func (s *Service) lockAgentErrorOperation(operationID string) func() {
+	s.agentErrorOperationLocksMu.Lock()
+	if s.agentErrorOperationLocks == nil {
+		s.agentErrorOperationLocks = make(map[string]*agentErrorOperationLock)
+	}
+	entry := s.agentErrorOperationLocks[operationID]
+	if entry == nil {
+		entry = &agentErrorOperationLock{}
+		s.agentErrorOperationLocks[operationID] = entry
+	}
+	entry.refs++
+	s.agentErrorOperationLocksMu.Unlock()
+
+	entry.mu.Lock()
+	// Order is deliberately reversed from acquisition (map lock released
+	// before entry.mu.Lock() above): no goroutine ever holds
+	// agentErrorOperationLocksMu while blocked on entry.mu, so the map lock
+	// taken here to decrement refs cannot deadlock against it.
+	return func() {
+		s.agentErrorOperationLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(s.agentErrorOperationLocks, operationID)
+		}
+		s.agentErrorOperationLocksMu.Unlock()
+		entry.mu.Unlock()
+	}
 }
 
 // agentErrorFailedAgentID resolves OnAgentErrorPayload.FailedAgentID.
@@ -195,6 +242,13 @@ func (s *Service) resolveAgentErrorDispatchTarget(
 // session-then-task reload feeding the ownership and shape guards
 // (resolveAgentErrorDispatchTarget).
 //
+// The operation id is computed and its lock acquired before the
+// task/session/MachineState load, and held across the engine call, the
+// commit, and this dispatch's own mark: the engine consumes PreloadedState
+// verbatim, so a lock taken only around the engine call would let a blocked
+// racer wake holding state built before a winner's commit and re-evaluate
+// the step the task has already left.
+//
 // ctx is stripped of the caller's cancellation (see the call site in
 // handleRecoverableFailureLocked): this dispatch is the recovery path for an
 // already-failed session, so a canceled request context must not suppress
@@ -214,13 +268,16 @@ func (s *Service) dispatchKanbanAgentErrorTrigger(ctx context.Context, data watc
 		return
 	}
 
+	operationID := agentErrorOperationID(data.SessionID, data.AgentExecutionID)
+	unlock := s.lockAgentErrorOperation(operationID)
+	defer unlock()
+
 	session, task, ok := s.resolveAgentErrorDispatchTarget(ctx, data)
 	if !ok {
 		return
 	}
 
 	state := s.buildMachineState(ctx, task, session)
-	operationID := agentErrorOperationID(data.SessionID, data.AgentExecutionID)
 
 	s.warnUnregisteredAgentErrorActions(ctx, deps, task, data.SessionID)
 
@@ -250,7 +307,16 @@ func (s *Service) dispatchKanbanAgentErrorTrigger(ctx context.Context, data watc
 	}
 
 	if result.Transitioned {
-		s.applyEngineTransition(ctx, data.TaskID, session, result, engine.TriggerOnAgentError, task.Description, true)
+		applied := s.applyEngineTransition(ctx, data.TaskID, session, result, engine.TriggerOnAgentError, task.Description, true)
+		if applied && result.OperationMarkDeferred {
+			if markErr := deps.store.MarkOperationApplied(ctx, operationID); markErr != nil {
+				s.logger.Warn(msgAgentErrorMarkFailed,
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.String("operation_id", operationID),
+					zap.Error(markErr))
+			}
+		}
 	}
 
 	if result.ActionCount > 0 {

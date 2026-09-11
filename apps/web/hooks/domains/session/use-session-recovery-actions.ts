@@ -14,9 +14,14 @@ import {
 
 export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null;
 
+export type ManualSessionRecoveryFailure = {
+  operation: "resume" | "restore_workspace";
+};
+
 type SessionRecoveryActionsOptions = {
   taskId: string;
   sessionId: string;
+  errorStamp?: string | null;
 };
 
 type RecoveryViewState = {
@@ -27,6 +32,7 @@ type RecoveryViewState = {
   continuationDetails: ContextContinuationDetails | null;
   lastFailedAction: SessionRecoveryAction | null;
   recoveryNotice: string | null;
+  manualRecoveryFailure: ManualSessionRecoveryFailure | null;
 };
 
 function createInitialRecoveryState(): RecoveryViewState {
@@ -38,6 +44,7 @@ function createInitialRecoveryState(): RecoveryViewState {
     continuationDetails: null,
     lastFailedAction: null,
     recoveryNotice: null,
+    manualRecoveryFailure: null,
   };
 }
 
@@ -56,9 +63,14 @@ function combineRecoveryErrors(
 }
 
 /** Owns shared manual recovery state while a failed session remains visible. */
-export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecoveryActionsOptions) {
+// eslint-disable-next-line max-lines-per-function -- the hook owns one coherent recovery state machine.
+export function useSessionRecoveryActions({
+  taskId,
+  sessionId,
+  errorStamp,
+}: SessionRecoveryActionsOptions) {
   const { t } = useTranslation();
-  const requestKey = `${taskId}\u0000${sessionId}`;
+  const requestKey = `${taskId}\u0000${sessionId}\u0000${errorStamp ?? ""}`;
   const activeRequestKeyRef = useRef(requestKey);
   const operationGenerationRef = useRef(0);
   if (activeRequestKeyRef.current !== requestKey) {
@@ -104,6 +116,7 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
           branchDetails: branchRecoveryDetails(cause),
           continuationDetails: contextContinuationDetails(cause),
           lastFailedAction: action,
+          manualRecoveryFailure: { operation: "resume" },
         });
         return false;
       } finally {
@@ -127,10 +140,12 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
       });
     } catch (cause) {
       if (!isCurrentOperation(operation)) return;
-      setState({
-        ...createInitialRecoveryState(),
+      setState((current) => ({
+        ...current,
+        recoveryNotice: null,
         restoreError: asRecoveryError(cause, t("task:failedToRestoreWorkspace")),
-      });
+        manualRecoveryFailure: { operation: "restore_workspace" },
+      }));
     } finally {
       if (isCurrentOperation(operation)) setState((current) => ({ ...current, busyAction: null }));
     }
@@ -154,6 +169,7 @@ export function useSessionRecoveryActions({ taskId, sessionId }: SessionRecovery
     branchDetails: state.branchDetails,
     continuationDetails: state.continuationDetails,
     recoveryNotice: state.recoveryNotice,
+    manualRecoveryFailure: state.manualRecoveryFailure,
     handleRecover,
     handleRestore,
     handleRetry,

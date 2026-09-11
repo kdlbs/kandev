@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
@@ -137,6 +138,7 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		intent := orchestrator.ResolveIntent(&req)
 		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
@@ -147,15 +149,19 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if orchestrator.IsBenignLaunchTeardownErr(err) {
 			h.logger.Warn("session launch aborted during shutdown",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.String("error", err.Error()))
 		} else {
 			h.logger.Error("failed to launch session",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.Error(err))
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+err.Error(), nil)
+		publicErr := err
+		if intent == orchestrator.IntentRestoreWorkspace {
+			publicErr = routingerr.SanitizeError(err)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+publicErr.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

@@ -5,7 +5,9 @@ description: "Change Kandev's Go backend across domain, API, event, persistence,
 
 # Backend Development
 
-The Go module in `apps/backend/` builds both the unified `kandev` binary and the `agentctl` helper installed in task environments.
+The Go module in `apps/backend/` builds the native `kandev` application binary
+with the compiled web frontend embedded. It also builds the separate `agentctl`
+helper installed in task environments.
 
 ## Quick path
 

@@ -179,6 +179,33 @@ func TestBuildContainerConfigPublishesManagedGitCredentialHelperBeforeAgentctlSt
 	}
 }
 
+func TestBuildContainerConfigScrubsForkPRCredentialsBeforeAgentctl(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig:   newConfigStubAgent(),
+		InstanceID:    "0123456789abcdef",
+		TaskID:        "task-1",
+		Credentials:   map[string]string{"GITHUB_TOKEN": "secret"},
+		Metadata:      map[string]interface{}{metadataCheckoutRef: "refs/pull/3527/head"},
+		PrepareScript: "echo prepare",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	script := got.Entrypoint[2]
+	if !strings.Contains(script, "${"+selectedCheckoutMarker+":-}") {
+		t.Fatalf("bootstrap marker check missing: %s", script)
+	}
+	if !strings.Contains(script, selectedCheckoutCredentialScrubCommands) {
+		t.Fatalf("bootstrap credential scrub missing: %s", script)
+	}
+	if !strings.Contains(script, "rm -f /run/kandev/auth.env") {
+		t.Fatalf("bootstrap must remove auth material: %s", script)
+	}
+}
+
 func containsExactString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

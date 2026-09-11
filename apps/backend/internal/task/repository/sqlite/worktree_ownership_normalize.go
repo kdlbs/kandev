@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ const (
 
 // worktreeCutover holds the legacy inventory and the normalized result.
 type worktreeCutover struct {
+	ctx                       context.Context
 	envs                      map[string]*legacyEnv
 	taskEnvs                  map[string][]*legacyEnv
 	sessions                  map[string]*legacySession
@@ -93,7 +95,7 @@ func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx, legacyEnvColumns, legacyRepoCo
 func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) error {
 	// Every interpolated expression comes from the fixed deprecated-column allowlist.
 	//nolint:gosec
-	rows, err := tx.Query(fmt.Sprintf(`
+	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
 		SELECT id, task_id, %s, executor_type, executor_id,
 			executor_profile_id, control_port, status,
 			%s, %s, %s, COALESCE(workspace_path, ''),
@@ -137,7 +139,7 @@ func (c *worktreeCutover) loadLegacySessions(tx *sqlx.Tx) error {
 	// query (SQLite is lenient about functional dependency). started_at is
 	// scanned as a string because MIN() makes the driver return the raw
 	// TEXT value instead of a time.
-	rows, err := tx.Query(`
+	rows, err := tx.QueryContext(c.ctx, `
 		SELECT ts.id, ts.task_id, COALESCE(ts.task_environment_id, ''), ts.state,
 			COALESCE(ts.executor_id, ''), COALESCE(ts.executor_profile_id, ''),
 			COALESCE(ts.repository_id, ''), COALESCE(er.container_id, ''),
@@ -186,7 +188,7 @@ func parseLegacyTimestamp(raw string) time.Time {
 func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]bool) error {
 	// Every interpolated expression comes from the fixed lifecycle-column allowlist.
 	//nolint:gosec
-	rows, err := tx.Query(fmt.Sprintf(`
+	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
 		SELECT id, task_environment_id, repository_id, COALESCE(branch_slug, ''),
 			COALESCE(worktree_id, ''), COALESCE(worktree_path, ''),
 			COALESCE(worktree_branch, ''), position, COALESCE(error_message, ''),
@@ -228,7 +230,7 @@ func legacyRepoColumnExpr(columns map[string]bool, column, fallback string) stri
 }
 
 func (c *worktreeCutover) loadLegacySessionWorktrees(tx *sqlx.Tx) error {
-	rows, err := tx.Query(`
+	rows, err := tx.QueryContext(c.ctx, `
 		SELECT session_id, worktree_id, repository_id, COALESCE(branch_slug, ''),
 			position, COALESCE(worktree_path, ''), COALESCE(worktree_branch, ''),
 			status, created_at, updated_at, merged_at, deleted_at
@@ -710,7 +712,7 @@ func (c *worktreeCutover) resolveExecutorType(tx *sqlx.Tx, executorID string) (s
 		return cached, nil
 	}
 	var executorType string
-	err := tx.QueryRow(tx.Rebind(`SELECT type FROM executors WHERE id = ?`), executorID).Scan(&executorType)
+	err := tx.QueryRowContext(c.ctx, tx.Rebind(`SELECT type FROM executors WHERE id = ?`), executorID).Scan(&executorType)
 	if errors.Is(err, sql.ErrNoRows) {
 		c.executorTypes[executorID] = executorTypeLocalPC
 		return executorTypeLocalPC, nil

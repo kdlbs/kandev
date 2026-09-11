@@ -40,7 +40,7 @@ The profile picker shows only profiles compatible with the task executor. If non
 | **Copy initial prompt** | Copies the first user message from the currently active session into the editable prompt field | A parallel approach; it is not guaranteed to be the task's original description, so inspect and edit it before launch |
 | **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field    | Continue or branch from work already discussed                                                                        |
 
-**Handoff** from an existing session opens the same dialog and selects a summary of that session. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
+**Handoff** from an existing session opens the same dialog with Blank context and an empty prompt. Select a session summary when you need earlier discussion. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
@@ -56,10 +56,12 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
-| **Handoff**        | Starts another session with a generated summary of this conversation                                                                                                       |
+| **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
-Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
+Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev shows one recovery card in the selected session's chat. It labels the safe cause, keeps technical details collapsed, and offers **Resume**, **Restore read-only workspace**, or **Start fresh session** when each action is valid.
+
+**Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. A successful restore keeps the recovery card visible until a later resume succeeds. Kandev keeps the card in the chat scroll area and uses stacked touch-sized actions on phones. A failure in another session or an unrelated provider error remains on its own existing surface.
 
 If Kandev cannot prove that the native conversation is available, it keeps the
 session blocked and shows **Continue from saved context** when that action is
@@ -117,6 +119,11 @@ Actions apply to the task whose menu you opened, even if its selected session
 changes. Canceling a confirmation leaves the task unchanged. See
 [archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
 for confirmation preferences and cleanup consequences.
+
+Once you confirm **Archive**, its conversation disappears immediately while
+cleanup continues. With archive confirmation disabled, choosing **Archive** is
+enough. If the request fails, the task returns when your current filters and
+column limit allow, without taking focus from the thread you are using.
 
 If an action or view filter removes your current thread, Threads selects the
 next remaining thread, otherwise the previous one. If neither survives from

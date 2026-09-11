@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   WorkflowSyncController,
@@ -7,7 +7,10 @@ import type {
 import type { WorkflowSyncConfig } from "@/lib/types/workflow-sync";
 import { WorkflowSyncDialog } from "./workflow-sync-dialog";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+});
 
 const WORKFLOWS_DIR = ".kandev/workflows";
 const REMOVE_TEST_ID = "workflow-sync-remove";
@@ -77,7 +80,82 @@ function controller(overrides: Partial<WorkflowSyncController> = {}): WorkflowSy
   };
 }
 
-describe("WorkflowSyncDialog removal confirmation", () => {
+describe("WorkflowSyncDialog phone removal confirmation", () => {
+  it("does not dismiss a replacement dialog when an unmounted removal completes", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    let finish!: (result: boolean) => void;
+    const sync = controller({
+      handleDelete: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    });
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <WorkflowSyncDialog key="original" open onOpenChange={onOpenChange} sync={sync} />,
+    );
+    fireEvent.click(screen.getByTestId(REMOVE_TEST_ID));
+    fireEvent.click(screen.getByTestId(REMOVE_CONFIRM_TEST_ID));
+    await waitFor(() => expect(sync.handleDelete).toHaveBeenCalledTimes(1));
+    rerender(
+      <WorkflowSyncDialog key="replacement" open onOpenChange={onOpenChange} sync={controller()} />,
+    );
+    await act(async () => finish(true));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId(REMOVE_TEST_ID)).toBeTruthy();
+  });
+
+  it("uses one phone dialog, preserves its draft, and retries a failed removal", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    let finish!: (result: boolean) => void;
+    const sync = controller({
+      handleDelete: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<boolean>((resolve) => {
+              finish = resolve;
+            }),
+        )
+        .mockResolvedValue(true),
+    });
+    const onOpenChange = vi.fn();
+    render(<WorkflowSyncDialog open onOpenChange={onOpenChange} sync={sync} />);
+    const dialog = screen.getByTestId("workflow-sync-dialog");
+    const originalId = dialog.id;
+    const input = screen.getByTestId("workflow-sync-branch-input");
+    const trigger = screen.getByTestId(REMOVE_TEST_ID);
+    fireEvent.click(trigger);
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(dialog.id).toBe(originalId);
+    expect(input.closest("[inert]")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.getByTestId("workflow-sync-branch-input")).toBe(input);
+    expect(sync.handleDelete).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    const confirm = screen.getByTestId(REMOVE_CONFIRM_TEST_ID);
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(sync.handleDelete).toHaveBeenCalledTimes(1));
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => finish(false));
+    await waitFor(() =>
+      expect((screen.getByTestId(REMOVE_CONFIRM_TEST_ID) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    expect(onOpenChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId(REMOVE_CONFIRM_TEST_ID));
+    await waitFor(() => expect(sync.handleDelete).toHaveBeenCalledTimes(2));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("WorkflowSyncDialog wider removal confirmation", () => {
   it("keeps removal inline in the existing dialog without a second overlay", () => {
     const sync = controller();
     render(<WorkflowSyncDialog open onOpenChange={vi.fn()} sync={sync} />);

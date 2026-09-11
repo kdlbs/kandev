@@ -5,6 +5,7 @@ import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-r
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
+import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
@@ -93,7 +94,7 @@ type UserMessageProps = {
 };
 
 type UserMessageMetadata = WorkflowMessageMetadata & {
-  attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
+  attachments?: UserMessageAttachment[];
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
@@ -335,7 +336,9 @@ function UserMessageContent({
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
           isFavorite={isFavorite}
-          onToggleFavorite={toggleFavorite}
+          onToggleFavorite={
+            comment.id === TASK_DESCRIPTION_SYNTHETIC_ID ? undefined : toggleFavorite
+          }
           onNavigatePrev={() => {
             if (userNavigation.previousId && onScrollToMessage)
               onScrollToMessage(userNavigation.previousId);

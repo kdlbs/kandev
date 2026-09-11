@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 function longProfileDeleteConflict() {
   return {
@@ -31,8 +32,9 @@ test.describe("Agent profile deletion on mobile", () => {
     await trigger.tap();
     await testPage.getByTestId(`delete-profile-${profile.id}`).tap();
 
-    const confirmation = row.getByTestId("agent-profile-delete-inline-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Delete agent profile?" });
     await expect(confirmation).toBeVisible();
+    await expect(testPage.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(0);
     for (const label of ["Cancel", "Delete"]) {
       const action = confirmation.getByRole("button", { name: label, exact: true });
       await expect
@@ -55,7 +57,7 @@ test.describe("Agent profile deletion on mobile", () => {
     await expect(testPage).toHaveURL(/\/settings\/agents$/);
   });
 
-  test("keeps simple deletion inline with touch-sized cancel and delete actions", async ({
+  test("opens simple deletion in a sheet with touch-sized cancel and delete actions", async ({
     testPage,
     apiClient,
     prCapture,
@@ -74,11 +76,12 @@ test.describe("Agent profile deletion on mobile", () => {
     const trigger = testPage.getByTestId("profile-delete-trigger");
     await trigger.tap();
 
-    const confirmation = testPage.getByTestId("agent-profile-delete-inline-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Delete agent profile?" });
     await expect(confirmation).toBeVisible();
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await waitForFiniteAnimations(confirmation);
     await prCapture.screenshot("mobile-agent-profile-delete-confirmation", {
-      caption: "Mobile inline agent profile deletion confirmation",
+      caption: "Mobile agent profile deletion confirmation sheet",
     });
     await expect
       .poll(async () =>
@@ -104,7 +107,7 @@ test.describe("Agent profile deletion on mobile", () => {
 
     await trigger.tap();
     await testPage
-      .getByTestId("agent-profile-delete-inline-confirmation")
+      .getByRole("dialog", { name: "Delete agent profile?" })
       .getByTestId("agent-profile-delete-confirm")
       .tap();
 
@@ -137,7 +140,7 @@ test.describe("Agent profile deletion on mobile", () => {
     });
 
     await testPage.getByTestId("profile-delete-trigger").tap();
-    const confirmation = testPage.getByTestId("agent-profile-delete-inline-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Delete agent profile?" });
     await expect(confirmation).toBeVisible();
     await confirmation.getByTestId("agent-profile-delete-confirm").tap();
 

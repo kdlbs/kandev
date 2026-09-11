@@ -456,7 +456,10 @@ export function MobileMenuSheet({
       onOpenChange={onOpenChange}
       contentRef={contentRef}
       onOpenAutoFocus={focusMenu}
-      onCloseAutoFocus={onCloseAutoFocus}
+      onCloseAutoFocus={(event) => {
+        onCloseAutoFocus?.(event);
+        navControls.onMenuCloseAutoFocus?.(event);
+      }}
       workspaceId={workspaceId}
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}

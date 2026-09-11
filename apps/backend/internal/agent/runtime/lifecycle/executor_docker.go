@@ -323,6 +323,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
 		DurableJournalHostPath:         journalHostPath,
 		DurableJournalContainerPath:    journalContainerPath,
+		Metadata:                       req.Metadata,
 	}, nil
 }
 
@@ -604,7 +605,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
 		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		Env:           selectedCheckoutAgentEnv(req.Env, req.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
@@ -850,7 +851,7 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 	if script == "" {
 		return "", nil
 	}
-	script += KandevBranchCheckoutPostlude()
+	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
 		if err != nil {

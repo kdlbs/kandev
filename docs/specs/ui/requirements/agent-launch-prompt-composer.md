@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-02
-updated: 2026-08-23
+updated: 2026-09-11
 owners:
   - kandev
 ---
@@ -28,6 +28,9 @@ Starting another agent inside an existing task is another prompt-authoring flow,
 - **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.6:** The Start Agent action remains disabled while the prompt is empty, while context is being summarized, while launch is in progress, or when no compatible agent profile is available.
 - **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.7:** Desktop and phone layouts expose the same capabilities and launch result. On phone, the existing mobile sessions entry point opens the dialog; the prompt menu follows the shared [composer suggestion overlay requirements](composer-suggestion-overlays.md), and the controls remain touch reachable without horizontal document overflow.
 - **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.8:** Agent launch continues to use the existing session launch contract, task environment, context selection, profile compatibility rules, and guarded enhancement delivery.
+- **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.9:** Each fresh opening of New Agent or handoff shall select Blank with an empty prompt. Reopening after a previous context choice shall also start Blank. Opening shall not generate a summary or launch an agent.
+- **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.10:** A session summary shall start only when the user explicitly selects a session summary option. The selected session supplies the summary. Opening, profile selection, and session-list updates shall not select context or start summarization.
+- **AC-UI-AGENT-LAUNCH-PROMPT-COMPOSER-001.11:** On desktop and phone, handoff shall retain the selected compatible target profile while starting with Blank context. Users can type a prompt and launch without configuring or invoking summarization.
 
 ## Migrated source detail
 
@@ -62,10 +65,25 @@ Starting another agent inside an existing task is another prompt-authoring flow,
 - **GIVEN** voice mode is configured, **WHEN** the user dictates in the launch composer, **THEN** the transcript is inserted at the caret and configured auto-send starts the agent only after non-empty text was inserted.
 - **GIVEN** a prior task prompt or session summary, **WHEN** the user selects that context, **THEN** the resulting text appears in the shared composer and remains editable with saved-prompt, attachment, enhancement, and voice controls available.
 - **GIVEN** a phone viewport, **WHEN** the user opens New Agent from the mobile session controls, inserts a saved prompt by touch, and starts the agent, **THEN** the dialog remains viewport-contained without document horizontal overflow and the new session becomes active.
-- **GIVEN** a session handoff, **WHEN** the handoff dialog opens, **THEN** it exposes the same shared launch composer while preserving the existing automatic summary and target-profile behavior.
+- **GIVEN** a session handoff, **WHEN** the handoff dialog opens, **THEN** it exposes an empty shared launch composer with Blank context and preserves compatible target-profile selection. Summary generation requires a subsequent explicit context selection.
+
+## Compatibility
+
+The 2026-09-11 correction replaces automatic handoff summaries with explicit
+context selection, as requested by the user. Existing summary generation,
+copy-prompt selection, profile compatibility, and launch contracts remain available.
+
+## System design
+
+- [Agent launch prompt composer](../system-design/agent-launch-prompt-composer.md)
+
+## Implementation Plans
+
+- [Shared composer delivery](../../../plans/agent-launch-prompt-composer/plan.md) records the completed composer integration.
+- [Blank handoff context](../../../plans/handoff-blank-context/plan.md) delivers AC-001.9 through AC-001.11 and supersedes the earlier automatic-summary expectation.
 
 ## Out of scope
 
 - Changing saved-prompt storage, mention search, attachment limits, utility-agent enhancement, voice settings, or the session launch API.
-- Changing task creation, subtask creation, task chat, Quick Chat, context selection semantics, agent profile selection, or environment reuse.
+- Changing task creation, subtask creation, task chat, Quick Chat, explicit context-action results, agent profile selection, or environment reuse.
 - Adding rich inline chips or external `#` entity references to the plain launch prompt.

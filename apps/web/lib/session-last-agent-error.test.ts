@@ -53,6 +53,37 @@ describe("readLastAgentError", () => {
 
 // eslint-disable-next-line max-lines-per-function -- this group preserves the complete metadata compatibility matrix.
 describe("readLastAgentError optional metadata", () => {
+  it("reads bootstrap correlation and bounded causes", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "The agent could not start.",
+          execution_id: "execution-1",
+          phase: "bootstrap",
+          attempt_id: "attempt-1",
+          causes: [
+            {
+              operation: "resume",
+              code: "permission_denied",
+              detail: "The required contribution access was denied.",
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      executionId: "execution-1",
+      phase: "bootstrap",
+      attemptId: "attempt-1",
+      causes: [
+        {
+          operation: "resume",
+          code: "permission_denied",
+          detail: "The required contribution access was denied.",
+        },
+      ],
+    });
+  });
+
   it("reads typed launch recovery fields and keeps action order bounded", () => {
     expect(
       readLastAgentError({

@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-24
-updated: 2026-09-07
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -24,6 +24,12 @@ every sentence as an equal paragraph.
 
 ## Terminology
 
+Phone archive presentation follows the
+[mobile action confirmation contract](mobile-action-confirmations.md).
+This document continues to own cleanup content, action variants, and full
+task-delete consent. Delivery is tracked in the
+[mobile confirmation plan](../../../plans/mobile-action-confirmations/plan.md).
+
 - **Still-working warning:** The localized caution shown when the task or one
   of the selected tasks has generating or background activity.
 
@@ -42,21 +48,21 @@ meaning and the existing archive and delete workflows.
   short-text wrapping, and its icon, spacing, and padding shall remain optically
   balanced with that typography.
 - **AC-TASKS-CONFIRMATION-WARNING-001.2:** When the warning renders in a full
-  dialog, desktop archive popover, archive inline confirmation, or shared delete
+  dialog, phone archive sheet, desktop archive popover, tablet inline confirmation, or shared delete
   dialog, it shall preserve its localized text, `role=alert`, restrained yellow
   semantic treatment, and existing in-flight visibility conditions.
 - **AC-TASKS-CONFIRMATION-WARNING-001.3:** At desktop and phone confirmation
   widths, the warning shall remain contained without document-level horizontal
   overflow, and existing confirmation actions shall remain reachable. Full
   task cleanup dialogs shall follow the dedicated action contract in
-  `AC-UI-TASK-CLEANUP-CONFIRMATION-001.5`; other action geometry shall remain
-  unchanged.
+  `AC-UI-TASK-CLEANUP-CONFIRMATION-001.5`; phone archive follows the mobile
+  contract and other action geometry shall remain unchanged.
 
 ### REQ-TASKS-CONFIRMATION-SURFACE-002: Stable fine-pointer archive surface
 
 **Intent:** Give the fine-pointer archive confirmation readable width while
-keeping the source sidebar row stable and preserving the intentional coarse
-pointer inline confirmation behavior.
+keeping the source sidebar row stable and preserving tablet coarse-pointer
+inline confirmation behavior.
 
 #### Acceptance criteria
 
@@ -73,9 +79,10 @@ pointer inline confirmation behavior.
   tolerance-only assertion.
 - **AC-TASKS-CONFIRMATION-SURFACE-002.3:** The fine-pointer popover shall
   preserve its existing anchor, focus-return boundary, confirmation callbacks,
-  and compact desktop/tablet viewport containment. Coarse-pointer inline
-  confirmation may continue to expand its row and shall retain its existing
-  44px action geometry and zero-overflow behavior.
+  and compact desktop/tablet viewport containment. Tablet coarse-pointer inline
+  confirmation may continue to expand its row with its existing 44px actions.
+  Phone archive shall leave row geometry unchanged and use a dedicated
+  confirmation step in the open sheet or a standalone bottom sheet.
 - **AC-TASKS-CONFIRMATION-SURFACE-002.4:** When a fine-pointer archive action
   needs descendant classification before choosing its confirmation surface, no
   provisional confirmation popover or archive action shall appear while that
@@ -111,39 +118,42 @@ repository resources, so that I can understand the consequence before acting.
   local Docker, remote Docker, Sprites, SSH, unknown executors, and running
   agent sessions in every supported locale.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.4:** Full dialogs, the archive popover,
-  and the archive inline confirmation shall derive their cleanup content from
+  phone archive surfaces, and tablet inline confirmation shall derive cleanup content from
   the same structured model. Each surface may use its established density, but
   shall preserve the same effects, reassurance, and order.
-- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.5:** At phone widths, full task cleanup
+- **AC-UI-TASK-CLEANUP-CONFIRMATION-001.5:** At phone widths, full task-delete
   dialogs shall remain centered and inset within the visual viewport, create no
   document horizontal overflow, keep overflowing content reachable, and expose
-  stacked full-width actions at least 44 CSS px high. Tablet and desktop shall
-  retain compact row actions.
+  stacked full-width actions at least 44 CSS px high. Phone archive shall use
+  the mobile confirmation surface with reachable consequences and options.
+  Tablet and desktop shall retain compact row actions.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.6:** Delete shall use the design
   system's semantic destructive action treatment without a competing primary
   treatment. Archive shall retain its non-destructive action treatment.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.7:** Cancel, dismiss, focus, Escape,
   Enter default-action behavior, archive/delete mutation loading state, cascade
   selection, in-flight warning visibility, and single/bulk archive and delete
-  callbacks shall remain unchanged.
+  callbacks shall remain unchanged. The new phone archive surface requires
+  explicit button activation; desktop default-Enter behavior remains unchanged.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.8:** When archive is initiated from a
-  phone Kanban card, the card shall use the contained full task-cleanup alert
-  dialog even when the task has no descendants. The dialog shall be centered
-  and inset, use the existing theme tokens, keep its content internally
+  phone Kanban card, the card shall use a compact inset bottom confirmation
+  sheet even when the task has no descendants. The sheet shall use the
+  existing theme tokens, keep its content internally
   scrollable, and expose stacked full-width actions at least 44 CSS px high;
   no inline confirmation shall be inserted between cards or change the card's
   height, board URL, or selected task. Fine-pointer desktop and compact-desktop
   Kanban shall retain their anchored archive popover. Coarse-pointer tablet
   Kanban shall retain its existing routing, including its current inline
-  zero-descendant surface. Task-switcher/task-row surfaces shall retain their
-  intentional row-owned coarse-pointer inline confirmation, and a disabled
+  zero-descendant surface. Phone task-switcher/task-row actions shall use a
+  confirmation step in the existing sheet without expanding a row. A disabled
   archive-confirmation preference shall continue to bypass the surface.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.11:** When the task's executor
   projection is absent but task-owned worktree state may remain after the last
-  session ends, the delete confirmation shall fail closed by showing the same
-  explicit discard selection.
+  session ends, the delete confirmation shall inspect the retained worktrees
+  through the task cleanup contract. Missing executor metadata alone shall not
+  require discard consent.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.12:** When delete can remove one or more
-  task worktrees, the confirmation shall state that tracked and untracked local
+  dirty task worktrees, the confirmation shall state that tracked and untracked local
   changes will be permanently discarded. The destructive action shall require
   an explicit selection for this outcome.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.13:** When the backend rejects deletion
@@ -154,19 +164,22 @@ repository resources, so that I can understand the consequence before acting.
   selection shall remain inside the existing centered dialog and its scrolling
   body. Its label shall provide a touch target of at least 44 CSS px.
 
+Consent inspection, clean-workspace suppression, and failure recovery follow
+[task runtime cleanup](../../tasks/requirements/runtime-cleanup.md),
+`AC-TASKS-RUNTIME-CLEANUP-001.14` through `.17`.
+
 ## Out of scope
 
 - Rewriting or re-translating the still-working warning.
 - Widening all confirmation popovers globally.
-- Changing in-flight detection, archive behavior, focus handling, Escape
-  handling, or safe-area handling.
-- Changing compact archive popover/inline or unrelated dialog action
+- Changing in-flight detection or archive behavior. Phone presentation, focus,
+  dismissal, and safe-area rules are owned by the linked mobile contract.
+- Changing desktop/tablet compact archive or unrelated dialog action
   dimensions.
-- Replacing the centered task alerts with a drawer, sheet, or new navigation
+- Replacing the centered task-delete alerts with a drawer, sheet, or new navigation
   flow.
 - Changing the descendant-count API or introducing background prefetching for
   archive confirmation.
 - Masking sidebar row layout changes with fixed/minimum heights or negative
   offsets.
-- Adding animation or redesigning any confirmation surface beyond the shared
-  warning density and the task cleanup hierarchy above.
+- Redesigning other confirmation surfaces under this cleanup-content contract.

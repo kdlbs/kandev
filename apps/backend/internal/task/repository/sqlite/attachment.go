@@ -556,7 +556,7 @@ func (r *Repository) deleteClaimedMessageAttachments(
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	queueTablePresent, err := r.tableExists("queued_messages")
+	queueTablePresent, err := r.tableExistsContext(ctx, "queued_messages")
 	if err != nil {
 		return nil, fmt.Errorf("probe queue attachment references: %w", err)
 	}

@@ -844,5 +844,9 @@ if [ ! -f /opt/kandev/prepared ]; then
   sh /opt/kandev/prepare.sh
   : > /opt/kandev/prepared
 fi
+if [ "${` + selectedCheckoutMarker + `:-}" = "1" ]; then
+  ` + selectedCheckoutCredentialScrubCommands + `
+  rm -f /run/kandev/auth.env 2>/dev/null || true
+fi
 exec /opt/kandev/agentctl`
 }

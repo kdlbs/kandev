@@ -1,5 +1,5 @@
 import { buildRestoreWorkspaceRequest } from "./session-launch-helpers";
-import { launchSession } from "./session-launch-service";
+import { launchSession, type LaunchSessionResponse } from "./session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError, type WebSocketRequestErrorDetails } from "@/lib/ws/client";
 
@@ -95,9 +95,10 @@ export async function restoreSessionWorkspace(
   taskId: string,
   sessionId: string,
   failureMessage: string,
-): Promise<void> {
+): Promise<LaunchSessionResponse> {
   const { request } = buildRestoreWorkspaceRequest(taskId, sessionId);
   const response = await launchSession(request);
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
+  return response;
 }

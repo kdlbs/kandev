@@ -339,7 +339,7 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (stri
 	if script == "" {
 		return "", nil
 	}
-	script += KandevBranchCheckoutPostlude()
+	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
 		if err != nil {
@@ -498,7 +498,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
-		Env:                        cloneStringMap(req.Env),
+		Env:                         selectedCheckoutAgentEnv(req.Env, req.Metadata),
 	}
 }
 
