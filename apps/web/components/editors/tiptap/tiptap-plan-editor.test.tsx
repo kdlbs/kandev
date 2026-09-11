@@ -283,6 +283,22 @@ describe("TipTapPlanEditor comment projection", () => {
     expect(onCommentDeleted).not.toHaveBeenCalled();
   });
 
+  it("keeps a persisted comment when the local plan projection cannot place it", async () => {
+    const onCommentDeleted = vi.fn();
+    render(
+      <TipTapPlanEditor
+        taskId="task-1"
+        value="Replacement plan text"
+        onChange={() => undefined}
+        comments={[{ id: "orphan", selectedText: "Removed text", from: 50, to: 62 }]}
+        onCommentDeleted={onCommentDeleted}
+      />,
+    );
+
+    await flushDeferredCommentCallbacks();
+    expect(onCommentDeleted).not.toHaveBeenCalled();
+  });
+
   // @covers AC-UI-PLAN-COMMENT-DRAFTS-001.4
   it("reports an untagged comment mark removal exactly once", async () => {
     const onCommentDeleted = vi.fn();

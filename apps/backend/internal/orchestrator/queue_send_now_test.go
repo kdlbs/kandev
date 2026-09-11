@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -343,7 +344,7 @@ func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 		t.Fatalf("claim send-now dispatch: tracked=%v err=%v", tracked, err)
 	}
 
-	if err := svc.promptSendNowClaim(ctx, claim); err != nil {
+	if _, err := svc.promptSendNowClaim(ctx, claim); err != nil {
 		t.Fatalf("prompt send-now claim: %v", err)
 	}
 
@@ -356,6 +357,57 @@ func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 	}
 	if len(agentMgr.capturedPrompts) != 1 {
 		t.Fatalf("expected the prompt to reach PromptAgent once, captured=%d", len(agentMgr.capturedPrompts))
+	}
+}
+
+func TestPromptSendNowClaimRejectsPlanCommentWhenTranscriptPersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(
+		repo, newMockStepGetter(), newMockTaskRepo(), agentMgr,
+	)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{userMessageErr: errors.New("transcript unavailable")}
+	claim := &messagequeue.SendNowClaim{
+		Sources: []messagequeue.QueuedMessage{
+			{ID: "q-ordinary", Metadata: map[string]interface{}{}},
+			{ID: "q-plan-comment", Metadata: map[string]interface{}{
+				plancomments.MetadataClientQueueID:      "q-plan-comment",
+				plancomments.MetadataRequestFingerprint: "fingerprint-plan-comment",
+			}},
+		},
+		Dispatch: messagequeue.QueuedMessage{
+			ID: "q-combined", SessionID: "session-1", TaskID: "task-1", Content: "ordinary\n\nplan feedback",
+			Metadata: map[string]interface{}{},
+		},
+	}
+	reservation := svc.markQueuedDispatchInFlight("session-1", claim.Dispatch.ID)
+	tracked, err := svc.claimQueuedDispatchForExecution(
+		"session-1", claim.Dispatch.ID, reservation,
+	)
+	if err != nil || !tracked {
+		t.Fatalf("claim send-now dispatch: tracked=%v err=%v", tracked, err)
+	}
+
+	_, err = svc.promptSendNowClaim(ctx, claim)
+	if !errors.Is(err, errLifecyclePromptMessagePersistence) {
+		t.Fatalf("prompt send-now plan comment error = %v", err)
+	}
+	if got := len(agentMgr.capturedPromptCalls); got != 0 {
+		t.Fatalf("prompt calls after transcript failure = %d, want 0", got)
 	}
 }
 

@@ -32,6 +32,7 @@ import {
   stopDialogPropagation,
 } from "./task-confirm-dialog-shared";
 import { useTranslation } from "react-i18next";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -49,9 +50,9 @@ type TaskDeleteConfirmDialogProps = {
   executorTypes?: Array<string | null | undefined>;
   onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
   confirmTestId?: string;
-  /** Element to return keyboard focus to on close, confirmed or cancelled
-   * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
-   * default restore-to-previously-focused-element behavior. */
+  /** Overrides default focus restoration when the original trigger may disappear. */
+  onCloseAutoFocus?: (event: Event) => void;
+  /** Returns focus on close; omitted callers keep Radix's default restoration. */
   focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
@@ -285,6 +286,7 @@ export function TaskDeleteConfirmDialog({
   executorTypes,
   onConfirm,
   confirmTestId,
+  onCloseAutoFocus,
   focusReturnRef,
 }: TaskDeleteConfirmDialogProps) {
   const { t } = useTranslation();
@@ -324,12 +326,7 @@ export function TaskDeleteConfirmDialog({
         size="lg"
         className={TASK_CONFIRM_CLASS}
         onClick={stopDialogPropagation}
-        onCloseAutoFocus={(event) => {
-          const target = focusReturnRef?.current;
-          if (!target || !document.contains(target)) return;
-          event.preventDefault();
-          target.focus();
-        }}
+        onCloseAutoFocus={onCloseAutoFocus ?? createFocusReturnHandler(focusReturnRef)}
       >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>

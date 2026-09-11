@@ -116,6 +116,22 @@ func (a *testMessageCreatorAdapter) CreateUserMessage(ctx context.Context, taskI
 	return err
 }
 
+func (a *testMessageCreatorAdapter) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
 func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
