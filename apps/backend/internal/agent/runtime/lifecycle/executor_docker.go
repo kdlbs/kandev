@@ -301,6 +301,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		ContributionDestinations:       req.ContributionDestinations,
 		ComparisonTargets:              req.ComparisonTargets,
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
+		Metadata:                       req.Metadata,
 	}, nil
 }
 
@@ -582,7 +583,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
 		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		Env:           selectedCheckoutAgentEnv(req.Env, req.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

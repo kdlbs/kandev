@@ -80,6 +80,38 @@ func TestBuildLaunchMetadataSelectedCheckoutAuthority(t *testing.T) {
 	}
 }
 
+func TestBuildLaunchMetadataSelectedCheckoutResumeRequiresSameSelection(t *testing.T) {
+	first := &LaunchRequest{CheckoutBranch: selectedTestBranch, PRNumber: 3527}
+	metadata := buildLaunchMetadata(first, "", "", selectedTestBranch)
+
+	resumed := &LaunchRequest{
+		CheckoutBranch: selectedTestBranch,
+		PRNumber:       3528,
+		Metadata:       metadata,
+	}
+	updated := buildLaunchMetadata(resumed, "", "", selectedTestBranch)
+	require.Equal(t, "refs/pull/3528/head", updated[metadataCheckoutRef])
+	require.Equal(t, false, updated[metadataPreserveCheckout], "a changed PR must not reuse the old checkout")
+}
+
+func TestSelectedCheckoutAgentEnvStripsForkPRCredentials(t *testing.T) {
+	env := map[string]string{
+		"GITHUB_TOKEN":                        "github-secret",
+		"GH_TOKEN":                            "gh-secret",
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "https://broker",
+		"KANDEV_GITHUB_CREDENTIAL_LEASE":      "lease",
+		"OPENAI_API_KEY":                      "keep",
+	}
+	metadata := map[string]interface{}{metadataCheckoutRef: "refs/pull/3527/head"}
+	got := selectedCheckoutAgentEnv(env, metadata)
+	require.NotContains(t, got, "GITHUB_TOKEN")
+	require.NotContains(t, got, "GH_TOKEN")
+	require.NotContains(t, got, "KANDEV_GITHUB_CREDENTIAL_BROKER_URL")
+	require.NotContains(t, got, "KANDEV_GITHUB_CREDENTIAL_LEASE")
+	require.Equal(t, "keep", got["OPENAI_API_KEY"])
+	require.Equal(t, "github-secret", env["GITHUB_TOKEN"], "sanitization must not mutate the request env")
+}
+
 // @covers AC-EXECUTORS-REPOSITORY-BRANCH-002.4
 func TestSelectedCheckoutRejectsInvalidSelection(t *testing.T) {
 	for _, tc := range []struct {

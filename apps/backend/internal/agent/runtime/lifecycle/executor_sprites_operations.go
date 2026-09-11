@@ -495,7 +495,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
-		Env:                        cloneStringMap(req.Env),
+		Env:                        selectedCheckoutAgentEnv(req.Env, req.Metadata),
 	}
 }
 

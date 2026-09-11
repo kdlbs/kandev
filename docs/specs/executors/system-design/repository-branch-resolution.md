@@ -115,6 +115,9 @@ The shared `withBranchCheckout` wrapper records whether HEAD exists before the p
 A recorded branch plus a pre-existing checkout selects resume preservation.
 A recorded branch without a pre-existing checkout still requires strict materialization for recreated compute.
 If fresh preparation encounters conflicting branch state, fail without overwriting it.
+The trusted clone and selected-ref fetch may use the resolved GitHub credential, but the checkout metadata is persisted so a changed branch or PR cannot reuse the previous checkout.
+For a selected PR, remove GitHub token, broker lease, and CLI-helper environment values before repository setup completes and before starting agentctl; remove the temporary Kubernetes auth file as well.
+Long-lived agent instance requests for Sprites, Docker, Kubernetes, and SSH must receive the sanitized environment, so code running from a fork PR cannot read the contribution credential.
 
 ### Read-only PR source
 
