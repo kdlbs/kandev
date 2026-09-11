@@ -233,3 +233,171 @@ func TestPostgresDeleteLocksStepAgainstConcurrentReorder(t *testing.T) {
 		t.Fatalf("GetTask(deleted task) error = %v, want ErrTaskNotFound", err)
 	}
 }
+
+// TestPostgresUnarchiveLocksStepAgainstConcurrentReorder and
+// TestPostgresUnarchiveByCascadeLocksStepAgainstConcurrentReorder prove
+// UnarchiveTask and UnarchiveTaskByCascade take the same lockTaskStepForWrite
+// guard as ArchiveTask/ArchiveTaskIfActive/DeleteTask above. Before this,
+// both were bare, non-transactional updates: a task reappearing mid-reorder
+// could still hold the stale position it had before it was archived, which
+// can collide with (or fall outside) the range the reorder just renumbered
+// the step's live tasks into — REQ-TASKS-KANBAN-TASK-REORDERING-001.15's
+// dense, gap-free guarantee holds only over the tasks a reorder actually
+// saw.
+func TestPostgresUnarchiveLocksStepAgainstConcurrentReorder(t *testing.T) {
+	const step = "unarchive-lock-step"
+	repo := seedVisibilityLockFixture(t, "unarchive-lock-ws", "unarchive-lock-workflow", step)
+	ctx := context.Background()
+
+	unarchiving := &models.Task{
+		ID: "unarchive-lock-target", WorkspaceID: "unarchive-lock-ws", WorkflowID: "unarchive-lock-workflow",
+		WorkflowStepID: step, Title: "Unarchiving", WIPAdmitted: true,
+	}
+	stays1 := &models.Task{
+		ID: "unarchive-lock-stays-1", WorkspaceID: "unarchive-lock-ws", WorkflowID: "unarchive-lock-workflow",
+		WorkflowStepID: step, Title: "Stays 1", WIPAdmitted: true,
+	}
+	stays2 := &models.Task{
+		ID: "unarchive-lock-stays-2", WorkspaceID: "unarchive-lock-ws", WorkflowID: "unarchive-lock-workflow",
+		WorkflowStepID: step, Title: "Stays 2", WIPAdmitted: true,
+	}
+	for _, task := range []*models.Task{unarchiving, stays1, stays2} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("seed task %s: %v", task.ID, err)
+		}
+	}
+	if err := repo.ArchiveTask(ctx, unarchiving.ID); err != nil {
+		t.Fatalf("pre-archive %s: %v", unarchiving.ID, err)
+	}
+
+	paused, release := armReorderPause(t, repo)
+	t.Cleanup(func() { repo.reorderPreWriteHook = nil })
+
+	var wg sync.WaitGroup
+	var reorderErr, unarchiveErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _, reorderErr = repo.ReorderStepTasks(ctx, step, ReorderBandAdmitted, []string{stays1.ID, stays2.ID})
+	}()
+
+	<-paused // reorder holds step's row lock, has already read the live membership (unarchiving excluded)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, unarchiveErr = repo.UnarchiveTask(ctx, unarchiving.ID)
+	}()
+
+	// Give the unarchive goroutine time to either run to completion (unfixed
+	// code, no step lock) or register its wait against reorder's held step
+	// lock (fixed code) before we peek at its committed state.
+	time.Sleep(200 * time.Millisecond)
+
+	var archivedAtMidPause sql.NullTime
+	if err := repo.db.QueryRowContext(ctx, repo.db.Rebind(
+		`SELECT archived_at FROM tasks WHERE id = ?`,
+	), unarchiving.ID).Scan(&archivedAtMidPause); err != nil {
+		t.Fatalf("peek archived_at mid-pause: %v", err)
+	}
+	if !archivedAtMidPause.Valid {
+		t.Fatalf("UnarchiveTask committed while the reorder still held step %q's lock: it must wait behind "+
+			"the reorder instead of racing its read-then-write window", step)
+	}
+
+	release()
+	wg.Wait()
+
+	if unarchiveErr != nil {
+		t.Fatalf("unarchive must always succeed: %v", unarchiveErr)
+	}
+	if reorderErr != nil && !errors.Is(reorderErr, repoerrors.ErrStepChanged) {
+		t.Fatalf("reorder error = %v, want nil or ErrStepChanged", reorderErr)
+	}
+
+	stored, err := repo.GetTask(ctx, unarchiving.ID)
+	if err != nil {
+		t.Fatalf("reload unarchived task: %v", err)
+	}
+	if stored.ArchivedAt != nil {
+		t.Fatalf("task %q is still archived", unarchiving.ID)
+	}
+}
+
+func TestPostgresUnarchiveByCascadeLocksStepAgainstConcurrentReorder(t *testing.T) {
+	const step = "unarchive-cascade-lock-step"
+	const cascadeID = "unarchive-cascade-lock-cascade"
+	repo := seedVisibilityLockFixture(t, "unarchive-cascade-lock-ws", "unarchive-cascade-lock-workflow", step)
+	ctx := context.Background()
+
+	unarchiving := &models.Task{
+		ID: "unarchive-cascade-lock-target", WorkspaceID: "unarchive-cascade-lock-ws",
+		WorkflowID: "unarchive-cascade-lock-workflow", WorkflowStepID: step, Title: "Unarchiving", WIPAdmitted: true,
+	}
+	stays1 := &models.Task{
+		ID: "unarchive-cascade-lock-stays-1", WorkspaceID: "unarchive-cascade-lock-ws",
+		WorkflowID: "unarchive-cascade-lock-workflow", WorkflowStepID: step, Title: "Stays 1", WIPAdmitted: true,
+	}
+	stays2 := &models.Task{
+		ID: "unarchive-cascade-lock-stays-2", WorkspaceID: "unarchive-cascade-lock-ws",
+		WorkflowID: "unarchive-cascade-lock-workflow", WorkflowStepID: step, Title: "Stays 2", WIPAdmitted: true,
+	}
+	for _, task := range []*models.Task{unarchiving, stays1, stays2} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("seed task %s: %v", task.ID, err)
+		}
+	}
+	if _, err := repo.ArchiveTaskIfActive(ctx, unarchiving.ID, cascadeID); err != nil {
+		t.Fatalf("pre-archive %s: %v", unarchiving.ID, err)
+	}
+
+	paused, release := armReorderPause(t, repo)
+	t.Cleanup(func() { repo.reorderPreWriteHook = nil })
+
+	var wg sync.WaitGroup
+	var reorderErr, unarchiveErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _, reorderErr = repo.ReorderStepTasks(ctx, step, ReorderBandAdmitted, []string{stays1.ID, stays2.ID})
+	}()
+
+	<-paused // reorder holds step's row lock, has already read the live membership (unarchiving excluded)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, unarchiveErr = repo.UnarchiveTaskByCascade(ctx, unarchiving.ID, cascadeID)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	var archivedAtMidPause sql.NullTime
+	if err := repo.db.QueryRowContext(ctx, repo.db.Rebind(
+		`SELECT archived_at FROM tasks WHERE id = ?`,
+	), unarchiving.ID).Scan(&archivedAtMidPause); err != nil {
+		t.Fatalf("peek archived_at mid-pause: %v", err)
+	}
+	if !archivedAtMidPause.Valid {
+		t.Fatalf("UnarchiveTaskByCascade committed while the reorder still held step %q's lock: it must wait "+
+			"behind the reorder instead of racing its read-then-write window", step)
+	}
+
+	release()
+	wg.Wait()
+
+	if unarchiveErr != nil {
+		t.Fatalf("unarchive must always succeed: %v", unarchiveErr)
+	}
+	if reorderErr != nil && !errors.Is(reorderErr, repoerrors.ErrStepChanged) {
+		t.Fatalf("reorder error = %v, want nil or ErrStepChanged", reorderErr)
+	}
+
+	stored, err := repo.GetTask(ctx, unarchiving.ID)
+	if err != nil {
+		t.Fatalf("reload unarchived task: %v", err)
+	}
+	if stored.ArchivedAt != nil {
+		t.Fatalf("task %q is still archived", unarchiving.ID)
+	}
+}

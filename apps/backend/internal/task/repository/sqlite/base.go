@@ -113,6 +113,15 @@ type Repository struct {
 	// membership in between. Nil in production and in every test but the
 	// one that sets it.
 	reorderPreWriteHook func()
+	// taskStepLockBeforeAcquireHook is a test-only synchronization seam,
+	// called (if set) inside lockTaskStepForWrite's retry loop after it has
+	// read a task's candidate step but before it locks that step - the exact
+	// gap a concurrent move of the same task can land in. It exists so a
+	// Postgres test can pause there and commit a real concurrent move,
+	// proving the confirm-and-retry loop settles on the task's post-move
+	// step rather than the stale one it read. Nil in production and in
+	// every test but the one that sets it.
+	taskStepLockBeforeAcquireHook func(candidateStepID string)
 	// stepEntryDispatcher fires a step's session-independent on_enter
 	// sequence after a registered step-transition writer commits. Nil-safe
 	// (see dispatchStepEntry in step_entry_dispatch.go): unset in every

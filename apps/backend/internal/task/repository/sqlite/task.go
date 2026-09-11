@@ -28,6 +28,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// forUpdateClause is the Postgres row-lock suffix appended to a conditionally
+// built SELECT. Not used on SQLite (dialect.IsPostgres gates every call site).
+const forUpdateClause = " FOR UPDATE"
+
 // defaultTaskAlias is the fallback alias the projection helpers use when
 // the caller passes an empty string — i.e., when the SELECT references
 // the `tasks` table directly rather than through a join alias.
@@ -509,22 +513,70 @@ func lockWorkflowStepForWrite(ctx context.Context, tx interface {
 
 // lockTaskStepForWrite locks the workflow step taskID currently belongs to
 // (see lockWorkflowStepForWrite), so a caller hiding or removing the task
-// (archive, delete) cannot straddle a concurrent ReorderStepTasks of that
-// same step: whichever acquires the step's row lock first runs to
+// (archive, delete, unarchive) cannot straddle a concurrent ReorderStepTasks
+// of that same step: whichever acquires the step's row lock first runs to
 // completion before the other proceeds. A task with no step (a config task,
 // or one whose row no longer exists) has no step to lock against.
+//
+// The step to lock is resolved with a plain read and re-confirmed with a
+// second, locked read taken only after that step's lock is held - not with
+// a single locked read up front. Locking the task row before the step would
+// invert this package's established order (step lock(s) acquired before any
+// task-row lock — see rebaseTaskForStepAdmissionCAS's call to
+// readTaskStepInTx, which runs after updateTaskWithWorkflowStepAdmission has
+// already taken its step locks) and could deadlock against a concurrent
+// CAS-guarded move doing the reverse. If a move changes the task's step in
+// the gap between the plain read and the step lock, the confirming re-read
+// (safe to take FOR UPDATE here, since the step lock already held orders it
+// correctly) detects the mismatch and this retries against the task's real
+// current step.
 func (r *Repository) lockTaskStepForWrite(ctx context.Context, tx interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, taskID string) error {
-	var stepID string
-	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workflow_step_id FROM tasks WHERE id = ?`), taskID).Scan(&stepID)
+	const maxAttempts = 10
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		stepID, found, err := r.readTaskWorkflowStepID(ctx, tx, taskID, false)
+		if err != nil || !found {
+			return err
+		}
+		if r.taskStepLockBeforeAcquireHook != nil {
+			r.taskStepLockBeforeAcquireHook(stepID)
+		}
+		if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
+			return err
+		}
+		confirmedStepID, found, err := r.readTaskWorkflowStepID(ctx, tx, taskID, true)
+		if err != nil || !found {
+			return err
+		}
+		if confirmedStepID == stepID {
+			return nil
+		}
+		// The task moved to a different step while we waited for stepID's
+		// lock; loop and lock the step it actually belongs to now.
+	}
+	return fmt.Errorf("lockTaskStepForWrite: task %s kept changing steps", taskID)
+}
+
+// readTaskWorkflowStepID reads taskID's current workflow_step_id. forUpdate
+// requests Postgres' FOR UPDATE, which is only safe to set once any step
+// lock this read must be ordered after is already held (see
+// lockTaskStepForWrite's confirming re-read).
+func (r *Repository) readTaskWorkflowStepID(ctx context.Context, tx interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, taskID string, forUpdate bool) (stepID string, found bool, err error) {
+	query := `SELECT workflow_step_id FROM tasks WHERE id = ?`
+	if forUpdate && dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&stepID)
 	if errors.Is(err, sql.ErrNoRows) || stepID == "" {
-		return nil
+		return "", false, nil
 	}
 	if err != nil {
-		return err
+		return "", false, err
 	}
-	return lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID)
+	return stepID, true, nil
 }
 
 // stepArrivalLockHeldKey marks, in a context, that the caller already holds
@@ -3365,7 +3417,15 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 	if cascadeID == "" {
 		return false, fmt.Errorf("cascadeID is required")
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = NULL, archived_by_cascade_id = '', updated_at = ?
 		WHERE id = ? AND archived_by_cascade_id = ?
 	`), time.Now().UTC(), id, cascadeID)
@@ -3373,6 +3433,9 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
 	return rows > 0, nil
 }
 
@@ -3383,7 +3446,15 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 // rows are only restored via UnarchiveTaskByCascade. Returns whether a
 // row was actually updated.
 func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = NULL, archived_by_cascade_id = '', updated_at = ?
 		WHERE id = ? AND archived_at IS NOT NULL
 			AND (archived_by_cascade_id = '' OR archived_by_cascade_id IS NULL)
@@ -3392,6 +3463,9 @@ func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error)
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
 	return rows > 0, nil
 }
 
