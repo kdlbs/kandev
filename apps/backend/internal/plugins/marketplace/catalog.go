@@ -3,18 +3,26 @@ package marketplace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+)
+
+var (
+	ErrCanvasListingNotFound = errors.New("canvas marketplace listing not found")
+	ErrCanvasListingStale    = errors.New("canvas marketplace listing is stale")
 )
 
 // maxIndexBytes caps the index.json body read from any source, bounding
@@ -25,6 +33,11 @@ const maxIndexBytes = 5 << 20 // 5 MiB
 // source is re-fetched. Refresh() (and adding/removing a source) invalidates
 // the cache immediately.
 const defaultCacheTTL = 5 * time.Minute
+
+const (
+	marketplaceKindPlugin = "plugin"
+	marketplaceKindCanvas = "canvas"
+)
 
 // Service fetches, caches, and merges catalog documents across the configured
 // marketplace sources.
@@ -114,7 +127,7 @@ func (s *Service) Catalog(ctx context.Context, installed []InstalledPlugin) (*Ca
 	// Merge sequentially in source order so first-source-wins dedup is stable,
 	// even though the fetches above ran concurrently.
 	installedByID := indexInstalled(installed)
-	result := &CatalogResult{Plugins: []CatalogEntry{}, Sources: []SourceStatus{}}
+	result := &CatalogResult{Plugins: []CatalogEntry{}, Canvases: []CatalogEntry{}, Sources: []SourceStatus{}}
 	seen := map[string]bool{}
 	for i, src := range sources {
 		status := statusFor(src)
@@ -128,10 +141,51 @@ func (s *Service) Catalog(ctx context.Context, installed []InstalledPlugin) (*Ca
 			result.Sources = append(result.Sources, status)
 			continue
 		}
-		result.Plugins = append(result.Plugins, mergeEntries(fetched[i].doc, src, installedByID, seen)...)
+		if fetched[i].doc.warning != "" {
+			status.Healthy = false
+			status.Error = fetched[i].doc.warning
+		}
+		for _, entry := range mergeEntries(fetched[i].doc, src, installedByID, seen) {
+			if entry.Kind == marketplaceKindCanvas {
+				result.Canvases = append(result.Canvases, entry)
+				continue
+			}
+			result.Plugins = append(result.Plugins, entry)
+		}
 		result.Sources = append(result.Sources, status)
 	}
 	return result, nil
+}
+
+// ResolveCanvasPackage resolves an exact canvas listing from the configured
+// source. The caller supplies only the source and expected identity/digest;
+// the package URL and repository URL come from the freshly validated source
+// document.
+func (s *Service) ResolveCanvasPackage(ctx context.Context, sourceID, packageID, version, digest string) (string, string, error) {
+	source, err := s.store.Get(strings.TrimSpace(sourceID))
+	if err != nil {
+		return "", "", ErrCanvasListingNotFound
+	}
+	if !source.Enabled {
+		return "", "", ErrCanvasListingNotFound
+	}
+	doc, err := s.fetch(ctx, source.URL)
+	if err != nil {
+		return "", "", ErrCanvasListingNotFound
+	}
+	for _, entry := range doc.Plugins {
+		if entry.Kind != marketplaceKindCanvas || entry.ID != packageID {
+			continue
+		}
+		if entry.Version != version || !strings.EqualFold(entry.PackageSHA256, digest) {
+			return "", "", ErrCanvasListingStale
+		}
+		if entry.PackageURL == "" {
+			return "", "", ErrCanvasListingNotFound
+		}
+		return entry.PackageURL, entry.RepoURL, nil
+	}
+	return "", "", ErrCanvasListingNotFound
 }
 
 type fetchOutcome struct {
@@ -195,6 +249,9 @@ func indexInstalled(installed []InstalledPlugin) map[string]string {
 
 // annotate derives a catalog entry's install state from what is installed.
 func annotate(e IndexEntry, src SourceRecord, installed map[string]string) CatalogEntry {
+	if e.Kind == "" {
+		e.Kind = marketplaceKindPlugin
+	}
 	ce := CatalogEntry{IndexEntry: e, SourceID: src.ID, SourceName: src.Name, InstallState: StateAvailable}
 	if v, ok := installed[e.ID]; ok {
 		ce.InstalledVersion = v
@@ -273,7 +330,90 @@ func (s *Service) download(ctx context.Context, url string) (*IndexDocument, err
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, fmt.Errorf("parse index: %w", err)
 	}
+	if err := validateIndexDocument(&doc); err != nil {
+		return nil, err
+	}
 	return &doc, nil
+}
+
+func validateIndexDocument(doc *IndexDocument) error {
+	if doc.SchemaVersion != 1 {
+		return fmt.Errorf("unsupported index schema version %d", doc.SchemaVersion)
+	}
+	if doc.Plugins == nil {
+		return fmt.Errorf("index plugins list is missing")
+	}
+	seen := make(map[string]struct{}, len(doc.Plugins))
+	valid := make([]IndexEntry, 0, len(doc.Plugins))
+	var warnings []string
+	for _, entry := range doc.Plugins {
+		kind := strings.TrimSpace(entry.Kind)
+		if kind == "" {
+			kind = marketplaceKindPlugin
+		}
+		if entry.ID == "" {
+			warnings = append(warnings, "an entry has no id")
+			continue
+		}
+		if _, exists := seen[entry.ID]; exists {
+			warnings = append(warnings, "duplicate entry "+entry.ID)
+			continue
+		}
+		seen[entry.ID] = struct{}{}
+		if kind != marketplaceKindPlugin && kind != marketplaceKindCanvas {
+			warnings = append(warnings, "entry "+entry.ID+" has an unsupported kind")
+			continue
+		}
+		if err := validatePreviews(entry.Previews, kind == marketplaceKindCanvas); err != nil {
+			warnings = append(warnings, "entry "+entry.ID+": "+err.Error())
+			continue
+		}
+		if kind == marketplaceKindCanvas && !validSHA256(entry.PackageSHA256) {
+			warnings = append(warnings, "entry "+entry.ID+": canvas package digest is missing or invalid")
+			continue
+		}
+		entry.Kind = kind
+		valid = append(valid, entry)
+	}
+	doc.Plugins = valid
+	if len(warnings) > 0 {
+		doc.warning = strings.Join(warnings, "; ")
+	}
+	return nil
+}
+
+func validatePreviews(previews []Preview, required bool) error {
+	if required && len(previews) == 0 {
+		return fmt.Errorf("canvas listings require at least one preview")
+	}
+	if len(previews) > 8 {
+		return fmt.Errorf("preview limit exceeded")
+	}
+	for _, preview := range previews {
+		if utf8.RuneCountInString(strings.TrimSpace(preview.Alt)) < 1 || utf8.RuneCountInString(strings.TrimSpace(preview.Alt)) > 300 {
+			return fmt.Errorf("preview alt text is invalid")
+		}
+		if len(preview.URL) > 2048 {
+			return fmt.Errorf("preview URL is too long")
+		}
+		parsed, err := url.Parse(preview.URL)
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.Opaque != "" {
+			return fmt.Errorf("preview URL must be an HTTPS URL without credentials or fragments")
+		}
+	}
+	return nil
+}
+
+func validSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // ApplyQuery filters and sorts a merged catalog per the request. Filtering:
@@ -284,8 +424,13 @@ func ApplyQuery(entries []CatalogEntry, q Query) []CatalogEntry {
 	out := make([]CatalogEntry, 0, len(entries))
 	text := strings.ToLower(strings.TrimSpace(q.Text))
 	category := strings.ToLower(strings.TrimSpace(q.Category))
+	kind := strings.ToLower(strings.TrimSpace(q.Kind))
 	for _, e := range entries {
-		if matchesText(e, text) && matchesCategory(e, category) {
+		entryKind := strings.ToLower(strings.TrimSpace(e.Kind))
+		if entryKind == "" {
+			entryKind = marketplaceKindPlugin
+		}
+		if (kind == "" || entryKind == kind) && matchesText(e, text) && matchesCategory(e, category) {
 			out = append(out, e)
 		}
 	}

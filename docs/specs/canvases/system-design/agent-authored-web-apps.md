@@ -35,6 +35,11 @@ state, events, grants, and runtime tokens. This design uses
 This design supersedes
 [the declarative canvas design](collaborative-canvases.md).
 
+The additive [marketplace and sharing design](marketplace-sharing.md) owns
+portable export/import, retained build-source additions, and direct reviewed
+workspace installation. Statements below excluding import/export describe this
+authoring baseline; they do not exclude that separately planned capability.
+
 ## Requirement mapping
 
 | Requirement                       | Design sections                        |

@@ -119,6 +119,40 @@ func TestCatalogInstallStateAnnotation(t *testing.T) {
 	assertState(t, result.Plugins, "fresh", StateAvailable)
 }
 
+func TestCatalogSeparatesCanvasEntriesAndPreservesPreviews(t *testing.T) {
+	canvas := `{"id":"board","kind":"canvas","name":"Board","version":"1.0.0","package_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","package_url":"https://ex/board.tar.gz","previews":[{"url":"https://cdn.example/cover.webp","alt":"Board cover"}]}`
+	s := newTestService(t)
+	_ = s.store.EnsureBuiltin("Official", serve(t, indexJSON(canvas)).URL)
+	result, err := s.Catalog(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(result.Plugins) != 0 || len(result.Canvases) != 1 {
+		t.Fatalf("catalog kind split = plugins=%d canvases=%d", len(result.Plugins), len(result.Canvases))
+	}
+	if got := result.Canvases[0].Previews[0].URL; got != "https://cdn.example/cover.webp" {
+		t.Fatalf("preview URL = %q", got)
+	}
+}
+
+func TestCatalogOmitsInvalidCanvasListingButKeepsValidEntries(t *testing.T) {
+	valid := `{"id":"valid","kind":"canvas","name":"Valid","version":"1.0.0","package_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","package_url":"https://ex/valid.tar.gz","previews":[{"url":"https://cdn.example/cover.webp","alt":"Valid cover"}]}`
+	invalid := `{"id":"invalid","kind":"canvas","name":"Invalid","version":"1.0.0","package_url":"https://ex/invalid.tar.gz"}`
+	s := newTestService(t)
+	_ = s.store.EnsureBuiltin("Official", serve(t, indexJSON(valid+","+invalid)).URL)
+	result, err := s.Catalog(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(result.Canvases) != 1 || result.Canvases[0].ID != "valid" {
+		t.Fatalf("invalid canvas was not omitted: %+v", result.Canvases)
+	}
+	status := findSource(result.Sources, "Official")
+	if status == nil || status.Healthy || status.Error == "" {
+		t.Fatalf("source warning missing: %+v", status)
+	}
+}
+
 func TestCatalogDegradedSourceDoesNotAbortMerge(t *testing.T) {
 	good := serve(t, indexJSON(entryJSON("alpha", "1.0.0", 1)))
 	s := newTestService(t)

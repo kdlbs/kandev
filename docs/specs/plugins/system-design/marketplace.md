@@ -3,6 +3,7 @@ status: draft
 system: plugins
 requirements:
   - REQ-PLUGINS-MARKETPLACE-001
+  - REQ-PLUGINS-MARKETPLACE-002
 created: 2026-07-18
 owners:
   - jcfs
@@ -13,11 +14,52 @@ owners:
 
 This design preserves the technical source detail for `REQ-PLUGINS-MARKETPLACE-001` during migration.
 
+The [canvas distribution design](../../canvases/system-design/marketplace-sharing.md)
+extends this catalog with validated static canvas packages, registry preview URLs,
+and workspace installation. Its canvas path does not use the managed-binary
+installer described here. Native plugin behavior remains owned by this document.
+
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLUGINS-MARKETPLACE-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLUGINS-MARKETPLACE-002` | [Registry preview images](#registry-preview-images) |
+
+## Registry preview images
+
+Extend registry pointers and generated catalog entries with an optional ordered
+`previews` list of `{url, alt}` objects. This is registry-owned presentation
+metadata for both `kind: plugin` and `kind: canvas`. Omitted kind means plugin.
+Plugin screenshots are optional; canvas listing admission requires at least one.
+The same contract applies to official and custom source documents.
+
+Allow up to eight entries. Each URL must be an absolute HTTPS URL without
+credentials or a fragment, at most 2048 characters; each alternative description
+has 1-300 characters after trimming. Reject malformed URLs and executable or
+inline-data schemes. URLs should return directly displayable PNG, JPEG, or WebP
+images; a pinned commit/release URL is recommended, not required. Preview
+availability and content are not evidence of package authenticity or permissions.
+
+The index builder copies validated registry URLs and their order to `index.json`.
+Do not download/re-encode media, extract screenshots from packages, or mirror
+assets into Pages. A registry can change images without changing package version.
+Custom source readers validate the same fields; invalid canvas listings are
+omitted with a source diagnostic while valid entries remain usable.
+
+Use one gallery component for plugin and canvas details: first image as cover,
+explicit previous/next and thumbnail controls, alt text, position, one-image
+mode, and a contained image-failure fallback. Load images without referrers;
+never embed HTML/iframes or run package code. A remote image failure does not
+block an otherwise valid package install. Plugins without screenshots keep
+their existing row and install action; screenshots add a View details action
+without adding a mandatory native-plugin installation step. Phone details use
+the same focused surface and touch controls as canvas details.
+
+The proposed complete registry schema is a design artifact at
+[`registry-entry.schema.json`](../../../plans/canvas-marketplace/registry-entry.schema.json).
+The [canvas distribution plan](../../../plans/canvas-marketplace/plan.md)
+Tasks 04-05 implement shared registry validation and gallery rendering.
 
 ## Migrated source detail
 

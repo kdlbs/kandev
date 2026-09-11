@@ -155,6 +155,45 @@ Kandev allows up to 100 workspace canvas instances across scopes. Archived canva
 
 On desktop, workspace canvases use the workspace Canvases area. On phones, Kandev opens a full-height canvas route and keeps canvas controls in an inset bottom drawer.
 
+## Share and install a canvas
+
+Canvas sharing is manual and release-bound. It does not capture screenshots or
+publish a repository. Screenshots belong to a marketplace registry entry, not
+to the canvas package.
+
+1. Open the canvas host or the workspace canvas list.
+2. Choose **Share canvas**.
+3. Review the active release, package identity, file inventory, and archive
+   sizes.
+4. Choose **Prepare downloads**, then download the bundle or source archive.
+5. Check the downloaded files for private content before sharing them.
+
+The bundle is an installable `.tar.gz`. The source download is a ZIP of the
+retained project when the release uses project source mode. The preparation is
+temporary and expires after 15 minutes. A release change, lost authorization,
+expiry, or cancellation requires a new preparation. Kandev does not change the
+running canvas while it prepares these files.
+
+Recipients can install a bundle from **Settings > Plugins > Canvases** by
+uploading the file or entering an HTTPS direct link. A registry entry provides
+an additional catalog path. Kandev fetches and inspects the exact package,
+shows its manifest and permissions, and requires an explicit confirmation
+before it creates an independent workspace canvas. A registry preview is only
+listing metadata. It does not grant permissions and it is not executed during
+review.
+
+Canvas registry entries use the same ordered `previews` field as plugin
+entries. A canvas entry must contain one to eight objects with an HTTPS `url`
+and non-empty `alt` text. The first object is the cover image. Plugin entries
+may omit `previews` or include up to eight images. Use **Preview images** in the
+catalog to move between images and retry a failed image.
+
+The official registry uses a manually reviewed pull request. Authors publish a
+versioned bundle as a release asset, add the repository and preview URLs to
+`plugin-registry/plugins.yaml`, and wait for the registry workflow to inspect
+the exact asset. Team registries can host an `index.json` with the same shape.
+Direct file and direct-link sharing does not require registry admission.
+
 ## Related guides
 
 - [Plugin manifest reference](plugins-manifest.md#isolated-web-applications) defines the `ui.web_apps` manifest fields.

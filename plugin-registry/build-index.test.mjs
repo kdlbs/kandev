@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
 import test, { afterEach } from "node:test";
+import os from "node:os";
+import path from "node:path";
 import {
   buildEntry,
   buildIndex,
@@ -30,6 +34,7 @@ const jsonResponse = (body, ok = body !== null) => ({
   text: async () => JSON.stringify(body ?? {}),
 });
 const textResponse = (text) => ({ ok: text !== "", status: text ? 200 : 404, text: async () => text });
+const binaryResponse = (body) => ({ ok: true, status: 200, arrayBuffer: async () => body });
 
 test("parsePluginsYaml reads the constrained pointer list", () => {
   const specs = parsePluginsYaml(
@@ -47,6 +52,26 @@ test("parsePluginsYaml reads the constrained pointer list", () => {
   assert.equal(specs.length, 2);
   assert.deepEqual(specs[0], { id: "hello", repo: "kdlbs/kandev-plugin-hello", featured: true });
   assert.deepEqual(specs[1].categories, ["analytics", "ops"]);
+});
+
+test("parsePluginsYaml reads ordered canvas previews", () => {
+  const specs = parsePluginsYaml(
+    [
+      "plugins:",
+      "  - id: board",
+      "    repo: acme/board",
+      "    kind: canvas",
+      "    previews:",
+      "      - url: https://cdn.example/cover.webp",
+      "        alt: Board cover",
+      "      - url: https://cdn.example/detail.webp",
+      "        alt: Board detail",
+    ].join("\n"),
+  );
+  assert.deepEqual(specs[0].previews, [
+    { url: "https://cdn.example/cover.webp", alt: "Board cover" },
+    { url: "https://cdn.example/detail.webp", alt: "Board detail" },
+  ]);
 });
 
 test("parseManifestFields extracts presentation keys and ignores the rest", () => {
@@ -122,6 +147,53 @@ test("buildEntry keeps stars null (never 0) when repo metadata lookup fails", as
   assert.equal(record.stars, null);
   assert.equal(record.author, "acme"); // legacy fallback when the manifest has no author
   assert.equal(record.icon_url, null); // no manifest icon
+});
+
+test("buildEntry inspects an exact canvas asset and preserves preview order", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-registry-test-"));
+  const inspector = path.join(directory, "inspector.mjs");
+  await fs.writeFile(
+    inspector,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({id:"board",version:"1.0.0",kind:"canvas"}));\n`,
+    { mode: 0o755 },
+  );
+  const previousInspector = process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+  process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = inspector;
+  const packageBytes = new Uint8Array([1, 2, 3, 4]);
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.includes("/releases/latest")) {
+      return jsonResponse({
+        tag_name: "v1.0.0",
+        assets: [{ name: "board-1.0.0.tar.gz", browser_download_url: "https://dl.example/board.tar.gz" }],
+      });
+    }
+    if (value.includes("/manifest.yaml")) return textResponse("display_name: Board\ndescription: A board\n");
+    if (value.includes("/repos/")) return jsonResponse({ stargazers_count: 2, owner: { login: "acme" } });
+    if (value === "https://dl.example/board.tar.gz") return binaryResponse(packageBytes);
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+  try {
+    const result = await buildEntry({
+      id: "board",
+      repo: "acme/board",
+      kind: "canvas",
+      previews: [{ url: "https://cdn.example/cover.webp", alt: "Board cover" }],
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.record.kind, "canvas");
+    assert.deepEqual(result.record.previews, [{ url: "https://cdn.example/cover.webp", alt: "Board cover" }]);
+    assert.equal(result.record.package_sha256, createHash("sha256").update(packageBytes).digest("hex"));
+  } finally {
+    if (previousInspector === undefined) delete process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+    else process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR = previousInspector;
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("buildEntry rejects a canvas without a preview before fetching a release", async () => {
+  const result = await buildEntry({ id: "board", repo: "acme/board", kind: "canvas" });
+  assert.match(result.error, /at least one preview/);
 });
 
 test("empty plugins.yaml parses to no specs and builds a valid empty index", async () => {

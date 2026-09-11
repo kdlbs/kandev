@@ -15,6 +15,7 @@ version: 1.0.0
 display_name: Example canvas
 description: A small task canvas.
 author: Canvas author
+min_kandev_version: "0.94.0"
 ui:
   web_apps:
     - key: main
@@ -35,6 +36,12 @@ capabilities:
   events:
     - task.updated
   state: true
+
+distribution:
+  schema_version: 1
+  kind: canvas
+  license: MIT
+  source_mode: static
 ```
 
 The host parses YAML and calls the same manifest validator used for plugin
@@ -74,3 +81,21 @@ authored scripts. It checks document startup and relative context access. Keep
 the entry valid HTML so the host can insert the bootstrap without changing the
 stored package. The host waits up to 15 seconds for the startup acknowledgement
 and exposes retry controls outside the frame when startup fails.
+
+## Portable distribution
+
+Use the `distribution` block when the canvas is intended for bundle, source, or
+registry sharing. `kind` must be `canvas`, `schema_version` must be `1`, and
+`source_mode` must be `static` or `project`. Include a non-empty license value
+and a compatible `min_kandev_version` in the manifest.
+
+The package must include `README.md` and generated `checksums.txt`. A project
+source mode package retains the editable project in
+`distribution/source/manifest.yaml` and `distribution/source/README.md`.
+Static source mode does not include that subtree. Keep source files bounded and
+free of secrets. The host rejects native plugin contributions, backend
+executables, unsafe paths, and unsupported files in a portable canvas.
+
+Registry screenshots are not package inputs. Add ordered preview objects to the
+registry entry later. The first preview is the cover, canvas entries require
+one to eight previews, and plugin entries may omit previews.

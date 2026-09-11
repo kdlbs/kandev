@@ -274,6 +274,31 @@ from the browser. The host tears down the app iframe immediately after a
 release, grant, scope, archive, disable, or removal authority change, then
 requires a fresh runtime binding before mounting it again.
 
+### Portable canvas distribution metadata
+
+A portable canvas adds a `distribution` block to the manifest. This block is
+package metadata. It does not contain registry screenshots, repository
+publication settings, credentials, or a live application URL.
+
+```yaml
+distribution:
+  schema_version: 1
+  kind: canvas
+  license: MIT
+  source_mode: static # static or project
+```
+
+The distribution validator requires one static web app with a
+`workspace-canvas` placement, a compatible `min_kandev_version`, a license,
+`README.md`, and generated `checksums.txt`. It rejects native UI, managed
+backend, actions, webhooks, tools, repository providers, and other plugin
+contributions in the same distribution. `static` source mode keeps only the
+application package. `project` source mode also retains the bounded editable
+project below `distribution/source/`, including its own manifest and README.
+
+Registry preview images belong to `plugin-registry/plugins.yaml` or another
+source's `index.json`. Do not add a `previews` field to `manifest.yaml`.
+
 ## Managed vs. legacy manifests
 
 Setting `runtime.type: binary` makes a manifest **runtime-managed**: kandev

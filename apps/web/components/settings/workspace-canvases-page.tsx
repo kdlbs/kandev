@@ -8,6 +8,7 @@ import {
   IconKey,
   IconRefresh,
   IconRestore,
+  IconShare3,
   IconTrash,
 } from "@tabler/icons-react";
 import {
@@ -38,6 +39,7 @@ import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
 import { CanvasTaskCreateLauncher } from "@/components/canvas/canvas-task-create-launcher";
 import { SettingsErrorText, SettingsPageHeader } from "./settings-typography";
 import { CanvasReleaseDialog } from "./canvas-lifecycle-dialogs";
+import { CanvasShareDialog } from "./canvas-share-dialog";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const canvasActionClassName = controlSizingClassName("standard", "cursor-pointer");
@@ -53,6 +55,7 @@ function canvasStatusLabel(status: string, t: (key: string) => string): string {
   return labels[status] ?? status;
 }
 
+// eslint-disable-next-line max-lines-per-function -- Workspace canvas actions share one lifecycle refresh and state owner.
 function useWorkspaceCanvasState(workspaceId: string) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -60,6 +63,7 @@ function useWorkspaceCanvasState(workspaceId: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [releaseCanvas, setReleaseCanvas] = useState<Canvas | null>(null);
+  const [shareCanvas, setShareCanvas] = useState<Canvas | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Canvas | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const requestRef = useRef(0);
@@ -144,6 +148,7 @@ function useWorkspaceCanvasState(workspaceId: string) {
     loading,
     error,
     releaseCanvas,
+    shareCanvas,
     removeTarget,
     busyId,
     active: canvases.filter((canvas) => canvas.status !== "archived"),
@@ -154,10 +159,12 @@ function useWorkspaceCanvasState(workspaceId: string) {
     remove,
     setCanvases,
     setReleaseCanvas,
+    setShareCanvas,
     setRemoveTarget,
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- The page composes lifecycle dialogs with the active and archived lists.
 export function WorkspaceCanvasesPage({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const workspaceName = useAppStore(
@@ -168,6 +175,7 @@ export function WorkspaceCanvasesPage({ workspaceId }: { workspaceId: string }) 
     loading,
     error,
     releaseCanvas,
+    shareCanvas,
     removeTarget,
     busyId,
     active,
@@ -178,6 +186,7 @@ export function WorkspaceCanvasesPage({ workspaceId }: { workspaceId: string }) 
     remove,
     setCanvases,
     setReleaseCanvas,
+    setShareCanvas,
     setRemoveTarget,
   } = useWorkspaceCanvasState(workspaceId);
 
@@ -217,6 +226,7 @@ export function WorkspaceCanvasesPage({ workspaceId }: { workspaceId: string }) 
           busyId={busyId}
           onEdit={edit}
           onReleases={setReleaseCanvas}
+          onShare={setShareCanvas}
           onArchive={(canvas) => void changeStatus(canvas, "archive")}
           onRestore={(canvas) => void changeStatus(canvas, "restore")}
           onRemove={setRemoveTarget}
@@ -229,6 +239,7 @@ export function WorkspaceCanvasesPage({ workspaceId }: { workspaceId: string }) 
           busyId={busyId}
           onEdit={edit}
           onReleases={setReleaseCanvas}
+          onShare={setShareCanvas}
           onArchive={(canvas) => void changeStatus(canvas, "archive")}
           onRestore={(canvas) => void changeStatus(canvas, "restore")}
           onRemove={setRemoveTarget}
@@ -250,6 +261,13 @@ export function WorkspaceCanvasesPage({ workspaceId }: { workspaceId: string }) 
         onOpenChange={(open) => !open && setRemoveTarget(null)}
         onConfirm={remove}
       />
+      <CanvasShareDialog
+        canvas={shareCanvas}
+        open={shareCanvas !== null}
+        onOpenChange={(open) => {
+          if (!open) setShareCanvas(null);
+        }}
+      />
     </div>
   );
 }
@@ -260,6 +278,7 @@ function CanvasGroup({
   busyId,
   onEdit,
   onReleases,
+  onShare,
   onArchive,
   onRestore,
   onRemove,
@@ -269,6 +288,7 @@ function CanvasGroup({
   busyId: string | null;
   onEdit: (canvas: Canvas) => void;
   onReleases: (canvas: Canvas) => void;
+  onShare: (canvas: Canvas) => void;
   onArchive: (canvas: Canvas) => void;
   onRestore: (canvas: Canvas) => void;
   onRemove: (canvas: Canvas) => void;
@@ -284,6 +304,7 @@ function CanvasGroup({
             busyId={busyId}
             onEdit={onEdit}
             onReleases={onReleases}
+            onShare={onShare}
             onArchive={onArchive}
             onRestore={onRestore}
             onRemove={onRemove}
@@ -340,6 +361,7 @@ function CanvasRow({
   busyId,
   onEdit,
   onReleases,
+  onShare,
   onArchive,
   onRestore,
   onRemove,
@@ -348,6 +370,7 @@ function CanvasRow({
   busyId: string | null;
   onEdit: (canvas: Canvas) => void;
   onReleases: (canvas: Canvas) => void;
+  onShare: (canvas: Canvas) => void;
   onArchive: (canvas: Canvas) => void;
   onRestore: (canvas: Canvas) => void;
   onRemove: (canvas: Canvas) => void;
@@ -386,6 +409,14 @@ function CanvasRow({
           >
             <IconKey className="mr-1.5 h-3.5 w-3.5" />
             {t("canvases:permissionsAndReleases")}
+          </Button>
+          <Button
+            variant="outline"
+            className={canvasActionClassName}
+            onClick={() => onShare(canvas)}
+          >
+            <IconShare3 className="mr-1.5 h-3.5 w-3.5" />
+            {t("canvases:shareCanvas")}
           </Button>
           <CanvasStatusAction
             canvas={canvas}

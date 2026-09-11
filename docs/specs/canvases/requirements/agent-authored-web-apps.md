@@ -25,8 +25,9 @@ web-application runtime and its data contract.
 
 - **Task canvas:** A canvas that belongs to one task and appears only in that
   task.
-- **Workspace canvas:** A promoted canvas that belongs to one workspace and
-  appears in workspace navigation.
+- **Workspace canvas:** A canvas that belongs to one workspace and appears in
+  workspace navigation. Agent-authored canvases reach this scope by promotion;
+  [distribution](marketplace-sharing.md) also defines reviewed package installs.
 - **Draft:** Editable canvas source in an authorized agent workspace.
 - **Release:** An immutable package that passed validation.
 - **Promotion:** A user action that changes a task canvas to workspace scope.
@@ -297,7 +298,9 @@ agent and review the canvas in the same task.
 - A direct source-code editor in Kandev.
 - Canvas invitations, collaborator roles, or multi-user live editing.
 - Demotion from workspace scope to task scope.
-- A marketplace or cross-instance package import flow.
-- Automatic permission increases after owner-authorized first publication.
+- Marketplace and cross-instance distribution are owned by the separate
+  [marketplace and sharing requirements](marketplace-sharing.md).
+- Automatic permission increases after owner-authorized first publication or
+  automatic publication of a release that requests new permissions.
 - General top-bar, sidebar-widget, or arbitrary-slot plugin contributions.
 - A custom server-side runtime for agent-generated backend code.

@@ -76,6 +76,11 @@ type Manifest struct {
 
 	Runtime          Runtime `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	MinKandevVersion string  `yaml:"min_kandev_version,omitempty" json:"min_kandev_version,omitempty"`
+
+	// Distribution declares an optional portable package profile. Legacy
+	// plugins and locally-authored canvases may omit it; registry-ready canvas
+	// packages must provide the complete profile.
+	Distribution *Distribution `yaml:"distribution,omitempty" json:"distribution,omitempty"`
 }
 
 const (

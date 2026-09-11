@@ -23,6 +23,7 @@ import {
   MobileCanvasActions,
   type CanvasHostState,
 } from "./canvas-host-components";
+import { CanvasShareDialog } from "./canvas-share-dialog";
 
 function stateForCanvas(canvas: Canvas): CanvasHostState {
   if (canvas.status === "archived") return "archived";
@@ -381,6 +382,7 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [promotionOpen, setPromotionOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
   const edit = async () => {
@@ -418,6 +420,7 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
       onReleases={() => setReleasesOpen(true)}
+      onShare={() => setShareOpen(true)}
     />
   ) : null;
 
@@ -451,6 +454,7 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
         onEdit={() => void edit()}
         onPromote={() => setPromotionOpen(true)}
         onReleases={() => setReleasesOpen(true)}
+        onShare={() => setShareOpen(true)}
         editing={editing}
         canvases={hostCanvases}
         onSelectCanvas={selectCanvas}
@@ -464,6 +468,7 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
         onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
         onChanged={load}
       />
+      <CanvasShareDialog canvas={canvas} open={shareOpen} onOpenChange={setShareOpen} />
     </PageShell>
   );
 }

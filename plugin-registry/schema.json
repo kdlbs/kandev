@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json",
-  "title": "Kandev plugin registry list",
-  "description": "Schema for plugin-registry/plugins.yaml — the curated, PR-edited pointer list of plugin repositories in the official Kandev marketplace source. Validated in CI on every PR. Descriptive metadata (name, description, author, version, package URL) is NOT stored here; it is read from each plugin's own GitHub release at index-build time so it can never drift from what actually ships.",
+  "title": "Kandev marketplace registry list",
+  "description": "Schema for plugin-registry/plugins.yaml, the curated pointer list of plugin and canvas repositories. Release metadata is read from the package at index-build time; preview images are registry-owned presentation metadata.",
   "type": "object",
   "additionalProperties": false,
   "required": ["plugins"],
@@ -36,7 +36,56 @@
             "items": {
               "type": "string"
             }
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["plugin", "canvas"],
+            "default": "plugin",
+            "description": "Omitted kind means plugin. Canvas entries are validated as portable canvas packages."
+          },
+          "previews": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/$defs/preview"
+            },
+            "description": "Ordered listing images. Optional for plugins and required for canvas entries."
           }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["kind"],
+              "properties": {"kind": {"const": "canvas"}}
+            },
+            "then": {
+              "required": ["previews"],
+              "properties": {"previews": {"minItems": 1}}
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "alt"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048,
+          "description": "Direct HTTPS listing image URL without credentials or a fragment."
+        },
+        "alt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S",
+          "description": "Accessible description of the listing image."
         }
       }
     }

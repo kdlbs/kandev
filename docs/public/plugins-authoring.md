@@ -172,6 +172,24 @@ Build and test the archive outside Kandev. Kandev validates the archive before
 it stores or runs a release. Use [Agent-authored Canvases](canvases.md) for
 creation, permission review, promotion, Quick Chat editing, and recovery.
 
+### Share a portable canvas
+
+For a canvas that another workspace can install, add the `distribution` block
+described in the [manifest reference](plugins-manifest.md#portable-canvas-distribution-metadata).
+Choose `static` when the packaged application is the only source you want to
+share. Choose `project` when you retain a bounded editable project under
+`distribution/source/`. Do not put screenshots in the package.
+
+After a valid release is active, use **Share canvas** in the host or workspace
+canvas list. Prepare and download the bundle and source archive, inspect them
+for private content, and share them as files or HTTPS links. This action does
+not create a repository, release, registry entry, or pull request.
+
+To list the canvas, publish the exact bundle as a versioned release asset and
+add a `kind: canvas` entry with one to eight ordered `previews` objects to a
+trusted registry. The first preview is the cover. Preview URLs and alt text
+are registry metadata and are not part of the package manifest.
+
 There is no separate HTTP server to launch. pluginsdk.Serve owns the
 go-plugin/gRPC handshake and Host injection. The backend implements
 pluginsdk.Plugin (OnEvent and/or HandleWebhook) and embeds
