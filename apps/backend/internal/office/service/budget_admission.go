@@ -436,9 +436,17 @@ func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context,
 
 	if run.RetryCount >= MaxRetryCount {
 		incBudgetFailedWorkspaceLookup(provenance)
-		if _, err := si.svc.FailRun(ctx, run.ID); err != nil {
+		wrote, err := si.svc.FailRun(ctx, run.ID)
+		if err != nil {
 			si.logger.Error("failed to fail run without escalation",
 				zap.String("run_id", run.ID), zap.Error(err))
+			return
+		}
+		if !wrote {
+			// Already terminal via another writer (e.g. a concurrent
+			// cancel) between the lookup failure and this write; it did
+			// not actually end via this failure, so there is nothing to
+			// log (Review round 3, R3-1).
 			return
 		}
 		si.svc.LogActivityWithRun(ctx, "", "system", "scheduler",

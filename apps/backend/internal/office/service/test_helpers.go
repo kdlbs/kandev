@@ -205,6 +205,16 @@ func AdmitRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *
 	return si.admitRun(ctx, run, agent)
 }
 
+// DeferWorkspaceLookupFailureForTest exposes deferWorkspaceLookupFailure
+// directly for external test packages, so its MaxRetryCount-exhausted
+// lost-race path (another writer already made the run terminal before
+// this call's FailRun runs) can be driven without reproducing a transient
+// GetAgentFromConfig lookup error through the full scheduler pipeline.
+func DeferWorkspaceLookupFailureForTest(svc *Service, ctx context.Context, run *models.Run) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.deferWorkspaceLookupFailure(ctx, run)
+}
+
 // FailTasklessRunForTest exposes failTasklessRun directly for external test
 // packages, so the lost-race path (another writer already made the run
 // terminal before this call runs) can be driven without the scheduler's

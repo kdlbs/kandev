@@ -75,6 +75,69 @@ func TestCancelBudgetRun_LostRaceDoesNotClassifyPublishOrLog(t *testing.T) {
 	}
 }
 
+// deferWorkspaceLookupFailure's MaxRetryCount-exhausted branch (CodeRabbit,
+// PR fixup round 2) has the same lost-race obligation as cancelBudgetRun
+// above: it discarded FailRun's wrote result and logged
+// run_budget_workspace_lookup_failed unconditionally whenever err was nil,
+// even when another writer had already made the run terminal.
+func TestDeferWorkspaceLookupFailure_LostRaceDoesNotLog(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	agent := makeAgent("worker-workspace-lookup-race", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v %v", run, err)
+	}
+	run.RetryCount = service.MaxRetryCount
+
+	// Another writer wins the terminal-transition race before this call's
+	// FailRun below runs.
+	if _, err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
+		t.Fatalf("finish (simulating the winning writer): %v", err)
+	}
+
+	got := make(chan *bus.Event, 1)
+	sub, err := eb.Subscribe(events.OfficeRunProcessed, func(_ context.Context, e *bus.Event) error {
+		got <- e
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	service.DeferWorkspaceLookupFailureForTest(svc, ctx, run)
+
+	select {
+	case e := <-got:
+		t.Fatalf("expected no OfficeRunProcessed publish for a lost workspace-lookup-failure race; got %+v", e)
+	default:
+	}
+
+	entries, err := svc.RepoForTest().ListActivityEntriesByAction(ctx, "", "run_budget_workspace_lookup_failed", 10)
+	if err != nil {
+		t.Fatalf("list activity: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("run_budget_workspace_lookup_failed activity entries = %d, want 0 for a lost race", len(entries))
+	}
+
+	survivor, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if survivor.Status != service.RunStatusFinished {
+		t.Fatalf("status = %q, want the winning writer's finished state to survive", survivor.Status)
+	}
+}
+
 // cancelUnresolvableAgentRun (reached when the run's agent was deleted)
 // has the same lost-race obligation as cancelBudgetRun above.
 func TestCancelUnresolvableAgentRun_LostRaceDoesNotClassifyPublishOrLog(t *testing.T) {
