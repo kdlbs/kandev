@@ -74,7 +74,9 @@ describe("useTaskDeletePreflight", () => {
     await waitFor(() => expect(result.current.status).toBe("resolved"));
     rerender({ open: false });
     rerender({ open: true });
-    await waitFor(() => expect(mockGetTaskDeletePreflight).toHaveBeenCalledTimes(2));
-    expect(result.current.status).toBe("resolved");
+    await waitFor(() => {
+      expect(mockGetTaskDeletePreflight).toHaveBeenCalledTimes(2);
+      expect(result.current.status).toBe("resolved");
+    });
   });
 });
