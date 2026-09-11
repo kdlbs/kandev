@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -504,6 +505,46 @@ func TestCreatePlanPostWriteReReadFailureStillReportsWrittenPlan(t *testing.T) {
 	if saved == nil || saved.ID != result.Plan.ID {
 		t.Fatalf("expected the reported ID to match the actually-persisted row: saved=%+v reported=%+v", saved, result.Plan)
 	}
+}
+
+func TestUpdatePlanPostWriteReadFailurePreservesCommentsRevision(t *testing.T) {
+	_, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-flaky-comments")
+	seedService := newFlakyPlanService(t, repo, eventBus, 0)
+	created, err := seedService.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-flaky-comments", Title: "T", Content: "v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateTaskPlanComment(ctx, &models.TaskPlanComment{
+		ID: "comment-flaky-comments", TaskID: "task-flaky-comments", PlanID: created.Plan.ID,
+		Body: "pending", AnchorFrom: 0, AnchorTo: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eventBus.ClearEvents()
+	svc := newFlakyPlanService(t, repo, eventBus, 2)
+
+	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: "task-flaky-comments", Content: "v2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Plan.CommentsRevision != 1 {
+		t.Fatalf("fallback comments revision = %d, want 1", updated.Plan.CommentsRevision)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TaskPlanUpdated {
+			continue
+		}
+		payload, _ := event.Data.(map[string]interface{})
+		if payload["comments_revision"] != int64(1) {
+			t.Fatalf("fallback event payload = %#v", payload)
+		}
+		return
+	}
+	t.Fatal("task.plan.updated event was not published")
 }
 
 // TestRevertPlanDoesNotAbortWhenOwnHeadReadFails covers AC-001.6/F36:

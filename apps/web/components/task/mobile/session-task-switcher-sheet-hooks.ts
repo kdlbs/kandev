@@ -12,7 +12,7 @@ import {
 } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import { type Repository, type Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
@@ -390,7 +390,7 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
 
 function useSheetDeleteActions(
   store: ReturnType<typeof useAppStoreApi>,
-  removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
+  runTaskRemoval: ReturnType<typeof useTaskRemoval>["runTaskRemoval"],
 ) {
   const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
@@ -419,13 +419,12 @@ function useSheetDeleteActions(
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);
-      // Capture active state before the async API call — the WS "task.deleted"
-      // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
       try {
-        await deleteTaskById(taskId, opts);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+        await runTaskRemoval(
+          "delete",
+          { taskId, mutate: () => deleteTaskById(taskId, opts) },
+          { cascade: opts?.cascade },
+        );
       } catch (error) {
         console.error("Failed to delete task:", error);
       } finally {
@@ -433,7 +432,7 @@ function useSheetDeleteActions(
         setDeletingTask(null);
       }
     },
-    [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store],
+    [deletingTask, isDeleting, deleteTaskById, runTaskRemoval],
   );
 
   const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
@@ -530,8 +529,12 @@ export function useSheetActions(
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const archiveActions = useSheetArchiveActions(store, archiveAndSwitch);
-  const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
-  const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemoval, loadTaskSessionsForTask } = useTaskRemoval({
+    store,
+    notifySuccess,
+  });
+  const deleteActions = useSheetDeleteActions(store, runTaskRemoval);
   const detachActions = useTaskDetachDialog(store);
   const handleNestTask = useSheetNestTask();
   const handleSelectTask = useCallback(

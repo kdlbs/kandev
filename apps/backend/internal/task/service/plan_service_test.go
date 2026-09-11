@@ -204,6 +204,44 @@ func TestPlanService_UpdatePlan(t *testing.T) {
 	}
 }
 
+func TestPlanService_UpdatePlanPreservesCommentsRevisionInResultAndEvent(t *testing.T) {
+	svc, eventBus, repo := createTestPlanService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-comments-revision")
+	created, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: "task-comments-revision", Title: "Plan", Content: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateTaskPlanComment(ctx, &models.TaskPlanComment{
+		ID: "comment-comments-revision", TaskID: "task-comments-revision", PlanID: created.Plan.ID,
+		Body: "keep this", AnchorFrom: 0, AnchorTo: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eventBus.ClearEvents()
+
+	updated, err := svc.UpdatePlan(ctx, UpdatePlanRequest{TaskID: "task-comments-revision", Content: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Plan.CommentsRevision != 1 {
+		t.Fatalf("updated comments revision = %d, want 1", updated.Plan.CommentsRevision)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TaskPlanUpdated {
+			continue
+		}
+		payload, ok := event.Data.(map[string]interface{})
+		if !ok || payload["comments_revision"] != int64(1) {
+			t.Fatalf("updated event payload = %#v, want comments_revision 1", event.Data)
+		}
+		return
+	}
+	t.Fatal("task.plan.updated event was not published")
+}
+
 func TestPlanService_MarkImplementationStartedIsDurableAndIdempotent(t *testing.T) {
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()

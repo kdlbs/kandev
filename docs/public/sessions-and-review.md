@@ -98,6 +98,24 @@ retry the failed saved-view update or dismiss the warning.
 
 Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
 
+To manage the task without leaving Threads, select **Task actions** (the three
+dots beside **Open task**). On desktop, you can also right-click the task
+header; conversation text and editors keep their normal context menus.
+The menu offers **Priority**, **Move to**, **Send to workflow**, supported
+**Link** choices, **Archive**, and **Delete**, according to availability.
+
+On a phone, the choices open in an inset bottom sheet. Choose a workflow and
+then a step in the same sheet; **Back** returns to the previous choices.
+Actions apply to the task whose menu you opened, even if its selected session
+changes. Canceling a confirmation leaves the task unchanged. See
+[archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
+for confirmation preferences and cleanup consequences.
+
+If an action or view filter removes your current thread, Threads selects the
+next remaining thread, otherwise the previous one. If neither survives from
+the previous view, it selects the first thread in the new view. The empty view
+appears only when no threads remain. Your workspace and view settings stay in place.
+
 <details>
 <summary>Let agents coordinate sessions</summary>
 

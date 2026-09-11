@@ -1,4 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render as renderReact,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
+import { StateProvider } from "@/components/state-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActiveThread } from "@/lib/threads/active-threads";
 
@@ -48,10 +57,9 @@ vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: sessionMocks.useTaskSessions,
 }));
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { agentProfiles: { items: [] } }) => unknown) =>
-    selector({ agentProfiles: { items: [] } }),
-}));
+function render(element: ReactElement) {
+  return renderReact(element, { wrapper: StateProvider });
+}
 
 import { ThreadsBoard } from "./threads-board";
 
@@ -90,6 +98,30 @@ function thread(overrides: Partial<ActiveThread> & { taskId: string }): ActiveTh
 }
 
 describe("ThreadsBoard — basic layout", () => {
+  // @covers AC-TASKS-THREADS-ACTIONS-003.2, AC-TASKS-THREADS-ACTIONS-004.6
+  it("focuses the successor when the focused column disappears", async () => {
+    const view = render(
+      <ThreadsBoard
+        threads={[thread({ taskId: "a" }), thread({ taskId: "b" }), thread({ taskId: "c" })]}
+        onOpenTask={() => {}}
+      />,
+    );
+    const opener = screen
+      .getByTestId(COLUMN_B)
+      .querySelector<HTMLButtonElement>("[data-thread-task-menu] button")!;
+    act(() => opener.focus());
+    view.rerender(
+      <ThreadsBoard
+        threads={[thread({ taskId: "a" }), thread({ taskId: "c" })]}
+        onOpenTask={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByTestId("thread-column-c").querySelector("[data-thread-task-menu] button"),
+      ),
+    );
+  });
   it("renders one column per active thread, in the order it was given", () => {
     render(
       <ThreadsBoard

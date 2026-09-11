@@ -610,6 +610,45 @@ func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) 
 	), nil
 }
 
+func (c *PATClient) ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", owner, repo, url.QueryEscape(headSHA))
+	var runs []WorkflowRun
+	for endpoint != "" {
+		var page struct {
+			WorkflowRuns []ghWorkflowRun `json:"workflow_runs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		for _, raw := range page.WorkflowRuns {
+			runs = append(runs, convertRawWorkflowRun(raw))
+		}
+		endpoint = next
+	}
+	return runs, nil
+}
+
+func (c *PATClient) ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", owner, repo, runID)
+	if attempt > 0 {
+		endpoint = fmt.Sprintf("/repos/%s/%s/actions/runs/%d/attempts/%d/jobs?per_page=100", owner, repo, runID, attempt)
+	}
+	var jobs []WorkflowJob
+	for endpoint != "" {
+		var page struct {
+			Jobs []ghWorkflowJob `json:"jobs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, convertRawWorkflowJobs(page.Jobs)...)
+		endpoint = next
+	}
+	return jobs, nil
+}
+
 func (c *PATClient) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
 	return getPRFeedback(ctx, c, owner, repo, number)
 }
