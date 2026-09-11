@@ -146,10 +146,12 @@ now describes the delivered Blank default.
   unchanged automatic-summary dialog test then failed after the helper was
   corrected, confirming both causes before the final production change.
 - `pnpm install --frozen-lockfile`: passed from `apps`.
-- Targeted Vitest suite: 5 files, 38 tests passed.
+- Targeted Vitest suite: 5 files, 38 tests passed for the implementation;
+  the post-review fixup suite passed with 5 files and 39 tests.
 - `pnpm run typecheck`: passed.
-- Targeted ESLint: passed with 0 errors and 2 existing duplicate-string
-  warnings in `new-session-dialog.test.tsx`.
+- Targeted ESLint: the implementation passed with 0 errors and 2 duplicate-
+  string warnings in `new-session-dialog.test.tsx`; the final fixup passed
+  with 0 errors and 0 warnings after deduplicating those test values.
 - `pnpm run i18n:ratchet`: passed; 0 new violations and guard allowlist intact.
 - Desktop managed E2E: 2 tests passed, including handoff and unhealthy-profile
   coverage.

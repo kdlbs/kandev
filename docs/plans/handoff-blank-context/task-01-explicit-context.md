@@ -142,15 +142,19 @@ TDD evidence:
   actual value was `summarize:session-a`.
 - RED: after the helper change, the unchanged dialog test failed because the
   old mount effect no longer received an automatic summary call.
-- GREEN: the final targeted suite passed with 5 files and 38 tests.
+- GREEN: the implementation targeted suite passed with 5 files and 38 tests;
+  the post-review fixup suite passed with 5 files and 39 tests.
 
 Validation:
 
 - `pnpm install --frozen-lockfile`: passed from `apps`.
-- `pnpm exec vitest run ...`: 5 files, 38 tests passed.
+- `pnpm exec vitest run ...`: 5 files, 38 tests passed for the implementation.
+- Post-review fixup targeted suite: 5 files, 39 tests passed after adding the
+  alternate-session summary regression.
 - `pnpm run typecheck`: passed.
-- Targeted ESLint: passed with 0 errors and 2 duplicate-string warnings in
-  `new-session-dialog.test.tsx`.
+- Targeted ESLint: the implementation passed with 0 errors and 2 duplicate-
+  string warnings in `new-session-dialog.test.tsx`; the final fixup passed
+  with 0 errors and 0 warnings after deduplicating those test values.
 - `pnpm run i18n:ratchet`: passed with 0 new violations.
 - The exact desktop command passed with 2 tests: handoff and
   unhealthy-profile compatibility.
