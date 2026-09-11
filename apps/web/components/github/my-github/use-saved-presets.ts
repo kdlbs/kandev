@@ -98,25 +98,36 @@ export function __resetSnapshotForTests() {
 }
 
 function useUserSavedPresetsSync(enabled: boolean) {
+  const [loadState, setLoadState] = useState({ loading: true, error: false });
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     const initialVersion = snapshotVersion;
+    setLoadState({ loading: true, error: false });
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
         const serverPresets = readSavedPresets(response.settings.github_saved_presets);
-        if (cancelled || snapshotVersion !== initialVersion) return;
-        publish(serverPresets);
+        if (cancelled) return;
+        if (snapshotVersion === initialVersion) publish(serverPresets);
+        setLoadState({ loading: false, error: false });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setLoadState({ loading: false, error: snapshotVersion === initialVersion });
+      });
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, attempt]);
+  return { ...loadState, retry };
 }
 
 function useWorkspaceSavedPresets(workspaceId: string | null) {
   const [workspacePresets, setWorkspacePresets] = useState<SavedPreset[] | undefined>(undefined);
+  const [loadState, setLoadState] = useState({ loading: true, error: false });
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
   const writeSeq = useRef(0);
   useEffect(() => {
     if (!workspaceId) {
@@ -126,24 +137,35 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
     let cancelled = false;
     const seq = writeSeq.current;
     setWorkspacePresets(undefined);
+    setLoadState({ loading: true, error: false });
     fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
         const serverPresets = readSavedPresets(settings.saved_presets);
         setWorkspacePresets(serverPresets);
+        setLoadState({ loading: false, error: false });
       })
       .catch(() => {
-        if (!cancelled && seq === writeSeq.current) setWorkspacePresets(undefined);
+        if (!cancelled && seq === writeSeq.current) {
+          setWorkspacePresets(undefined);
+          setLoadState({ loading: false, error: true });
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, attempt]);
   const setWorkspacePresetsFromLocal = useCallback((next: SavedPreset[]) => {
     writeSeq.current += 1;
     setWorkspacePresets(next);
+    setLoadState({ loading: false, error: false });
   }, []);
-  return { workspacePresets, setWorkspacePresets: setWorkspacePresetsFromLocal };
+  return {
+    workspacePresets,
+    setWorkspacePresets: setWorkspacePresetsFromLocal,
+    ...loadState,
+    retry,
+  };
 }
 
 function discardSavedPreset(presets: SavedPreset[], id: string): SavedPreset[] {
@@ -226,18 +248,7 @@ function useSavedPresetMutationContext(
   return { mutationContextRef, applyLocal };
 }
 
-export function useSavedPresets(workspaceId: string | null = null) {
-  const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
-  const workspacePresetsRef = useRef(workspacePresets);
-  workspacePresetsRef.current = workspacePresets;
-  useUserSavedPresetsSync(!workspaceId);
-  const activePresets = workspaceId ? (workspacePresets ?? emptySnapshot) : presets;
-  const { mutationContextRef, applyLocal } = useSavedPresetMutationContext(
-    workspaceId,
-    activePresets,
-    setWorkspacePresets,
-  );
+function useSavedPresetMutationQueue(workspaceId: string | null) {
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const previousWorkspaceIdRef = useRef(workspaceId);
   if (previousWorkspaceIdRef.current !== workspaceId) {
@@ -245,7 +256,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
     mutationQueueRef.current = Promise.resolve();
   }
 
-  const queueMutation = useCallback(
+  return useCallback(
     (mutation: () => Promise<void>) => {
       if (workspaceId === null) return queuePortableMutation(mutation);
       const queued = mutationQueueRef.current.catch(() => undefined).then(mutation);
@@ -254,6 +265,22 @@ export function useSavedPresets(workspaceId: string | null = null) {
     },
     [workspaceId],
   );
+}
+
+export function useSavedPresets(workspaceId: string | null = null) {
+  const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const { workspacePresets, setWorkspacePresets, ...workspaceLoad } =
+    useWorkspaceSavedPresets(workspaceId);
+  const workspacePresetsRef = useRef(workspacePresets);
+  workspacePresetsRef.current = workspacePresets;
+  const userLoad = useUserSavedPresetsSync(!workspaceId);
+  const activePresets = workspaceId ? (workspacePresets ?? emptySnapshot) : presets;
+  const { mutationContextRef, applyLocal } = useSavedPresetMutationContext(
+    workspaceId,
+    activePresets,
+    setWorkspacePresets,
+  );
+  const queueMutation = useSavedPresetMutationQueue(workspaceId);
 
   /**
    * @returns The created preset, or null while workspace settings are unavailable.
@@ -351,5 +378,11 @@ export function useSavedPresets(workspaceId: string | null = null) {
     [applyLocal, queueMutation, workspaceId],
   );
 
-  return { presets: activePresets, save, remove, setDefault };
+  return {
+    presets: activePresets,
+    save,
+    remove,
+    setDefault,
+    ...(workspaceId ? workspaceLoad : userLoad),
+  };
 }

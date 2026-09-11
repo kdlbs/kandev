@@ -32,7 +32,10 @@ describe("IntegrationListToolbar", () => {
   it("renders shared title, count, filter, query, and responsive refresh controls", () => {
     const { onRefresh } = renderToolbar();
     expect(screen.getByTestId("change-toolbar-title").textContent).toBe("Pull requests");
-    expect(screen.getByText("3")).toBeTruthy();
+    expect(screen.getAllByText("3")).toHaveLength(2);
+    expect(screen.getByTestId("integration-mobile-result-count").textContent).toMatch(
+      /Results\s+3/,
+    );
     expect(screen.getByRole("button", { name: "All repositories" })).toBeTruthy();
     expect(screen.getByTestId("change-toolbar-query").getAttribute("placeholder")).toBe(
       "Search pull requests",

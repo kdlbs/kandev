@@ -310,6 +310,14 @@ Workspace GitHub settings control repository scope, default/saved searches, quic
 
 In the **Saved** list, use the star beside a query to set or clear it as the default view. Pull requests and issues keep separate saved defaults. Kandev applies the relevant saved default, including its repository filter, the next time you enter `/github` or switch to that result type; setting or clearing the star does not replace the view currently on screen. Without a saved default, Kandev uses the first configured default query for that result type.
 
+On a phone, tap **Views** beside the current query name to open the query drawer. Switch between **Pull requests** and **Issues**, then select a built-in or saved query. The drawer stays open when you switch result types; select a query or tap **Done** to return to results. **Save current query** stays at the bottom while the query list scrolls. Saved-query loading failures offer **Retry**; a failed save keeps your name and repository selection in the save dialog.
+
+Long query names shorten to one line in the **Views** button; open the drawer to read the full name. The result count, last-updated time, and **Refresh** appear in a separate row below the search input.
+
+Result rows provide touch-sized task actions and show a linked task's workflow step without hovering. Tap the page chooser between the previous/next buttons to open a bottom drawer with the current page marked. Select a page to jump directly to it, up to GitHub's first 1,000 search results, or tap **Done** to keep the current page.
+
+To use saved **task** filters from this page, open the app navigation menu and choose **Task views**. This opens the same task-view picker and filter editor as the task sidebar, for the active Kanban workspace. These task views are separate from GitHub saved queries and Threads views. Open a task from this drawer and use browser Back to return to the GitHub dashboard.
+
 A **Review Watch** polls a GitHub search and creates review work. It requires a workflow, starting step, prompt, and workspace. The default query is `type:pr state:open review-requested:@me -is:draft`; add repository filters or replace the query as needed. An optional agent or executor profile overrides the selected step's defaults. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds. The prompt field accepts `@name` references to saved prompts, resolved the same way as in a workflow step; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
 When a review watch is created, Kandev saves its verified target GitHub login. App-backed polling replaces `review-requested:@me` with that explicit login because an installation is not a user. Creating a user-targeted review watch therefore requires a connected personal identity or human PAT/CLI automation identity. A migrated watch with no verified target is disabled until an identity is reconnected.

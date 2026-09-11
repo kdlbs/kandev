@@ -74,14 +74,15 @@ function useConfirmSave({
       try {
         const created = await save({ kind, label, customQuery, repoFilter: defaultRepoFilter });
         // No persistence started when workspace presets are not available yet.
-        if (!created) return;
-        if (!isCurrentWorkspace(workspaceId)) return;
+        if (!created || !isCurrentWorkspace(workspaceId)) return false;
         markSearchInteracted();
         setProgrammaticSelection({ kind, source: "saved", id: created.id });
         setQueryImmediate(customQuery);
         setRepoFilter(defaultRepoFilter);
+        return true;
       } catch {
-        reportError();
+        if (isCurrentWorkspace(workspaceId)) reportError();
+        return false;
       }
     },
     [

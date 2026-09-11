@@ -1,4 +1,13 @@
 {
+  "views": "Vistas",
+  "viewPicker": "Vistas: {{view}}",
+  "loadingSavedQueries": "A carregar consultas guardadas...",
+  "savedQueriesLoadFailed": "Não foi possível carregar as consultas guardadas.",
+  "pageOf": "Página {{page}} de {{total}}",
+  "choosePage": "Escolher página de resultados",
+  "resultRange": "{{start}}–{{end}} de {{total}}",
+  "previousPage": "Página anterior",
+  "nextPage": "Página seguinte",
   "aRegistrationCanBeReusedAcross": "Um registo pode ser reutilizado em várias áreas de trabalho, ou pode manter separadas as Apps de trabalho e pessoais. Cada área de trabalho seleciona e instala a sua própria credencial.",
   "accountsUnavailable": "Contas indisponíveis",
   "actionPromptPlaceholderHelp": "Escreva {{token}} para ver os marcadores disponíveis. <4>{{url}}</4> e <7>{{title}}</7> são substituídos quando a ação é executada.",

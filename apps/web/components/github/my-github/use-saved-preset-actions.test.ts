@@ -149,7 +149,7 @@ async function expectStaleSaveOutcomeIgnored() {
     setRepoFilter,
   } = renderActions({}, makeStore({ save }));
 
-  let mutation!: Promise<void>;
+  let mutation!: Promise<boolean>;
   act(() => {
     mutation = result.current.onConfirmSave(savedPreset.label, savedPreset.repoFilter);
   });
@@ -321,7 +321,9 @@ describe("useSavedPresetActions save actions", () => {
       markSearchInteracted,
     } = renderActions({}, makeStore({ save }));
 
-    await act(async () => result.current.onConfirmSave("Unavailable", REPO));
+    await act(async () => {
+      expect(await result.current.onConfirmSave("Unavailable", REPO)).toBe(false);
+    });
 
     expect(markSearchInteracted).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalledWith({
@@ -344,7 +346,9 @@ describe("useSavedPresetActions save actions", () => {
       makeStore({ save }),
     );
 
-    await act(async () => result.current.onConfirmSave("Unavailable", REPO));
+    await act(async () => {
+      expect(await result.current.onConfirmSave("Unavailable", REPO)).toBe(false);
+    });
 
     expect(mockToast).toHaveBeenCalledWith({
       description: "Failed to save saved query",
