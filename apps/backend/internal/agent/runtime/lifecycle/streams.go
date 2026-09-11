@@ -350,12 +350,18 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			deliveryEffect = effect
 			skipCallback = durableSkip
 		}
+		event, canonicalProjected, skipEvent := sm.projectCanonicalAgentEvent(
+			ctx, execution, event, delivery, client, skipCallback,
+		)
+		if skipEvent {
+			return
+		}
 		if !skipCallback && sm.callbacks.OnAgentEventWithGeneration != nil {
 			sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
 		} else if !skipCallback && sm.callbacks.OnAgentEvent != nil {
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
-		if delivery != nil {
+		if delivery != nil && !canonicalProjected {
 			if deliveryErr := sm.projectAndAcknowledgeDurableAgentEventWithEffect(ctx, execution, event, delivery, client, deliveryEffect); deliveryErr != nil {
 				sm.logger.Error("durable agent event projection or acknowledgment failed",
 					zap.String("instance_id", execution.ID), zap.Error(deliveryErr))
@@ -401,6 +407,47 @@ func (sm *StreamManager) prepareDurableAgentEvent(
 	}
 	effect = deliveryEffectForEvent(event)
 	return process, stale || sm.deliveryEffectAlreadyApplied(ctx, repository, effect), effect, nil
+}
+
+func (sm *StreamManager) projectCanonicalAgentEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	delivery AgentDeliveryRepository,
+	client *agentctl.Client,
+	skipCallback bool,
+) (agentctl.AgentEvent, bool, bool) {
+	if skipCallback || delivery == nil || !canonicalAgentDeliveryEvent(event) {
+		return event, false, false
+	}
+	projector, ok := delivery.(canonicalAgentDeliveryProjector)
+	if !ok {
+		sm.logger.Debug("canonical agent delivery projector is unavailable; using legacy projection",
+			zap.String("instance_id", execution.ID),
+			zap.String("event_type", event.Type))
+		return event, false, false
+	}
+	isAppend, err := projector.ProjectCanonicalAgentDeliveryEvent(
+		ctx, durableAgentEvent(execution, event), deliveryEffectForEvent(event),
+	)
+	if err != nil {
+		sm.logger.Error("canonical agent event projection failed",
+			zap.String("instance_id", execution.ID),
+			zap.String("event_type", event.Type),
+			zap.Error(err))
+		return event, false, true
+	}
+	event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+	event.CanonicalProjection = true
+	event.CanonicalMessageAppend = isAppend
+	if err := acknowledgeDurableAgentEvent(ctx, event, client); err != nil {
+		sm.logger.Error("canonical agent event acknowledgment failed",
+			zap.String("instance_id", execution.ID),
+			zap.String("event_type", event.Type),
+			zap.Error(err))
+		return event, false, true
+	}
+	return event, true, false
 }
 
 func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {

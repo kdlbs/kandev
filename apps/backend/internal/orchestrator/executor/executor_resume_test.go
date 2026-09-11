@@ -348,6 +348,32 @@ func TestBuildResumeRequestWithOptions_ForwardsContextContinuation(t *testing.T)
 	}
 }
 
+func TestBuildResumeRequestWithOptions_DefersContextContinuationPromptUntilAdmission(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	req, _, _, _, _, err := exec.buildResumeRequestAtCredentialBoundaryWithOptions(
+		context.Background(), repo.tasks["task-1"].ToAPI(), repo.sessions["sess-1"], true, nil,
+		ResumeOptions{
+			ForceContextContinuation: true,
+			ContinuationPrompt:       "continue from this saved context",
+			DeferInitialPrompt:       true,
+			RecoveryAction:           "continue_from_history",
+			StartAgentSynchronously:  true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("buildResumeRequestWithOptions returned error: %v", err)
+	}
+	if req.TaskDescription != "" {
+		t.Fatalf("TaskDescription = %q, want empty until generation commit", req.TaskDescription)
+	}
+	if req.RecoveryAction != "continue_from_history" {
+		t.Fatalf("RecoveryAction = %q, want continue_from_history", req.RecoveryAction)
+	}
+}
+
 type resumeCredentialStateIssuer struct {
 	repo          *mockRepository
 	observedState models.TaskSessionState

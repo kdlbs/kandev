@@ -29,6 +29,8 @@ type deliveryAcknowledgementRequest struct {
 
 const deliverySubmissionRequestOverhead int64 = 64 << 10
 
+const deliveryOwnerMismatchCode = "OWNER_MISMATCH"
+
 func (s *Server) getDeliveryJournal(c *gin.Context) (*journal.Journal, bool) {
 	if s.procMgr == nil {
 		c.JSON(http.StatusConflict, gin.H{
@@ -388,7 +390,7 @@ func writeDeliveryError(c *gin.Context, err error) {
 	case errors.Is(err, journal.ErrSequenceConflict):
 		status, code = http.StatusConflict, "SEQUENCE_CONFLICT"
 	case errors.Is(err, journal.ErrOwnerMismatch):
-		status, code = http.StatusConflict, "OWNER_MISMATCH"
+		status, code = http.StatusConflict, deliveryOwnerMismatchCode
 	case errors.Is(err, journal.ErrSubmissionNotFound):
 		status, code = http.StatusNotFound, "SUBMISSION_NOT_FOUND"
 	case errors.Is(err, journal.ErrSubmissionGeneration):

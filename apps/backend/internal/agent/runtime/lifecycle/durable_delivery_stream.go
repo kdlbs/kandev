@@ -2,11 +2,13 @@ package lifecycle
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -24,6 +26,13 @@ type AgentDeliveryRepository interface {
 	ReceiveAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, remoteHighWater int64) (bool, error)
 	GetAgentDeliveryCursor(ctx context.Context, streamID string) (*models.AgentDeliveryCursor, error)
 	ProjectAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
+}
+
+// canonicalAgentDeliveryProjector is implemented by the backend repository
+// that owns task messages. It must persist the canonical message and advance
+// the inbox cursor in one transaction before returning.
+type canonicalAgentDeliveryProjector interface {
+	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
 }
 
 type agentDeliveryAcknowledger interface {
@@ -323,6 +332,12 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 		harnessGeneration = 1
 	}
 	payloadEvent := event
+	if payloadEvent.TurnID == "" && execution != nil {
+		payloadEvent.TurnID = execution.promptTurnIDSnapshot()
+	}
+	payloadEvent.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+	payloadEvent.CanonicalProjection = false
+	payloadEvent.CanonicalMessageAppend = false
 	payloadEvent.DeliveryStreamID = ""
 	payloadEvent.DeliveryIncarnationID = ""
 	payloadEvent.DeliveryHarnessGeneration = 0
@@ -340,4 +355,47 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 		Payload:           payload,
 		Terminal:          event.Type == streams.EventTypeComplete || event.Type == streams.EventTypeError,
 	}
+}
+
+func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {
+	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning
+}
+
+func canonicalMessageType(event agentctl.AgentEvent) string {
+	if event.Type == streams.EventTypeReasoning {
+		return "thinking"
+	}
+	return "message"
+}
+
+func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEvent) string {
+	if event.CanonicalMessageID != "" {
+		return event.CanonicalMessageID
+	}
+	streamID := event.DeliveryStreamID
+	if streamID == "" && execution != nil {
+		streamID = execution.DeliveryStreamID
+	}
+	if streamID == "" && execution != nil {
+		streamID = execution.SessionID
+	}
+	turnID := event.TurnID
+	if turnID == "" && execution != nil {
+		turnID = execution.promptTurnIDSnapshot()
+	}
+	scope := event.ProtocolMessageID
+	if scope == "" {
+		scope = turnID
+	}
+	if scope == "" {
+		scope = event.DeliverySubmissionID
+	}
+	if scope == "" {
+		scope = "prompt:" + strconv.FormatUint(event.PromptGeneration, 10)
+	}
+	if scope == "prompt:0" {
+		scope = "stream"
+	}
+	digest := sha256.Sum256([]byte(streamID + ":" + event.Type + ":" + scope))
+	return "agent-delivery-" + fmt.Sprintf("%x", digest[:16])
 }

@@ -2,10 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -128,6 +131,145 @@ func TestProjectionRejectsMismatchedEventIdentity(t *testing.T) {
 	}
 	if cursor.ProjectedSequence != 0 {
 		t.Fatalf("projected cursor after conflict = %+v", cursor)
+	}
+}
+
+func TestCanonicalAgentDeliveryProjectionPersistsNewlineFreeChunksExactlyOnce(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-canonical", "session-canonical", "turn-canonical")
+
+	for sequence, text := range []string{"hello", " world"} {
+		sequenceNumber := int64(sequence + 1)
+		wire := streams.AgentEvent{
+			Type:               streams.EventTypeMessageChunk,
+			Text:               text,
+			TurnID:             "turn-canonical",
+			CanonicalMessageID: "canonical-message-1",
+		}
+		payload, err := json.Marshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := &models.AgentDeliveryEvent{
+			SessionID:         "session-canonical",
+			IncarnationID:     "incarnation-canonical",
+			HarnessGeneration: 1,
+			StreamID:          "stream-canonical",
+			Sequence:          sequenceNumber,
+			EventType:         streams.EventTypeMessageChunk,
+			Payload:           payload,
+		}
+		if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, event, sequenceNumber); err != nil || !inserted {
+			t.Fatalf("receive sequence %d = %v, err=%v", sequenceNumber, inserted, err)
+		}
+		appended, err := repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, &models.AgentDeliveryEffect{
+			EffectKey:  "canonical:" + string(rune('0'+sequence)),
+			StreamID:   event.StreamID,
+			Sequence:   sequenceNumber,
+			EffectType: "agent_delivery.event",
+		})
+		if err != nil {
+			t.Fatalf("project sequence %d: %v", sequenceNumber, err)
+		}
+		if appended != (sequence == 1) {
+			t.Fatalf("sequence %d appended=%v", sequenceNumber, appended)
+		}
+	}
+
+	message, err := repo.GetMessage(ctx, "canonical-message-1")
+	if err != nil {
+		t.Fatalf("get canonical message: %v", err)
+	}
+	if message.Content != "hello world" {
+		t.Fatalf("canonical content = %q, want %q", message.Content, "hello world")
+	}
+	var count int
+	if err := repo.db.Get(&count, repo.db.Rebind(`
+		SELECT COUNT(*) FROM task_session_messages WHERE id = ?`), "canonical-message-1"); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("canonical message rows = %d, want 1", count)
+	}
+	cursor, err := repo.GetAgentDeliveryCursor(ctx, "stream-canonical")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.ProjectedSequence != 2 {
+		t.Fatalf("projected cursor = %d, want 2", cursor.ProjectedSequence)
+	}
+}
+
+func TestCanonicalAgentDeliveryProjectionLeavesOutOfOrderEventsForReplay(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-canonical-gap", "session-canonical-gap", "turn-canonical-gap")
+
+	makeEvent := func(sequence int64, text string) *models.AgentDeliveryEvent {
+		payload, err := json.Marshal(streams.AgentEvent{
+			Type:               streams.EventTypeMessageChunk,
+			Text:               text,
+			TurnID:             "turn-canonical-gap",
+			CanonicalMessageID: "canonical-message-gap",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &models.AgentDeliveryEvent{
+			SessionID:         "session-canonical-gap",
+			IncarnationID:     "incarnation-canonical-gap",
+			HarnessGeneration: 1,
+			StreamID:          "stream-canonical-gap",
+			Sequence:          sequence,
+			EventType:         streams.EventTypeMessageChunk,
+			Payload:           payload,
+		}
+	}
+	project := func(event *models.AgentDeliveryEvent) error {
+		_, err := repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, &models.AgentDeliveryEffect{
+			EffectKey:  "canonical-gap:" + fmt.Sprint(event.Sequence),
+			StreamID:   event.StreamID,
+			Sequence:   event.Sequence,
+			EffectType: "agent_delivery.event",
+		})
+		return err
+	}
+
+	second := makeEvent(2, " world")
+	if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, second, 2); err != nil || !inserted {
+		t.Fatalf("receive out-of-order sequence = %v, err=%v", inserted, err)
+	}
+	if err := project(second); err == nil {
+		t.Fatal("out-of-order canonical projection unexpectedly succeeded")
+	}
+	if _, err := repo.GetMessage(ctx, "canonical-message-gap"); err == nil {
+		t.Fatal("out-of-order canonical event created a message before its predecessor")
+	}
+	cursor, err := repo.GetAgentDeliveryCursor(ctx, second.StreamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.ProjectedSequence != 0 {
+		t.Fatalf("projected cursor after gap = %d, want 0", cursor.ProjectedSequence)
+	}
+
+	first := makeEvent(1, "hello")
+	if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, first, 2); err != nil || !inserted {
+		t.Fatalf("receive predecessor = %v, err=%v", inserted, err)
+	}
+	if err := project(first); err != nil {
+		t.Fatalf("project predecessor: %v", err)
+	}
+	if err := project(second); err != nil {
+		t.Fatalf("replay out-of-order event: %v", err)
+	}
+	message, err := repo.GetMessage(ctx, "canonical-message-gap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Content != "hello world" {
+		t.Fatalf("replayed canonical content = %q, want %q", message.Content, "hello world")
 	}
 }
 

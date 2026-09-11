@@ -65,7 +65,7 @@ environment-dependent.
 - Automatic context continuation after native-state loss.
 - Exactly-once external tool execution.
 - Survival after deliberate executor-volume removal.
-- Automatic autonomous context continuation and operator rollout toggles.
+- Automatic autonomous context continuation.
 - Universal native-state migration across harnesses or deleted executor storage.
 
 ## Technical approach
@@ -335,6 +335,18 @@ All work is sequential. Wave numbers do not authorize parallel agents.
 Implementation is complete on 2026-09-11 against main
 `407ed4f1a586385f3f0f6d86f9ee928d8fce822f`.
 
+- PR review remediation is included: continuation candidates now initialize
+  synchronously, publish their generation before durable submission admission,
+  and leave no prompt or parked-work release after a failed generation CAS.
+  Open recovery blocks move with the generation commit in the same SQL
+  transaction.
+- The browser WS boundary now returns bounded typed continuation details, Office
+  recovery releases the original run back to the scheduler, and scheduler
+  admission still enforces budget and provenance before launch.
+- Canonical agent chunks now persist stable task messages and the projected
+  cursor atomically before agentctl acknowledgment. Workspace rebind rejects
+  incompatible CWD/native-state moves with typed recovery and keeps the native
+  identity unchanged.
 - Focused backend lifecycle, journal, task SQLite, agentctl, API, process, and orchestrator suites pass.
 - Focused race coverage passes for orchestrator, agentctl API/process/journal, runtime agentctl, and lifecycle.
 - Store conformance and persistence upgrade checks pass.
@@ -361,7 +373,7 @@ package links, frontmatter references, dependency order, and whitespace checks.
 
 ## Handoff
 
-PR #3598 contains the implementation and is ready for final review fixup. The
+PR #3598 contains the implementation and review remediation and is ready for final review fixup. The
 remaining environment-dependent checks are recorded above.
 Automatic context continuation and release publication remain outside this
 package.

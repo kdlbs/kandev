@@ -158,6 +158,18 @@ type AgentEvent struct {
 	// ownership from cross-subject event ordering.
 	TurnID string `json:"turn_id,omitempty"`
 
+	// CanonicalMessageID is assigned by the backend inbox projector for output
+	// events. It is stable across reconnects and is not a transport cursor.
+	CanonicalMessageID string `json:"canonical_message_id,omitempty"`
+
+	// CanonicalProjection marks an event whose canonical task message and inbox
+	// cursor were committed before the event was published to consumers.
+	CanonicalProjection bool `json:"canonical_projection,omitempty"`
+
+	// CanonicalMessageAppend tells lifecycle/UI consumers whether the stable
+	// canonical message already existed when this event was projected.
+	CanonicalMessageAppend bool `json:"canonical_message_append,omitempty"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.

@@ -260,6 +260,40 @@ func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, er
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), branchRecoveryErr.Details())
 }
 
+// restoreRequiredRecoveryResponse exposes only the bounded restore policy
+// needed by the shared recovery UI. Provider errors and internal recovery
+// blocks must remain server-side because neither is a safe browser contract.
+func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID string) (*ws.Message, error) {
+	var reasoner interface{ RecoveryReason() string }
+	if !errors.As(err, &reasoner) {
+		return nil, nil
+	}
+	reason := reasoner.RecoveryReason()
+	switch reason {
+	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible":
+	default:
+		return nil, nil
+	}
+	details := map[string]interface{}{
+		"kind":            "session_restore_required",
+		"recovery_action": "continue_from_history",
+		"reason":          reason,
+		"session_id":      sessionID,
+	}
+	if generationer, ok := reasoner.(interface{ RecoveryGeneration() int64 }); ok {
+		if generation := generationer.RecoveryGeneration(); generation > 0 {
+			details["generation"] = generation
+		}
+	}
+	return ws.NewError(
+		msg.ID,
+		msg.Action,
+		ws.ErrorCodeConflict,
+		"Native session state requires explicit history continuation.",
+		details,
+	)
+}
+
 func taskArchivedConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
 	if !errors.Is(err, executor.ErrTaskArchived) {
 		return nil, nil
@@ -303,6 +337,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := branchRecoveryConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
 		h.logger.Error("failed to recover session",

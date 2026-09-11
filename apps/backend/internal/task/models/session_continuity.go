@@ -39,18 +39,20 @@ type RestoreAttempt struct {
 // ContinuationSnapshot is bounded, untrusted context composed from canonical
 // Kandev task data. It is not a native harness checkpoint.
 type ContinuationSnapshot struct {
-	ID              string     `json:"id"`
-	AttemptID       string     `json:"attempt_id"`
-	SessionID       string     `json:"session_id"`
-	SourceMessageID string     `json:"source_message_id,omitempty"`
-	Content         string     `json:"content"`
-	ByteCount       int        `json:"byte_count"`
-	OmittedMessages int        `json:"omitted_messages"`
-	Truncated       bool       `json:"truncated"`
-	ContentHash     string     `json:"content_hash"`
-	Status          string     `json:"status"`
-	CreatedAt       time.Time  `json:"created_at"`
-	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
+	ID               string     `json:"id"`
+	AttemptID        string     `json:"attempt_id"`
+	SessionID        string     `json:"session_id"`
+	TargetGeneration int64      `json:"target_generation"`
+	SubmissionID     string     `json:"submission_id,omitempty"`
+	SourceMessageID  string     `json:"source_message_id,omitempty"`
+	Content          string     `json:"content"`
+	ByteCount        int        `json:"byte_count"`
+	OmittedMessages  int        `json:"omitted_messages"`
+	Truncated        bool       `json:"truncated"`
+	ContentHash      string     `json:"content_hash"`
+	Status           string     `json:"status"`
+	CreatedAt        time.Time  `json:"created_at"`
+	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
 }
 
 // SessionRecoveryBlock prevents automatic work admission while a session

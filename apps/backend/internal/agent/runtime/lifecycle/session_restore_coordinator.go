@@ -32,6 +32,7 @@ type RestoreCoordinatorRequest struct {
 	Action                RestoreAction
 	ExplicitAuthorization bool
 	Capabilities          RestoreCapabilities
+	Failure               RestoreFailure
 	TargetWorkspace       string
 	Snapshot              *models.ContinuationSnapshot
 }
@@ -109,6 +110,15 @@ func (c *RestoreCoordinator) Restore(ctx context.Context, request RestoreCoordin
 }
 
 func (c *RestoreCoordinator) decide(ctx context.Context, request RestoreCoordinatorRequest, hooks RestoreCoordinatorHooks) (RestoreDecision, string, error) {
+	if request.Failure.Reason != RestoreReasonNone {
+		return DecideRestore(RestoreRequest{
+			Identity:              request.Identity,
+			Capabilities:          request.Capabilities,
+			Failure:               request.Failure,
+			Action:                request.Action,
+			ExplicitAuthorization: request.ExplicitAuthorization,
+		}), "", nil
+	}
 	switch {
 	case request.Identity.NativeSessionID == "":
 		return decideWithoutNativeIdentity(request), "", nil

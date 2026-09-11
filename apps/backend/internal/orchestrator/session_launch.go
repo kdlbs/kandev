@@ -26,6 +26,8 @@ import (
 // sufficient and required (see IsBenignLaunchTeardownErr).
 const sessionTerminalErrText = "session is terminal"
 
+const sessionRecoveryActionContinueFromHistory = "continue_from_history"
+
 // SessionIntent represents the type of session operation requested.
 type SessionIntent string
 
@@ -91,6 +93,16 @@ func (e *sessionRecoveryRequiredError) RecoveryReason() string {
 	return e.Block.Reason
 }
 
+// RecoveryGeneration identifies the generation the operator is settling. It
+// is optional browser context and is omitted when no persisted block carries
+// one.
+func (e *sessionRecoveryRequiredError) RecoveryGeneration() int64 {
+	if e == nil || e.Block == nil {
+		return 0
+	}
+	return e.Block.ExpectedGeneration
+}
+
 // DispatchDeferred leaves an automation run admitted but open until the
 // operator resolves the persisted recovery block. The method satisfies the
 // automation package's generic deferred-dispatch contract without coupling
@@ -103,10 +115,19 @@ type continuationCheckpoint struct {
 	store         sessionContinuityStore
 	attemptID     string
 	snapshotID    string
+	submissionID  string
 	sessionID     string
 	incarnationID string
 	expectedGen   int64
 	workspace     string
+	nativeID      string
+	// The candidate execution is deliberately tracked separately from the
+	// committed harness generation. A candidate must be torn down, and the
+	// pre-recovery session state restored, if the generation CAS loses after
+	// candidate initialization.
+	candidateExecutionID string
+	previousState        models.TaskSessionState
+	previousErrorMessage string
 }
 
 // LaunchSessionRequest is the unified request for session.launch.
@@ -166,6 +187,10 @@ type LaunchSessionRequest struct {
 	// recovery block. It is populated only by RecoverSession and is consumed
 	// after a successful launch, so a failed recovery remains blocked.
 	RecoveryAction string `json:"-"`
+	// DeferRecoveryResolution keeps the existing recovery block and parked
+	// work in place until an explicit continuation prompt has crossed the
+	// durable admission boundary. It is set only by RecoverSession.
+	DeferRecoveryResolution bool `json:"-"`
 	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
 	// follow-up dispatcher. It is intentionally not part of the wire request:
 	// ordinary launch, ensure, and startup recovery paths must keep completed
@@ -294,7 +319,7 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		}
 		return nil, err
 	}
-	if req.RecoveryAction != "" {
+	if req.RecoveryAction != "" && !req.DeferRecoveryResolution {
 		if err := s.resolveSessionRecoveryBlock(ctx, req.SessionID, req.RecoveryAction); err != nil {
 			return nil, err
 		}
@@ -673,6 +698,9 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
 		ForceContextContinuation:    req.ForceContextContinuation,
 		ContinuationPrompt:          req.ContinuationPrompt,
+		DeferInitialPrompt:          req.DeferRecoveryResolution,
+		RecoveryAction:              req.RecoveryAction,
+		StartAgentSynchronously:     req.DeferRecoveryResolution,
 	})
 	if err != nil {
 		return nil, err
@@ -759,8 +787,25 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 			action = "fresh_start"
 		}
 	}
+	// Office owns autonomous run admission. An operator recovery action must
+	// settle the canonical block and let the Office scheduler perform the next
+	// launch, so budget, provenance, approval, checkout, and agent-status gates
+	// remain authoritative. Calling ResumeTaskSessionWithOptions here would
+	// bypass those gates and would also create a direct chat-style launch for a
+	// run whose identity belongs to the scheduler.
+	if action == "resume" || action == sessionRecoveryActionContinueFromHistory || action == "fresh_start" {
+		isOfficeTask, officeErr := s.lookupOfficeTask(ctx, taskID)
+		if officeErr != nil {
+			return nil, fmt.Errorf("failed to determine office task status: %w", officeErr)
+		}
+		if isOfficeTask {
+			return s.recoverOfficeSessionThroughScheduler(ctx, taskID, sessionID, action)
+		}
+	}
 	resumeOptions := executor.ResumeOptions{}
 	var checkpoint *continuationCheckpoint
+	var continuation executor.ContextContinuation
+	var err error
 	switch action {
 	case "fresh_start":
 		if err := s.clearResumeToken(ctx, sessionID); err != nil {
@@ -771,8 +816,8 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	case "resume_new_branch":
 		// The launch carries the explicit permission. It is not persisted on the
 		// session and cannot be inferred from a previous failed attempt.
-	case "continue_from_history":
-		continuation, err := s.buildContextContinuationPrompt(ctx, taskID, sessionID)
+	case sessionRecoveryActionContinueFromHistory:
+		continuation, err = s.buildContextContinuationPrompt(ctx, taskID, sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build context continuation: %w", err)
 		}
@@ -783,6 +828,9 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		resumeOptions = executor.ResumeOptions{
 			ForceContextContinuation: true,
 			ContinuationPrompt:       continuation.Prompt,
+			DeferInitialPrompt:       true,
+			RecoveryAction:           action,
+			StartAgentSynchronously:  true,
 		}
 	default:
 		return nil, fmt.Errorf("invalid recovery action: %s", action)
@@ -797,14 +845,107 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		ForceContextContinuation:    resumeOptions.ForceContextContinuation,
 		ContinuationPrompt:          resumeOptions.ContinuationPrompt,
 		RecoveryAction:              action,
+		DeferRecoveryResolution:     checkpoint != nil,
 	})
-	if checkpoint != nil {
-		s.finishContinuationCheckpoint(ctx, checkpoint, err)
-	}
 	if err != nil {
+		return s.handleContinuationLaunchError(ctx, checkpoint, err)
+	}
+	if checkpoint == nil {
+		return resp, nil
+	}
+	checkpoint.candidateExecutionID = resp.AgentExecutionID
+	if err := s.commitContinuationGeneration(ctx, checkpoint); err != nil {
+		rollbackErr := s.rollbackContinuationCandidate(ctx, checkpoint)
+		settleErr := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+		if rollbackErr != nil {
+			err = errors.Join(err, rollbackErr)
+		}
+		if settleErr != nil {
+			err = errors.Join(err, settleErr)
+		}
+		return nil, normalizeRecoverSessionError(err)
+	}
+	if _, err := s.promptTask(
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true,
+		promptTaskOptions{
+			recoveryAction:             action,
+			preservePromptContext:      true,
+			deliverySubmissionID:       checkpoint.submissionID,
+			expectedDeliveryGeneration: checkpoint.expectedGen + 1,
+		},
+	); err != nil {
+		settleErr := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+		if settleErr != nil {
+			err = errors.Join(err, settleErr)
+		}
+		return nil, normalizeRecoverSessionError(err)
+	}
+	if err := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotConsumed); err != nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
 		return nil, normalizeRecoverSessionError(err)
 	}
 	return resp, nil
+}
+
+func (s *Service) handleContinuationLaunchError(
+	ctx context.Context,
+	checkpoint *continuationCheckpoint,
+	err error,
+) (*LaunchSessionResponse, error) {
+	if checkpoint == nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	settleErr := s.finishContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+	if settleErr != nil {
+		err = errors.Join(err, settleErr)
+	}
+	return nil, normalizeRecoverSessionError(err)
+}
+
+// recoverOfficeSessionThroughScheduler resolves an operator-owned recovery
+// block without launching the session in the chat/orchestrator path. The
+// resolved block is observed by Office's next scheduler tick, which releases
+// the original run and repeats its normal admission gates before calling the
+// Office task starter. Missing blocks remain an error: a scheduler-owned
+// session must never be turned into an untracked manual launch.
+func (s *Service) recoverOfficeSessionThroughScheduler(
+	ctx context.Context,
+	taskID, sessionID, action string,
+) (*LaunchSessionResponse, error) {
+	// Validate the task/session binding before mutating the recovery block. A
+	// scheduler handoff must never authorize a block and then fail while
+	// loading the session that owns the run.
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load Office session for recovery authorization: %w", err)
+	}
+	if session == nil || session.TaskID != taskID {
+		return nil, ErrTaskSessionPairMismatch
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err == nil {
+		return nil, errOfficeTaskResumeRequiresScheduler
+	} else {
+		var required *sessionRecoveryRequiredError
+		if !errors.As(err, &required) {
+			return nil, err
+		}
+	}
+	if action == "fresh_start" {
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to clear resume token for Office fresh start: %w", err)
+		}
+	}
+	if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+		return nil, normalizeRecoverSessionError(err)
+	}
+	return &LaunchSessionResponse{
+		Success:   true,
+		TaskID:    taskID,
+		SessionID: sessionID,
+		State:     string(session.State),
+	}, nil
 }
 
 // buildContextContinuationPrompt composes canonical Kandev data for the
@@ -850,7 +991,7 @@ func (s *Service) persistContinuationCheckpoint(
 ) (*continuationCheckpoint, error) {
 	store, ok := s.repo.(sessionContinuityStore)
 	if !ok {
-		return nil, nil
+		return nil, errors.New("continuation checkpoint store is unavailable")
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -877,7 +1018,7 @@ func (s *Service) persistContinuationCheckpoint(
 		SessionID:          session.ID,
 		IncarnationID:      incarnationID,
 		ExpectedGeneration: expectedGeneration,
-		Action:             "continue_from_history",
+		Action:             sessionRecoveryActionContinueFromHistory,
 		Outcome:            "blocked",
 		Reason:             "native_state_missing",
 		TargetWorkspace:    session.WorkspacePath,
@@ -887,18 +1028,21 @@ func (s *Service) persistContinuationCheckpoint(
 		return nil, err
 	}
 	snapshotID := uuid.NewString()
+	submissionID := normalizeDeliverySubmissionID(uuid.NewString())
 	if err := store.CreateContinuationSnapshot(ctx, &models.ContinuationSnapshot{
-		ID:              snapshotID,
-		AttemptID:       attemptID,
-		SessionID:       session.ID,
-		SourceMessageID: continuation.SourceMessageID,
-		Content:         continuation.Prompt,
-		ByteCount:       continuation.ByteCount,
-		OmittedMessages: continuation.OmittedMessages,
-		Truncated:       continuation.Truncated,
-		ContentHash:     continuation.ContentHash,
-		Status:          models.ContinuitySnapshotPrepared,
-		CreatedAt:       now,
+		ID:               snapshotID,
+		AttemptID:        attemptID,
+		SessionID:        session.ID,
+		TargetGeneration: expectedGeneration + 1,
+		SubmissionID:     submissionID,
+		SourceMessageID:  continuation.SourceMessageID,
+		Content:          continuation.Prompt,
+		ByteCount:        continuation.ByteCount,
+		OmittedMessages:  continuation.OmittedMessages,
+		Truncated:        continuation.Truncated,
+		ContentHash:      continuation.ContentHash,
+		Status:           models.ContinuitySnapshotPrepared,
+		CreatedAt:        now,
 	}); err != nil {
 		return nil, err
 	}
@@ -906,33 +1050,110 @@ func (s *Service) persistContinuationCheckpoint(
 		agentruntime.RecordRestoreContextTruncated(session.AgentProfileID)
 	}
 	return &continuationCheckpoint{
-		store:         store,
-		attemptID:     attemptID,
-		snapshotID:    snapshotID,
-		sessionID:     session.ID,
-		incarnationID: incarnationID,
-		expectedGen:   expectedGeneration,
-		workspace:     session.WorkspacePath,
+		store:                store,
+		attemptID:            attemptID,
+		snapshotID:           snapshotID,
+		submissionID:         submissionID,
+		sessionID:            session.ID,
+		incarnationID:        incarnationID,
+		expectedGen:          expectedGeneration,
+		workspace:            session.WorkspacePath,
+		previousState:        session.State,
+		previousErrorMessage: session.ErrorMessage,
 	}, nil
 }
 
-func (s *Service) finishContinuationCheckpoint(ctx context.Context, checkpoint *continuationCheckpoint, launchErr error) {
+// rollbackContinuationCandidate releases the promptless replacement created
+// while preparing an explicit context continuation. The candidate execution
+// is not yet a committed harness generation, so a failed generation CAS must
+// not leave it live or overwrite a concurrent successor's state.
+func (s *Service) rollbackContinuationCandidate(ctx context.Context, checkpoint *continuationCheckpoint) error {
+	if checkpoint == nil || checkpoint.candidateExecutionID == "" {
+		return nil
+	}
+	running, err := s.loadContinuationCandidate(ctx, checkpoint)
+	if err != nil {
+		return err
+	}
+	if running == nil || running.AgentExecutionID != checkpoint.candidateExecutionID {
+		// A different execution already owns the session. Never clean it up or
+		// roll its state back while settling a stale continuation candidate.
+		return nil
+	}
+	if err := s.cleanupContinuationCandidate(ctx, checkpoint, running); err != nil {
+		return err
+	}
+	return s.restoreContinuationSessionState(ctx, checkpoint)
+}
+
+func (s *Service) loadContinuationCandidate(ctx context.Context, checkpoint *continuationCheckpoint) (*models.ExecutorRunning, error) {
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, checkpoint.sessionID)
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("load continuation candidate execution: %w", err)
+	}
+	return running, nil
+}
+
+func (s *Service) cleanupContinuationCandidate(ctx context.Context, checkpoint *continuationCheckpoint, running *models.ExecutorRunning) error {
+	if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
+		if err := cleaner.CleanupStaleExecutionBySessionIDIfCurrent(
+			ctx,
+			checkpoint.sessionID,
+			checkpoint.candidateExecutionID,
+			running.UpdatedAt,
+		); err != nil {
+			return fmt.Errorf("cleanup continuation candidate: %w", err)
+		}
+	} else if err := s.agentManager.CleanupStaleExecutionBySessionID(ctx, checkpoint.sessionID); err != nil {
+		return fmt.Errorf("cleanup continuation candidate: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) restoreContinuationSessionState(ctx context.Context, checkpoint *continuationCheckpoint) error {
+	// Cleanup is identity-fenced above. Re-read before restoring state so a
+	// successor that won the session after cleanup is never overwritten.
+	currentRunning, runningErr := s.repo.GetExecutorRunningBySessionID(ctx, checkpoint.sessionID)
+	if runningErr == nil && currentRunning != nil && currentRunning.AgentExecutionID != checkpoint.candidateExecutionID {
+		return nil
+	}
+	if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+		return fmt.Errorf("re-read continuation execution after cleanup: %w", runningErr)
+	}
+	currentSession, err := s.repo.GetTaskSession(ctx, checkpoint.sessionID)
+	if err != nil {
+		return fmt.Errorf("load session after continuation cleanup: %w", err)
+	}
+	if currentSession == nil || isTerminalSessionState(currentSession.State) {
+		return nil
+	}
+	if currentSession.State == checkpoint.previousState {
+		return nil
+	}
+	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
+		ctx,
+		checkpoint.sessionID,
+		currentSession.State,
+		checkpoint.previousState,
+		checkpoint.previousErrorMessage,
+	)
+	if err != nil {
+		return fmt.Errorf("restore session state after continuation cleanup: %w", err)
+	}
+	if !changed {
+		return nil
+	}
+	return nil
+}
+
+func (s *Service) commitContinuationGeneration(ctx context.Context, checkpoint *continuationCheckpoint) error {
 	if checkpoint == nil || checkpoint.store == nil {
-		return
+		return nil
 	}
 	now := time.Now().UTC()
-	if launchErr != nil {
-		_ = checkpoint.store.CompleteContinuationSnapshot(ctx, checkpoint.snapshotID, models.ContinuitySnapshotUncertain, now)
-		_ = checkpoint.store.CompleteRestoreAttempt(ctx, checkpoint.attemptID, "blocked", now)
-		agentruntime.RecordRestoreAttempt("blocked", "native_state_missing", "")
-		return
-	}
 	acpSessionID := s.currentACPSessionID(checkpoint.sessionID)
 	if acpSessionID == "" {
-		_ = checkpoint.store.CompleteContinuationSnapshot(ctx, checkpoint.snapshotID, models.ContinuitySnapshotUncertain, now)
-		_ = checkpoint.store.CompleteRestoreAttempt(ctx, checkpoint.attemptID, "blocked", now)
-		agentruntime.RecordRestoreAttempt("blocked", "unknown_failure", "")
-		return
+		return errors.New("continuation candidate has no native session identity")
 	}
 	committed, err := checkpoint.store.CommitHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
 		SessionID:             checkpoint.sessionID,
@@ -959,14 +1180,57 @@ func (s *Service) finishContinuationCheckpoint(ctx context.Context, checkpoint *
 		}
 	}
 	if err != nil || !committed {
-		_ = checkpoint.store.CompleteContinuationSnapshot(ctx, checkpoint.snapshotID, models.ContinuitySnapshotUncertain, now)
-		_ = checkpoint.store.CompleteRestoreAttempt(ctx, checkpoint.attemptID, "blocked", now)
-		agentruntime.RecordRestoreAttempt("blocked", "configuration_failure", "")
-		return
+		if err != nil {
+			return fmt.Errorf("commit continuation generation: %w", err)
+		}
+		return errors.New("commit continuation generation: stale generation")
 	}
-	_ = checkpoint.store.CompleteContinuationSnapshot(ctx, checkpoint.snapshotID, models.ContinuitySnapshotConsumed, now)
-	_ = checkpoint.store.CompleteRestoreAttempt(ctx, checkpoint.attemptID, "context_continued", now)
-	agentruntime.RecordRestoreAttempt("context_continued", "native_state_missing", "")
+	checkpoint.nativeID = acpSessionID
+	return nil
+}
+
+func (s *Service) finishContinuationCheckpoint(ctx context.Context, checkpoint *continuationCheckpoint, status string) error {
+	if checkpoint == nil || checkpoint.store == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	var resultErr error
+	if err := checkpoint.store.CompleteContinuationSnapshot(ctx, checkpoint.snapshotID, status, now); err != nil {
+		resultErr = errors.Join(resultErr, fmt.Errorf("settle continuation snapshot: %w", err))
+	}
+	attemptOutcome := "blocked"
+	metricOutcome := "blocked"
+	if status == models.ContinuitySnapshotConsumed {
+		attemptOutcome = "context_continued"
+		metricOutcome = "context_continued"
+	}
+	if err := checkpoint.store.CompleteRestoreAttempt(ctx, checkpoint.attemptID, attemptOutcome, now); err != nil {
+		resultErr = errors.Join(resultErr, fmt.Errorf("settle restore attempt: %w", err))
+	}
+	if resultErr == nil {
+		agentruntime.RecordRestoreAttempt(metricOutcome, "native_state_missing", "")
+	}
+	return resultErr
+}
+
+// settleContinuationCheckpoint never reports a consumed snapshot after a
+// persistence failure. If the success settlement is ambiguous, the
+// conservative outcome is uncertain, which keeps the recovery block closed
+// and prevents a retry from replaying the same context automatically.
+func (s *Service) settleContinuationCheckpoint(
+	ctx context.Context,
+	checkpoint *continuationCheckpoint,
+	status string,
+) error {
+	err := s.finishContinuationCheckpoint(ctx, checkpoint, status)
+	if err == nil || status != models.ContinuitySnapshotConsumed {
+		return err
+	}
+	uncertainErr := s.finishContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain)
+	if uncertainErr != nil {
+		return errors.Join(err, uncertainErr)
+	}
+	return err
 }
 
 // normalizeRecoverSessionError maps a missing-profile resume failure to a

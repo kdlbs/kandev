@@ -120,4 +120,8 @@ This work order does not authorize subagents. Preserve unrelated user edits.
 
 ## Results
 
-Implemented Office park-and-surface recovery with durable task-owned blocks, repeated-tick protection, preserved budget/provenance admission, and operator recovery navigation. Backend regression coverage passes; live browser evidence remains in the final E2E gate.
+Implemented Office park-and-surface recovery with durable task-owned blocks, repeated-tick
+protection, preserved budget/provenance admission, and operator recovery navigation. Recovery
+settles the existing block and returns the same run to the scheduler; it never launches a direct
+chat-style replacement. A scheduler regression covers same-run identity and denied budget
+admission. Live browser evidence remains in the final E2E gate.

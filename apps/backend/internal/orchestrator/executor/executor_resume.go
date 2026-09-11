@@ -753,6 +753,19 @@ type ResumeOptions struct {
 	// session identity.
 	ForceContextContinuation bool
 	ContinuationPrompt       string
+	// DeferInitialPrompt starts a context-continuation candidate without
+	// dispatching its bounded prompt. The orchestrator commits the replacement
+	// harness generation before it admits that prompt through the durable
+	// submission path.
+	DeferInitialPrompt bool
+	// RecoveryAction carries the one explicit operator settlement through the
+	// executor. Office continuations use this to retain scheduler admission;
+	// ordinary resume paths leave it empty.
+	RecoveryAction string
+	// StartAgentSynchronously makes a candidate launch return only after the
+	// native session is initialized and promptable. It is required before a
+	// generation CAS can authorize context-continuation dispatch.
+	StartAgentSynchronously bool
 }
 
 // ResumeSession restarts an existing task session using its stored worktree.
@@ -936,13 +949,33 @@ func (e *Executor) resumeSession(
 	}
 
 	if startAgent {
-		e.startAgentProcessOnResumeWithTaskPromotion(
-			ctx,
-			task.ID,
-			session,
-			resp.AgentExecutionID,
-			!completedResume,
-		)
+		if options.StartAgentSynchronously {
+			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
+				e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
+				return nil, err
+			}
+			if terminalState, terminal := e.stopStartedExecutionIfSessionTerminal(
+				ctx, session.ID, resp.AgentExecutionID, "terminal continuation start race",
+			); terminal {
+				return nil, &SessionStateSupersededError{SessionID: session.ID, State: terminalState}
+			}
+			if !completedResume && options.RecoveryAction == "" {
+				if err := e.writeTaskInProgressForRuntime(ctx, task.ID, session.ID); err != nil {
+					e.logger.Warn("failed to update task state after synchronous resume start",
+						zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
+				}
+			}
+		} else {
+			e.startAgentProcessOnResumeWithTaskPromotion(
+				ctx,
+				task.ID,
+				session,
+				resp.AgentExecutionID,
+				!completedResume,
+			)
+		}
 	}
 
 	return execution, nil
@@ -1283,11 +1316,17 @@ func newResumeLaunchRequest(
 		IsEphemeral:              task.IsEphemeral,
 		IsPassthrough:            session.IsPassthrough,
 		TaskEnvironmentID:        session.TaskEnvironmentID,
+		OriginalWorkspacePath:    session.WorkspacePath,
 		AllowBranchReplacement:   options.AllowBranchReplacement,
 		ForceContextContinuation: options.ForceContextContinuation,
+		RecoveryAction:           options.RecoveryAction,
 	}
 	if options.ForceContextContinuation {
-		req.TaskDescription = options.ContinuationPrompt
+		if options.DeferInitialPrompt {
+			req.TaskDescription = ""
+		} else {
+			req.TaskDescription = options.ContinuationPrompt
+		}
 	}
 
 	metadata := map[string]interface{}{}

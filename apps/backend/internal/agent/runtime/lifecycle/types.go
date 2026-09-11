@@ -43,11 +43,15 @@ type AgentExecution struct {
 	AgentProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID      string
-	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	ContainerID               string
-	ContainerIP               string   // IP address of the container for agentctl communication
-	WorkspacePath             string   // Path to the workspace (worktree or repository path)
+	OfficeAgentProfileID string
+	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	ContainerID          string
+	ContainerIP          string // IP address of the container for agentctl communication
+	WorkspacePath        string // Path to the workspace (worktree or repository path)
+	// OriginalWorkspacePath is the first agent-visible CWD for this native
+	// session. It is retained separately from the current target so restore
+	// policy can classify relocation before touching native state.
+	OriginalWorkspacePath     string
 	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
 	ACPSessionID              string   // ACP session ID to resume, if available
 	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
@@ -956,19 +960,23 @@ type LaunchRequest struct {
 	// ForceContextContinuation starts a new native conversation with the
 	// bounded continuation prompt instead of loading a native session.
 	ForceContextContinuation bool
-	TaskTitle                string // Human-readable task title for semantic worktree naming
+	// RecoveryAction is a server-authorized recovery settlement. It remains
+	// internal to the lifecycle launch boundary and is never client-controlled.
+	RecoveryAction string
+	TaskTitle      string // Human-readable task title for semantic worktree naming
 	// AgentProfileID is the stable Office identity for routed Office launches.
 	// For non-Office launches it is also the concrete execution profile.
 	AgentProfileID string
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
-	ExecutionProfileID string
-	StartAgent         bool                // Transfer launch activity through initial startup/prompt
-	TurnID             string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath      string              // Host path to workspace (original repository path)
-	TaskDescription    string              // Task description to send via ACP prompt
-	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                map[string]string   // Additional env vars
+	ExecutionProfileID    string
+	StartAgent            bool                // Transfer launch activity through initial startup/prompt
+	TurnID                string              // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath         string              // Host path to workspace (original repository path)
+	OriginalWorkspacePath string              // First agent-visible path for native restore policy
+	TaskDescription       string              // Task description to send via ACP prompt
+	Attachments           []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env                   map[string]string   // Additional env vars
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

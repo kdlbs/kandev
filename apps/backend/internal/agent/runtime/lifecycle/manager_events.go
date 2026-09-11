@@ -31,6 +31,16 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	// chunk observed before an atomic reset is detached with the old turn,
 	// while one observed after reset is retained for the replacement turn.
 	m.appendAssistantHistoryChunk(execution, event.Text)
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContentNow(
+			execution,
+			"message_streaming",
+			event.CanonicalMessageID,
+			event.Text,
+			event.CanonicalMessageAppend,
+		)
+		return
+	}
 	if event.ProtocolMessageID != "" {
 		m.flushPendingLegacyMessage(execution)
 		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text)
@@ -65,6 +75,16 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 // handleReasoningEvent handles a "reasoning" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
+		return
+	}
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContentNow(
+			execution,
+			thinkingStreamingEventType,
+			event.CanonicalMessageID,
+			event.ReasoningText,
+			event.CanonicalMessageAppend,
+		)
 		return
 	}
 	if event.ProtocolMessageID != "" {
