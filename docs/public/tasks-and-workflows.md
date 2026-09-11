@@ -35,6 +35,16 @@ The task carries the outcome through the workflow. The repository and session pr
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
+## Move a task with one-time entry options
+
+The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
+
+Available options are **Reset context**, **Instructions**, and **Skip step prompt**. The normalized one-time `entry_options` object carries `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. By default, instructions are appended after the destination step prompt. Skip step prompt suppresses the destination step's configured prompt (and its task-description fallback) for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. Reset context is additive, so it cannot disable a reset already required by the destination step. On touch devices the same controls open in a bottom Drawer.
+
+Moves keep the existing reachability, authorization, WIP, archive, workspace, and active-session rules. Reset runs when either the destination or override requests it, and instructions are appended once. An entry override that carries instructions requires an active target session or a destination step that auto-starts an agent. Pull-request draft versus ready-for-review behavior is not part of these move options; configure that in the PR step's normal automation.
+
+When the source agent is running, the move is deferred until its turn ends. The complete normalized options survive WIP admission, promotion, and backend restart, then apply once at destination entry. A plain move remains valid without a target session or auto-start, but agent-facing options are rejected when there is no recipient.
+
 ## Prepare a workspace
 
 A new workspace created from **Settings → Workspaces** automatically receives a **Kanban** workflow
@@ -395,10 +405,11 @@ deletion is not success.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
 **Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
-different layouts. Kandev remembers the last selected view in that browser on
-the current device. Phones offer **Kanban**, **Threads**, and **List** in the
-topbar menu; a saved desktop Pipeline preference is kept but shown as Kanban
-on the phone.
+different layouts. Threads shows agent conversations side by side. Kandev
+remembers the last selected view in that browser on the current device. Phones
+offer **Kanban**, **Threads**, and **List** in the topbar menu, with a native
+Threads deck showing one conversation at a time. A saved desktop Pipeline
+preference is kept but shown as Kanban on the phone.
 
 Kanban and List share a compact phone header showing the workspace and current
 mode. Tap that context or the menu button to change views, workspaces, or display
@@ -407,7 +418,15 @@ Threads view. Phone **Search tasks** lives in the menu: selecting it reveals
 and focuses the search field below the header. Selecting it again hides the
 field and clears the query.
 
-Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
+Under **Settings → Preferences → Appearance → Startup Page**, choose a destination, then select **Save changes**:
+
+- **Task overview** (the default): open the last listing view used on this device, including Threads.
+- **Last visited task**: resume the most recently opened task in the current workspace on this device when Kandev starts or you open the bare home address. If no matching task exists, open the remembered listing instead. Home navigation does not resume the task.
+- **Threads**: always open Threads on startup and Home navigation in the selected workspace, even after using a different listing view. This saved choice follows your user across devices; changing a listing view does not change it.
+
+Office workspaces keep their Office Home while Office is enabled. With Office disabled, Home keeps the workspace and uses the task-listing startup choice.
+
+Explicit view selections (including Kanban, Pipeline, and List), task, session, workflow, overview, and focused Threads links keep their destination on reload instead of applying the saved Threads default. A task's **Task overview** or Back action still opens the overview family using the remembered listing; it does not apply the fixed Threads default.
 
 The **TASKS** list in the left sidebar has two time-based sort choices. These choices are separate from the sort choices in the task **List** view.
 
@@ -605,7 +624,7 @@ For a Review or Approval step:
 
 ### Avoid automation loops
 
-An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits stop over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
+An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits queue over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
 
 For examples and portability, see [Workflow tips](workflow-tips.md), [Workflow import and export](workflow-import-export.md), and [Workflow sync](workflow-sync.md).
 
@@ -627,8 +646,15 @@ Regular tasks have one shared Markdown plan, not a collection of named documents
 2. Write the plan or let an agent write it through task MCP.
 3. Edit it directly. The panel autosaves after 1.5 seconds.
 4. Use plan history to preview a revision, compare it with the previous or current revision, or restore it. Restore creates a new revision; it does not erase history or coalesce with the preceding revision.
-5. Select plan text to leave a comment. **Run** sends the selected feedback to the agent in plan mode.
+5. Select plan text to add pending feedback. Plan comments belong to the task plan, so the same comments appear above every session composer. A normal **Send** includes the visible comments in the message to the selected session. **Run** sends only that comment, in plan mode, to the task's current primary session. An accepted Send or Run removes the delivered comments from the plan and every composer.
 6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the current draft first and marks the plan as sent for implementation; the implement control is then disabled for that plan.
+
+Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
+text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
+and selected text. The complete message, including formatted comments, must
+also fit within 1 MiB. If a limit is exceeded, shorten the feedback, selection,
+or message and retry; rejected changes and deliveries do not remove pending
+comments.
 
 Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
 

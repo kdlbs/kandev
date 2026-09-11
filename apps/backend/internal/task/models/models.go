@@ -120,6 +120,13 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
+	// (immediately applied) workflow move whose target-step entry has not yet
+	// run. Its value records the source step, the move ID, and the encoded
+	// entry options. The public task.moved event carries only the move ID; the
+	// instructions and profile choice ride on this transient marker and are
+	// cleared once the target entry is dispatched.
+	MetaKeyWorkflowMovePending = "workflow_move_pending"
 	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
 	// task.moved lifecycle must finish before feeder reconciliation. Its value
 	// records the source step so stale deliveries cannot run the wrong exit.
@@ -2334,6 +2341,30 @@ type TaskEnvironmentRepo struct {
 	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
 }
 
+// TaskEnvironmentRecoveryClaimRequest identifies the environment authority
+// required while an automatic host-worktree recovery is in progress.
+type TaskEnvironmentRecoveryClaimRequest struct {
+	TaskEnvironmentID   string
+	OwnerTaskID         string
+	OwnershipGeneration int64
+	SessionID           string
+	OperationID         string
+	ExecutorType        string
+}
+
+// TaskEnvironmentRecoveryClaim is the durable authority held from recovery
+// preflight through the external workspace-start boundary.
+type TaskEnvironmentRecoveryClaim struct {
+	TaskEnvironmentID   string    `json:"task_environment_id"`
+	OwnerTaskID         string    `json:"owner_task_id"`
+	OwnershipGeneration int64     `json:"ownership_generation"`
+	SessionID           string    `json:"session_id"`
+	OperationID         string    `json:"operation_id"`
+	ExecutorType        string    `json:"executor_type"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
 // ToAPI converts internal TaskEnvironment to API map.
 func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
@@ -2407,9 +2438,38 @@ type TaskPlan struct {
 	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
+	CommentsRevision               int64      `json:"comments_revision"`
 	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
 	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
 	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
+}
+
+// TaskPlanComment is pending user feedback attached to the current task plan.
+type TaskPlanComment struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	PlanID       string    `json:"plan_id"`
+	Body         string    `json:"body"`
+	SelectedText string    `json:"selected_text"`
+	AnchorFrom   int       `json:"anchor_from"`
+	AnchorTo     int       `json:"anchor_to"`
+	Version      int64     `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// TaskPlanCommentSnapshot is the authoritative pending-comment collection for a plan.
+type TaskPlanCommentSnapshot struct {
+	TaskID   string             `json:"task_id" db:"task_id"`
+	PlanID   string             `json:"plan_id" db:"plan_id"`
+	Revision int64              `json:"revision" db:"revision"`
+	Comments []*TaskPlanComment `json:"comments"`
+}
+
+// TaskPlanCommentRef identifies the exact pending-comment version a delivery includes.
+type TaskPlanCommentRef struct {
+	ID      string `json:"id"`
+	Version int64  `json:"version"`
 }
 
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.

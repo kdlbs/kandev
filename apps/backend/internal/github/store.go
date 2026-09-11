@@ -160,6 +160,7 @@ const createTablesSQL = `
 		closed_by_login TEXT,
 		auto_merge_observed_at DATETIME,
 		source TEXT NOT NULL DEFAULT '',
+		workflow_attention TEXT NOT NULL DEFAULT '',
 		UNIQUE(task_id, repository_id, pr_number)
 	);
 
@@ -667,6 +668,9 @@ func (s *Store) initSchemaUpgrades() error {
 	if err := s.addTaskPRSourceColumn(); err != nil {
 		return err
 	}
+	if err := s.addTaskPRWorkflowAttentionColumn(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -726,6 +730,25 @@ func (s *Store) addTaskPRSourceColumn() error {
 	)); err != nil &&
 		!dbutil.IsDuplicateColumnError(err) {
 		return fmt.Errorf("add github_task_prs.source: %w", err)
+	}
+	return nil
+}
+
+// addTaskPRWorkflowAttentionColumn adds the serialized, head-scoped Actions
+// observation. Empty is the legacy/unobserved value and is not an assertion
+// that no workflow needs attention.
+func (s *Store) addTaskPRWorkflowAttentionColumn() error {
+	cols, err := s.tableColumns("github_task_prs")
+	if err != nil {
+		return fmt.Errorf("read github_task_prs columns: %w", err)
+	}
+	if _, ok := cols["workflow_attention"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(schemaSQLForDriver(
+		`ALTER TABLE github_task_prs ADD COLUMN workflow_attention TEXT NOT NULL DEFAULT ''`, s.db.DriverName(),
+	)); err != nil && !dbutil.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add github_task_prs.workflow_attention: %w", err)
 	}
 	return nil
 }
@@ -1641,6 +1664,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			closed_by_login TEXT,
 			auto_merge_observed_at DATETIME,
 			source TEXT NOT NULL DEFAULT '',
+			workflow_attention TEXT NOT NULL DEFAULT '',
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
 		// The five outcome-attribution columns and source are selected
@@ -1657,7 +1681,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, COALESCE(head_sha, ''), author_login, state, review_state, checks_state,
@@ -1666,7 +1690,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			COALESCE(merge_queue_last_removal_reason, ''), COALESCE(merge_queue_last_removal_before_sha, ''),
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention
 		FROM github_task_prs`,
 	)
 }
@@ -1983,6 +2007,7 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	now := time.Now().UTC()
 	tp.UpdatedAt = now
+	tp.WorkflowAttentionJSON = marshalWorkflowAttention(tp.WorkflowAttention)
 	return insertTaskPR(ctx, s.db, tp)
 }
 
@@ -2003,7 +2028,7 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
 	head_sha, merge_queue_entry_id, merge_queue_entry_head_sha, merge_queue_last_removal_id,
 	merge_queue_last_removed_at, merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
-	source`
+	source, workflow_attention`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -2016,7 +2041,7 @@ const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repos
 	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at,
 	gtp.head_sha, gtp.merge_queue_entry_id, gtp.merge_queue_entry_head_sha, gtp.merge_queue_last_removal_id,
 	gtp.merge_queue_last_removed_at, gtp.merge_queue_last_removal_reason, gtp.merge_queue_last_removal_before_sha,
-	gtp.source`
+	gtp.source, gtp.workflow_attention`
 
 type taskPRWriter interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -2059,8 +2084,46 @@ func taskPRValues(tp *TaskPR) []any {
 		tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt, tp.HeadSHA,
 		tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueLastRemovalID,
 		tp.MergeQueueLastRemovedAt, tp.MergeQueueLastRemovalReason, tp.MergeQueueLastRemovalBeforeSHA,
-		tp.Source,
+		tp.Source, marshalWorkflowAttention(tp.WorkflowAttention),
 	}
+}
+
+func marshalWorkflowAttention(attention *WorkflowAttention) string {
+	if attention == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(attention)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
+func hydrateTaskPRWorkflowAttention(tp *TaskPR) error {
+	if tp == nil || strings.TrimSpace(tp.WorkflowAttentionJSON) == "" {
+		if tp != nil {
+			tp.WorkflowAttention = nil
+		}
+		return nil
+	}
+	var attention WorkflowAttention
+	if err := json.Unmarshal([]byte(tp.WorkflowAttentionJSON), &attention); err != nil {
+		return fmt.Errorf("decode task PR workflow attention: %w", err)
+	}
+	if attention.Runs == nil {
+		attention.Runs = []WorkflowAttentionRun{}
+	}
+	tp.WorkflowAttention = &attention
+	return nil
+}
+
+func hydrateTaskPRsWorkflowAttention(prs []TaskPR) error {
+	for i := range prs {
+		if err := hydrateTaskPRWorkflowAttention(&prs[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetTaskPR returns the first PR association for a task. For multi-repo tasks
@@ -2071,6 +2134,9 @@ func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? AND detached_at IS NULL LIMIT 1`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
+	}
+	if err == nil {
+		err = hydrateTaskPRWorkflowAttention(&tp)
 	}
 	return &tp, err
 }
@@ -2084,6 +2150,9 @@ func (s *Store) GetTaskPRByID(ctx context.Context, associationID string) (*TaskP
 		s.ro.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs WHERE id = ? LIMIT 1`), associationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
+	}
+	if err == nil {
+		err = hydrateTaskPRWorkflowAttention(&tp)
 	}
 	return &tp, err
 }
@@ -2104,6 +2173,9 @@ func (s *Store) GetTaskPRByRepository(ctx context.Context, taskID, repositoryID 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err == nil {
+		err = hydrateTaskPRWorkflowAttention(&tp)
+	}
 	return &tp, err
 }
 
@@ -2121,6 +2193,9 @@ func (s *Store) GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repository
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err == nil {
+		err = hydrateTaskPRWorkflowAttention(&tp)
+	}
 	return &tp, err
 }
 
@@ -2136,6 +2211,9 @@ func (s *Store) GetTaskPRByRepoAndNumberIncludingDetached(ctx context.Context, t
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err == nil {
+		err = hydrateTaskPRWorkflowAttention(&tp)
+	}
 	return &tp, err
 }
 
@@ -2145,6 +2223,9 @@ func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR
 	var prs []TaskPR
 	if err := s.ro.SelectContext(ctx, &prs,
 		s.ro.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? AND detached_at IS NULL ORDER BY created_at ASC`), taskID); err != nil {
+		return nil, err
+	}
+	if err := hydrateTaskPRsWorkflowAttention(prs); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskPR, 0, len(prs))
@@ -2162,6 +2243,9 @@ func (s *Store) ListTaskPRsByTaskIncludingDetached(ctx context.Context, taskID s
 	var prs []TaskPR
 	if err := s.ro.SelectContext(ctx, &prs,
 		s.ro.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? ORDER BY created_at ASC`), taskID); err != nil {
+		return nil, err
+	}
+	if err := hydrateTaskPRsWorkflowAttention(prs); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskPR, 0, len(prs))
@@ -2215,10 +2299,15 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 	var outgoing TaskPR
 	err = tx.GetContext(ctx, &outgoing,
 		tx.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs
-		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
+			 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
 		taskID, repositoryID, pr.Number)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
+	}
+	if err == nil {
+		if err := hydrateTaskPRWorkflowAttention(&outgoing); err != nil {
+			return nil, err
+		}
 	}
 
 	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
@@ -2228,6 +2317,7 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 	if pr.HeadSHA != "" {
 		headSHA = pr.HeadSHA
 	}
+	workflowAttention := resolveTaskPRWorkflowAttention(&outgoing, status, headSHA)
 
 	if _, err := tx.ExecContext(ctx, tx.Rebind(
 		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
@@ -2236,13 +2326,14 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 			merge_queue_last_removal_id = ?, merge_queue_last_removed_at = ?, merge_queue_last_removal_reason = ?, merge_queue_last_removal_before_sha = ?,
 			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?,
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
-			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
 		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, headSHA, pr.AuthorLogin,
 		pr.State, pr.MergeableState, queue.state, queue.position, queue.entryID, queue.entryHeadSHA, queue.estimate,
 		queue.lastRemovalID, queue.lastRemovedAt, queue.lastRemovalReason, queue.lastRemovalBeforeSHA,
 		pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
 		isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
+		marshalWorkflowAttention(workflowAttention),
 		taskID, repositoryID, pr.Number); err != nil {
 		return nil, err
 	}
@@ -2271,6 +2362,9 @@ func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map
 	if err := s.ro.SelectContext(ctx, &prs, query, args...); err != nil {
 		return nil, err
 	}
+	if err := hydrateTaskPRsWorkflowAttention(prs); err != nil {
+		return nil, err
+	}
 	return groupTaskPRsByTask(prs), nil
 }
 
@@ -2283,7 +2377,10 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 		s.ro.Rebind(`SELECT `+taskPRColumnsQualified+` FROM github_task_prs gtp
 		 INNER JOIN tasks t ON gtp.task_id = t.id
 		 WHERE t.workspace_id = ? AND gtp.detached_at IS NULL
-		 ORDER BY gtp.created_at ASC`), workspaceID); err != nil {
+			ORDER BY gtp.created_at ASC`), workspaceID); err != nil {
+		return nil, err
+	}
+	if err := hydrateTaskPRsWorkflowAttention(prs); err != nil {
 		return nil, err
 	}
 	return groupTaskPRsByTask(prs), nil
@@ -2333,7 +2430,10 @@ func (s *Store) ListTaskPRsByPRNumber(
 		 INNER JOIN tasks t ON gtp.task_id = t.id
 		 WHERE t.workspace_id = ? AND gtp.owner = ? AND gtp.repo = ? AND gtp.pr_number = ?
 			 AND gtp.detached_at IS NULL
-		 ORDER BY gtp.created_at ASC`), workspaceID, owner, repo, prNumber); err != nil {
+			ORDER BY gtp.created_at ASC`), workspaceID, owner, repo, prNumber); err != nil {
+		return nil, err
+	}
+	if err := hydrateTaskPRsWorkflowAttention(prs); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskPR, 0, len(prs))
@@ -2408,6 +2508,8 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR, status *PRStatus)
 	} else if tp.HeadSHA == "" && outgoing.ID != "" {
 		tp.HeadSHA = outgoing.HeadSHA
 	}
+	tp.WorkflowAttention = resolveTaskPRWorkflowAttention(outgoing, status, tp.HeadSHA)
+	tp.WorkflowAttentionJSON = marshalWorkflowAttention(tp.WorkflowAttention)
 
 	if tp.RepositoryID != "" {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(
@@ -2458,6 +2560,9 @@ func replaceTaskPROutgoingRow(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) (*Ta
 	if err != nil {
 		return nil, err
 	}
+	if err := hydrateTaskPRWorkflowAttention(&outgoing); err != nil {
+		return nil, err
+	}
 	return &outgoing, nil
 }
 
@@ -2490,7 +2595,7 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
 			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?,
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
-			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?), workflow_attention = ?
 		WHERE id = ?`),
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.HeadSHA, tp.MergeQueueState, tp.MergeQueuePosition, tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueEstimatedTimeToMergeSeconds,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
@@ -2498,7 +2603,7 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt,
 		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin,
-		tp.AutoMergeObservedAt, tp.ID); err != nil {
+		tp.AutoMergeObservedAt, marshalWorkflowAttention(tp.WorkflowAttention), tp.ID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`

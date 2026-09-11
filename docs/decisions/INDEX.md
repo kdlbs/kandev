@@ -235,6 +235,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-31-generic-plugin-host-boundary | [Generic plugin Host boundary](2026-08-31-generic-plugin-host-boundary.md) | proposed | backend, frontend, protocol, security, workflow | 2026-08-31 |
 | 2026-08-30-environment-owned-git-status | [Persist Current Git Status with the Task Environment](2026-08-30-environment-owned-git-status.md) | accepted | backend, frontend, protocol | 2026-08-31 |
 | 2026-08-31-explicit-new-branch-session-recovery | [Require Explicit User Action Before Continuing a Session on a Replacement Branch](2026-08-31-explicit-new-branch-session-recovery.md) | accepted | backend, frontend, protocol | 2026-08-31 |
+| 2026-09-10-worktree-metadata-recovery-boundary | [Bound Automatic Worktree Metadata Recovery](2026-09-10-worktree-metadata-recovery-boundary.md) | proposed | backend | 2026-09-10 |
 | 2026-08-31-local-worktree-refresh-best-effort | [Local Worktree Refresh Is Best Effort](2026-08-31-local-worktree-refresh-best-effort.md) | accepted | backend, security, operations | 2026-08-31 |
 | 2026-08-31-revoke-merge-approval-after-untrusted-push | [Revoke merge approval after an untrusted pull-request push](2026-08-31-revoke-merge-approval-after-untrusted-push.md) | accepted | workflow, security | 2026-08-31 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |
@@ -244,6 +245,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |
 | 2026-09-01-passthrough-initial-prompt-turn-boundary | [Keep Passthrough Initial Prompt State in Lifecycle](2026-09-01-passthrough-initial-prompt-turn-boundary.md) | accepted | backend, workflow | 2026-09-01 |
 | 2026-09-02-automation-self-archive | [Permit Automation Self-Archive as Terminal Completion](2026-09-02-automation-self-archive.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-09-02 |
+| 2026-09-02-task-owned-plan-comments | [Persist Pending Plan Comments with the Task Plan](2026-09-02-task-owned-plan-comments.md) | accepted (amended 2026-09-09) | backend, frontend, protocol, persistence | 2026-09-02 |
 | 2026-09-02-separate-mcp-startup-and-tool-budgets | [Separate MCP Startup and Tool-Call Budgets](2026-09-02-separate-mcp-startup-and-tool-budgets.md) | proposed | backend, agents | 2026-09-02 |
 | 2026-09-03-separate-system-data-storage-pages | [Separate System Data and Storage Pages](2026-09-03-separate-system-data-storage-pages.md) | accepted | frontend | 2026-09-03 |
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |

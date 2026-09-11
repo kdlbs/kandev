@@ -934,6 +934,7 @@ type taskPRSyncState struct {
 	changedFiles                                         *int
 	mergedByLogin, closedByLogin                         *string
 	autoMergeObservedAt                                  *time.Time
+	workflowAttention                                    *WorkflowAttention
 }
 
 type taskPRMergeQueueState struct {
@@ -1125,12 +1126,13 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	}
 	queue := resolveTaskPRMergeQueueState(tp, status)
 	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
-	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
-		resolveTaskPROutcomeFields(tp, status)
 	nextHeadSHA := tp.HeadSHA
 	if status.PR.HeadSHA != "" {
 		nextHeadSHA = status.PR.HeadSHA
 	}
+	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, nextHeadSHA)
+	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
+		resolveTaskPROutcomeFields(tp, status)
 	return taskPRSyncState{
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
@@ -1144,6 +1146,7 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 		isDraft: nextIsDraft, changedFiles: nextChangedFiles,
 		mergedByLogin: nextMergedByLogin, closedByLogin: nextClosedByLogin,
 		autoMergeObservedAt: nextAutoMergeObservedAt,
+		workflowAttention:   nextWorkflowAttention,
 	}
 }
 
@@ -1198,6 +1201,11 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 		changed,
 		"auto_merge_observed_at",
 		!timeEqual(tp.AutoMergeObservedAt, next.autoMergeObservedAt),
+	)
+	changed = appendChangedField(
+		changed,
+		"workflow_attention",
+		!workflowAttentionSemanticEqual(tp.WorkflowAttention, next.workflowAttention),
 	)
 	return changed
 }
@@ -1262,6 +1270,8 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.MergedByLogin = next.mergedByLogin
 	tp.ClosedByLogin = next.closedByLogin
 	tp.AutoMergeObservedAt = next.autoMergeObservedAt
+	tp.WorkflowAttention = next.workflowAttention
+	tp.WorkflowAttentionJSON = marshalWorkflowAttention(next.workflowAttention)
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now

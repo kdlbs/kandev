@@ -547,6 +547,12 @@ export type WorkflowStepDTO = {
 export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
+  move_id?: string;
+  entry_options?: {
+    reset_context?: boolean;
+    instructions?: string;
+    skip_step_prompt?: boolean;
+  };
 };
 
 /** A worktree associated with a task session (one per repo on multi-repo tasks). */
@@ -919,6 +925,7 @@ export type MessageType =
 
 export type MessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  client_queue_id?: string;
 };
 
 export type Message = {

@@ -119,6 +119,50 @@ If the selected PR or branch cannot be fetched, preparation fails instead of sta
 Resuming an existing workspace preserves its branch, local commits, and uncommitted changes.
 A newly recreated workspace fetches the selected PR again.
 Existing workspaces that previously started on the wrong branch are not reset automatically.
+### Files remain, but Git metadata is missing
+
+A linked worktree stores its files separately from its Git administrative
+directory. Its `.git` file points to an entry under the main repository's
+`worktrees` directory.
+
+An incomplete backup restore or manual metadata removal can break this link
+without removing the checkout files. Git pruning can also remove administrative
+data while a worktree drive is unavailable. This is different from a missing
+checkout or a lost branch.
+
+Checkout files alone do not contain the complete Git state. They cannot restore
+a lost index, previous staging choices, or commits absent from the object database.
+Ignored files can include credentials and require the same protection as source
+files.
+
+CAUTION: Do not remove the remaining checkout to clear a metadata error. It can
+contain the only copy of uncommitted work. Stop active sessions before manual
+recovery, and preserve the checkout and available repository metadata first.
+
+For remote or container executors, the relevant filesystem belongs to that
+executor. An identical path on the Kandev host does not identify the same checkout.
+
+### Automatic recovery of missing linked-worktree metadata
+
+For a selected host **Worktree** environment, Kandev can recover a checkout when
+the checkout directory still exists, its linked Git administrative directory is
+missing, and the recorded branch still resolves in the source repository. Local,
+container, SSH, Sprites, Kubernetes, and other remote executor workspaces keep
+their own recovery behavior. A remote Git origin does not make an executor remote.
+
+Kandev checks every selected repository slot before it changes any slot. It keeps
+the original checkout and creates a sibling recovery worktree with a branch named
+`{recorded-branch}-recovered-{operation-prefix}`. It copies tracked, untracked,
+and ignored files, deletions, modes, and symbolic links. It does not restore the
+old index, staging choices, or commits that are no longer available.
+
+Kandev refuses automatic recovery when metadata is ambiguous, the recorded branch
+is unavailable, the environment is busy, the environment owner changed, or the
+recovery claim is not current. It does not substitute the task base branch. A
+multi-repository recovery can retain an earlier completed slot when a later slot
+fails, but Kandev does not start an agent with an incomplete inventory. Recovery
+records and snapshots remain beside the original checkout for inspection and can
+contain ignored files, including sensitive data.
 
 ### Named branch policies
 

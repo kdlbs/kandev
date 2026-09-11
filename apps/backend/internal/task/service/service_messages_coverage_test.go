@@ -9,10 +9,55 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type admissionOrderMessageRepository struct {
+	repository.MessageRepository
+	events []string
+}
+
+func (r *admissionOrderMessageRepository) AcquirePlanCommentAdmission(
+	ctx context.Context,
+	_ string,
+) (context.Context, func(), error) {
+	r.events = append(r.events, "acquire-plan")
+	return ctx, func() { r.events = append(r.events, "release-plan") }, nil
+}
+
+func (r *admissionOrderMessageRepository) AcquireMessageAdmission(
+	ctx context.Context,
+	_ string,
+) (context.Context, func(), error) {
+	r.events = append(r.events, "acquire-message")
+	return ctx, func() { r.events = append(r.events, "release-message") }, nil
+}
+
+func TestPlanCommentMessageAdmissionUsesStableLockOrder(t *testing.T) {
+	repo := &admissionOrderMessageRepository{}
+	svc := &Service{messages: repo}
+	_, release, err := svc.acquireMessageCreateAdmission(context.Background(), "message-1", &CreateMessageRequest{
+		TaskID:          "task-1",
+		PlanCommentRefs: []models.TaskPlanCommentRef{{ID: "comment-1", Version: 1}},
+	})
+	if err != nil {
+		t.Fatalf("acquire admission: %v", err)
+	}
+	release()
+	want := []string{"acquire-plan", "acquire-message", "release-message", "release-plan"}
+	if len(repo.events) != len(want) {
+		t.Fatalf("admission events = %v, want %v", repo.events, want)
+	}
+	for index := range want {
+		if repo.events[index] != want[index] {
+			t.Fatalf("admission events = %v, want %v", repo.events, want)
+		}
+	}
+}
 
 // newMessageTestService seeds one workspace/workflow/task/session so message
 // writes have a real session and task to hang off.
@@ -237,6 +282,35 @@ func TestCreateMessageIdempotentReplaysExistingRow(t *testing.T) {
 	}
 	if len(all) != 1 {
 		t.Fatalf("stored %d messages, want the replay to be a no-op", len(all))
+	}
+}
+
+func TestCreateMessageIdempotentRejectsDifferentCallerFingerprint(t *testing.T) {
+	svc, _, _ := newMessageTestService(t)
+	ctx := context.Background()
+	firstRequest := &CreateMessageRequest{
+		TaskSessionID: "sess-msg",
+		Content:       "first",
+		Metadata: map[string]interface{}{
+			plancomments.MetadataClientMessageFingerprint: "fingerprint-one",
+		},
+	}
+	first, err := svc.CreateMessageIdempotent(ctx, "msg-fingerprint", firstRequest)
+	if err != nil {
+		t.Fatalf("first CreateMessageIdempotent: %v", err)
+	}
+
+	replayed, err := svc.CreateMessageIdempotent(ctx, first.ID, firstRequest)
+	if err != nil || replayed.ID != first.ID {
+		t.Fatalf("exact replay = %#v, %v; want message %s", replayed, err, first.ID)
+	}
+
+	different := *firstRequest
+	different.Metadata = map[string]interface{}{
+		plancomments.MetadataClientMessageFingerprint: "fingerprint-two",
+	}
+	if _, err := svc.CreateMessageIdempotent(ctx, first.ID, &different); !errors.Is(err, ErrMessageIDConflict) {
+		t.Fatalf("different fingerprint error = %v, want ErrMessageIDConflict", err)
 	}
 }
 

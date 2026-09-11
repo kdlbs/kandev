@@ -31,7 +31,7 @@ async function cleanupFixture(
 }
 
 test.describe("SSH executor — attach workspace sources", () => {
-  test("materializes a cloneable repository across backend reconnect without leaking credentials", async ({
+  test("materializes a cloneable repository across repeated backend reconnects without leaking credentials", async ({
     apiClient,
     backend,
     seedData,
@@ -125,8 +125,8 @@ test.describe("SSH executor — attach workspace sources", () => {
       const row = rows.find((candidate) => candidate.task_id === task.id);
       expect(row?.remote_task_dir).toBeTruthy();
       expect(row?.local_forward_port).toBeGreaterThan(0);
-      const initialForwardPort = row!.local_forward_port;
-      const sibling = `${row!.remote_task_dir}/fixture-ssh-second-source-main/remote-source.txt`;
+      const siblingPath = "fixture-ssh-second-source-main/remote-source.txt";
+      const sibling = `${row!.remote_task_dir}/${siblingPath}`;
       expect(remotePathExists(seedData.sshTarget, sibling)).toBe(true);
       expect(readRemoteFile(seedData.sshTarget, sibling)).toBe("ssh-second-source fixture\n");
       const agentctlLog = readRemoteFile(
@@ -142,32 +142,39 @@ test.describe("SSH executor — attach workspace sources", () => {
           .filter({ hasText: "fixture-ssh-second-source-main" }),
       ).toBeVisible({ timeout: 30_000 });
 
-      await backend.restart();
-      await testPage.reload();
-      await session.waitForLoad();
-      await session.waitForChatIdle({ timeout: 60_000 });
-      await expect
-        .poll(
-          async () => {
-            const forwardPort = (await apiClient.listSSHSessions(seedData.sshExecutorId)).find(
-              (item) => item.task_id === task.id,
-            )?.local_forward_port;
-            return Boolean(forwardPort && forwardPort !== initialForwardPort);
-          },
-          {
-            timeout: 60_000,
-            message: "Waiting for SSH backend reconnect",
-          },
-        )
-        .toBe(true);
-      expect(remotePathExists(seedData.sshTarget, sibling)).toBe(true);
-      expect(readRemoteFile(seedData.sshTarget, sibling)).toBe("ssh-second-source fixture\n");
-      await session.clickTab("Files");
-      await expect(
-        session.files
-          .getByTestId("file-tree-node")
-          .filter({ hasText: "fixture-ssh-second-source-main" }),
-      ).toBeVisible({ timeout: 30_000 });
+      for (let recovery = 0; recovery < 2; recovery++) {
+        await backend.restart();
+        await testPage.reload();
+        await session.waitForLoad();
+        await session.waitForChatIdle({ timeout: 60_000 });
+        await expect
+          .poll(
+            async () => {
+              try {
+                const response = await apiClient.wsRequest<{ content: string }>(
+                  "workspace.file.get",
+                  { session_id: row!.session_id, path: siblingPath },
+                );
+                return response.content;
+              } catch {
+                return undefined;
+              }
+            },
+            {
+              timeout: 60_000,
+              message: "Waiting for restored SSH workspace file access",
+            },
+          )
+          .toBe("ssh-second-source fixture\n");
+        expect(remotePathExists(seedData.sshTarget, sibling)).toBe(true);
+        expect(readRemoteFile(seedData.sshTarget, sibling)).toBe("ssh-second-source fixture\n");
+        await session.clickTab("Files");
+        await expect(
+          session.files
+            .getByTestId("file-tree-node")
+            .filter({ hasText: "fixture-ssh-second-source-main" }),
+        ).toBeVisible({ timeout: 30_000 });
+      }
     } finally {
       try {
         releaseRemoteGitRewrite?.();

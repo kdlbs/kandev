@@ -88,7 +88,7 @@ function QuickChatContent({
         !quickChat.activeSessionNeedsAgent && (
           <QuickChatSessionView
             session={quickChat.activeSession}
-            onInitialPromptSent={() =>
+            onInitialPromptAttempted={() =>
               setQuickChatInitialPrompt(quickChat.activeSessionId!, undefined)
             }
           />

@@ -185,6 +185,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
+	_ = r.migrate.Apply("task_plans.comments_revision", `ALTER TABLE task_plans ADD COLUMN comments_revision INTEGER NOT NULL DEFAULT 0`)
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and
@@ -381,6 +382,7 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plan_revisions.workflow_step_id", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
+
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required task migration: %w", err)
 	}

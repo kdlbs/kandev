@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 
@@ -48,6 +48,48 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+function FocusReturnHarness({ custom }: { custom: boolean }) {
+  const [open, setOpen] = useState(true);
+  const fallback = useRef<HTMLButtonElement>(null);
+  const customTarget = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button ref={fallback}>Fallback trigger</button>
+      <button ref={customTarget}>Surviving thread</button>
+      <TaskDeleteConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        taskId="task-1"
+        executorType="local"
+        onConfirm={() => {}}
+        focusReturnRef={fallback}
+        onCloseAutoFocus={
+          custom
+            ? (event) => {
+                event.preventDefault();
+                customTarget.current?.focus();
+              }
+            : undefined
+        }
+      />
+    </>
+  );
+}
+
+it.each([false, true])(
+  "preserves dialog focus return with a custom override (%s)",
+  async (custom) => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(<FocusReturnHarness custom={custom} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: custom ? "Surviving thread" : "Fallback trigger" }),
+      ),
+    );
+  },
+);
 
 describe("TaskDeleteConfirmDialog", () => {
   it("contains long confirmation content in a scrolling body with touch-safe actions", () => {

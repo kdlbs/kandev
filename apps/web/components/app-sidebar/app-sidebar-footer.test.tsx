@@ -37,7 +37,7 @@ const state = {
     user: null as { display_name: string; email: string } | null,
   },
   connection: { issueSeverity: "none" as "none" | "unstable" | "lost" },
-  userSettings: { appStatusBarEnabled: true },
+  userSettings: { appStatusBarEnabled: true, startupPage: "task_overview" },
 };
 
 const DEFAULT_PATHNAME = "/tasks/session-1";

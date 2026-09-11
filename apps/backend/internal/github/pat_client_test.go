@@ -235,6 +235,44 @@ func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
 	}
 }
 
+func TestPATClient_ListWorkflowRunsPaginatesAndListsAttemptJobs(t *testing.T) {
+	c, requests := newLinkPaginatedPATServer(t, "/repos/acme/widget/actions/runs", []string{
+		`{"workflow_runs":[{"id":7,"run_attempt":1,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T10:00:00Z","pull_requests":[]}]}`,
+		`{"workflow_runs":[{"id":8,"run_attempt":1,"workflow_id":10,"name":"Lint","event":"pull_request","status":"completed","conclusion":"success","head_sha":"sha","head_branch":"feature","html_url":"https://github.com/acme/widget/actions/runs/8","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}]}`,
+	})
+
+	runs, err := c.ListWorkflowRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListWorkflowRuns: %v", err)
+	}
+	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" {
+		t.Fatalf("runs = %#v", runs)
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("workflow run requests = %d, want 2", len(*requests))
+	}
+	if got := parseQueryValues(t, (*requests)[0].Query).Get("head_sha"); got != "sha" {
+		t.Fatalf("head_sha = %q, want sha", got)
+	}
+	if got := parseQueryValues(t, (*requests)[0].Query).Get("per_page"); got != "100" {
+		t.Fatalf("per_page = %q, want 100", got)
+	}
+
+	jobClient, jobRequests := newRecordingPATServer(t, map[string]string{
+		"/repos/acme/widget/actions/runs/7/attempts/1/jobs": `{"jobs":[{"id":70,"name":"approval gate","status":"completed","conclusion":null}]}`,
+	})
+	jobs, err := jobClient.ListWorkflowRunJobs(context.Background(), "acme", "widget", 7, 1)
+	if err != nil {
+		t.Fatalf("ListWorkflowRunJobs: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Name != "approval gate" || jobs[0].Conclusion != "" {
+		t.Fatalf("jobs = %#v", jobs)
+	}
+	if len(*jobRequests) != 1 || parseQueryValues(t, (*jobRequests)[0].Query).Get("per_page") != "100" {
+		t.Fatalf("job requests = %#v", *jobRequests)
+	}
+}
+
 func TestPATClient_PRCommitDetailUsesExactSHAAndMergesPages(t *testing.T) {
 	var requested []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

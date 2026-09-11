@@ -109,6 +109,7 @@ func TestApplyWorkflowAndPlanMode_ExpandsWithoutWorkflowComposition(t *testing.T
 				false,
 				test.isEphemeral,
 				false,
+				false,
 				"",
 			)
 
@@ -142,7 +143,7 @@ func TestApplyWorkflowAndPlanMode_PreservesAcceptedContextWithoutWorkflow(t *tes
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	svc.promptExpander = promptService
 	got, _, gotTrustedContext := svc.applyWorkflowAndPlanModeWithPromptContext(
-		ctx, preparedPrompt, "task-1", "session-1", "", false, false, false, trustedContext,
+		ctx, preparedPrompt, "task-1", "session-1", "", false, false, false, false, trustedContext,
 	)
 
 	require.Equal(t, trustedContext, gotTrustedContext)
@@ -209,7 +210,7 @@ func TestApplyWorkflowAndPlanMode_WithoutWorkflowGuards(t *testing.T) {
 			svc.promptExpander = test.expander
 			got, _, trustedContext := svc.applyWorkflowAndPlanModeWithPromptContext(
 				ctx, test.prompt, "task-1", "session-1", "", false, false,
-				test.isPassthrough, "",
+				test.isPassthrough, false, "",
 			)
 
 			require.Contains(t, got, test.wantPromptContent)

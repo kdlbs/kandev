@@ -3,6 +3,10 @@ package messagequeue
 import (
 	"errors"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // DefaultMaxPerSession is the default cap for queued messages per session
@@ -80,6 +84,29 @@ const metadataLifecycleReservationID = "lifecycle_reservation_id"
 // key name is retained for storage compatibility.
 const MetadataLifecycleReservationIncarnation = "lifecycle_reservation_incarnation_id"
 
+// MetadataDeliveryReservationToken gives one backend process exclusive
+// ownership of a retained queue row until the reservation expires. Every
+// release, acknowledgement, and delivery-attempt mutation compares this token.
+const MetadataDeliveryReservationToken = "delivery_reservation_token"
+
+// MetadataDeliveryReservationExpiresAt bounds a pre-dispatch reservation. An
+// expired owner can be replaced, but its stale token can no longer dispatch.
+const MetadataDeliveryReservationExpiresAt = "delivery_reservation_expires_at"
+
+// MetadataDeliveryAttempted is the durable at-most-once boundary for a
+// comment-bearing queue receipt. Once set, restart recovery removes the row
+// instead of risking a second external prompt delivery.
+const MetadataDeliveryAttempted = "delivery_attempted"
+
+// MetadataDurableTranscriptMessageID marks workflow-deferred prompts whose
+// user transcript row was committed atomically with the queue row. The stable
+// message ID is also the queue receipt's replay identity.
+const MetadataDurableTranscriptMessageID = "durable_transcript_message_id"
+
+// DeliveryReservationTTL bounds the database-only work between reserving a
+// queue row and committing its external-delivery attempt marker.
+const DeliveryReservationTTL = 30 * time.Second
+
 // MetadataSenderTaskID identifies the task that produced an agent message. Two
 // agent entries may only merge when their sender task ids match, so the merge
 // never mixes prompts issued by different agents.
@@ -116,6 +143,9 @@ var (
 	// drained, removed, merged, or newly queued since the client's snapshot.
 	// The reorder is rejected atomically with no partial position rewrite.
 	ErrQueueChanged = errors.New("queue changed during reorder")
+	// ErrQueueIDConflict is returned when a caller-owned queue ID is replayed
+	// with different admission inputs.
+	ErrQueueIDConflict = errors.New("client queue id is already used")
 	// ErrTaskInactive means a lifecycle prompt could not be accepted because
 	// its task was deleted or archived before the queue transaction claimed it.
 	ErrTaskInactive = errors.New("queue task is inactive")
@@ -218,8 +248,10 @@ type QueuedMessage struct {
 	QueuedAt    time.Time              `json:"queued_at"`
 	QueuedBy    string                 `json:"queued_by"`
 
-	// reservedLifecycleDelivery is process-local evidence that ReserveHead
-	// retained this durable row for acknowledgement.
+	// reservedDelivery is process-local evidence that a reserve/ack path
+	// retained this row. reservedLifecycleDelivery additionally identifies
+	// lifecycle-generation semantics.
+	reservedDelivery          bool
 	reservedLifecycleDelivery bool
 
 	// dispatchAttemptID and lifecycleReservationID identify the exact durable
@@ -236,6 +268,8 @@ type QueuedMessage struct {
 	reservationLifecycleGeneration int64
 	reservationGenerationsCaptured bool
 	reservationIdentity            QueueSessionIdentity
+	reservationToken               string
+	reservationExpiresAt           time.Time
 }
 
 // QueueRemovalResult is the atomic outcome of a user-driven queue deletion.
@@ -274,6 +308,28 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 	return origin == lifecycleOriginGitHubPR || origin == "ci_automation" || origin == lifecycleOriginGitLabMR
 }
 
+// IsDurablePlanComment reports whether this queue row is also the replay
+// receipt for one caller-identified plan-comment admission.
+func (m *QueuedMessage) IsDurablePlanComment() bool {
+	if m == nil {
+		return false
+	}
+	clientID, _ := m.Metadata[plancomments.MetadataClientQueueID].(string)
+	fingerprint, _ := m.Metadata[plancomments.MetadataRequestFingerprint].(string)
+	if clientID != "" && fingerprint != "" {
+		return true
+	}
+	messageID, _ := m.Metadata[MetadataDurableTranscriptMessageID].(string)
+	messageFingerprint, _ := m.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
+	return messageID != "" && messageFingerprint != ""
+}
+
+// IsDurableDelivery reports whether the row must survive dequeue until a
+// transcript record or executor acknowledgement closes its replay window.
+func (m *QueuedMessage) IsDurableDelivery() bool {
+	return m != nil && (m.IsDurableLifecycle() || m.IsDurablePlanComment())
+}
+
 // IsReservedInFlight reports whether this row was retained for an in-flight
 // dispatch and should not be shown as a pending queue entry.
 func (m *QueuedMessage) IsReservedInFlight() bool {
@@ -284,10 +340,37 @@ func (m *QueuedMessage) IsReservedInFlight() bool {
 	return reserved
 }
 
+// IsDeliveryAttempted reports whether external prompt delivery may already
+// have happened and therefore must never be retried automatically.
+func (m *QueuedMessage) IsDeliveryAttempted() bool {
+	if m == nil {
+		return false
+	}
+	attempted, _ := m.Metadata[MetadataDeliveryAttempted].(bool)
+	return attempted
+}
+
+// DeliveryReservationExpiresAt reports when another backend may take over a
+// pre-dispatch plan-comment receipt.
+func (m *QueuedMessage) DeliveryReservationExpiresAt() time.Time {
+	if m == nil {
+		return time.Time{}
+	}
+	if !m.reservationExpiresAt.IsZero() {
+		return m.reservationExpiresAt
+	}
+	return deliveryReservationExpiresAt(m.Metadata)
+}
+
 // IsReservedLifecycleDelivery reports whether this copy came from the
 // reserve/ack path rather than a destructive legacy TakeHead call.
 func (m *QueuedMessage) IsReservedLifecycleDelivery() bool {
 	return m != nil && m.reservedLifecycleDelivery
+}
+
+// IsReservedDelivery reports whether this copy came from a retaining reserve/ack path.
+func (m *QueuedMessage) IsReservedDelivery() bool {
+	return m != nil && m.reservedDelivery
 }
 
 // markReservedMetadata returns a copy carrying the exact lifecycle delivery
@@ -309,9 +392,53 @@ func markReservedMetadataForIncarnation(metadata map[string]interface{}, incarna
 	return marked
 }
 
+func markReservedMetadataWithLease(
+	metadata map[string]interface{},
+	incarnationID string,
+	now time.Time,
+) (map[string]interface{}, string, time.Time) {
+	token := uuid.NewString()
+	expiresAt := now.UTC().Add(DeliveryReservationTTL)
+	marked := markReservedMetadataForIncarnation(metadata, incarnationID)
+	marked[MetadataDeliveryReservationToken] = token
+	marked[MetadataDeliveryReservationExpiresAt] = expiresAt.Format(time.RFC3339Nano)
+	return marked, token, expiresAt
+}
+
 func lifecycleReservationIncarnation(metadata map[string]interface{}) string {
 	incarnationID, _ := metadata[MetadataLifecycleReservationIncarnation].(string)
 	return incarnationID
+}
+
+func deliveryReservationToken(metadata map[string]interface{}) string {
+	token, _ := metadata[MetadataDeliveryReservationToken].(string)
+	return token
+}
+
+func deliveryReservationExpiresAt(metadata map[string]interface{}) time.Time {
+	raw, _ := metadata[MetadataDeliveryReservationExpiresAt].(string)
+	expiresAt, _ := time.Parse(time.RFC3339Nano, raw)
+	return expiresAt
+}
+
+func (m *QueuedMessage) bindDeliveryReservation(metadata map[string]interface{}) {
+	if m == nil {
+		return
+	}
+	m.lifecycleReservationID, _ = metadata[metadataLifecycleReservationID].(string)
+	m.reservationToken = deliveryReservationToken(metadata)
+	m.reservationExpiresAt = deliveryReservationExpiresAt(metadata)
+}
+
+func (m *QueuedMessage) reservationMatches(metadata map[string]interface{}) bool {
+	if m == nil {
+		return false
+	}
+	stored := deliveryReservationToken(metadata)
+	if m.IsDurablePlanComment() {
+		return stored != "" && m.reservationToken != "" && stored == m.reservationToken
+	}
+	return stored == "" || (m.reservationToken != "" && stored == m.reservationToken)
 }
 
 // clearReservedMetadata removes transient delivery ownership from copies
@@ -322,11 +449,9 @@ func clearReservedMetadata(metadata map[string]interface{}) map[string]interface
 		cleared = make(map[string]interface{})
 	}
 	for k := range cleared {
-		if k != MetadataLifecycleReserved && k != metadataLifecycleReservationID {
-			if k == MetadataLifecycleReservationIncarnation {
-				delete(cleared, k)
-				continue
-			}
+		if k != MetadataLifecycleReserved && k != metadataLifecycleReservationID &&
+			k != MetadataLifecycleReservationIncarnation &&
+			k != MetadataDeliveryReservationToken && k != MetadataDeliveryReservationExpiresAt {
 			continue
 		}
 		delete(cleared, k)
@@ -421,6 +546,11 @@ type PendingMove struct {
 	// distinct from the session owning this queue, which is only the execution
 	// context used to apply the deferred move.
 	SenderSessionID string `json:"sender_session_id,omitempty"`
+	// EntryOptions carries the complete typed one-shot move overrides for a
+	// deferred move so the target-step entry can apply them once the source
+	// turn ends. It survives the queue's normal restart/reload path; existing
+	// rows decode as nil (an ordinary move).
+	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
 // PendingMoveTTL bounds how long a deferred move may stay armed before it is
