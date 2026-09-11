@@ -103,6 +103,7 @@ test.describe("Pipeline view", () => {
 
     await kanban.bulkDeleteButton.click();
     await expect(kanban.bulkDeleteConfirm).toBeVisible();
+    await expect(kanban.bulkDeleteConfirm).toBeEnabled();
     await expect(testPage.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     await kanban.bulkDeleteConfirm.click();
 

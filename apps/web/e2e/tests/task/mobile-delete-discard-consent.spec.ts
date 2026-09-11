@@ -16,7 +16,8 @@ async function openDeleteDialog(page: Page, title: string) {
   const taskRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible();
   await taskRow.locator("button.mobile-task-actions-button").tap();
-  const menu = page.locator('[data-slot="context-menu-content"]:visible').last();
+  const menu = page.locator('[data-slot="context-menu-content"]:visible');
+  await expect(menu).toHaveCount(1);
   await expect(menu).toBeVisible();
   await menu.getByRole("menuitem", { name: "Delete", exact: true }).tap();
   const dialog = page.getByRole("alertdialog");
@@ -59,9 +60,9 @@ test.describe("Mobile delete discard consent", () => {
 
     const dialog = await openDeleteDialog(testPage, "Mobile clean delete");
     await assertContainedTouchDialog(dialog);
-    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     const deleteAction = dialog.getByRole("button", { name: "Delete", exact: true });
     await expect(deleteAction).toBeEnabled();
+    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     await deleteAction.tap();
     await expect
       .poll(async () => (await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status, {
@@ -119,5 +120,66 @@ test.describe("Mobile delete discard consent", () => {
       })
       .toBe(404);
     await expect.poll(() => fs.existsSync(dirtyFilePath), { timeout: 15_000 }).toBe(false);
+  });
+
+  test("retries an unavailable preflight for a clean worktree", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 393, height: 700 });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile clean worktree delete",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 60_000,
+        message: "the mobile clean-delete worktree did not become ready",
+      })
+      .toBe("ready");
+
+    let preflightAttempts = 0;
+    await testPage.route("**/api/v1/tasks/delete-preflight**", async (route) => {
+      preflightAttempts += 1;
+      if (preflightAttempts === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "preflight unavailable" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+    const dialog = await openDeleteDialog(testPage, "Mobile clean worktree delete");
+    const retry = dialog.getByRole("button", { name: "Retry", exact: true });
+    await expect(retry).toBeVisible();
+    const retryBox = await retry.boundingBox();
+    if (!retryBox) throw new Error("mobile delete preflight retry has no layout box");
+    expect(retryBox.height).toBeGreaterThanOrEqual(44);
+
+    await retry.tap();
+    const deleteAction = dialog.getByRole("button", { name: "Delete", exact: true });
+    await expect(deleteAction).toBeEnabled();
+    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
+    await deleteAction.tap();
+    await expect
+      .poll(async () => (await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status, {
+        timeout: 15_000,
+      })
+      .toBe(404);
   });
 });

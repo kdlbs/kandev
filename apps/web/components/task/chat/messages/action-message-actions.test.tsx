@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import type { MessageAction } from "@/components/task/chat/types";
@@ -36,6 +36,12 @@ describe("ActionButton task deletion", () => {
 
     fireEvent.click(screen.getByTestId("message-delete-task-button"));
     expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    await waitFor(() => expect(getTaskDeletePreflightMock).toHaveBeenCalledWith(["task-1"], false));
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
     expect(screen.queryByTestId("delete-discard-worktree-checkbox")).toBeNull();
   });
 });

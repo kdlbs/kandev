@@ -178,7 +178,7 @@ function useResetDiscardWorktreeChanges(resetKey: string, reset: (checked: boole
   }, [resetKey, reset]);
 }
 
-function TaskDeletePreflightStatus({
+function PreflightStatusBanner({
   status,
   onRetry,
 }: {
@@ -209,7 +209,7 @@ function TaskDeletePreflightStatus({
         type="button"
         variant="outline"
         size="sm"
-        className="cursor-pointer"
+        className={TASK_CONFIRM_ACTION_CLASS}
         onClick={onRetry}
       >
         {t("task:retryDeletePreflight")}
@@ -252,7 +252,7 @@ function TaskDeleteDialogOptions({
       {(isInFlight || storeInFlight) && (
         <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
       )}
-      <TaskDeletePreflightStatus status={preflightStatus} onRetry={onRetryPreflight} />
+      <PreflightStatusBanner status={preflightStatus} onRetry={onRetryPreflight} />
       <DiscardWorktreeChangesOption
         enabled={requiresDiscardConsent}
         checked={discardWorktreeChanges}

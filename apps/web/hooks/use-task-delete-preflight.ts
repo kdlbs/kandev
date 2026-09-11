@@ -22,8 +22,8 @@ export function useTaskDeletePreflight(
   taskIds?: string[],
   cascade = false,
 ): TaskDeletePreflightResult {
-  const idsKey = JSON.stringify({ ids: taskIds ?? (taskId ? [taskId] : []), cascade });
   const requestIds = taskIds ?? (taskId ? [taskId] : []);
+  const idsKey = JSON.stringify({ ids: requestIds, cascade });
   const [retryVersion, setRetryVersion] = useState(0);
   const requestKey = `${idsKey}:${retryVersion}`;
   const [result, setResult] = useState<StoredPreflightResult>({

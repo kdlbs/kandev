@@ -29,9 +29,9 @@ test.describe("Dialog Enter key — executes the semantic action", () => {
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Enter Delete Task");
-    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     const deleteAction = dialog.getByRole("button", { name: "Delete" });
     await expect(deleteAction).toBeEnabled();
+    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     await deleteAction.focus();
 
     // Do NOT click Delete — Enter alone must trigger the destructive action.

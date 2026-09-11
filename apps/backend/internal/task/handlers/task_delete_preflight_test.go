@@ -85,3 +85,18 @@ func TestHTTPTaskDeletePreflightRejectsEmptySelection(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
+
+func TestHTTPTaskDeletePreflightReturnsServiceUnavailableWhenInspectionUnavailable(t *testing.T) {
+	router := newTaskDeletePreflightRouter(t, nil)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/tasks/delete-preflight",
+		strings.NewReader(`{"task_ids":["task-1"],"cascade":false}`),
+	)
+
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+}

@@ -120,7 +120,7 @@ consent. Missing inspection capability and inspection errors fail closed.
 Verification passed:
 
 - Backend: `go test ./internal/task/service ./internal/task/handlers ./internal/worktree`
-  reported 2,826 passing tests.
+  reported 2,827 passing tests after the PR fixup handler coverage was added.
 - Web: 52 focused Vitest tests, typecheck, production build, i18n checks, and
   focused lint passed. Lint reported three existing-style warnings and no errors.
 - Browser: the required desktop delete/archive set passed 6 tests; the final
@@ -130,9 +130,15 @@ Verification passed:
 - Documents: `python3 scripts/lint-spec-files.py --all` and `git diff --check`
   passed.
 
+The PR fixup also passed 35 focused Vitest tests, changed-file ESLint, a fresh
+Vite build, 45 affected Chromium E2E tests, and 3 mobile delete-consent tests.
+The mobile fixup suite covers a real clean worktree and a failed-preflight Retry
+path with a 44px touch target.
+
 The work order records the transient browser failures and their fixes: the
-mobile assertion now waits for the dialog entrance animation, and the clean
-desktop hierarchy fixture no longer clicks a heuristic checkbox.
+mobile assertion now waits for the dialog entrance animation, the clean desktop
+hierarchy fixture no longer clicks a heuristic checkbox, and Retry uses the
+shared 44px touch-action class.
 
 ## Risks
 

@@ -145,6 +145,8 @@ test.describe("Desktop confirmation text hierarchy", () => {
     const deleteDialog = testPage.getByRole("alertdialog");
     await expect(deleteDialog).toBeVisible();
     await assertDesktopDeleteDialog(deleteDialog);
+    const deleteAction = deleteDialog.locator('[data-slot="alert-dialog-action"]');
+    await expect(deleteAction).toBeEnabled();
     await expect(deleteDialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
 
     await deleteDialog.locator('[data-slot="alert-dialog-cancel"]').click();
@@ -153,10 +155,15 @@ test.describe("Desktop confirmation text hierarchy", () => {
 
     await session.openSidebarMenuAndClick(LONG_TASK_TITLE, "Delete");
     const confirmedDeleteDialog = testPage.getByRole("alertdialog");
+    await expect(confirmedDeleteDialog).toBeVisible();
+    const confirmedDeleteAction = confirmedDeleteDialog.locator(
+      '[data-slot="alert-dialog-action"]',
+    );
+    await expect(confirmedDeleteAction).toBeEnabled();
     await expect(confirmedDeleteDialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(
       0,
     );
-    await confirmedDeleteDialog.locator('[data-slot="alert-dialog-action"]').click();
+    await confirmedDeleteAction.click();
     await expect
       .poll(
         async () => (await apiClient.rawRequest("GET", `/api/v1/tasks/${task.task_id}`)).status,

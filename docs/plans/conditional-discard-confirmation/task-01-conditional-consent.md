@@ -33,12 +33,13 @@ Require consent only for inspected local changes, with safe pending/error states
 
 - Read-only authorized preflight, exact cascade scope, and all repository inventory.
 - Shared API client, hook, dialog, callers, localization, and regression fixtures.
-- Desktop and mobile clean/dirty flows and clean archive regression coverage.
+- Desktop and mobile clean/dirty/retry flows and clean archive regression
+  coverage.
 
 ## Out of scope
 
 Changes to archive cleanup policy, task ownership, unique-commit preservation,
-mutation-time safeguards, or dialog presentation primitives.
+mutation-time safeguards, or dialog-presentation primitives.
 
 ## Acceptance
 
@@ -86,8 +87,9 @@ classes and the mobile task-switcher as the entry-point exemplar.
   request identity, and false consent for a clean result.
 - Existing admission tests retain the dirty-after-preflight conflict behavior.
 - Desktop card E2E completes clean delete and archive. Mobile E2E completes clean
-  delete with `.tap()`, verifies dirty consent, viewport containment, and touch
-  action bounds. Seed real clean/dirty task worktrees in disposable fixtures.
+  delete with `.tap()`, verifies dirty consent, unavailable-preflight retry,
+  viewport containment, and touch action bounds. Seed real clean/dirty task
+  worktrees in disposable fixtures.
 
 ## Verification
 
@@ -123,7 +125,9 @@ The first combined Chromium run passed 45 tests and exposed one clean-fixture
 assumption. The corrected hierarchy test passed both tests. The first mobile
 consent run passed three tests and exposed an assertion during the entrance
 animation. After waiting for finite animations, the required mobile run passed
-all four tests.
+all four tests. The PR fixup mobile run passed three tests, including a real
+clean worktree and unavailable-preflight Retry flow; its first attempt exposed
+the missing 44px Retry target and the shared action class fixed it.
 
 ## Files likely touched
 
@@ -176,11 +180,13 @@ behavior remains unchanged.
 Final verification:
 
 - `go test ./internal/task/service ./internal/task/handlers ./internal/worktree`:
-  2,826 passed.
+  2,827 passed.
 - Focused Vitest command in the verification block: 52 passed.
+- PR fixup Vitest command including the action-message delete test: 35 passed.
 - `pnpm run typecheck`, `pnpm run i18n:check`, and
   `pnpm --filter @kandev/web run build:vite`: passed.
 - Focused ESLint and Prettier checks: passed with no errors.
-- Required and affected Chromium/mobile E2E commands: passed after the two
-  fixture/assertion corrections recorded above.
+- Required and affected Chromium/mobile E2E commands: passed after the
+  fixture/assertion corrections recorded above. The final affected Chromium
+  run passed 45 tests, and the PR fixup mobile run passed 3 tests.
 - `python3 scripts/lint-spec-files.py --all` and `git diff --check`: passed.

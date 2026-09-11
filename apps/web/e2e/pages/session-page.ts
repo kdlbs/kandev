@@ -724,13 +724,29 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Delete",
    * and confirms the delete dialog.
    */
-  async deleteTaskInSidebar(title: string): Promise<void> {
+  async deleteTaskInSidebar(
+    title: string,
+    options: { discardWorktreeChanges?: boolean; waitForCompletion?: boolean } = {},
+  ): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
     const dialog = this.page.getByRole("alertdialog");
-    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    const discardCheckbox = dialog.getByTestId("delete-discard-worktree-checkbox");
+    if (options.discardWorktreeChanges) {
+      await expect(discardCheckbox).toBeVisible();
+      await discardCheckbox.click();
+      await expect(discardCheckbox).toBeChecked();
+    } else {
+      await expect(confirmButton).toBeEnabled();
+      await expect(discardCheckbox).toHaveCount(0);
+    }
     await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
+    if (options.waitForCompletion !== false) {
+      await expect(
+        this.page.getByTestId("toast-message").filter({ hasText: "Deleted 1 task." }),
+      ).toBeVisible({ timeout: 15_000 });
+    }
   }
 
   /**

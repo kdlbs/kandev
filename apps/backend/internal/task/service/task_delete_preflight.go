@@ -44,7 +44,7 @@ func (s *Service) TaskDeletePreflight(
 	if err != nil {
 		return TaskDeletePreflightResult{}, err
 	}
-	worktrees := make([]*worktree.Worktree, 0)
+	var worktrees []*worktree.Worktree
 	for _, taskID := range targets {
 		inventory, inventoryErr := provider.GetAllByTaskID(ctx, taskID)
 		if inventoryErr != nil {
