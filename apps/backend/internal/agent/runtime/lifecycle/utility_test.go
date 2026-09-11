@@ -23,10 +23,15 @@ import (
 // reachable without depending on a real CLI.
 type inferenceTestAgent struct {
 	*agents.MockAgent
-	id        string
-	installed bool
-	config    *agents.InferenceConfig
-	stripEnv  []string
+	id           string
+	installed    bool
+	config       *agents.InferenceConfig
+	stripEnv     []string
+	providerSpec *agents.OpenAICompatibleProviderSpec
+}
+
+func (a *inferenceTestAgent) OpenAICompatibleProvider() *agents.OpenAICompatibleProviderSpec {
+	return a.providerSpec
 }
 
 func (a *inferenceTestAgent) ID() string          { return a.id }
@@ -359,6 +364,52 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 			t.Fatalf("WorkDir = %q", got.InferenceConfig.WorkDir)
 		}
 	})
+}
+
+func TestManagerExecuteInferenceProfilePromptInjectsOpenAICompatibleProvider(t *testing.T) {
+	agent := newInferenceAgent("provider-agent", true, true)
+	agent.providerSpec = &agents.OpenAICompatibleProviderSpec{
+		AuthMethodID: "gateway", ProviderName: "Kandev", KeyEnvVar: "OPENAI_API_KEY",
+	}
+	harness := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{
+		ProfileID:       "profile-1",
+		AgentID:         "provider-agent",
+		Model:           "gpt-5",
+		ProviderKind:    settingsmodels.ProviderKindOpenAICompatible,
+		ProviderBaseURL: "http://localhost:20128/v1",
+	}}, agent)
+
+	if _, err := harness.manager.ExecuteInferenceProfilePrompt(t.Context(), "session-1", "profile-1", "hi"); err != nil {
+		t.Fatalf("ExecuteInferenceProfilePrompt: %v", err)
+	}
+	recorded := harness.recorded()
+	if len(recorded) != 1 {
+		t.Fatalf("agentctl calls = %d", len(recorded))
+	}
+	gw := recorded[0].InferenceConfig.ProviderGatewayAuth
+	if gw == nil || gw.MethodID != "gateway" {
+		t.Fatalf("ProviderGatewayAuth = %#v, want a gateway auth", gw)
+	}
+	meta, _ := gw.Meta["gateway"].(map[string]any)
+	if meta["baseUrl"] != "http://localhost:20128/v1" {
+		t.Fatalf("gateway baseUrl = %v", meta["baseUrl"])
+	}
+}
+
+func TestManagerExecuteInferenceProfilePromptRejectsProviderOnUnsupportedAgent(t *testing.T) {
+	// inference-ok's fixture has no provider spec, so an openai_compatible
+	// profile pointed at it must fail closed rather than run against the vendor.
+	harness := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{
+		ProfileID:       "profile-1",
+		AgentID:         "inference-ok",
+		ProviderKind:    settingsmodels.ProviderKindOpenAICompatible,
+		ProviderBaseURL: "http://localhost:20128/v1",
+	}}, newInferenceAgent("inference-ok", true, true))
+
+	_, err := harness.manager.ExecuteInferenceProfilePrompt(t.Context(), "session-1", "profile-1", "hi")
+	if !errors.Is(err, ErrProviderMisconfigured) {
+		t.Fatalf("error = %v, want ErrProviderMisconfigured", err)
+	}
 }
 
 // The agents table's primary key is a generated UUID while the registry is

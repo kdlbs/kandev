@@ -20,7 +20,12 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 		CLIFlags:       request.CLIFlags,
 		EnvVars:        request.EnvVars,
 		CommandPrefix:  request.CommandPrefix,
-		Dynamic:        request.Dynamic,
+
+		ProviderKind:           request.ProviderKind,
+		ProviderBaseURL:        request.ProviderBaseURL,
+		ProviderAPIKeySecretID: request.ProviderAPIKeySecretID,
+
+		Dynamic: request.Dynamic,
 	}
 }
 
@@ -43,7 +48,12 @@ func UpdateProfileRequestFromDTO(request dto.ProfileUpdateRequest) UpdateProfile
 		CLIFlags:       request.CLIFlags,
 		EnvVars:        request.EnvVars,
 		CommandPrefix:  request.CommandPrefix,
-		Dynamic:        request.Dynamic,
-		Force:          request.Force,
+
+		ProviderKind:           request.ProviderKind,
+		ProviderBaseURL:        request.ProviderBaseURL,
+		ProviderAPIKeySecretID: request.ProviderAPIKeySecretID,
+
+		Dynamic: request.Dynamic,
+		Force:   request.Force,
 	}
 }

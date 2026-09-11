@@ -448,7 +448,8 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		Profiles:    profiles,
 	})
 	if err != nil {
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -621,7 +622,8 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -657,7 +659,8 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

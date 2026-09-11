@@ -301,6 +301,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		ContributionDestinations:       req.ContributionDestinations,
 		ComparisonTargets:              req.ComparisonTargets,
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
+		ProviderGatewayAuth:            req.ProviderGatewayAuth,
 	}, nil
 }
 
@@ -600,6 +601,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		McpMode:                    req.McpMode,
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,

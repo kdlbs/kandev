@@ -51,6 +51,9 @@ const ALLOW_ALL_TOOLS_FLAG = "--allow-all-tools";
 const COMMAND_PREFIX = "greywall --";
 const PERSISTED_PROFILE_ID = toAgentProfileId("persisted-profile");
 const DRAFT_PROFILE_ID = toAgentProfileId("draft-profile");
+const NEW_PROFILE_ID = toAgentProfileId("draft-new-profile");
+const NEW_PROFILE_NAME = "New profile";
+const PLAYWRIGHT_MCP_SERVERS = '{"mcpServers":{"playwright":{"command":"npx"}}}';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -283,7 +286,7 @@ describe("saveNewAgent", () => {
       id: DRAFT_PROFILE_ID,
       mcp_config: {
         enabled: true,
-        servers: '{"mcpServers":{"playwright":{"command":"npx"}}}',
+        servers: PLAYWRIGHT_MCP_SERVERS,
         dirty: true,
         error: null,
       },
@@ -329,11 +332,11 @@ describe("saveNewAgent", () => {
 describe("saveExistingAgent", () => {
   it("reconciles a created profile so a failed MCP write retries without duplication", async () => {
     const newProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-new-profile"),
-      name: "New profile",
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
       mcp_config: {
         enabled: true,
-        servers: '{"mcpServers":{"playwright":{"command":"npx"}}}',
+        servers: PLAYWRIGHT_MCP_SERVERS,
         dirty: true,
         error: null,
       },
@@ -435,8 +438,8 @@ describe("command prefix save payloads", () => {
   it("includes the command prefix when adding a new profile to an existing agent", async () => {
     const savedAgent = agentWithProfiles([baseProfile]);
     const newProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-new-profile"),
-      name: "New profile",
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
       commandPrefix: COMMAND_PREFIX,
     });
     const draftAgent = agentWithProfiles([baseProfile, newProfile]);
@@ -502,8 +505,8 @@ describe("fallback model save payloads", () => {
   it("includes the fallback fields when adding a new profile to an existing agent", async () => {
     const savedAgent = agentWithProfiles([baseProfile]);
     const newProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-new-profile"),
-      name: "New profile",
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
       fallbackModel: "gpt-5",
       autoFallback: true,
     });
@@ -519,6 +522,62 @@ describe("fallback model save payloads", () => {
     expect(createAgentProfileAction).toHaveBeenCalledWith(
       savedAgent.id,
       expect.objectContaining({ fallback_model: "gpt-5", auto_fallback: true }),
+    );
+  });
+});
+
+describe("provider config save payloads", () => {
+  const OPENAI_COMPATIBLE = "openai_compatible";
+  const BASE_URL = "http://localhost:20128/v1";
+
+  it("returns true when a provider field changes", () => {
+    const draft = draftFrom(baseProfile, {
+      providerKind: OPENAI_COMPATIBLE,
+      providerBaseUrl: BASE_URL,
+    });
+    expect(isProfileDirty(draft, baseProfile)).toBe(true);
+  });
+
+  it("includes provider fields when saving a dirty existing profile", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const draftProfile = draftFrom(baseProfile, {
+      providerKind: OPENAI_COMPATIBLE,
+      providerBaseUrl: BASE_URL,
+      providerApiKeySecretId: "sec_1",
+    });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue({ ...baseProfile });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({
+        provider_kind: OPENAI_COMPATIBLE,
+        provider_base_url: BASE_URL,
+        provider_api_key_secret_id: "sec_1",
+      }),
+    );
+  });
+
+  it("includes provider fields when adding a new profile to an existing agent", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const newProfile = draftFrom(baseProfile, {
+      id: NEW_PROFILE_ID,
+      name: NEW_PROFILE_NAME,
+      providerKind: OPENAI_COMPATIBLE,
+      providerBaseUrl: BASE_URL,
+    });
+    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentProfileAction).mockResolvedValue({ ...newProfile, id: PERSISTED_PROFILE_ID });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(createAgentProfileAction).toHaveBeenCalledWith(
+      savedAgent.id,
+      expect.objectContaining({ provider_kind: OPENAI_COMPATIBLE, provider_base_url: BASE_URL }),
     );
   });
 });

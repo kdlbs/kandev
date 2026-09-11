@@ -8,7 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useAgentSaveContributor } from "./agent-save-contributor";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import type {
   Agent,
@@ -25,6 +25,7 @@ import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import { useAppStore } from "@/components/state-provider";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
@@ -363,38 +364,6 @@ function useProfileHandlers(
   };
 }
 
-function areAgentProfilesValid(agent: DraftAgent): boolean {
-  return agent.profiles.every((profile) => {
-    if (!profile.name.trim()) return false;
-    if (profile.kind === "dynamic") return (profile.dynamic?.candidates.length ?? 0) > 0;
-    return profile.model.trim().length > 0;
-  });
-}
-
-function useAgentSaveRevision(agent: DraftAgent) {
-  const revision = JSON.stringify(agent);
-  const initial = agent.profiles.some((profile) => profile.mcp_config?.dirty) ? "" : revision;
-  const [saved, setSaved] = useState(initial);
-  return { revision, saved, setSaved };
-}
-
-/**
- * Explains why the shared Save control is blocked, or undefined when it is not.
- * Extracted so AgentSetupForm stays within the file's function-length limit.
- */
-function resolveSaveInvalidReason(
-  t: (key: string) => string,
-  profilesValid: boolean,
-  hasInvalidMcpConfig: boolean,
-  dynamic: boolean,
-): string | undefined {
-  if (!profilesValid) {
-    return t(dynamic ? "agents:noDynamicCandidates" : "agents:everyProfileNeedsNameAndModel");
-  }
-  if (hasInvalidMcpConfig) return t("agents:fixInvalidMcpConfig");
-  return undefined;
-}
-
 function AgentSetupForm({
   initialAgent,
   savedAgent,
@@ -405,6 +374,7 @@ function AgentSetupForm({
   const { t } = useTranslation();
   const router = useRouter();
   const availableAgents = useAvailableAgents().items;
+  const { items: secrets } = useSecrets();
   const { upsertAgent } = useAgentStoreSync();
 
   const {
@@ -446,29 +416,16 @@ function AgentSetupForm({
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });
-  const saveRevision = useAgentSaveRevision(draftAgent);
-  const handleCoordinatedSave = async () => {
-    const savedDraft = await handleSave();
-    if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
-  };
-  const profilesValid = areAgentProfilesValid(draftAgent);
-  // Agents and agent profiles are org configuration: every mutating route
-  // behind this page requires org.config.manage, which only an administrator
-  // holds. Without this the save bar stays live for a member and the write
-  // fails with a 403 they cannot act on.
-  const canManage = useIsAdmin();
-  const saveInvalidReason = canManage
-    ? resolveSaveInvalidReason(t, profilesValid, hasInvalidMcpConfig, draftAgent.name === "dynamic")
-    : t("agents:adminOnly");
-  useSettingsSaveContributor({
-    id: `agent:${draftAgent.id}`,
-    revision: saveRevision.revision,
-    isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
-    canSave: canManage && profilesValid && !hasInvalidMcpConfig,
-    invalidReason: saveInvalidReason,
-    save: handleCoordinatedSave,
-    discard: () => undefined,
+  useAgentSaveContributor({
+    draftAgent,
+    savedAgent,
+    isCreateMode,
+    hasInvalidMcpConfig,
+    isAgentDirty,
+    handleSave,
+    t,
   });
+  const canManage = useIsAdmin();
 
   const displayName = draftAgent.profiles[0]?.agentDisplayName ?? draftAgent.name;
 
@@ -493,6 +450,7 @@ function AgentSetupForm({
         currentAgentModelConfig={currentAgentModelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
+        secrets={secrets}
         onAddProfile={handleAddProfile}
         onProfileChange={handleProfileChange}
         onProfileMcpChange={handleProfileMcpChange}

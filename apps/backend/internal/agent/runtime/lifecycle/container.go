@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/docker/seccomp"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -39,6 +40,9 @@ const (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth            *acpprovider.GatewayAuth
 	AgentConfig                    agents.Agent
 	WorkspacePath                  string // If empty, workspace is not mounted (will clone inside container)
 	TaskID                         string
@@ -125,6 +129,7 @@ func buildContainerCreateInstanceRequest(
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        config.ProviderGatewayAuth,
 		BaseBranches:               config.BaseBranches,
 		RemoteContributions:        config.RemoteContributions,
 		ContributionDestinations:   config.ContributionDestinations,
@@ -559,8 +564,13 @@ exec /usr/local/bin/agentctl`,
 		Mounts:       mounts,
 		PortBindings: dockerAgentctlPortBindings(),
 		NetworkMode:  cm.networkName,
-		Memory:       memoryBytes,
-		CPUQuota:     cpuQuota,
+		// Give every agent container the host.docker.internal alias so a profile
+		// whose OpenAI-compatible provider is a service on the developer's host
+		// (loopback URLs are rewritten to this hostname) resolves on Linux too,
+		// matching Docker Desktop. Requires Docker Engine 20.10+.
+		ExtraHosts: []string{acpprovider.DockerHostGatewayHost + ":host-gateway"},
+		Memory:     memoryBytes,
+		CPUQuota:   cpuQuota,
 		Labels: map[string]string{
 			"kandev.managed":             boolStringTrue,
 			"kandev.instance_id":         config.InstanceID,

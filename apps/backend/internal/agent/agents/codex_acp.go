@@ -19,10 +19,19 @@ var codexACPLogoDark []byte
 const codexACPPackage = "@agentclientprotocol/codex-acp"
 
 var (
-	_ Agent                  = (*CodexACP)(nil)
-	_ PassthroughAgent       = (*CodexACP)(nil)
-	_ InferenceAgent         = (*CodexACP)(nil)
-	_ ManagedNPMRuntimeAgent = (*CodexACP)(nil)
+	_ Agent                         = (*CodexACP)(nil)
+	_ PassthroughAgent              = (*CodexACP)(nil)
+	_ InferenceAgent                = (*CodexACP)(nil)
+	_ ManagedNPMRuntimeAgent        = (*CodexACP)(nil)
+	_ OpenAICompatibleProviderAgent = (*CodexACP)(nil)
+)
+
+// codex-acp >= 1.7 advertises an ACP "gateway" auth method when the client
+// sends clientCapabilities.auth._meta.gateway=true, then applies the base URL
+// and Authorization header from authenticate({methodId:"gateway"}) live.
+const (
+	codexGatewayAuthMethodID = "gateway"
+	codexGatewayProviderName = "Kandev"
 )
 
 // CodexACP implements Agent for the Agent Client Protocol codex-acp package.
@@ -190,6 +199,16 @@ func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
+}
+
+// OpenAICompatibleProvider lets a Codex profile point at a self-hosted
+// OpenAI-compatible router through codex-acp's ACP gateway auth method.
+func (a *CodexACP) OpenAICompatibleProvider() *OpenAICompatibleProviderSpec {
+	return &OpenAICompatibleProviderSpec{
+		AuthMethodID: codexGatewayAuthMethodID,
+		ProviderName: codexGatewayProviderName,
+		KeyEnvVar:    "OPENAI_API_KEY",
+	}
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

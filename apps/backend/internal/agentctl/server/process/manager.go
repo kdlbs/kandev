@@ -1412,6 +1412,7 @@ func (m *Manager) buildAdapterConfig() error {
 		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
+		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
