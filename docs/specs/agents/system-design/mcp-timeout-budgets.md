@@ -88,12 +88,14 @@ Separately, the CLI runs a per-tool-call idle watchdog. This section and its
 experiments were verified against a different binary than the CLI version
 above: `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`,
 bundled by `@agentclientprotocol/claude-agent-acp@0.75.1` as
-`claude-agent-sdk@0.3.257` (the managed default Claude ACP runtime pinned at
-this commit; an operator selection can launch a different version — see
-`apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md`), not
-`~/.local/share/claude/versions/*`. The watchdog function is rewritten
-below with descriptive names from that binary's minified source (logic and
-constants unchanged; the minified identifiers are not):
+`claude-agent-sdk@0.3.257`, not `~/.local/share/claude/versions/*`. These exact
+versions identify the binary used for the experiments, not a current default.
+Current managed defaults are listed in the [managed runtime
+catalogue](../../../../apps/backend/internal/agent/agents/managed_npm_runtime_versions.json).
+An operator selection can launch a different version (see
+`apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md`). The watchdog
+function is rewritten below with descriptive names from that binary's minified
+source. The logic and constants are unchanged. The minified identifiers are not:
 
 ```js
 function idleTimeoutMs(server) {

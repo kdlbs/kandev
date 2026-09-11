@@ -12,10 +12,12 @@ Kandev's `codex-acp` agent previously launched `@zed-industries/codex-acp`. That
 
 Kandev's `codex-acp` agent launches the exact effective version of
 `@agentclientprotocol/codex-acp` for ACP chat and one-shot inference sessions.
-The reviewed Kandev default is currently `1.10.0`; an install-wide operator
-selection can override it. Normal launches prefer npm's execution cache. The
-install script still installs `@openai/codex` for `codex login`; that native
-authentication helper is separate from the managed ACP runtime.
+The reviewed Kandev default is listed in the [managed runtime
+catalogue](../../apps/backend/internal/agent/agents/managed_npm_runtime_versions.json).
+An install-wide operator selection can override it. Normal launches prefer
+npm's execution cache. The install script still installs `@openai/codex` for
+`codex login`. That native authentication helper is separate from the managed
+ACP runtime.
 
 The host operator can deliberately refresh the ACP package through
 **Settings > Agents > Update agent**. Kandev then re-probes the bridge and
