@@ -51,30 +51,24 @@ function createGitHubStatusActions(
         if (!entry) return;
         let nextStatus = status;
         const currentHealth = entry.status?.pr_discovery_health;
-        if (
-          nextStatus &&
-          currentHealth &&
-          nextStatus.authenticated &&
-          nextStatus.pr_discovery_health &&
-          !shouldApplyDiscoveryHealth(nextStatus.pr_discovery_health, currentHealth)
-        ) {
-          nextStatus = {
-            ...nextStatus,
-            pr_discovery_health: currentHealth,
-          };
-        }
         const pending = draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
-        if (
-          nextStatus &&
-          pending &&
-          !nextStatus.pr_discovery_health &&
-          nextStatus.authenticated &&
-          (!currentHealth || shouldApplyDiscoveryHealth(pending.health, currentHealth))
-        ) {
-          nextStatus = {
-            ...nextStatus,
-            pr_discovery_health: pending.health,
-          };
+        if (nextStatus?.authenticated) {
+          let selectedHealth = nextStatus.pr_discovery_health;
+          if (
+            currentHealth &&
+            (!selectedHealth || !shouldApplyDiscoveryHealth(selectedHealth, currentHealth))
+          ) {
+            selectedHealth = currentHealth;
+          }
+          if (
+            pending &&
+            (!selectedHealth || shouldApplyDiscoveryHealth(pending.health, selectedHealth))
+          ) {
+            selectedHealth = pending.health;
+          }
+          if (selectedHealth) {
+            nextStatus = { ...nextStatus, pr_discovery_health: selectedHealth };
+          }
         }
         delete draft.githubStatus.pendingPRDiscoveryHealthByWorkspaceId[workspaceId];
         entry.status = nextStatus;

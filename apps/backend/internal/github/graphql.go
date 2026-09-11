@@ -354,6 +354,9 @@ func graphQLRetryAtFromData(data map[string]json.RawMessage) *time.Time {
 	if err := json.Unmarshal(raw, &rate); err != nil || rate.ResetAt.IsZero() {
 		return nil
 	}
+	if rate.Remaining > 0 {
+		return nil
+	}
 	return copyTime(&rate.ResetAt)
 }
 

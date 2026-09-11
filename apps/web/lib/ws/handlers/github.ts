@@ -50,8 +50,6 @@ export function registerGitHubHandlers(store: StoreApi<AppState>): WsHandlers {
     "github.pr_discovery_health.updated": (message) => {
       const update = message.payload as GitHubPRDiscoveryHealthUpdate;
       if (!update?.workspace_id || !update.health) return;
-      const state = store.getState();
-      if (state.workspaces.activeId && state.workspaces.activeId !== update.workspace_id) return;
       store.getState().applyGitHubPRDiscoveryHealthUpdate(update);
     },
   };

@@ -175,7 +175,11 @@ this work order without a revised scope.
   disconnected status clears stale connection health. HTTP Retry-After/reset
   headers and HTTP-200 GraphQL rate-limit resetAt values now reach discovery
   admission instead of being replaced by synthetic deadlines.
-- Verification passed: backend normal and race suites (1,769 tests each),
+- Verification passed: backend normal and race suites (1,775 tests each),
   backend/frontend lint, frontend typecheck, 33 focused frontend tests, i18n
   gates, backend and Vite builds, 5 Chromium E2E tests, 3 mobile Chrome E2E
   tests, public-doc validators, specification lint, and `git diff --check`.
+  Review regressions additionally cover overlapping entry points, invalidated
+  deleted consumers, transport fallback release, provider deadline clamping,
+  GraphQL remaining evidence, capacity admission, and HTTP/WS projection
+  ordering.

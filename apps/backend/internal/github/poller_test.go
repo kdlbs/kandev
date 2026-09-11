@@ -786,6 +786,191 @@ func TestSyncWorkspaceWatchesBatched_ConcurrentEntryPointsShareDuplicateResult(t
 	}
 }
 
+func TestSyncWorkspaceWatchesBatched_OverlappingEntryPointsShareTargetResult(t *testing.T) {
+	_, service, client, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-overlap-a", false)
+	seedTask(t, store, "task-overlap-b", false)
+	seedTask(t, store, "task-overlap-extra", false)
+	watchA := withTestWorkspace(&PRWatch{
+		SessionID: "session-overlap-a", TaskID: "task-overlap-a", Owner: "o", Repo: "r",
+		PRNumber: 43, Branch: "feature/overlap",
+	})
+	watchB := withTestWorkspace(&PRWatch{
+		SessionID: "session-overlap-b", TaskID: "task-overlap-b", Owner: "o", Repo: "r",
+		PRNumber: 43, Branch: "feature/overlap",
+	})
+	extra := withTestWorkspace(&PRWatch{
+		SessionID: "session-overlap-extra", TaskID: "task-overlap-extra", Owner: "o", Repo: "r",
+		PRNumber: 44, Branch: "feature/overlap-extra",
+	})
+	for _, watch := range []*PRWatch{watchA, watchB, extra} {
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("create overlapping watch: %v", err)
+		}
+	}
+	healthScope := testAutomationScope(t, service, testWorkspaceID)
+	client.prResponses = []string{`{"data":{"repo0":{"pr0":{
+		"state":"OPEN","title":"Shared PR","url":"https://x/43",
+		"headRefName":"feature/overlap","baseRefName":"main","headRefOid":"def",
+		"author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},
+		"reviewRequests":{"totalCount":0},"commits":{"nodes":[]}
+	}},"repo1":{"pr0":{
+		"state":"OPEN","title":"Extra PR","url":"https://x/44",
+		"headRefName":"feature/overlap-extra","baseRefName":"main","headRefOid":"ghi",
+		"author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},
+		"reviewRequests":{"totalCount":0},"commits":{"nodes":[]}
+	}}}}`}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	client.onExecute = func() {
+		once.Do(func() { close(started) })
+		<-release
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watchA, extra})
+		firstDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("overlapping leader never reached GraphQL")
+	}
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watchB})
+		secondDone <- err
+	}()
+	deadline := time.After(2 * time.Second)
+	for {
+		service.prDiscoveryHealth.mu.Lock()
+		scope := service.prDiscoveryHealth.scopes[prDiscoveryScopeKey(testWorkspaceID, healthScope)]
+		joined := false
+		if scope != nil {
+			state := scope.targets[prDiscoveryHealthTarget{Owner: "o", Repo: "r", PRNumber: 43}.key()]
+			joined = state != nil && state.active && len(state.consumers) == 2
+		}
+		service.prDiscoveryHealth.mu.Unlock()
+		if joined {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("overlapping consumer did not join active discovery target")
+		default:
+			runtime.Gosched()
+		}
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("overlapping leader sync: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("overlapping joined sync: %v", err)
+	}
+	if got := len(client.prQueries); got != 1 {
+		t.Fatalf("overlapping target transport calls = %d, want one", got)
+	}
+	for _, taskID := range []string{"task-overlap-a", "task-overlap-b"} {
+		pr, err := store.GetTaskPR(ctx, taskID)
+		if err != nil || pr == nil {
+			t.Fatalf("task %s association = %#v, err=%v; joined consumer was dropped", taskID, pr, err)
+		}
+		if pr.PRNumber != 43 {
+			t.Errorf("task %s PR number = %d, want 43", taskID, pr.PRNumber)
+		}
+	}
+}
+
+func TestPollerFallbackAfterUnavailableBatchDoesNotPauseDiscovery(t *testing.T) {
+	poller, service, client, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-unavailable-fallback", false)
+	watch := withTestWorkspace(&PRWatch{
+		SessionID: "session-unavailable-fallback", TaskID: "task-unavailable-fallback", Owner: "o", Repo: "r",
+		Branch: "feature/unavailable-fallback",
+	})
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create unavailable-fallback watch: %v", err)
+	}
+	client.AddPR(&PR{
+		Number: 52, RepoOwner: "o", RepoName: "r", HeadRepoOwner: "o", HeadRepoName: "r",
+		HeadBranch: "feature/unavailable-fallback", State: "open", Title: "Fallback PR",
+		URL: "https://x/52", BaseBranch: "main",
+	})
+	client.branchErr = errors.New("graphql transport unavailable")
+	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Fatal("unavailable batch unexpectedly succeeded")
+	}
+	// The poller's per-watch fallback must be able to acquire the released
+	// target immediately. A batch transport outage is not provider evidence
+	// that should pause the target for a minute.
+	poller.checkSinglePRWatch(ctx, watch)
+	associated, err := store.GetTaskPR(ctx, "task-unavailable-fallback")
+	if err != nil {
+		t.Fatalf("read fallback association: %v", err)
+	}
+	if associated == nil || associated.PRNumber != 52 {
+		t.Fatalf("fallback association = %#v, want PR #52", associated)
+	}
+	health := service.prDiscoveryHealth.snapshot(testWorkspaceID, testAutomationScope(t, service, testWorkspaceID), 0)
+	if health.State == PRDiscoveryHealthDegraded {
+		t.Fatalf("fallback transport outage left discovery degraded: %+v", health)
+	}
+}
+
+func TestSyncWorkspaceWatchesBatched_DoesNotApplyAfterWatchDeletion(t *testing.T) {
+	_, service, client, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-deleted-in-flight", false)
+	watch := withTestWorkspace(&PRWatch{
+		SessionID: "session-deleted-in-flight", TaskID: "task-deleted-in-flight", Owner: "o", Repo: "r",
+		PRNumber: 53, Branch: "feature/deleted-in-flight",
+	})
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create deleted in-flight watch: %v", err)
+	}
+	client.prResponses = []string{`{"data":{"repo0":{"pr0":{
+		"state":"OPEN","title":"Deleted Watch PR","url":"https://x/53",
+		"headRefName":"feature/deleted-in-flight","baseRefName":"main","headRefOid":"def",
+		"author":{"login":"alice"},"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z","reviews":{"nodes":[]},
+		"reviewRequests":{"totalCount":0},"commits":{"nodes":[]}
+	}}}}`}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	client.onExecute = func() {
+		close(started)
+		<-release
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watch})
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deleted-watch sync never reached GraphQL")
+	}
+	if err := service.DeletePRWatch(ctx, watch.ID); err != nil {
+		t.Fatalf("delete in-flight watch: %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("deleted-watch sync: %v", err)
+	}
+	if associated, err := store.GetTaskPR(ctx, "task-deleted-in-flight"); err != nil {
+		t.Fatalf("read deleted-watch association: %v", err)
+	} else if associated != nil {
+		t.Fatalf("deleted-watch association = %+v, want no persisted result", associated)
+	}
+}
+
 func TestTryBatchedPRWatchCheck_PersistsExactReviewThreadCount(t *testing.T) {
 	poller, _, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()

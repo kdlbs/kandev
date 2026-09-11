@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -189,6 +190,56 @@ func TestPRDiscoveryHealth_PreservesGraphQLRateLimitResetDeadline(t *testing.T) 
 	fixedNow = fixedNow.Add(2 * time.Minute)
 	if _, admitted = health.begin("workspace-rate", "credential-rate", 1, target); admitted {
 		t.Fatal("target was admitted before provider reset deadline")
+	}
+}
+
+func TestPRDiscoveryHealth_DoesNotUsePositiveGraphQLRemainingAsRetryEvidence(t *testing.T) {
+	executor := &stubGraphQLExecutor{response: `{"data":{"rateLimit":{"limit":5000,"remaining":4999,"resetAt":"2030-09-11T12:10:00Z","cost":1}},"errors":[{"type":"GRAPHQL_VALIDATION_FAILED","message":"schema mismatch"}]}`}
+	_, err := runBatchedBranchQuery(context.Background(), executor, []graphQLBranchRef{{Owner: "o", Repo: "r", Branch: "feature/positive"}})
+	if err == nil {
+		t.Fatal("runBatchedBranchQuery succeeded, want GraphQL error")
+	}
+	if retryAt := prDiscoveryRetryAtFromError(err); retryAt != nil {
+		t.Fatalf("GraphQL retry deadline = %v, want no quota deadline with positive remaining", retryAt)
+	}
+}
+
+func TestPRDiscoveryHealth_ClampsFarFutureProviderRetryDeadline(t *testing.T) {
+	fixedNow := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	health := newPRDiscoveryHealth(nil, nil)
+	health.setNow(func() time.Time { return fixedNow })
+	target := prDiscoveryHealthTarget{Owner: "o", Repo: "r", Branch: "feature/far-future"}
+	attempt, admitted := health.begin("workspace-far-future", "credential-far-future", 1, target)
+	if !admitted {
+		t.Fatal("far-future target was not admitted")
+	}
+	providerRetryAt := fixedNow.Add(24 * time.Hour)
+	health.finishFailure("workspace-far-future", "credential-far-future", 1, target, attempt, PRDiscoveryHealthRateLimited, &providerRetryAt)
+	snapshot := health.snapshot("workspace-far-future", "credential-far-future", 1)
+	if snapshot.RetryAt == nil || !snapshot.RetryAt.Equal(fixedNow.Add(prDiscoveryRetryMax)) {
+		t.Fatalf("far-future retry deadline = %v, want %v", snapshot.RetryAt, fixedNow.Add(prDiscoveryRetryMax))
+	}
+}
+
+func TestPRDiscoveryHealth_CapacityReportsDegradedWithoutEvictingLiveScopes(t *testing.T) {
+	health := newPRDiscoveryHealth(nil, nil)
+	target := prDiscoveryHealthTarget{Owner: "o", Repo: "r", Branch: "feature/capacity"}
+	for index := 0; index < prDiscoveryMaxScopes; index++ {
+		workspaceID := fmt.Sprintf("workspace-capacity-%d", index)
+		if _, admitted := health.begin(workspaceID, "credential", 1, target); !admitted {
+			t.Fatalf("live scope %s was not admitted", workspaceID)
+		}
+	}
+	blockedWorkspace := "workspace-capacity-blocked"
+	if _, admitted := health.begin(blockedWorkspace, "credential", 1, target); admitted {
+		t.Fatal("capacity-blocked scope was admitted by evicting a live scope")
+	}
+	blocked := health.snapshot(blockedWorkspace, "credential", 1)
+	if blocked.State != PRDiscoveryHealthDegraded || blocked.FailedTargetCount != 1 || blocked.Category != PRDiscoveryHealthUnavailable {
+		t.Fatalf("capacity projection = %+v, want degraded unavailable state", blocked)
+	}
+	if _, admitted := health.begin("workspace-capacity-0", "credential", 1, target); !admitted {
+		t.Fatal("capacity admission displaced a live scope")
 	}
 }
 

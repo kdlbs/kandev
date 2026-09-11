@@ -71,15 +71,27 @@ func (s *Service) findPRByBranchForWorkspace(
 			return nil, nil
 		}
 	}
-	pr, err := s.findPRByBranchInForkNetwork(ctx, resolved.Client, resolved.CacheScope, owner, repo, branch)
+	pr, err := s.resolvePRByBranchAttempt(
+		ctx, resolved.Client, resolved.CacheScope, owner, repo, branch, attempt,
+	)
 	if err != nil {
 		if tracked {
+			category := classifyPRDiscoveryError(err)
+			s.completePRDiscoveryWatchAttempt(
+				attempt, nil, false, true, err,
+				category == PRDiscoveryHealthInvalidQuery || category == PRDiscoveryHealthRateLimited,
+			)
 			s.finishPRDiscoveryWatchFailure(workspaceID, resolved.CacheScope, credentialGeneration, attempt, err)
+			s.forgetPRDiscoveryWatchAttempt(workspaceID, resolved.CacheScope, credentialGeneration, attempt)
 		}
 		return nil, err
 	}
 	if tracked {
-		s.finishPRDiscoveryWatchSuccess(workspaceID, resolved.CacheScope, credentialGeneration, attempt)
+		if !attempt.joined {
+			s.completePRDiscoveryWatchAttempt(attempt, &PRStatus{PR: pr}, true, false, nil, false)
+			s.finishPRDiscoveryWatchSuccess(workspaceID, resolved.CacheScope, credentialGeneration, attempt)
+			s.forgetPRDiscoveryWatchAttempt(workspaceID, resolved.CacheScope, credentialGeneration, attempt)
+		}
 		if pr != nil {
 			// Finish the immutable source attempt first, then move the live
 			// consumer to the discovered repository/PR target. The caller still
@@ -95,6 +107,16 @@ func (s *Service) findPRByBranchForWorkspace(
 		}
 	}
 	return pr, nil
+}
+
+func (s *Service) resolvePRByBranchAttempt(
+	ctx context.Context, client Client, cacheScope, owner, repo, branch string,
+	attempt prDiscoveryWatchAttempt,
+) (*PR, error) {
+	if attempt.joined {
+		return sharedPRDiscoveryResult(ctx, attempt)
+	}
+	return s.findPRByBranchInForkNetwork(ctx, client, cacheScope, owner, repo, branch)
 }
 
 // findPRByBranchInForkNetwork first searches the requested repository. When

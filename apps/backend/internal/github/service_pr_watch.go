@@ -1625,22 +1625,39 @@ func (s *Service) detectPRForWatchOnce(
 		effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
 		return s.store.GetTaskPRByRepository(ctx, effectiveTaskID, watch.RepositoryID)
 	}
-	pr, err := s.findPRByBranchInForkNetwork(
-		ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
-	)
-	if err != nil && isRepoNotResolvableErr(err) {
-		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
-		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
-		// to flag the WS response as permanent without re-running the
-		// classifier on the raw upstream error string.
-		err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
-	}
-	if err != nil {
-		s.finishPRDiscoveryWatchFailure(
-			watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt, err,
-		)
+	var pr *PR
+	var err error
+	if attempt.joined {
+		pr, err = sharedPRDiscoveryResult(ctx, attempt)
 	} else {
-		s.finishPRDiscoveryWatchSuccess(
+		pr, err = s.findPRByBranchInForkNetwork(
+			ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
+		)
+		if err != nil && isRepoNotResolvableErr(err) {
+			s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
+			// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
+			// to flag the WS response as permanent without re-running the
+			// classifier on the raw upstream error string.
+			err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
+		}
+		if err != nil {
+			category := classifyPRDiscoveryError(err)
+			s.completePRDiscoveryWatchAttempt(
+				attempt, nil, false, true, err,
+				category == PRDiscoveryHealthInvalidQuery || category == PRDiscoveryHealthRateLimited,
+			)
+			s.finishPRDiscoveryWatchFailure(
+				watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt, err,
+			)
+		} else {
+			s.completePRDiscoveryWatchAttempt(
+				attempt, &PRStatus{PR: pr}, true, false, nil, false,
+			)
+			s.finishPRDiscoveryWatchSuccess(
+				watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt,
+			)
+		}
+		s.forgetPRDiscoveryWatchAttempt(
 			watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt,
 		)
 	}
@@ -1680,6 +1697,12 @@ func (s *Service) detectPRForWatchOnce(
 			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
 	}
+	s.trackPRDiscoveryWatchTarget(
+		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch,
+		prDiscoveryHealthTarget{
+			Owner: watch.Owner, Repo: watch.Repo, Branch: watch.Branch, PRNumber: pr.Number,
+		},
+	)
 	// Also fetch status so the first response includes review/check state
 	watch.PRNumber = pr.Number
 	return s.triggerPRStatusSync(ctx, watch, taskID)

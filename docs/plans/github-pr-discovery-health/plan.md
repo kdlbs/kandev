@@ -167,8 +167,8 @@ schema validation.
 
 Implementation checks passed:
 
-- `go test ./internal/github -count=1`: 1,769 passed.
-- `go test -race ./internal/github -count=1`: 1,769 passed.
+- `go test ./internal/github -count=1`: 1,775 passed.
+- `go test -race ./internal/github -count=1`: 1,775 passed.
 - Backend `make lint` and frontend `pnpm run lint`: passed.
 - Frontend typecheck, focused Vitest suite (33 tests), i18n check, and i18n
   ratchet: passed.
@@ -176,6 +176,11 @@ Implementation checks passed:
 - Chromium GitHub settings E2E: 5 passed. Mobile Chrome GitHub settings E2E:
   3 passed.
 - Public-doc validators, specification lint, and `git diff --check`: passed.
+
+The review remediation adds focused coverage for overlapping entry points,
+transport fallback release, deletion invalidation, positive GraphQL remaining,
+far-future provider deadlines, capacity degradation, pending HTTP/WS ordering,
+and workspace-scoped health events. No public documentation contract changed.
 
 ## Risks
 

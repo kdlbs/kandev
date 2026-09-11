@@ -273,6 +273,78 @@ describe("discovery health ordering", () => {
   });
 });
 
+describe("discovery health merge", () => {
+  it("lets a newer pending websocket health update beat an older HTTP status", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "unavailable",
+        revision: 4,
+        credential_generation: 2,
+        runtime_epoch: 10,
+      },
+    });
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().applyGitHubPRDiscoveryHealthUpdate({
+      workspace_id: WORKSPACE_A,
+      health: {
+        state: "healthy",
+        failed_target_count: 0,
+        revision: 5,
+        credential_generation: 2,
+        runtime_epoch: 10,
+      },
+    });
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: {
+        state: "degraded",
+        failed_target_count: 1,
+        category: "unavailable",
+        revision: 4,
+        credential_generation: 2,
+        runtime_epoch: 10,
+      },
+    });
+
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toMatchObject({ state: "healthy", revision: 5 });
+  });
+
+  it("preserves current health when an authenticated HTTP status omits it", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    const health: GitHubPRDiscoveryHealth = {
+      state: "degraded",
+      failed_target_count: 1,
+      category: "rate_limited",
+      revision: 8,
+      credential_generation: 3,
+      runtime_epoch: 10,
+    };
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+      pr_discovery_health: health,
+    });
+    store.getState().setGitHubStatus(WORKSPACE_A, {
+      ...baseStatus,
+      workspace_id: WORKSPACE_A,
+    });
+
+    expect(
+      store.getState().githubStatus.byWorkspaceId[WORKSPACE_A]?.status?.pr_discovery_health,
+    ).toEqual(health);
+  });
+});
+
 describe("runtime epoch health ordering", () => {
   it("accepts a lower revision from a newer runtime and rejects delayed old-runtime events", () => {
     const store = makeStore();

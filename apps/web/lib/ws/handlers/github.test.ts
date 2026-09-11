@@ -163,7 +163,7 @@ describe("registerGitHubHandlers PR discovery health", () => {
 });
 
 describe("registerGitHubHandlers", () => {
-  it("ignores discovery health events from another workspace", () => {
+  it("applies discovery health events from another workspace", () => {
     const store = createAppStore();
     store.getState().setActiveWorkspace(ACTIVE_WORKSPACE_ID);
     store.getState().resetGitHubStatus(FOREIGN_WORKSPACE_ID);
@@ -186,7 +186,7 @@ describe("registerGitHubHandlers", () => {
     expect(
       store.getState().githubStatus.byWorkspaceId[FOREIGN_WORKSPACE_ID]?.status
         ?.pr_discovery_health,
-    ).toBeUndefined();
+    ).toMatchObject({ state: "degraded", failed_target_count: 1 });
   });
 });
 

@@ -107,12 +107,19 @@ type prDiscoveryHealthScope struct {
 	runtimeEpoch         int64
 }
 
+type prDiscoveryHealthCapacityBlock struct {
+	workspaceID string
+	cacheScope  string
+	blockedAt   time.Time
+}
+
 type prDiscoveryHealthStore struct {
 	mu           sync.Mutex
 	now          func() time.Time
 	bus          bus.EventBus
 	logger       *logger.Logger
 	scopes       map[string]*prDiscoveryHealthScope
+	capacity     map[string]prDiscoveryHealthCapacityBlock
 	retired      map[string]bool
 	runtimeEpoch int64
 }
@@ -123,6 +130,7 @@ func newPRDiscoveryHealth(eventBus bus.EventBus, log *logger.Logger) *prDiscover
 		bus:          eventBus,
 		logger:       log,
 		scopes:       make(map[string]*prDiscoveryHealthScope),
+		capacity:     make(map[string]prDiscoveryHealthCapacityBlock),
 		retired:      make(map[string]bool),
 		runtimeEpoch: atomic.AddInt64(&prDiscoveryRuntimeEpochSeed, 1),
 	}
@@ -153,8 +161,18 @@ func (h *prDiscoveryHealthStore) scopeLocked(workspaceID, cacheScope string, cre
 	scope := h.scopes[key]
 	if scope == nil {
 		if !h.ensureScopeCapacityLocked() {
+			h.capacity[key] = prDiscoveryHealthCapacityBlock{
+				workspaceID: workspaceID,
+				cacheScope:  cacheScope,
+				blockedAt:   h.nowLocked(),
+			}
+			if h.logger != nil {
+				h.logger.Warn("PR discovery health scope capacity exhausted",
+					zap.String("workspace_id", workspaceID), zap.String("cache_scope", cacheScope))
+			}
 			return nil
 		}
+		delete(h.capacity, key)
 		scope = &prDiscoveryHealthScope{
 			workspaceID:  workspaceID,
 			cacheScope:   cacheScope,
@@ -222,42 +240,8 @@ func prDiscoveryTargetHasFailure(state *prDiscoveryHealthTargetState) bool {
 func (h *prDiscoveryHealthStore) begin(
 	workspaceID, cacheScope string, credentialGeneration int64, target prDiscoveryHealthTarget,
 ) (uint64, bool) {
-	if h == nil || workspaceID == "" || cacheScope == "" {
-		return 0, true
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	scopeKey := prDiscoveryScopeKey(workspaceID, cacheScope)
-	delete(h.retired, scopeKey)
-	scope := h.scopeLocked(workspaceID, cacheScope, credentialGeneration)
-	if scope == nil {
-		return 0, false
-	}
-	key := target.key()
-	state := scope.targets[key]
-	now := h.nowLocked()
-	if state != nil {
-		if state.active {
-			// A concurrent entry point may share the in-flight provider
-			// attempt. Its own watch still needs the result fan-out, while the
-			// immutable attempt number makes completion idempotent.
-			return state.attempt, true
-		}
-		if state.retryAt != nil && now.Before(*state.retryAt) {
-			return 0, false
-		}
-	}
-	if state == nil {
-		if !h.ensureTargetCapacityLocked(scope) {
-			return 0, false
-		}
-		state = newPRDiscoveryHealthTargetState()
-		scope.targets[key] = state
-	}
-	scope.nextAttempt++
-	state.attempt = scope.nextAttempt
-	state.active = true
-	return state.attempt, true
+	attempt, admitted, _ := h.beginWithJoin(workspaceID, cacheScope, credentialGeneration, target)
+	return attempt, admitted
 }
 
 // trackConsumer records the live watch identity for a target. It moves a
@@ -265,11 +249,12 @@ func (h *prDiscoveryHealthStore) begin(
 // any active attempt that no longer has a live consumer.
 func (h *prDiscoveryHealthStore) trackConsumer(
 	workspaceID, cacheScope string, credentialGeneration int64, watchID string, target prDiscoveryHealthTarget,
-) {
+) []string {
 	if h == nil || workspaceID == "" || cacheScope == "" || watchID == "" {
-		return
+		return nil
 	}
 	key := target.key()
+	invalidatedTargets := make([]string, 0, 1)
 	var eventHealth *PRDiscoveryHealth
 	h.mu.Lock()
 	scopeKey := prDiscoveryScopeKey(workspaceID, cacheScope)
@@ -277,17 +262,20 @@ func (h *prDiscoveryHealthStore) trackConsumer(
 	scope := h.scopeLocked(workspaceID, cacheScope, credentialGeneration)
 	if scope == nil {
 		h.mu.Unlock()
-		return
+		return nil
 	}
 	oldKey := scope.watchTargets[watchID]
-	changed := detachPRDiscoveryConsumerLocked(scope, watchID, oldKey, key)
+	changed, removed := detachPRDiscoveryConsumerLocked(scope, watchID, oldKey, key)
+	if removed {
+		invalidatedTargets = append(invalidatedTargets, oldKey)
+	}
 	state, ok := h.targetStateLocked(scope, key)
 	if !ok {
 		h.mu.Unlock()
 		if changed {
 			h.publish(workspaceID, h.snapshot(workspaceID, cacheScope, credentialGeneration))
 		}
-		return
+		return invalidatedTargets
 	}
 	if state.consumers == nil {
 		state.consumers = make(map[string]struct{})
@@ -305,24 +293,27 @@ func (h *prDiscoveryHealthStore) trackConsumer(
 	if eventHealth != nil {
 		h.publish(workspaceID, eventHealth)
 	}
+	return invalidatedTargets
 }
 
-func detachPRDiscoveryConsumerLocked(scope *prDiscoveryHealthScope, watchID, oldKey, newKey string) bool {
+func detachPRDiscoveryConsumerLocked(scope *prDiscoveryHealthScope, watchID, oldKey, newKey string) (bool, bool) {
 	if oldKey == "" || oldKey == newKey {
-		return false
+		return false, false
 	}
 	state := scope.targets[oldKey]
 	if state == nil {
 		delete(scope.watchTargets, watchID)
-		return false
+		return false, false
 	}
 	wasFailed := prDiscoveryTargetHasFailure(state)
 	delete(state.consumers, watchID)
+	removed := false
 	if len(state.consumers) == 0 {
 		delete(scope.targets, oldKey)
+		removed = true
 	}
 	delete(scope.watchTargets, watchID)
-	return wasFailed
+	return wasFailed, removed
 }
 
 func (h *prDiscoveryHealthStore) targetStateLocked(scope *prDiscoveryHealthScope, key string) (*prDiscoveryHealthTargetState, bool) {
@@ -340,15 +331,16 @@ func (h *prDiscoveryHealthStore) targetStateLocked(scope *prDiscoveryHealthScope
 
 // removeWatch removes a watch from every credential scope for its workspace.
 // A deleted or archived watch must not keep a failed target degraded forever.
-func (h *prDiscoveryHealthStore) removeWatch(workspaceID, watchID string) {
+func (h *prDiscoveryHealthStore) removeWatch(workspaceID, watchID string) []string {
 	if h == nil || workspaceID == "" || watchID == "" {
-		return
+		return nil
 	}
 	type publication struct {
 		workspaceID string
 		health      *PRDiscoveryHealth
 	}
 	publications := make([]publication, 0)
+	invalidatedTargets := make([]string, 0, 1)
 	h.mu.Lock()
 	for _, scope := range h.scopes {
 		if scope.workspaceID != workspaceID {
@@ -367,6 +359,7 @@ func (h *prDiscoveryHealthStore) removeWatch(workspaceID, watchID string) {
 		delete(state.consumers, watchID)
 		if len(state.consumers) == 0 {
 			delete(scope.targets, key)
+			invalidatedTargets = append(invalidatedTargets, key)
 		}
 		if wasFailed {
 			scope.revision++
@@ -378,6 +371,7 @@ func (h *prDiscoveryHealthStore) removeWatch(workspaceID, watchID string) {
 	for _, item := range publications {
 		h.publish(item.workspaceID, item.health)
 	}
+	return invalidatedTargets
 }
 
 func (h *prDiscoveryHealthStore) finishSuccess(
@@ -518,7 +512,11 @@ func prDiscoveryRetryDeadline(
 	now time.Time, category PRDiscoveryHealthCategory, failureCount int, retryAt *time.Time,
 ) *time.Time {
 	if retryAt != nil && retryAt.After(now) {
-		return copyTime(retryAt)
+		deadline := now.Add(prDiscoveryRetryMax)
+		if retryAt.Before(deadline) {
+			return copyTime(retryAt)
+		}
+		return &deadline
 	}
 	delay := PRDiscoveryRetryBase
 	if category == PRDiscoveryHealthRateLimited {
@@ -554,6 +552,18 @@ func (h *prDiscoveryHealthStore) snapshot(
 	}
 	scope := h.scopes[prDiscoveryScopeKey(workspaceID, cacheScope)]
 	if scope == nil {
+		if blocked, ok := h.capacity[prDiscoveryScopeKey(workspaceID, cacheScope)]; ok {
+			retryAt := blocked.blockedAt.Add(PRDiscoveryRetryBase)
+			return &PRDiscoveryHealth{
+				State:                PRDiscoveryHealthDegraded,
+				FailedTargetCount:    1,
+				LastFailureAt:        copyTime(&blocked.blockedAt),
+				Category:             PRDiscoveryHealthUnavailable,
+				RetryAt:              &retryAt,
+				CredentialGeneration: credentialGeneration,
+				RuntimeEpoch:         h.runtimeEpoch,
+			}
+		}
 		return &PRDiscoveryHealth{
 			State: PRDiscoveryHealthUnknown, CredentialGeneration: credentialGeneration, RuntimeEpoch: h.runtimeEpoch,
 		}
@@ -608,6 +618,11 @@ func (h *prDiscoveryHealthStore) clearWorkspace(workspaceID string) {
 			h.retired[key] = true
 		}
 	}
+	for key, blocked := range h.capacity {
+		if blocked.workspaceID == workspaceID {
+			delete(h.capacity, key)
+		}
+	}
 	h.mu.Unlock()
 }
 
@@ -617,6 +632,7 @@ func (h *prDiscoveryHealthStore) clearAll() {
 	}
 	h.mu.Lock()
 	h.scopes = make(map[string]*prDiscoveryHealthScope)
+	h.capacity = make(map[string]prDiscoveryHealthCapacityBlock)
 	h.retired = make(map[string]bool)
 	h.mu.Unlock()
 }
@@ -668,164 +684,4 @@ func containsRateLimitMarker(value string) bool {
 		}
 	}
 	return false
-}
-
-type prDiscoveryWatchAttempt struct {
-	target prDiscoveryHealthTarget
-	number uint64
-}
-
-type prDiscoveryRetryAtProvider interface {
-	ProviderRetryAt() *time.Time
-}
-
-type prDiscoveryRetryAtError struct {
-	err     error
-	retryAt *time.Time
-}
-
-func (e *prDiscoveryRetryAtError) Error() string {
-	if e == nil || e.err == nil {
-		return ""
-	}
-	return e.err.Error()
-}
-
-func (e *prDiscoveryRetryAtError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
-func (e *prDiscoveryRetryAtError) ProviderRetryAt() *time.Time {
-	if e == nil {
-		return nil
-	}
-	return copyTime(e.retryAt)
-}
-
-func withPRDiscoveryRetryAt(err error, retryAt *time.Time) error {
-	if err == nil || retryAt == nil {
-		return err
-	}
-	return &prDiscoveryRetryAtError{err: err, retryAt: copyTime(retryAt)}
-}
-
-func prDiscoveryRetryAtFromError(err error) *time.Time {
-	if err == nil {
-		return nil
-	}
-	var providerErr prDiscoveryRetryAtProvider
-	if errors.As(err, &providerErr) {
-		return providerErr.ProviderRetryAt()
-	}
-	return nil
-}
-
-func (s *Service) ensurePRDiscoveryHealth() *prDiscoveryHealthStore {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.prDiscoveryHealth == nil {
-		s.prDiscoveryHealth = newPRDiscoveryHealth(s.eventBus, s.logger)
-	}
-	return s.prDiscoveryHealth
-}
-
-func prDiscoveryTargetForWatch(watch *PRWatch) prDiscoveryHealthTarget {
-	if watch == nil {
-		return prDiscoveryHealthTarget{}
-	}
-	return prDiscoveryHealthTarget{
-		Owner: watch.Owner, Repo: watch.Repo, Branch: watch.Branch, PRNumber: watch.PRNumber,
-	}
-}
-
-func (s *Service) beginPRDiscoveryWatch(
-	workspaceID, cacheScope string, credentialGeneration int64, watch *PRWatch,
-) (prDiscoveryWatchAttempt, bool) {
-	target := prDiscoveryTargetForWatch(watch)
-	attempt := prDiscoveryWatchAttempt{target: target}
-	health := s.ensurePRDiscoveryHealth()
-	if health == nil {
-		return attempt, true
-	}
-	health.trackConsumer(workspaceID, cacheScope, credentialGeneration, prDiscoveryWatchID(watch), target)
-	number, admitted := health.begin(workspaceID, cacheScope, credentialGeneration, target)
-	attempt.number = number
-	return attempt, admitted
-}
-
-func (s *Service) trackPRDiscoveryWatchConsumer(
-	workspaceID, cacheScope string, credentialGeneration int64, watch *PRWatch,
-) {
-	s.trackPRDiscoveryWatchTarget(
-		workspaceID, cacheScope, credentialGeneration, watch, prDiscoveryTargetForWatch(watch),
-	)
-}
-
-func (s *Service) trackPRDiscoveryWatchTarget(
-	workspaceID, cacheScope string, credentialGeneration int64, watch *PRWatch,
-	target prDiscoveryHealthTarget,
-) {
-	if health := s.ensurePRDiscoveryHealth(); health != nil {
-		health.trackConsumer(workspaceID, cacheScope, credentialGeneration, prDiscoveryWatchID(watch), target)
-	}
-}
-
-func (s *Service) finishPRDiscoveryWatchSuccess(
-	workspaceID, cacheScope string, credentialGeneration int64, attempt prDiscoveryWatchAttempt,
-) {
-	if health := s.ensurePRDiscoveryHealth(); health != nil {
-		health.finishSuccess(workspaceID, cacheScope, credentialGeneration, attempt.target, attempt.number)
-	}
-}
-
-func (s *Service) finishPRDiscoveryWatchFailure(
-	workspaceID, cacheScope string, credentialGeneration int64, attempt prDiscoveryWatchAttempt, err error,
-) {
-	if health := s.ensurePRDiscoveryHealth(); health != nil {
-		health.finishFailure(
-			workspaceID, cacheScope, credentialGeneration, attempt.target, attempt.number,
-			classifyPRDiscoveryError(err), prDiscoveryRetryAtFromError(err),
-		)
-	}
-}
-
-func (s *Service) finishPRDiscoveryWatchFailureCategory(
-	workspaceID, cacheScope string, credentialGeneration int64, attempt prDiscoveryWatchAttempt,
-	category PRDiscoveryHealthCategory,
-) {
-	if health := s.ensurePRDiscoveryHealth(); health != nil {
-		health.finishFailure(
-			workspaceID, cacheScope, credentialGeneration, attempt.target, attempt.number, category, nil,
-		)
-	}
-}
-
-func (s *Service) releasePRDiscoveryWatch(
-	workspaceID, cacheScope string, credentialGeneration int64, attempt prDiscoveryWatchAttempt,
-) {
-	if health := s.ensurePRDiscoveryHealth(); health != nil {
-		health.release(workspaceID, cacheScope, credentialGeneration, attempt.target, attempt.number)
-	}
-}
-
-func prDiscoveryWatchID(watch *PRWatch) string {
-	if watch == nil {
-		return ""
-	}
-	return watch.ID
-}
-
-func (s *Service) removePRDiscoveryWatchConsumer(watch *PRWatch) {
-	if s == nil || watch == nil {
-		return
-	}
-	if health := s.ensurePRDiscoveryHealth(); health != nil {
-		health.removeWatch(watch.WorkspaceID, watch.ID)
-	}
 }
