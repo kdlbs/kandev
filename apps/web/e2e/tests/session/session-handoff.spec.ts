@@ -124,19 +124,32 @@ test.describe("Session handoff", () => {
     await expect(
       session.handoffDialog().locator("button").filter({ hasText: "Blank" }),
     ).toBeVisible();
+    expect(getSummarizeRequestCount()).toBe(1);
 
     await prompt.fill("/e2e:simple-message");
     await session.newSessionStartButton().click();
     await expect(session.handoffDialog()).not.toBeVisible({ timeout: 15_000 });
 
+    let handoffSessionId: string | undefined;
     await expect
       .poll(
         async () => {
           const { sessions: updated } = await apiClient.listTaskSessions(task.id);
-          return updated.length;
+          const handoffSession = updated.find(({ id }) => id !== session1Id);
+          handoffSessionId = handoffSession?.id;
+          if (!handoffSession) return null;
+
+          const { messages } = await apiClient.listSessionMessages(handoffSession.id);
+          return messages.find((message) => message.author_type === "user")?.content ?? null;
         },
         { timeout: 30_000, message: "Waiting for handoff session to be created" },
       )
-      .toBe(2);
+      .toBe("/e2e:simple-message");
+
+    const { sessions: updated } = await apiClient.listTaskSessions(task.id);
+    const handoffSession = updated.find(({ id }) => id !== session1Id);
+    expect(handoffSession?.id).toBe(handoffSessionId);
+    expect(handoffSession?.agent_profile_id).toBe(profileB.id);
+    expect(getSummarizeRequestCount()).toBe(1);
   });
 });
