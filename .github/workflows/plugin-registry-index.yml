@@ -58,7 +58,8 @@ jobs:
           node-version: "22"
 
       - name: Build canvas package inspector
-        run: go build -o apps/backend/bin/canvas-package ./apps/backend/cmd/canvas-package
+        working-directory: apps/backend
+        run: go build -o bin/canvas-package ./cmd/canvas-package
 
       - name: Test build script
         env:
