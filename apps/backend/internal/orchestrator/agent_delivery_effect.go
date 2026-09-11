@@ -56,13 +56,11 @@ func workflowEffectForTurn(turnID string) *models.AgentDeliveryEffect {
 	if turnID == "" {
 		return nil
 	}
-	now := time.Now().UTC()
 	return &models.AgentDeliveryEffect{
-		EffectKey:   "workflow.on_turn_complete:" + turnID,
-		EffectType:  "workflow.on_turn_complete",
-		State:       models.DeliveryEffectCompleted,
-		CreatedAt:   now,
-		CompletedAt: &now,
+		EffectKey:  "workflow.on_turn_complete:" + turnID,
+		EffectType: "workflow.on_turn_complete",
+		State:      models.DeliveryEffectPending,
+		CreatedAt:  time.Now().UTC(),
 	}
 }
 

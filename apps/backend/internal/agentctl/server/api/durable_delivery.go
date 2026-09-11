@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -138,6 +139,45 @@ func (s *Server) handleDeliverySubmissionByID(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, submission)
+}
+
+func (s *Server) handleDeliverySubmissions(c *gin.Context) {
+	deliveryJournal, ok := s.getDeliveryJournal(c)
+	if !ok {
+		return
+	}
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	sessionID, _, _ := s.procMgr.DeliverySubmissionIdentity()
+	if c.Query("session_id") != sessionID {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	submissions, err := deliveryJournal.ListSubmissions(c.Request.Context(), c.Query("session_id"))
+	if err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, submissions)
+}
+
+func (s *Server) handleDeliverySubmissionRetire(c *gin.Context) {
+	if _, ok := s.getDeliveryJournal(c); !ok {
+		return
+	}
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	if err := s.procMgr.RetireDeliverySubmission(
+		c.Request.Context(), c.Param("id"), s.procMgr.DeliveryHarnessGeneration(),
+	); err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (s *Server) handleDeliveryReplay(c *gin.Context) {
@@ -281,7 +321,8 @@ func (s *Server) loadAgentStreamReplay(ctx context.Context, after uint64) ([]ada
 	if err != nil {
 		return nil, err
 	}
-	events, _, err := deliveryJournal.Replay(ctx, s.procMgr.DeliveryStreamID(), after, 1000)
+	streamID := s.procMgr.DeliveryStreamID()
+	events, stream, err := deliveryJournal.Replay(ctx, streamID, after, 1000)
 	if err != nil {
 		// A first connection has no cursor and no retained stream yet. That is
 		// a normal empty history, not a cursor loss.
@@ -290,18 +331,41 @@ func (s *Server) loadAgentStreamReplay(ctx context.Context, after uint64) ([]ada
 		}
 		return nil, err
 	}
+	boundary := stream.HighWater
 	replay := make([]adapter.AgentEvent, 0, len(events))
-	for _, event := range events {
-		var notification adapter.AgentEvent
-		if err := json.Unmarshal(event.Payload, &notification); err != nil {
+	appendEvents := func(page []journal.Event) error {
+		for _, event := range page {
+			var notification adapter.AgentEvent
+			if err := json.Unmarshal(event.Payload, &notification); err != nil {
+				return err
+			}
+			notification.DeliveryStreamID = event.StreamID
+			notification.DeliveryIncarnationID = event.IncarnationID
+			notification.DeliveryHarnessGeneration = event.HarnessGeneration
+			notification.DeliverySequence = event.Sequence
+			notification.DeliverySubmissionID = event.SubmissionID
+			replay = append(replay, notification)
+			after = event.Sequence
+		}
+		return nil
+	}
+	if err := appendEvents(events); err != nil {
+		return nil, err
+	}
+	for after < boundary {
+		page, pageStream, pageErr := deliveryJournal.Replay(ctx, streamID, after, 1000)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		if len(page) == 0 {
+			return nil, fmt.Errorf("durable delivery replay stopped before high-water %d", boundary)
+		}
+		if pageStream.HighWater < boundary {
+			return nil, fmt.Errorf("durable delivery replay high-water regressed from %d to %d", boundary, pageStream.HighWater)
+		}
+		if err := appendEvents(page); err != nil {
 			return nil, err
 		}
-		notification.DeliveryStreamID = event.StreamID
-		notification.DeliveryIncarnationID = event.IncarnationID
-		notification.DeliveryHarnessGeneration = event.HarnessGeneration
-		notification.DeliverySequence = event.Sequence
-		notification.DeliverySubmissionID = event.SubmissionID
-		replay = append(replay, notification)
 	}
 	return replay, nil
 }
@@ -327,6 +391,8 @@ func writeDeliveryError(c *gin.Context, err error) {
 		status, code = http.StatusConflict, "OWNER_MISMATCH"
 	case errors.Is(err, journal.ErrSubmissionNotFound):
 		status, code = http.StatusNotFound, "SUBMISSION_NOT_FOUND"
+	case errors.Is(err, journal.ErrSubmissionGeneration):
+		status, code = http.StatusConflict, "SUBMISSION_GENERATION_CONFLICT"
 	}
 	c.JSON(status, gin.H{"code": code, "message": code})
 }

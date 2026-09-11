@@ -613,6 +613,11 @@ func (sm *SessionManager) initializeACPConnection(
 		return ctx, nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 	result, err := sm.InitializeSession(ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
+	if err == nil && execution.ForceContextContinuation {
+		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
+			err = retireErr
+		}
+	}
 	releaseClient()
 	if err != nil {
 		// loadSession already logged the root cause. context.Canceled is
@@ -632,6 +637,40 @@ func (sm *SessionManager) initializeACPConnection(
 		zap.String("execution_id", execution.ID), zap.String("agent_name", result.AgentName),
 		zap.String("agent_version", result.AgentVersion), zap.String("session_id", result.SessionID))
 	return ctx, result, nil
+}
+
+func retireUnresolvedDeliverySubmissions(
+	ctx context.Context,
+	client *agentctl.Client,
+	execution *AgentExecution,
+) error {
+	if client == nil || execution == nil || execution.SessionID == "" || execution.DeliveryHarnessGeneration == 0 {
+		return nil
+	}
+	submissions, err := client.ListDeliverySubmissions(ctx, execution.SessionID)
+	if err != nil {
+		return fmt.Errorf("list prior durable delivery submissions: %w", err)
+	}
+	for _, submission := range submissions {
+		if submission.HarnessGeneration >= execution.DeliveryHarnessGeneration || !submissionNeedsRecoveryRetirement(submission) {
+			continue
+		}
+		if err := client.RetireDeliverySubmission(ctx, submission.ID); err != nil {
+			return fmt.Errorf("retire durable delivery submission %s: %w", submission.ID, err)
+		}
+	}
+	return nil
+}
+
+func submissionNeedsRecoveryRetirement(submission journal.Submission) bool {
+	switch submission.State {
+	case journal.SubmissionPrepared, journal.SubmissionAccepted, journal.SubmissionDispatching, journal.SubmissionInterruptedUnknown:
+		return true
+	case journal.SubmissionCompleted:
+		return !submission.TerminalEventRetained
+	default:
+		return false
+	}
 }
 
 func (sm *SessionManager) applyProfileSessionLayers(

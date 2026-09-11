@@ -15,6 +15,7 @@ import {
 import type { SessionRecoveryAction } from "@/lib/services/session-recovery-service";
 import type { MessageAction } from "@/components/task/chat/types";
 import { ACTION_ICON_MAP, ActionButton } from "./action-message-actions";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAction | null {
   if (action.type !== "ws_request" || !action.params) return null;
@@ -143,8 +144,10 @@ function SessionRecoveryActionButton({
   const button = (
     <Button
       variant="outline"
-      size="sm"
-      className="h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto"
+      className={controlSizingClassName(
+        "standard",
+        "w-full gap-1.5 text-xs cursor-pointer sm:w-auto",
+      )}
       disabled={busyAction !== null}
       onClick={onClick}
       data-testid={action.test_id}

@@ -86,3 +86,27 @@ func TestAnalyzeKeepsProgressMonotonicAcrossManagedAndUnmanagedCaches(t *testing
 		}
 	}
 }
+
+func TestMeasurementRootsIncludeAdoptedAndUnmanagedCaches(t *testing.T) {
+	home := t.TempDir()
+	adoptedPath := filepath.Join(t.TempDir(), "adopted-go-build")
+	unmanagedPath := filepath.Join(t.TempDir(), "user-go-build")
+	settings := storage.DefaultSettings()
+	settings.GoCache.AdoptedPath = adoptedPath
+	t.Setenv("GOCACHE", unmanagedPath)
+	provider := New(Config{HomeDir: home})
+
+	roots, err := provider.MeasurementRoots(settings)
+	if err != nil {
+		t.Fatalf("MeasurementRoots: %v", err)
+	}
+	want := []string{adoptedPath, unmanagedPath}
+	if len(roots) != len(want) {
+		t.Fatalf("roots = %v, want %v", roots, want)
+	}
+	for index := range want {
+		if roots[index] != want[index] {
+			t.Fatalf("roots = %v, want %v", roots, want)
+		}
+	}
+}

@@ -1,5 +1,9 @@
 {
   "columnLabel": "Àĝēńţ ţĥŕēàď ƒōŕ {{title}}",
+  "chooseThread": "Ćĥōōśē ţĥŕēàď",
+  "chooseThreadLabel": "Ćĥōōśē ţĥŕēàď. Ćũŕŕēńţ: {{title}}",
+  "chooseThreadDescription": "Ĵũḿƥ ţō à ćōńvēŕśàţĩōń ĩń ţĥĩś vĩēŵ.",
+  "threadPosition": "{{position}}/{{total}}",
   "emptyBody": "Ţĥŕēàďś ƥũţś ēvēŕŷ ŕũńńĩńĝ àĝēńţ śĩďē ƀŷ śĩďē. Śţàŕţ àń àĝēńţ ōń à ţàśķ àńď ĩţś ćōńvēŕśàţĩōń śĥōŵś ũƥ ĥēŕē àś à ćōĺũḿń.",
   "emptyTitle": "Ńō àĝēńţ ĩś ŵōŕķĩńĝ ŕĩĝĥţ ńōŵ",
   "loading": "Ĺōàďĩńĝ ţĥŕēàďś...",

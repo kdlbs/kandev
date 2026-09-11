@@ -107,6 +107,24 @@ func (c *Client) GetDeliverySubmission(ctx context.Context, id string) (*journal
 	return &result, nil
 }
 
+// ListDeliverySubmissions returns the submissions retained for one session.
+// It is used only during an explicitly authorized harness-generation change.
+func (c *Client) ListDeliverySubmissions(ctx context.Context, sessionID string) ([]journal.Submission, error) {
+	var result []journal.Submission
+	path := "/api/v1/agent/submissions?" + url.Values{"session_id": []string{sessionID}}.Encode()
+	if err := c.doDeliveryRequest(ctx, http.MethodGet, path, nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RetireDeliverySubmission seals an uncertain submission after an explicit
+// recovery has committed a newer harness generation.
+func (c *Client) RetireDeliverySubmission(ctx context.Context, id string) error {
+	path := "/api/v1/agent/submissions/" + url.PathEscape(id) + "/retire"
+	return c.doDeliveryRequest(ctx, http.MethodPost, path, nil, nil)
+}
+
 // ReplayDelivery reads events after a committed cursor. Cursor expiration is
 // returned as an error so the caller can perform the explicit recovery path.
 func (c *Client) ReplayDelivery(ctx context.Context, streamID string, after uint64, limit int) ([]journal.Event, journal.Stream, error) {

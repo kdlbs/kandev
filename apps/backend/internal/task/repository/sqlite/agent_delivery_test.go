@@ -45,6 +45,13 @@ func TestInboxAckAfterCommitDeduplicatesMessages(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	projectedEffect, err := repo.GetAgentDeliveryEffect(ctx, "message:stream-1:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectedEffect.State != models.DeliveryEffectPending || projectedEffect.CompletedAt != nil {
+		t.Fatalf("projected effect = %+v, want pending intent", projectedEffect)
+	}
 	if _, err := repo.ProjectAgentDeliveryEvent(ctx, event, &models.AgentDeliveryEffect{
 		EffectKey:  "message:stream-1:1",
 		StreamID:   event.StreamID,

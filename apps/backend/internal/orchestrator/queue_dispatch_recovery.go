@@ -7,10 +7,14 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"go.uber.org/zap"
 )
 
-const unknownQueueDispatchRecoveryReason = "unknown_queue_dispatch_outcome"
+const (
+	unknownQueueDispatchRecoveryReason    = "unknown_queue_dispatch_outcome"
+	queueDispatchSubmissionRecoveryReason = "queue_dispatch_submission_requires_reconciliation"
+)
 
 func (s *Service) reconcilePendingQueueDispatchesOnStartup(ctx context.Context) error {
 	if s.messageQueue == nil || !s.messageQueue.PendingQueueDispatchPersistenceAvailable() {
@@ -23,6 +27,11 @@ func (s *Service) reconcilePendingQueueDispatchesOnStartup(ctx context.Context) 
 	for i := range pending {
 		dispatch := &pending[i]
 		msg := &dispatch.Message
+		if handled, err := s.reconcileDurableQueueDispatch(ctx, dispatch); err != nil {
+			return err
+		} else if handled {
+			continue
+		}
 		if dispatch.Accepted {
 			if err := s.messageQueue.DeletePendingQueueDispatch(ctx, msg); err != nil {
 				return fmt.Errorf("acknowledge accepted queue dispatch %s: %w", msg.ID, err)
@@ -59,6 +68,67 @@ func (s *Service) reconcilePendingQueueDispatchesOnStartup(ctx context.Context) 
 			return fmt.Errorf("locate pending queue dispatch %s: %w", msg.ID, findErr)
 		}
 	}
+	return nil
+}
+
+// reconcileDurableQueueDispatch uses the backend submission ledger before an
+// interrupted v1 claim is made visible again. The local queue claim and the
+// backend ledger are committed independently, so a missing or in-flight ledger
+// record is an explicit recovery block, not permission to dispatch again.
+func (s *Service) reconcileDurableQueueDispatch(
+	ctx context.Context,
+	dispatch *messagequeue.PendingQueueDispatch,
+) (bool, error) {
+	if dispatch == nil || dispatch.Protocol != messagequeue.DeliveryProtocolV1 || dispatch.SubmissionID == "" {
+		return false, nil
+	}
+	store, ok := s.repo.(repository.AgentDeliveryRepository)
+	if !ok {
+		return true, s.parkQueueDispatchForRecovery(ctx, &dispatch.Message, queueDispatchSubmissionRecoveryReason)
+	}
+	submission, err := store.GetAgentDeliverySubmission(ctx, dispatch.SubmissionID)
+	if errors.Is(err, repository.ErrAgentDeliverySubmissionNotFound) {
+		return true, s.parkQueueDispatchForRecovery(ctx, &dispatch.Message, unknownQueueDispatchRecoveryReason)
+	}
+	if err != nil {
+		return true, fmt.Errorf("load queue dispatch submission %s: %w", dispatch.SubmissionID, err)
+	}
+	switch submission.State {
+	case models.DeliverySubmissionCompleted:
+		if err := s.messageQueue.DeletePendingQueueDispatch(ctx, &dispatch.Message); err != nil {
+			return true, fmt.Errorf("settle completed queue dispatch %s: %w", dispatch.Message.ID, err)
+		}
+		return true, nil
+	case models.DeliverySubmissionFailed, models.DeliverySubmissionCancelled:
+		if _, err := s.messageQueue.RestoreMessage(context.WithoutCancel(ctx), &dispatch.Message); err != nil {
+			return true, fmt.Errorf("restore terminal-failed queue dispatch %s: %w", dispatch.Message.ID, err)
+		}
+		return true, nil
+	case models.DeliverySubmissionPrepared,
+		models.DeliverySubmissionAccepted,
+		models.DeliverySubmissionDispatching,
+		models.DeliverySubmissionInterruptedUnknown:
+		return true, s.parkQueueDispatchForRecovery(ctx, &dispatch.Message, queueDispatchSubmissionRecoveryReason)
+	default:
+		return true, s.parkQueueDispatchForRecovery(ctx, &dispatch.Message, queueDispatchSubmissionRecoveryReason)
+	}
+}
+
+func (s *Service) parkQueueDispatchForRecovery(ctx context.Context, msg *messagequeue.QueuedMessage, reason string) error {
+	if msg == nil {
+		return nil
+	}
+	recoveryErr := &sessionRecoveryRequiredError{
+		Block: &models.SessionRecoveryBlock{Reason: reason},
+	}
+	if err := s.recordSessionRecoveryBlock(ctx, msg.SessionID, "queue_dispatch", recoveryErr); err != nil {
+		return fmt.Errorf("park pending queue dispatch %s for recovery: %w", msg.ID, err)
+	}
+	s.logger.Warn("parked queued dispatch with unresolved delivery outcome",
+		zap.String("entry_id", msg.ID),
+		zap.String("session_id", msg.SessionID),
+		zap.String("task_id", msg.TaskID),
+		zap.String("reason", reason))
 	return nil
 }
 

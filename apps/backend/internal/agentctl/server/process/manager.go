@@ -499,11 +499,19 @@ func (m *Manager) DeliveryHarnessGeneration() uint64 {
 // before the caller acknowledges admission. Dispatch is a separate operation
 // because an accepted record can safely wait for reconciliation.
 func (m *Manager) AdmitDeliverySubmission(ctx context.Context, submission journal.Submission) (journal.Submission, error) {
+	stored, _, err := m.AdmitDeliverySubmissionWithResult(ctx, submission)
+	return stored, err
+}
+
+// AdmitDeliverySubmissionWithResult preserves the immutable admission
+// identity so a repeated request cannot turn an accepted record into a second
+// harness dispatch.
+func (m *Manager) AdmitDeliverySubmissionWithResult(ctx context.Context, submission journal.Submission) (journal.Submission, bool, error) {
 	deliveryJournal, err := m.DeliveryJournal()
 	if err != nil {
-		return journal.Submission{}, err
+		return journal.Submission{}, false, err
 	}
-	return (&SubmissionDelivery{Journal: deliveryJournal}).Admit(ctx, submission)
+	return (&SubmissionDelivery{Journal: deliveryJournal}).AdmitWithResult(ctx, submission)
 }
 
 // DispatchDeliverySubmission reconciles the immutable submission before it
@@ -551,6 +559,56 @@ func (m *Manager) TrackDeliverySubmission(submissionID string, promptGeneration 
 	}
 	m.deliveryPromptByGeneration[promptGeneration] = submissionID
 	m.deliveryPromptMu.Unlock()
+}
+
+// DeliverySubmissionMatches reports whether an immutable submission already
+// owns the supplied identity. It is used to reconcile a retried request before
+// the journal-wide unresolved-work admission fence rejects new work.
+func (m *Manager) DeliverySubmissionMatches(ctx context.Context, id, hash string) bool {
+	if m == nil || id == "" || hash == "" {
+		return false
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return false
+	}
+	submission, err := deliveryJournal.GetSubmission(ctx, id)
+	return err == nil && submission.Hash == hash
+}
+
+// CanSteerDelivery reports whether a live durable prompt owns the requested
+// prompt generation. Steering reuses that generation and must not create a
+// second serialized durable submission.
+func (m *Manager) CanSteerDelivery(ctx context.Context, promptGeneration uint64) bool {
+	if m == nil {
+		return false
+	}
+	m.deliveryPromptMu.Lock()
+	submissionID := m.deliveryPromptByGeneration[promptGeneration]
+	m.deliveryPromptMu.Unlock()
+	if submissionID == "" {
+		submissionID = m.activeDeliverySubmissionID()
+	}
+	if submissionID == "" {
+		return false
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return false
+	}
+	submission, err := deliveryJournal.GetSubmission(ctx, submissionID)
+	return err == nil && submission.State == journal.SubmissionDispatching
+}
+
+// RetireDeliverySubmission seals one uncertain submission only after a newer
+// harness generation has been committed by the explicit recovery path.
+func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recoveryGeneration uint64) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
+	return err
 }
 
 func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string {

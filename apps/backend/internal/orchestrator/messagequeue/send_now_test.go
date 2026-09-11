@@ -64,6 +64,38 @@ func TestBuildSendNowEnvelopeAggregatesInFIFOOrder(t *testing.T) {
 	}
 }
 
+func TestBuildSendNowEnvelopeRequiresCombinedTranscript(t *testing.T) {
+	entries := []QueuedMessage{
+		{
+			ID: "first", SessionID: "session-1", TaskID: "task-1", Position: 1,
+			Content: "first", Metadata: map[string]interface{}{
+				metadataUserMessageRecorded:        true,
+				MetadataDeliveryAttempted:          true,
+				MetadataDurableTranscriptMessageID: "first-transcript",
+			},
+		},
+		{ID: "second", SessionID: "session-1", TaskID: "task-1", Position: 2, Content: "second"},
+	}
+
+	envelope, err := BuildSendNowEnvelope(entries)
+	if err != nil {
+		t.Fatalf("BuildSendNowEnvelope() error = %v", err)
+	}
+	if _, inherited := envelope.Metadata[metadataUserMessageRecorded]; inherited {
+		t.Fatal("combined envelope inherited a source transcript marker")
+	}
+	if _, inherited := envelope.Metadata[MetadataDeliveryAttempted]; inherited {
+		t.Fatal("combined envelope inherited a source delivery marker")
+	}
+	if _, inherited := envelope.Metadata[MetadataDurableTranscriptMessageID]; inherited {
+		t.Fatal("combined envelope inherited a source transcript identity")
+	}
+	sources, ok := envelope.Metadata[MetadataSendNowSources].([]map[string]interface{})
+	if !ok || len(sources) != 2 {
+		t.Fatalf("combined envelope sources = %#v, want two", envelope.Metadata[MetadataSendNowSources])
+	}
+}
+
 func TestBuildSendNowEnvelopeCarriesHandoffFromNonHeadEntry(t *testing.T) {
 	queuedAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
 	entries := []QueuedMessage{

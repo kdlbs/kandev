@@ -173,7 +173,12 @@ function RoutingBlockBadge({
           )}
         </div>
         {recoveryHref && (
-          <Button asChild variant="outline" size="sm" className="min-h-9 shrink-0 cursor-pointer">
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="min-h-11 shrink-0 cursor-pointer sm:min-h-9"
+          >
             <Link href={recoveryHref} data-testid="run-session-recovery-link">
               {t("office:openSessionRecovery")}
             </Link>

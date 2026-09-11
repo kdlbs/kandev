@@ -39,6 +39,8 @@ feedback.
 
 ### System design
 
+- [Database Storage Analysis System Design](system-design/storage-database-footprint.md)
+
 
 
 - [Backup location and action guidance](system-design/backup-location-actions.md)

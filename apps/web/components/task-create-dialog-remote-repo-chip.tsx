@@ -136,8 +136,7 @@ function RemoteResolutionError({ error, onRetry }: { error: Error; onRetry: () =
       <Button
         type="button"
         variant="outline"
-        size="sm"
-        className="h-11 sm:h-9 cursor-pointer"
+        className="cursor-pointer"
         aria-label={t("task:retryRemoteRepositoryResolution")}
         onClick={onRetry}
       >

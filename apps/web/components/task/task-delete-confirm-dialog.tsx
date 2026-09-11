@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { IconLoader } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -31,6 +31,7 @@ import {
   stopDialogPropagation,
 } from "./task-confirm-dialog-shared";
 import { useTranslation } from "react-i18next";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -50,6 +51,10 @@ type TaskDeleteConfirmDialogProps = {
   requireDiscardConsent?: boolean;
   onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
   confirmTestId?: string;
+  /** Overrides default focus restoration when the original trigger may disappear. */
+  onCloseAutoFocus?: (event: Event) => void;
+  /** Returns focus on close; omitted callers keep Radix's default restoration. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 type DiscardWorktreeChangesOptionProps = {
@@ -254,6 +259,8 @@ export function TaskDeleteConfirmDialog({
   requireDiscardConsent = false,
   onConfirm,
   confirmTestId,
+  onCloseAutoFocus,
+  focusReturnRef,
 }: TaskDeleteConfirmDialogProps) {
   const { t } = useTranslation();
   const safeCount = count ?? 0;
@@ -284,7 +291,12 @@ export function TaskDeleteConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+      <AlertDialogContent
+        size="lg"
+        className={TASK_CONFIRM_CLASS}
+        onClick={stopDialogPropagation}
+        onCloseAutoFocus={onCloseAutoFocus ?? createFocusReturnHandler(focusReturnRef)}
+      >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
         </AlertDialogHeader>

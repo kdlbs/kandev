@@ -48,6 +48,10 @@ func TestSubmissionCrashWindowAndHashConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	retry, duplicate, err := delivery.AdmitWithResult(context.Background(), journal.Submission{ID: submission.ID, Hash: submission.Hash, Payload: submission.Payload})
+	if err != nil || !duplicate || retry.State != journal.SubmissionAccepted {
+		t.Fatalf("accepted retry = %#v, duplicate=%t, err=%v", retry, duplicate, err)
+	}
 	if _, err := deliveryJournal.TransitionSubmission(context.Background(), submission.ID, journal.SubmissionDispatching, delivery.now()); err != nil {
 		t.Fatal(err)
 	}

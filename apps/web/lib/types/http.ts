@@ -129,6 +129,7 @@ export type StepDefinition = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
   route_state?: string;
@@ -157,6 +158,7 @@ export type WorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   complete_task_on_enter?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
@@ -230,6 +232,7 @@ export type TaskPendingActionRevision = {
 
 export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
 export type WorkflowProfileSessionEndPolicy = "complete" | "park";
+export type WorkflowSessionTarget = { kind: "initial" } | { kind: "step"; step_id: string };
 
 export function normalizeWorkflowProfileSessionStartPolicy(
   value: unknown,
@@ -240,7 +243,7 @@ export function normalizeWorkflowProfileSessionStartPolicy(
 export function normalizeWorkflowProfileSessionEndPolicy(
   value: unknown,
 ): WorkflowProfileSessionEndPolicy {
-  return typeof value === "string" && value.trim() === "park" ? "park" : "complete";
+  return typeof value === "string" && value.trim() === "complete" ? "complete" : "park";
 }
 
 /**
@@ -438,6 +441,9 @@ export type Task = ActiveSubagentCountFields & {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start (see internal/task/models WorkspaceOrphaned). */
+  workspace_orphaned?: boolean;
   /**
    * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
    * then "background"; null/absent means none is known. The count is the
@@ -526,8 +532,8 @@ export type WorkflowStepDTO = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
-  auto_advance_requires_signal?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   complete_task_on_enter: boolean;
@@ -913,6 +919,7 @@ export type MessageType =
 
 export type MessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  client_queue_id?: string;
 };
 
 export type Message = {
@@ -990,6 +997,7 @@ export type StepPortable = {
   agent_profile?: AgentProfilePortable;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
   complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;

@@ -227,13 +227,12 @@ func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffe
 	}
 	now := time.Now().UTC()
 	return &models.AgentDeliveryEffect{
-		EffectKey:   effectKey,
-		StreamID:    event.DeliveryStreamID,
-		Sequence:    int64(event.DeliverySequence),
-		EffectType:  effectType,
-		State:       models.DeliveryEffectCompleted,
-		CreatedAt:   now,
-		CompletedAt: &now,
+		EffectKey:  effectKey,
+		StreamID:   event.DeliveryStreamID,
+		Sequence:   int64(event.DeliverySequence),
+		EffectType: effectType,
+		State:      models.DeliveryEffectPending,
+		CreatedAt:  now,
 	}
 }
 

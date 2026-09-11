@@ -398,6 +398,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
 	}
+	if err := s.resumeAutomationRunsAfterRecovery(ctx, block); err != nil {
+		return fmt.Errorf("resume parked automation work after session recovery: %w", err)
+	}
 	return nil
 }
 
@@ -475,12 +478,20 @@ func (s *Service) recordSessionRecoveryBlock(
 		UpdatedAt:          time.Now().UTC(),
 	}
 	if existing, getErr := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation); getErr == nil && existing != nil {
+		var typed *sessionRecoveryRequiredError
+		if errors.As(launchErr, &typed) {
+			typed.Block = existing
+		}
 		return nil
 	} else if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
 		return getErr
 	}
 	if err := store.UpsertSessionRecoveryBlock(ctx, block); err != nil {
 		return fmt.Errorf("persist session recovery block: %w", err)
+	}
+	var typed *sessionRecoveryRequiredError
+	if errors.As(launchErr, &typed) {
+		typed.Block = block
 	}
 	agentruntime.RecordRecoveryRequired(consumer, reason)
 	return nil
@@ -567,14 +578,26 @@ func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bo
 	return info.CLIPassthrough
 }
 
+// blocksAutoStartLaunch reports whether an auto-start request must be
+// downgraded to a prepare, either because the task's current step does not
+// allow it or because it has an unresolved dependency. The dependency gate's
+// launch-token restore concern does not apply here: this path owns no
+// lifecycle token to restore.
+func (s *Service) blocksAutoStartLaunch(ctx context.Context, req *LaunchSessionRequest) bool {
+	if s.shouldBlockAutoStart(ctx, req) {
+		return true
+	}
+	blocked, _ := s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")
+	return blocked
+}
+
 // launchStart creates a new session and launches the agent.
 // If the request is an auto-start and the task's current workflow step does not
 // have auto_start_agent, or the task has unresolved dependencies, the request
 // is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
 // auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && (s.shouldBlockAutoStart(ctx, req) ||
-		s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")) {
+	if req.AutoStart && s.blocksAutoStartLaunch(ctx, req) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}

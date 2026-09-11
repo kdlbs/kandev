@@ -597,7 +597,7 @@ func TestExportWorkflow(t *testing.T) {
 
 		export, err := svc.ExportWorkflow(ctx, "wf-1")
 		require.NoError(t, err)
-		assert.Equal(t, models.ExportVersion, export.Version)
+		assert.Equal(t, models.LegacyExportVersion, export.Version)
 		assert.Equal(t, models.ExportType, export.Type)
 		require.Len(t, export.Workflows, 1)
 		assert.Equal(t, "My Pipeline", export.Workflows[0].Name)

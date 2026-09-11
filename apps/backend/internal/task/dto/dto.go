@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -235,6 +236,11 @@ type TaskDTO struct {
 	// auto_start_failed metadata key at DTO conversion time (see
 	// FromTaskWithSessionInfo).
 	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
+	// WorkspaceOrphaned reports that this task's materialized workspace was
+	// removed when its parent was archived, while workspace.mode is still
+	// inherit_parent. Derived from metadata.workspace at DTO conversion time
+	// via models.WorkspaceOrphaned (see FromTaskWithSessionInfo).
+	WorkspaceOrphaned bool `json:"workspace_orphaned,omitempty"`
 
 	// Dependency projection. Derived on every read from task_blockers plus each
 	// related task's own state — never persisted, because a stale copy would be
@@ -980,6 +986,7 @@ func FromTaskWithSessionInfo(
 		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		WorkspaceOrphaned:           models.WorkspaceOrphaned(task.Metadata),
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
@@ -1173,6 +1180,7 @@ type WorkflowStepDTO struct {
 	AgentProfileID            string                                   `json:"agent_profile_id,omitempty"`
 	ProfileSessionStartPolicy models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
 	ProfileSessionEndPolicy   models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	SessionTarget             *wfmodels.WorkflowSessionTarget          `json:"session_target,omitempty"`
 	WIPLimit                  int                                      `json:"wip_limit"`
 	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
@@ -1235,6 +1243,7 @@ type TaskPlanDTO struct {
 	CreatedBy                      string     `json:"created_by"`
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
+	CommentsRevision               int64      `json:"comments_revision"`
 	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
 	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
 	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
@@ -1253,10 +1262,53 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 		CreatedBy:                      plan.CreatedBy,
 		CreatedAt:                      plan.CreatedAt,
 		UpdatedAt:                      plan.UpdatedAt,
+		CommentsRevision:               plan.CommentsRevision,
 		ImplementationStartedAt:        plan.ImplementationStartedAt,
 		ImplementationStartedSessionID: plan.ImplementationStartedSessionID,
 		ImplementationStartedBy:        plan.ImplementationStartedBy,
 	}
+}
+
+// TaskPlanCommentDTO is pending feedback attached to a task's current plan.
+type TaskPlanCommentDTO struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	PlanID       string    `json:"plan_id"`
+	Body         string    `json:"body"`
+	SelectedText string    `json:"selected_text"`
+	AnchorFrom   int       `json:"anchor_from"`
+	AnchorTo     int       `json:"anchor_to"`
+	Version      int64     `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// TaskPlanCommentSnapshotDTO is a complete, versioned replacement snapshot.
+type TaskPlanCommentSnapshotDTO struct {
+	TaskID   string                `json:"task_id"`
+	PlanID   string                `json:"plan_id"`
+	Revision int64                 `json:"revision"`
+	Comments []*TaskPlanCommentDTO `json:"comments"`
+}
+
+// TaskPlanCommentSnapshotFromModel converts the authoritative repository snapshot.
+func TaskPlanCommentSnapshotFromModel(snapshot *models.TaskPlanCommentSnapshot) *TaskPlanCommentSnapshotDTO {
+	if snapshot == nil {
+		return nil
+	}
+	out := &TaskPlanCommentSnapshotDTO{
+		TaskID: snapshot.TaskID, PlanID: snapshot.PlanID, Revision: snapshot.Revision,
+		Comments: make([]*TaskPlanCommentDTO, 0, len(snapshot.Comments)),
+	}
+	for _, comment := range snapshot.Comments {
+		out.Comments = append(out.Comments, &TaskPlanCommentDTO{
+			ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
+			Body: comment.Body, SelectedText: comment.SelectedText,
+			AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, Version: comment.Version,
+			CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,
+		})
+	}
+	return out
 }
 
 // TaskPlanRevisionDTO represents a plan revision for API responses.

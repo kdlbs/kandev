@@ -1,6 +1,6 @@
 # Durable sessions across harness generations
 
-- Status: accepted (implementation pending)
+- Status: accepted (implemented; PR #3598 under review)
 - Date: 2026-09-10
 - Owners: kandev
 - Scope: agents, platform, executors
@@ -149,7 +149,7 @@ External implementations can change. Pinned harness contract tests remain the re
 - [ACP session setup](https://agentclientprotocol.com/protocol/v1/session-setup)
 - [bbolt implementation and durability contract](https://github.com/etcd-io/bbolt)
 
-Local evidence, refreshed against main `65d64f6fa9f85b4977b8cdd62cf162380732effc`:
+Local evidence, refreshed against main `407ed4f1a586385f3f0f6d86f9ee928d8fce822f`:
 
 - `apps/backend/internal/orchestrator/queue_dispatch_recovery.go`: startup recovery of existing durable queue claims.
 - `apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go`: attempt identity and accepted-state persistence.

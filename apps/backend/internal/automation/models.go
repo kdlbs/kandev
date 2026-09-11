@@ -207,6 +207,15 @@ type AutomationRun struct {
 	ThreadAction ThreadAction `json:"thread_action,omitempty" db:"thread_action"`
 	ThreadReason string       `json:"thread_reason,omitempty" db:"thread_reason"`
 	DisplayTitle string       `json:"display_title,omitempty" db:"display_title"`
+
+	// Recovery fields are internal coordination state. They retain the exact
+	// dispatch input while a native session recovery block is open; successful
+	// binding clears them before the run becomes task_created.
+	RecoveryBlockID        string `json:"-" db:"recovery_block_id"`
+	RecoverySessionID      string `json:"-" db:"recovery_session_id"`
+	RecoveryPrompt         string `json:"-" db:"recovery_prompt"`
+	RecoveryMetadataJSON   string `json:"-" db:"recovery_metadata"`
+	RecoveryWorkflowStepID string `json:"-" db:"recovery_workflow_step_id"`
 }
 
 // WorkspaceAutomationRun is a run carrying just enough of its owning

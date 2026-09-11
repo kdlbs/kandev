@@ -20,24 +20,32 @@ type SubmissionDelivery struct {
 }
 
 func (d *SubmissionDelivery) Admit(ctx context.Context, submission journal.Submission) (journal.Submission, error) {
+	stored, _, err := d.AdmitWithResult(ctx, submission)
+	return stored, err
+}
+
+// AdmitWithResult returns whether the immutable submission was already
+// present. A duplicate is a reconciliation response, not a new dispatch
+// opportunity, even when its state is only accepted.
+func (d *SubmissionDelivery) AdmitWithResult(ctx context.Context, submission journal.Submission) (journal.Submission, bool, error) {
 	if d == nil || d.Journal == nil {
-		return journal.Submission{}, fmt.Errorf("submission journal is required")
+		return journal.Submission{}, false, fmt.Errorf("submission journal is required")
 	}
 	if submission.State == "" {
 		submission.State = journal.SubmissionPrepared
 	}
-	stored, err := d.Journal.PutSubmission(ctx, submission)
+	stored, duplicate, err := d.Journal.PutSubmissionWithResult(ctx, submission)
 	if err != nil {
-		return journal.Submission{}, err
+		return journal.Submission{}, false, err
 	}
-	if stored.State == journal.SubmissionPrepared {
+	if !duplicate && stored.State == journal.SubmissionPrepared {
 		stored, err = d.Journal.TransitionSubmission(ctx, stored.ID, journal.SubmissionAccepted, d.now())
 		if err != nil {
-			return journal.Submission{}, err
+			return journal.Submission{}, false, err
 		}
 	}
 	journal.RecordSubmission(string(stored.State))
-	return stored, nil
+	return stored, duplicate, nil
 }
 
 // Dispatch moves accepted to dispatching before invoking the harness. An

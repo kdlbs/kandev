@@ -190,6 +190,63 @@ func TestJournalSubmissionIdentityIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestJournalSubmissionQuotaAndGenerationBoundRetirement(t *testing.T) {
+	j, err := Open(Config{
+		Path:            filepath.Join(t.TempDir(), "delivery.bbolt"),
+		MaxJournalBytes: 500,
+		ReserveBytes:    1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	ctx := context.Background()
+	first := Submission{
+		ID:                "submission-quota-1",
+		SessionID:         "session-1",
+		IncarnationID:     "incarnation-1",
+		HarnessGeneration: 1,
+		Hash:              "hash-1",
+		Payload:           make([]byte, 128),
+	}
+	if _, err := j.PutSubmission(ctx, first); err != nil {
+		t.Fatalf("first submission: %v", err)
+	}
+	if _, err := j.PutSubmission(ctx, Submission{
+		ID:                "submission-quota-2",
+		SessionID:         "session-1",
+		IncarnationID:     "incarnation-1",
+		HarnessGeneration: 1,
+		Hash:              "hash-2",
+		Payload:           make([]byte, 128),
+	}); !errors.Is(err, ErrJournalFull) {
+		t.Fatalf("second submission error = %v, want ErrJournalFull", err)
+	}
+	if _, err := j.RetireSubmission(ctx, first.ID, first.HarnessGeneration); !errors.Is(err, ErrSubmissionGeneration) {
+		t.Fatalf("same-generation retirement error = %v, want ErrSubmissionGeneration", err)
+	}
+	retired, err := j.RetireSubmission(ctx, first.ID, first.HarnessGeneration+1)
+	if err != nil {
+		t.Fatalf("new-generation retirement: %v", err)
+	}
+	if retired.ID != first.ID {
+		t.Fatalf("retired submission = %#v", retired)
+	}
+	if _, err := j.GetSubmission(ctx, first.ID); !errors.Is(err, ErrSubmissionNotFound) {
+		t.Fatalf("retired submission lookup error = %v, want ErrSubmissionNotFound", err)
+	}
+	if _, err := j.PutSubmission(ctx, Submission{
+		ID:                "submission-quota-2",
+		SessionID:         "session-1",
+		IncarnationID:     "incarnation-1",
+		HarnessGeneration: 1,
+		Hash:              "hash-2",
+		Payload:           make([]byte, 128),
+	}); err != nil {
+		t.Fatalf("submission after retirement: %v", err)
+	}
+}
+
 func TestJournalTerminalEventMarksSubmissionAtomically(t *testing.T) {
 	j, err := Open(Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
 	if err != nil {

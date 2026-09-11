@@ -26,17 +26,18 @@ const (
 )
 
 var (
-	ErrJournalCorrupt      = errors.New("agent delivery journal is corrupt")
-	ErrJournalNewerVersion = errors.New("agent delivery journal uses a newer version")
-	ErrJournalFull         = errors.New("agent delivery journal is full")
-	ErrStreamFull          = errors.New("agent delivery stream is full")
-	ErrStreamNotFound      = errors.New("agent delivery stream not found")
-	ErrCursorExpired       = errors.New("agent delivery cursor expired")
-	ErrSequenceConflict    = errors.New("agent delivery sequence conflict")
-	ErrSubmissionConflict  = errors.New("agent delivery submission conflict")
-	ErrSubmissionNotFound  = errors.New("agent delivery submission not found")
-	ErrSubmissionState     = errors.New("invalid agent delivery submission transition")
-	ErrOwnerMismatch       = errors.New("agent delivery owner mismatch")
+	ErrJournalCorrupt       = errors.New("agent delivery journal is corrupt")
+	ErrJournalNewerVersion  = errors.New("agent delivery journal uses a newer version")
+	ErrJournalFull          = errors.New("agent delivery journal is full")
+	ErrStreamFull           = errors.New("agent delivery stream is full")
+	ErrStreamNotFound       = errors.New("agent delivery stream not found")
+	ErrCursorExpired        = errors.New("agent delivery cursor expired")
+	ErrSequenceConflict     = errors.New("agent delivery sequence conflict")
+	ErrSubmissionConflict   = errors.New("agent delivery submission conflict")
+	ErrSubmissionNotFound   = errors.New("agent delivery submission not found")
+	ErrSubmissionState      = errors.New("invalid agent delivery submission transition")
+	ErrSubmissionGeneration = errors.New("agent delivery submission generation is not eligible for retirement")
+	ErrOwnerMismatch        = errors.New("agent delivery owner mismatch")
 )
 
 var (
@@ -172,7 +173,10 @@ func (j *Journal) initialize() error {
 		if version == nil {
 			return initializeFreshJournal(tx, meta)
 		}
-		return validateExistingJournal(tx, meta, version)
+		if err := validateExistingJournal(tx, meta, version); err != nil {
+			return err
+		}
+		return recalculateJournalBytes(tx)
 	})
 	if err != nil {
 		return fmt.Errorf("initialize delivery journal: %w", err)
@@ -228,6 +232,33 @@ func validateJournalBuckets(tx *bolt.Tx) error {
 		}
 	}
 	return nil
+}
+
+func recalculateJournalBytes(tx *bolt.Tx) error {
+	var total int64
+	add := func(raw []byte) error {
+		if raw == nil {
+			return nil
+		}
+		if int64(len(raw)) > (int64(^uint64(0)>>1) - total) {
+			return ErrJournalCorrupt
+		}
+		total += int64(len(raw))
+		return nil
+	}
+	events := tx.Bucket(bucketEvents)
+	if err := events.ForEach(func(streamID, value []byte) error {
+		if value != nil {
+			return ErrJournalCorrupt
+		}
+		return events.Bucket(streamID).ForEach(func(_, event []byte) error { return add(event) })
+	}); err != nil {
+		return err
+	}
+	if err := tx.Bucket(bucketSubmissions).ForEach(func(_, submission []byte) error { return add(submission) }); err != nil {
+		return err
+	}
+	return tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(total))
 }
 
 func (j *Journal) Close() error {
@@ -399,7 +430,7 @@ func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) 
 		return err
 	}
 	if event.Terminal && event.SubmissionID != "" {
-		return markSubmissionTerminalTx(ctx, tx, event.SubmissionID, event.Sequence)
+		return markSubmissionTerminalTx(ctx, tx, event.SubmissionID, event.Sequence, j)
 	}
 	return nil
 }
@@ -450,7 +481,14 @@ func validateAppendCapacity(j *Journal, stream Stream, journalBytes, eventBytes 
 	if stream.Bytes+eventBytes > j.config.MaxStreamBytes {
 		return ErrStreamFull
 	}
-	if journalBytes+eventBytes > j.config.MaxJournalBytes-j.config.ReserveBytes {
+	return validateJournalCapacity(j, journalBytes, eventBytes)
+}
+
+func validateJournalCapacity(j *Journal, journalBytes, additionalBytes int64) error {
+	if additionalBytes <= 0 {
+		return nil
+	}
+	if journalBytes < 0 || additionalBytes > j.config.MaxJournalBytes-j.config.ReserveBytes-journalBytes {
 		return ErrJournalFull
 	}
 	return nil
@@ -635,205 +673,4 @@ func (j *Journal) GetStream(ctx context.Context, streamID string) (Stream, error
 		return nil
 	})
 	return stream, err
-}
-
-func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Submission, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	if submission.ID == "" || submission.Hash == "" {
-		return Submission{}, fmt.Errorf("submission id and hash are required")
-	}
-	if int64(len(submission.Payload)) > j.config.MaxEventBytes {
-		return Submission{}, fmt.Errorf("%w: %d bytes", ErrStreamFull, len(submission.Payload))
-	}
-	if submission.CreatedAt.IsZero() {
-		submission.CreatedAt = time.Now().UTC()
-	}
-	if submission.UpdatedAt.IsZero() {
-		submission.UpdatedAt = submission.CreatedAt
-	}
-	if submission.State == "" {
-		submission.State = SubmissionPrepared
-	}
-	duplicate := false
-	err := j.db.Update(func(tx *bolt.Tx) error {
-		stored, isDuplicate, err := putSubmissionTx(ctx, tx, submission)
-		if err != nil {
-			return err
-		}
-		submission = stored
-		duplicate = isDuplicate
-		return nil
-	})
-	if duplicate {
-		RecordDuplicateSubmission("same_hash")
-	}
-	if errors.Is(err, ErrSubmissionConflict) {
-		RecordDuplicateSubmission("hash_conflict")
-	}
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return submission, err
-}
-
-func putSubmissionTx(ctx context.Context, tx *bolt.Tx, submission Submission) (Submission, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return Submission{}, false, err
-	}
-	bucket := tx.Bucket(bucketSubmissions)
-	if raw := bucket.Get([]byte(submission.ID)); raw != nil {
-		var existing Submission
-		if err := json.Unmarshal(raw, &existing); err != nil {
-			return Submission{}, false, ErrJournalCorrupt
-		}
-		if existing.Hash != submission.Hash {
-			return Submission{}, false, ErrSubmissionConflict
-		}
-		return existing, true, nil
-	}
-	encoded, err := json.Marshal(submission)
-	if err != nil {
-		return Submission{}, false, err
-	}
-	if err := bucket.Put([]byte(submission.ID), encoded); err != nil {
-		return Submission{}, false, err
-	}
-	return submission, false, nil
-}
-
-func markSubmissionTerminalTx(ctx context.Context, tx *bolt.Tx, id string, sequence uint64) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	bucket := tx.Bucket(bucketSubmissions)
-	raw := bucket.Get([]byte(id))
-	if raw == nil {
-		return ErrSubmissionNotFound
-	}
-	var submission Submission
-	if err := json.Unmarshal(raw, &submission); err != nil {
-		return ErrJournalCorrupt
-	}
-	if submission.TerminalEventRetained {
-		if submission.TerminalSequence != sequence {
-			return ErrSequenceConflict
-		}
-		return nil
-	}
-	submission.TerminalEventRetained = true
-	submission.TerminalSequence = sequence
-	submission.UpdatedAt = time.Now().UTC()
-	encoded, err := json.Marshal(submission)
-	if err != nil {
-		return err
-	}
-	return bucket.Put([]byte(id), encoded)
-}
-
-func (j *Journal) GetSubmission(ctx context.Context, id string) (Submission, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	var submission Submission
-	err := j.db.View(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		raw := tx.Bucket(bucketSubmissions).Get([]byte(id))
-		if raw == nil {
-			return ErrSubmissionNotFound
-		}
-		return json.Unmarshal(raw, &submission)
-	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return submission, err
-}
-
-// HasUnresolvedWork reports whether the retained journal contains work that
-// cannot be silently downgraded to a legacy delivery path. It covers both
-// prompt outcomes and event records that still need backend acknowledgment.
-func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	var unresolved bool
-	err := j.db.View(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := tx.Bucket(bucketSubmissions).ForEach(func(_, raw []byte) error {
-			if raw == nil {
-				return nil
-			}
-			var submission Submission
-			if err := json.Unmarshal(raw, &submission); err != nil {
-				return ErrJournalCorrupt
-			}
-			switch submission.State {
-			case SubmissionPrepared, SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown:
-				unresolved = true
-			case SubmissionCompleted:
-				if !submission.TerminalEventRetained {
-					unresolved = true
-				}
-			}
-			return nil
-		}); err != nil || unresolved {
-			return err
-		}
-		return tx.Bucket(bucketStreamMeta).ForEach(func(_, raw []byte) error {
-			if raw == nil {
-				return nil
-			}
-			stream, err := decodeStream(raw)
-			if err != nil {
-				return err
-			}
-			if stream.HighWater > stream.Acknowledged {
-				unresolved = true
-			}
-			return nil
-		})
-	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return unresolved, err
-}
-
-func (j *Journal) TransitionSubmission(ctx context.Context, id string, next SubmissionState, updatedAt time.Time) (Submission, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	var submission Submission
-	err := j.db.Update(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		bucket := tx.Bucket(bucketSubmissions)
-		raw := bucket.Get([]byte(id))
-		if raw == nil {
-			return ErrSubmissionNotFound
-		}
-		if err := json.Unmarshal(raw, &submission); err != nil {
-			return ErrJournalCorrupt
-		}
-		if !validSubmissionTransition(submission.State, next) {
-			return ErrSubmissionState
-		}
-		submission.State = next
-		if updatedAt.IsZero() {
-			updatedAt = time.Now().UTC()
-		}
-		submission.UpdatedAt = updatedAt
-		encoded, err := json.Marshal(submission)
-		if err != nil {
-			return err
-		}
-		return bucket.Put([]byte(id), encoded)
-	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return submission, err
 }

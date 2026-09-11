@@ -256,9 +256,8 @@ function CompletedSessionActions({
               >
                 <Button
                   variant="default"
-                  size="sm"
                   data-testid="recovery-resume-button"
-                  className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+                  className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
                   onClick={handleResume}
                   disabled={busyAction !== null || !profileExists}
                 >
@@ -274,8 +273,7 @@ function CompletedSessionActions({
         )}
         <Button
           variant="outline"
-          size="sm"
-          className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+          className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
           onClick={() => {
             if (taskId) onShowDialog(true);
           }}
@@ -322,9 +320,8 @@ function RecoverableSessionButtons({
             >
               <Button
                 variant="default"
-                size="sm"
                 data-testid="recovery-resume-button"
-                className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+                className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
                 onClick={onResume}
                 disabled={busyAction !== null || !profileExists}
               >
@@ -340,8 +337,7 @@ function RecoverableSessionButtons({
       )}
       <Button
         variant="outline"
-        size="sm"
-        className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
+        className="w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
         onClick={onFreshStart}
         disabled={busyAction !== null}
         data-testid="recovery-fresh-button"

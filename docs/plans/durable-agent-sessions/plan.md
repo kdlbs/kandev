@@ -137,7 +137,7 @@ Without a feature flag, a regression requires a corrected release or a documente
 ### Refreshed implementation baseline
 
 The initial investigation used `28581093085ab7a903d7ee331ad7c713ea159a7e`.
-The branch now includes verified main `65d64f6fa9f85b4977b8cdd62cf162380732effc` by fast-forward.
+The branch now includes verified main `407ed4f1a586385f3f0f6d86f9ee928d8fce822f` by fast-forward.
 The original draft files survived the update.
 This revision reconciles the following changes:
 
@@ -333,16 +333,15 @@ All work is sequential. Wave numbers do not authorize parallel agents.
 ## Verification results
 
 Implementation is complete on 2026-09-11 against main
-`65d64f6fa9f85b4977b8cdd62cf162380732effc`.
+`407ed4f1a586385f3f0f6d86f9ee928d8fce822f`.
 
 - Focused backend lifecycle, journal, task SQLite, agentctl, API, process, and orchestrator suites pass.
 - Focused race coverage passes for orchestrator, agentctl API/process/journal, runtime agentctl, and lifecycle.
 - Store conformance and persistence upgrade checks pass.
 - Backend lint and SQL guard pass.
 - Agentctl native and Linux/macOS cross-builds pass.
-- Focused web recovery tests pass; web lint and i18n checks pass with all required locales synchronized.
+- Focused desktop and mobile web recovery tests pass; web lint, typecheck, and i18n checks pass with all required locales synchronized.
 - Public documentation validators and specification lint pass.
-- Web typecheck reaches two unchanged duplicate-property errors in `lib/types/http.ts` and `lib/ws/handlers/workflows.ts`.
 - PostgreSQL, Docker, SSH, Kind, retained-executor replacement, full browser matrix, and live harness compatibility evidence remain environment-dependent.
 
 The earlier design-package checks also passed: spec lint, 36 linter tests,
@@ -362,7 +361,7 @@ package links, frontmatter references, dependency order, and whitespace checks.
 
 ## Handoff
 
-The implementation branch is ready for commit and PR review. The remaining
-environment-dependent checks are recorded above.
+PR #3598 contains the implementation and is ready for final review fixup. The
+remaining environment-dependent checks are recorded above.
 Automatic context continuation and release publication remain outside this
 package.

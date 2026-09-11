@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -54,6 +55,40 @@ func TestLoadAgentStreamReplayAddsTransportCursor(t *testing.T) {
 	}
 	if replay[0].DeliveryStreamID != "session-1" || replay[0].DeliverySequence != 1 {
 		t.Fatalf("replay cursor = %q/%d", replay[0].DeliveryStreamID, replay[0].DeliverySequence)
+	}
+}
+
+func TestLoadAgentStreamReplayReadsEveryRetainedPage(t *testing.T) {
+	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
+	ctx := context.Background()
+	for sequence := 0; sequence < 1001; sequence++ {
+		payload, err := json.Marshal(adapter.AgentEvent{
+			Type: adapter.EventTypeMessageChunk,
+			Text: fmt.Sprintf("replayed-%d", sequence),
+		})
+		if err != nil {
+			t.Fatalf("marshal event %d: %v", sequence, err)
+		}
+		if _, err := deliveryJournal.Append(ctx, journal.Event{
+			SessionID:     "session-1",
+			IncarnationID: "session-1",
+			StreamID:      "session-1",
+			Type:          adapter.EventTypeMessageChunk,
+			Payload:       payload,
+		}); err != nil {
+			t.Fatalf("append event %d: %v", sequence, err)
+		}
+	}
+
+	replay, err := server.loadAgentStreamReplay(ctx, 0)
+	if err != nil {
+		t.Fatalf("load replay: %v", err)
+	}
+	if len(replay) != 1001 {
+		t.Fatalf("replay length = %d, want 1001", len(replay))
+	}
+	if replay[0].DeliverySequence != 1 || replay[1000].DeliverySequence != 1001 {
+		t.Fatalf("replay sequence range = %d..%d", replay[0].DeliverySequence, replay[1000].DeliverySequence)
 	}
 }
 

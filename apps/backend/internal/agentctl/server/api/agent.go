@@ -744,8 +744,8 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 		return resp
 	}
 
-	adapter := s.procMgr.GetAdapter()
-	if adapter == nil {
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
@@ -768,18 +768,35 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 		})
 		return resp
 	}
-	if resp := unresolvedDeliveryResponse(msg, deliveryCapability); resp != nil {
+	steerDelivery := false
+	if req.Steer {
+		if steerable, ok := agentAdapter.(adapter.SteerablePrompter); ok && steerable.SupportsSteering() {
+			steerDelivery = s.procMgr.CanSteerDelivery(ctx, req.PromptGeneration)
+		}
+	}
+	reconcileExisting := false
+	if deliveryCapability.Unresolved && !steerDelivery {
+		payload, payloadErr := promptSubmissionPayload(req)
+		if payloadErr == nil {
+			reconcileExisting = s.procMgr.DeliverySubmissionMatches(
+				ctx,
+				promptSubmissionID(req, msg.ID),
+				journal.SubmissionHash(payload),
+			)
+		}
+	}
+	if resp := unresolvedDeliveryResponse(msg, deliveryCapability, reconcileExisting || steerDelivery); resp != nil {
 		return resp
 	}
 	submissionID := ""
-	if deliveryCapability.Durable {
+	if deliveryCapability.Durable && !steerDelivery {
 		var resp *ws.Message
 		submissionID, resp = s.admitDurablePrompt(ctx, msg, req)
 		if resp != nil {
 			return resp
 		}
 	}
-	durableDelivery := deliveryCapability.Durable
+	durableDelivery := deliveryCapability.Durable && !steerDelivery
 
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.
@@ -790,7 +807,7 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// the user cancels, or agentctl shuts down.
 	go func() {
 		prompt := func(promptCtx context.Context) error {
-			return promptOrSteer(promptCtx, adapter, req)
+			return promptOrSteer(promptCtx, agentAdapter, req)
 		}
 		var err error
 		if durableDelivery {
@@ -831,8 +848,8 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	return resp
 }
 
-func unresolvedDeliveryResponse(msg *ws.Message, capability journal.StorageCapability) *ws.Message {
-	if !capability.Durable || !capability.Unresolved {
+func unresolvedDeliveryResponse(msg *ws.Message, capability journal.StorageCapability, allowReconciliation bool) *ws.Message {
+	if !capability.Durable || !capability.Unresolved || allowReconciliation {
 		return nil
 	}
 	resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "durable delivery requires reconciliation before a new prompt", map[string]interface{}{
@@ -868,7 +885,7 @@ func (s *Server) admitDurablePrompt(
 	}
 	submissionID := promptSubmissionID(req, msg.ID)
 	sessionID, incarnationID, generation := s.procMgr.DeliverySubmissionIdentity()
-	submission, err := s.procMgr.AdmitDeliverySubmission(ctx, journal.Submission{
+	submission, duplicate, err := s.procMgr.AdmitDeliverySubmissionWithResult(ctx, journal.Submission{
 		ID:                submissionID,
 		SessionID:         sessionID,
 		IncarnationID:     incarnationID,
@@ -881,14 +898,28 @@ func (s *Server) admitDurablePrompt(
 		return "", resp
 	}
 	s.procMgr.TrackDeliverySubmission(submission.ID, req.PromptGeneration)
-	if resp := durableSubmissionResponse(msg, submission); resp != nil {
+	if duplicate {
+		if resp := durableSubmissionResponse(msg, submission, true); resp != nil {
+			return "", resp
+		}
+	}
+	if resp := durableSubmissionResponse(msg, submission, false); resp != nil {
 		return "", resp
 	}
 	return submission.ID, nil
 }
 
-func durableSubmissionResponse(msg *ws.Message, submission journal.Submission) *ws.Message {
+func durableSubmissionResponse(msg *ws.Message, submission journal.Submission, duplicate bool) *ws.Message {
 	switch submission.State {
+	case journal.SubmissionPrepared, journal.SubmissionAccepted:
+		if !duplicate {
+			return nil
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "prompt submission is already admitted; reconcile before retrying", map[string]interface{}{
+			"submission_id": submission.ID,
+			"state":         submission.State,
+		})
+		return resp
 	case journal.SubmissionDispatching, journal.SubmissionInterruptedUnknown:
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "prompt outcome is uncertain; reconcile before retrying", map[string]interface{}{
 			"submission_id": submission.ID,

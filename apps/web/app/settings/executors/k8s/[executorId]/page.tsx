@@ -22,6 +22,7 @@ import { KubernetesDiagnosticsCard } from "@/components/settings/kubernetes-diag
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { saveWithKubernetesSessionConfirmation } from "@/components/settings/kubernetes-save-confirmation";
 import { KubernetesSessionsCard } from "@/components/settings/kubernetes-sessions-card";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useAppStore } from "@/components/state-provider";
 import {
   SettingsSaveCancelledError,
@@ -91,7 +92,7 @@ function ExecutorMessage({ message }: { message: string }) {
       <CardContent className="py-12 text-center">
         <p className="break-words text-sm text-muted-foreground">{message}</p>
         <Button
-          className="mt-4 min-h-11 cursor-pointer"
+          className={settingsActionClassName("mt-4 cursor-pointer")}
           onClick={() => router.push(EXECUTORS_ROUTE)}
         >
           {t("executors:backToExecutors")}
@@ -251,19 +252,17 @@ function KubernetesExecutorHeader({
         <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
           <Button
             variant="destructive"
-            size="sm"
             onClick={onDelete}
             disabled={!canManage}
-            className="min-h-11 cursor-pointer text-sm md:min-h-7 md:text-xs"
+            className={settingsActionClassName("cursor-pointer text-sm md:text-xs")}
           >
             <IconTrash className="mr-1.5 h-4 w-4" />
             {t("executors:deleteExecutor")}
           </Button>
           <Button
             variant="outline"
-            size="sm"
             onClick={() => router.push(EXECUTORS_ROUTE)}
-            className="min-h-11 cursor-pointer text-sm md:min-h-7 md:text-xs"
+            className={settingsActionClassName("cursor-pointer text-sm md:text-xs")}
           >
             {t("executors:backToExecutors")}
           </Button>
@@ -299,7 +298,7 @@ function DeleteExecutorDialog({
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            className="min-h-11 cursor-pointer md:min-h-9"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {t("common:cancel")}
           </Button>
@@ -307,7 +306,7 @@ function DeleteExecutorDialog({
             variant="destructive"
             onClick={onDelete}
             disabled={deleting}
-            className="min-h-11 cursor-pointer md:min-h-9"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>

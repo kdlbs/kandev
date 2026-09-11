@@ -137,6 +137,8 @@ test.describe("Workflow step prompt autocomplete", () => {
   }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
+    const stepId = seedData.steps[0]?.id;
+    expect(stepId).toBeTruthy();
 
     const card = await page.findWorkflowCard("E2E Workflow");
     await expect(card).toBeVisible();
@@ -156,7 +158,8 @@ test.describe("Workflow step prompt autocomplete", () => {
     // Click to open the dropdown
     await agentSelect.click();
 
-    // Select the first non-"none" option (skip "No profile override").
+    // Select the first actual profile option. Session-target choices can appear
+    // before the profile group, so role order does not identify a profile.
     // `count()` is a one-shot read, not an auto-retrying assertion, so gate on
     // the listbox being populated before counting instead of sleeping first.
     //
@@ -164,22 +167,24 @@ test.describe("Workflow step prompt autocomplete", () => {
     // is static markup and is already there while the settings bootstrap is
     // still loading profiles, so a count() taken on it reads 1 and skips the
     // test. Poll the count itself, which is the thing the branch below reads.
-    const options = testPage.getByRole("option");
-    await expect(options.first()).toBeVisible({ timeout: 5_000 });
+    const noProfileOption = testPage.getByTestId(`${stepId}-profile-option-none`);
+    const profileOptions = testPage.locator(
+      `[data-testid^="${stepId}-profile-option-"]:not([data-testid="${stepId}-profile-option-none"])`,
+    );
+    await expect(noProfileOption).toBeVisible({ timeout: 5_000 });
     await expect
-      .poll(() => options.count(), { timeout: 5_000 })
-      .toBeGreaterThan(1)
+      .poll(() => profileOptions.count(), { timeout: 5_000 })
+      .toBeGreaterThan(0)
       // A workspace with genuinely no profiles is a legitimate skip, so this
       // stays tolerant; the poll only removes the race with a slow bootstrap.
       .catch(() => undefined);
-    const optionCount = await options.count();
-    // Need at least 2 options (none + at least one profile)
-    if (optionCount < 2) {
+    const optionCount = await profileOptions.count();
+    if (optionCount < 1) {
       test.skip(true, "No agent profiles available to test with");
       return;
     }
 
-    const profileOption = options.nth(1);
+    const profileOption = profileOptions.first();
     const profileName = await profileOption.textContent();
     await profileOption.click();
 
@@ -204,7 +209,6 @@ test.describe("Workflow step prompt autocomplete", () => {
     await expect(reloadedSelect).toContainText(profileName?.trim() ?? "", { timeout: 10_000 });
 
     // Clean up: reset the step agent profile
-    const stepId = seedData.steps[0]?.id;
     if (stepId) {
       await apiClient.updateWorkflowStep(stepId, { agent_profile_id: "" });
     }

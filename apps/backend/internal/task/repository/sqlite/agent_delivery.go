@@ -492,6 +492,53 @@ func insertDeliveryEffectTx(ctx context.Context, tx deliveryEffectTx, rebind fun
 	return reconcileExistingDeliveryEffect(ctx, tx, rebind, effect)
 }
 
+// completeDeliveryEffectTx claims a pending intent at the same transaction as
+// its authoritative consumer transition. A completed effect suppresses a
+// replay; a pending effect remains eligible for exactly one consumer to claim.
+func completeDeliveryEffectTx(ctx context.Context, tx deliveryEffectTx, rebind func(string) string, effect *models.AgentDeliveryEffect) (bool, error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, fmt.Errorf("effect key is required")
+	}
+	now := time.Now().UTC()
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = now
+	}
+	result, err := tx.ExecContext(ctx, rebind(`
+		UPDATE agent_delivery_effects
+		SET state = ?, completed_at = ?
+		WHERE effect_key = ? AND effect_type = ? AND state = ?`),
+		models.DeliveryEffectCompleted, now, effect.EffectKey, effect.EffectType,
+		models.DeliveryEffectPending)
+	if err != nil {
+		return false, err
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return false, rowsErr
+	} else if affected == 1 {
+		return true, nil
+	}
+	completed := *effect
+	completed.State = models.DeliveryEffectCompleted
+	completed.CompletedAt = &now
+	inserted, err := insertDeliveryEffectTx(ctx, tx, rebind, &completed)
+	if err != nil {
+		return false, err
+	}
+	if inserted {
+		return true, nil
+	}
+	var effectType string
+	if err := tx.QueryRowContext(ctx, rebind(`
+		SELECT effect_type FROM agent_delivery_effects WHERE effect_key = ?`),
+		effect.EffectKey).Scan(&effectType); err != nil {
+		return false, err
+	}
+	if effectType != effect.EffectType {
+		return false, repoerrors.ErrAgentDeliveryEffectConflict
+	}
+	return false, nil
+}
+
 func reconcileExistingDeliveryEffect(ctx context.Context, tx deliveryEffectTx, rebind func(string) string, effect *models.AgentDeliveryEffect) (bool, error) {
 	var existing struct {
 		StreamID   string

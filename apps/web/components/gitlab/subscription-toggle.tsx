@@ -135,9 +135,8 @@ export function SubscriptionToggle(identity: SubscriptionIdentity) {
   const Icon = subscribed ? IconBellOff : IconBell;
   return (
     <Button
-      size="sm"
       variant="outline"
-      className="h-11 cursor-pointer gap-1.5 sm:h-8"
+      className="cursor-pointer gap-1.5"
       disabled={loading}
       aria-label={label}
       title={label}

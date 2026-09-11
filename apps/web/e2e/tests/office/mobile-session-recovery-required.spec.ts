@@ -50,7 +50,7 @@ test.describe("mobile: Office session recovery required", () => {
     );
     const box = await link.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(36);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile Office recovery notice");
   });
 });

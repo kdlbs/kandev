@@ -44,6 +44,7 @@ var catalog = []Descriptor{
 		"workspaces", "tasks", "harness_session_generations", "session_restore_attempts",
 		"session_continuation_snapshots", "session_recovery_blocks", "agent_delivery_submissions",
 		"agent_delivery_inbox", "agent_delivery_cursors", "agent_delivery_effects",
+		"task_workflow_session_bindings",
 	}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "workflow", OwnerPackage: "internal/workflow/repository", RequiredTables: []string{"workflow_templates", "workflow_steps"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "analytics", OwnerPackage: "internal/analytics/repository", RequiredTables: []string{"tasks"}, DependsOn: []string{"task", "workflow"}, Capabilities: []Capability{CapabilityTimestamp}},

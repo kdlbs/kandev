@@ -46,23 +46,26 @@ type AgentExecution struct {
 	OfficeAgentProfileID      string
 	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
 	ContainerID               string
-	ContainerIP               string               // IP address of the container for agentctl communication
-	WorkspacePath             string               // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots      []string             // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID              string               // ACP session ID to resume, if available
-	DeliveryStreamID          string               // Generation-scoped durable agentctl stream
-	DeliveryIncarnationID     string               // Kandev session incarnation owning the stream
-	DeliveryHarnessGeneration uint64               // Native harness generation owning the stream
-	AgentCommand              string               // Command to start the agent subprocess
-	ContinueCommand           string               // Command for follow-up prompts (one-shot agents)
-	AgentArgs                 []string             // Structured argv for AgentCommand
-	ContinueArgs              []string             // Structured argv for ContinueCommand
-	RuntimeName               agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
-	Status                    v1.AgentStatus
-	StartedAt                 time.Time
-	FinishedAt                *time.Time
-	ExitCode                  *int
-	ErrorMessage              string
+	ContainerIP               string   // IP address of the container for agentctl communication
+	WorkspacePath             string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID              string   // ACP session ID to resume, if available
+	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	// ForceContextContinuation records that this execution was explicitly
+	// authorized to replace native context with a bounded Kandev snapshot.
+	ForceContextContinuation bool
+	AgentCommand             string               // Command to start the agent subprocess
+	ContinueCommand          string               // Command for follow-up prompts (one-shot agents)
+	AgentArgs                []string             // Structured argv for AgentCommand
+	ContinueArgs             []string             // Structured argv for ContinueCommand
+	RuntimeName              agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
+	Status                   v1.AgentStatus
+	StartedAt                time.Time
+	FinishedAt               *time.Time
+	ExitCode                 *int
+	ErrorMessage             string
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.

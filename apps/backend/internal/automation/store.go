@@ -94,6 +94,11 @@ const createTablesSQL = `
 		thread_action TEXT DEFAULT '',
 		thread_reason TEXT DEFAULT '',
 		display_title TEXT DEFAULT '',
+		recovery_block_id TEXT DEFAULT '',
+		recovery_session_id TEXT DEFAULT '',
+		recovery_prompt TEXT DEFAULT '',
+		recovery_metadata TEXT NOT NULL DEFAULT '{}',
+		recovery_workflow_step_id TEXT DEFAULT '',
 		created_at DATETIME NOT NULL
 	);
 
@@ -152,19 +157,24 @@ const createTablesSQL = `
 // automationColumns needs the column to exist on every DB it queries,
 // including one initialised before the column was ever added.
 const (
-	migrateTaskTitleSQL          = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
-	migrateExecutionModeSQL      = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
-	migrateRepositoryIDSQL       = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
-	migrateContinuationPolicySQL = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
-	migrateContinuationTaskSQL   = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
-	migrateTaskModeSQL           = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
-	migrateRepositoryModeSQL     = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'none'`
-	migrateRepositoryBranchSQL   = `ALTER TABLE automation_repositories ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`
-	migrateRunSessionSQL         = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
-	migrateRunTurnSQL            = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
-	migrateRunThreadActionSQL    = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
-	migrateRunThreadReasonSQL    = `ALTER TABLE automation_runs ADD COLUMN thread_reason TEXT DEFAULT ''`
-	migrateRunDisplayTitleSQL    = `ALTER TABLE automation_runs ADD COLUMN display_title TEXT DEFAULT ''`
+	migrateTaskTitleSQL           = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
+	migrateExecutionModeSQL       = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
+	migrateRepositoryIDSQL        = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
+	migrateContinuationPolicySQL  = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
+	migrateContinuationTaskSQL    = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
+	migrateTaskModeSQL            = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
+	migrateRepositoryModeSQL      = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'none'`
+	migrateRepositoryBranchSQL    = `ALTER TABLE automation_repositories ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`
+	migrateRunSessionSQL          = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
+	migrateRunTurnSQL             = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
+	migrateRunThreadActionSQL     = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
+	migrateRunThreadReasonSQL     = `ALTER TABLE automation_runs ADD COLUMN thread_reason TEXT DEFAULT ''`
+	migrateRunDisplayTitleSQL     = `ALTER TABLE automation_runs ADD COLUMN display_title TEXT DEFAULT ''`
+	migrateRunRecoveryBlockSQL    = `ALTER TABLE automation_runs ADD COLUMN recovery_block_id TEXT DEFAULT ''`
+	migrateRunRecoverySessionSQL  = `ALTER TABLE automation_runs ADD COLUMN recovery_session_id TEXT DEFAULT ''`
+	migrateRunRecoveryPromptSQL   = `ALTER TABLE automation_runs ADD COLUMN recovery_prompt TEXT DEFAULT ''`
+	migrateRunRecoveryMetadataSQL = `ALTER TABLE automation_runs ADD COLUMN recovery_metadata TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRecoveryStepSQL     = `ALTER TABLE automation_runs ADD COLUMN recovery_workflow_step_id TEXT DEFAULT ''`
 )
 
 // automationColumns is the explicit column list for every query that scans a
@@ -210,6 +220,11 @@ func (s *Store) initSchema() error {
 		{"automation_runs.thread_action", schemaSQLForDriver(migrateRunThreadActionSQL, s.db.DriverName())},
 		{"automation_runs.thread_reason", schemaSQLForDriver(migrateRunThreadReasonSQL, s.db.DriverName())},
 		{"automation_runs.display_title", schemaSQLForDriver(migrateRunDisplayTitleSQL, s.db.DriverName())},
+		{"automation_runs.recovery_block_id", schemaSQLForDriver(migrateRunRecoveryBlockSQL, s.db.DriverName())},
+		{"automation_runs.recovery_session_id", schemaSQLForDriver(migrateRunRecoverySessionSQL, s.db.DriverName())},
+		{"automation_runs.recovery_prompt", schemaSQLForDriver(migrateRunRecoveryPromptSQL, s.db.DriverName())},
+		{"automation_runs.recovery_metadata", schemaSQLForDriver(migrateRunRecoveryMetadataSQL, s.db.DriverName())},
+		{"automation_runs.recovery_workflow_step_id", schemaSQLForDriver(migrateRunRecoveryStepSQL, s.db.DriverName())},
 	}
 	for _, migration := range migrations {
 		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
@@ -218,6 +233,12 @@ func (s *Store) initSchema() error {
 	}
 	if err := migrate.Err(); err != nil {
 		return fmt.Errorf("required automation migration: %w", err)
+	}
+	if _, err := s.db.Exec(schemaSQLForDriver(
+		`CREATE INDEX IF NOT EXISTS idx_automation_runs_recovery ON automation_runs(recovery_block_id, status)`,
+		s.db.DriverName(),
+	)); err != nil {
+		return fmt.Errorf("create automation recovery index: %w", err)
 	}
 	if err := s.backfillLegacyRepositoryIDs(); err != nil {
 		return err
@@ -1117,11 +1138,13 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
 			dedup_key, trigger_data, error_message, session_id, turn_id, thread_action, thread_reason,
-			display_title, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			display_title, recovery_block_id, recovery_session_id, recovery_prompt, recovery_metadata,
+			recovery_workflow_step_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
 		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
-		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.CreatedAt)
+		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.RecoveryBlockID, r.RecoverySessionID,
+		r.RecoveryPrompt, r.RecoveryMetadataJSON, r.RecoveryWorkflowStepID, r.CreatedAt)
 	return err
 }
 
@@ -1180,7 +1203,9 @@ func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID 
 func (s *Store) BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action ThreadAction, reason string) error {
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs
-		SET task_id = ?, session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, status = ?
+		SET task_id = ?, session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, status = ?,
+			recovery_block_id = '', recovery_session_id = '', recovery_prompt = '', recovery_metadata = '{}',
+			recovery_workflow_step_id = ''
 		WHERE id = ? AND status IN (?, ?)`),
 		taskID, sessionID, turnID, action, reason, string(RunStatusTaskCreated),
 		runID, string(RunStatusTriggered), string(RunStatusTaskCreated))
@@ -1191,6 +1216,57 @@ func (s *Store) BindRun(ctx context.Context, runID, taskID, sessionID, turnID st
 		return fmt.Errorf("automation run %s is not bindable", runID)
 	}
 	return nil
+}
+
+// ParkRunForRecovery retains the dispatch input for an admitted run whose
+// native session outcome is unresolved. The row stays open so it continues to
+// occupy the automation concurrency slot until the block is resolved and the
+// original operation either binds or reaches a terminal failure.
+func (s *Store) ParkRunForRecovery(
+	ctx context.Context,
+	runID, taskID, blockID, sessionID, prompt, metadataJSON, workflowStepID string,
+	action ThreadAction,
+	reason string,
+) error {
+	if runID == "" || blockID == "" {
+		return fmt.Errorf("automation recovery run and block identities are required")
+	}
+	if metadataJSON == "" {
+		metadataJSON = "{}"
+	}
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs
+		SET task_id = ?, recovery_block_id = ?, recovery_session_id = ?, recovery_prompt = ?,
+			recovery_metadata = ?, recovery_workflow_step_id = ?, thread_action = ?, thread_reason = ?
+		WHERE id = ? AND status IN (?, ?)`),
+		taskID, blockID, sessionID, prompt, metadataJSON, workflowStepID, action, reason,
+		runID, string(RunStatusTriggered), string(RunStatusTaskCreated))
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return fmt.Errorf("automation run %s is not parkable", runID)
+	}
+	return nil
+}
+
+// ListRecoveryRuns returns open automation runs parked on one resolved block.
+// The block identity is mandatory so resolving one session block cannot
+// accidentally release a later recovery attempt for the same session.
+func (s *Store) ListRecoveryRuns(ctx context.Context, blockID string) ([]*AutomationRun, error) {
+	if blockID == "" {
+		return nil, nil
+	}
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT * FROM automation_runs
+		WHERE recovery_block_id = ? AND status IN (?, ?)
+		ORDER BY created_at ASC, id ASC`),
+		blockID, string(RunStatusTriggered), string(RunStatusTaskCreated))
+	for _, run := range runs {
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	return runs, err
 }
 
 // MarkRunTerminal settles one exact run. Empty session/turn arguments are
