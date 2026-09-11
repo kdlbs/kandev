@@ -116,7 +116,7 @@ function BootstrapRecoveryActions({
           >
             <Button
               variant="default"
-              className="h-auto min-h-11 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto sm:min-h-7"
+              className="h-auto min-h-7 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto [@media(pointer:coarse)]:min-h-11"
               onClick={onResume}
               disabled={busyAction !== null || !profileExists}
               data-testid="recovery-resume-button"
@@ -136,7 +136,7 @@ function BootstrapRecoveryActions({
       </Tooltip>
       <Button
         variant="outline"
-        className="h-auto min-h-11 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto sm:min-h-7"
+        className="h-auto min-h-7 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto [@media(pointer:coarse)]:min-h-11"
         onClick={onRestore}
         disabled={busyAction !== null}
         data-testid="recovery-restore-workspace-button"
@@ -150,7 +150,7 @@ function BootstrapRecoveryActions({
       </Button>
       <Button
         variant="outline"
-        className="h-auto min-h-11 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto sm:min-h-7"
+        className="h-auto min-h-7 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto [@media(pointer:coarse)]:min-h-11"
         onClick={onFreshStart}
         disabled={busyAction !== null}
         data-testid="recovery-fresh-button"
@@ -161,7 +161,7 @@ function BootstrapRecoveryActions({
       {hasBranchRecovery ? (
         <Button
           variant="outline"
-          className="h-auto min-h-11 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto sm:min-h-7"
+          className="h-auto min-h-7 w-full cursor-pointer justify-start gap-1.5 text-xs sm:w-auto [@media(pointer:coarse)]:min-h-11"
           onClick={onNewBranch}
           disabled={busyAction !== null}
           data-testid="recovery-new-branch-button"

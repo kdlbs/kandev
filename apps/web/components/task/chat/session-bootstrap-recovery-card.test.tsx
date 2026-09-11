@@ -89,7 +89,7 @@ describe("SessionBootstrapRecoveryCard", () => {
       "recovery-restore-workspace-button",
       "recovery-fresh-button",
     ]) {
-      expect(screen.getByTestId(testId).className).toContain("min-h-11");
+      expect(screen.getByTestId(testId).className).toContain("[@media(pointer:coarse)]:min-h-11");
     }
 
     fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));

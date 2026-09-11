@@ -1,6 +1,6 @@
 # ADR-2026-09-11-contribution-resume-preflight: Separate resume admission from push history readiness
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-09-11
 **Area:** backend, protocol, security
 
@@ -43,4 +43,5 @@ resume, workspace promotion, mixed failures, and malformed probe output.
 ## Delivery
 
 See the [fix package](../plans/contribution-resume-recovery/plan.md).
-This decision is proposed; production behavior has not changed.
+Production behavior implements this decision. The delivery and regression
+evidence are recorded in the [fix package](../plans/contribution-resume-recovery/plan.md).

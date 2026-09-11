@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: agents
 created: 2026-09-11
 requirements:
@@ -22,7 +22,7 @@ to own contribution admission and durable bootstrap failure projection.
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005 | Workspace-only registration |
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006 | Recovery presentation ownership; responsive amendment |
 
-The following amendments are pending implementation in the
+The following amendments are implemented in the
 [contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md).
 They qualify the older recovery-surface descriptions below.
 

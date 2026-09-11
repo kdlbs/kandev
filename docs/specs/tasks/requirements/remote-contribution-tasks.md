@@ -44,5 +44,6 @@ user intent for destructive replacement, and evidence-based version comparison.
 
 ## Delivery
 
-Requirement 002 is specified but not implemented. See the
-[contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md).
+Requirement 002 is implemented. See the
+[contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md)
+for the admission tests and verification evidence.

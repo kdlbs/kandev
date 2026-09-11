@@ -263,11 +263,14 @@ checks, 36 specification-linter tests, full specification lint, and
 
 The code-only review findings are resolved. Bootstrap failure persistence now
 uses one execution-, state-, and error-stamp-fenced repository write before
-publishing `FAILED`; deterministic tests cover a successor installed after the
-last ownership read for both absent and unchanged-stamp errors. The detail,
-preview, and Quick Chat owners now receive the automatic resumption state,
-preserve workspace-only success and dual failure causes, share the in-flight
-busy latch, and keep manual failures in the same sanitized card disclosure.
+publishing `FAILED`; executor registration and failure mutation serialize on
+the same session row, and bounded ownership-read retries handle transient
+lookups. Deterministic tests cover successor registration for both absent and
+unchanged-stamp errors, plus the terminal promotion race. The detail, preview,
+and Quick Chat owners now receive the automatic resumption state, preserve
+workspace-only success and dual failure causes, share the in-flight busy latch,
+and keep manual failures in the same sanitized card disclosure. Phone action
+targets remain at least 44 pixels for coarse pointers.
 
 Verification passed:
 

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
@@ -90,7 +90,7 @@ source error only after its write and relaunch or move succeed.
 
 ### Asynchronous startup amendment
 
-Pending implementation: `Executor.handleAgentProcessStartFailure` and
+Implemented by `Executor.handleAgentProcessStartFailure` and
 `Service.handleAgentStartFailed` must preserve the launch phase through the
 existing terminal path. After provider-specific auth/runtime handling and
 current-execution guards, persist one typed `last_agent_error` using the

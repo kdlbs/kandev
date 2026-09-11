@@ -26,7 +26,8 @@ import {
   TaskLaunchErrorProvider,
   useTaskLaunchErrorContext,
 } from "@/components/task/task-launch-error-context";
-import { ownsSessionRecoveryChat } from "@/lib/session-recovery-presentation";
+import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
 import {
   buildDebugEntries,
   buildArchivedValue,
@@ -228,16 +229,39 @@ function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDe
 }
 
 function TaskPageRecoveryFeedback({
+  taskId,
   sessionId,
   resumption,
   workspaceId,
+  isPassthrough,
 }: {
+  taskId: string;
   sessionId: string | null;
   resumption: TaskPageInnerProps["resumption"];
   workspaceId: string | null;
+  isPassthrough: boolean;
 }) {
   const launchErrorContext = useTaskLaunchErrorContext();
-  if (ownsSessionRecoveryChat(launchErrorContext?.statusSummary?.active_error, sessionId)) {
+  const sessionMetadata = useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId]?.metadata ?? null) : null,
+  );
+  const bootstrapRecoveryError = selectSessionRecoveryError(
+    launchErrorContext?.statusSummary?.active_error,
+    sessionId,
+    sessionMetadata,
+  );
+  if (bootstrapRecoveryError && sessionId && isPassthrough) {
+    return (
+      <SessionBootstrapRecoveryCard
+        taskId={taskId}
+        sessionId={sessionId}
+        workspaceId={workspaceId}
+        error={bootstrapRecoveryError}
+        automaticRecovery={resumption}
+      />
+    );
+  }
+  if (bootstrapRecoveryError) {
     return null;
   }
   return (
@@ -396,9 +420,11 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 }}
               >
                 <TaskPageRecoveryFeedback
+                  taskId={task.id}
                   sessionId={effectiveSessionId}
                   resumption={props.resumption}
                   workspaceId={task?.workspace_id ?? null}
+                  isPassthrough={sessionPanel.isSessionPassthrough}
                 />
                 <TaskLayout {...layoutProps} />
               </TaskLaunchErrorProvider>

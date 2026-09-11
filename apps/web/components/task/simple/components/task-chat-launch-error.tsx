@@ -14,6 +14,7 @@ type TaskChatLaunchErrorProps = {
   statusSummary?: TaskStatusSummary | null;
   /** When supplied, only render the error that belongs to this session. */
   sessionId?: string | null;
+  sessionMetadata?: Record<string, unknown> | null;
   repositories?: TaskRepository[];
 };
 
@@ -22,11 +23,12 @@ export function TaskChatLaunchError({
   workspaceId,
   statusSummary,
   sessionId,
+  sessionMetadata,
   repositories,
 }: TaskChatLaunchErrorProps) {
   const launchErrorContext = useTaskLaunchErrorContext();
   const candidate = statusSummary?.active_error;
-  const bootstrapError = selectSessionRecoveryError(candidate, sessionId);
+  const bootstrapError = selectSessionRecoveryError(candidate, sessionId, sessionMetadata);
   if (bootstrapError && sessionId) {
     return (
       <SessionBootstrapRecoveryCard

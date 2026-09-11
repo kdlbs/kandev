@@ -24,7 +24,7 @@ This design record preserves the technical source for the capability mapped to R
 
 ## Contribution resume preflight
 
-This amendment is pending implementation in the
+This amendment is implemented in the
 [fix package](../../../plans/contribution-resume-recovery/plan.md).
 The [resume preflight decision](../../../decisions/2026-09-11-contribution-resume-preflight.md)
 qualifies the startup preflight policy below for existing contribution sessions.

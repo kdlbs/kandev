@@ -21,6 +21,37 @@ describe("session recovery presentation", () => {
     expect(ownsSessionRecoveryChat(bootstrapError, "session-1")).toBe(true);
   });
 
+  it("selects an older session's persisted bootstrap error instead of the task-wide newest error", () => {
+    const selectedSessionMetadata = {
+      last_agent_error: {
+        message: "The selected session could not start.",
+        occurred_at: "2026-09-11T09:00:00Z",
+        stamp: "bootstrap-session-1",
+        phase: "bootstrap",
+        code: "permission_denied",
+        details: "safe structured details",
+        execution_id: "execution-session-1",
+      },
+    };
+
+    expect(
+      selectSessionRecoveryError(
+        { ...bootstrapError, session_id: "session-2", stamp: "bootstrap-2" },
+        "session-1",
+        selectedSessionMetadata,
+      ),
+    ).toEqual({
+      session_id: "session-1",
+      stamp: "bootstrap-session-1",
+      occurred_at: "2026-09-11T09:00:00Z",
+      preview: "The selected session could not start.",
+      phase: "bootstrap",
+      category: "permission_denied",
+      details: "safe structured details",
+      execution_id: "execution-session-1",
+    });
+  });
+
   it.each([
     { ...bootstrapError, phase: "agent" },
     { ...bootstrapError, session_id: undefined },

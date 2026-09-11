@@ -197,11 +197,19 @@ func (r *Repository) CommitBootstrapFailureIfCurrentExecution(
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("failed to serialize bootstrap failure: %w", err)
 	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := lockTaskSessionRow(ctx, tx, sessionID); err != nil {
+		return false, time.Time{}, err
+	}
 	now := r.nowUTC()
 	completedAt := now
 	query, args := bootstrapFailureCommitQuery(r.db.DriverName(), string(payload), errorValue.Message, now, completedAt,
 		taskID, sessionID, agentExecutionID, string(expectedState), expectedStamp)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, time.Time{}, err
 	}
@@ -209,7 +217,30 @@ func (r *Repository) CommitBootstrapFailureIfCurrentExecution(
 	if err != nil {
 		return false, time.Time{}, err
 	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, err
+	}
 	return rows > 0, now, nil
+}
+
+// lockTaskSessionRow serializes executor ownership changes with session
+// lifecycle mutations. PostgreSQL can hold a row lock without changing data;
+// SQLite needs a no-op UPDATE to acquire the transaction write lock.
+func lockTaskSessionRow(ctx context.Context, tx *sqlx.Tx, sessionID string) (bool, error) {
+	if dialect.IsPostgres(tx.DriverName()) {
+		var id string
+		err := tx.QueryRowxContext(ctx, tx.Rebind(`SELECT id FROM task_sessions WHERE id = ? FOR UPDATE`), sessionID).Scan(&id)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_sessions SET updated_at = updated_at WHERE id = ?`), sessionID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 func bootstrapFailureCommitQuery(

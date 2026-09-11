@@ -1417,6 +1417,9 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
 	_, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		if err := m.ensureLaunchSessionStillActive(sharedCtx, req.SessionID, executionAdmissionAgent); err != nil {
+			return nil, err
+		}
 		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
 		if acquireErr != nil {
 			return nil, acquireErr

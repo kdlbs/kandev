@@ -22,9 +22,10 @@ import { PreviewPlanPanel, usePreviewPlanSummary } from "./preview-plan-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskLaunchErrorProvider } from "./task-launch-error-context";
 import {
-  ownsSessionRecoveryChat,
+  selectSessionRecoveryError,
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
+import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
 import type { HandoffPreset } from "./new-session-dialog";
 import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
 import {
@@ -247,6 +248,45 @@ function PreviewSessionTabDialogHost({
   );
 }
 
+function PreviewSessionRecoverySurface({
+  taskId,
+  activeSession,
+  workspaceId,
+  bootstrapRecoveryError,
+  resumption,
+}: {
+  taskId: string;
+  activeSession: TaskSession | null;
+  workspaceId?: string | null;
+  bootstrapRecoveryError: ReturnType<typeof selectSessionRecoveryError>;
+  resumption: ReturnType<typeof useSessionResumption>;
+}) {
+  if (activeSession?.is_passthrough && bootstrapRecoveryError) {
+    return (
+      <SessionBootstrapRecoveryCard
+        taskId={taskId}
+        sessionId={activeSession.id}
+        workspaceId={workspaceId}
+        error={bootstrapRecoveryError}
+        automaticRecovery={resumption}
+      />
+    );
+  }
+  if (bootstrapRecoveryError) return null;
+  return (
+    <SessionRecoveryFeedback
+      error={resumption.error}
+      notice={resumption.notice}
+      recoveryFailure={resumption.recoveryFailure}
+      onRetry={() => void resumption.resumeSession()}
+      retryDisabled={
+        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+      }
+      workspaceId={workspaceId ?? null}
+    />
+  );
+}
+
 /**
  * Session tabs for the kanban preview panel.
  *
@@ -307,6 +347,11 @@ export function PreviewSessionTabs({
   // active session is ready (resumes / restores workspace after a kandev
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId, isArchived ?? null);
+  const bootstrapRecoveryError = selectSessionRecoveryError(
+    taskStatusSummary?.active_error,
+    activeSessionId,
+    activeSession?.metadata,
+  );
 
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
   // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
@@ -366,21 +411,13 @@ export function PreviewSessionTabs({
   // an empty session body when there's nothing else to select.
   return (
     <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
-      {!ownsSessionRecoveryChat(
-        taskStatusSummary?.active_error,
-        activeSession?.is_passthrough ? null : activeSessionId,
-      ) ? (
-        <SessionRecoveryFeedback
-          error={resumption.error}
-          notice={resumption.notice}
-          recoveryFailure={resumption.recoveryFailure}
-          onRetry={() => void resumption.resumeSession()}
-          retryDisabled={
-            resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
-          }
-          workspaceId={workspaceId ?? null}
-        />
-      ) : null}
+      <PreviewSessionRecoverySurface
+        taskId={taskId}
+        activeSession={activeSession}
+        workspaceId={workspaceId}
+        bootstrapRecoveryError={bootstrapRecoveryError}
+        resumption={resumption}
+      />
       <div className="border-b px-2 py-1">
         <SessionTabs
           tabs={tabs}

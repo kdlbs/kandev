@@ -62,7 +62,11 @@ export function QuickChatSessionView({
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
   const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
   const bootstrapRecoveryError = taskId
-    ? selectSessionRecoveryError(statusSummary?.active_error, session.sessionId)
+    ? selectSessionRecoveryError(
+        statusSummary?.active_error,
+        session.sessionId,
+        taskSession?.metadata,
+      )
     : null;
   const recoveryFeedback = (
     <SessionRecoveryFeedback
@@ -75,10 +79,21 @@ export function QuickChatSessionView({
       }
     />
   );
+  const recoverySurface = bootstrapRecoveryError ? (
+    <SessionBootstrapRecoveryCard
+      taskId={taskId!}
+      sessionId={session.sessionId}
+      workspaceId={task?.workspaceId ?? null}
+      error={bootstrapRecoveryError}
+      automaticRecovery={resumption}
+    />
+  ) : (
+    recoveryFeedback
+  );
   if (isPassthrough) {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {recoveryFeedback}
+        {recoverySurface}
         <div className="min-h-0 flex-1">
           <PassthroughTerminal key={session.sessionId} sessionId={session.sessionId} mode="agent" />
         </div>
@@ -88,17 +103,7 @@ export function QuickChatSessionView({
   const isConfig = session.kind === "config";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {bootstrapRecoveryError ? (
-        <SessionBootstrapRecoveryCard
-          taskId={taskId!}
-          sessionId={session.sessionId}
-          workspaceId={task?.workspaceId ?? null}
-          error={bootstrapRecoveryError}
-          automaticRecovery={resumption}
-        />
-      ) : (
-        recoveryFeedback
-      )}
+      {recoverySurface}
       <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
           sessionId={session.sessionId}

@@ -95,3 +95,7 @@ Verification passed:
 - `go test ./internal/agent/runtime/lifecycle -count=1` (the full lifecycle package)
 - The planned desktop and mobile recovery suites passed, including archived
   session and workspace restoration flows.
+
+Review remediation also rechecks session admission immediately before
+promoting a workspace-only execution. The lifecycle regression confirms that
+terminalization during that boundary prevents promotion and agent commands.

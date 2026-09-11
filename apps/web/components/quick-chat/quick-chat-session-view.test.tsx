@@ -5,7 +5,12 @@ const sessionRows = vi.hoisted(
   () =>
     ({}) as Record<
       string,
-      { task_id?: string; agent_profile_id?: string; is_passthrough?: boolean }
+      {
+        task_id?: string;
+        agent_profile_id?: string;
+        is_passthrough?: boolean;
+        metadata?: Record<string, unknown> | null;
+      }
     >,
 );
 const quickChatSessions = vi.hoisted(
@@ -74,6 +79,10 @@ import { QuickChatSessionView } from "./quick-chat-session-view";
 const DESCRIPTOR_TASK_ID = "task-from-descriptor";
 const HYDRATED_TASK_ID = "task-from-hydrated-row";
 const WORKSPACE_ID = "workspace-1";
+const BOOTSTRAP_OCCURRED_AT = "2026-09-11T10:00:00Z";
+const BOOTSTRAP_PREVIEW = "The agent could not start.";
+const WORKSPACE_READ_ONLY_NOTICE = "workspace restored read-only";
+const RESUME_FAILURE = "resume failed";
 const RECOVERY_CARD_TEST_ID = "session-bootstrap-recovery-card";
 
 const session = {
@@ -175,8 +184,8 @@ describe("QuickChatSessionView session resumption", () => {
       active_error: {
         session_id: session.sessionId,
         stamp: "bootstrap-1",
-        occurred_at: "2026-09-11T10:00:00Z",
-        preview: "The agent could not start.",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
         phase: "bootstrap",
       },
     });
@@ -194,8 +203,8 @@ describe("QuickChatSessionView session resumption", () => {
       active_error: {
         session_id: session.sessionId,
         stamp: "bootstrap-read-only",
-        occurred_at: "2026-09-11T10:00:00Z",
-        preview: "The agent could not start.",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
         phase: "bootstrap",
       },
     });
@@ -203,8 +212,8 @@ describe("QuickChatSessionView session resumption", () => {
       resumptionState: "resumed",
       sessionStatus: null,
       error: null,
-      notice: "workspace restored read-only",
-      recoveryFailure: { outcome: "workspace_read_only", resumeError: "resume failed" },
+      notice: WORKSPACE_READ_ONLY_NOTICE,
+      recoveryFailure: { outcome: "workspace_read_only", resumeError: RESUME_FAILURE },
       taskSessionState: "FAILED",
       worktreePath: null,
       worktreeBranch: null,
@@ -214,9 +223,9 @@ describe("QuickChatSessionView session resumption", () => {
     render(<QuickChatSessionView session={session} />);
 
     expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toContain(
-      "workspace restored read-only",
+      WORKSPACE_READ_ONLY_NOTICE,
     );
-    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).not.toContain("resume failed");
+    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).not.toContain(RESUME_FAILURE);
   });
 
   it("passes automatic recovery failure into the inline card", () => {
@@ -226,8 +235,8 @@ describe("QuickChatSessionView session resumption", () => {
       active_error: {
         session_id: session.sessionId,
         stamp: "bootstrap-failed",
-        occurred_at: "2026-09-11T10:00:00Z",
-        preview: "The agent could not start.",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
         phase: "bootstrap",
       },
     });
@@ -250,5 +259,38 @@ describe("QuickChatSessionView session resumption", () => {
     render(<QuickChatSessionView session={session} />);
 
     expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toContain("recovery_failed");
+  });
+
+  it("keeps the bootstrap recovery card and automatic outcome in passthrough Quick Chat", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID, is_passthrough: true };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "bootstrap-passthrough",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
+        phase: "bootstrap",
+      },
+    });
+    useSessionResumption.mockReturnValue({
+      resumptionState: "resumed",
+      sessionStatus: null,
+      error: null,
+      notice: WORKSPACE_READ_ONLY_NOTICE,
+      recoveryFailure: { outcome: "workspace_read_only", resumeError: "raw resume failure" },
+      taskSessionState: "FAILED",
+      worktreePath: null,
+      worktreeBranch: null,
+      resumeSession: vi.fn(),
+    } as never);
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toContain(
+      WORKSPACE_READ_ONLY_NOTICE,
+    );
+    expect(screen.getByTestId("passthrough-terminal")).toBeTruthy();
+    expect(screen.queryByTestId("quick-chat-content")).toBeNull();
   });
 });

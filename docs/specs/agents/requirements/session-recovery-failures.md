@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: agents
 created: 2026-09-11
 owners:
@@ -16,8 +16,10 @@ retain durable bootstrap error and contribution-admission ownership.
 
 ## Requirements
 
-The recovery amendments below are pending implementation in the
+The recovery amendments are implemented in the
 [contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md).
+The package records the implementation and browser/regression verification
+results, including the shared recovery owner and phone touch-target checks.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005: Workspace access after failed startup
 

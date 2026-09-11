@@ -356,6 +356,7 @@ test.describe("task launch failure recovery", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }, testInfo) => {
     test.setTimeout(120_000);
 
@@ -432,6 +433,10 @@ test.describe("task launch failure recovery", () => {
 
     await testPage.screenshot({
       path: testInfo.outputPath("bootstrap-recovery-presentation-desktop.png"),
+      fullPage: true,
+    });
+    await prCapture.screenshot("bootstrap-recovery-card-desktop", {
+      caption: "Desktop bootstrap recovery card with labeled recovery details and actions.",
       fullPage: true,
     });
     await testPage.reload();

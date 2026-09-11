@@ -113,3 +113,8 @@ successor fence:
 - `go test ./internal/orchestrator/executor -run TestBootstrapFailure -count=1`
 - `go test ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/orchestrator/executor ./internal/orchestrator ./internal/task/repository/sqlite -count=1`
 - `make -C apps/backend build` and `make -C apps/backend lint`
+
+Review remediation verification adds bounded retries for transient ownership
+reads and a shared task-session transaction lock for successor registration
+and bootstrap-failure commit. The SQLite CAS suite and the PostgreSQL
+multi-connection lock regression cover absent and unchanged error stamps.

@@ -227,6 +227,27 @@ func (e *Executor) persistLastAgentError(
 // primary fence; the runtime lookup catches the smaller window in which a
 // successor has been registered but its session row has not been refreshed in
 // this process yet.
+func (e *Executor) loadBootstrapFailureSession(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		session, err := e.repo.GetTaskSession(ctx, sessionID)
+		if err == nil {
+			return session, nil
+		}
+		if attempt == 2 {
+			return nil, fmt.Errorf("load session before bootstrap failure projection: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	return nil, ctx.Err()
+}
+
 func (e *Executor) bootstrapFailureOwnsSession(
 	ctx context.Context,
 	sessionID, agentExecutionID string,
@@ -234,9 +255,9 @@ func (e *Executor) bootstrapFailureOwnsSession(
 	if sessionID == "" || agentExecutionID == "" {
 		return true, nil
 	}
-	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	session, err := e.loadBootstrapFailureSession(ctx, sessionID)
 	if err != nil {
-		return false, fmt.Errorf("load session before bootstrap failure projection: %w", err)
+		return false, err
 	}
 	if session == nil {
 		return false, nil

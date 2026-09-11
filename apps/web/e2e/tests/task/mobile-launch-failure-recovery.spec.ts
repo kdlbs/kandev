@@ -239,6 +239,7 @@ test.describe("mobile task launch failure recovery", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }, testInfo) => {
     test.setTimeout(120_000);
 
@@ -317,6 +318,10 @@ test.describe("mobile task launch failure recovery", () => {
 
     await testPage.screenshot({
       path: testInfo.outputPath("bootstrap-recovery-presentation-mobile.png"),
+      fullPage: true,
+    });
+    await prCapture.screenshot("bootstrap-recovery-card-mobile", {
+      caption: "Mobile bootstrap recovery card with stacked touch-sized actions.",
       fullPage: true,
     });
   });
