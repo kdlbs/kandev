@@ -2921,6 +2921,17 @@ func (s *Service) resolveStepProfileSessionStartPolicy(step *wfmodels.WorkflowSt
 	return models.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy))
 }
 
+// shouldKeepCurrentWorkflowStepSession reports whether profile-only routing
+// can keep the current session without applying replacement policy.
+func shouldKeepCurrentWorkflowStepSession(
+	effectiveProfile string,
+	currentProfile string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+) bool {
+	return effectiveProfile == "" ||
+		(effectiveProfile == currentProfile && startPolicy == models.WorkflowProfileSessionStartPolicyReuse)
+}
+
 // resolveStepProfileSessionEndPolicy returns the source step's session end
 // behavior. Invalid or absent values use the conversation-preserving park default.
 func (s *Service) resolveStepProfileSessionEndPolicy(step *wfmodels.WorkflowStep) models.WorkflowProfileSessionEndPolicy {
@@ -3737,25 +3748,10 @@ func (s *Service) prepareWorkflowStepSession(
 		return s.prepareExplicitWorkflowSession(ctx, taskID, session, step, sourceStep, entryIDs...)
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
-	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
-		s.tagSessionAsWorkflowSwitched(ctx, session.ID)
-		if !session.IsPrimary {
-			if err := s.SetPrimarySession(ctx, session.ID); err != nil {
-				s.logger.Warn("failed to preserve session as primary for workflow step",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.String("step_id", step.ID),
-					zap.Error(err))
-			} else {
-				session.IsPrimary = true
-			}
-		}
-		if err := s.recordWorkflowSourceBinding(ctx, taskID, step, session, entryIDs...); err != nil {
-			return nil, false, err
-		}
-		return session, false, nil
-	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
+	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, session.AgentProfileID, startPolicy) {
+		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, entryIDs...)
+	}
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 	}
@@ -3768,6 +3764,31 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+func (s *Service) keepCurrentWorkflowStepSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	step *wfmodels.WorkflowStep,
+	entryIDs ...int64,
+) (*models.TaskSession, bool, error) {
+	s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+	if !session.IsPrimary {
+		if err := s.SetPrimarySession(ctx, session.ID); err != nil {
+			s.logger.Warn("failed to preserve session as primary for workflow step",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("step_id", step.ID),
+				zap.Error(err))
+		} else {
+			session.IsPrimary = true
+		}
+	}
+	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, session, entryIDs...); err != nil {
+		return nil, false, err
+	}
+	return session, false, nil
 }
 
 func (s *Service) preflightWorkflowStepCredentials(
@@ -3801,10 +3822,10 @@ func (s *Service) preflightWorkflowStepCredentials(
 		)
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
-	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
+	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
+	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, currentSession.AgentProfileID, startPolicy) {
 		return nil
 	}
-	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	targetSession := currentSession
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
 		existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
