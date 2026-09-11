@@ -524,7 +524,10 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	byKey, legacyFlatByRepo, soleByRepo := indexTaskEnvironmentReposTx(existing)
 	matched := make(map[string]struct{}, len(repos))
 	for position, incoming := range repos {
-		row := findTaskEnvironmentRepoTransition(byKey, legacyFlatByRepo, soleByRepo, incoming)
+		row := findTaskEnvironmentRepoTransition(byKey, legacyFlatByRepo, incoming)
+		if row == nil && !replacePhysical {
+			row = takeSoleUntrackedTaskEnvironmentRepo(byKey, soleByRepo, incoming)
+		}
 		if row == nil {
 			if incoming == nil || incoming.RepositoryID == "" {
 				continue
@@ -567,6 +570,9 @@ func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (
 		if row.BranchSlug == "" {
 			legacyFlatByRepo[row.RepositoryID] = row
 		}
+		if row.DeletedAt != nil || row.Status == "failed" || row.Status == worktreeRepoStatusDeleted {
+			continue
+		}
 		if _, ambiguous := ambiguousRepo[row.RepositoryID]; ambiguous {
 			continue
 		}
@@ -583,7 +589,6 @@ func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (
 func findTaskEnvironmentRepoTransition(
 	byKey map[string]*models.TaskEnvironmentRepo,
 	legacyFlatByRepo map[string]*models.TaskEnvironmentRepo,
-	soleByRepo map[string]*models.TaskEnvironmentRepo,
 	incoming *models.TaskEnvironmentRepo,
 ) *models.TaskEnvironmentRepo {
 	if incoming == nil || incoming.RepositoryID == "" {
@@ -598,22 +603,25 @@ func findTaskEnvironmentRepoTransition(
 			byKey[key] = row
 		}
 	}
-	if row == nil && incoming.BranchSlug == "" {
-		// A resume with no tracked branch identity (every local/local_pc
-		// resume, which never stamps req.BaseBranch) must update the
-		// repository's sole existing canonical row in place rather than
-		// insert a second, empty-branch row: a duplicate row makes the
-		// read-side untracked-branch match count two rows instead of one
-		// on the next resume and fail the exactly-one-match reuse guard.
-		// Only apply this when the repository has exactly one existing
-		// row; with two or more real branches already tracked, which one
-		// this write belongs to is ambiguous, so fall back to inserting.
-		row = soleByRepo[incoming.RepositoryID]
-		if row != nil {
-			delete(soleByRepo, incoming.RepositoryID)
-			delete(byKey, row.RepositoryID+"\x00"+row.BranchSlug)
-			byKey[key] = row
-		}
+	return row
+}
+
+// takeSoleUntrackedTaskEnvironmentRepo reuses the only active inventory row
+// for a repository when a non-replacement transition has no branch identity.
+// Local resumes intentionally do not select or switch branches, so the
+// existing canonical row is the only safe branch identity to retain.
+func takeSoleUntrackedTaskEnvironmentRepo(
+	byKey, soleByRepo map[string]*models.TaskEnvironmentRepo,
+	incoming *models.TaskEnvironmentRepo,
+) *models.TaskEnvironmentRepo {
+	if incoming == nil || incoming.RepositoryID == "" || incoming.BranchSlug != "" {
+		return nil
+	}
+	row := soleByRepo[incoming.RepositoryID]
+	if row != nil {
+		delete(soleByRepo, incoming.RepositoryID)
+		delete(byKey, row.RepositoryID+"\x00"+row.BranchSlug)
+		byKey[incoming.RepositoryID+"\x00"] = row
 	}
 	return row
 }
@@ -628,7 +636,7 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	// An incoming transition with untracked branch identity (a non-worktree
 	// local/local_pc resume never stamps req.BaseBranch) must not overwrite
 	// a row's already-known real branch with an empty one; preserve it.
-	if incoming.BranchSlug != "" {
+	if replacePhysical || incoming.BranchSlug != "" || row.BranchSlug == "" {
 		row.BranchSlug = incoming.BranchSlug
 	}
 	if replacePhysical || incoming.WorktreeID != "" {

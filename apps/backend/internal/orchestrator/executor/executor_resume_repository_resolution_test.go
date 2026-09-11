@@ -15,6 +15,12 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+type sshCloneURLCapabilities struct{ mockCapabilities }
+
+func (m *sshCloneURLCapabilities) RequiresCloneURL(executorType string) bool {
+	return executorType == string(models.ExecutorTypeSSH) || m.mockCapabilities.RequiresCloneURL(executorType)
+}
+
 // These tests cover REQ-TASKS-LAUNCH-REPOSITORY-RESOLUTION-001 and -002: a
 // launch must resolve its repositories from the task's attachment set
 // (task_repositories) rather than the session's stale repository_id/base_branch
@@ -159,7 +165,7 @@ func TestApplyResumeRepoConfig_KeepsSessionPreferenceWhenPresentInAttachmentSet(
 // the environment.
 func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutor(t *testing.T) {
 	repo := newMockRepository()
-	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo"}
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo", RemoteURL: "https://example.com/repo-1.git"}
 	repo.taskRepositories["tr-1"] = &models.TaskRepository{
 		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0, BaseBranch: "main",
 	}
@@ -171,6 +177,7 @@ func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutor(t *
 		// Empty preference: the repository was attached after session creation.
 	}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetCapabilities(&sshCloneURLCapabilities{})
 
 	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "ssh"}
 
@@ -182,6 +189,16 @@ func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutor(t *
 	}
 	if req.UseWorktree {
 		t.Fatalf("expected UseWorktree=false for the ssh executor")
+	}
+	if req.RepositoryURL != "https://example.com/repo-1.git" {
+		t.Fatalf("req.RepositoryURL = %q, want the repository clone URL", req.RepositoryURL)
+	}
+	if req.BaseBranch != "main" {
+		t.Fatalf("req.BaseBranch = %q, want main for an SSH clone launch", req.BaseBranch)
+	}
+	inventory := environmentReposForLaunch(req, &LaunchAgentResponse{})
+	if len(inventory) != 1 || inventory[0].RepositoryID != "repo-1" || inventory[0].BranchSlug != "main" {
+		t.Fatalf("resume inventory = %#v, want one repo-1/main slot", inventory)
 	}
 }
 
@@ -238,7 +255,7 @@ func TestApplyResumeRepoConfig_StampsRepositoryPathAndNameOnLocalExecutor(t *tes
 // not just the newly-fixed empty-preference population.
 func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutorWithPresentPreference(t *testing.T) {
 	repo := newMockRepository()
-	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo"}
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo", RemoteURL: "https://example.com/repo-1.git"}
 	repo.taskRepositories["tr-1"] = &models.TaskRepository{
 		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0, BaseBranch: "main",
 	}
@@ -250,6 +267,7 @@ func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutorWith
 		RepositoryID: "repo-1", // present preference, not the empty-preference population.
 	}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetCapabilities(&sshCloneURLCapabilities{})
 
 	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "ssh"}
 
@@ -258,6 +276,13 @@ func TestApplyResumeRepoConfig_StampsRepositoryIdentityOnNonWorktreeExecutorWith
 	}
 	if req.RepositoryID != "repo-1" {
 		t.Fatalf("req.RepositoryID = %q, want repo-1: a present preference on a non-worktree executor must also carry the identity", req.RepositoryID)
+	}
+	if req.RepositoryURL != "https://example.com/repo-1.git" || req.BaseBranch != "main" {
+		t.Fatalf("SSH resume request = URL %q, base branch %q; want clone URL and main", req.RepositoryURL, req.BaseBranch)
+	}
+	inventory := environmentReposForLaunch(req, &LaunchAgentResponse{})
+	if len(inventory) != 1 || inventory[0].RepositoryID != "repo-1" || inventory[0].BranchSlug != "main" {
+		t.Fatalf("resume inventory = %#v, want one repo-1/main slot", inventory)
 	}
 }
 

@@ -475,46 +475,58 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 // covers a non-worktree (local/local_pc) resume, which never stamps a base
 // branch and so always transitions with an incoming empty BranchSlug. It must
 // update the repository's sole existing canonical row in place rather than
-// insert a duplicate empty-branch row: a duplicate makes the read-side
-// untracked-branch reuse guard in the executor package see two matching rows
-// instead of one on a later resume and refuse to reuse the environment. It
-// also must not clobber the row's already-known real branch with the
-// incoming empty one.
+// insert a duplicate empty-branch row. The test uses a repo-backed task and
+// performs two transitions to model successive resumes.
 func TestPersistTaskEnvironmentTransitionUntrackedBranchResumeUpdatesSoleRowInPlace(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
-	seedWorkspace(t, repo, "workspace-untracked-resume")
-	if err := repo.CreateTask(ctx, &models.Task{ID: "task-untracked-resume", WorkspaceID: "workspace-untracked-resume", Title: "untracked-resume"}); err != nil {
-		t.Fatal(err)
+	workspaceID := "workspace-untracked-resume"
+	taskID := "task-untracked-resume"
+	repositoryID := "repo-untracked-resume"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "untracked-resume"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: repositoryID, WorkspaceID: workspaceID, Name: "repository"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{TaskID: taskID, RepositoryID: repositoryID, BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
 	}
 	env := &models.TaskEnvironment{
-		ID: "env-untracked-resume", TaskID: "task-untracked-resume", ExecutorType: string(models.ExecutorTypeLocal),
-		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/untracked-resume",
+		ID:            "env-untracked-resume",
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeLocal),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/workspace/untracked-resume",
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID:           "canonical",
+			RepositoryID: repositoryID,
+			BranchSlug:   "main",
+			Position:     0,
+		}},
 	}
 	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
-	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
-		ID: "canonical", TaskEnvironmentID: env.ID, RepositoryID: "repo-untracked-resume", BranchSlug: "main",
-	}); err != nil {
-		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
-	}
 
-	for i := 0; i < 2; i++ {
+	for resume := 0; resume < 2; resume++ {
 		if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
-			RepositoryID: "repo-untracked-resume", BranchSlug: "",
+			RepositoryID: repositoryID,
+			Position:     0,
 		}}, false); err != nil {
-			t.Fatalf("PersistTaskEnvironmentTransition resume %d: %v", i, err)
+			t.Fatalf("PersistTaskEnvironmentTransition resume %d: %v", resume+1, err)
 		}
 		persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
 		if err != nil {
-			t.Fatalf("GetTaskEnvironment resume %d: %v", i, err)
+			t.Fatalf("GetTaskEnvironment resume %d: %v", resume+1, err)
 		}
 		if len(persisted.Repos) != 1 {
-			t.Fatalf("resume %d repos = %#v, want a single canonical row, not a duplicate", i, persisted.Repos)
+			t.Fatalf("resume %d repos = %#v, want a single canonical row, not a duplicate", resume+1, persisted.Repos)
 		}
-		if persisted.Repos[0].ID != "canonical" || persisted.Repos[0].BranchSlug != "main" {
-			t.Fatalf("resume %d row = %#v, want the original canonical row with branch preserved", i, persisted.Repos[0])
+		row := persisted.Repos[0]
+		if row.ID != "canonical" || row.RepositoryID != repositoryID || row.BranchSlug != "main" || row.Status != worktreeRepoStatusActive || row.DeletedAt != nil {
+			t.Fatalf("resume %d row = %#v, want the active canonical row with branch preserved", resume+1, row)
 		}
 	}
 }
