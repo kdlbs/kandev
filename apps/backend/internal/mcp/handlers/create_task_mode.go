@@ -81,6 +81,8 @@ func (h *Handlers) admitMCPCreateTask(
 		return h.admitExternalMCPCreateTask(ctx, req)
 	}
 	if principal.IsAutomation() {
+		// Automation callers retain their existing explicit policies and are
+		// not subject to the Kanban-versus-Office session admission checks.
 		return mcpCreateTaskAdmission{}, nil
 	}
 	if principal.Surface != mcpprofile.SurfaceKanbanTask {
