@@ -9,6 +9,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -222,13 +223,29 @@ func (h *Handlers) resolveMCPCreateWorkspace(
 			"failed to resolve the authorized workspace",
 		)
 	}
-	if len(workspaces) != 1 {
+	writableWorkspaces := make([]*models.Workspace, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		if workspace == nil {
+			continue
+		}
+		if err := h.taskSvc.AuthorizeWorkspaceScope(ctx, workspace.ID, authz.ScopeTaskWrite); err != nil {
+			if service.IsForbidden(err) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				continue
+			}
+			return "", denyMCPCreateTask(
+				ws.ErrorCodeInternalError,
+				"failed to resolve the authorized workspace",
+			)
+		}
+		writableWorkspaces = append(writableWorkspaces, workspace)
+	}
+	if len(writableWorkspaces) != 1 {
 		return "", denyMCPCreateTask(
 			ws.ErrorCodeValidation,
 			"workspace_id is required unless exactly one authorized workspace exists",
 		)
 	}
-	return workspaces[0].ID, nil
+	return writableWorkspaces[0].ID, nil
 }
 
 func (h *Handlers) validateMCPCreateWorkspace(

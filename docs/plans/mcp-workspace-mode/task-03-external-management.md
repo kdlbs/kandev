@@ -87,12 +87,15 @@ external-ID retries that return either mode. The isolated
 `backendapp.TestExternalMCPTaskModesReachPersistenceAndManagement` composition
 test drives HTTP JSON-RPC through the real external server, dispatcher, handler,
 and SQLite persistence, then lists and state-updates both tasks. The handler
-suite also rejects fabricated session provenance, requires an explicit
-workspace when the authorized root is ambiguous, and hides legacy mixed-mode
-Office tasks from Kanban retries. Existing external discovery, lifecycle,
-conversation, session, question, and management handlers remain on the same
-surface. Public documentation now distinguishes session MCP, Office skills
-and CLI, external MCP, and materialized-workspace policy.
+suite also rejects fabricated session provenance, selects the sole writable
+workspace when readable workspaces are also visible, requires an explicit
+workspace when multiple writable destinations are available, and hides legacy
+mixed-mode Office tasks from Kanban retries. Existing external discovery,
+lifecycle, conversation, session, question, and management handlers remain on
+the same surface. The isolated composition test covers list/read, state update,
+move, archive, and delete for each mode. Public documentation now distinguishes
+session MCP, Office skills and CLI, external MCP, and materialized-workspace
+policy.
 
 Verification:
 

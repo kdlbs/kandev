@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -358,6 +360,71 @@ func TestHandleCreateTask_ExternalTransportReachesBothWorkspaceModes(t *testing.
 	require.NoError(t, err)
 	require.Len(t, afterKanban, len(beforeKanban))
 	require.Len(t, afterOffice, len(beforeOffice))
+}
+
+func TestHandleCreateTask_ExternalDefaultSelectsWritableWorkspace(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	initialWorkspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, initialWorkspaces, 1)
+	require.NoError(t, repo.DeleteWorkspace(ctx, initialWorkspaces[0].ID))
+
+	writableWorkspace := &models.Workspace{
+		ID:      "external-default-writable",
+		Name:    "External default writable",
+		OwnerID: "external-user",
+	}
+	readableWorkspace := &models.Workspace{
+		ID:      "external-default-readable",
+		Name:    "External default readable",
+		OwnerID: "other-user",
+	}
+	require.NoError(t, repo.CreateWorkspace(ctx, writableWorkspace))
+	require.NoError(t, repo.CreateWorkspace(ctx, readableWorkspace))
+	require.NoError(t, repo.UpsertWorkspaceMember(ctx, &models.WorkspaceMember{
+		WorkspaceID: readableWorkspace.ID,
+		UserID:      "external-user",
+		Role:        string(authz.WorkspaceRoleViewer),
+	}))
+	writableWorkflow := &models.Workflow{
+		ID:          "external-default-writable-workflow",
+		WorkspaceID: writableWorkspace.ID,
+		Name:        "Writable workflow",
+	}
+	readableWorkflow := &models.Workflow{
+		ID:          "external-default-readable-workflow",
+		WorkspaceID: readableWorkspace.ID,
+		Name:        "Readable workflow",
+	}
+	require.NoError(t, repo.CreateWorkflow(ctx, writableWorkflow))
+	require.NoError(t, repo.CreateWorkflow(ctx, readableWorkflow))
+
+	externalCtx := authn.WithIdentity(
+		mcpTestExternalContext(ctx),
+		authn.Identity{UserID: "external-user", Role: authn.RoleMember},
+	)
+	visible, err := svc.ListWorkspaces(externalCtx)
+	require.NoError(t, err)
+	require.Len(t, visible, 2, "the caller can read both candidate workspaces")
+
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	resp, err := h.handleCreateTask(externalCtx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workflow_id":      writableWorkflow.ID,
+		"title":            "Default writable destination",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type, string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, writableWorkspace.ID, task.WorkspaceID)
 }
 
 func TestHandleCreateTask_KanbanCallerCannotExposeFoundOfficeIdentity(t *testing.T) {

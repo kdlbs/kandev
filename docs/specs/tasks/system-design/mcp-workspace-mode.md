@@ -21,9 +21,12 @@ to CLI task creation. `office/runtime/handler.go` registers
 `POST /runtime/tasks`; `office/runtime.Actions.CreateTask` enforces the
 run's capabilities and workspace/parent/project checks.
 
-`internal/mcp/handlers/handlers.go:handleCreateTask` currently accepts a
-destination workspace without enforcing the session caller's mode. Its
-assignee-field rejection does not prevent Office targeting.
+Before this change, `internal/mcp/handlers/handlers.go:handleCreateTask`
+accepted a destination workspace without enforcing the session caller's mode.
+Its assignee-field rejection did not prevent Office targeting. The implemented
+handler now rejects Office sessions and wrong-mode destinations before
+repository resolution, and revalidates deduplicated results before exposing
+them.
 
 ## Requirement mapping
 

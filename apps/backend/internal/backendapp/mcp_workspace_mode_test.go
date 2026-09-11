@@ -16,6 +16,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -40,6 +41,14 @@ func TestExternalMCPTaskModesReachPersistenceAndManagement(t *testing.T) {
 	require.NoError(t, harness.taskRepo.CreateWorkspace(ctx, officeWorkspace))
 	officeWorkflowID, err := harness.taskRepo.EnsureOfficeWorkflow(ctx, officeWorkspace.ID)
 	require.NoError(t, err)
+	kanbanMoveStepID := "external-composition-kanban-target"
+	officeMoveStepID := "external-composition-office-target"
+	require.NoError(t, harness.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID: kanbanMoveStepID, WorkflowID: kanbanWorkflows[0].ID, Name: "External Kanban target", Position: 100,
+	}))
+	require.NoError(t, harness.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID: officeMoveStepID, WorkflowID: officeWorkflowID, Name: "External Office target", Position: 100,
+	}))
 
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level: "error", Format: "console", OutputPath: "stdout",
@@ -134,10 +143,10 @@ func TestExternalMCPTaskModesReachPersistenceAndManagement(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name, workflowID string
+		name, workflowID, moveStepID string
 	}{
-		{name: "kanban", workflowID: kanbanWorkflows[0].ID},
-		{name: "office", workflowID: officeWorkflowID},
+		{name: "kanban", workflowID: kanbanWorkflows[0].ID, moveStepID: kanbanMoveStepID},
+		{name: "office", workflowID: officeWorkflowID, moveStepID: officeMoveStepID},
 	} {
 		t.Run(tc.name+" management", func(t *testing.T) {
 			listPayload := externalWorkspaceModeToolCall(t, httpServer.URL+"/mcp", 10, "list_tasks_kandev", map[string]any{
@@ -154,6 +163,30 @@ func TestExternalMCPTaskModesReachPersistenceAndManagement(t *testing.T) {
 			task, err := harness.taskSvc.GetTask(ctx, created[tc.name])
 			require.NoError(t, err)
 			require.Equal(t, v1.TaskStateInProgress, task.State)
+
+			externalWorkspaceModeToolCall(t, httpServer.URL+"/mcp", 30, "move_task_kandev", map[string]any{
+				"task_id":          created[tc.name],
+				"workflow_id":      tc.workflowID,
+				"workflow_step_id": tc.moveStepID,
+			})
+			task, err = harness.taskSvc.GetTask(ctx, created[tc.name])
+			require.NoError(t, err)
+			require.Equal(t, tc.moveStepID, task.WorkflowStepID)
+
+			archived := externalWorkspaceModeToolCall(t, httpServer.URL+"/mcp", 40, "archive_task_kandev", map[string]any{
+				"task_id": created[tc.name],
+			})
+			require.Equal(t, true, archived["success"])
+			task, err = harness.taskSvc.GetTask(ctx, created[tc.name])
+			require.NoError(t, err)
+			require.NotNil(t, task.ArchivedAt)
+
+			deleted := externalWorkspaceModeToolCall(t, httpServer.URL+"/mcp", 50, "delete_task_kandev", map[string]any{
+				"task_id": created[tc.name],
+			})
+			require.Equal(t, true, deleted["success"])
+			_, err = harness.taskSvc.GetTask(ctx, created[tc.name])
+			require.Error(t, err)
 		})
 	}
 }
