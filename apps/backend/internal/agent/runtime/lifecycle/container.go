@@ -108,7 +108,7 @@ func buildContainerCreateInstanceRequest(
 		WorkspacePath: "/workspace",
 		AgentCommand:  "",
 		AgentType:     agentType,
-		Env:           config.Credentials,
+		Env:           selectedCheckoutAgentEnv(config.Credentials, config.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
@@ -514,6 +514,9 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	if config.PrepareScript != "" {
 		env = append(env, "KANDEV_PREPARE_SCRIPT="+config.PrepareScript)
 	}
+	if selectedCheckoutIsPullRequest(config.Metadata) {
+		env = append(env, selectedCheckoutMarker+"=1")
+	}
 
 	// We always launch agentctl as the container's main process and fan out the
 	// agent subprocess from there via the agentctl HTTP API. This frees user-built
@@ -544,7 +547,11 @@ if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
     echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2
-  fi
+	fi
+fi
+if [ "${` + selectedCheckoutMarker + `:-}" = "1" ]; then
+  ` + selectedCheckoutCredentialScrubScript(config.Metadata) + `
+  rm -f /run/kandev/auth.env 2>/dev/null || true
 fi
 exec /usr/local/bin/agentctl`,
 	}

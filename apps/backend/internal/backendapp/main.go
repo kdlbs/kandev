@@ -699,6 +699,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
 	}
+	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
 	// AC-EXECUTORS-SURVIVAL-003.1: lifecycleMgr.Start already ran
 	// synchronously inside provideLifecycleManager above, so every session's

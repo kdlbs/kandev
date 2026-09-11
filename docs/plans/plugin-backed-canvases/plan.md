@@ -310,6 +310,14 @@ dependency order only. They do not authorize implementation subagents.
   heading links. The work order references `scripts/check-links.py`, which is
   not present in current `main`.
 
+## Follow-up repair
+
+The [canvas runtime and permission repair](../canvas-runtime-permission-fixes/plan.md)
+supersedes the original framing, load-as-ready, initial-approval, and review-layout
+assumptions. Its work orders 01-04 own the replacement tests and documentation.
+This completed package and its recorded results remain historical evidence,
+not validation of the repair.
+
 ## Risks
 
 - A branch transition can lose uncommitted design files or include superseded

@@ -7,6 +7,7 @@ import {
   KIND_VERSION,
   KUBECTL_SHA256_AMD64,
   KUBERNETES_FIXTURE_PINS,
+  KUBERNETES_E2E_BASE_IMAGE,
   KUBERNETES_VERSION,
   resolveKubernetesFixturePin,
 } from "../fixtures/kubernetes-pins";
@@ -22,6 +23,8 @@ const CURRENT_KUBECTL_SHA256_AMD64 =
   "629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7";
 const CURRENT_KIND_NODE_IMAGE =
   "kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5";
+const KUBERNETES_E2E_RUNTIME_IMAGE =
+  "ghcr.io/kdlbs/kandev-ci:runtime-sha-6f288a23c526@sha256:b9636e1c20adb0fcce1c65858a767fb1b0fe48a15ac5688b9c623163575efb8d";
 
 describe("Kubernetes E2E version pins", () => {
   it("uses the current supported Kubernetes release for the full lifecycle fixture", () => {
@@ -49,6 +52,17 @@ describe("Kubernetes E2E version pins", () => {
     expect(() => resolveKubernetesFixturePin("v1.33.0")).toThrow(/unsupported/);
   });
 
+  it("uses a prebuilt immutable runtime image for Kubernetes fixture containers", () => {
+    const tools = fs.readFileSync(
+      path.join(REPOSITORY_ROOT, "apps/web/e2e/fixtures/kubernetes-tools.ts"),
+      "utf8",
+    );
+
+    expect(KUBERNETES_E2E_BASE_IMAGE).toBe(KUBERNETES_E2E_RUNTIME_IMAGE);
+    expect(tools).toContain("FROM ${KUBERNETES_E2E_BASE_IMAGE}");
+    expect(tools).not.toContain("RUN apt-get update");
+  });
+
   it("keeps CI tool installation aligned with the fixture", () => {
     const workflow = fs.readFileSync(
       path.join(REPOSITORY_ROOT, ".github/workflows/e2e-tests.yml"),
@@ -61,6 +75,7 @@ describe("Kubernetes E2E version pins", () => {
       KUBERNETES_VERSION,
       KUBECTL_SHA256_AMD64,
       KIND_NODE_IMAGE,
+      KUBERNETES_E2E_BASE_IMAGE,
     ]) {
       expect(workflow).toContain(pin);
     }
@@ -94,6 +109,8 @@ describe("Kubernetes E2E version pins", () => {
     expect(workflow).toContain("KANDEV_E2E_KUBERNETES_VERSION");
     expect(workflow).toContain("KANDEV_E2E_BUILD_IDENTITY");
     expect(workflow).toContain("KANDEV_E2E_EXPECTED_SOURCE_REVISION");
+    expect(workflow).toContain("Pull pinned Kubernetes fixture base image");
+    expect(workflow).toMatch(/for attempt in 1 2 3; do[\s\S]*docker pull/);
     expect(workflow).not.toContain("KANDEV_E2E_SKIP_FRESHNESS");
     for (const pin of [
       OLDEST_KUBERNETES_VERSION,

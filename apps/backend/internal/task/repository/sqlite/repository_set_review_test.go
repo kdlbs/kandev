@@ -26,7 +26,10 @@ func TestUpdateRepositorySetRollsBackMetadataWhenMembershipFails(t *testing.T) {
 	renamed := *set
 	renamed.Name = "Renamed"
 	renamed.Description = "changed"
-	members := []string{"repo-web", "repo-does-not-exist"}
+	members := []models.RepositorySetItem{
+		{RepositoryID: "repo-web"},
+		{RepositoryID: "repo-does-not-exist"},
+	}
 	if err := repo.UpdateRepositorySet(ctx, &renamed, &members); err == nil {
 		t.Fatal("UpdateRepositorySet accepted a member that does not exist")
 	}
@@ -55,7 +58,7 @@ func TestUpdateRepositorySetAppliesBothHalvesTogether(t *testing.T) {
 	}
 
 	set.Name = "Backend"
-	members := []string{"repo-orders"}
+	members := []models.RepositorySetItem{{RepositoryID: "repo-orders"}}
 	if err := repo.UpdateRepositorySet(ctx, set, &members); err != nil {
 		t.Fatalf("UpdateRepositorySet: %v", err)
 	}
@@ -84,7 +87,7 @@ func TestUpdateRepositorySetOnDeletedSetReportsNotFound(t *testing.T) {
 	// An empty membership list touches no item rows, so without checking the
 	// metadata UPDATE's RowsAffected this used to commit successfully and let the
 	// service publish an update for a set that no longer exists.
-	empty := []string{}
+	empty := []models.RepositorySetItem{}
 	if err := repo.UpdateRepositorySet(ctx, set, &empty); !errors.Is(err, repoerrors.ErrRepositorySetNotFound) {
 		t.Fatalf("UpdateRepositorySet error = %v, want ErrRepositorySetNotFound", err)
 	}

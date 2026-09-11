@@ -324,6 +324,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if branches := collectBaseBranches(req); len(branches) > 0 {
 		metadata[MetadataKeyBaseBranches] = branches
 	}
+	setSelectedCheckoutMetadata(req, metadata)
 	return metadata
 }
 
@@ -1426,6 +1427,9 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
 	_, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		if err := m.ensureLaunchSessionStillActive(sharedCtx, req.SessionID, executionAdmissionAgent); err != nil {
+			return nil, err
+		}
 		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -1800,7 +1804,7 @@ func (m *Manager) registerAndPublishExecution(
 	execInstance *ExecutorInstance,
 	sessionID string,
 ) error {
-	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during runtime creation")
 		return err
 	}
@@ -1836,7 +1840,7 @@ func (m *Manager) registerAndPublishExecution(
 		return errors.Join(fmt.Errorf("persist execution registration: %w", err), secretCleanupErr)
 	}
 
-	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		if errors.Is(err, errTaskCleanupActive) {
 			m.rollbackRegisteredLaunchForTaskCleanup(rt, execInstance, execution)
 		} else {
@@ -1870,7 +1874,11 @@ func (m *Manager) registerAndPublishExecution(
 // durable cleanup-intent check is the admission boundary between them: either
 // launch persists first and cleanup's final inventory observes it, or cleanup
 // persists first and launch rolls the runtime back.
-func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID string) error {
+func (m *Manager) ensureLaunchSessionStillActive(
+	ctx context.Context,
+	sessionID string,
+	purpose executionAdmissionPurpose,
+) error {
 	if m.executorProfileReader == nil || sessionID == "" {
 		return nil
 	}
@@ -1880,6 +1888,11 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	}
 	if session == nil {
 		return fmt.Errorf("verify session before registering execution: session %q not found", sessionID)
+	}
+	if purpose == executionAdmissionWorkspaceOnly {
+		if err := m.ensureWorkspaceTaskAdmission(ctx, session); err != nil {
+			return err
+		}
 	}
 	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, session.TaskID)
 	if err != nil {
@@ -1898,14 +1911,47 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	if session == nil {
 		return fmt.Errorf("reverify session after task cleanup admission: session %q not found", sessionID)
 	}
+	if purpose == executionAdmissionWorkspaceOnly {
+		if err := m.ensureWorkspaceTaskAdmission(ctx, session); err != nil {
+			return err
+		}
+	}
+	return validateLaunchSessionState(sessionID, session, purpose)
+}
+
+func validateLaunchSessionState(
+	sessionID string,
+	session *models.TaskSession,
+	purpose executionAdmissionPurpose,
+) error {
 	switch session.State {
 	case models.TaskSessionStateCancelled,
 		models.TaskSessionStateCompleted,
 		models.TaskSessionStateFailed:
+		if purpose == executionAdmissionWorkspaceOnly {
+			return nil
+		}
 		return fmt.Errorf("verify session before registering execution: session %q is %s: %w", sessionID, session.State, ErrSessionTerminal)
 	default:
 		return nil
 	}
+}
+
+func (m *Manager) ensureWorkspaceTaskAdmission(ctx context.Context, session *models.TaskSession) error {
+	if session == nil || session.TaskID == "" {
+		return fmt.Errorf("workspace restore has ambiguous task ownership")
+	}
+	task, err := m.executorProfileReader.GetTask(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("verify task before registering workspace execution: %w", err)
+	}
+	if task == nil || task.ID == "" || task.ID != session.TaskID {
+		return fmt.Errorf("verify task before registering workspace execution: task %q not found", session.TaskID)
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("verify task before registering workspace execution: task %q is archived: %w", session.TaskID, ErrSessionTerminal)
+	}
+	return nil
 }
 
 // rollbackRegisteredLaunchForTaskCleanup cannot assume the session is

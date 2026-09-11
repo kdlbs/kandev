@@ -726,15 +726,21 @@ export class SessionPage {
    */
   async deleteTaskInSidebar(
     title: string,
-    options: { waitForCompletion?: boolean } = {},
+    options: { discardWorktreeChanges?: boolean; waitForCompletion?: boolean } = {},
   ): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
     const dialog = this.page.getByRole("alertdialog");
-    const discard = dialog.getByTestId("delete-discard-worktree-checkbox");
-    if (await discard.isVisible()) {
-      await discard.click();
-    }
     const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    const discardCheckbox = dialog.getByTestId("delete-discard-worktree-checkbox");
+    if (options.discardWorktreeChanges) {
+      await expect(discardCheckbox).toBeVisible();
+      await discardCheckbox.click();
+      await expect(discardCheckbox).toBeChecked();
+    } else {
+      await expect(confirmButton).toBeEnabled();
+      await expect(discardCheckbox).toHaveCount(0);
+    }
+    await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
     if (options.waitForCompletion !== false) {
       await expect(

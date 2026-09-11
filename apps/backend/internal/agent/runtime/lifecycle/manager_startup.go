@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -102,6 +104,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	defer func() {
+		retErr = wrapBootstrapFailure(execution, retErr)
+	}()
 	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
 	if err != nil {
 		return err
@@ -229,17 +234,69 @@ func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, executi
 	for _, key := range keys {
 		result, err := client.GitPushPreflight(ctx, key)
 		if err != nil {
-			return fmt.Errorf("repository %q: %w", key, err)
+			return &BootstrapFailure{
+				Operation: bootstrapOperation(execution),
+				Code:      classifyBootstrapCause(err),
+				Detail:    bootstrapFailureDetail(classifyBootstrapCause(err)),
+				Cause:     fmt.Errorf("repository %q: %w", contributionPreflightDisplayLabel(key), err),
+			}
 		}
 		if result == nil || !result.Success {
+			if execution.isResumedSession && result != nil &&
+				result.PreflightReason == agentctl.GitPushPreflightHistoryUpdateRequired {
+				continue
+			}
 			message := "remote contribution push is not writable"
+			code := models.AgentErrorCauseCodeUnknown
 			if result != nil && result.Error != "" {
 				message = result.Error
+				code = classifyBootstrapCauseCode(result.ErrorCode)
 			}
-			return fmt.Errorf("repository %q: %s", key, message)
+			return &BootstrapFailure{
+				Operation: bootstrapOperation(execution),
+				Code:      code,
+				Detail:    bootstrapFailureDetail(code),
+				Cause:     fmt.Errorf("repository %q: %s", contributionPreflightDisplayLabel(key), message),
+			}
 		}
 	}
 	return nil
+}
+
+func classifyBootstrapCauseCode(code string) string {
+	if isKnownBootstrapCauseCode(code) {
+		return code
+	}
+	return models.AgentErrorCauseCodeUnknown
+}
+
+func classifyBootstrapCause(err error) string {
+	if err == nil {
+		return models.AgentErrorCauseCodeUnknown
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return models.AgentErrorCauseCodeTimeout
+	}
+	normalized := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(normalized, "authentication"), strings.Contains(normalized, "login"):
+		return models.AgentErrorCauseCodeAuthenticationRequired
+	case strings.Contains(normalized, "permission denied"), strings.Contains(normalized, "access denied"):
+		return models.AgentErrorCauseCodePermissionDenied
+	case strings.Contains(normalized, "destination"), strings.Contains(normalized, "push url"):
+		return models.AgentErrorCauseCodeDestinationInvalid
+	case strings.Contains(normalized, "could not resolve host"), strings.Contains(normalized, "unable to access"), strings.Contains(normalized, "connection refused"):
+		return models.AgentErrorCauseCodeTransportUnavailable
+	default:
+		return models.AgentErrorCauseCodeUnknown
+	}
+}
+
+func contributionPreflightDisplayLabel(key string) string {
+	if strings.TrimSpace(key) == "" {
+		return "default repository"
+	}
+	return key
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.

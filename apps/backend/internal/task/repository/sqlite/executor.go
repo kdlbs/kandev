@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
 // Executor operations
@@ -162,7 +165,24 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		metadataJSON = string(b)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := lockTaskSessionRow(ctx, tx, running.SessionID); err != nil {
+		return err
+	}
+	var environmentID sql.NullString
+	if queryErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?`), running.SessionID).Scan(&environmentID); queryErr != nil && queryErr != sql.ErrNoRows {
+		return queryErr
+	}
+	if environmentID.Valid {
+		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID.String); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
@@ -218,7 +238,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.CreatedAt,
 		running.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
@@ -421,7 +444,15 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM executors_running WHERE session_id = ?`), sessionID)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM executors_running WHERE session_id = ?`), sessionID)
 	if err != nil {
 		return err
 	}
@@ -429,7 +460,39 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	if rows == 0 {
 		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// ensureExecutorRunningAvailableTx applies the environment recovery claim to
+// every mutation of an executors_running row. A session without an environment
+// is still allowed because initial materialization creates the environment
+// before it can be used for recovery.
+func (r *Repository) ensureExecutorRunningAvailableTx(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
+	var environmentID sql.NullString
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&environmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !environmentID.Valid || environmentID.String == "" {
+		return nil
+	}
+	return recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID.String)
+}
+
+func (r *Repository) executorRunningRowExistsTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT 1 FROM executors_running WHERE session_id = ? LIMIT 1
+	`), sessionID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return exists == 1, err
 }
 
 // HasExecutorRunningRow returns true if an executors_running row exists for sessionID.
@@ -465,18 +528,25 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 		return fmt.Errorf("session_id is required")
 	}
 	now := time.Now().UTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	var (
 		result sql.Result
-		err    error
 	)
 	if expectedExecID == "" {
-		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE executors_running
 			   SET resume_token = ?, last_message_uuid = ?, updated_at = ?
-			 WHERE session_id = ?
+			WHERE session_id = ?
 		`), resumeToken, lastMessageUUID, now, sessionID)
 	} else {
-		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE executors_running
 			   SET resume_token = ?, last_message_uuid = ?, updated_at = ?
 			 WHERE session_id = ?
@@ -489,7 +559,7 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		// Distinguish "no row at all" from "row exists but rotated".
-		exists, hasErr := r.HasExecutorRunningRow(ctx, sessionID)
+		exists, hasErr := r.executorRunningRowExistsTx(ctx, tx, sessionID)
 		if hasErr != nil {
 			return hasErr
 		}
@@ -498,7 +568,7 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 		}
 		return models.ErrExecutionRotated
 	}
-	return nil
+	return tx.Commit()
 }
 
 // RepairExecutorRunningDead repairs a row in place to reflect that its backing
@@ -516,7 +586,15 @@ func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID st
 		return fmt.Errorf("session_id is required")
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors_running
 		   SET status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
 		 WHERE session_id = ?
@@ -528,7 +606,7 @@ func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID st
 	if rows == 0 {
 		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // RepairExecutorRunningDeadIfCurrent is the compare-and-set variant used by
@@ -543,6 +621,14 @@ func (r *Repository) RepairExecutorRunningDeadIfCurrent(
 		return fmt.Errorf("session_id is required")
 	}
 	now := time.Now().UTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	query := `
 		UPDATE executors_running
 		   SET status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
@@ -555,15 +641,15 @@ func (r *Repository) RepairExecutorRunningDeadIfCurrent(
 		query += " AND updated_at = ?\n"
 		args = append(args, expectedUpdatedAt)
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows > 0 {
-		return nil
+		return tx.Commit()
 	}
-	exists, err := r.HasExecutorRunningRow(ctx, sessionID)
+	exists, err := r.executorRunningRowExistsTx(ctx, tx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -584,21 +670,29 @@ func (r *Repository) DeleteExecutorRunningIfCurrent(
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	query := `DELETE FROM executors_running WHERE session_id = ? AND agent_execution_id = ?`
 	args := []interface{}{sessionID, expectedExecID}
 	if !expectedUpdatedAt.IsZero() {
 		query += " AND updated_at = ?\n"
 		args = append(args, expectedUpdatedAt)
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows > 0 {
-		return nil
+		return tx.Commit()
 	}
-	exists, err := r.HasExecutorRunningRow(ctx, sessionID)
+	exists, err := r.executorRunningRowExistsTx(ctx, tx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -615,7 +709,15 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 		return fmt.Errorf("session_id is required")
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors_running
 		   SET status = ?, updated_at = ?
 		 WHERE session_id = ?
@@ -627,7 +729,7 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 	if rows == 0 {
 		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // UpdateExecutorRunningWorktreeBranch narrowly updates the branch snapshot for
@@ -641,7 +743,15 @@ func (r *Repository) UpdateExecutorRunningWorktreeBranch(ctx context.Context, se
 		return fmt.Errorf("expected execution_id is required")
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors_running
 		   SET worktree_branch = ?, updated_at = ?
 		 WHERE session_id = ?
@@ -652,7 +762,7 @@ func (r *Repository) UpdateExecutorRunningWorktreeBranch(ctx context.Context, se
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		exists, hasErr := r.HasExecutorRunningRow(ctx, sessionID)
+		exists, hasErr := r.executorRunningRowExistsTx(ctx, tx, sessionID)
 		if hasErr != nil {
 			return hasErr
 		}
@@ -661,7 +771,7 @@ func (r *Repository) UpdateExecutorRunningWorktreeBranch(ctx context.Context, se
 		}
 		return models.ErrExecutionRotated
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *Repository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {

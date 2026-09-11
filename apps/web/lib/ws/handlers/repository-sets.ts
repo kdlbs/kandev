@@ -60,6 +60,7 @@ function toRepositorySetItems(items: RepositorySetPayload["repositories"]): Repo
     .map((entry, index) => ({
       repository_id: repositoryId(entry.repository_id),
       position: typeof entry.position === "number" ? entry.position : index,
+      base_branch: entry.base_branch ?? "",
     }))
     .sort((left, right) => left.position - right.position);
 }

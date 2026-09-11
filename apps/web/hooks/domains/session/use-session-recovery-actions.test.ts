@@ -26,11 +26,13 @@ vi.mock("react-i18next", () => ({
 
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
+const PROVIDER_UNAVAILABLE = "provider unavailable";
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
+// eslint-disable-next-line max-lines-per-function -- recovery retry scenarios share one hook harness.
 describe("useSessionRecoveryActions", () => {
   it("clears busy and error state after a successful recovery", async () => {
     mocks.requestSessionRecover.mockResolvedValueOnce(undefined);
@@ -56,7 +58,7 @@ describe("useSessionRecoveryActions", () => {
 
   it("retains a failed action for retry and releases its busy state", async () => {
     mocks.requestSessionRecover
-      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockRejectedValueOnce(new Error(PROVIDER_UNAVAILABLE))
       .mockResolvedValueOnce(undefined);
     const { result } = renderHook(() =>
       useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
@@ -66,7 +68,8 @@ describe("useSessionRecoveryActions", () => {
       await result.current.handleRecover("resume");
     });
 
-    expect(result.current.recoveryError?.message).toBe("provider unavailable");
+    expect(result.current.recoveryError?.message).toBe(PROVIDER_UNAVAILABLE);
+    expect(result.current.manualRecoveryFailure).toEqual({ operation: "resume" });
     expect(result.current.busyAction).toBeNull();
 
     await act(async () => {
@@ -81,6 +84,31 @@ describe("useSessionRecoveryActions", () => {
       "task:failedToResumeSession",
     );
     expect(result.current.recoveryError).toBeNull();
+    expect(result.current.manualRecoveryFailure).toBeNull();
+    expect(result.current.busyAction).toBeNull();
+  });
+
+  it("keeps restore failure state safe across repeated retries", async () => {
+    const rawError = `backend secret ${"x".repeat(600)}`;
+    mocks.restoreSessionWorkspace
+      .mockRejectedValueOnce(new Error(rawError))
+      .mockRejectedValueOnce(new Error(rawError));
+    const { result } = renderHook(() =>
+      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+    );
+
+    await act(async () => {
+      await result.current.handleRestore();
+    });
+    expect(result.current.manualRecoveryFailure).toEqual({ operation: "restore_workspace" });
+    expect(result.current.recoveryError?.message).toBe(rawError);
+    expect(result.current.busyAction).toBeNull();
+
+    await act(async () => {
+      await result.current.handleRestore();
+    });
+    expect(mocks.restoreSessionWorkspace).toHaveBeenCalledTimes(2);
+    expect(result.current.manualRecoveryFailure).toEqual({ operation: "restore_workspace" });
     expect(result.current.busyAction).toBeNull();
   });
 
@@ -108,5 +136,22 @@ describe("useSessionRecoveryActions", () => {
 
     expect(result.current.recoveryError).toBeNull();
     expect(result.current.busyAction).toBeNull();
+  });
+
+  it("clears recovery state when a new durable error stamp arrives", async () => {
+    mocks.requestSessionRecover.mockRejectedValueOnce(new Error(PROVIDER_UNAVAILABLE));
+    const { result, rerender } = renderHook(
+      ({ errorStamp }: { errorStamp: string }) =>
+        useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID, errorStamp }),
+      { initialProps: { errorStamp: "bootstrap-1" } },
+    );
+
+    await act(async () => {
+      await result.current.handleRecover("resume");
+    });
+    expect(result.current.recoveryError?.message).toBe(PROVIDER_UNAVAILABLE);
+
+    rerender({ errorStamp: "bootstrap-2" });
+    await waitFor(() => expect(result.current.recoveryError).toBeNull());
   });
 });

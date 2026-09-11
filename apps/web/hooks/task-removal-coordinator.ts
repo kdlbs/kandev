@@ -34,6 +34,7 @@ type TaskRemovalCoordinatorDeps = {
   ) => Promise<RemoveFromBoardResult>;
   getRemovalIds: (requestIds: string[], cascade: boolean) => RemovalIdsByRequest;
   notifySuccess?: TaskRemovalSuccessNotifier;
+  stayOnListing?: boolean;
 };
 
 type SettledRequests = {
@@ -148,7 +149,7 @@ function beginRemovalOperation(
   const { store } = deps;
   const state = store.getState();
   const activeTaskId = state.tasks.activeTaskId;
-  if (!activeTaskId || !removalTaskIds.has(activeTaskId)) return null;
+  if (deps.stayOnListing || !activeTaskId || !removalTaskIds.has(activeTaskId)) return null;
 
   const activeSessionId = state.tasks.activeSessionId;
   const workspaceId = resolveWorkspaceId(store, activeTaskId, opts?.workspaceId);
@@ -194,7 +195,7 @@ function beginUnselectedRemovalOperation(
   const { store } = deps;
   const state = store.getState();
   const activeTaskId = state.tasks.activeTaskId;
-  if (activeTaskId && removalTaskIds.has(activeTaskId)) return null;
+  if (!deps.stayOnListing && activeTaskId && removalTaskIds.has(activeTaskId)) return null;
   const workspaceId = resolveWorkspaceId(store, null, opts?.workspaceId);
   const token = state.beginTaskRemoval({
     action,

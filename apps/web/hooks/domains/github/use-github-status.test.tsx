@@ -62,6 +62,7 @@ describe("useGitHubStatus workspace scoping", () => {
                 loading: false,
               },
             },
+            pendingPRDiscoveryHealthByWorkspaceId: {},
           },
         }}
       >

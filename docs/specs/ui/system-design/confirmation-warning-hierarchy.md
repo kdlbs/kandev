@@ -5,7 +5,7 @@ requirements:
   - REQ-TASKS-CONFIRMATION-WARNING-001
   - REQ-TASKS-CONFIRMATION-SURFACE-002
   - REQ-UI-TASK-CLEANUP-CONFIRMATION-001
-updated: 2026-09-07
+updated: 2026-09-10
 ---
 
 # Task Confirmation Surface System Design
@@ -70,13 +70,14 @@ policy into a visual component.
 phone width remains because prose benefits from the available line length and
 the primitive already preserves 16px viewport insets.
 
-`TaskDeleteConfirmDialog` shows an unchecked discard selection when the delete
-can remove a worktree. This includes a worktree executor, a bulk selection with
-a worktree executor, or a cascade that can include child worktrees. The label
-states that tracked and untracked files will be permanently removed. The delete
-action remains disabled until the user selects this outcome. When the task's
-executor projection is absent, the dialog fails closed and shows the same
-choice because a retained task-owned worktree may outlive its last session.
+`TaskDeleteConfirmDialog` shows an unchecked discard selection only when fresh
+inspection finds dirty worktrees in the selected scope. Clean results hide the
+selection. Loading or failed inspection disables Delete without showing discard
+consent. The label states that tracked and untracked files will be permanently
+removed. Dirty results require explicit selection before Delete is enabled.
+The [task cleanup design](../../tasks/system-design/dirty-worktree-deletion.md#read-only-confirmation-inspection)
+owns inspection, cascade scope, retry, and stale-response handling, including
+retained worktrees whose task has no executor projection.
 
 Each full surface uses an auto/minmax/auto layout: title in the first row, one
 `minmax(0, 1fr)` body containing description, cleanup consequences, warning,

@@ -31,6 +31,8 @@ across a backend restart, and executor-specific failure and recovery contracts.
 
 ### Requirements
 
+- [Repository branch resolution](requirements/repository-branch-resolution.md)
+
 
 
 - [Agent survival across a backend restart](requirements/agent-survival-across-restart.md)
@@ -46,6 +48,8 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 
 ### System design
+
+- [Repository branch resolution](system-design/repository-branch-resolution.md)
 
 
 

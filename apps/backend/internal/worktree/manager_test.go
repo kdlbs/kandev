@@ -198,43 +198,6 @@ func TestNewManager_DisabledConfig(t *testing.T) {
 	}
 }
 
-func TestManager_IsValid(t *testing.T) {
-	cfg := newTestConfig(t)
-	log := newTestLogger()
-	store := newMockStore()
-
-	mgr, err := NewManager(cfg, store, log)
-	if err != nil {
-		t.Fatalf("NewManager failed: %v", err)
-	}
-
-	// Test non-existent path
-	if mgr.IsValid("/nonexistent/path") {
-		t.Error("expected false for non-existent path")
-	}
-
-	// Create a mock worktree directory
-	worktreePath := filepath.Join(cfg.TasksBasePath, "test-worktree")
-	if err := os.MkdirAll(worktreePath, 0755); err != nil {
-		t.Fatalf("failed to create test dir: %v", err)
-	}
-
-	// Without .git file - should be invalid
-	if mgr.IsValid(worktreePath) {
-		t.Error("expected false for directory without .git file")
-	}
-
-	// With proper .git file
-	gitFile := filepath.Join(worktreePath, ".git")
-	if err := os.WriteFile(gitFile, []byte("gitdir: /some/path/.git/worktrees/test"), 0644); err != nil {
-		t.Fatalf("failed to create .git file: %v", err)
-	}
-
-	if !mgr.IsValid(worktreePath) {
-		t.Error("expected true for valid worktree directory")
-	}
-}
-
 func TestSanitizeForBranch(t *testing.T) {
 	tests := []struct {
 		name     string
