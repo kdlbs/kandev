@@ -128,6 +128,8 @@ type MockClient struct {
 	reviews           map[prKey][]PRReview
 	comments          map[prKey][]PRComment
 	checks            map[checkKey][]CheckRun
+	workflowRuns      map[workflowRunKey][]WorkflowRun
+	workflowJobs      map[workflowJobKey][]WorkflowJob
 	files             map[prKey][]PRFile
 	commits           map[prKey][]PRCommitInfo
 	prCommitsFailures map[prKey]int
@@ -184,6 +186,8 @@ func NewMockClient() *MockClient {
 		reviews:           make(map[prKey][]PRReview),
 		comments:          make(map[prKey][]PRComment),
 		checks:            make(map[checkKey][]CheckRun),
+		workflowRuns:      make(map[workflowRunKey][]WorkflowRun),
+		workflowJobs:      make(map[workflowJobKey][]WorkflowJob),
 		files:             make(map[prKey][]PRFile),
 		commits:           make(map[prKey][]PRCommitInfo),
 		prCommitsFailures: make(map[prKey]int),
@@ -558,6 +562,20 @@ func (m *MockClient) ListCheckRuns(_ context.Context, owner, repo, ref string) (
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.checks[checkKey{owner, repo, ref}], nil
+}
+
+func (m *MockClient) ListWorkflowRuns(_ context.Context, owner, repo, headSHA string) ([]WorkflowRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	runs := m.workflowRuns[workflowRunKey{Owner: owner, Repo: repo, HeadSHA: headSHA}]
+	return append([]WorkflowRun(nil), runs...), nil
+}
+
+func (m *MockClient) ListWorkflowRunJobs(_ context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	jobs := m.workflowJobs[workflowJobKey{Owner: owner, Repo: repo, RunID: runID, Attempt: attempt}]
+	return append([]WorkflowJob(nil), jobs...), nil
 }
 
 func (m *MockClient) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
@@ -1051,6 +1069,36 @@ func (m *MockClient) ReplaceCheckRuns(owner, repo, ref string, checks []CheckRun
 	m.checks[checkKey{owner, repo, ref}] = cp
 }
 
+// AddWorkflowRuns appends Actions runs for a PR head SHA.
+func (m *MockClient) AddWorkflowRuns(owner, repo, headSHA string, runs []WorkflowRun) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := workflowRunKey{Owner: owner, Repo: repo, HeadSHA: headSHA}
+	m.workflowRuns[k] = append(m.workflowRuns[k], runs...)
+}
+
+// ReplaceWorkflowRuns overwrites Actions runs for a PR head SHA.
+func (m *MockClient) ReplaceWorkflowRuns(owner, repo, headSHA string, runs []WorkflowRun) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workflowRuns[workflowRunKey{Owner: owner, Repo: repo, HeadSHA: headSHA}] = append([]WorkflowRun(nil), runs...)
+}
+
+// AddWorkflowRunJobs appends jobs for one Actions run attempt.
+func (m *MockClient) AddWorkflowRunJobs(owner, repo string, runID int64, attempt int, jobs []WorkflowJob) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := workflowJobKey{Owner: owner, Repo: repo, RunID: runID, Attempt: attempt}
+	m.workflowJobs[k] = append(m.workflowJobs[k], jobs...)
+}
+
+// ReplaceWorkflowRunJobs overwrites jobs for one Actions run attempt.
+func (m *MockClient) ReplaceWorkflowRunJobs(owner, repo string, runID int64, attempt int, jobs []WorkflowJob) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workflowJobs[workflowJobKey{Owner: owner, Repo: repo, RunID: runID, Attempt: attempt}] = append([]WorkflowJob(nil), jobs...)
+}
+
 // ReplaceReviews overwrites the reviews for a PR.
 func (m *MockClient) ReplaceReviews(owner, repo string, number int, reviews []PRReview) {
 	m.mu.Lock()
@@ -1125,6 +1173,8 @@ func (m *MockClient) Reset() {
 	m.reviews = make(map[prKey][]PRReview)
 	m.comments = make(map[prKey][]PRComment)
 	m.checks = make(map[checkKey][]CheckRun)
+	m.workflowRuns = make(map[workflowRunKey][]WorkflowRun)
+	m.workflowJobs = make(map[workflowJobKey][]WorkflowJob)
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
 	m.prCommitsFailures = make(map[prKey]int)

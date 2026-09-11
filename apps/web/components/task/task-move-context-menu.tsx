@@ -6,9 +6,9 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuSub,
-  ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@kandev/ui/context-menu";
+import { TaskContextMenuSubContent as ContextMenuSubContent } from "./task-context-menu-sub-content";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useWorkflowMove } from "@/hooks/domains/kanban/use-workflow-move";
@@ -160,6 +160,18 @@ type TaskMoveContextMenuItemsProps = {
 
 export function stepHasAutoStart(step: TaskMoveStep) {
   return step.events?.on_enter?.some((action) => action.type === "auto_start_agent") ?? false;
+}
+
+export function taskMoveOptions(
+  currentWorkflowId: string | null | undefined,
+  workflows: TaskMoveWorkflow[],
+  stepsByWorkflowId: Record<string, TaskMoveStep[]>,
+) {
+  const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
+  const targets = currentWorkflowId
+    ? workflows.filter((workflow) => !workflow.hidden && workflow.id !== currentWorkflowId)
+    : [];
+  return { currentSteps, targets, canMove: currentSteps.length > 1, canSend: targets.length > 0 };
 }
 
 function StepMenuLabel({
@@ -397,21 +409,18 @@ function WorkflowTargetItem({
 }
 
 function SendToWorkflowSubmenu({
-  currentWorkflowId,
   workflows,
   stepsByWorkflowId,
   disabled,
   onSendToWorkflow,
 }: {
-  currentWorkflowId?: string | null;
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, TaskMoveStep[]>;
   disabled?: boolean;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 }) {
   const { t } = useTranslation();
-  const targets = workflows.filter((workflow) => workflow.id !== currentWorkflowId);
-  if (!onSendToWorkflow || !currentWorkflowId || targets.length === 0) return null;
+  if (!onSendToWorkflow || workflows.length === 0) return null;
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger
@@ -423,7 +432,7 @@ function SendToWorkflowSubmenu({
         {t("task:sendToWorkflow")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
-        {targets.map((workflow) => (
+        {workflows.map((workflow) => (
           <WorkflowTargetItem
             key={workflow.id}
             workflow={workflow}
@@ -450,16 +459,15 @@ export function TaskMoveContextMenuItems({
   isMoving,
   onSendToWorkflow,
 }: TaskMoveContextMenuItemsProps) {
-  const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
-  const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
+  const { currentSteps, targets, canMove, canSend } = taskMoveOptions(
+    currentWorkflowId,
+    workflows,
+    stepsByWorkflowId,
+  );
   const hasSameWorkflowMove = Boolean(
-    (onMoveToStep || onMoveToStepWithOptions || onSubmitWithOptions) && currentSteps.length > 1,
+    (onMoveToStep || onMoveToStepWithOptions || onSubmitWithOptions) && canMove,
   );
-  const hasCrossWorkflowMove = Boolean(
-    onSendToWorkflow &&
-    currentWorkflowId &&
-    visibleWorkflows.some((workflow) => workflow.id !== currentWorkflowId),
-  );
+  const hasCrossWorkflowMove = Boolean(onSendToWorkflow && canSend);
 
   if (!hasSameWorkflowMove && !hasCrossWorkflowMove) return null;
 
@@ -476,8 +484,7 @@ export function TaskMoveContextMenuItems({
         isMoving={isMoving}
       />
       <SendToWorkflowSubmenu
-        currentWorkflowId={currentWorkflowId}
-        workflows={visibleWorkflows}
+        workflows={targets}
         stepsByWorkflowId={stepsByWorkflowId}
         disabled={disabled}
         onSendToWorkflow={onSendToWorkflow}

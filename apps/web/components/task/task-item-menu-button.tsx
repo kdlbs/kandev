@@ -1,15 +1,24 @@
 import { IconDots } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import type { MouseEventHandler, Ref } from "react";
 
 export function TaskMenuButton({
   visible,
   expanded,
   rowFocus = false,
+  onOpen,
+  buttonRef,
+  touchTarget = false,
+  popup = "menu",
 }: {
   visible: boolean;
   expanded: boolean;
   rowFocus?: boolean;
+  onOpen?: MouseEventHandler<HTMLButtonElement>;
+  buttonRef?: Ref<HTMLButtonElement>;
+  touchTarget?: boolean;
+  popup?: "menu" | "dialog";
 }) {
   const { t } = useTranslation();
   return (
@@ -28,15 +37,21 @@ export function TaskMenuButton({
       )}
     >
       <button
+        ref={buttonRef}
         type="button"
         className={cn(
           "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation",
           "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
+          touchTarget && "size-11!",
         )}
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();
+          if (onOpen) {
+            onOpen(e);
+            return;
+          }
           e.currentTarget.dispatchEvent(
             new MouseEvent("contextmenu", {
               bubbles: true,
@@ -46,7 +61,7 @@ export function TaskMenuButton({
           );
         }}
         aria-label={t("task:taskActions")}
-        aria-haspopup="menu"
+        aria-haspopup={popup}
         aria-expanded={expanded}
       >
         <IconDots className="h-4 w-4" />

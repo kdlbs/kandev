@@ -389,26 +389,105 @@ type CheckRun struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
+// WorkflowAttentionState describes an Actions workflow observation that is
+// separate from check-run success and failure. Unknown means the Actions
+// evidence was unavailable or incomplete; none is authoritative absence.
+type WorkflowAttentionState string
+
+const (
+	WorkflowAttentionUnknown          WorkflowAttentionState = "unknown"
+	WorkflowAttentionNone             WorkflowAttentionState = "none"
+	WorkflowAttentionApprovalRequired WorkflowAttentionState = "approval_required"
+	WorkflowAttentionActionRequired   WorkflowAttentionState = "action_required"
+)
+
+// WorkflowAttentionRun identifies a selected workflow that needs a human or
+// other GitHub action before it can proceed.
+type WorkflowAttentionRun struct {
+	RunID      int64  `json:"run_id"`
+	RunAttempt int    `json:"run_attempt"`
+	WorkflowID int64  `json:"workflow_id"`
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	Reason     string `json:"reason"`
+}
+
+// WorkflowAttention is the head-scoped Actions observation persisted with a
+// pull request. A positive stale observation remains useful only for the
+// same head SHA and is never treated as fresh evidence.
+type WorkflowAttention struct {
+	State      WorkflowAttentionState `json:"state"`
+	HeadSHA    string                 `json:"head_sha"`
+	ObservedAt time.Time              `json:"observed_at"`
+	Stale      bool                   `json:"stale"`
+	Runs       []WorkflowAttentionRun `json:"runs"`
+}
+
+// WorkflowRun is the provider-neutral subset of a GitHub Actions run needed
+// to match a run to one pull-request head and classify action_required.
+type WorkflowRun struct {
+	ID            int64                    `json:"id"`
+	RunAttempt    int                      `json:"run_attempt"`
+	WorkflowID    int64                    `json:"workflow_id"`
+	Name          string                   `json:"name"`
+	Event         string                   `json:"event"`
+	Status        string                   `json:"status"`
+	Conclusion    string                   `json:"conclusion"`
+	HeadSHA       string                   `json:"head_sha"`
+	HeadBranch    string                   `json:"head_branch"`
+	HeadRepoID    int64                    `json:"head_repo_id"`
+	HeadRepoOwner string                   `json:"head_repo_owner"`
+	HeadRepoName  string                   `json:"head_repo_name"`
+	HeadRepoURL   string                   `json:"head_repo_url"`
+	HTMLURL       string                   `json:"html_url"`
+	CreatedAt     time.Time                `json:"created_at"`
+	UpdatedAt     time.Time                `json:"updated_at"`
+	PullRequests  []WorkflowRunPullRequest `json:"pull_requests"`
+}
+
+// WorkflowRunPullRequest is an association included in a workflow-run API
+// response. GitHub can return no associations for a fork pull_request run.
+type WorkflowRunPullRequest struct {
+	Number        int    `json:"number"`
+	HeadSHA       string `json:"head_sha"`
+	HeadBranch    string `json:"head_branch"`
+	HeadRepoID    int64  `json:"head_repo_id"`
+	HeadRepoOwner string `json:"head_repo_owner"`
+	HeadRepoName  string `json:"head_repo_name"`
+	HeadRepoURL   string `json:"head_repo_url"`
+}
+
+// WorkflowJob is the current-attempt job subset used to distinguish a
+// jobless fork approval gate from other action_required conclusions.
+type WorkflowJob struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
 // PRFeedback aggregates all feedback for a PR (fetched live from GitHub).
 type PRFeedback struct {
-	PR        *PR         `json:"pr"`
-	Reviews   []PRReview  `json:"reviews"`
-	Comments  []PRComment `json:"comments"`
-	Checks    []CheckRun  `json:"checks"`
-	HasIssues bool        `json:"has_issues"`
+	PR                *PR                `json:"pr"`
+	Reviews           []PRReview         `json:"reviews"`
+	Comments          []PRComment        `json:"comments"`
+	Checks            []CheckRun         `json:"checks"`
+	HasIssues         bool               `json:"has_issues"`
+	WorkflowAttention *WorkflowAttention `json:"workflow_attention,omitempty"`
 }
 
 // PRStatus contains lightweight PR state used by the background poller.
 // Unlike PRFeedback, it skips comments to reduce API calls.
 type PRStatus struct {
-	PR                     *PR    `json:"pr"`
-	ReviewState            string `json:"review_state"`    // "approved", "changes_requested", "pending", ""
-	ChecksState            string `json:"checks_state"`    // "success", "failure", "pending", ""
-	MergeableState         string `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
-	MergeQueueState        string `json:"merge_queue_state"`
-	MergeQueuePosition     *int   `json:"merge_queue_position,omitempty"`
-	MergeQueueEntryID      string `json:"merge_queue_entry_id,omitempty"`
-	MergeQueueEntryHeadSHA string `json:"merge_queue_entry_head_sha,omitempty"`
+	PR                     *PR                `json:"pr"`
+	WorkflowAttention      *WorkflowAttention `json:"workflow_attention,omitempty"`
+	ReviewState            string             `json:"review_state"`    // "approved", "changes_requested", "pending", ""
+	ChecksState            string             `json:"checks_state"`    // "success", "failure", "pending", ""
+	MergeableState         string             `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
+	MergeQueueState        string             `json:"merge_queue_state"`
+	MergeQueuePosition     *int               `json:"merge_queue_position,omitempty"`
+	MergeQueueEntryID      string             `json:"merge_queue_entry_id,omitempty"`
+	MergeQueueEntryHeadSHA string             `json:"merge_queue_entry_head_sha,omitempty"`
 	// A nil estimate is an observed absence when mergeQueuePopulated is true.
 	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
 	MergeQueueLastRemovalID               string     `json:"merge_queue_last_removal_id,omitempty"`
@@ -445,6 +524,9 @@ type PRStatus struct {
 	// a full single pull request or a batched GraphQL result, so a zero/empty
 	// value is a real observation rather than "I didn't look."
 	OutcomeFieldsPopulated bool `json:"outcome_fields_populated,omitempty"`
+	// WorkflowAttentionPopulated distinguishes a status path that attempted
+	// the Actions read from legacy callers that did not know this field.
+	WorkflowAttentionPopulated bool `json:"workflow_attention_populated,omitempty"`
 	// ClosedByLogin is the closed-event actor's login, populated only by the
 	// GraphQL path (closed_by is absent from the REST pulls endpoint and the
 	// gh CLI's PR field set).
@@ -562,6 +644,11 @@ type TaskPR struct {
 	// TaskPRSourceWatch / TaskPRSourceURLLink. Empty on rows written before
 	// this column existed; never backfilled.
 	Source string `json:"source" db:"source"`
+
+	// WorkflowAttentionJSON is the persisted wire value. WorkflowAttention is
+	// the API-facing decoded form and is hydrated after database reads.
+	WorkflowAttentionJSON string             `json:"-" db:"workflow_attention"`
+	WorkflowAttention     *WorkflowAttention `json:"workflow_attention,omitempty" db:"-"`
 
 	// --- PR outcome attribution (five nullable columns, never backfilled) ---
 	//

@@ -405,10 +405,11 @@ deletion is not success.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
 **Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
-different layouts. Kandev remembers the last selected view in that browser on
-the current device. Phones offer **Kanban**, **Threads**, and **List** in the
-topbar menu; a saved desktop Pipeline preference is kept but shown as Kanban
-on the phone.
+different layouts. Threads shows agent conversations side by side. Kandev
+remembers the last selected view in that browser on the current device. Phones
+offer **Kanban**, **Threads**, and **List** in the topbar menu, with a native
+Threads deck showing one conversation at a time. A saved desktop Pipeline
+preference is kept but shown as Kanban on the phone.
 
 Kanban and List share a compact phone header showing the workspace and current
 mode. Tap that context or the menu button to change views, workspaces, or display
@@ -417,7 +418,15 @@ Threads view. Phone **Search tasks** lives in the menu: selecting it reveals
 and focuses the search field below the header. Selecting it again hides the
 field and clears the query.
 
-Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
+Under **Settings → Preferences → Appearance → Startup Page**, choose a destination, then select **Save changes**:
+
+- **Task overview** (the default): open the last listing view used on this device, including Threads.
+- **Last visited task**: resume the most recently opened task in the current workspace on this device when Kandev starts or you open the bare home address. If no matching task exists, open the remembered listing instead. Home navigation does not resume the task.
+- **Threads**: always open Threads on startup and Home navigation in the selected workspace, even after using a different listing view. This saved choice follows your user across devices; changing a listing view does not change it.
+
+Office workspaces keep their Office Home while Office is enabled. With Office disabled, Home keeps the workspace and uses the task-listing startup choice.
+
+Explicit view selections (including Kanban, Pipeline, and List), task, session, workflow, overview, and focused Threads links keep their destination on reload instead of applying the saved Threads default. A task's **Task overview** or Back action still opens the overview family using the remembered listing; it does not apply the fixed Threads default.
 
 The **TASKS** list in the left sidebar has two time-based sort choices. These choices are separate from the sort choices in the task **List** view.
 
