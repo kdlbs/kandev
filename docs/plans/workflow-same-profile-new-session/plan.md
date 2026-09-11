@@ -69,6 +69,11 @@ stamped runtime-stop paths. Preserve the explicit-target branch in
 destination is prepared. A replacement keeps the task environment and executor
 inheritance, and starts its own provider conversation.
 
+The task service invokes the same destination credential preflight before
+committing a service-level workflow move. This keeps an asynchronous
+`task.moved` lifecycle failure from leaving the task persisted on a step with
+no prepared destination session.
+
 ## Tests
 
 Add `event_handlers_workflow_same_profile_policy_test.go` beside the existing

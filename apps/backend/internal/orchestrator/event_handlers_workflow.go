@@ -3848,6 +3848,17 @@ func (s *Service) preflightWorkflowStepCredentials(
 	)
 }
 
+// PreflightWorkflowStepMove exposes the destination lifecycle preflight to
+// the task service, which must run it before committing a manual move.
+func (s *Service) PreflightWorkflowStepMove(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	return s.preflightWorkflowStepCredentials(ctx, taskID, currentSession, targetStep)
+}
+
 // maybySwitchSessionForProfile preserves the legacy processOnEnter failure
 // handling while sharing the error-returning step-entry preflight with direct
 // workflow-engine dispatch.

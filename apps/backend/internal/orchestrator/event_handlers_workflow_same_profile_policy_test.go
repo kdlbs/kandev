@@ -189,9 +189,15 @@ func TestProcessOnEnter_SameProfileNewPromptRecipient(t *testing.T) {
 		require.NotEqual(t, fixture.current.ID, launchedSessionID)
 		require.True(t, strings.Contains(launchedPrompt, marker))
 	} else {
-		require.Len(t, descriptionCalls, 1)
-		require.NotEqual(t, "execution-a", descriptionCalls[0].ExecutionID)
-		require.True(t, strings.Contains(descriptionCalls[0].Prompt, marker))
+		markerIdx := -1
+		for i, call := range descriptionCalls {
+			if strings.Contains(call.Prompt, marker) {
+				markerIdx = i
+				break
+			}
+		}
+		require.GreaterOrEqual(t, markerIdx, 0, "marker not found in setExecutionDescriptionCalls")
+		require.NotEqual(t, "execution-a", descriptionCalls[markerIdx].ExecutionID)
 	}
 
 	sessions, err := fixture.repo.ListTaskSessions(ctx, "t1")

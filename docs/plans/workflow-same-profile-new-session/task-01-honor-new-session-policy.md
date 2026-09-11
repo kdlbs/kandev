@@ -106,6 +106,11 @@ only for normalized `reuse` or an empty profile; matching `new` uses the
 existing replacement lifecycle and the source end policy. Runtime model and
 reasoning overrides remain untouched.
 
+The task service now runs the orchestrator's destination credential preflight
+before committing a service-level workflow move. A failed preflight therefore
+leaves the source step unchanged instead of relying on the asynchronous
+`task.moved` lifecycle handler to reject the destination.
+
 Added backend regressions for same-profile `new` with both source end policies,
 explicit/default `reuse` override preservation, credential preflight failure,
 and `processOnEnter` prompt delivery to the replacement. Added the Chromium
