@@ -208,6 +208,7 @@ describe("filterIdsByPriorityFilter", () => {
 const moveTaskById = vi.fn();
 const deleteTaskById = vi.fn();
 const archiveTaskById = vi.fn();
+const runTaskRemovalBatch = vi.fn();
 
 vi.mock("@/hooks/use-task-actions", () => ({
   useTaskActions: () => ({
@@ -220,6 +221,37 @@ vi.mock("@/hooks/use-task-actions", () => ({
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
 }));
+vi.mock("@/hooks/use-task-removal", () => ({
+  useTaskRemovalSuccessNotifier: () => vi.fn(),
+  useTaskRemoval: () => ({ runTaskRemovalBatch }),
+}));
+
+// Stands in for coordinateTaskRemovalBatch: dispatches every request's
+// `mutate()` synchronously (matching the real coordinator's Promise.allSettled
+// call) so the eligibility-snapshot-at-invocation tests below still observe
+// dispatch happening before their gates resolve.
+function mockRunTaskRemovalBatchDefault() {
+  runTaskRemovalBatch.mockImplementation(
+    async (
+      _action: "delete" | "archive",
+      requests: Array<{ taskId: string; mutate: () => Promise<void> }>,
+    ) => {
+      const results = await Promise.allSettled(requests.map((request) => request.mutate()));
+      return {
+        skipped: false,
+        operationToken: "removal-1",
+        switchedTaskId: null,
+        succeededTaskIds: requests
+          .filter((_, index) => results[index].status === "fulfilled")
+          .map((request) => request.taskId),
+        failedTaskIds: requests
+          .filter((_, index) => results[index].status === "rejected")
+          .map((request) => request.taskId),
+        errorsByTaskId: {},
+      };
+    },
+  );
+}
 
 function makeTask(id: string, priority?: TaskPriority) {
   return {
@@ -284,6 +316,8 @@ describe("useTaskMultiSelect — bulk actions exclude priority-filtered-out task
     moveTaskById.mockReset().mockResolvedValue(undefined);
     deleteTaskById.mockReset().mockResolvedValue(undefined);
     archiveTaskById.mockReset().mockResolvedValue(undefined);
+    runTaskRemovalBatch.mockReset();
+    mockRunTaskRemovalBatchDefault();
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -395,6 +429,8 @@ describe("useTaskMultiSelect — eligibility snapshot is frozen at invocation (A
     moveTaskById.mockReset().mockResolvedValue(undefined);
     deleteTaskById.mockReset().mockResolvedValue(undefined);
     archiveTaskById.mockReset().mockResolvedValue(undefined);
+    runTaskRemovalBatch.mockReset();
+    mockRunTaskRemovalBatchDefault();
   });
   afterEach(() => {
     vi.clearAllMocks();
