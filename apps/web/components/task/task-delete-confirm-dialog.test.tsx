@@ -120,7 +120,7 @@ describe("TaskDeleteConfirmDialog", () => {
     expect(screen.getByTestId("task-confirmation-body").className).toContain("min-h-0");
     expect(screen.getByTestId("task-confirmation-body").className).toContain("space-y-3");
     expect(screen.getByTestId("task-confirmation-body").className).toContain("overflow-y-auto");
-    expect(screen.getByTestId("confirm").className).toContain("min-h-[44px]");
+    expect(screen.getByTestId("confirm").className).toContain("min-h-11");
     expect(screen.getByTestId("confirm").className).toContain("w-full");
     expect(screen.getByTestId("confirm").getAttribute("data-variant")).toBe("destructive");
   });
