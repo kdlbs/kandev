@@ -109,7 +109,7 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	}
 }
 
-func TestProcessOnChildrenCompleted_TreatsTerminalStepAsCompleted(t *testing.T) {
+func TestProcessOnChildrenCompleted_UsesCommittedTaskState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "parent", "parent-session", "step_wait")
@@ -152,7 +152,7 @@ func TestProcessOnChildrenCompleted_TreatsTerminalStepAsCompleted(t *testing.T) 
 	now := time.Now().UTC()
 	requireCreateTask(t, repo, &models.Task{
 		ID: "child-terminal-step", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
-		Title: "Child in Done", State: v1.TaskStateReview, ParentID: "parent",
+		Title: "Child in Done", State: v1.TaskStateCompleted, ParentID: "parent",
 		CreatedAt: now, UpdatedAt: now,
 	})
 
@@ -200,10 +200,11 @@ func TestHandleTaskMovedToTerminalStepProcessesParentChildrenCompleted(t *testin
 		Position:   0,
 	}
 	stepGetter.steps["child_done"] = &wfmodels.WorkflowStep{
-		ID:         "child_done",
-		WorkflowID: "wf-child",
-		Name:       "Done",
-		Position:   1,
+		ID:                  "child_done",
+		WorkflowID:          "wf-child",
+		Name:                "Done",
+		Position:            1,
+		CompleteTaskOnEnter: true,
 	}
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}

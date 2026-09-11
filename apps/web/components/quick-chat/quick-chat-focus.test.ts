@@ -80,4 +80,22 @@ describe("quick chat launcher focus", () => {
     expect(document.activeElement).not.toBe(launcher);
     expect(launcher.getAttribute(SILENT_FOCUS_ATTRIBUTE)).toBeNull();
   });
+
+  it("returns to the persistent opener when a menu launcher unmounts", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+    const menuButton = document.createElement("button");
+    const menuAction = document.createElement("button");
+    document.body.append(menuButton, menuAction);
+    menuAction.focus();
+
+    captureQuickChatLauncherFocus({ returnFocusRef: { current: menuButton } });
+    menuAction.remove();
+    restoreQuickChatLauncherFocus();
+
+    expect(document.activeElement).toBe(menuButton);
+    expect(menuButton.getAttribute(SILENT_FOCUS_ATTRIBUTE)).toBe("true");
+  });
 });

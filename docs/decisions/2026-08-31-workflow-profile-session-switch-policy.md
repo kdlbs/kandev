@@ -32,8 +32,10 @@ The defaults are `reuse` and `complete`. These defaults preserve existing
 behavior. The router reuses an eligible nonterminal destination session when one
 exists. It completes the source session.
 
-The settings apply only when the effective agent profile changes. Consecutive
-steps with the same effective profile keep the active session.
+For profile-only routing, the settings apply only when the effective agent
+profile changes. Consecutive steps with the same effective profile keep the
+active session. The proposed explicit-target extension below distinguishes
+session identity from profile identity.
 
 The workflow engine keeps its transition graph, actions, events, and states. The
 transition integration must provide both source and destination settings to the
@@ -75,3 +77,31 @@ new-task selector.
   files, logs, and tests.
 - Add a `PARKED` task-session state: rejected because
   `WAITING_FOR_INPUT` already represents a stopped, resumable session.
+
+## Proposed extension: explicit session targets (2026-09-09)
+
+The [recipient design](../specs/tasks/system-design/workflow-profile-session-lifecycle.md#explicit-recipient-contract)
+adds initial-session and earlier-step references beside legacy profile routing.
+This extension is pending implementation through the
+[session-targeting plan](../plans/workflow-session-targeting/plan.md).
+
+An explicit target resolves a conversation identity before applying the start
+setting. Its `new` setting must work even when profiles match. The source step
+still owns retirement, and terminal sessions remain unavailable for reuse.
+
+An initial reference retains the original identity. A source-step reference
+uses that step's latest successful session selection. Deliver initial targeting
+first, using the existing original marker and a write-once task metadata
+snapshot that survives session deletion. A task metadata route record makes
+fresh selection retry-safe from the first slice. Add durable source-step
+bindings in the second slice; initial provenance stays in the snapshot.
+Asynchronous history remains audit evidence rather than selection authority.
+
+Matching only by profile was considered, but cannot distinguish two source
+steps using the same profile or the original conversation from a newer tab.
+Reinterpreting **No profile override** as initial was considered, but would
+change existing workflows. Explicit references keep that compatibility path.
+
+Portable version 2 is used when targets exist. Adding routing fields to version
+1 was considered, but an older reader could silently ignore them and deliver a
+prompt to another agent. Version rejection is the required compatibility result.

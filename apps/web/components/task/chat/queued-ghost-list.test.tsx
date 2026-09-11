@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- queue panel behavior tests share one fixture matrix. */
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -10,10 +11,28 @@ import { toast } from "sonner";
 import { simulateReorderDrag } from "./queued-ghost-list.test-helpers";
 
 const useQueueMock = vi.fn();
+const useQueueEditProtectionMock = vi.fn();
 const STATE_ATTRIBUTE = "data-state";
 
 vi.mock("@/hooks/domains/session/use-queue", () => ({
   useQueue: (sessionId: string | null) => useQueueMock(sessionId),
+}));
+
+vi.mock("@/hooks/use-queue-edit-protection", () => ({
+  useQueueEditProtection: () => useQueueEditProtectionMock(),
+  useQueuedGhostLeaseLoss: () => undefined,
+  useQueuedGhostStartEdit:
+    ({
+      onEditStart,
+      onStart,
+    }: {
+      onEditStart?: () => void | Promise<boolean | string | void>;
+      onStart: (editToken?: string) => void;
+    }) =>
+    async () => {
+      const editToken = await onEditStart?.();
+      if (editToken !== false) onStart(typeof editToken === "string" ? editToken : undefined);
+    },
 }));
 
 // The queue pin is desktop-only; these tests exercise the desktop path.
@@ -53,6 +72,7 @@ const EDIT_BUTTON_ID = "queue-entry-edit";
 const REMOVE_BUTTON_ID = "queue-entry-remove";
 const SEND_NOW_BUTTON_ID = "queue-entry-send-now";
 const AUTO_RUN_BUTTON_ID = "queue-auto-run";
+const QUEUE_EDIT_TEXTAREA_ID = "queue-edit-textarea";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -126,9 +146,20 @@ function pressQueueEscape(): ReturnType<typeof vi.fn> {
   }
   return outerEscapeHandler;
 }
-
 beforeEach(() => {
   useQueueMock.mockReset();
+  useQueueEditProtectionMock.mockReset();
+  useQueueEditProtectionMock.mockReturnValue({
+    editingEntryId: null,
+    editLease: {
+      session_id: SESSION_ID,
+      entry_id: "q-1",
+      lease_id: "lease-default",
+      target_revision: 0,
+    },
+    beginEdit: vi.fn(async () => true),
+    completeEdit: vi.fn(async () => {}),
+  });
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
 });
@@ -303,6 +334,76 @@ describe("QueueAffordance Send Now", () => {
     );
   });
 });
+it("acquires a target lease before activating an editor and releases it after cancel", async () => {
+  const state = queueState([entry()]);
+  useQueueMock.mockReturnValue(state);
+  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  fireEvent.click(screen.getByTestId(CHIP_ID));
+
+  fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
+  expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeNull();
+  await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeNull();
+});
+
+it("does not activate the editor when the target lease cannot be acquired", async () => {
+  const state = queueState([entry()]);
+  useQueueMock.mockReturnValue(state);
+  useQueueEditProtectionMock.mockReturnValue({
+    editingEntryId: null,
+    editLease: null,
+    beginEdit: vi.fn(async () => false),
+    completeEdit: vi.fn(async () => {}),
+  });
+  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  fireEvent.click(screen.getByTestId(CHIP_ID));
+
+  fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
+  await waitFor(() => expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeNull());
+});
+
+it("preserves queued attachments when saving a text edit", async () => {
+  const attachments = [
+    {
+      type: "resource",
+      attachment_id: "attachment-1",
+      mime_type: "text/plain",
+      name: "notes.txt",
+    },
+  ];
+  const state = queueState([entry({ attachments })]);
+  state.editEntry = vi.fn(async () => {});
+  useQueueMock.mockReturnValue(state);
+  useQueueEditProtectionMock.mockReturnValue({
+    editingEntryId: null,
+    editLease: {
+      session_id: SESSION_ID,
+      entry_id: "q-1",
+      lease_id: "lease-1",
+      target_revision: 0,
+    },
+    beginEdit: vi.fn(async () => true),
+    completeEdit: vi.fn(async () => {}),
+  });
+  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  fireEvent.click(screen.getByTestId(CHIP_ID));
+  fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
+  await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
+  fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID), { target: { value: "edited" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(state.editEntry).toHaveBeenCalledWith(
+      "q-1",
+      "edited",
+      attachments,
+      [],
+      expect.objectContaining({ lease_id: "lease-1" }),
+    ),
+  );
+});
 
 describe("QueueAffordance positions", () => {
   it("compacts displayed positions when persisted queue positions contain gaps", () => {
@@ -434,13 +535,20 @@ describe("QueueAffordance entity-reference edits", () => {
 
     fireEvent.click(screen.getByTestId(CHIP_ID));
     fireEvent.click(screen.getByTitle("Edit queued message"));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
+    await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID), {
       target: { value: "reference removed" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(state.editEntry).toHaveBeenCalledWith("q-1", "reference removed", undefined, []),
+      expect(state.editEntry).toHaveBeenCalledWith(
+        "q-1",
+        "reference removed",
+        undefined,
+        [],
+        expect.objectContaining({ lease_id: "lease-default" }),
+      ),
     );
   });
 });
@@ -625,7 +733,7 @@ describe("QueueAffordance reorder", () => {
     for (const handle of handles) expect(handle.disabled).toBe(true);
   });
 
-  it("removes the handle while the row is being edited", () => {
+  it("removes the handle while the row is being edited", async () => {
     const state = queueState([
       entry({ id: "q-1", queued_by: QUEUED_BY_USER }),
       entry({ id: "q-2", content: "second" }),
@@ -635,7 +743,7 @@ describe("QueueAffordance reorder", () => {
     fireEvent.click(screen.getByTestId(CHIP_ID));
 
     fireEvent.click(screen.getAllByTestId(EDIT_BUTTON_ID)[0]);
-    expect(screen.getByTestId("queue-edit-textarea")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
     expect(screen.getAllByTestId(GRAB_HANDLE_ID)).toHaveLength(1);
   });
 

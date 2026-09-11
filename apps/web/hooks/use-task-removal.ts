@@ -2,19 +2,30 @@ import { useCallback } from "react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { KanbanState } from "@/lib/state/slices";
-import type { TaskSession } from "@/lib/types/http";
-import { linkToTaskOverview, replaceTaskUrl } from "@/lib/links";
+import type { Task, TaskSession } from "@/lib/types/http";
+import { linkToTask, linkToTaskOverview } from "@/lib/links";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
 import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
+import { softNavigate } from "@/lib/routing/client-router";
+import { ownsTaskRemovalDeparture, type TaskRemovalAction } from "@/lib/state/task-removal";
+import { coordinateTaskRemovalBatch } from "./task-removal-coordinator";
+import { useToast } from "@/components/toast-provider";
+import { useTranslation } from "react-i18next";
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
   /** Whether to call performLayoutSwitch when switching sessions (desktop sidebar uses this) */
   useLayoutSwitch?: boolean;
+  /** Listing surfaces own their viewport selection and must not navigate to task detail. */
+  stayOnListing?: boolean;
+  /** Show one localized success message after a fully successful operation. */
+  notifySuccess?: TaskRemovalSuccessNotifier;
 };
+
+export type TaskRemovalSuccessNotifier = (action: TaskRemovalAction, count: number) => void;
 
 export type TaskSessionLoadOptions = {
   /** Ignore the local task-session cache and request an authoritative snapshot. */
@@ -23,7 +34,7 @@ export type TaskSessionLoadOptions = {
   signal?: AbortSignal;
 };
 
-type RemoveFromBoardOptions = {
+export type RemoveFromBoardOptions = {
   /**
    * The active task ID captured **before** the async delete/archive API call.
    * Only honored when the current `activeTaskId` has been cleared to `null`
@@ -41,12 +52,56 @@ type RemoveFromBoardOptions = {
   excludeTaskTree?: boolean;
   /** Reuse the tree captured before an archive can prune cached descendants. */
   excludedTaskIds?: ReadonlySet<string>;
+  /** Remove this exact set from cached board projections after success. */
+  removedTaskIds?: ReadonlySet<string>;
+  /** Guard automatic selection and URL writes for a coordinated operation. */
+  removalToken?: string;
+  /** Navigation revision captured when the operation was accepted. */
+  removalNavigationRevision?: number;
+  /** Restrict fallback candidates to the current workspace projection. */
+  workspaceId?: string | null;
+  /** Revalidate parent ancestry when the removal set came from a cascade. */
+  validateTaskAncestry?: boolean;
 };
 
-type RemoveFromBoardResult = {
+export type RemoveFromBoardResult = {
   switchedTaskId: string | null;
   excludedTaskIds?: ReadonlySet<string>;
 };
+
+export type TaskRemovalRunOptions = {
+  cascade?: boolean;
+  workspaceId?: string | null;
+};
+
+export type TaskRemovalRequest = {
+  taskId: string;
+  mutate: () => Promise<void>;
+};
+
+export type TaskRemovalRunResult = {
+  skipped: boolean;
+  operationToken: string | null;
+  switchedTaskId: string | null;
+  succeededTaskIds: string[];
+  failedTaskIds: string[];
+};
+
+export type TaskRemovalBatchResult = TaskRemovalRunResult & {
+  errorsByTaskId: Record<string, unknown>;
+};
+
+export function useTaskRemovalSuccessNotifier(): TaskRemovalSuccessNotifier {
+  const { toast } = useToast();
+  const { t } = useTranslation();
+  return useCallback(
+    (action: TaskRemovalAction, count: number) => {
+      const key = action === "archive" ? "tasks:taskArchiveCompleted" : "tasks:taskDeleteCompleted";
+      toast({ title: t(key, { count }), variant: "success" });
+    },
+    [t, toast],
+  );
+}
 
 const taskSessionLoadGenerations = new WeakMap<StoreApi<AppState>, Map<string, number>>();
 
@@ -164,14 +219,21 @@ function removeTasksFromSnapshots(store: StoreApi<AppState>, taskIds: ReadonlySe
 }
 
 function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] {
-  // Keep candidate ordering snapshot-first; task-tree exclusion follows the
-  // same precedence and uses kanban.tasks only to fill missing rows.
+  // Keep candidate ordering snapshot-first; the canonical board fills missing
+  // rows without duplicating a task present in a workflow snapshot.
   const allRemainingTasks: KanbanState["tasks"] = [];
+  const seen = new Set<string>();
   for (const snapshot of Object.values(store.getState().kanbanMulti.snapshots)) {
-    allRemainingTasks.push(...snapshot.tasks);
+    for (const task of snapshot.tasks) {
+      if (seen.has(task.id)) continue;
+      seen.add(task.id);
+      allRemainingTasks.push(task);
+    }
   }
-  if (allRemainingTasks.length === 0) {
-    allRemainingTasks.push(...store.getState().kanban.tasks);
+  for (const task of store.getState().kanban.tasks) {
+    if (seen.has(task.id)) continue;
+    seen.add(task.id);
+    allRemainingTasks.push(task);
   }
   return allRemainingTasks;
 }
@@ -230,9 +292,13 @@ function orderedTaskCandidates(
   remainingTasks: KanbanState["tasks"],
   removedTaskId: string,
   excludedTaskIds?: ReadonlySet<string>,
+  workspaceId?: string | null,
 ): KanbanState["tasks"] {
   const candidates = remainingTasks.filter(
-    (task) => task.id !== removedTaskId && !excludedTaskIds?.has(task.id),
+    (task) =>
+      task.id !== removedTaskId &&
+      !excludedTaskIds?.has(task.id) &&
+      (!workspaceId || task.workspaceId === workspaceId),
   );
   const remainingById = new Map(candidates.map((task) => [task.id, task]));
   const ordered: KanbanState["tasks"] = [];
@@ -255,6 +321,35 @@ async function taskIsLive(taskId: string): Promise<boolean> {
   }
 }
 
+async function taskHasSafeRemovalAncestry(
+  taskId: string,
+  excludedTaskIds: ReadonlySet<string>,
+  workspaceId?: string | null,
+): Promise<boolean> {
+  const visited = new Set<string>();
+  let currentTaskId: string | null = taskId;
+
+  while (currentTaskId) {
+    if (visited.has(currentTaskId)) return false;
+    visited.add(currentTaskId);
+
+    let task: Task;
+    try {
+      task = await fetchTask(currentTaskId, { cache: "no-store" });
+    } catch {
+      return false;
+    }
+    if (task.archived_at || (workspaceId && task.workspace_id !== workspaceId)) return false;
+
+    const parentId = task.parent_id ?? null;
+    if (!parentId) return true;
+    if (excludedTaskIds.has(parentId)) return false;
+    currentTaskId = parentId;
+  }
+
+  return false;
+}
+
 /**
  * Picks the first candidate that the task API still reports as unarchived.
  * Workflow snapshots and the active kanban are both cached projections and can
@@ -265,9 +360,25 @@ export async function selectNextTaskAfterRemoval(
   remainingTasks: KanbanState["tasks"],
   removedTaskId: string,
   isLive: (taskId: string) => Promise<boolean> = taskIsLive,
-  excludedTaskIds?: ReadonlySet<string>,
+  options?: {
+    excludedTaskIds?: ReadonlySet<string>;
+    workspaceId?: string | null;
+    validateTaskAncestry?: boolean;
+  },
 ): Promise<KanbanState["tasks"][number] | null> {
-  for (const task of orderedTaskCandidates(remainingTasks, removedTaskId, excludedTaskIds)) {
+  const { excludedTaskIds, workspaceId, validateTaskAncestry = false } = options ?? {};
+  for (const task of orderedTaskCandidates(
+    remainingTasks,
+    removedTaskId,
+    excludedTaskIds,
+    workspaceId,
+  )) {
+    if (
+      validateTaskAncestry &&
+      !(await taskHasSafeRemovalAncestry(task.id, excludedTaskIds ?? new Set(), workspaceId))
+    ) {
+      continue;
+    }
     if (await isLive(task.id)) return task;
   }
   return null;
@@ -281,7 +392,7 @@ function switchToSessionForTask(params: {
   useLayoutSwitch: boolean;
 }): void {
   const { store, nextTask, sessionId, oldEnvId, useLayoutSwitch } = params;
-  store.getState().setActiveSession(nextTask.id, sessionId);
+  setActiveSessionAutomatically(store, nextTask.id, sessionId);
   if (!useLayoutSwitch) return;
   const state = store.getState();
   const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
@@ -297,12 +408,14 @@ async function switchToNextTask(params: {
   oldEnvId: string | null;
   useLayoutSwitch: boolean;
   loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
-}): Promise<void> {
-  const { store, nextTask, oldEnvId, useLayoutSwitch, loadTaskSessionsForTask } = params;
+  canCommit?: () => boolean;
+}): Promise<boolean> {
+  const { store, nextTask, oldEnvId, useLayoutSwitch, loadTaskSessionsForTask, canCommit } = params;
   if (nextTask.primarySessionId) {
     if (useLayoutSwitch && !store.getState().environmentIdBySessionId[nextTask.primarySessionId]) {
       await loadTaskSessionsForTask(nextTask.id);
     }
+    if (canCommit && !canCommit()) return false;
     switchToSessionForTask({
       store,
       nextTask,
@@ -310,18 +423,20 @@ async function switchToNextTask(params: {
       oldEnvId,
       useLayoutSwitch,
     });
-    replaceTaskUrl(nextTask.id);
-    return;
+    softNavigate(linkToTask(nextTask.id), "replace");
+    return true;
   }
 
   const sessions = await loadTaskSessionsForTask(nextTask.id);
+  if (canCommit && !canCommit()) return false;
   const sessionId = sessions[0]?.id ?? null;
   if (sessionId) {
     switchToSessionForTask({ store, nextTask, sessionId, oldEnvId, useLayoutSwitch });
   } else {
-    store.getState().setActiveTask(nextTask.id);
+    setActiveTaskAutomatically(store, nextTask.id);
   }
-  replaceTaskUrl(nextTask.id);
+  softNavigate(linkToTask(nextTask.id), "replace");
+  return true;
 }
 
 function resolveOldEnvId(store: StoreApi<AppState>, opts?: RemoveFromBoardOptions): string | null {
@@ -330,6 +445,39 @@ function resolveOldEnvId(store: StoreApi<AppState>, opts?: RemoveFromBoardOption
       ? opts.wasActiveSessionId
       : store.getState().tasks.activeSessionId;
   return oldSessionId ? (store.getState().environmentIdBySessionId[oldSessionId] ?? null) : null;
+}
+
+function taskTreeIdsForRequests(
+  store: StoreApi<AppState>,
+  taskIds: string[],
+  cascade: boolean,
+): Map<string, ReadonlySet<string>> {
+  return new Map(
+    taskIds.map((taskId) => [
+      taskId,
+      cascade ? collectTaskTreeIdsFromStore(store, taskId) : new Set([taskId]),
+    ]),
+  );
+}
+
+function setActiveTaskAutomatically(store: StoreApi<AppState>, taskId: string): void {
+  const state = store.getState() as AppState & {
+    setActiveTaskAuto?: (id: string) => void;
+  };
+  if (state.setActiveTaskAuto) state.setActiveTaskAuto(taskId);
+  else state.setActiveTask(taskId);
+}
+
+function setActiveSessionAutomatically(
+  store: StoreApi<AppState>,
+  taskId: string,
+  sessionId: string,
+): void {
+  const state = store.getState() as AppState & {
+    setActiveSessionAuto?: (task: string, session: string) => void;
+  };
+  if (state.setActiveSessionAuto) state.setActiveSessionAuto(taskId, sessionId);
+  else state.setActiveSession(taskId, sessionId);
 }
 
 /**
@@ -350,9 +498,129 @@ function shouldSwitchAfterRemoval(
   opts?: RemoveFromBoardOptions,
 ): boolean {
   const currentActiveTaskId = store.getState().tasks.activeTaskId;
-  const stillOnRemoved = currentActiveTaskId === taskId;
-  const wsCleared = currentActiveTaskId === null && opts?.wasActiveTaskId === taskId;
+  const stillOnRemoved =
+    currentActiveTaskId === taskId ||
+    Boolean(currentActiveTaskId && opts?.excludedTaskIds?.has(currentActiveTaskId));
+  const wsCleared =
+    currentActiveTaskId === null &&
+    Boolean(
+      opts?.wasActiveTaskId &&
+      (opts.wasActiveTaskId === taskId || opts.excludedTaskIds?.has(opts.wasActiveTaskId)),
+    );
   return stillOnRemoved || wsCleared;
+}
+
+function removalTaskIdsForBoard(
+  store: StoreApi<AppState>,
+  taskId: string,
+  opts?: RemoveFromBoardOptions,
+): { excludedTaskIds?: ReadonlySet<string>; removedTaskIds: ReadonlySet<string> } {
+  const excludedTaskIds =
+    opts?.excludedTaskIds ??
+    (opts?.excludeTaskTree ? collectTaskTreeIdsFromStore(store, taskId) : undefined);
+  return {
+    excludedTaskIds,
+    removedTaskIds: opts?.removedTaskIds ?? excludedTaskIds ?? new Set([taskId]),
+  };
+}
+
+async function switchAfterRemoval(params: {
+  store: StoreApi<AppState>;
+  taskId: string;
+  opts?: RemoveFromBoardOptions;
+  excludedTaskIds?: ReadonlySet<string>;
+  oldEnvId: string | null;
+  useLayoutSwitch: boolean;
+  loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
+}): Promise<{ candidateFound: boolean; switchedTaskId: string | null }> {
+  const {
+    store,
+    taskId,
+    opts,
+    excludedTaskIds,
+    oldEnvId,
+    useLayoutSwitch,
+    loadTaskSessionsForTask,
+  } = params;
+  const nextTask = await selectNextTaskAfterRemoval(
+    collectRemainingTasks(store),
+    taskId,
+    taskIsLive,
+    {
+      excludedTaskIds,
+      workspaceId: opts?.workspaceId,
+      validateTaskAncestry: opts?.validateTaskAncestry,
+    },
+  );
+  if (!nextTask) return { candidateFound: false, switchedTaskId: null };
+
+  const switched = await switchToNextTask({
+    store,
+    nextTask,
+    oldEnvId,
+    useLayoutSwitch,
+    loadTaskSessionsForTask,
+    canCommit:
+      opts?.removalToken && opts.removalNavigationRevision !== undefined
+        ? () =>
+            ownsTaskRemovalDeparture(
+              store.getState().taskRemoval,
+              opts.removalToken!,
+              opts.removalNavigationRevision!,
+            )
+        : undefined,
+  });
+  return { candidateFound: true, switchedTaskId: switched ? nextTask.id : null };
+}
+
+function shouldRedirectAfterNoRemovalCandidate(
+  store: StoreApi<AppState>,
+  opts: RemoveFromBoardOptions | undefined,
+): boolean {
+  if (opts?.switchOnly) return false;
+  if (
+    opts?.removalToken &&
+    opts.removalNavigationRevision !== undefined &&
+    !ownsTaskRemovalDeparture(
+      store.getState().taskRemoval,
+      opts.removalToken,
+      opts.removalNavigationRevision,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function removeTaskFromBoardFromStore(params: {
+  store: StoreApi<AppState>;
+  taskId: string;
+  opts?: RemoveFromBoardOptions;
+  useLayoutSwitch: boolean;
+  stayOnListing: boolean;
+  loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
+}): Promise<RemoveFromBoardResult> {
+  const { store, taskId, opts, useLayoutSwitch, stayOnListing, loadTaskSessionsForTask } = params;
+  const { excludedTaskIds, removedTaskIds } = removalTaskIdsForBoard(store, taskId, opts);
+  if (!opts?.switchOnly) removeTasksFromSnapshots(store, removedTaskIds);
+  if (stayOnListing || !shouldSwitchAfterRemoval(store, taskId, opts)) {
+    return { switchedTaskId: null, excludedTaskIds };
+  }
+
+  const switchResult = await switchAfterRemoval({
+    store,
+    taskId,
+    opts,
+    excludedTaskIds,
+    oldEnvId: resolveOldEnvId(store, opts),
+    useLayoutSwitch,
+    loadTaskSessionsForTask,
+  });
+  if (switchResult.candidateFound) return switchResult;
+  if (shouldRedirectAfterNoRemovalCandidate(store, opts)) {
+    softNavigate(linkToTaskOverview(), "replace");
+  }
+  return { switchedTaskId: null, excludedTaskIds };
 }
 
 /**
@@ -361,7 +629,12 @@ function shouldSwitchAfterRemoval(
  *
  * Used by both TaskSessionSidebar and SessionTaskSwitcherSheet.
  */
-export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOptions) {
+export function useTaskRemoval({
+  store,
+  useLayoutSwitch = false,
+  stayOnListing = false,
+  notifySuccess,
+}: TaskRemovalOptions) {
   const loadTaskSessionsForTask = useCallback(
     (taskId: string, options?: TaskSessionLoadOptions) =>
       loadTaskSessionsForTaskFromStore(store, taskId, options),
@@ -380,49 +653,57 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    * wins and the captured value is ignored (no auto-switch).
    */
   const removeTaskFromBoard = useCallback(
-    async (taskId: string, opts?: RemoveFromBoardOptions): Promise<RemoveFromBoardResult> => {
-      const excludedTaskIds = opts?.excludeTaskTree
-        ? (opts.excludedTaskIds ?? collectTaskTreeIdsFromStore(store, taskId))
-        : undefined;
-      if (!opts?.switchOnly) {
-        // A cascade archive publishes one task.updated event per descendant,
-        // but those events can arrive after the archive request resolves. The
-        // cached tree is already known to be removed at this point, so prune
-        // it optimistically and let WS updates reconcile any other clients.
-        removeTasksFromSnapshots(store, excludedTaskIds ?? new Set([taskId]));
-      }
-      const allRemainingTasks = collectRemainingTasks(store);
-
-      if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
-        return { switchedTaskId: null, excludedTaskIds };
-      }
-
-      const oldEnvId = resolveOldEnvId(store, opts);
-      const nextTask = await selectNextTaskAfterRemoval(
-        allRemainingTasks,
+    (taskId: string, opts?: RemoveFromBoardOptions) =>
+      removeTaskFromBoardFromStore({
+        store,
         taskId,
-        taskIsLive,
-        excludedTaskIds,
-      );
-      if (nextTask) {
-        await switchToNextTask({
-          store,
-          nextTask,
-          oldEnvId,
-          useLayoutSwitch,
-          loadTaskSessionsForTask,
-        });
-        return { switchedTaskId: nextTask.id, excludedTaskIds };
-      }
-
-      // When switchOnly=true and no safe candidate exists, defer Home until
-      // the post-archive cleanup confirms that the request succeeded.
-      if (opts?.switchOnly) return { switchedTaskId: null, excludedTaskIds };
-      window.location.href = linkToTaskOverview();
-      return { switchedTaskId: null, excludedTaskIds };
-    },
-    [store, useLayoutSwitch, loadTaskSessionsForTask],
+        opts,
+        useLayoutSwitch,
+        stayOnListing,
+        loadTaskSessionsForTask,
+      }),
+    [store, useLayoutSwitch, stayOnListing, loadTaskSessionsForTask],
   );
 
-  return { removeTaskFromBoard, loadTaskSessionsForTask };
+  const getRemovalIds = useCallback(
+    (requestIds: string[], cascade: boolean) => taskTreeIdsForRequests(store, requestIds, cascade),
+    [store],
+  );
+
+  const runTaskRemovalBatch = useCallback(
+    (
+      action: TaskRemovalAction,
+      requests: TaskRemovalRequest[],
+      opts?: TaskRemovalRunOptions,
+    ): Promise<TaskRemovalBatchResult> =>
+      coordinateTaskRemovalBatch(
+        { store, removeTaskFromBoard, getRemovalIds, notifySuccess, stayOnListing },
+        action,
+        requests,
+        opts,
+      ),
+    [getRemovalIds, notifySuccess, removeTaskFromBoard, stayOnListing, store],
+  );
+
+  const runTaskRemoval = useCallback(
+    async (
+      action: TaskRemovalAction,
+      request: TaskRemovalRequest,
+      opts?: TaskRemovalRunOptions,
+    ): Promise<TaskRemovalRunResult> => {
+      const result = await runTaskRemovalBatch(action, [request], opts);
+      if (result.failedTaskIds.length > 0) {
+        throw result.errorsByTaskId[request.taskId] ?? new Error();
+      }
+      return result;
+    },
+    [runTaskRemovalBatch],
+  );
+
+  return {
+    removeTaskFromBoard,
+    loadTaskSessionsForTask,
+    runTaskRemoval,
+    runTaskRemovalBatch,
+  };
 }

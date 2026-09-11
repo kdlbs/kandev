@@ -552,11 +552,12 @@ func applyStartupPage(settings *models.UserSettings, value *string) error {
 	}
 	v := strings.TrimSpace(*value)
 	switch v {
-	case models.StartupPageTaskOverview, models.StartupPageLastTask:
+	case models.StartupPageTaskOverview, models.StartupPageLastTask, models.StartupPageThreads:
 		settings.StartupPage = v
 		return nil
 	default:
-		return fmt.Errorf("startup_page must be %q or %q", models.StartupPageTaskOverview, models.StartupPageLastTask)
+		return fmt.Errorf("startup_page must be %q, %q, or %q",
+			models.StartupPageTaskOverview, models.StartupPageLastTask, models.StartupPageThreads)
 	}
 }
 

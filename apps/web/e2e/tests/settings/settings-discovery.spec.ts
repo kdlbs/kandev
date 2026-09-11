@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { expectControlHeight } from "../../helpers/control-sizing";
 
 const APPEARANCE_PATH = "/settings/preferences/appearance";
 
@@ -50,13 +51,7 @@ test.describe("Settings discovery", () => {
     const sidebar = settingsSidebar(testPage);
     const search = sidebar.getByRole("searchbox", { name: "Search settings" });
     await expect(search).toBeVisible();
-    const [searchBox, navigationRowBox] = await Promise.all([
-      search.boundingBox(),
-      sidebar.getByRole("link", { name: "Appearance" }).boundingBox(),
-    ]);
-    expect(searchBox).not.toBeNull();
-    expect(navigationRowBox).not.toBeNull();
-    expect(Math.abs(searchBox!.height - navigationRowBox!.height)).toBeLessThanOrEqual(2);
+    await expectControlHeight(search, 28);
 
     await search.fill("no such setting exists");
     await expect(sidebar.getByText("No matching settings", { exact: true })).toBeVisible();

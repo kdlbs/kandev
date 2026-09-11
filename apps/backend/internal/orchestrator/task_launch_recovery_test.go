@@ -125,7 +125,7 @@ func recoveryFixtureService(t *testing.T, repo *sqliterepo.Repository, fake *tas
 	t.Helper()
 	steps := newMockStepGetter()
 	steps.steps["review-recovery"] = &wfmodels.WorkflowStep{ID: "review-recovery", WorkflowID: "wf-recovery", Position: 0, Name: "Review"}
-	steps.steps["done-recovery"] = &wfmodels.WorkflowStep{ID: "done-recovery", WorkflowID: "wf-recovery", Position: 1, Name: "Done"}
+	steps.steps["done-recovery"] = &wfmodels.WorkflowStep{ID: "done-recovery", WorkflowID: "wf-recovery", Position: 1, Name: "Done", CompleteTaskOnEnter: true}
 	svc := createTestService(repo, steps, newMockTaskRepo())
 	svc.taskLaunchRecoveryRepo = repo
 	svc.taskLaunchRecoveryTasks = fake

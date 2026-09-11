@@ -47,8 +47,9 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.mobileKanbanLayout()).toBeVisible();
     // FAB should be visible for creating tasks
     await expect(mobile.mobileFab).toBeVisible();
-    // Search is collapsed behind a topbar icon by default
-    await expect(mobile.mobileSearchToggle).toBeVisible();
+    // Search lives in the listing menu and starts collapsed.
+    await expect(mobile.mobileMenuButton).toBeVisible();
+    await expect(mobile.mobileSearchToggle).toHaveCount(0);
     await expect(mobile.mobileSearchBar).not.toBeVisible();
     await expect(mobile.boardNavigator).toBeVisible();
     await expect(mobile.boardNavigator).toContainText("E2E Workflow");
@@ -438,14 +439,15 @@ test.describe("Mobile kanban view", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    // Hidden by default, revealed when the topbar search icon is tapped
+    // Hidden by default, revealed from the listing menu.
     await expect(mobile.mobileSearchBar).not.toBeVisible();
     await mobile.openSearch();
     await expect(mobile.mobileSearchBar).toBeVisible();
     // Input is focused on reveal so the keyboard opens immediately
     await expect(mobile.searchInput()).toBeFocused();
 
-    // Tapping the icon again collapses the search bar
+    // Toggling search in the menu again collapses the search bar.
+    await mobile.mobileMenuButton.click();
     await mobile.mobileSearchToggle.click();
     await expect(mobile.mobileSearchBar).not.toBeVisible();
   });
@@ -468,6 +470,7 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.taskCardByTitle("Other Beta")).not.toBeVisible({ timeout: 5000 });
 
     // Collapsing clears the query so the full list is shown again
+    await mobile.mobileMenuButton.click();
     await mobile.mobileSearchToggle.click();
     await expect(mobile.mobileSearchBar).not.toBeVisible();
     await expect(mobile.taskCardByTitle("Clearable Alpha")).toBeVisible({ timeout: 5000 });
@@ -528,8 +531,10 @@ test.describe("Mobile kanban view", () => {
     const dialog = testPage.getByRole("dialog", { name: "Menu" });
     const searchInput = dialog.getByPlaceholder("Search tasks...");
 
-    await expect(searchInput).toBeVisible();
-    await expect(searchInput).not.toBeFocused();
+    await expect(searchInput).toHaveCount(0);
+    await expect(mobile.mobileSearchToggle).toBeVisible();
+    await expect(mobile.mobileSearchToggle).not.toBeFocused();
+    await expect(mobile.mobileSearchBar).not.toBeVisible();
   });
 
   test("opens missing git health issue from mobile menu", async ({ testPage, backend }) => {

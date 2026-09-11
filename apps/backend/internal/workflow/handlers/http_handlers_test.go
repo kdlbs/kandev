@@ -212,6 +212,41 @@ func TestStepMutationValidationRejections(t *testing.T) {
 		}
 	})
 
+	t.Run("create rejects explicit null completion policy", func(t *testing.T) {
+		h := setupStepRouter(t)
+		rec := recordStepEvents(t, h.eventBus)
+		resp := doRaw(t, h, http.MethodPost, "/api/v1/workflow/steps", `{"workflow_id":"workflow-1","name":"Null completion","complete_task_on_enter":null}`)
+		if resp.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body = %s", resp.Code, resp.Body.String())
+		}
+		if len(rec.events) != 0 {
+			t.Fatalf("rejected create published %v", rec.subjects())
+		}
+	})
+
+	t.Run("update rejects explicit null completion policy without mutation", func(t *testing.T) {
+		h := setupStepRouter(t)
+		step := createStepViaHTTP(t, h.router, map[string]interface{}{
+			"workflow_id": "workflow-1", "name": "Done", "position": 0,
+			"complete_task_on_enter": true,
+		})
+		rec := recordStepEvents(t, h.eventBus)
+		resp := doRaw(t, h, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, `{"complete_task_on_enter":null}`)
+		if resp.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body = %s", resp.Code, resp.Body.String())
+		}
+		if len(rec.events) != 0 {
+			t.Fatalf("rejected update published %v", rec.subjects())
+		}
+		stored, err := h.service.GetStep(context.Background(), step.ID)
+		if err != nil {
+			t.Fatalf("reload step: %v", err)
+		}
+		if !stored.CompleteTaskOnEnter {
+			t.Fatal("explicit null update changed the saved completion policy")
+		}
+	})
+
 	t.Run("create without workflow_id or name", func(t *testing.T) {
 		h := setupStepRouter(t)
 		rec := recordStepEvents(t, h.eventBus)
@@ -463,7 +498,7 @@ func TestExportWorkflowEndpoints(t *testing.T) {
 	t.Run("single workflow export carries its steps", func(t *testing.T) {
 		h := newExportHarness(t)
 		export := decodeExport(t, doJSON(t, h.router, http.MethodGet, "/api/v1/workflows/workflow-1/export", nil))
-		if export.Version != models.ExportVersion || export.Type != models.ExportType {
+		if export.Version != models.LegacyExportVersion || export.Type != models.ExportType {
 			t.Fatalf("export envelope = %d/%q", export.Version, export.Type)
 		}
 		if len(export.Workflows) != 1 || export.Workflows[0].Name != "Main" {

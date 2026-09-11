@@ -187,7 +187,11 @@ func (r *Repository) GetAgentInstance(ctx context.Context, id string) (*models.A
 	query := `SELECT ` + agentInstanceColumns + ` FROM agent_profiles WHERE id = ? AND ` + agentInstanceFilter
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), id).StructScan(&agent)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent instance not found: %s", id)
+		// Wrapping (not just formatting) sql.ErrNoRows lets callers tell "no
+		// such agent" apart from a transient I/O failure via errors.Is,
+		// without a second lookup or a new sentinel type (AC-OFFICE-BUDGET-
+		// 001.13's two dispositions require exactly that distinction).
+		return nil, fmt.Errorf("agent instance not found: %s: %w", id, sql.ErrNoRows)
 	}
 	return &agent, err
 }
@@ -478,7 +482,9 @@ func (r *Repository) GetAgentInstanceByNameAny(
 	query := `SELECT ` + agentInstanceColumns + ` FROM agent_profiles WHERE name = ? AND ` + agentInstanceFilter + ` LIMIT 1`
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), name).StructScan(&agent)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent instance not found: %s", name)
+		// See GetAgentInstance above: wrapped so GetAgentFromConfig can
+		// distinguish "not found" from a transient error via errors.Is.
+		return nil, fmt.Errorf("agent instance not found: %s: %w", name, sql.ErrNoRows)
 	}
 	return &agent, err
 }

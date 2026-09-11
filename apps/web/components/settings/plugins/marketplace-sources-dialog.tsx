@@ -21,6 +21,7 @@ import {
   updateMarketplaceSource,
 } from "@/lib/api/domains/marketplace-api";
 import type { MarketplaceSource } from "@/lib/types/plugins";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type MarketplaceSourcesDialogProps = {
   open: boolean;
@@ -128,7 +129,7 @@ function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChange
             size="icon"
             disabled={busy}
             onClick={remove}
-            className="min-h-11 min-w-11 cursor-pointer sm:min-h-0 sm:min-w-0"
+            className={controlSizingClassName("icon", "cursor-pointer")}
             aria-label={t("plugins:removeSource", { name: source.name })}
           >
             <IconTrash className="h-4 w-4" />
@@ -169,7 +170,7 @@ function AddSourceForm({ onChanged }: { onChanged: () => void }) {
         placeholder={t("plugins:sourceNamePlaceholder")}
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="min-h-11 sm:min-h-7"
+        className={controlSizingClassName("standard")}
         data-testid="marketplace-add-source-name"
       />
       <div className="flex items-center gap-2">
@@ -177,13 +178,13 @@ function AddSourceForm({ onChanged }: { onChanged: () => void }) {
           placeholder={t("plugins:sourceUrlPlaceholder")}
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className="min-h-11 sm:min-h-7"
+          className={controlSizingClassName("standard")}
           data-testid="marketplace-add-source-url"
         />
         <Button
           disabled={busy || !url.trim()}
           onClick={submit}
-          className="min-h-11 cursor-pointer shrink-0 sm:min-h-0"
+          className={controlSizingClassName("standard", "cursor-pointer shrink-0")}
           data-testid="marketplace-add-source-submit"
         >
           {t("plugins:add")}

@@ -58,7 +58,7 @@ test.describe("Workflow sorting", () => {
     ]);
   });
 
-  test("settings page shows drag handles for workflows", async ({
+  test("settings page places workflow drag handles inside cards without a list gutter", async ({
     testPage,
     apiClient,
     seedData,
@@ -71,10 +71,26 @@ test.describe("Workflow sorting", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(workspaceId);
 
-    // Verify drag handles are visible
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const handle = page.dragHandle(seedData.workflowId);
+    const list = testPage.getByTestId("workflow-order-list");
     const handles = testPage.locator('[data-testid^="workflow-drag-handle-"]');
-    await expect(handles.first()).toBeVisible();
+    await expect(handle).toBeVisible();
+    await expect(handle).toHaveAccessibleName("Reorder E2E Workflow");
     expect(await handles.count()).toBeGreaterThanOrEqual(2);
+
+    const [cardBox, handleBox, listBox] = await Promise.all([
+      card.boundingBox(),
+      handle.boundingBox(),
+      list.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(handleBox).not.toBeNull();
+    expect(listBox).not.toBeNull();
+    expect(handleBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(handleBox!.x + handleBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(handleBox!.x).toBeGreaterThan(cardBox!.x + cardBox!.width / 2);
+    expect(Math.abs(cardBox!.x - listBox!.x)).toBeLessThanOrEqual(1);
   });
 
   test("kanban board respects workflow sort order", async ({ testPage, apiClient, seedData }) => {

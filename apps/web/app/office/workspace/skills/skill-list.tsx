@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/office/types";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 interface SkillListProps {
   skills: Skill[];
@@ -86,7 +87,7 @@ export function SkillList(props: SkillListProps) {
           placeholder={t("office:filterSkills")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 text-xs"
+          className={controlSizingClassName("standard", "text-xs")}
         />
       </div>
       <SkillItems items={filtered} selectedId={selectedId} onSelect={onSelect} search={search} />
@@ -126,12 +127,7 @@ function SkillListHeader({
       <div className="flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onRefresh}
-              className="h-7 w-7 p-0 cursor-pointer"
-            >
+            <Button variant="ghost" size="icon" onClick={onRefresh} className="p-0 cursor-pointer">
               <IconRefresh className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
@@ -139,12 +135,7 @@ function SkillListHeader({
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onAdd}
-              className="h-7 w-7 p-0 cursor-pointer"
-            >
+            <Button variant="ghost" size="icon" onClick={onAdd} className="p-0 cursor-pointer">
               <IconPlus className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
@@ -175,14 +166,13 @@ function SkillImportInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onImport()}
-          className="h-8 text-xs"
+          className={controlSizingClassName("standard", "text-xs")}
         />
         <Button
           variant="secondary"
-          size="sm"
           onClick={onImport}
           disabled={!value.trim() || importing}
-          className="h-8 shrink-0 cursor-pointer"
+          className={controlSizingClassName("standard", "shrink-0 cursor-pointer")}
         >
           {importing ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : t("office:add")}
         </Button>

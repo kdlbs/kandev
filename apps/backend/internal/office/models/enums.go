@@ -164,11 +164,14 @@ func (s CostSource) Valid() bool {
 // BudgetPeriod is the time window a BudgetPolicy limit applies to.
 type BudgetPeriod string
 
-// Budget period values.
+// Budget period values. BudgetPeriodTotal (AC-OFFICE-BUDGET-002.8) selects
+// an unbounded-below window by name, rather than by falling through from an
+// unrecognized period value.
 const (
 	BudgetPeriodDaily   BudgetPeriod = "daily"
 	BudgetPeriodMonthly BudgetPeriod = "monthly"
 	BudgetPeriodYearly  BudgetPeriod = "yearly"
+	BudgetPeriodTotal   BudgetPeriod = "total"
 )
 
 // String implements fmt.Stringer.
@@ -177,7 +180,7 @@ func (p BudgetPeriod) String() string { return string(p) }
 // Valid reports whether p is one of the declared BudgetPeriod values.
 func (p BudgetPeriod) Valid() bool {
 	switch p {
-	case BudgetPeriodDaily, BudgetPeriodMonthly, BudgetPeriodYearly:
+	case BudgetPeriodDaily, BudgetPeriodMonthly, BudgetPeriodYearly, BudgetPeriodTotal:
 		return true
 	}
 	return false

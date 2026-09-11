@@ -11,8 +11,11 @@ package messagequeue
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,8 +38,17 @@ type Service struct {
 	autoMergeLoader atomic.Pointer[autoMergePolicyLoader]
 	statusEpoch     string
 	logger          *logger.Logger
-	admissionMu     sync.Mutex
-	admissions      map[string]*sessionAdmission
+	// lifecycleMu fences task-wide purges against every session-scoped queue
+	// admission. A task purge cannot enumerate every possibly empty session,
+	// so the barrier must cover admissions before they reach the repository.
+	lifecycleMu                                   sync.RWMutex
+	admissionMu                                   sync.Mutex
+	admissions                                    map[string]*sessionAdmission
+	editLeaseMu                                   sync.Mutex
+	editLeases                                    map[editLeaseKey]*QueueEditLease
+	editRevisions                                 map[editLeaseKey]int64
+	editRevisionTaskIDs                           map[editLeaseKey]string
+	sessionTransferCompensationLeaseRenewInterval time.Duration
 }
 
 type sessionAdmission struct {
@@ -47,8 +59,9 @@ type sessionAdmission struct {
 type sessionAdmissionContextKey struct{}
 
 type sessionAdmissionToken struct {
-	service   *Service
-	sessionID string
+	service              *Service
+	sessionID            string
+	afterLifecycleUnlock *[]func()
 }
 
 type queueAttachmentRepository interface {
@@ -90,10 +103,13 @@ type autoMergeAdmissionRepository interface {
 // pass 0 to disable the cap.
 func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service {
 	service := &Service{
-		repo:        repo,
-		statusEpoch: uuid.NewString(),
-		logger:      log.WithFields(zap.String("component", "message-queue")),
-		admissions:  make(map[string]*sessionAdmission),
+		repo:                repo,
+		statusEpoch:         uuid.NewString(),
+		logger:              log.WithFields(zap.String("component", "message-queue")),
+		admissions:          make(map[string]*sessionAdmission),
+		editLeases:          make(map[editLeaseKey]*QueueEditLease),
+		editRevisions:       make(map[editLeaseKey]int64),
+		editRevisionTaskIDs: make(map[editLeaseKey]string),
 	}
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
@@ -134,6 +150,18 @@ func (s *Service) LifecycleGeneration(ctx context.Context, taskID string) (int64
 // with their owning automation reservations.
 func (s *Service) ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error) {
 	return s.repo.ListDurableLifecycleEntries(ctx)
+}
+
+// SessionGeneration returns the session destructive-mutation generation used
+// to fence Send Now restores.
+func (s *Service) SessionGeneration(ctx context.Context, sessionID string) (int64, error) {
+	return s.repo.SessionGeneration(ctx, sessionID)
+}
+
+// ListDurableDeliveryEntries returns all durable queue receipts used by
+// startup reconciliation.
+func (s *Service) ListDurableDeliveryEntries(ctx context.Context) ([]QueuedMessage, error) {
+	return s.repo.ListDurableDeliveryEntries(ctx)
 }
 
 // SetMaxPerSession applies a new admission cap without pruning existing rows.
@@ -266,10 +294,30 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 		return errors.New("session admission callback is nil")
 	}
 	if token, ok := ctx.Value(sessionAdmissionContextKey{}).(sessionAdmissionToken); ok &&
-		token.service == s && token.sessionID == sessionID {
-		return fn(ctx)
+		token.service == s {
+		if token.sessionID == sessionID {
+			return fn(ctx)
+		}
+		return s.withSessionAdmissionLock(ctx, sessionID, token.afterLifecycleUnlock, fn)
 	}
 
+	var afterLifecycleUnlock []func()
+	s.lifecycleMu.RLock()
+	defer func() {
+		s.lifecycleMu.RUnlock()
+		for _, callback := range afterLifecycleUnlock {
+			callback()
+		}
+	}()
+	return s.withSessionAdmissionLock(ctx, sessionID, &afterLifecycleUnlock, fn)
+}
+
+func (s *Service) withSessionAdmissionLock(
+	ctx context.Context,
+	sessionID string,
+	afterLifecycleUnlock *[]func(),
+	fn func(context.Context) error,
+) error {
 	s.admissionMu.Lock()
 	entry := s.admissions[sessionID]
 	if entry == nil {
@@ -291,10 +339,662 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 	}()
 
 	admittedCtx := context.WithValue(ctx, sessionAdmissionContextKey{}, sessionAdmissionToken{
-		service:   s,
-		sessionID: sessionID,
+		service: s, sessionID: sessionID, afterLifecycleUnlock: afterLifecycleUnlock,
 	})
 	return fn(admittedCtx)
+}
+
+// withSessionAdmissions holds both queue admission locks in stable order.
+// Transfer and replacement operations otherwise allow opposite-direction
+// transfers to deadlock while each session is waiting for the other lock.
+func (s *Service) withSessionAdmissions(
+	ctx context.Context,
+	firstSessionID, secondSessionID string,
+	fn func(context.Context) error,
+) error {
+	if firstSessionID == secondSessionID {
+		return s.WithSessionAdmission(ctx, firstSessionID, fn)
+	}
+	if firstSessionID > secondSessionID {
+		firstSessionID, secondSessionID = secondSessionID, firstSessionID
+	}
+	return s.WithSessionAdmission(ctx, firstSessionID, func(admittedCtx context.Context) error {
+		return s.WithSessionAdmission(admittedCtx, secondSessionID, fn)
+	})
+}
+
+type editLeaseKey struct {
+	sessionID string
+	entryID   string
+}
+
+func (s *Service) editLeaseKey(sessionID, entryID string) editLeaseKey {
+	return editLeaseKey{sessionID: sessionID, entryID: entryID}
+}
+
+func editOperationHash(content string, attachments []MessageAttachment, metadata map[string]interface{}) string {
+	payload, _ := json.Marshal(struct {
+		Content     string
+		Attachments []MessageAttachment
+		Metadata    map[string]interface{}
+	}{content, attachments, metadata})
+	return fmt.Sprintf("%x", sha256.Sum256(payload))
+}
+
+func (s *Service) expireEditLeaseLocked(key editLeaseKey, now time.Time) {
+	if lease := s.editLeases[key]; lease != nil && !lease.ExpiresAt.After(now) {
+		delete(s.editLeases, key)
+	}
+}
+
+type sessionTransferFenceRepository interface {
+	withSessionTransferFence(context.Context, string, func(context.Context) error) error
+}
+
+type editReplayValidationRepository interface {
+	validateSessionEntryForEditReplay(context.Context, string, string) error
+}
+
+type editLeaseRepository interface {
+	acquireEditLease(context.Context, *QueueEditLease) error
+	renewEditLease(context.Context, *QueueEditLease) error
+	releaseEditLease(context.Context, string, string, string) error
+}
+
+func (s *Service) validateDuplicateEditReplay(
+	ctx context.Context,
+	sessionID, entryID string,
+) error {
+	repo, ok := s.repo.(editReplayValidationRepository)
+	if !ok {
+		_, err := s.findQueuedMessageForEdit(ctx, sessionID, entryID)
+		return err
+	}
+	return repo.validateSessionEntryForEditReplay(ctx, sessionID, entryID)
+}
+
+func (s *Service) withRepositorySessionTransferFence(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	repo, ok := s.repo.(sessionTransferFenceRepository)
+	if !ok {
+		return fn(ctx)
+	}
+	return repo.withSessionTransferFence(ctx, sessionID, fn)
+}
+
+func (s *Service) editableEntry(
+	ctx context.Context,
+	sessionID, entryID string,
+) (*QueuedMessage, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].ID == entryID &&
+			entries[i].QueuedBy == QueuedByUser &&
+			!entries[i].IsReservedInFlight() {
+			return &entries[i], nil
+		}
+	}
+	return nil, ErrEditLeaseNotFound
+}
+
+// BeginEdit acquires a target-bound lease for a visible user-owned entry.
+func (s *Service) BeginEdit(ctx context.Context, sessionID, entryID, connectionID string) (*QueueEditLease, error) {
+	if sessionID == "" || entryID == "" || connectionID == "" {
+		return nil, ErrEditLeaseNotFound
+	}
+	var lease *QueueEditLease
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		entry, err := s.editableEntry(admittedCtx, sessionID, entryID)
+		if err != nil {
+			return err
+		}
+		key := s.editLeaseKey(sessionID, entryID)
+		now := time.Now().UTC()
+		s.editLeaseMu.Lock()
+		s.expireEditLeaseLocked(key, now)
+		if s.editLeases[key] != nil {
+			s.editLeaseMu.Unlock()
+			return ErrEditConflict
+		}
+		lease = &QueueEditLease{
+			SessionID: sessionID, EntryID: entryID, LeaseID: uuid.NewString(),
+			TargetRevision: s.editRevisions[key], LeaseGeneration: 1,
+			ExpiresAt: now.Add(QueueEditLeaseTTL), connectionID: connectionID,
+			taskID: entry.TaskID,
+		}
+		s.editLeaseMu.Unlock()
+		if repo, ok := s.repo.(editLeaseRepository); ok {
+			if err := repo.acquireEditLease(admittedCtx, lease); err != nil {
+				return err
+			}
+		}
+		s.editLeaseMu.Lock()
+		s.editLeases[key] = lease
+		s.editLeaseMu.Unlock()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cloneEditLease(lease), nil
+}
+
+// GetEditLease returns the current lease for an entry without acquiring
+// session admission. Callers use it only to avoid starting cleanup while an
+// editor still owns the target; the mutation itself remains admission-bound.
+func (s *Service) GetEditLease(_ context.Context, sessionID, entryID string) (*QueueEditLease, error) {
+	key := s.editLeaseKey(sessionID, entryID)
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	s.expireEditLeaseLocked(key, time.Now().UTC())
+	lease := s.editLeases[key]
+	if lease == nil {
+		return nil, ErrEditLeaseNotFound
+	}
+	return cloneEditLease(lease), nil
+}
+
+// RenewEdit extends a live lease owned by connectionID.
+func (s *Service) RenewEdit(ctx context.Context, sessionID, entryID, leaseID, connectionID string) (*QueueEditLease, error) {
+	var renewed *QueueEditLease
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		if _, err := s.editableEntry(admittedCtx, sessionID, entryID); err != nil {
+			return err
+		}
+		return s.withRepositorySessionTransferFence(admittedCtx, sessionID, func(context.Context) error {
+			key := s.editLeaseKey(sessionID, entryID)
+			now := time.Now().UTC()
+			s.editLeaseMu.Lock()
+			defer s.editLeaseMu.Unlock()
+			s.expireEditLeaseLocked(key, now)
+			lease := s.editLeases[key]
+			if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {
+				return ErrEditLeaseNotFound
+			}
+			lease.LeaseGeneration++
+			lease.ExpiresAt = now.Add(QueueEditLeaseTTL)
+			renewed = cloneEditLease(lease)
+			return nil
+		})
+	})
+	if err != nil || renewed == nil {
+		return renewed, err
+	}
+	if repo, ok := s.repo.(editLeaseRepository); ok {
+		if err := repo.renewEditLease(ctx, renewed); err != nil {
+			s.editLeaseMu.Lock()
+			if lease := s.editLeases[s.editLeaseKey(sessionID, entryID)]; lease != nil && lease.LeaseID == leaseID {
+				delete(s.editLeases, s.editLeaseKey(sessionID, entryID))
+			}
+			s.editLeaseMu.Unlock()
+			return nil, err
+		}
+	}
+	return renewed, nil
+}
+
+func (s *Service) EndEdit(ctx context.Context, sessionID, entryID, leaseID, connectionID string) error {
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.withRepositorySessionTransferFence(admittedCtx, sessionID, func(context.Context) error {
+			key := s.editLeaseKey(sessionID, entryID)
+			s.editLeaseMu.Lock()
+			defer s.editLeaseMu.Unlock()
+			s.expireEditLeaseLocked(key, time.Now().UTC())
+			lease := s.editLeases[key]
+			if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {
+				return ErrEditLeaseNotFound
+			}
+			delete(s.editLeases, key)
+			return nil
+		})
+	})
+	if err != nil {
+		return err
+	}
+	if repo, ok := s.repo.(editLeaseRepository); ok {
+		return repo.releaseEditLease(ctx, sessionID, entryID, leaseID)
+	}
+	return nil
+}
+
+// EndEditAfterSave releases a lease and reports whether its latest update
+// completed all attachment finalization. Only that state may authorize a
+// post-save automatic drain.
+func (s *Service) EndEditAfterSave(ctx context.Context, sessionID, entryID, leaseID, connectionID string) (bool, error) {
+	saved := false
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.withRepositorySessionTransferFence(admittedCtx, sessionID, func(context.Context) error {
+			key := s.editLeaseKey(sessionID, entryID)
+			s.editLeaseMu.Lock()
+			defer s.editLeaseMu.Unlock()
+			s.expireEditLeaseLocked(key, time.Now().UTC())
+			lease := s.editLeases[key]
+			if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {
+				return ErrEditLeaseNotFound
+			}
+			saved = lease.lastOperationID != "" && lease.lastOperationFinalized
+			delete(s.editLeases, key)
+			return nil
+		})
+	})
+	if err != nil {
+		return false, err
+	}
+	if repo, ok := s.repo.(editLeaseRepository); ok {
+		if err := repo.releaseEditLease(ctx, sessionID, entryID, leaseID); err != nil {
+			return saved, err
+		}
+	}
+	return saved, nil
+}
+
+func (s *Service) UpdateMessageWithLease(
+	ctx context.Context,
+	sessionID, entryID, leaseID, operationID, connectionID string,
+	expectedRevision int64,
+	content string,
+	attachments []MessageAttachment,
+	metadataUpdates map[string]interface{},
+) (int64, error) {
+	return s.UpdateMessageWithLeaseAfterValidation(
+		ctx, sessionID, entryID, leaseID, operationID, connectionID,
+		expectedRevision, content, attachments, metadataUpdates, nil, nil,
+	)
+}
+
+// UpdateMessageWithLeaseAfterValidation runs prepare after all rejectable edit
+// preconditions pass and before the queue row is changed. Both callbacks run
+// inside the session admission boundary, so rejected prepared state can be
+// rolled back before another editor can acquire the target.
+func (s *Service) UpdateMessageWithLeaseAfterValidation(
+	ctx context.Context,
+	sessionID, entryID, leaseID, operationID, connectionID string,
+	expectedRevision int64,
+	content string,
+	attachments []MessageAttachment,
+	metadataUpdates map[string]interface{},
+	prepare func(context.Context) error,
+	rollback func(context.Context) error,
+) (int64, error) {
+	return s.updateMessageWithLeaseAfterValidation(
+		ctx, sessionID, entryID, leaseID, operationID, connectionID,
+		expectedRevision, content, attachments, metadataUpdates, prepare, rollback, nil,
+	)
+}
+
+// UpdateMessageWithLeaseAfterValidationAndFinalize is the attachment-aware
+// variant. finalize runs after the durable row update while session admission
+// remains held, preventing a concurrent session transfer from moving the row
+// before superseded external state is reconciled. A failed finalize is retained
+// as part of the operation record so an identical retry can run it again with
+// the original pre-update snapshot. Intervening entry lifecycle mutations
+// invalidate the lease operation record, so a valid replay cannot belong to a
+// newer edit.
+func (s *Service) UpdateMessageWithLeaseAfterValidationAndFinalize(
+	ctx context.Context,
+	sessionID, entryID, leaseID, operationID, connectionID string,
+	expectedRevision int64,
+	content string,
+	attachments []MessageAttachment,
+	metadataUpdates map[string]interface{},
+	prepare func(context.Context) error,
+	rollback func(context.Context) error,
+	finalize func(context.Context, *QueuedMessage) error,
+) (int64, error) {
+	return s.updateMessageWithLeaseAfterValidation(
+		ctx, sessionID, entryID, leaseID, operationID, connectionID,
+		expectedRevision, content, attachments, metadataUpdates, prepare, rollback, finalize,
+	)
+}
+
+func (s *Service) updateMessageWithLeaseAfterValidation(
+	ctx context.Context,
+	sessionID, entryID, leaseID, operationID, connectionID string,
+	expectedRevision int64,
+	content string,
+	attachments []MessageAttachment,
+	metadataUpdates map[string]interface{},
+	prepare func(context.Context) error,
+	rollback func(context.Context) error,
+	finalize func(context.Context, *QueuedMessage) error,
+) (int64, error) {
+	if operationID == "" {
+		return 0, ErrEditLeaseNotFound
+	}
+	key := s.editLeaseKey(sessionID, entryID)
+	operationHash := editOperationHash(content, attachments, metadataUpdates)
+	var revision int64
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		initialRevision, initialOperationID, duplicate, previous, err := s.beginEditMutation(
+			key, leaseID, operationID, connectionID, expectedRevision, operationHash,
+		)
+		if err != nil {
+			return err
+		}
+		if duplicate {
+			if err := s.validateDuplicateEditReplay(admittedCtx, sessionID, entryID); err != nil {
+				return err
+			}
+			revision = initialRevision
+			return s.finalizeDuplicateEdit(
+				admittedCtx, key, operationID, operationHash, previous, finalize,
+			)
+		}
+		revision = initialRevision
+		previous, err = s.findQueuedMessageForEdit(admittedCtx, sessionID, entryID)
+		if err != nil {
+			return err
+		}
+
+		if prepare != nil {
+			if err := prepare(admittedCtx); err != nil {
+				s.rollbackPreparedEdit(admittedCtx, rollback)
+				return err
+			}
+		}
+
+		lease, err := s.relockEditMutation(key, leaseID, connectionID, revision, initialOperationID)
+		if err != nil {
+			s.rollbackPreparedEdit(admittedCtx, rollback)
+			return err
+		}
+		if leaseRepository, ok := s.repo.(durableEditLeaseMutationRepository); ok {
+			if err := leaseRepository.updateContentAndMetadataWithLease(admittedCtx, sessionID, entryID, leaseID, content, attachments, metadataUpdates, QueuedByUser); err != nil {
+				s.editLeaseMu.Unlock()
+				s.rollbackPreparedEdit(admittedCtx, rollback)
+				return err
+			}
+		} else if err := s.repo.UpdateContentAndMetadata(admittedCtx, sessionID, entryID, content, attachments, metadataUpdates, QueuedByUser); err != nil {
+			s.editLeaseMu.Unlock()
+			s.rollbackPreparedEdit(admittedCtx, rollback)
+			return err
+		}
+		revision++
+		s.editRevisions[key] = revision
+		s.editRevisionTaskIDs[key] = lease.taskID
+		lease.TargetRevision = revision
+		lease.lastOperationID = operationID
+		lease.lastOperationHash = operationHash
+		lease.lastOperationResult = revision
+		lease.lastOperationPrevious = cloneQueuedMessage(previous)
+		lease.lastOperationFinalized = finalize == nil
+		s.editLeaseMu.Unlock()
+		if finalize != nil {
+			if err := finalize(admittedCtx, previous); err != nil {
+				return err
+			}
+			s.markEditOperationFinalized(key, operationID, operationHash)
+		}
+		return nil
+	})
+	return revision, err
+}
+
+func (s *Service) finalizeDuplicateEdit(
+	ctx context.Context,
+	key editLeaseKey,
+	operationID, operationHash string,
+	previous *QueuedMessage,
+	finalize func(context.Context, *QueuedMessage) error,
+) error {
+	if finalize == nil || s.editOperationFinalized(key, operationID, operationHash) {
+		return nil
+	}
+	if err := finalize(ctx, previous); err != nil {
+		return err
+	}
+	s.markEditOperationFinalized(key, operationID, operationHash)
+	return nil
+}
+
+func (s *Service) findQueuedMessageForEdit(
+	ctx context.Context,
+	sessionID, entryID string,
+) (*QueuedMessage, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].ID == entryID {
+			return cloneQueuedMessage(&entries[i]), nil
+		}
+	}
+	return nil, ErrEntryNotFound
+}
+func (s *Service) beginEditMutation(
+	key editLeaseKey,
+	leaseID, operationID, connectionID string,
+	expectedRevision int64,
+	operationHash string,
+) (int64, string, bool, *QueuedMessage, error) {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	s.expireEditLeaseLocked(key, time.Now().UTC())
+	lease := s.editLeases[key]
+	if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {
+		return 0, "", false, nil, ErrEditLeaseNotFound
+	}
+	if lease.lastOperationID == operationID {
+		if lease.lastOperationHash == operationHash {
+			return lease.lastOperationResult, lease.lastOperationID, true,
+				cloneQueuedMessage(lease.lastOperationPrevious), nil
+		}
+		return 0, "", false, nil, ErrEditRevisionConflict
+	}
+	revision := s.editRevisions[key]
+	if expectedRevision != revision {
+		return 0, "", false, nil, ErrEditRevisionConflict
+	}
+	return revision, lease.lastOperationID, false, nil, nil
+}
+func (s *Service) editOperationFinalized(key editLeaseKey, operationID, operationHash string) bool {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	lease := s.editLeases[key]
+	return lease != nil &&
+		lease.lastOperationID == operationID &&
+		lease.lastOperationHash == operationHash &&
+		lease.lastOperationFinalized
+}
+
+func (s *Service) markEditOperationFinalized(key editLeaseKey, operationID, operationHash string) {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	lease := s.editLeases[key]
+	if lease != nil && lease.lastOperationID == operationID && lease.lastOperationHash == operationHash {
+		lease.lastOperationFinalized = true
+	}
+}
+
+// relockEditMutation validates the lease again after attachment preparation and
+// leaves editLeaseMu held for the repository update.
+func (s *Service) relockEditMutation(
+	key editLeaseKey,
+	leaseID, connectionID string,
+	revision int64,
+	initialOperationID string,
+) (*QueueEditLease, error) {
+	s.editLeaseMu.Lock()
+	s.expireEditLeaseLocked(key, time.Now().UTC())
+	lease := s.editLeases[key]
+	if lease == nil || lease.LeaseID != leaseID || leaseConnection(lease) != connectionID {
+		s.editLeaseMu.Unlock()
+		return nil, ErrEditLeaseNotFound
+	}
+	if s.editRevisions[key] != revision || lease.lastOperationID != initialOperationID {
+		s.editLeaseMu.Unlock()
+		return nil, ErrEditRevisionConflict
+	}
+	return lease, nil
+}
+
+func (s *Service) rollbackPreparedEdit(ctx context.Context, rollback func(context.Context) error) {
+	if rollback == nil {
+		return
+	}
+	if err := rollback(ctx); err != nil {
+		s.logger.Warn("failed to roll back prepared queue edit state", zap.Error(err))
+	}
+}
+
+func cloneEditLease(lease *QueueEditLease) *QueueEditLease {
+	if lease == nil {
+		return nil
+	}
+	copy := *lease
+	return &copy
+}
+
+// leaseConnection is intentionally process-local. The connection binding is
+// stored beside the lease rather than exposed in the wire response.
+func leaseConnection(lease *QueueEditLease) string {
+	return lease.connectionID
+}
+
+func (s *Service) editLeaseBlocksHead(ctx context.Context, sessionID string) (bool, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	now := time.Now().UTC()
+	for _, entry := range entries {
+		key := s.editLeaseKey(sessionID, entry.ID)
+		s.expireEditLeaseLocked(key, now)
+		return s.editLeases[key] != nil, nil
+	}
+	return false, nil
+}
+
+func (s *Service) editLeaseBlocksEntryLocked(sessionID, entryID string) bool {
+	key := s.editLeaseKey(sessionID, entryID)
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	s.expireEditLeaseLocked(key, time.Now().UTC())
+	return s.editLeases[key] != nil
+}
+func (s *Service) editLeaseBlocksReorderLocked(sessionID string) bool {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	now := time.Now().UTC()
+	for key := range s.editLeases {
+		if key.sessionID != sessionID {
+			continue
+		}
+		s.expireEditLeaseLocked(key, now)
+		if s.editLeases[key] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) editLeaseBlocksTail(ctx context.Context, sessionID, excludedEntryID, queuedBy string) (bool, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	var tail *QueuedMessage
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ID == excludedEntryID {
+			continue
+		}
+		if tail == nil || entry.Position > tail.Position {
+			tail = entry
+		}
+	}
+	if tail == nil {
+		return false, nil
+	}
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	key := s.editLeaseKey(sessionID, tail.ID)
+	s.expireEditLeaseLocked(key, time.Now().UTC())
+	return s.editLeases[key] != nil && tail.QueuedBy == queuedBy, nil
+}
+
+func (s *Service) editLeaseBlocksMerge(ctx context.Context, sessionID, sourceID string) (bool, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	var source, target *QueuedMessage
+	for i := range entries {
+		if entries[i].ID == sourceID {
+			source = &entries[i]
+			break
+		}
+	}
+	if source == nil {
+		return false, nil
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if entry.IsReservedInFlight() || entry.Position >= source.Position {
+			continue
+		}
+		if target == nil || entry.Position > target.Position {
+			target = entry
+		}
+	}
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	now := time.Now().UTC()
+	sourceKey := s.editLeaseKey(sessionID, source.ID)
+	s.expireEditLeaseLocked(sourceKey, now)
+	if s.editLeases[sourceKey] != nil {
+		return true, nil
+	}
+	if target == nil {
+		return false, nil
+	}
+	targetKey := s.editLeaseKey(sessionID, target.ID)
+	s.expireEditLeaseLocked(targetKey, now)
+	return s.editLeases[targetKey] != nil, nil
+}
+
+func (s *Service) deleteEditStateLocked(key editLeaseKey) {
+	delete(s.editLeases, key)
+	delete(s.editRevisions, key)
+	delete(s.editRevisionTaskIDs, key)
+}
+
+func (s *Service) invalidateEditLeasesLocked(sessionIDs ...string) {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	for key := range s.editRevisions {
+		for _, sessionID := range sessionIDs {
+			if key.sessionID == sessionID {
+				s.deleteEditStateLocked(key)
+				break
+			}
+		}
+	}
+	for key := range s.editLeases {
+		for _, sessionID := range sessionIDs {
+			if key.sessionID == sessionID {
+				s.deleteEditStateLocked(key)
+				break
+			}
+		}
+	}
+	for key := range s.editRevisionTaskIDs {
+		for _, sessionID := range sessionIDs {
+			if key.sessionID == sessionID {
+				s.deleteEditStateLocked(key)
+				break
+			}
+		}
+	}
 }
 
 // QueueMessage appends a new entry to the session's FIFO queue. Returns
@@ -309,6 +1009,14 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
 	identity, err := s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
+		// The legacy admission API predates durable session incarnations. Keep
+		// it usable for callers that only have the session/task pair while the
+		// identity-bound API remains strict for browser mutations.
+		if errors.Is(err, ErrSessionIdentityMismatch) {
+			return s.queueMessageWithMetadataAdmission(
+				ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, metadata, nil, nil,
+			)
+		}
 		return nil, err
 	}
 	return s.queueMessageWithMetadataAdmission(
@@ -323,6 +1031,11 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 func (s *Service) QueueMessageWithMetadataAfterInsert(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
 	identity, err := s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
+		if errors.Is(err, ErrSessionIdentityMismatch) {
+			return s.queueMessageWithMetadataAdmission(
+				ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, metadata, nil, afterInsert,
+			)
+		}
 		return nil, err
 	}
 	return s.queueMessageWithMetadataAdmission(
@@ -544,6 +1257,17 @@ func (s *Service) finalizeAutoMerge(
 	policy *AutoMergePolicy,
 ) *QueuedMessage {
 	for policy != nil && policy.Enabled {
+		blocked, leaseErr := s.editLeaseBlocksTail(ctx, source.SessionID, source.ID, source.QueuedBy)
+		if leaseErr != nil {
+			s.logger.Error("automatic queue merge lease check failed; preserving separate admission",
+				zap.String("session_id", source.SessionID),
+				zap.String("source_entry_id", source.ID),
+				zap.Error(leaseErr))
+			return source
+		}
+		if blocked {
+			return source
+		}
 		var merged *QueuedMessage
 		var didMerge bool
 		var err error
@@ -679,6 +1403,7 @@ func (s *Service) restoreMessage(ctx context.Context, msg *QueuedMessage) (*Queu
 	if err := s.repo.Restore(ctx, &restored, 0); err != nil {
 		return nil, err
 	}
+	s.invalidateEditLease(restored.SessionID, restored.ID)
 	s.logger.Info("message restored at original queue position",
 		zap.String("session_id", restored.SessionID),
 		zap.String("task_id", restored.TaskID),
@@ -765,6 +1490,9 @@ func (s *Service) insertQueueMessageWithCoalesceKey(ctx context.Context, session
 		}
 		return nil, false, err
 	}
+	if replaced && queued != nil {
+		s.invalidateEditLease(sessionID, queued.ID)
+	}
 	s.logger.Info("message queued with coalesce key",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", taskID),
@@ -810,7 +1538,11 @@ func (s *Service) RequeueAtHead(ctx context.Context, msg *QueuedMessage) error {
 		return errors.New("queued message is nil")
 	}
 	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
-		return s.repo.RequeuePreservingFIFO(admittedCtx, msg)
+		if err := s.repo.RequeuePreservingFIFO(admittedCtx, msg); err != nil {
+			return err
+		}
+		s.invalidateEditLease(msg.SessionID, msg.ID)
+		return nil
 	})
 }
 
@@ -1006,10 +1738,107 @@ func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, ide
 	return queued, replaced, true, nil
 }
 
+// InvalidateEditLeasesForTask drops process-local edit leases after the task
+// repository has purged its durable queue rows in the same lifecycle operation.
+func (s *Service) InvalidateEditLeasesForTask(taskID string) {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	s.invalidateEditLeasesForTaskLocked(taskID)
+}
+
+func (s *Service) invalidateEditLeasesForTaskLocked(taskID string) {
+	for key, lease := range s.editLeases {
+		if lease.taskID == taskID {
+			s.deleteEditStateLocked(key)
+		}
+	}
+	for key, revisionTaskID := range s.editRevisionTaskIDs {
+		if revisionTaskID == taskID {
+			s.deleteEditStateLocked(key)
+		}
+	}
+}
+
+// InvalidateEditLeasesForSession drops process-local edit leases after a task
+// repository deletes that session's durable queue rows.
+func (s *Service) InvalidateEditLeasesForSession(sessionID string) {
+	s.invalidateEditLeasesLocked(sessionID)
+}
+
+func (s *Service) invalidateEditLease(sessionID, entryID string) {
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+	s.deleteEditStateLocked(s.editLeaseKey(sessionID, entryID))
+}
+
+// ReleaseEditLeasesForConnection drops every lease owned by a disconnected
+// WebSocket connection. Durable release is attempted before local removal,
+// but a failed durable release cannot preserve a disconnected owner's lease.
+func (s *Service) ReleaseEditLeasesForConnection(connectionID string) int {
+	if connectionID == "" {
+		return 0
+	}
+	s.editLeaseMu.Lock()
+	leases := make([]*QueueEditLease, 0)
+	for _, lease := range s.editLeases {
+		if lease.connectionID == connectionID {
+			leases = append(leases, cloneEditLease(lease))
+		}
+	}
+	s.editLeaseMu.Unlock()
+	released := 0
+	repo, persistent := s.repo.(editLeaseRepository)
+	for _, lease := range leases {
+		if persistent {
+			if err := repo.releaseEditLease(context.Background(), lease.SessionID, lease.EntryID, lease.LeaseID); err != nil {
+				s.logger.Warn("failed to release durable queue edit lease",
+					zap.String("session_id", lease.SessionID),
+					zap.String("entry_id", lease.EntryID),
+					zap.Error(err))
+			}
+		}
+		s.editLeaseMu.Lock()
+		key := s.editLeaseKey(lease.SessionID, lease.EntryID)
+		if current := s.editLeases[key]; current != nil && current.LeaseID == lease.LeaseID {
+			delete(s.editLeases, key)
+			released++
+		}
+		s.editLeaseMu.Unlock()
+	}
+	return released
+}
+
 // PurgeTask is a backend-only task lifecycle operation. Client deletion APIs
 // retain their reserved-entry protections.
 func (s *Service) PurgeTask(ctx context.Context, taskID string) (int, error) {
-	return s.repo.PurgeTask(ctx, taskID)
+	if token, ok := ctx.Value(sessionAdmissionContextKey{}).(sessionAdmissionToken); ok &&
+		token.service == s && token.afterLifecycleUnlock != nil {
+		purgeCtx := context.WithoutCancel(ctx)
+		*token.afterLifecycleUnlock = append(*token.afterLifecycleUnlock, func() {
+			if _, err := s.purgeTask(purgeCtx, taskID); err != nil {
+				s.logger.Error("failed to purge task queue after admission",
+					zap.String("task_id", taskID), zap.Error(err))
+			}
+		})
+		return 0, nil
+	}
+	return s.purgeTask(ctx, taskID)
+}
+
+func (s *Service) purgeTask(ctx context.Context, taskID string) (int, error) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.editLeaseMu.Lock()
+	defer s.editLeaseMu.Unlock()
+
+	// The lifecycle barrier above serializes the persistent purge with all
+	// queue admissions, including writes for sessions absent from the purge.
+	removed, err := s.repo.PurgeTask(ctx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	s.invalidateEditLeasesForTaskLocked(taskID)
+	return removed, nil
 }
 
 // lifecycleGenerationFromMetadata reads the lifecycle generation captured on an entry.
@@ -1046,7 +1875,14 @@ func (s *Service) ReserveQueuedWithAutoRun(ctx context.Context, sessionID string
 	var msg *QueuedMessage
 	autoRun := true
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		var err error
+		blocked, err := s.editLeaseBlocksHead(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			autoRun, err = s.repo.GetAutoRun(admittedCtx, sessionID)
+			return err
+		}
 		msg, autoRun, err = s.repo.ReserveHeadIfAutoRun(admittedCtx, sessionID)
 		return err
 	})
@@ -1130,10 +1966,30 @@ func (s *Service) PauseAutoRunIfPendingForSession(
 	return paused, err
 }
 
-// AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
-func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID string) error {
-	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		return s.repo.AcknowledgeByID(admittedCtx, sessionID, entryID)
+// AcknowledgeQueued settles only the exact server reservation carried by msg.
+func (s *Service) AcknowledgeQueued(ctx context.Context, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		err := s.repo.AcknowledgeReserved(admittedCtx, msg)
+		if err != nil && !errors.Is(err, ErrEntryNotFound) {
+			return err
+		}
+		return s.deletePendingQueueDispatch(admittedCtx, msg)
+	})
+}
+
+func (s *Service) AcknowledgeQueuedForSession(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	reserved *QueuedMessage,
+) error {
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		if err := s.validateSessionIdentity(admittedCtx, identity); err != nil {
+			return err
+		}
+		return s.repo.AcknowledgeByIDForSession(admittedCtx, identity, reserved)
 	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
@@ -1141,21 +1997,16 @@ func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID stri
 	return err
 }
 
-func (s *Service) AcknowledgeQueuedForSession(
+// MarkDeliveryAttemptedForSession atomically crosses the at-most-once boundary
+// for token-owned plan-comment receipts immediately before external I/O.
+func (s *Service) MarkDeliveryAttemptedForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	messages []QueuedMessage,
 ) error {
-	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		if err := s.validateSessionIdentity(admittedCtx, identity); err != nil {
-			return err
-		}
-		return s.repo.AcknowledgeByIDForSession(admittedCtx, identity, entryID)
+	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.MarkDeliveryAttemptedForSession(admittedCtx, identity, messages)
 	})
-	if errors.Is(err, ErrEntryNotFound) {
-		return nil
-	}
-	return err
 }
 
 // ReleaseQueuedDeliveryForSession makes an unaccepted retained entry visible
@@ -1163,10 +2014,10 @@ func (s *Service) AcknowledgeQueuedForSession(
 func (s *Service) ReleaseQueuedDeliveryForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	reserved *QueuedMessage,
 ) error {
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		return s.repo.ReleaseDeliveryReservationForSession(admittedCtx, identity, entryID)
+		return s.repo.ReleaseDeliveryReservationForSession(admittedCtx, identity, reserved)
 	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
@@ -1180,10 +2031,10 @@ func (s *Service) ReleaseQueuedDeliveryForSession(
 func (s *Service) DiscardLifecycleReservation(
 	ctx context.Context,
 	identity QueueSessionIdentity,
-	entryID string,
+	reserved *QueuedMessage,
 ) error {
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		return s.repo.DiscardLifecycleReservation(admittedCtx, identity, entryID)
+		return s.repo.DiscardLifecycleReservation(admittedCtx, identity, reserved)
 	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
@@ -1242,9 +2093,67 @@ func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map
 	}
 	out := make(map[string]interface{}, len(metadata)+extraCapacity)
 	for key, value := range metadata {
-		out[key] = value
+		out[key] = copyMessageMetadataValue(value)
 	}
 	return out
+}
+
+func copyMessageMetadataValue(value interface{}) interface{} {
+	cloned := copyMessageMetadataReflect(reflect.ValueOf(value))
+	if !cloned.IsValid() {
+		return nil
+	}
+	return cloned.Interface()
+}
+
+func copyMessageMetadataReflect(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := copyMessageMetadataReflect(value.Elem())
+		out := reflect.New(value.Type()).Elem()
+		out.Set(cloned)
+		return out
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			out.SetMapIndex(iter.Key(), copyMessageMetadataReflect(iter.Value()))
+		}
+		return out
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := range value.Len() {
+			out.Index(i).Set(copyMessageMetadataReflect(value.Index(i)))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(value.Type()).Elem()
+		for i := range value.Len() {
+			out.Index(i).Set(copyMessageMetadataReflect(value.Index(i)))
+		}
+		return out
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.New(value.Type().Elem())
+		out.Elem().Set(copyMessageMetadataReflect(value.Elem()))
+		return out
+	default:
+		return value
+	}
 }
 
 // AppendContent appends content onto the session's tail entry when the tail's
@@ -1253,6 +2162,31 @@ func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map
 func (s *Service) AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, bool, error) {
 	identity, err := s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
+		if errors.Is(err, ErrSessionIdentityMismatch) {
+			var msg *QueuedMessage
+			var appended bool
+			err = s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+				blocked, blockErr := s.editLeaseBlocksTail(admittedCtx, sessionID, "", userID)
+				if blockErr != nil {
+					return blockErr
+				}
+				if blocked {
+					return ErrEditConflict
+				}
+				msg, appended, err = s.repo.AppendOrInsertTail(
+					admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, nil, s.MaxPerSession(),
+				)
+				return err
+			})
+			if err != nil {
+				return nil, false, err
+			}
+			s.logger.Info("queue append-or-insert",
+				zap.String("session_id", sessionID),
+				zap.String("entry_id", msg.ID),
+				zap.Bool("appended", appended))
+			return msg, appended, nil
+		}
 		return nil, false, err
 	}
 	return s.AppendContentForSession(ctx, identity, content, model, userID, planMode, attachments)
@@ -1263,7 +2197,13 @@ func (s *Service) AppendContentForSession(ctx context.Context, identity QueueSes
 	var msg *QueuedMessage
 	var appended bool
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		var err error
+		blocked, err := s.editLeaseBlocksTail(admittedCtx, identity.SessionID, "", userID)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return ErrEditConflict
+		}
 		msg, appended, err = s.repo.AppendOrInsertTailForSession(admittedCtx, identity, content, model, userID, planMode, attachments, nil, s.MaxPerSession())
 		return err
 	})
@@ -1278,12 +2218,29 @@ func (s *Service) AppendContentForSession(ctx context.Context, identity QueueSes
 }
 
 // TakeQueued atomically removes and returns the head entry. Returns nil, false
-// when the queue is empty.
 func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
 	var msg *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		var err error
+		// TakeQueued is a destructive legacy cleanup path. Never let it
+		// consume a durable lifecycle row that is already reserved for an
+		// in-flight dispatch; that row must remain available for ack/retry.
+		entries, err := s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 && entries[0].IsReservedInFlight() {
+			return nil
+		}
+		blocked, err := s.editLeaseBlocksHead(admittedCtx, sessionID)
+		if err != nil || blocked {
+			return err
+		}
 		msg, err = s.repo.TakeHead(admittedCtx, sessionID)
+		if err == nil && msg != nil {
+			s.editLeaseMu.Lock()
+			s.deleteEditStateLocked(s.editLeaseKey(sessionID, msg.ID))
+			s.editLeaseMu.Unlock()
+		}
 		return err
 	})
 	if err != nil {
@@ -1311,7 +2268,23 @@ func (s *Service) TakeQueuedIfAutoRun(ctx context.Context, sessionID string) (*Q
 		if err != nil || !autoRun {
 			return err
 		}
+		entries, err := s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 || entries[0].IsDurableLifecycle() || entries[0].IsReservedInFlight() {
+			return nil
+		}
+		blocked, err := s.editLeaseBlocksHead(admittedCtx, sessionID)
+		if err != nil || blocked {
+			return err
+		}
 		msg, err = s.repo.TakeHead(admittedCtx, sessionID)
+		if err == nil && msg != nil {
+			s.editLeaseMu.Lock()
+			s.deleteEditStateLocked(s.editLeaseKey(sessionID, msg.ID))
+			s.editLeaseMu.Unlock()
+		}
 		return err
 	})
 	if err != nil {
@@ -1344,8 +2317,16 @@ func (s *Service) TakeQueuedIfAutoRun(ctx context.Context, sessionID string) (*Q
 func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, bool, error) {
 	var msg *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		if s.editLeaseBlocksEntryLocked(sessionID, entryID) {
+			return ErrEditConflict
+		}
 		var err error
 		msg, err = s.repo.TakeByID(admittedCtx, sessionID, entryID)
+		if err == nil && msg != nil {
+			s.editLeaseMu.Lock()
+			s.deleteEditStateLocked(s.editLeaseKey(sessionID, msg.ID))
+			s.editLeaseMu.Unlock()
+		}
 		return err
 	})
 	if err != nil {
@@ -1404,17 +2385,69 @@ func (s *Service) UpdateMessage(ctx context.Context, sessionID, entryID, content
 // lifecycle-aware callers that must inspect the trusted task ID and previous
 // attachment descriptors before replacing an entry.
 func (s *Service) GetEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
-	entries, err := s.repo.ListBySession(ctx, sessionID)
-	if err != nil {
+	var entry *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		entries, err := s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		for i := range entries {
+			if entries[i].ID == entryID {
+				found := entries[i]
+				entry = &found
+				return nil
+			}
+		}
+		return ErrEntryNotFound
+	})
+	return entry, err
+}
+
+type entryByIDRepository interface {
+	FindByID(context.Context, string) (*QueuedMessage, error)
+}
+
+// FindEntryByID locates a queue entry after a session transfer has moved it
+// out of its original session.
+func (s *Service) FindEntryByID(ctx context.Context, entryID string) (*QueuedMessage, error) {
+	repository, ok := s.repo.(entryByIDRepository)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return repository.FindByID(ctx, entryID)
+}
+
+// ReferencedQueueAttachmentIDs returns attachment IDs referenced by pending
+// entries in a session, excluding one entry. It is admission-aware so callers
+// can use it while already holding the session admission lock.
+func (s *Service) ReferencedQueueAttachmentIDs(
+	ctx context.Context, sessionID, excludedEntryID string, attachmentIDs []string,
+) (map[string]struct{}, error) {
+	referenced := make(map[string]struct{}, len(attachmentIDs))
+	if len(attachmentIDs) == 0 {
+		return referenced, nil
+	}
+	read := func(admittedCtx context.Context) error {
+		entries, err := s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if entry.ID == excludedEntryID {
+				continue
+			}
+			for _, attachment := range entry.Attachments {
+				if attachment.AttachmentID != "" {
+					referenced[attachment.AttachmentID] = struct{}{}
+				}
+			}
+		}
+		return nil
+	}
+	if err := s.WithSessionAdmission(ctx, sessionID, read); err != nil {
 		return nil, err
 	}
-	for i := range entries {
-		if entries[i].ID == entryID {
-			entry := entries[i]
-			return &entry, nil
-		}
-	}
-	return nil, ErrEntryNotFound
+	return referenced, nil
 }
 
 // ClaimSendNow atomically claims the exact pending source snapshot for an
@@ -1425,8 +2458,22 @@ func (s *Service) GetEntry(ctx context.Context, sessionID, entryID string) (*Que
 func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
 	var claim *SendNowClaim
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		for _, entry := range expected {
+			if s.editLeaseBlocksEntryLocked(sessionID, entry.ID) {
+				return ErrEditConflict
+			}
+		}
 		var err error
 		claim, err = s.repo.ClaimSendNow(admittedCtx, sessionID, expected)
+		if err == nil && claim != nil {
+			s.editLeaseMu.Lock()
+			for _, source := range claim.Sources {
+				if !source.IsDurableLifecycle() {
+					s.deleteEditStateLocked(s.editLeaseKey(sessionID, source.ID))
+				}
+			}
+			s.editLeaseMu.Unlock()
+		}
 		return err
 	})
 	if err != nil {
@@ -1458,15 +2505,41 @@ func (s *Service) ClaimSendNowForSession(ctx context.Context, identity QueueSess
 // RestoreSendNowClaim restores every source from an interrupted replacement
 // dispatch. Durable lifecycle reservations are cleared as part of the same
 // repository operation.
+func sendNowClaimSessionID(claim *SendNowClaim) (string, error) {
+	if claim == nil || len(claim.Sources) == 0 {
+		return "", ErrSendNowEmpty
+	}
+	sessionID := claim.Dispatch.SessionID
+	for _, source := range claim.Sources {
+		if source.SessionID == "" {
+			return "", ErrSendNowClaimChanged
+		}
+		if sessionID == "" {
+			sessionID = source.SessionID
+		}
+		if source.SessionID != sessionID {
+			return "", ErrSendNowClaimChanged
+		}
+	}
+	return sessionID, nil
+}
+
 func (s *Service) RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
-	if err := s.repo.RestoreSendNowClaim(ctx, claim); err != nil {
+	if claim == nil {
+		return s.repo.RestoreSendNowClaim(ctx, claim)
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
 		return err
 	}
-	if claim != nil {
-		s.logger.Info("restored send-now queue claim",
-			zap.String("session_id", claim.Dispatch.SessionID),
-			zap.Int("source_count", len(claim.Sources)))
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.RestoreSendNowClaim(admittedCtx, claim)
+	}); err != nil {
+		return err
 	}
+	s.logger.Info("restored send-now queue claim",
+		zap.String("session_id", sessionID),
+		zap.Int("source_count", len(claim.Sources)))
 	return nil
 }
 
@@ -1474,15 +2547,127 @@ func (s *Service) RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) 
 // replacement prompt has been accepted. Ordinary sources were deleted at
 // claim time and therefore need no second acknowledgement.
 func (s *Service) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
-	if err := s.repo.AcknowledgeSendNowClaim(ctx, claim); err != nil {
+	if claim == nil {
+		return s.repo.AcknowledgeSendNowClaim(ctx, claim)
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
 		return err
 	}
-	if claim != nil {
-		s.logger.Info("acknowledged send-now queue claim",
-			zap.String("session_id", claim.Dispatch.SessionID),
-			zap.Int("source_count", len(claim.Sources)))
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.AcknowledgeSendNowClaim(admittedCtx, claim)
+	}); err != nil {
+		return err
 	}
+	s.logger.Info("acknowledged send-now queue claim",
+		zap.String("session_id", sessionID),
+		zap.Int("source_count", len(claim.Sources)))
 	return nil
+}
+
+type pendingSendNowClaimRepository interface {
+	ListPendingSendNowClaims(context.Context) ([]PendingSendNowClaim, error)
+	MarkPendingSendNowClaimAccepted(context.Context, *SendNowClaim) error
+	DeletePendingSendNowClaim(context.Context, *SendNowClaim) error
+}
+
+// PendingSendNowClaimPersistenceAvailable reports whether ordinary claimed
+// prompts can be recovered after the owning process exits.
+func (s *Service) PendingSendNowClaimPersistenceAvailable() bool {
+	_, ok := s.repo.(pendingSendNowClaimRepository)
+	return ok
+}
+
+// ListPendingSendNowClaims reloads interrupted Send Now claims after restart.
+func (s *Service) ListPendingSendNowClaims(ctx context.Context) ([]PendingSendNowClaim, error) {
+	repo, ok := s.repo.(pendingSendNowClaimRepository)
+	if !ok {
+		return nil, errors.New("pending Send Now claim persistence unavailable")
+	}
+	return repo.ListPendingSendNowClaims(ctx)
+}
+
+// MarkPendingSendNowClaimAccepted records the executor acceptance boundary
+// before the potentially long-running prompt call returns.
+func (s *Service) MarkPendingSendNowClaimAccepted(ctx context.Context, claim *SendNowClaim) error {
+	repo, ok := s.repo.(pendingSendNowClaimRepository)
+	if !ok {
+		return errors.New("pending Send Now claim persistence unavailable")
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return err
+	}
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return repo.MarkPendingSendNowClaimAccepted(admittedCtx, claim)
+	})
+}
+
+// DeletePendingSendNowClaim discards only the exact recovery record that can
+// no longer be applied because a destructive queue generation change
+// superseded it.
+func (s *Service) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
+	repo, ok := s.repo.(pendingSendNowClaimRepository)
+	if !ok {
+		return errors.New("pending Send Now claim persistence unavailable")
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return err
+	}
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return repo.DeletePendingSendNowClaim(admittedCtx, claim)
+	})
+}
+
+type pendingQueueDispatchRepository interface {
+	ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error)
+	MarkPendingQueueDispatchAccepted(context.Context, *QueuedMessage) error
+	DeletePendingQueueDispatch(context.Context, *QueuedMessage) error
+}
+
+// PendingQueueDispatchPersistenceAvailable reports whether ordinary dequeues
+// survive a process exit before executor acceptance.
+func (s *Service) PendingQueueDispatchPersistenceAvailable() bool {
+	_, ok := s.repo.(pendingQueueDispatchRepository)
+	return ok
+}
+
+func (s *Service) ListPendingQueueDispatches(ctx context.Context) ([]PendingQueueDispatch, error) {
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok {
+		return nil, errors.New("pending queue dispatch persistence unavailable")
+	}
+	return repo.ListPendingQueueDispatches(ctx)
+}
+
+func (s *Service) MarkPendingQueueDispatchAccepted(
+	ctx context.Context,
+	msg *QueuedMessage,
+) error {
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok {
+		return nil
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.MarkPendingQueueDispatchAccepted(admittedCtx, msg)
+	})
+}
+
+// DeletePendingQueueDispatch acknowledges the exact recovered or accepted
+// ordinary dispatch attempt carried by msg.
+func (s *Service) DeletePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return s.deletePendingQueueDispatch(admittedCtx, msg)
+	})
+}
+
+func (s *Service) deletePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok || msg.IsDurableDelivery() {
+		return nil
+	}
+	return repo.DeletePendingQueueDispatch(ctx, msg)
 }
 
 // GetEntryForSession returns an entry from an identity-bound repository
@@ -1505,6 +2690,10 @@ func (s *Service) GetEntryForSession(ctx context.Context, identity QueueSessionI
 // metadata replacements while retaining unrelated metadata keys.
 func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
 	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		if s.editLeaseBlocksEntryLocked(sessionID, entryID) {
+			return ErrEditConflict
+		}
+
 		return s.repo.UpdateContentAndMetadata(admittedCtx, sessionID, entryID, content, attachments, metadataUpdates, queuedBy)
 	}); err != nil {
 		return err
@@ -1513,6 +2702,39 @@ func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entr
 		zap.String("session_id", sessionID),
 		zap.String("entry_id", entryID))
 	return nil
+}
+
+// RemoveEntryWithEntry deletes a single entry and returns the exact snapshot
+// removed under the same session admission lock. Callers that release
+// entry-owned resources must use this method instead of GetEntry followed by
+// RemoveEntry, because an edit between those calls can change attachments.
+func (s *Service) RemoveEntryWithEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	var removed *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		entries, err := s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		for i := range entries {
+			if entries[i].ID != entryID {
+				continue
+			}
+			entry := entries[i]
+			if err := s.repo.DeleteByID(admittedCtx, sessionID, entryID); err != nil {
+				return err
+			}
+			removed = &entry
+			s.editLeaseMu.Lock()
+			s.deleteEditStateLocked(s.editLeaseKey(sessionID, entryID))
+			s.editLeaseMu.Unlock()
+			return nil
+		}
+		return ErrEntryNotFound
+	})
+	if err != nil {
+		return nil, err
+	}
+	return removed, nil
 }
 
 // UpdateMessageWithMetadataForSession edits content only for the exact session incarnation.
@@ -1550,9 +2772,8 @@ func (s *Service) UpdateMessageWithMetadataForSessionWithClaim(ctx context.Conte
 // the rationale on the Repository.DeleteByID contract for why. Returns
 // ErrEntryNotFound when no entry matches.
 func (s *Service) RemoveEntry(ctx context.Context, sessionID, entryID string) error {
-	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		return s.repo.DeleteByID(admittedCtx, sessionID, entryID)
-	}); err != nil {
+	_, err := s.RemoveEntryWithEntry(ctx, sessionID, entryID)
+	if err != nil {
 		return err
 	}
 	s.logger.Info("queued entry removed",
@@ -1588,9 +2809,19 @@ func (s *Service) MergeIntoAbove(ctx context.Context, sessionID, entryID, queued
 	}
 	var merged *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		var err error
-		merged, err = s.repo.MergeIntoAbove(admittedCtx, sessionID, entryID, queuedBy)
-		return err
+		blocked, err := s.editLeaseBlocksMerge(admittedCtx, sessionID, entryID)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return ErrEditConflict
+		}
+		var mergeErr error
+		merged, mergeErr = s.repo.MergeIntoAbove(admittedCtx, sessionID, entryID, queuedBy)
+		if mergeErr == nil {
+			s.invalidateEditLease(sessionID, entryID)
+		}
+		return mergeErr
 	})
 	if err != nil {
 		return nil, err
@@ -1631,6 +2862,9 @@ func (s *Service) ReorderEntries(ctx context.Context, sessionID string, orderedI
 		return err
 	}
 	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		if s.editLeaseBlocksReorderLocked(sessionID) {
+			return ErrEditConflict
+		}
 		return s.repo.ReorderEntries(admittedCtx, sessionID, orderedIDs)
 	}); err != nil {
 		return err
@@ -1664,6 +2898,9 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
 		n, err = s.repo.DeleteAllBySession(admittedCtx, sessionID)
+		if err == nil {
+			s.invalidateEditLeasesLocked(sessionID)
+		}
 		return err
 	})
 	if err != nil {
@@ -1673,6 +2910,54 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 		zap.String("session_id", sessionID),
 		zap.Int("removed", n))
 	return n, nil
+}
+
+// PurgeSession removes all queue rows for a deleted session, including
+// reserved lifecycle deliveries. It is intentionally distinct from
+// CancelAll, which preserves in-flight durable rows for executor recovery.
+func (s *Service) PurgeSession(ctx context.Context, sessionID string) (int, error) {
+	var removed int
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		removed, err = s.repo.PurgeSession(admittedCtx, sessionID)
+		if err == nil {
+			s.invalidateEditLeasesLocked(sessionID)
+		}
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
+// CancelAllWithEntries clears a session queue and returns the deleted rows so
+// callers can release resources owned by those entries.
+func (s *Service) CancelAllWithEntries(ctx context.Context, sessionID string) ([]QueuedMessage, error) {
+	var entries []QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		entries, err = s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		_, err = s.repo.DeleteAllBySession(admittedCtx, sessionID)
+		if err == nil {
+			deleted := entries[:0]
+			for i := range entries {
+				if !entries[i].IsReservedInFlight() {
+					deleted = append(deleted, entries[i])
+				}
+			}
+			entries = deleted
+			s.invalidateEditLeasesLocked(sessionID)
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 // CancelAllForSession clears pending entries only for the exact session
@@ -1709,37 +2994,58 @@ func (s *Service) PurgeDeletedSession(ctx context.Context, identity QueueSession
 func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus {
 	maxPerSession := s.MaxPerSession()
 	mergeEnabled := s.MergeEnabled()
-	autoRun, autoRunErr := s.repo.GetAutoRun(ctx, sessionID)
-	if autoRunErr != nil {
-		s.logger.Error("get queue auto-run failed",
-			zap.String("session_id", sessionID),
-			zap.Error(autoRunErr))
-		// Preserve pre-policy behavior if status storage is temporarily unreadable.
-		autoRun = true
-	}
-	entries, err := s.repo.ListBySession(ctx, sessionID)
-	if err != nil {
-		s.logger.Error("list queued failed",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession, AutoRun: autoRun, MergeEnabled: mergeEnabled}
-	}
-	pending := make([]QueuedMessage, 0, len(entries))
-	for _, entry := range entries {
-		// A reserved lifecycle row is already being delivered; listing it next
-		// to the message it produced reads as a stuck duplicate.
-		if entry.IsReservedInFlight() {
-			continue
-		}
-		pending = append(pending, entry)
-	}
-	return &QueueStatus{
-		Entries:      pending,
-		Count:        len(pending),
+	status := &QueueStatus{
+		Entries:      []QueuedMessage{},
+		Count:        0,
 		Max:          maxPerSession,
-		AutoRun:      autoRun,
+		AutoRun:      true,
 		MergeEnabled: mergeEnabled,
 	}
+	_ = s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		autoRun, autoRunErr := s.repo.GetAutoRun(admittedCtx, sessionID)
+		if autoRunErr != nil {
+			s.logger.Error("get queue auto-run failed",
+				zap.String("session_id", sessionID),
+				zap.Error(autoRunErr))
+			// Preserve pre-policy behavior if status storage is temporarily unreadable.
+			autoRun = true
+		}
+		entries, err := s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			s.logger.Error("list queued failed",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			status = &QueueStatus{
+				Entries:      []QueuedMessage{},
+				Count:        0,
+				Max:          maxPerSession,
+				AutoRun:      autoRun,
+				MergeEnabled: mergeEnabled,
+			}
+			return nil
+		}
+		pending := make([]QueuedMessage, 0, len(entries))
+		for _, entry := range entries {
+			// Unattempted comment receipts remain queryable during lost-response reconciliation.
+			if entry.IsReservedInFlight() &&
+				(!entry.IsDurablePlanComment() || entry.IsDeliveryAttempted()) {
+				continue
+			}
+			// Repositories may return shallow copies. The status is also handed to
+			// asynchronous event publishers, so detach maps and slices before the
+			// admission lock is released.
+			pending = append(pending, *cloneQueuedMessage(&entry))
+		}
+		status = &QueueStatus{
+			Entries:      pending,
+			Count:        len(pending),
+			Max:          maxPerSession,
+			AutoRun:      autoRun,
+			MergeEnabled: mergeEnabled,
+		}
+		return nil
+	})
+	return status
 }
 
 // Snapshot returns an ordered status bound to one immutable session identity.
@@ -1750,7 +3056,8 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 	}
 	pending := make([]QueuedMessage, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
-		if !entry.IsReservedInFlight() {
+		if !entry.IsReservedInFlight() ||
+			(entry.IsDurablePlanComment() && !entry.IsDeliveryAttempted()) {
 			pending = append(pending, entry)
 		}
 	}
@@ -1822,15 +3129,46 @@ func (s *Service) CountPendingByTask(ctx context.Context, taskID string) (int, e
 // Unlike GetStatus, it includes durable lifecycle rows reserved by an in-flight
 // delivery so a later restore cannot erase them before acknowledgement.
 func (s *Service) SnapshotSession(ctx context.Context, sessionID string) ([]QueuedMessage, *PendingMove, error) {
-	entries, err := s.repo.ListBySession(ctx, sessionID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("snapshot queued messages: %w", err)
+	var entries []QueuedMessage
+	var move *PendingMove
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		rawEntries, err := s.repo.ListBySession(admittedCtx, sessionID)
+		if err != nil {
+			return fmt.Errorf("snapshot queued messages: %w", err)
+		}
+		entries = make([]QueuedMessage, 0, len(rawEntries))
+		for i := range rawEntries {
+			entries = append(entries, *cloneQueuedMessage(&rawEntries[i]))
+		}
+		move, err = s.repo.GetPendingMove(admittedCtx, sessionID)
+		if err != nil {
+			return fmt.Errorf("snapshot pending move: %w", err)
+		}
+		if move != nil {
+			moveCopy := *move
+			move = &moveCopy
+		}
+		return nil
+	})
+	return entries, move, err
+}
+
+type ownedSessionTransferRepository interface {
+	transferSessionOwned(context.Context, string, string, string) error
+}
+
+func (s *Service) transferRepositorySession(
+	ctx context.Context,
+	oldSessionID, newSessionID, operationID string,
+) error {
+	if operationID == "" {
+		return s.repo.TransferSession(ctx, oldSessionID, newSessionID)
 	}
-	move, err := s.repo.GetPendingMove(ctx, sessionID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("snapshot pending move: %w", err)
+	repo, ok := s.repo.(ownedSessionTransferRepository)
+	if !ok {
+		return errors.New("owned session transfer unavailable")
 	}
-	return entries, move, nil
+	return repo.transferSessionOwned(ctx, oldSessionID, newSessionID, operationID)
 }
 
 // SnapshotSessionForIdentity captures queue and deferred-move state for one exact incarnation.
@@ -1848,7 +3186,58 @@ func (s *Service) SnapshotSessionForIdentity(ctx context.Context, identity Queue
 // old session — a transfer that no-ops without a signal would let the workflow
 // step move forward while the queue sticks behind.
 func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionID string) error {
-	if err := s.repo.TransferSession(ctx, oldSessionID, newSessionID); err != nil {
+	return s.transferSession(ctx, "", oldSessionID, newSessionID, "", nil, nil)
+}
+
+// TransferSessionWithPreparation runs preparation while both session
+// admissions are held, then transfers queued state. If the queue transfer
+// fails, rollback runs under the same admissions before they are released.
+// Callers use this to keep external state, such as attachment ownership,
+// synchronized with the queue move.
+func (s *Service) TransferSessionWithPreparation(
+	ctx context.Context,
+	oldSessionID, newSessionID string,
+	prepare func(context.Context) error,
+	rollback func(context.Context) error,
+) error {
+	return s.transferSession(ctx, "", oldSessionID, newSessionID, "", prepare, rollback)
+}
+
+func (s *Service) transferSession(
+	ctx context.Context,
+	taskID string,
+	oldSessionID, newSessionID, operationID string,
+	prepare func(context.Context) error,
+	rollback func(context.Context) error,
+) error {
+	err := s.withSessionAdmissions(ctx, oldSessionID, newSessionID, func(admittedCtx context.Context) error {
+		rollbackPreparation := func(transferErr error) error {
+			if rollback == nil {
+				return transferErr
+			}
+			rollbackErr := rollback(context.WithoutCancel(admittedCtx))
+			if rollbackErr != nil {
+				s.logger.Warn("failed to roll back transfer preparation",
+					zap.String("from_session_id", oldSessionID),
+					zap.String("to_session_id", newSessionID),
+					zap.Error(rollbackErr))
+			}
+			return errors.Join(transferErr, rollbackErr)
+		}
+		if prepare != nil {
+			if err := prepare(admittedCtx); err != nil {
+				return rollbackPreparation(err)
+			}
+		}
+		if err := s.transferRepositorySessionForTask(
+			admittedCtx, taskID, oldSessionID, newSessionID, operationID,
+		); err != nil {
+			return rollbackPreparation(err)
+		}
+		s.invalidateEditLeasesLocked(oldSessionID, newSessionID)
+		return nil
+	})
+	if err != nil {
 		s.logger.Error("transfer session failed",
 			zap.String("from_session_id", oldSessionID),
 			zap.String("to_session_id", newSessionID),
@@ -1859,6 +3248,276 @@ func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionI
 		zap.String("from_session_id", oldSessionID),
 		zap.String("to_session_id", newSessionID))
 	return nil
+}
+
+func (s *Service) transferRepositorySessionForTask(
+	ctx context.Context,
+	taskID, oldSessionID, newSessionID, operationID string,
+) error {
+	// Transfers that do not have a durable compensation record can use the
+	// immutable session identities. This fences a workflow handoff to one task
+	// and lets repositories reject a stale or cross-task destination. Durable
+	// transfers keep the owned-operation path because it also carries the
+	// compensation lease and operation token.
+	if taskID != "" && operationID == "" {
+		source, sourceErr := s.repo.ResolveSessionIdentity(ctx, taskID, oldSessionID)
+		if sourceErr != nil && !errors.Is(sourceErr, ErrSessionIdentityMismatch) {
+			return sourceErr
+		}
+		destination, destinationErr := s.repo.ResolveSessionIdentity(ctx, taskID, newSessionID)
+		if destinationErr != nil && !errors.Is(destinationErr, ErrSessionIdentityMismatch) {
+			return destinationErr
+		}
+		if sourceErr == nil && destinationErr == nil {
+			return s.repo.TransferSessionIdentities(ctx, source, destination)
+		}
+	}
+	return s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID)
+}
+
+type attachmentCleanupRepository interface {
+	UpsertAttachmentCleanup(context.Context, AttachmentCleanup) error
+	DeleteAttachmentCleanup(context.Context, string, string, string) error
+	ListAttachmentCleanups(context.Context) ([]AttachmentCleanup, error)
+}
+
+// AttachmentCleanupPersistenceAvailable reports whether this service's
+// repository can preserve cleanup work across handler restarts.
+func (s *Service) AttachmentCleanupPersistenceAvailable() bool {
+	_, ok := s.repo.(attachmentCleanupRepository)
+	return ok
+}
+
+// UpsertAttachmentCleanup persists a cleanup obligation before its retry
+// worker is allowed to outlive the current handler.
+func (s *Service) UpsertAttachmentCleanup(ctx context.Context, cleanup AttachmentCleanup) error {
+	repo, ok := s.repo.(attachmentCleanupRepository)
+	if !ok {
+		return errors.New("attachment cleanup persistence unavailable")
+	}
+	return repo.UpsertAttachmentCleanup(ctx, cleanup)
+}
+
+// DeleteAttachmentCleanup acknowledges one completed cleanup obligation.
+func (s *Service) DeleteAttachmentCleanup(
+	ctx context.Context,
+	sessionID, entryID, operationID string,
+) error {
+	repo, ok := s.repo.(attachmentCleanupRepository)
+	if !ok {
+		return errors.New("attachment cleanup persistence unavailable")
+	}
+	return repo.DeleteAttachmentCleanup(ctx, sessionID, entryID, operationID)
+}
+
+// ListAttachmentCleanups reloads cleanup obligations after process restart.
+func (s *Service) ListAttachmentCleanups(ctx context.Context) ([]AttachmentCleanup, error) {
+	repo, ok := s.repo.(attachmentCleanupRepository)
+	if !ok {
+		return nil, errors.New("attachment cleanup persistence unavailable")
+	}
+	return repo.ListAttachmentCleanups(ctx)
+}
+
+type attachmentCleanupLocatorRepository interface {
+	GetAttachmentCleanup(context.Context, string, string, string) (*AttachmentCleanup, error)
+}
+
+// GetAttachmentCleanup reloads one cleanup by its immutable acknowledgement key.
+func (s *Service) GetAttachmentCleanup(
+	ctx context.Context,
+	sessionID, entryID, operationID string,
+) (*AttachmentCleanup, error) {
+	repo, ok := s.repo.(attachmentCleanupLocatorRepository)
+	if !ok {
+		return nil, errors.New("attachment cleanup persistence unavailable")
+	}
+	return repo.GetAttachmentCleanup(ctx, sessionID, entryID, operationID)
+}
+
+type sessionTransferCompensationRepository interface {
+	UpsertSessionTransferCompensation(context.Context, SessionTransferCompensation) error
+	DeleteSessionTransferCompensation(context.Context, string, string, string, string) error
+	ListSessionTransferCompensations(context.Context) ([]SessionTransferCompensation, error)
+}
+
+type sessionTransferCompensationRecoveryRepository interface {
+	claimSessionTransferCompensationRecovery(context.Context, SessionTransferCompensation) (string, error)
+	renewSessionTransferCompensationLease(context.Context, SessionTransferCompensation, string) error
+	deleteSessionTransferCompensationWithOwner(context.Context, string, string, string, string, string) error
+}
+
+// SessionTransferCompensationPersistenceAvailable reports whether interrupted
+// queue and attachment transfers can be reconciled after process restart.
+func (s *Service) SessionTransferCompensationPersistenceAvailable() bool {
+	_, ok := s.repo.(sessionTransferCompensationRepository)
+	return ok
+}
+
+// UpsertSessionTransferCompensation persists intent before attachment ownership
+// changes outside the queue repository transaction.
+func (s *Service) UpsertSessionTransferCompensation(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+) error {
+	repo, ok := s.repo.(sessionTransferCompensationRepository)
+	if !ok {
+		return errors.New("session transfer compensation persistence unavailable")
+	}
+	return repo.UpsertSessionTransferCompensation(ctx, compensation)
+}
+
+// DeleteSessionTransferCompensation acknowledges a reconciled transfer.
+func (s *Service) DeleteSessionTransferCompensation(
+	ctx context.Context,
+	operationID, taskID, fromSessionID, toSessionID string,
+) error {
+	repo, ok := s.repo.(sessionTransferCompensationRepository)
+	if !ok {
+		return errors.New("session transfer compensation persistence unavailable")
+	}
+	return repo.DeleteSessionTransferCompensation(
+		ctx, operationID, taskID, fromSessionID, toSessionID,
+	)
+}
+
+// RenewSessionTransferCompensationLease keeps external transfer work owned
+// until its queue mutation or recovery acknowledgement completes.
+func (s *Service) RenewSessionTransferCompensationLease(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+	ownerID string,
+) error {
+	repo, ok := s.repo.(sessionTransferCompensationRecoveryRepository)
+	if !ok {
+		return errors.New("session transfer compensation recovery unavailable")
+	}
+	return repo.renewSessionTransferCompensationLease(ctx, compensation, ownerID)
+}
+
+// ClaimSessionTransferCompensationRecovery claims an expired transfer
+// compensation before its external attachment recovery starts.
+func (s *Service) ClaimSessionTransferCompensationRecovery(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+) (string, error) {
+	repo, ok := s.repo.(sessionTransferCompensationRecoveryRepository)
+	if !ok {
+		return "", errors.New("session transfer compensation recovery unavailable")
+	}
+	return repo.claimSessionTransferCompensationRecovery(ctx, compensation)
+}
+
+// DeleteClaimedSessionTransferCompensation acknowledges recovered attachment
+// state only while the caller owns the compensation recovery lease.
+
+// MaintainSessionTransferCompensationLease renews an owner-scoped lease until
+// the caller completes its external attachment operation. Renewal failure
+// cancels the returned context and is returned by the stop function.
+func (s *Service) MaintainSessionTransferCompensationLease(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+	ownerID string,
+) (context.Context, func() error) {
+	return s.maintainSessionTransferCompensationLease(
+		ctx, compensation, ownerID, nil, sessionTransferCompensationLeaseDuration/2,
+	)
+}
+
+// MaintainSessionTransferCompensationLeaseWithCancel is the recovery variant
+// that also cancels the owning operation when lease renewal fails.
+func (s *Service) MaintainSessionTransferCompensationLeaseWithCancel(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+	ownerID string,
+	cancelOwner context.CancelFunc,
+) (context.Context, func() error) {
+	return s.maintainSessionTransferCompensationLease(
+		ctx, compensation, ownerID, cancelOwner, sessionTransferCompensationLeaseDuration/2,
+	)
+}
+
+func (s *Service) maintainSessionTransferCompensationLease(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+	ownerID string,
+	cancelOwner context.CancelFunc,
+	renewInterval time.Duration,
+) (context.Context, func() error) {
+	operationCtx, cancel := context.WithCancel(ctx)
+	stop := make(chan struct{})
+	done := make(chan error, 1)
+	var stopOnce sync.Once
+	var stopErr error
+	go func() {
+		ticker := time.NewTicker(renewInterval)
+		defer ticker.Stop()
+		var err error
+		for {
+			select {
+			case <-stop:
+				done <- nil
+				return
+			case <-operationCtx.Done():
+				done <- nil
+				return
+			case <-ticker.C:
+				renewCtx, renewCancel := context.WithTimeout(
+					operationCtx, sessionTransferCompensationLeaseDuration/3,
+				)
+				err = s.RenewSessionTransferCompensationLease(
+					renewCtx, compensation, ownerID,
+				)
+				renewCancel()
+				if err != nil {
+					cancel()
+					if cancelOwner != nil {
+						cancelOwner()
+					}
+					done <- err
+					return
+				}
+			}
+		}
+	}()
+	return operationCtx, func() error {
+		stopOnce.Do(func() {
+			close(stop)
+			stopErr = <-done
+			cancel()
+		})
+		return stopErr
+	}
+}
+
+func (s *Service) DeleteClaimedSessionTransferCompensation(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+	ownerID string,
+) error {
+	repo, ok := s.repo.(sessionTransferCompensationRecoveryRepository)
+	if !ok {
+		return errors.New("session transfer compensation recovery unavailable")
+	}
+	return repo.deleteSessionTransferCompensationWithOwner(
+		ctx,
+		compensation.OperationID,
+		ownerID,
+		compensation.TaskID,
+		compensation.FromSessionID,
+		compensation.ToSessionID,
+	)
+}
+
+// ListSessionTransferCompensations reloads interrupted transfers after restart.
+func (s *Service) ListSessionTransferCompensations(
+	ctx context.Context,
+) ([]SessionTransferCompensation, error) {
+	repo, ok := s.repo.(sessionTransferCompensationRepository)
+	if !ok {
+		return nil, errors.New("session transfer compensation persistence unavailable")
+	}
+	return repo.ListSessionTransferCompensations(ctx)
 }
 
 func (s *Service) validateSessionIdentity(ctx context.Context, identity QueueSessionIdentity) error {
@@ -1899,7 +3558,14 @@ func (s *Service) TransferSessionIdentities(ctx context.Context, source, destina
 // RestoreSession replaces a session's queue and pending move from a snapshot,
 // preserving queued-message identity fields.
 func (s *Service) RestoreSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
-	if err := s.repo.ReplaceSession(ctx, sessionID, entries, pendingMove); err != nil {
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		if err := s.repo.ReplaceSession(admittedCtx, sessionID, entries, pendingMove); err != nil {
+			return err
+		}
+		s.invalidateEditLeasesLocked(sessionID)
+		return nil
+	})
+	if err != nil {
 		s.logger.Error("restore session queue failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
@@ -1933,7 +3599,9 @@ func (s *Service) RestoreSessionForIdentity(ctx context.Context, identity QueueS
 // SetPendingMove records a pending move for a session (replaces any existing one).
 // The move is applied by handleAgentReady when the agent's current turn completes.
 func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error {
-	if err := s.repo.SetPendingMove(ctx, sessionID, move); err != nil {
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.SetPendingMove(admittedCtx, sessionID, move)
+	}); err != nil {
 		s.logger.Error("set pending move failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
@@ -1950,7 +3618,12 @@ func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *Pe
 // removing it. It distinguishes an empty queue from a storage failure so
 // callers that must preserve deferred workflow state can fail closed.
 func (s *Service) GetPendingMoveWithError(ctx context.Context, sessionID string) (*PendingMove, bool, error) {
-	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	var move *PendingMove
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		move, err = s.repo.GetPendingMove(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		return nil, false, err
 	}
@@ -1974,7 +3647,12 @@ func (s *Service) GetPendingMove(ctx context.Context, sessionID string) (*Pendin
 
 // TakePendingMove retrieves and removes the pending move for a session.
 func (s *Service) TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
-	move, err := s.repo.TakePendingMove(ctx, sessionID)
+	var move *PendingMove
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		move, err = s.repo.TakePendingMove(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		s.logger.Error("take pending move failed",
 			zap.String("session_id", sessionID),

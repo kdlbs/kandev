@@ -324,6 +324,15 @@ func (r *Repository) createCostTables() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+
+	-- Built-in default spend ceiling (REQ-OFFICE-BUDGET-003): a stable
+	-- per-workspace identifier distinct from any office_budget_policies row
+	-- (AC-OFFICE-BUDGET-003.7), never listed alongside operator policies.
+	CREATE TABLE IF NOT EXISTS office_budget_default_settings (
+		workspace_id TEXT PRIMARY KEY,
+		limit_subcents INTEGER NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
 	`)
 	return err
 }
@@ -731,7 +740,8 @@ func (r *Repository) createParentChildWakeReceiptsTable() error {
 		child_set_key         TEXT NOT NULL,
 		delivered_run_id      TEXT NOT NULL DEFAULT '',
 		delivery_operation_id TEXT NOT NULL DEFAULT '',
-		delivered_at          TIMESTAMP NOT NULL
+		delivered_at          TIMESTAMP NOT NULL,
+		child_generation      TEXT NOT NULL DEFAULT ''
 	);
 	`)
 	return err

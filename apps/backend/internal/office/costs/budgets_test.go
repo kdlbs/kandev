@@ -149,9 +149,70 @@ func insertBudgetTestCostEvent(t *testing.T, execSQL func(string, ...interface{}
 	now := time.Now().UTC().Format(time.RFC3339)
 	execSQL(
 		`INSERT INTO office_cost_events (id, agent_profile_id, task_id, cost_subcents, occurred_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?)`,
 		uuid.NewString(), agentID, taskID, costSubcents, now, now,
 	)
+}
+
+func insertBudgetTestCostEventAt(
+	t *testing.T,
+	execSQL func(string, ...interface{}),
+	agentID, taskID string,
+	costSubcents int64,
+	at time.Time,
+) {
+	t.Helper()
+	occurredAt := at.UTC().Format(time.RFC3339)
+	execSQL(
+		`INSERT INTO office_cost_events (id, agent_profile_id, task_id, cost_subcents, occurred_at, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+		uuid.NewString(), agentID, taskID, costSubcents, occurredAt, occurredAt,
+	)
+}
+
+func TestCheckBudget_PeriodWindowsExcludeOlderSpend(t *testing.T) {
+	cases := []struct {
+		name      string
+		period    models.BudgetPeriod
+		olderBy   time.Duration
+		wantLimit bool
+	}{
+		{name: "daily", period: models.BudgetPeriodDaily, olderBy: 48 * time.Hour},
+		{name: "yearly", period: models.BudgetPeriodYearly, olderBy: 400 * 24 * time.Hour},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, execSQL := newBudgetTestService(t)
+			ctx := context.Background()
+			createBudgetTestAgent(t, repo, "ws-1", "agent-1")
+
+			policy := &models.BudgetPolicy{
+				WorkspaceID:       "ws-1",
+				ScopeType:         models.BudgetScopeAgent,
+				ScopeID:           "agent-1",
+				LimitSubcents:     500,
+				Period:            tc.period,
+				AlertThresholdPct: 80,
+				ActionOnExceed:    models.BudgetActionNotifyOnly,
+			}
+			if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+				t.Fatalf("create policy: %v", err)
+			}
+
+			insertBudgetTestCostEventAt(t, execSQL, "agent-1", "task-1", 600, time.Now().UTC().Add(-tc.olderBy))
+			results, err := svc.CheckBudget(ctx, "ws-1", "agent-1", "project-1")
+			if err != nil {
+				t.Fatalf("CheckBudget: %v", err)
+			}
+			if len(results) != 1 {
+				t.Fatalf("results = %d, want 1", len(results))
+			}
+			if results[0].LimitExceed != tc.wantLimit {
+				t.Errorf("LimitExceed = %t, want %t", results[0].LimitExceed, tc.wantLimit)
+			}
+		})
+	}
 }
 
 func TestCheckBudget_UnderThreshold(t *testing.T) {
