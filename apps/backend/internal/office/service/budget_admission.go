@@ -172,7 +172,13 @@ func (si *SchedulerIntegration) finishPolicyBlock(
 	} else {
 		incBudgetBlockedByLimit(provenance)
 	}
-	_, _ = si.svc.FinishRun(ctx, run.ID, outcome)
+	wrote, _ := si.svc.FinishRun(ctx, run.ID, outcome)
+	if !wrote {
+		// Another writer already moved the run out of claimed between the
+		// admission decision and this write; it did not actually end via a
+		// budget block, so there is nothing to log (Review round 3, R3-1).
+		return false
+	}
 
 	fields := map[string]string{"degraded": strconv.FormatBool(p.Degraded)}
 	if p.IsDefault {

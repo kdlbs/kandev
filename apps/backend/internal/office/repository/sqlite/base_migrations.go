@@ -79,21 +79,21 @@ func (r *Repository) runMigrations() error {
 // from a run to its originating fire is a direct lookup on every
 // dialect, not a table scan — NFR-2 is symmetric with the forward walk.
 func (r *Repository) migrateLoopLivenessCausationID() {
-	r.migrate.Apply("office_routine_runs.causation_id",
+	_ = r.migrate.Apply("office_routine_runs.causation_id",
 		`ALTER TABLE office_routine_runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("idx_office_routine_runs_causation_id",
+	_ = r.migrate.Apply("idx_office_routine_runs_causation_id",
 		`CREATE INDEX IF NOT EXISTS idx_office_routine_runs_causation_id
 			ON office_routine_runs(causation_id) WHERE causation_id != ''`)
 
-	r.migrate.Apply("agent_wakeup_requests.causation_id",
+	_ = r.migrate.Apply("agent_wakeup_requests.causation_id",
 		`ALTER TABLE agent_wakeup_requests ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("idx_agent_wakeup_requests_causation_id",
+	_ = r.migrate.Apply("idx_agent_wakeup_requests_causation_id",
 		`CREATE INDEX IF NOT EXISTS idx_agent_wakeup_requests_causation_id
 			ON agent_wakeup_requests(causation_id) WHERE causation_id != ''`)
 
-	r.migrate.Apply("runs.causation_id",
+	_ = r.migrate.Apply("runs.causation_id",
 		`ALTER TABLE runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("idx_runs_causation_id",
+	_ = r.migrate.Apply("idx_runs_causation_id",
 		`CREATE INDEX IF NOT EXISTS idx_runs_causation_id
 			ON runs(causation_id) WHERE causation_id != ''`)
 }
