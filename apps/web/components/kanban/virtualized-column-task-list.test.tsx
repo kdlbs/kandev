@@ -1,11 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Task } from "../kanban-card";
+
+const droppableState = vi.hoisted(() => ({ isOverId: null as string | null }));
+
+// AC.7's DroppableTaskRow calls dnd-kit's real useDroppable, which needs a
+// live DndContext to resolve isOver during a pointer drag. Mocking it lets
+// the render test below drive isOver directly, isolating "does the indicator
+// actually render" from dnd-kit's own collision-detection machinery (already
+// exercised by e2e).
+vi.mock("@dnd-kit/core", () => ({
+  useDroppable: ({ id }: { id: string }) => ({
+    setNodeRef: () => {},
+    isOver: id === droppableState.isOverId,
+  }),
+}));
+
 import {
   computeInsertionEdge,
   computeKeyboardInsertionEdge,
+  DroppableTaskRow,
   findTaskIndex,
   type KeyboardReorderDraft,
 } from "./virtualized-column-task-list";
-import type { Task } from "../kanban-card";
 
 function fakeTask(id: string): Task {
   return { id, workflowStepId: "step-1", title: id, position: 0 } as Task;
@@ -99,5 +116,123 @@ describe("computeKeyboardInsertionEdge", () => {
     expect(computeKeyboardInsertionEdge(moved, "step-1", "b")).toBeNull();
     expect(computeKeyboardInsertionEdge(moved, "step-1", "c")).toBe("bottom");
     expect(computeKeyboardInsertionEdge(moved, "step-1", "d")).toBe("top");
+  });
+});
+
+// AC.7: "while a card is dragged over its own band, show which edge of the
+// hovered card the drop would insert next to". The suites above only cover
+// the math (computeInsertionEdge / computeKeyboardInsertionEdge); nothing
+// asserted the indicator itself ever reaches the DOM. These tests render
+// DroppableTaskRow directly (bypassing the virtualizer and the full
+// KanbanCard tree, neither of which this indicator's rendering depends on)
+// and check the actual border classes and data-testid it produces.
+const INDICATOR_BOTTOM_TESTID = "kanban-insertion-indicator-bottom";
+const INDICATOR_TOP_TESTID = "kanban-insertion-indicator-top";
+
+describe("DroppableTaskRow (AC.7 insertion-point indicator)", () => {
+  afterEach(() => {
+    cleanup();
+    droppableState.isOverId = null;
+  });
+
+  it("renders the bottom-edge indicator while the row is a pointer drag's drop target", () => {
+    droppableState.isOverId = "row-b";
+    render(
+      <DroppableTaskRow
+        taskId="row-b"
+        index={0}
+        top={0}
+        measureElement={() => {}}
+        insertionEdge="bottom"
+        forceShowIndicator={false}
+      >
+        <div>card</div>
+      </DroppableTaskRow>,
+    );
+
+    const indicator = screen.getByTestId(INDICATOR_BOTTOM_TESTID);
+    expect(indicator.className).toContain("border-b-2");
+    expect(indicator.className).toContain("border-primary");
+    expect(indicator.className).not.toContain("border-t-2");
+  });
+
+  it("renders the top-edge indicator while the row is a pointer drag's drop target", () => {
+    droppableState.isOverId = "row-b";
+    render(
+      <DroppableTaskRow
+        taskId="row-b"
+        index={0}
+        top={0}
+        measureElement={() => {}}
+        insertionEdge="top"
+        forceShowIndicator={false}
+      >
+        <div>card</div>
+      </DroppableTaskRow>,
+    );
+
+    const indicator = screen.getByTestId(INDICATOR_TOP_TESTID);
+    expect(indicator.className).toContain("border-t-2");
+    expect(indicator.className).toContain("border-primary");
+    expect(indicator.className).not.toContain("border-b-2");
+  });
+
+  it("renders the indicator for a keyboard reorder's adjacent row even though isOver is false", () => {
+    // forceShowIndicator is how the keyboard path (no pointer, so dnd-kit
+    // never reports isOver) drives the same visual indicator as a pointer
+    // drag (AC.12).
+    droppableState.isOverId = null;
+    render(
+      <DroppableTaskRow
+        taskId="row-b"
+        index={0}
+        top={0}
+        measureElement={() => {}}
+        insertionEdge="bottom"
+        forceShowIndicator={true}
+      >
+        <div>card</div>
+      </DroppableTaskRow>,
+    );
+
+    expect(screen.getByTestId(INDICATOR_BOTTOM_TESTID)).toBeTruthy();
+  });
+
+  it("renders no indicator when the row is not a drop target and no keyboard draft targets it", () => {
+    droppableState.isOverId = null;
+    render(
+      <DroppableTaskRow
+        taskId="row-b"
+        index={0}
+        top={0}
+        measureElement={() => {}}
+        insertionEdge="bottom"
+        forceShowIndicator={false}
+      >
+        <div>card</div>
+      </DroppableTaskRow>,
+    );
+
+    expect(screen.queryByTestId(INDICATOR_BOTTOM_TESTID)).toBeNull();
+    expect(screen.queryByTestId(INDICATOR_TOP_TESTID)).toBeNull();
+  });
+
+  it("renders no indicator when isOver is true but insertionEdge is null (AC.11 cross-band reject)", () => {
+    droppableState.isOverId = "row-b";
+    render(
+      <DroppableTaskRow
+        taskId="row-b"
+        index={0}
+        top={0}
+        measureElement={() => {}}
+        insertionEdge={null}
+        forceShowIndicator={false}
+      >
+        <div>card</div>
+      </DroppableTaskRow>,
+    );
+
+    expect(screen.queryByTestId(INDICATOR_BOTTOM_TESTID)).toBeNull();
+    expect(screen.queryByTestId(INDICATOR_TOP_TESTID)).toBeNull();
   });
 });

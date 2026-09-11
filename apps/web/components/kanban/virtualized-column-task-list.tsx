@@ -152,7 +152,7 @@ function useStableExternalLinkAvailability(
  * staying measured by the virtualizer. Renders the AC.7 insertion-point
  * indicator when this card is the current drop target for a same-band drag.
  */
-function DroppableTaskRow({
+export function DroppableTaskRow({
   taskId,
   index,
   top,

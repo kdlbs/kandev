@@ -84,7 +84,7 @@ describe("classifyDrop", () => {
     expect(result).toEqual({ kind: "no-op" });
   });
 
-  it("is a no-op when there is no drop target (dropped outside any band, AC.9)", () => {
+  it("is a no-op when overId is null (defensive: the real AC.9 drop-outside-any-band path never reaches classifyDrop, since useSwimlaneKanbanDnd's handleDragEnd returns early on a null `over` — see use-swimlane-kanban-dnd.test.ts)", () => {
     const stepTasks = [admitted("a", 0), admitted("b", 1)];
 
     const result = classifyDrop({
