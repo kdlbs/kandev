@@ -193,3 +193,6 @@ desktop/phone layouts with touch-sized controls.
 Verification: 8 focused Vitest files passed 21 tests; web typecheck, full lint,
 i18n checks, and the new-code ratchet passed; desktop and mobile marketplace E2E
 passed; and the existing plugin marketplace regression passed 16 tests.
+
+Review remediation: every responsive install-dialog dismissal now cancels the
+staged review, including drawer and dialog outside-click or Escape handling.

@@ -101,6 +101,26 @@ func TestPrepareInstallRejectsExpectedDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestPrepareInstallRejectsPackageRequiringNewerKandev(t *testing.T) {
+	service, _, _ := newDistributionExportTestService(t)
+	service.SetKandevVersion("0.9.0")
+	export, err := service.PrepareExport(context.Background(), ExportRequest{
+		UserID: "user-1", WorkspaceID: "workspace-1", CanvasID: "canvas-1", ExpectedReleaseID: "release-1",
+		Metadata: ExportMetadata{PackageID: "canvas-board", Version: "1.2.3", DisplayName: "Board", Description: "A board", Author: "Kandev", License: "MIT", SourceMode: manifest.SourceModeStatic, MinKandevVersion: "1.0.0"},
+	})
+	if err != nil {
+		t.Fatalf("PrepareExport() error = %v", err)
+	}
+	bundle, err := service.DownloadExport(context.Background(), "user-1", export.PreparationID, ExportBundle)
+	if err != nil {
+		t.Fatalf("DownloadExport() error = %v", err)
+	}
+	_, err = service.PrepareInstall(context.Background(), InstallRequest{UserID: "user-1", WorkspaceID: "workspace-1", OriginKind: "upload", Bundle: bundle.Data})
+	if !errors.Is(err, ErrInstallIncompatible) {
+		t.Fatalf("PrepareInstall() error = %v, want ErrInstallIncompatible", err)
+	}
+}
+
 func TestConfirmInstallIsIdempotentForOnePreparation(t *testing.T) {
 	exportService, _, _ := newDistributionExportTestService(t)
 	export, err := exportService.PrepareExport(context.Background(), ExportRequest{
@@ -170,6 +190,14 @@ func (f *fakeDistributionArtifactWriter) Put(pkg *webapp.Package) (webapp.Artifa
 type fakeDistributionInstaller struct {
 	created int
 	canvas  *Canvas
+}
+
+func (f *fakeDistributionInstaller) InstallCanvasPackage(_ context.Context, request InstallCanvasPackageRequest) (*InstallResult, error) {
+	f.created++
+	f.canvas = &Canvas{ID: "installed-canvas", PluginInstanceID: "installed-instance", WorkspaceID: request.WorkspaceID, ScopeKind: ScopeWorkspace, Status: StatusActive, Title: request.Title}
+	receipt := request.Receipt
+	receipt.CanvasID = f.canvas.ID
+	return &InstallResult{Canvas: f.canvas, Receipt: receipt}, nil
 }
 
 func (f *fakeDistributionInstaller) Get(context.Context, string) (*Canvas, error) {

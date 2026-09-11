@@ -61,6 +61,25 @@ func TestValidateDistributionPackageRejectsChecksumAndSourceViolations(t *testin
 	}
 }
 
+func TestParseChecksumsPreservesSpacesInFilenames(t *testing.T) {
+	data := []byte("" + strings.Repeat("a", sha256.Size*2) + "  ui/my app.js\n")
+	want, err := parseChecksums(data, 1)
+	if err != nil {
+		t.Fatalf("parseChecksums() error = %v", err)
+	}
+	if want["ui/my app.js"] != strings.Repeat("a", sha256.Size*2) {
+		t.Fatalf("checksums = %+v", want)
+	}
+}
+
+func TestValidateCanvasSourcePathRejectsWorkspaceSecretsAndDependencies(t *testing.T) {
+	for _, name := range []string{".env", "node_modules/pkg/index.js", "source/.env"} {
+		if err := ValidateCanvasSourcePath(name, false); !errors.Is(err, ErrUnsafeSource) {
+			t.Fatalf("ValidateCanvasSourcePath(%q) error = %v, want ErrUnsafeSource", name, err)
+		}
+	}
+}
+
 func TestDistributionArchiveWritersRoundTrip(t *testing.T) {
 	pkg := packageFromFiles(t, distributionFiles())
 	archives, err := BuildDistributionArchives(pkg)

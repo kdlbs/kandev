@@ -121,7 +121,7 @@ func TestCanvasSourceTransfer_RejectsFileDataLimit(t *testing.T) {
 	server, workDir := newCanvasSourceTestServer(t)
 	root := filepath.Join(workDir, "source")
 	require.NoError(t, os.Mkdir(root, 0o755))
-	file, err := os.Create(filepath.Join(root, "large.bin"))
+	file, err := os.Create(filepath.Join(root, "large.txt"))
 	require.NoError(t, err)
 	require.NoError(t, file.Truncate(int64(agentctltypes.MaxCanvasSourceFileData+1)))
 	require.NoError(t, file.Close())
@@ -135,6 +135,18 @@ func TestCanvasSourceTransfer_RejectsExcludedProjectSource(t *testing.T) {
 	root := filepath.Join(workDir, "source", "distribution", "source")
 	require.NoError(t, os.MkdirAll(root, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=secret"), 0o600))
+
+	response := canvasSourceRequest(t, server, "source", true)
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.NotContains(t, response.Body.String(), "secret")
+}
+
+func TestCanvasSourceTransfer_RejectsExcludedWorkspaceSourceFiles(t *testing.T) {
+	server, workDir := newCanvasSourceTestServer(t)
+	root := filepath.Join(workDir, "source")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=secret"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "node_modules", "pkg", "index.js"), []byte("secret"), 0o600))
 
 	response := canvasSourceRequest(t, server, "source", true)
 	require.Equal(t, http.StatusBadRequest, response.Code)

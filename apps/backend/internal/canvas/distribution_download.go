@@ -81,10 +81,7 @@ func (s *DistributionService) downloadInstallBundle(ctx context.Context, rawURL 
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInstallDownload, safeDownloadError(err))
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, fmt.Errorf("%w: server returned %s", ErrInstallDownload, resp.Status)
 	}

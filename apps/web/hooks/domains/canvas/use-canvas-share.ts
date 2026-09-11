@@ -45,21 +45,24 @@ export function useCanvasShare(canvas: Canvas | null) {
   const download = useCallback(
     async (kind: "bundle" | "source") => {
       if (!review) return;
+      const current = ++generation.current;
       setLoading(true);
       setError(null);
       try {
         const blob = await downloadCanvasExport(review.preparation_id, kind);
         const packageId = review.metadata.package_id ?? review.canvas_id;
         const version = review.metadata.version ?? "release";
-        triggerBlobDownload(
-          blob,
-          `${packageId}-${version}.${kind === "bundle" ? "tar.gz" : "zip"}`,
-        );
+        if (generation.current === current) {
+          triggerBlobDownload(
+            blob,
+            `${packageId}-${version}.${kind === "bundle" ? "tar.gz" : "zip"}`,
+          );
+        }
       } catch (reason) {
-        setError(reason);
+        if (generation.current === current) setError(reason);
         throw reason;
       } finally {
-        setLoading(false);
+        if (generation.current === current) setLoading(false);
       }
     },
     [review],

@@ -128,3 +128,8 @@ Verification: the registry build-index suite passed 11 tests, the proposed
 schema parsed successfully, the relevant marketplace/backend suite passed, and
 desktop/mobile marketplace E2E passed 2 tests total. The existing plugin
 marketplace regression passed 16 tests.
+
+Review remediation: canvas catalog presentation now comes from the inspected
+archive descriptor, repository identity is checked against the registry
+pointer, asset inspection is streamed and time-bounded, and pull requests
+fail when a canvas entry is invalid instead of silently omitting it.
