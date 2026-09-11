@@ -6,7 +6,7 @@ system: plugins
 owners:
   - kandev
 created: 2026-08-26
-last_updated: 2026-08-30
+last_updated: 2026-09-10
 ---
 
 # Isolated plugin web-application contributions Requirements
@@ -26,7 +26,8 @@ runtime tokens, data access, state access, event delivery, and isolation.
 - **Web application:** Packaged static HTML, CSS, JavaScript, fonts, and images.
 - **Plugin instance:** One enabled binding of a plugin package to an instance,
   workspace, task, session, or repository scope.
-- **Grant:** A user-approved subset of the permissions declared by a package.
+- **Grant:** A subset of declared permissions approved directly by the user or
+  through [owner-authorized canvas creation](../../canvases/requirements/local-creation-authority.md).
 - **Runtime token:** A short-lived capability that authorizes one iframe
   instance without a Kandev session cookie.
 - **Native bundle:** A trusted React module that runs inside the Kandev SPA.
@@ -97,7 +98,8 @@ user grant, and current resource access.
   iframe immediately. In-flight direct external requests are not treated as
   newly authorized requests.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-003.4:** A new release shall not gain a
-  permission that the user did not approve.
+  permission without direct user approval or recorded owner-authorized initial
+  canvas creation. Package-provided identity shall not establish that authority.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-003.5:** A denial shall return a stable safe
   code without resource content or existence details.
 
@@ -183,7 +185,8 @@ escape its approved network and presentation boundary.
   packaged scripts and styles but deny remote scripts, undeclared network
   origins, and form submissions.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-007.5:** A network permission shall name exact
-  HTTPS origins and shall require user approval.
+  HTTPS origins and shall require direct or delegated user approval under
+  `AC-PLUGINS-ISOLATED-WEB-APPS-003.4`.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-007.6:** The host shall keep navigation,
   permission, release, archive, edit, and remove controls outside the iframe.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-007.7:** Each runtime document response shall
@@ -194,6 +197,10 @@ escape its approved network and presentation boundary.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-007.9:** The runtime shall resolve ordinary
   relative asset requests beside a nested entry document while reserving the
   `_kandev/v1` path at the capability root.
+- **AC-PLUGINS-ISOLATED-WEB-APPS-007.10:** A web host and runtime served from
+  the same origin shall support custom DNS names, IP addresses, and ports
+  without per-host configuration. Distinct origins shall not acquire embedding
+  permission through request headers or wildcard matching.
 
 ### REQ-PLUGINS-ISOLATED-WEB-APPS-008: Scoped instance lifecycle
 
@@ -270,13 +277,33 @@ without receiving host authority.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-011.4:** The same appearance behavior shall
   apply to direct desktop routes, task panels, and phone hosts.
 
+### REQ-PLUGINS-ISOLATED-WEB-APPS-012: Runtime startup acknowledgement
+
+**Intent:** A host can distinguish a started document from a blocked or failed
+frame without granting the frame host authority.
+
+#### Acceptance criteria
+
+- **AC-PLUGINS-ISOLATED-WEB-APPS-012.1:** The runtime shall acknowledge
+  startup only after the document loads and its current capability context
+  succeeds. A captured startup script or asset failure shall report failure.
+- **AC-PLUGINS-ISOLATED-WEB-APPS-012.2:** The host shall accept startup
+  messages only from the current frame attempt. Sibling, malformed, unsupported,
+  and stale messages shall not change host status.
+- **AC-PLUGINS-ISOLATED-WEB-APPS-012.3:** Startup messages shall contain no
+  credentials, runtime URLs, application content, or domain actions. They shall
+  not authorize data access, grant changes, navigation, or host APIs.
+- **AC-PLUGINS-ISOLATED-WEB-APPS-012.4:** Existing retained HTML releases shall
+  gain startup detection without republishing or changing their stored bytes or
+  digest. A startup timeout shall preserve releases, grants, and stored state.
+
 ## Out of scope
 
 - A second JavaScript SDK for canvases.
 - Direct iframe access to Kandev frontend state or native components.
 - Remote script execution.
 - An unbounded general proxy to Kandev HTTP endpoints.
-- Automatic approval of new permissions.
+- Automatic grants without direct or recorded delegated user approval.
 - A host process for agent-generated backend code.
 - General-purpose plugin placement in every Kandev UI surface.
 - A general bidirectional iframe SDK or privileged message bridge.

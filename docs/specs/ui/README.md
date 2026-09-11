@@ -154,6 +154,8 @@ runtime, and workspace lifecycle/state ownership.
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 
 ### Design
+
+- [Agent launch prompt composer](system-design/agent-launch-prompt-composer.md)
 - [Control sizing](system-design/control-sizing.md)
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)

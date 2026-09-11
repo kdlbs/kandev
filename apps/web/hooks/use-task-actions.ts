@@ -1,13 +1,18 @@
 import { useCallback } from "react";
 import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
-import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
+import type { DeleteTaskParams, WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { useTranslation } from "react-i18next";
 
-type MovePayload = { workflow_id: string; workflow_step_id: string; position: number };
+type MovePayload = {
+  workflow_id: string;
+  workflow_step_id: string;
+  position: number;
+  entry_options?: WorkflowMoveEntryOptions;
+};
 
 export type TaskActionOptions = {
   cascade?: boolean;

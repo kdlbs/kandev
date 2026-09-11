@@ -217,11 +217,17 @@ func (r *Repository) cutoverAcquireLocks(tx *sqlx.Tx) error {
 	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, taskWorktreeCutoverLockID); err != nil {
 		return fmt.Errorf("cutover: acquire migration advisory lock: %w", err)
 	}
-	if _, err := tx.Exec(`
-		LOCK TABLE task_session_git_snapshots, task_session_worktrees,
-			task_environments, task_environment_repos, task_sessions,
-			task_resource_cleanup_jobs
-		IN ACCESS EXCLUSIVE MODE`); err != nil {
+	claimTable, err := r.columnExists(tx, "task_environment_recovery_claims", "task_environment_id")
+	if err != nil {
+		return fmt.Errorf("cutover: inspect recovery claim table: %w", err)
+	}
+	lockTables := `task_session_git_snapshots, task_session_worktrees,
+		task_environments, task_environment_repos, task_sessions,
+		task_resource_cleanup_jobs`
+	if claimTable {
+		lockTables += `, task_environment_recovery_claims`
+	}
+	if _, err := tx.Exec("LOCK TABLE " + lockTables + " IN ACCESS EXCLUSIVE MODE"); err != nil {
 		return fmt.Errorf("cutover: lock ownership tables: %w", err)
 	}
 	return nil
