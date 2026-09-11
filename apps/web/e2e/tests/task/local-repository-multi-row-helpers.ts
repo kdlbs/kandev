@@ -112,7 +112,9 @@ export async function exerciseMultiRowCreation(
   const response = await taskCreated;
   expect(response.ok()).toBe(true);
   const task = await response.json();
-  expect((await apiClient.getTask(task.id)).repositories).toEqual(
+  const taskRepositories = (await apiClient.getTask(task.id)).repositories;
+  expect(taskRepositories).toHaveLength(2);
+  expect(taskRepositories).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ repository_id: firstId }),
       expect.objectContaining({ repository_id: secondId, base_branch: "main" }),
