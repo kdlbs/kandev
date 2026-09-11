@@ -482,7 +482,7 @@ pnpm e2e:run --host --project chromium tests/task/threads-task-actions.spec.ts t
 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/task/mobile-archive-task-redirect.spec.ts tests/task/mobile-delete-task-redirect.spec.ts -- --retries=0
 ```
 
-Remote CI/review confirmation remains pending until the merged branch is pushed.
+[CI follow-up](ci-launcher-signal-readiness.md) records the launcher fixture race exposed after pushing.
 
 ## Risks
 
