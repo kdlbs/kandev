@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 )
@@ -21,6 +22,48 @@ var ErrAccessDenied = errors.New("document access denied")
 // in this file alone.
 type taskLookup interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
+}
+
+func (s *HandoffService) canReadForCaller(ctx context.Context, callerID, callerSessionID, targetID string) (bool, coordinator.Decision, error) {
+	ok, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, callerID, targetID)
+	if err != nil || ok || s.coordinatorAuthority == nil {
+		return ok, coordinator.Decision{}, err
+	}
+	caller, err := s.tasks.GetTask(ctx, callerID)
+	if err != nil {
+		// Caller lookup failed. Attempt a denied-only audit when the caller
+		// might hold an active grant — we know the IDs but cannot resolve the
+		// caller task to a workspace for scope/capability evaluation.
+		return false, coordinator.Decision{}, err
+	}
+	target, err := s.tasks.GetTask(ctx, targetID)
+	if target == nil || err != nil {
+		// Target lookup failed (nil task or DB error) but caller is known and
+		// we have a workspace. Produce a denied audit row that records the
+		// attempt without leaking whether the target exists.
+		if caller != nil {
+			decision, auditErr := s.coordinatorAuthority.AuditMaterializationDenied(
+				ctx, caller.ID, callerSessionID, targetID, caller.WorkspaceID,
+				"inspect_task_documents", coordinator.CapabilityInspect,
+			)
+			if auditErr == nil {
+				return false, decision, nil
+			}
+		}
+		return false, coordinator.Decision{}, nil
+	}
+	decision, err := s.coordinatorAuthority.Authorize(ctx, coordinator.Request{ActorTask: caller, TargetTask: target, ActorSessionID: callerSessionID, Action: "inspect_task_documents", Capability: coordinator.CapabilityInspect})
+	if err != nil {
+		return false, coordinator.Decision{}, nil
+	}
+	return decision.Allowed, decision, err
+}
+
+func (s *HandoffService) finishCoordinatorRead(ctx context.Context, decision coordinator.Decision, operationErr error) error {
+	if !decision.Allowed || decision.Basis != coordinator.BasisGrant || s.coordinatorAuthority == nil {
+		return nil
+	}
+	return s.coordinatorAuthority.Finish(ctx, decision, operationErr)
 }
 
 // blockerLookup is the minimal repository surface canReadDocuments

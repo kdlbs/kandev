@@ -685,6 +685,10 @@ func taskPriorityMigrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`,
+		// workspace_coordinator_grants references the task identity in its
+		// workspace. Recreate the parent key after rebuilding tasks so SQLite
+		// keeps that composite foreign key valid for ordinary task mutations.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_tasks_workspace_id_id ON tasks(workspace_id, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`,
 		// idx_tasks_assignee was removed in ADR 0005 Wave F when the

@@ -36,6 +36,22 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsIncludeCoordinatorTaskAuthorityMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.coordinatorTaskAuthority")
+	if !ok {
+		t.Fatal("features.coordinatorTaskAuthority definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental || def.RiskLevel != RiskHigh {
+		t.Fatalf("metadata = (%q, %q), want (%q, %q)", def.Stability, def.RiskLevel, StabilityExperimental, RiskHigh)
+	}
+	if !def.RestartRequired || !def.Mutable {
+		t.Fatalf("restart/mutable = (%t, %t), want (true, true)", def.RestartRequired, def.Mutable)
+	}
+}
+
 func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
 	def, ok := DefinitionByKey("features.dynamicAgentRouting")
 	if !ok {
