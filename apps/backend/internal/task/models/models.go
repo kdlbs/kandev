@@ -1189,7 +1189,7 @@ func HasStartWhenUnblockedIntent(task *Task) bool {
 // every dependency chain, because admission happens at create time for any task
 // entering a step with room.
 func DropWIPDeferredLaunch(task *Task) {
-	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) {
+	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) || HasCeilingDeferredIntent(task) {
 		return
 	}
 	delete(task.Metadata, MetaKeyDeferredLaunch)
