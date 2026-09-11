@@ -13,6 +13,7 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     const task = await apiClient.createTask(seedData.workspaceId, "Card Menu Delete Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
     });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -20,6 +21,13 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     const startUrl = testPage.url();
 
     await kanban.openTaskActionsMenu(task.id);
+
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]').last();
+    const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
+      (text) => text.replace(/\s+/g, " ").trim(),
+    );
+    expect(menuLabels).toEqual(["Priority", "Edit", "Link", "Move to", "Archive", "Delete"]);
+    await expect(menu.locator(":scope > [data-slot='dropdown-menu-separator']")).toHaveCount(4);
 
     const deleteItem = testPage.getByRole("menuitem", { name: "Delete" });
     await expect(deleteItem).toBeVisible();

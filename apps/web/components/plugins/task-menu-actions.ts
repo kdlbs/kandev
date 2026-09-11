@@ -70,8 +70,8 @@ export function runnablePluginMenuEntry(
 /**
  * Builds flat, top-level menu entries for group "primary" task menu
  * actions, in registration order. Unlike group "edit" (nested in the Edit
- * submenu), these render directly in the card menu — positioned between
- * "Move to"/"Send to workflow" and "Link".
+ * submenu), these render directly in the card menu — after the movement
+ * group and before the Archive/Delete removal group.
  */
 export function buildPrimaryPluginEntries({
   disabled,
