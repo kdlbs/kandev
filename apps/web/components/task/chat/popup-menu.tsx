@@ -3,7 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
-import { positionPopupMenu } from "./popup-menu-position";
+import { POPUP_MENU_SIZE, positionPopupMenu } from "./popup-menu-position";
 
 export type PopupMenuProps = {
   isOpen: boolean;
@@ -51,6 +51,7 @@ export function PopupMenu({
     return () => document.removeEventListener("pointerdown", handlePointerOutside);
   }, [isOpen, onClose]);
 
+  // A virtual caret can move between result renders without an element resize.
   useLayoutEffect(() => {
     const menu = menuRef.current;
     if (!hasAnchor || !menu) return;
@@ -74,8 +75,14 @@ export function PopupMenu({
     <div
       ref={menuRef}
       data-testid={testId}
-      style={{ position: "fixed", visibility: "hidden", zIndex: 60, pointerEvents: "auto" }}
-      className="flex w-[420px] max-h-[280px] flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
+      style={{
+        ...POPUP_MENU_SIZE,
+        position: "fixed",
+        visibility: "hidden",
+        zIndex: 60,
+        pointerEvents: "auto",
+      }}
+      className="flex flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
     >
       {/* Header */}
       <div className="shrink-0 border-b border-border/50 px-2 py-1.5">

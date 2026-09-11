@@ -145,9 +145,12 @@ delegation remains unauthorized.
 
 ### Integrated patch and cleanup
 
-- 16 popup unit tests pass, including WebKit coordinate normalization through
+- 18 popup unit tests pass, including WebKit coordinate normalization through
   the actual DOM positioning platform, viewport resize/scroll, missing-to-ready
   anchors, tiny viewports, above/below placement, and disposal.
+- PR review added coverage for initially narrow menus and stable virtual-caret
+  callbacks during same-size result updates, plus shared sizing constants and
+  stronger E2E selectors/assertions. Task 02 records the verification.
 - Fresh E2E build: all 7 targeted mobile Chromium tests and all 3 selected
   desktop Chromium keyboard-selection tests pass. Commands are in Task 02.
 - Full web lint, final changed-file lint, typecheck, i18n new-code ratchet,

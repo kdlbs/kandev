@@ -22,10 +22,11 @@ export async function expectReachableComposerOption(surface: Locator, option: Lo
         const rect = element.getBoundingClientRect();
         const viewport = window.visualViewport!;
         return (
+          // Keep room for a heading and at least one 44px touch row.
           rect.height >= 76 &&
-          rect.top >= viewport.offsetTop &&
+          rect.top >= viewport.offsetTop - 1 &&
           rect.bottom <= viewport.offsetTop + viewport.height + 1 &&
-          rect.left >= viewport.offsetLeft &&
+          rect.left >= viewport.offsetLeft - 1 &&
           rect.right <= viewport.offsetLeft + viewport.width + 1
         );
       }),

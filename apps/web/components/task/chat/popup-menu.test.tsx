@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PopupMenu, PopupMenuItem, type PopupMenuProps } from "./popup-menu";
+import { positionPopupMenu } from "./popup-menu-position";
 
 let contentHeight = 120;
 
@@ -95,6 +96,22 @@ describe("popup menu geometry", () => {
     expect(menu.getBoundingClientRect().bottom).toBe(692);
   });
 
+  it("derives the padded viewport span even when the menu initially renders narrower", async () => {
+    setViewport({ width: 600, height: 500 });
+    const menu = document.createElement("div");
+    Object.assign(menu.style, { position: "fixed", width: "180px" });
+    document.body.append(menu);
+    const stop = positionPopupMenu(menu, () => new DOMRect(100, 400, 1, 20), "above");
+    try {
+      await expectPositioned(menu);
+      expect(menu.style.width).toBe("420px");
+      expect(menu.style.maxHeight).toBe("280px");
+    } finally {
+      stop();
+      menu.remove();
+    }
+  });
+
   it("keeps short results adjacent and shrinks long results before moving over the caret", async () => {
     setViewport({ width: 393, height: 420 });
     const { menu } = mountMenu({ position: { x: 17, y: 157 } });
@@ -163,6 +180,32 @@ describe("popup menu geometry", () => {
 });
 
 describe("popup menu viewport updates", () => {
+  it("refreshes a stable virtual caret when same-size results rerender", async () => {
+    let caretY = 240;
+    const clientRect = () => new DOMRect(16, caretY, 1, 20);
+    const popup = (result: string) => (
+      <PopupMenu
+        isOpen
+        position={null}
+        clientRect={clientRect}
+        testId="live-caret-menu"
+        title="References"
+        selectedIndex={0}
+        onClose={vi.fn()}
+      >
+        {result}
+      </PopupMenu>
+    );
+    const { rerender } = render(popup("First"));
+    const menu = screen.getByTestId("live-caret-menu");
+    await expectPositioned(menu);
+    expect(menu.getBoundingClientRect().bottom).toBe(232);
+
+    caretY = 200;
+    rerender(popup("Later"));
+    await waitFor(() => expect(menu.getBoundingClientRect().bottom).toBe(192));
+  });
+
   it("reflows while the mobile visual viewport changes", async () => {
     const viewport = setViewport({ width: 360, height: 500 });
     const { menu } = mountMenu({ position: null, clientRect: () => new DOMRect(16, 240, 1, 20) });
@@ -206,6 +249,7 @@ describe("popup menu viewport updates", () => {
     await act(async () => {
       // A callback already queued by the browser must also be inert after cleanup.
       const resize = addListener.mock.calls.find(([event]) => event === "resize")?.[1];
+      expect(resize).toBeDefined();
       (resize as EventListener)(new Event("resize"));
     });
     expect(menu.style.visibility).toBe("hidden");
@@ -221,7 +265,7 @@ describe("popup menu viewport updates", () => {
         Result
       </PopupMenu>,
     );
-    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByRole("listbox", { hidden: true })).toBeNull();
   });
 
   it("positions when a live anchor becomes available without changing its callback", async () => {
@@ -240,7 +284,7 @@ describe("popup menu viewport updates", () => {
       </PopupMenu>
     );
     const { rerender } = render(popup());
-    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByRole("listbox", { hidden: true })).toBeNull();
     rect = new DOMRect(16, 240, 1, 20);
     rerender(popup());
     expect(await screen.findByRole("listbox", { name: "References" })).toBeTruthy();

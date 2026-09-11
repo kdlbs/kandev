@@ -56,29 +56,29 @@ test("keeps custom prompts directly above a keyboard-resized mobile composer", a
     await editor.pressSequentially("@mobile-prompt");
 
     const menu = testPage.getByRole("listbox", { name: /Mention tasks, files, prompts/i });
+    const surface = testPage.getByTestId("mention-menu");
     const option = menu.getByRole("option").filter({ hasText: PROMPT_NAME });
     await expect(menu).toBeVisible();
     await expect(option).toBeVisible();
 
     const [menuBox, composerBox] = await Promise.all([
-      menu.locator("..").boundingBox(),
+      surface.boundingBox(),
       session.activeChat().getByTestId("chat-input-editor-shell").boundingBox(),
     ]);
     expect(menuBox).not.toBeNull();
     expect(composerBox).not.toBeNull();
     expect(Math.abs(menuBox!.y + menuBox!.height - composerBox!.y)).toBeLessThanOrEqual(8);
 
-    const geometry = await menu.evaluate((listbox) => {
-      const surface = listbox.parentElement;
-      const rect = surface?.getBoundingClientRect();
+    const geometry = await surface.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
       return {
-        top: rect?.top ?? -1,
-        bottom: rect?.bottom ?? -1,
+        top: rect.top,
+        bottom: rect.bottom,
         viewportTop: window.visualViewport?.offsetTop ?? 0,
         viewportBottom: window.visualViewport
           ? window.visualViewport.offsetTop + window.visualViewport.height
           : window.innerHeight,
-        rowHeight: listbox.querySelector<HTMLElement>("[role='option']")?.getBoundingClientRect()
+        rowHeight: element.querySelector<HTMLElement>("[role='option']")?.getBoundingClientRect()
           .height,
         hasHorizontalOverflow:
           document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -122,10 +122,11 @@ test("keeps custom prompts reachable with the caret above an offset visual viewp
     await editor.pressSequentially("@mobile-prompt");
 
     const menu = testPage.getByRole("listbox", { name: /Mention tasks, files, prompts/i });
+    const surface = testPage.getByTestId("mention-menu");
     const option = menu.getByRole("option").filter({ hasText: PROMPT_NAME });
-    await expectReachableComposerOption(menu.locator(".."), option);
+    await expectReachableComposerOption(surface, option);
     await expandComposerViewport(testPage);
-    await expectReachableComposerOption(menu.locator(".."), option);
+    await expectReachableComposerOption(surface, option);
     await option.tap();
     await expect(menu).toHaveCount(0);
     await expect(editor).toContainText(PROMPT_NAME);

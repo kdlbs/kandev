@@ -1,7 +1,6 @@
 import { autoUpdate, computePosition, detectOverflow, offset, shift, size } from "@floating-ui/dom";
 
-const MENU_HEIGHT = 280;
-const MENU_WIDTH = 420;
+export const POPUP_MENU_SIZE = { width: 420, maxHeight: 280 } as const;
 const MENU_MARGIN = 8;
 const ROW_HEIGHT = 44;
 const LIST_PADDING = 8;
@@ -37,6 +36,7 @@ export function positionPopupMenu(
           async apply(state) {
             const overflow = await detectOverflow(state, { padding: MENU_MARGIN });
             if (!isCurrent()) return;
+            // Signed overflow cancels the element size, leaving the padded clipping span.
             const viewportWidth = state.rects.floating.width - overflow.left - overflow.right;
             const viewportHeight = state.rects.floating.height - overflow.top - overflow.bottom;
             const headerHeight = menu.firstElementChild?.getBoundingClientRect().height ?? 0;
@@ -47,8 +47,8 @@ export function positionPopupMenu(
                 ? viewportHeight
                 : state.availableHeight;
             Object.assign(menu.style, {
-              width: `${Math.max(0, Math.min(MENU_WIDTH, viewportWidth))}px`,
-              maxHeight: `${Math.max(0, Math.min(MENU_HEIGHT, viewportHeight, availableHeight))}px`,
+              width: `${Math.max(0, Math.min(POPUP_MENU_SIZE.width, viewportWidth))}px`,
+              maxHeight: `${Math.max(0, Math.min(POPUP_MENU_SIZE.maxHeight, viewportHeight, availableHeight))}px`,
             });
           },
         }),

@@ -1,4 +1,5 @@
 import { type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -106,15 +107,13 @@ test.describe("Mobile entity reference composer", () => {
       apiClient,
       seedData,
     }) => {
-      const references: EntityReference[] = [];
-      for (let index = 1; index <= 5; index += 1) {
-        const title = `Mobile Reference ${String(index).padStart(2, "0")}`;
-        const task = await apiClient.seedTask(seedData.workspaceId, title, {
-          workflow_id: seedData.workflowId,
-          workflow_step_id: seedData.startStepId,
-        });
-        references.push(taskReference(seedData.workspaceId, task.task_id, title));
-      }
+      const references = Array.from({ length: 5 }, (_, index) =>
+        taskReference(
+          seedData.workspaceId,
+          randomUUID(),
+          `Mobile Reference ${String(index + 1).padStart(2, "0")}`,
+        ),
+      );
       const linearReferences = Array.from({ length: 8 }, (_, index) =>
         linearIssueReference(index + 1),
       );

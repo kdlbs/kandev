@@ -39,16 +39,13 @@ Permanent UI changes, real providers, main-instance interaction, broad suites.
 3. Record whether each candidate picker is selectable before Done; do not
    infer success from Chromium or a menu appearing after keyboard dismissal.
 
-## Verification
+## Historical verification (before cleanup)
 
-Open `http://100.105.155.17:48762/__picker_eval/` on the reporting iPhone and
-follow the three displayed steps in candidate mode, then current mode.
-Inspect the recorded geometry without printing unrelated chat content:
-
-```bash
-jq -c '{at,browserId,mode,event,viewport,composing,suggestions,menus}' \
-  /tmp/kandev-picker-eval-I97UqT/phone-events.jsonl
-```
+The reporting iPhone exercised the disposable current/candidate comparison.
+Its probe recorded geometry, focus, composition, and suggestion state without
+unrelated chat content. The endpoint and raw trace were deleted at the user's
+request; they cannot be rerun or inspected. The retained measurements and
+their evidence limits are recorded in Results below.
 
 ## Files likely touched
 
@@ -90,6 +87,13 @@ This confirms the coordinate-space mismatch, not delayed search or input
 composition. Candidate functional success is user-confirmed; selection of a
 specific external item is covered by the isolated browser tests, not asserted
 from this short phone trace.
+
+Original acceptance criterion 3 is **unverified for both pickers on the
+physical iPhone**: neither `@` result selection nor `#` external-item selection
+before Done was captured. Chromium selection tests do not fill that gap.
+The user confirmed candidate positioning, then explicitly ended the evaluation
+and authorized implementation and cleanup. This work order is closed on that
+decision; `done` does not certify the unobserved selection criterion.
 
 The authorized shutdown closed ports 48761, 48762 and 50761. Main port 9998
 retained PID 3960526. Evidence values are retained here before temporary

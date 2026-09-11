@@ -156,3 +156,34 @@ API, as the sibling external-reference test does. Final results follow below.
   evaluation ports 48761, 48762 and 50761 are closed.
 
 Ready for Open PR. No commit, push, or PR was created during this phase.
+
+## PR review follow-up
+
+Rendering and middleware now share `POPUP_MENU_SIZE`; the geometry and visible
+appearance remain unchanged. The signed-overflow invariant and E2E minimum
+height are documented. A stable mention-surface test ID replaces wrapper
+traversal, geometry tolerances are symmetric, missing-anchor assertions include
+hidden DOM, and mocked task references use valid synthetic UUIDs instead of
+creating unused backend rows. The phone comparison explicitly marks original
+selection acceptance criterion 3 unverified and its instructions historical.
+
+Two review-driven contract tests passed before the constant refactor: initially
+narrow menus still recover the padded viewport width, and same-size results
+refresh a stable virtual-caret callback. A disposable check of the proposed
+`children`-dependency removal failed with menu bottom 232 instead of 192;
+restoring the dependency passed. Keep that required update path.
+
+Post-review local checks:
+
+- `pnpm test -- components/task/chat/popup-menu.test.tsx`: 18 passed.
+- Fresh-build mobile command above: 7 passed. After final test-selector and
+  fixture refinements, reran the two changed mobile `@`/`#` specs with
+  `pnpm e2e:run --host --no-build --project mobile-chrome` after `build:e2e`:
+  4 passed.
+- The selected desktop command above: 3 passed.
+- Web typecheck, changed-file ESLint, specification lint, and whitespace check:
+  passed. Normal commit hooks remain required.
+
+No public contract or rendered-UI behavior changed, so the owning design and
+published screenshots remain representative. Remote checks and review
+dispositions remain pending until the refinement commit's CI completes.
