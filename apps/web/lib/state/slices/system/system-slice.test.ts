@@ -95,7 +95,7 @@ const ANALYSIS = {
   refresh_due_at: "2026-05-18T00:15:00Z",
   stale: false,
   error: null,
-  progress: { completed_sources: 7, total_sources: 7, sources: {} },
+  progress: { completed_sources: 8, total_sources: 8, sources: {} },
   partial_summary: null,
 } as const;
 

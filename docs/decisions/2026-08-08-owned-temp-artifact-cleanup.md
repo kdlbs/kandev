@@ -35,8 +35,10 @@ Add a typed `temporary_artifacts` storage provider with these rules:
   `resources: ["temporary_artifacts"]` selection invokes it; scheduled maintenance and an
   unscoped full manual run do not delete these artifacts. No new persisted policy toggle is added.
 - Eligible roots are moved by same-filesystem rename into the existing Kandev quarantine before
-  permanent deletion. Cross-device moves have no copy/delete fallback. Existing quarantine
-  retention, restore, and permanent-delete safety rules apply.
+  permanent deletion. Cross-device moves use a verified staged copy under quarantine and remove the
+  original only after publication and filesystem identity revalidation. A failed copy or validation
+  leaves the original intact. Existing quarantine retention, restore, and permanent-delete safety
+  rules apply. The later temporary-storage policy decision adds the opt-in scheduled path.
 - Legacy `/tmp/kandev-agent/*`, generic `tmp.*` paths, dependency and package caches, Go/Node/
   Playwright caches, PR/preview folders, E2E/dev-isolated roots, and artifacts belonging to another
   Kandev installation remain outside the provider.

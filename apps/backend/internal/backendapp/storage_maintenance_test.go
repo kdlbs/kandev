@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
+	"github.com/kandev/kandev/internal/system/storage/tempstore"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
@@ -80,6 +81,10 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 		dockerSummary["image_layer_bytes"] != int64(128) {
 		t.Fatalf("docker summary = %#v", summary.Docker)
 	}
+	systemTemporary, ok := summary.SystemTemporary.(tempstore.Analysis)
+	if !ok || systemTemporary.Status != tempstore.StatusNotApplicable || systemTemporary.Roots == nil {
+		t.Fatalf("unavailable system temporary summary = %#v, want an empty roots array", summary.SystemTemporary)
+	}
 
 	overview.quarantine = failingQuarantineSummarizer{err: errors.New("quarantine unavailable")}
 	degraded, err := overview.Summary(context.Background())
@@ -92,6 +97,51 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 	}
 	if _, ok := degraded.Workspaces.(workspaces.Analysis); !ok {
 		t.Fatalf("workspace summary should remain available, got %#v", degraded.Workspaces)
+	}
+}
+
+func TestSystemTemporaryConfigUsesDisposableE2ERoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KANDEV_E2E_SYSTEM_TEMP_ROOT", root)
+
+	configured := systemTemporaryConfig(filescan.NewLimiter(1))
+	if configured.EffectiveRoot != root || configured.UnixRoot != root {
+		t.Fatalf("system temporary config = %#v, want disposable root %q", configured, root)
+	}
+}
+
+func TestStorageOverviewIncludesInformationalSystemTemporaryFootprint(t *testing.T) {
+	root := t.TempDir()
+	writeStorageTestFile(t, filepath.Join(root, "temporary-file"), 23)
+	settings, store := newStorageMaintenanceStores(t)
+	overview := &storageOverview{
+		settings: settings, quarantine: store,
+		workspaceFactory: func(current storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+			return workspaces.New(workspaces.Config{
+				TasksRoot: filepath.Join(root, "tasks"), TrashRoot: filepath.Join(root, "trash"),
+				Inventory: overviewWorkspaceInventory{}, Store: store,
+				GracePeriod: time.Duration(current.OrphanGraceHours) * time.Hour,
+				Retention:   time.Duration(current.QuarantineRetentionHours) * time.Hour,
+			})
+		},
+		goCache: gocache.New(gocache.Config{HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store}),
+		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
+		systemTemporary: tempstore.New(tempstore.Config{
+			GOOS: "windows", EffectiveRoot: root,
+			RootResolver: func(context.Context) ([]tempstore.RootCandidate, error) {
+				return []tempstore.RootCandidate{{RequestedPath: root}}, nil
+			},
+		}),
+		homeDir: root,
+	}
+
+	summary, err := overview.Summary(context.Background())
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	temporary, ok := summary.SystemTemporary.(tempstore.Analysis)
+	if !ok || temporary.SizeBytes == nil || *temporary.SizeBytes != 23 || temporary.IncludedInTotal {
+		t.Fatalf("system temporary summary = %#v, want informational 23-byte measurement", summary.SystemTemporary)
 	}
 }
 
@@ -228,6 +278,7 @@ func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
 		storagepkg.StorageSourceGoCache,
 		storagepkg.StorageSourceQuarantine,
 		storagepkg.StorageSourceTemporaryArtifacts,
+		storagepkg.StorageSourceSystemTemporary,
 		storagepkg.StorageSourceDocker,
 		storagepkg.StorageSourceDatabase,
 		storagepkg.StorageSourceDatabaseBackups,

@@ -289,6 +289,7 @@ export interface StorageMaintenanceSettings {
   quarantine_retention_hours: number;
   workspaces: StorageWorkspaceSettings;
   kandev_containers: StorageResourceSettings;
+  temporary_artifacts?: StorageResourceSettings;
   go_cache: StorageGoCacheSettings;
   docker: StorageDockerSettings;
 }
@@ -361,6 +362,28 @@ export interface StorageTemporaryArtifactsSummary {
   warning?: string;
 }
 
+export type StorageTemporaryRootStatus = "measured" | "partial" | "unavailable" | "not_applicable";
+
+export interface StorageTemporaryRootMeasurement {
+  requested_path: string;
+  path: string;
+  aliases?: string[];
+  status: StorageTemporaryRootStatus;
+  size_bytes?: number;
+  skipped_count?: number;
+  reason?: string;
+  warnings?: string[];
+}
+
+export interface StorageSystemTemporarySummary {
+  status: StorageTemporaryRootStatus;
+  roots: StorageTemporaryRootMeasurement[];
+  size_bytes?: number;
+  included_in_total: false;
+  reason?: string;
+  warnings?: string[];
+}
+
 export type StorageFootprintMeasurementStatus = "measured" | "unavailable" | "not_applicable";
 
 export type StorageFootprintMeasurement =
@@ -386,6 +409,7 @@ export interface StorageSummary {
   go_cache: StorageGoCacheSummary;
   quarantine: StorageQuarantineSummary;
   temporary_artifacts: StorageTemporaryArtifactsSummary;
+  system_temporary?: StorageSystemTemporarySummary;
   docker: StorageDockerSummary;
   database?: StorageFootprintMeasurement;
   database_backups?: StorageFootprintMeasurement;
@@ -396,6 +420,7 @@ export type StorageSummaryPartial = {
   go_cache?: StorageGoCacheSummary | null;
   quarantine?: StorageQuarantineSummary | null;
   temporary_artifacts?: StorageTemporaryArtifactsSummary | null;
+  system_temporary?: StorageSystemTemporarySummary | null;
   docker?: StorageDockerSummary | null;
   database?: StorageFootprintMeasurement | null;
   database_backups?: StorageFootprintMeasurement | null;

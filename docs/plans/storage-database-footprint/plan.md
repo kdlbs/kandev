@@ -21,6 +21,9 @@ The system-page system owns this package because it owns the existing storage an
 existing capability with active requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002`.
 [System design](../../specs/system-page/system-design/storage-database-footprint.md) defines the measurement and presentation contract.
 
+The [temporary storage visibility and cleanup package](../storage-temporary-folders/plan.md)
+extends the same overview with a separate informational temporary-folder source.
+
 ## Scope
 
 ### In scope

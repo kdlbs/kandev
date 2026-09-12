@@ -24,6 +24,10 @@ caches can be reused. The superseded marker, snapshot, Storage-provider, UI, and
 managed Go-cache defaults and injection remain unchanged. A separate test-harness task addresses
 the observed accumulation of `kandev-e2e-*` roots.
 
+The current [temporary storage visibility and cleanup package](../storage-temporary-folders/plan.md)
+extends this completed maintenance system with read-only system temporary-folder visibility and an
+opt-in policy for verified registered artifacts.
+
 ---
 
 ## Backend

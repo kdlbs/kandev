@@ -290,6 +290,18 @@ func (p explicitCleanupSelection) Cleanup(ctx context.Context) (map[string]any, 
 	return p.explicit.CleanupExplicit(ctx)
 }
 
+func (p explicitCleanupSelection) CleanupWithSettings(
+	ctx context.Context,
+	settings StorageMaintenanceSettings,
+) (map[string]any, error) {
+	if snapshotProvider, ok := p.explicit.(interface {
+		CleanupExplicitWithSettings(context.Context, StorageMaintenanceSettings) (map[string]any, error)
+	}); ok {
+		return snapshotProvider.CleanupExplicitWithSettings(ctx, settings)
+	}
+	return p.explicit.CleanupExplicit(ctx)
+}
+
 func runResultMap(run MaintenanceRun) map[string]any {
 	result := valueMap(run.Result)
 	result["run_id"] = run.ID

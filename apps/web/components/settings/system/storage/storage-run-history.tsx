@@ -5,10 +5,55 @@ import { Spinner } from "@kandev/ui/spinner";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
 import type { StorageMaintenanceRun } from "@/lib/types/system";
+import { formatGigabytes } from "./storage-units";
 
 function dateLabel(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : formatDateTime(parsed);
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function temporaryArtifactResult(result: Record<string, unknown>): {
+  quarantinedBytes: number;
+  failed: number;
+} | null {
+  const outer = recordValue(result.result) ?? result;
+  const provider = recordValue(outer.temporary_artifacts);
+  const cleanup = recordValue(provider?.result) ?? provider;
+  if (!cleanup) return null;
+  const rawBytes = cleanup.quarantined_bytes ?? cleanup.reclaimed_bytes;
+  if (typeof rawBytes !== "number" || !Number.isFinite(rawBytes) || rawBytes < 0) return null;
+  const rawFailed = cleanup.failed;
+  return {
+    quarantinedBytes: rawBytes,
+    failed: typeof rawFailed === "number" && Number.isFinite(rawFailed) ? rawFailed : 0,
+  };
+}
+
+function TemporaryArtifactRunResult({ result }: { result: Record<string, unknown> }) {
+  const { t } = useTranslation();
+  const cleanup = temporaryArtifactResult(result);
+  if (!cleanup) return null;
+  return (
+    <div className="mb-3 space-y-1 text-sm" data-testid="storage-temporary-artifacts-result">
+      <p>
+        {t("system:storageTemporaryArtifactsQuarantinedResult", {
+          size: formatGigabytes(cleanup.quarantinedBytes),
+        })}
+      </p>
+      <p className="text-muted-foreground">
+        {t("system:storageTemporaryArtifactsFreedAfterDelete")}
+      </p>
+      {cleanup.failed > 0 && (
+        <p className="text-amber-600">{t("system:storageTemporaryArtifactsMoveFailed")}</p>
+      )}
+    </div>
+  );
 }
 
 export function StorageRunHistory({
@@ -75,6 +120,7 @@ function StorageRunHistoryContent({
           </AccordionTrigger>
           <AccordionContent className="px-3">
             {run.message && <p className="mb-2 break-words text-amber-600">{run.message}</p>}
+            <TemporaryArtifactRunResult result={run.result} />
             <pre className="max-w-full overflow-hidden whitespace-pre-wrap break-all rounded bg-muted p-3 text-[11px]">
               {JSON.stringify(run.result, null, 2)}
             </pre>

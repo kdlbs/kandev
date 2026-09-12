@@ -3,6 +3,7 @@ import type {
   StorageOverviewResponse,
   StorageQuarantineSummary,
   StorageSourceProgress,
+  StorageSystemTemporarySummary,
   StorageSummaryPartial,
   StorageTemporaryArtifactsSummary,
 } from "@/lib/types/system";
@@ -16,12 +17,14 @@ export type Translate = (key: string, options?: Record<string, unknown>) => stri
 export const TEMPORARY_ARTIFACTS_RESOURCE_ID = "temporary-artifacts";
 export const DATABASE_RESOURCE_ID = "database";
 export const DATABASE_BACKUPS_RESOURCE_ID = "database-backups";
+export const SYSTEM_TEMPORARY_RESOURCE_ID = "system-temporary";
 
 export interface StorageResource {
   id: string;
   label: string;
   value: string;
   detail: string;
+  detailLines?: string[];
   warning?: string;
   source?: string;
 }
@@ -327,6 +330,116 @@ function temporaryArtifactsResourceOrPending(
   return { ...temporaryArtifactsResource(t, temporaryArtifacts), source: "temporary_artifacts" };
 }
 
+function temporaryRootStatus(
+  t: Translate,
+  status: StorageSystemTemporarySummary["status"],
+): string {
+  switch (status) {
+    case "measured":
+      return t("system:storageSystemTemporaryComplete");
+    case "partial":
+      return t("system:storageSystemTemporaryPartial");
+    case "unavailable":
+      return t("system:storageSystemTemporaryUnavailable");
+    case "not_applicable":
+      return t("system:storageSystemTemporaryNotApplicable");
+  }
+}
+
+function temporaryRootLine(
+  t: Translate,
+  root: NonNullable<StorageSystemTemporarySummary["roots"]>[number],
+): string {
+  const path =
+    root.requested_path === root.path
+      ? root.path
+      : t("system:storageSystemTemporaryResolvedRoot", {
+          requested: root.requested_path,
+          resolved: root.path,
+        });
+  let value: string;
+  if (root.status === "unavailable" || root.status === "not_applicable") {
+    value = temporaryRootStatus(t, root.status);
+  } else if (root.size_bytes === undefined) {
+    value = t(STORAGE_UNAVAILABLE_VALUE_KEY);
+  } else {
+    value = formatGigabytes(root.size_bytes);
+  }
+  const line = t("system:storageSystemTemporaryRoot", {
+    path,
+    size: value,
+    status: temporaryRootStatus(t, root.status),
+  });
+  if (!root.skipped_count) return line;
+  return [line, t("system:storageSystemTemporarySkippedCount", { count: root.skipped_count })].join(
+    " · ",
+  );
+}
+
+function temporarySummaryValue(t: Translate, summary: StorageSystemTemporarySummary): string {
+  if (summary.status === "unavailable") {
+    return t(STORAGE_UNAVAILABLE_VALUE_KEY);
+  }
+  if (summary.status === "not_applicable") {
+    return t("system:storageNotApplicableValue");
+  }
+  if (summary.size_bytes === undefined) {
+    return t(STORAGE_UNAVAILABLE_VALUE_KEY);
+  }
+  return formatGigabytes(summary.size_bytes);
+}
+
+function temporarySummaryDetail(
+  t: Translate,
+  status: StorageSystemTemporarySummary["status"],
+): string {
+  switch (status) {
+    case "partial":
+      return t("system:storageSystemTemporaryPartialDetail");
+    case "unavailable":
+      return t("system:storageSystemTemporaryUnavailableDetail");
+    case "not_applicable":
+      return t("system:storageSystemTemporaryNotApplicableDetail");
+    case "measured":
+      return t("system:storageSystemTemporaryCompleteDetail");
+  }
+}
+
+function systemTemporaryResource(
+  t: Translate,
+  summary: StorageSystemTemporarySummary,
+): StorageResource {
+  const warnings = (summary.warnings ?? []).filter(Boolean).join(" · ");
+  const value = temporarySummaryValue(t, summary);
+  const statusDetail = temporarySummaryDetail(t, summary.status);
+  return {
+    id: SYSTEM_TEMPORARY_RESOURCE_ID,
+    label: t("system:storageSystemTemporaryFolders"),
+    value,
+    detail: [t("system:storageSystemTemporaryInformational"), statusDetail].join(" "),
+    detailLines: summary.roots.map((root) => temporaryRootLine(t, root)),
+    warning: warnings || undefined,
+    source: "system_temporary",
+  };
+}
+
+function systemTemporaryResourceOrPending(
+  t: Translate,
+  summary: StorageSummaryPartial["system_temporary"],
+  progress?: StorageSourceProgress,
+): StorageResource {
+  if (!summary) {
+    return pendingStorageResource(
+      t,
+      SYSTEM_TEMPORARY_RESOURCE_ID,
+      t("system:storageSystemTemporaryFolders"),
+      progress,
+      "system_temporary",
+    );
+  }
+  return systemTemporaryResource(t, summary);
+}
+
 function dockerResources(
   t: Translate,
   docker: DockerSummary | null | undefined,
@@ -400,6 +513,7 @@ export function storageResources(
       source: "database_backups",
     }),
     quarantineResourceOrPending(t, summary.quarantine, progress.quarantine),
+    systemTemporaryResourceOrPending(t, summary.system_temporary, progress.system_temporary),
     ...goCacheResources(
       t,
       summary.go_cache,

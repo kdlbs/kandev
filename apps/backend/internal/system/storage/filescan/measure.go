@@ -24,7 +24,15 @@ type Root struct {
 	SymlinkPolicy SymlinkPolicy
 	MissingOK     bool
 	Exclude       func(string, fs.DirEntry) bool
+	ShouldSkip    func(string, fs.DirEntry) (bool, error)
+	Validate      func() error
 	OverlapRoots  []string
+}
+
+type MeasureOptions struct {
+	TolerateEntryErrors bool
+	CountSkipped        bool
+	MaxWarnings         int
 }
 
 type ProgressPhase string
@@ -50,6 +58,9 @@ type Result struct {
 	Bytes           int64
 	OverlappedBytes int64
 	Err             error
+	Partial         bool
+	SkippedCount    int
+	Warnings        []string
 }
 
 type Limiter struct {
@@ -69,6 +80,7 @@ type partition struct {
 	partitionIndex int
 	root           Root
 	path           string
+	skip           bool
 }
 
 type rootPlan struct {
@@ -81,6 +93,9 @@ type partitionResult struct {
 	bytes           int64
 	overlappedBytes int64
 	err             error
+	partial         bool
+	skippedCount    int
+	warnings        []string
 }
 
 type progressTracker struct {
@@ -97,14 +112,26 @@ type progressTracker struct {
 }
 
 func (l *Limiter) Measure(ctx context.Context, roots []Root, notify func(Progress)) []Result {
+	return l.MeasureWithOptions(ctx, roots, MeasureOptions{}, notify)
+}
+
+func (l *Limiter) MeasureWithOptions(
+	ctx context.Context,
+	roots []Root,
+	options MeasureOptions,
+	notify func(Progress),
+) []Result {
 	if l == nil {
 		l = NewLimiter(4)
+	}
+	if options.MaxWarnings <= 0 {
+		options.MaxWarnings = 10
 	}
 	plans := make([]rootPlan, len(roots))
 	partitions := make([]partition, 0)
 	rootPartitionCounts := make([]int, len(roots))
 	for index, root := range roots {
-		planned, err := planRoot(ctx, index, root)
+		planned, err := planRoot(ctx, index, root, options)
 		plans[index] = rootPlan{root: root, partitions: planned, err: err}
 		if err == nil {
 			rootPartitionCounts[index] = len(planned)
@@ -130,7 +157,7 @@ func (l *Limiter) Measure(ctx context.Context, roots []Root, notify func(Progres
 		}
 	}
 	if len(partitions) > 0 {
-		l.measurePartitions(ctx, partitions, partitionResults, tracker)
+		l.measurePartitions(ctx, partitions, partitionResults, tracker, options)
 	}
 	for index, plan := range plans {
 		if plan.err != nil {
@@ -139,11 +166,25 @@ func (l *Limiter) Measure(ctx context.Context, roots []Root, notify func(Progres
 		var errs []error
 		for _, measured := range partitionResults[index] {
 			if measured.err != nil {
+				if options.TolerateEntryErrors {
+					results[index].Bytes += measured.bytes
+					results[index].OverlappedBytes += measured.overlappedBytes
+					results[index].Partial = true
+					results[index].SkippedCount += measured.skippedCount
+					results[index].Warnings = appendBounded(
+						results[index].Warnings, measured.warnings, options.MaxWarnings,
+					)
+				}
 				errs = append(errs, measured.err)
 				continue
 			}
 			results[index].Bytes += measured.bytes
 			results[index].OverlappedBytes += measured.overlappedBytes
+			results[index].Partial = results[index].Partial || measured.partial
+			results[index].SkippedCount += measured.skippedCount
+			results[index].Warnings = appendBounded(
+				results[index].Warnings, measured.warnings, options.MaxWarnings,
+			)
 		}
 		results[index].Err = errors.Join(errs...)
 	}
@@ -155,6 +196,7 @@ func (l *Limiter) measurePartitions(
 	partitions []partition,
 	partitionResults [][]partitionResult,
 	tracker *progressTracker,
+	options MeasureOptions,
 ) {
 	workerCount := l.maxPartitions
 	if workerCount > len(partitions) {
@@ -171,7 +213,7 @@ func (l *Limiter) measurePartitions(
 		go func() {
 			defer workers.Done()
 			for item := range jobs {
-				measured := l.measurePartition(ctx, item, tracker)
+				measured := l.measurePartition(ctx, item, tracker, options)
 				partitionResults[item.rootIndex][item.partitionIndex] = measured
 			}
 		}()
@@ -179,16 +221,21 @@ func (l *Limiter) measurePartitions(
 	workers.Wait()
 }
 
-func (l *Limiter) measurePartition(ctx context.Context, item partition, tracker *progressTracker) partitionResult {
+func (l *Limiter) measurePartition(
+	ctx context.Context,
+	item partition,
+	tracker *progressTracker,
+	options MeasureOptions,
+) partitionResult {
 	if err := l.acquire(ctx); err != nil {
 		tracker.partitionCompleted(item, 0, err)
 		return partitionResult{err: err}
 	}
 	tracker.partitionStarted(item)
-	bytes, overlappedBytes, err := walkPartition(ctx, item.root, item.path)
-	tracker.partitionCompleted(item, bytes, err)
+	measured := walkPartition(ctx, item.root, item.path, item.skip, options)
+	tracker.partitionCompleted(item, measured.bytes, measured.err)
 	l.release()
-	return partitionResult{bytes: bytes, overlappedBytes: overlappedBytes, err: err}
+	return measured
 }
 
 func (l *Limiter) acquire(ctx context.Context) error {
@@ -204,9 +251,14 @@ func (l *Limiter) release() {
 	<-l.slots
 }
 
-func planRoot(ctx context.Context, rootIndex int, root Root) ([]partition, error) {
+func planRoot(ctx context.Context, rootIndex int, root Root, options MeasureOptions) ([]partition, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if root.Validate != nil {
+		if err := root.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	info, err := os.Lstat(root.Path)
 	if errors.Is(err, os.ErrNotExist) && root.MissingOK {
@@ -217,6 +269,9 @@ func planRoot(ctx context.Context, rootIndex int, root Root) ([]partition, error
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		if root.SymlinkPolicy == SkipSymlinks {
+			if options.CountSkipped {
+				return []partition{{rootIndex: rootIndex, root: root, path: root.Path, skip: true}}, nil
+			}
 			return nil, nil
 		}
 		return nil, fmt.Errorf("symlink found at %s", root.Path)
@@ -224,10 +279,15 @@ func planRoot(ctx context.Context, rootIndex int, root Root) ([]partition, error
 	if !info.IsDir() {
 		return []partition{{rootIndex: rootIndex, root: root, path: root.Path}}, nil
 	}
-	return planDirectory(ctx, rootIndex, root)
+	return planDirectory(ctx, rootIndex, root, options)
 }
 
-func planDirectory(ctx context.Context, rootIndex int, root Root) ([]partition, error) {
+func planDirectory(
+	ctx context.Context,
+	rootIndex int,
+	root Root,
+	options MeasureOptions,
+) ([]partition, error) {
 	entries, err := os.ReadDir(root.Path)
 	if err != nil {
 		return nil, err
@@ -238,10 +298,24 @@ func planDirectory(ctx context.Context, rootIndex int, root Root) ([]partition, 
 			return nil, err
 		}
 		path := filepath.Join(root.Path, entry.Name())
-		if root.Exclude != nil && root.Exclude(path, entry) {
+		skip, err := shouldSkip(root, path, entry)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			if options.CountSkipped {
+				partitions = append(partitions, partition{
+					rootIndex: rootIndex, partitionIndex: len(partitions), root: root, path: path, skip: true,
+				})
+			}
 			continue
 		}
 		if entry.Type()&os.ModeSymlink != 0 && root.SymlinkPolicy == SkipSymlinks {
+			if options.CountSkipped {
+				partitions = append(partitions, partition{
+					rootIndex: rootIndex, partitionIndex: len(partitions), root: root, path: path, skip: true,
+				})
+			}
 			continue
 		}
 		partitions = append(partitions, partition{
@@ -254,48 +328,165 @@ func planDirectory(ctx context.Context, rootIndex int, root Root) ([]partition, 
 	return partitions, nil
 }
 
-func walkPartition(ctx context.Context, root Root, path string) (int64, int64, error) {
-	var total int64
-	var overlapped int64
+func walkPartition(
+	ctx context.Context,
+	root Root,
+	path string,
+	skip bool,
+	options MeasureOptions,
+) partitionResult {
+	result := partitionResult{}
+	if skip {
+		if options.CountSkipped {
+			result.partial = true
+			result.skippedCount = 1
+		}
+		return result
+	}
+	if root.Validate != nil {
+		if err := root.Validate(); err != nil {
+			result.err = err
+			return result
+		}
+	}
 	err := filepath.WalkDir(path, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if root.Exclude != nil && root.Exclude(path, entry) {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if root.SymlinkPolicy == SkipSymlinks {
-				return nil
-			}
-			return fmt.Errorf("symlink found at %s", path)
-		}
-		if !entry.Type().IsRegular() {
-			return nil
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		total += info.Size()
-		if pathWithinAny(path, root.OverlapRoots) {
-			overlapped += info.Size()
-		}
-		return nil
+		return walkEntry(ctx, root, path, entry, walkErr, &result, options)
 	})
 	if err != nil {
-		return 0, 0, err
+		result.err = err
 	}
-	return total, overlapped, nil
+	return result
+}
+
+func walkEntry(
+	ctx context.Context,
+	root Root,
+	path string,
+	entry fs.DirEntry,
+	walkErr error,
+	result *partitionResult,
+	options MeasureOptions,
+) error {
+	if walkErr != nil {
+		return tolerateWalkError(path, entry, walkErr, result, options)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	skip, err := shouldSkip(root, path, entry)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return skipEntry(entry, result, options)
+	}
+	if entry.Type()&os.ModeSymlink != 0 {
+		return handleSymlink(path, root, result, options)
+	}
+	if entry.IsDir() {
+		return nil
+	}
+	if !entry.Type().IsRegular() {
+		markSkipped(result, options)
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return tolerateInfoError(path, err, result, options)
+	}
+	result.bytes += info.Size()
+	if pathWithinAny(path, root.OverlapRoots) {
+		result.overlappedBytes += info.Size()
+	}
+	return nil
+}
+
+func tolerateWalkError(
+	path string,
+	entry fs.DirEntry,
+	walkErr error,
+	result *partitionResult,
+	options MeasureOptions,
+) error {
+	if !options.TolerateEntryErrors {
+		return walkErr
+	}
+	result.partial = true
+	result.skippedCount++
+	result.warnings = appendWarning(result.warnings, fmt.Errorf("%s: %w", path, walkErr), options.MaxWarnings)
+	if entry != nil && entry.IsDir() {
+		return fs.SkipDir
+	}
+	return nil
+}
+
+func skipEntry(entry fs.DirEntry, result *partitionResult, options MeasureOptions) error {
+	markSkipped(result, options)
+	if entry.IsDir() {
+		return fs.SkipDir
+	}
+	return nil
+}
+
+func handleSymlink(path string, root Root, result *partitionResult, options MeasureOptions) error {
+	if root.SymlinkPolicy != SkipSymlinks {
+		return fmt.Errorf("symlink found at %s", path)
+	}
+	markSkipped(result, options)
+	return nil
+}
+
+func tolerateInfoError(
+	path string,
+	infoErr error,
+	result *partitionResult,
+	options MeasureOptions,
+) error {
+	if !options.TolerateEntryErrors {
+		return infoErr
+	}
+	result.partial = true
+	result.skippedCount++
+	result.warnings = appendWarning(result.warnings, fmt.Errorf("%s: %w", path, infoErr), options.MaxWarnings)
+	return nil
+}
+
+func markSkipped(result *partitionResult, options MeasureOptions) {
+	if !options.CountSkipped {
+		return
+	}
+	result.partial = true
+	result.skippedCount++
+}
+
+func shouldSkip(root Root, path string, entry fs.DirEntry) (bool, error) {
+	if root.Exclude != nil && root.Exclude(path, entry) {
+		return true, nil
+	}
+	if root.ShouldSkip != nil {
+		return root.ShouldSkip(path, entry)
+	}
+	return false, nil
+}
+
+func appendWarning(warnings []string, err error, limit int) []string {
+	if err == nil || len(warnings) >= limit {
+		return warnings
+	}
+	return append(warnings, err.Error())
+}
+
+func appendBounded(warnings, additions []string, limit int) []string {
+	for _, warning := range additions {
+		if len(warnings) >= limit {
+			break
+		}
+		warnings = append(warnings, warning)
+	}
+	return warnings
 }
 
 func pathWithinAny(path string, roots []string) bool {
