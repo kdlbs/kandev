@@ -108,12 +108,17 @@ function SavePresetForm({
           </p>
         </div>
       </fieldset>
+      {pending && (
+        <p role="status" className="text-xs text-muted-foreground">
+          {t("github:saving")}
+        </p>
+      )}
       <DialogFooter>
         <Button variant="outline" className="cursor-pointer" onClick={onClose} disabled={pending}>
           {t("common:cancel")}
         </Button>
         <Button className="cursor-pointer" disabled={!canSubmit} onClick={handleSubmit}>
-          {pending ? t("github:saving") : t("common:save")}
+          {t("common:save")}
         </Button>
       </DialogFooter>
     </>

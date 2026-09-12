@@ -1,7 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
-import { fetchGitHubWorkspaceSettings } from "@/lib/api/domains/github-api";
+import {
+  fetchGitHubWorkspaceSettings,
+  updateGitHubWorkspaceSettings,
+} from "@/lib/api/domains/github-api";
 import { __resetSnapshotForTests, useSavedPresets } from "./use-saved-presets";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
@@ -85,4 +89,49 @@ it("ignores a failed load from the previous workspace", async () => {
   expect(result.current.error).toBe(false);
   expect(result.current.loading).toBe(false);
   expect(result.current.presets).toEqual([saved]);
+});
+
+it("exposes no previous-workspace data or writable snapshot on the first new-scope render", async () => {
+  const second = deferred<Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>>>();
+  vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue({} as never);
+  vi.mocked(fetchGitHubWorkspaceSettings)
+    .mockResolvedValueOnce({ saved_presets: [saved] } as never)
+    .mockReturnValueOnce(second.promise);
+  const renders: Array<{ id: string; labels: string[]; loading: boolean }> = [];
+  let attemptedSave: Promise<unknown> | undefined;
+  const { result, rerender } = renderHook(
+    (id: string) => {
+      const store = useSavedPresets(id);
+      const { save } = store;
+      renders.push({
+        id,
+        labels: store.presets.map((preset) => preset.label),
+        loading: store.loading,
+      });
+      useLayoutEffect(() => {
+        if (id === "second") {
+          attemptedSave = save({
+            kind: "pr",
+            label: "New view",
+            customQuery: "is:open",
+            repoFilter: "",
+          });
+        }
+      }, [id, save]);
+      return store;
+    },
+    { initialProps: "first" },
+  );
+  await waitFor(() => expect(result.current.presets).toEqual([saved]));
+  rerender("second");
+  expect(renders.find((render) => render.id === "second")).toEqual({
+    id: "second",
+    labels: [],
+    loading: true,
+  });
+  await expect(attemptedSave).resolves.toBeNull();
+  expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
+  await act(async () => second.resolve({ saved_presets: [] } as never));
+  expect(result.current.presets).toEqual([]);
+  expect(result.current.loading).toBe(false);
 });

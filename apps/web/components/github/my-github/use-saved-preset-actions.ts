@@ -69,19 +69,23 @@ function useConfirmSave({
   reportError: () => void;
   isCurrentWorkspace: IsCurrentWorkspace;
 }) {
+  const scope = useRef({ workspaceId });
+  if (scope.current.workspaceId !== workspaceId) scope.current = { workspaceId };
   return useCallback(
     async (label: string, defaultRepoFilter: string) => {
+      const startedIn = scope.current;
       try {
         const created = await save({ kind, label, customQuery, repoFilter: defaultRepoFilter });
         // No persistence started when workspace presets are not available yet.
-        if (!created || !isCurrentWorkspace(workspaceId)) return false;
+        if (!created || scope.current !== startedIn || !isCurrentWorkspace(workspaceId))
+          return false;
         markSearchInteracted();
         setProgrammaticSelection({ kind, source: "saved", id: created.id });
         setQueryImmediate(customQuery);
         setRepoFilter(defaultRepoFilter);
         return true;
       } catch {
-        if (isCurrentWorkspace(workspaceId)) reportError();
+        if (scope.current === startedIn && isCurrentWorkspace(workspaceId)) reportError();
         return false;
       }
     },

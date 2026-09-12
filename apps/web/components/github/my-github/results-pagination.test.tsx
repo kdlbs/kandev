@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResultsPagination } from "./results-pagination";
 
@@ -14,6 +14,20 @@ afterEach(cleanup);
 
 // @covers AC-INTEGRATIONS-GITHUB-MOBILE-001.4
 describe("phone pagination", () => {
+  it("keeps focus in the page drawer when the current page disappears after a refresh", async () => {
+    const onPageChange = vi.fn();
+    const { rerender } = render(
+      <ResultsPagination page={40} pageSize={25} total={1000} onPageChange={onPageChange} />,
+    );
+    rerender(<ResultsPagination page={40} pageSize={25} total={50} onPageChange={onPageChange} />);
+    fireEvent.click(screen.getByRole("button", { name: CHOOSE_PAGE }));
+    const dialog = screen.getByRole("dialog", { name: CHOOSE_PAGE });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    expect(onPageChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Page 2 of 2" }));
+    expect(onPageChange).toHaveBeenCalledExactlyOnceWith(2);
+  });
+
   it("offers direct selection up to GitHub's 1000-result cap", () => {
     const onPageChange = vi.fn();
     render(<ResultsPagination page={1} pageSize={25} total={1700} onPageChange={onPageChange} />);

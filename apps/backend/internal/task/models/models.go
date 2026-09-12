@@ -120,6 +120,13 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
+	// (immediately applied) workflow move whose target-step entry has not yet
+	// run. Its value records the source step, the move ID, and the encoded
+	// entry options. The public task.moved event carries only the move ID; the
+	// instructions and profile choice ride on this transient marker and are
+	// cleared once the target entry is dispatched.
+	MetaKeyWorkflowMovePending = "workflow_move_pending"
 	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
 	// task.moved lifecycle must finish before feeder reconciliation. Its value
 	// records the source step so stale deliveries cannot run the wrong exit.
@@ -726,16 +733,20 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
-	Message          string     `json:"message"`
-	OccurredAt       time.Time  `json:"occurred_at"`
-	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
-	RemediationURL   string     `json:"remediation_url,omitempty"`
-	Code             string     `json:"code,omitempty"`
-	Details          string     `json:"details,omitempty"`
-	RecoveryActions  []string   `json:"recovery_actions,omitempty"`
-	TaskRepositoryID string     `json:"task_repository_id,omitempty"`
-	StampValue       string     `json:"stamp,omitempty"`
-	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
+	Message          string            `json:"message"`
+	OccurredAt       time.Time         `json:"occurred_at"`
+	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
+	ExecutionID      string            `json:"execution_id,omitempty"`
+	Phase            string            `json:"phase,omitempty"`
+	AttemptID        string            `json:"attempt_id,omitempty"`
+	Causes           []AgentErrorCause `json:"causes,omitempty"`
+	RemediationURL   string            `json:"remediation_url,omitempty"`
+	Code             string            `json:"code,omitempty"`
+	Details          string            `json:"details,omitempty"`
+	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
+	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
+	StampValue       string            `json:"stamp,omitempty"`
+	DismissedAt      *time.Time        `json:"dismissed_at,omitempty"`
 }
 
 func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {
@@ -758,7 +769,52 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, out)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	// Optional bootstrap fields are deliberately decoded independently. A
+	// malformed optional field must not hide a valid legacy session error.
+	optional := map[string]json.RawMessage{}
+	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+		if value, ok := fields[key]; ok {
+			optional[key] = value
+			delete(fields, key)
+		}
+	}
+	legacyData, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(legacyData, out); err != nil {
+		return err
+	}
+	if value, ok := optional["execution_id"]; ok {
+		var executionID string
+		if json.Unmarshal(value, &executionID) == nil {
+			out.ExecutionID = executionID
+		}
+	}
+	if value, ok := optional["phase"]; ok {
+		var phase string
+		if json.Unmarshal(value, &phase) == nil {
+			out.Phase = phase
+		}
+	}
+	if value, ok := optional["attempt_id"]; ok {
+		var attemptID string
+		if json.Unmarshal(value, &attemptID) == nil {
+			out.AttemptID = attemptID
+		}
+	}
+	if value, ok := optional["causes"]; ok {
+		var causes []AgentErrorCause
+		if json.Unmarshal(value, &causes) == nil {
+			out.Causes = causes
+		}
+	}
+	return nil
 }
 
 func (e LastAgentError) Stamp() string {
@@ -1996,9 +2052,8 @@ type RepositoryBranchPolicy struct {
 // RepositorySet is a named, reusable group of workspace repositories that fills
 // the task-creation repository picker in one action.
 //
-// A set deliberately stores no branch. Branch choice belongs to a task and is
-// already modelled on TaskRepository; a branch cached here would go stale
-// against the repository's real refs.
+// A set stores an optional base branch for each member. The task draft copies
+// that preference when the set is applied; checkout state remains task-owned.
 type RepositorySet struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -2017,6 +2072,7 @@ type RepositorySetItem struct {
 	RepositorySetID string    `json:"repository_set_id"`
 	RepositoryID    string    `json:"repository_id"`
 	Position        int       `json:"position"`
+	BaseBranch      string    `json:"base_branch"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -2332,6 +2388,30 @@ type TaskEnvironmentRepo struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 	MergedAt          *time.Time `json:"merged_at,omitempty"`
 	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
+}
+
+// TaskEnvironmentRecoveryClaimRequest identifies the environment authority
+// required while an automatic host-worktree recovery is in progress.
+type TaskEnvironmentRecoveryClaimRequest struct {
+	TaskEnvironmentID   string
+	OwnerTaskID         string
+	OwnershipGeneration int64
+	SessionID           string
+	OperationID         string
+	ExecutorType        string
+}
+
+// TaskEnvironmentRecoveryClaim is the durable authority held from recovery
+// preflight through the external workspace-start boundary.
+type TaskEnvironmentRecoveryClaim struct {
+	TaskEnvironmentID   string    `json:"task_environment_id"`
+	OwnerTaskID         string    `json:"owner_task_id"`
+	OwnershipGeneration int64     `json:"ownership_generation"`
+	SessionID           string    `json:"session_id"`
+	OperationID         string    `json:"operation_id"`
+	ExecutorType        string    `json:"executor_type"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // ToAPI converts internal TaskEnvironment to API map.

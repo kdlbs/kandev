@@ -74,3 +74,5 @@ sequential
 ## Results
 
 Verified deferred load/save failures, successful empty collections, retry, duplicate-submit prevention, optimistic rollback, mutation ordering, and stale workspace responses. The focused hook/form tests were observed failing before implementation, then passing. Mobile persistence/recovery tests and desktop saved-query regressions pass. Desktop Retry uses the menu's keyboard navigation semantics.
+
+PR #3614 remediation (2026-09-12) adds first-render workspace isolation, A-to-B-to-A save-generation rejection, cached portable entries alongside desktop load status, a stable Save accessible name with one progress status, and deferred desktop menu-to-save focus handoff. Red regressions reproduced each boundary; 338 scoped unit tests pass across 51 files. `github-scope-bar-focus.spec.ts` covers keyboard save/cancel; existing mobile save/recovery coverage remains active. Final browser/CI and commit evidence is recorded in the plan's PR fixup results.

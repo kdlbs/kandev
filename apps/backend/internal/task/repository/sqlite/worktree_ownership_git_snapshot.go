@@ -64,6 +64,40 @@ func (r *Repository) rehomeGitSnapshotsForCutover(c *worktreeCutover, tx *sqlx.T
 	return nil
 }
 
+// rebindTaskEnvironmentRecoveryClaimForeignKey preserves recovery authority
+// when a retry encounters a claim table created before a legacy ownership
+// cutover. Normal upgrades create this table after the cutover, but a failed
+// older boot can leave it in place.
+func (r *Repository) rebindTaskEnvironmentRecoveryClaimForeignKey(c *worktreeCutover, tx *sqlx.Tx) error {
+	hasEnvironmentColumn, err := r.columnExists(tx, "task_environment_recovery_claims", "task_environment_id")
+	if err != nil {
+		return fmt.Errorf("cutover: inspect recovery claim ownership: %w", err)
+	}
+	if !hasEnvironmentColumn {
+		return nil
+	}
+	for environmentID, environment := range c.envs {
+		survivingID := c.taskEnvIDs[environment.taskID]
+		if survivingID == "" || survivingID == environmentID {
+			continue
+		}
+		if _, err := tx.Exec(tx.Rebind(`
+			UPDATE task_environment_recovery_claims
+			SET task_environment_id = ?
+			WHERE task_environment_id = ?
+		`), survivingID, environmentID); err != nil {
+			return fmt.Errorf("cutover: rehome recovery claim from environment %s to %s: %w", environmentID, survivingID, err)
+		}
+	}
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+	if _, err := tx.Exec(postgresRecoveryClaimShadowForeignKeyDDL); err != nil {
+		return fmt.Errorf("cutover: rebind recovery claim environment foreign key: %w", err)
+	}
+	return nil
+}
+
 const postgresGitSnapshotShadowForeignKeyDDL = `
 DO $$
 DECLARE
@@ -87,6 +121,33 @@ BEGIN
 
 	ALTER TABLE task_session_git_snapshots
 		ADD CONSTRAINT task_session_git_snapshots_task_environment_id_fkey
+		FOREIGN KEY (task_environment_id) REFERENCES task_environments_shadow(id) ON DELETE CASCADE;
+END $$;
+`
+
+const postgresRecoveryClaimShadowForeignKeyDDL = `
+DO $$
+DECLARE
+	old_constraint_name text;
+BEGIN
+	FOR old_constraint_name IN
+		SELECT DISTINCT tc.constraint_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON kcu.constraint_name = tc.constraint_name
+			AND kcu.constraint_schema = tc.constraint_schema
+			AND kcu.table_schema = tc.table_schema
+			AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema = current_schema()
+			AND tc.table_name = 'task_environment_recovery_claims'
+			AND tc.constraint_type = 'FOREIGN KEY'
+			AND kcu.column_name = 'task_environment_id'
+	LOOP
+		EXECUTE format('ALTER TABLE task_environment_recovery_claims DROP CONSTRAINT %I', old_constraint_name);
+	END LOOP;
+
+	ALTER TABLE task_environment_recovery_claims
+		ADD CONSTRAINT task_environment_recovery_claims_task_environment_id_fkey
 		FOREIGN KEY (task_environment_id) REFERENCES task_environments_shadow(id) ON DELETE CASCADE;
 END $$;
 `

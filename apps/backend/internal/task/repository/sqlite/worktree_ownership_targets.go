@@ -507,6 +507,9 @@ func (r *Repository) cutoverSwap(c *worktreeCutover, tx *sqlx.Tx) error {
 	if err := r.rebindGitSnapshotEnvironmentForeignKey(c, tx); err != nil {
 		return err
 	}
+	if err := r.rebindTaskEnvironmentRecoveryClaimForeignKey(c, tx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DROP TABLE task_environments`); err != nil {
 		return fmt.Errorf("cutover: drop legacy task_environments: %w", err)
 	}

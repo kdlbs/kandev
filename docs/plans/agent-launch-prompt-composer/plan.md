@@ -6,6 +6,13 @@ status: complete
 
 # Implementation Plan: Agent Launch Prompt Composer
 
+## Later context-default correction
+
+The [Blank handoff context package](../handoff-blank-context/plan.md) supersedes
+this completed package's automatic-summary preservation expectation. Its new
+regressions require explicit summary selection. The results below describe the
+original delivery and are retained as historical evidence.
+
 ## Overview
 
 The New Agent and handoff flows currently render a bespoke `SessionPromptField`, while task creation renders `TaskFormInputs`. The bespoke field independently implements attachments and enhancement but never installs `useTaskCreatePromptMention` or the voice control, so `@saved-prompt` remains literal text in the affected dialog. The repair replaces that duplicate field with `TaskFormInputs` in session mode and adapts the surrounding context, enhancement, and launch hooks to its existing `TaskFormInputsHandle` contract before adding desktop and mobile regressions.

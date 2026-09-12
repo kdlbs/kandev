@@ -31,6 +31,8 @@ failure and recovery contracts.
 
 ### Requirements
 
+- [Repository branch resolution](requirements/repository-branch-resolution.md)
+
 
 
 - [Executor-Profile Environment Precedence](requirements/executor-profile-env-precedence.md)
@@ -42,6 +44,8 @@ failure and recovery contracts.
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 
 ### System design
+
+- [Repository branch resolution](system-design/repository-branch-resolution.md)
 
 
 

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -70,10 +70,15 @@ function MobileToolbarStatus({ count, ...props }: RefreshControlsProps & { count
         className="shrink-0 whitespace-nowrap text-xs leading-5 text-muted-foreground"
         data-testid="integration-mobile-result-count"
       >
-        {t("common:results")}{" "}
-        <span className="font-medium tabular-nums text-foreground">
-          {props.loading ? "…" : count}
-        </span>
+        {props.loading ? (
+          t("integrations:loadingResults")
+        ) : (
+          <Trans
+            i18nKey="integrations:resultCount"
+            count={count}
+            components={{ count: <span className="font-medium tabular-nums text-foreground" /> }}
+          />
+        )}
       </span>
       <div className="flex min-w-0 items-center justify-end gap-2">
         <RefreshControls {...props} />

@@ -158,6 +158,7 @@ runtime, and workspace lifecycle/state ownership.
 ### Design
 
 - [Mobile task-view access](system-design/mobile-task-view-access.md)
+- [Agent launch prompt composer](system-design/agent-launch-prompt-composer.md)
 - [Control sizing](system-design/control-sizing.md)
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)

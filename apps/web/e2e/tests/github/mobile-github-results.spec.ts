@@ -24,6 +24,7 @@ test("phone results wrap long content, expose touch actions, and support every c
     })),
   );
   // The mock provider returns every seeded PR; model GitHub's bounded page response.
+  let resultTotal = 1050;
   await testPage.route("**/api/v1/github/user/prs?**", async (route) => {
     const response = await route.fetch();
     const data = await response.json();
@@ -32,7 +33,11 @@ test("phone results wrap long content, expose touch actions, and support every c
     const pageSize = Number(params.get("per_page") ?? 25);
     await route.fulfill({
       response,
-      json: { ...data, prs: data.prs.slice((page - 1) * pageSize, page * pageSize) },
+      json: {
+        ...data,
+        total_count: resultTotal,
+        prs: data.prs.slice(0, resultTotal).slice((page - 1) * pageSize, page * pageSize),
+      },
     });
   });
   await testPage.setViewportSize({ width: 320, height: 640 });
@@ -85,6 +90,14 @@ test("phone results wrap long content, expose touch actions, and support every c
   await expect(pages).toBeHidden();
   await expect(chooser).toBeFocused();
   await expect(testPage.getByRole("button", { name: "Next page", exact: true })).toBeDisabled();
+  resultTotal = 50;
+  await testPage.getByRole("button", { name: "Refresh", exact: true }).tap();
+  await expect(chooser).toContainText("Page 40 of 2");
+  await chooser.tap();
+  await expect(pages.getByRole("button", { name: "Done", exact: true })).toBeFocused();
+  await pages.getByRole("button", { name: "Page 2 of 2", exact: true }).tap();
+  await expect(testPage.getByText("26–50 of 50", { exact: true })).toBeVisible();
+  await expect(chooser).toBeFocused();
   expect(
     await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   ).toBe(true);
@@ -146,7 +159,7 @@ test("long view names do not compress result counts and refresh metadata", async
     const refreshBounds = (await refresh.boundingBox())!;
     expect(refreshBounds.y).toBeGreaterThanOrEqual(viewBounds.y + viewBounds.height);
     expect(viewBounds.height).toBeLessThanOrEqual(48);
-    await expect(testPage.getByTestId("integration-mobile-result-count")).toHaveText("Results 1");
+    await expect(testPage.getByTestId("integration-mobile-result-count")).toHaveText("Result 1");
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

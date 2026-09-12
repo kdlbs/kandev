@@ -185,3 +185,23 @@ pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/gitlab/m
 ```
 
 Screenshot runs additionally enabled `CAPTURE_PR_ASSETS=1` and included a disposable `mobile-pr-delivery-capture.spec.ts`; its capture scenario passed. Repository-root specification and public-doc commands are listed in Verification above. Publication, CI, and automated-review state are tracked by the delivery task and PR; an open PR does not satisfy sibling work's merged-host dependency gate.
+
+### PR fixup results (2026-09-12)
+
+The later explicit user authorization permits reconciling main into PR #3614, fixing CI/review findings, and pushing this branch. It does not authorize merging the PR, queueing it, or restarting the stopped demo/personal instance.
+
+Reconciled base `20efe4855a8d88c6f2a8a220be9abc03ca3a0d50` with PR head `6b22494e142754c8cccae2128450a2cc878f3177`. The task-switcher conflict retains main's extracted dialogs and move options together with optional-provider handling, focus return, and rotation-safe child drafts. The UI index retains both independent specification links.
+
+All five inline findings and two additional CodeRabbit aggregate findings have scoped fixes: cached saved-query visibility; page-drawer focus fallback; stable Save label/status; desktop menu-to-save handoff; first-render workspace snapshot isolation; stale A-to-B-to-A save rejection; localized result count/plural/order. New regressions failed before their fixes. The desktop keyboard scenario passed before remediation, but the callback-order regression proved Save opened before menu focus restoration; the explicit deferred handoff and unmount cancellation now pass.
+
+Fresh local validation:
+
+- 338 unit tests passed in 51 scoped files using the original delivery Vitest command above.
+- 17 phone scenarios passed using the original mobile command plus `tests/workflow/mobile-workflow-step-move-overrides.spec.ts`, with retries disabled. This includes page-count shrink recovery and all three move-option scenarios.
+- 13 desktop scenarios passed using the original desktop command plus `tests/github/github-scope-bar-focus.spec.ts` and `tests/workflow/workflow-step-move-overrides.spec.ts`. The shared GitLab mobile browse/review scenario passed separately. All 31 final browser scenarios passed without retries; suites used one worker and did not overlap.
+- Typecheck, zero-warning changed-file ESLint, i18n completeness/new-code ratchet, specification lint, and public-doc validators passed. Public how-to instructions remain accurate; these corrections clarify existing recovery, accessibility, and localization behavior rather than add a new user workflow.
+- Harness validation passed: 19 harness-validator tests, all 196 harness files, 36 specification-validator tests, and the harness pre-commit hook. No manual harness changes were introduced.
+- An initial mobile direct-move test observed stale running UI after an early idle-placeholder check. Three isolated runs and two complete original-order runs passed. The move fixture now waits for the real mock session to finish before navigation, then checks UI readiness; the final phone run passes without retries. This is a fixture readiness correction, not a task lifecycle change.
+- Locale generation touched backend catalog timestamps without changing their contents. The managed freshness guard rejected stale artifacts; rebuilding backend and frontend resolved that guard before the successful phone run. Existing Vite chunk and unused-key notices remain non-blocking.
+
+Fresh screenshot publication, normal-hook commit/push, current-head CI, review dispositions, and the minimum five-minute feedback hold remain in progress. Exact publication receipts and mutable PR state are tracked in the Kandev delivery task plan.

@@ -124,46 +124,51 @@ function useUserSavedPresetsSync(enabled: boolean) {
 }
 
 function useWorkspaceSavedPresets(workspaceId: string | null) {
-  const [workspacePresets, setWorkspacePresets] = useState<SavedPreset[] | undefined>(undefined);
-  const [loadState, setLoadState] = useState({ loading: true, error: false });
+  const [state, setState] = useState<{
+    workspaceId: string | null;
+    presets?: SavedPreset[];
+    loading: boolean;
+    error: boolean;
+  }>({ workspaceId, loading: true, error: false });
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   const writeSeq = useRef(0);
   useEffect(() => {
     if (!workspaceId) {
-      setWorkspacePresets(undefined);
+      setState({ workspaceId, loading: true, error: false });
       return;
     }
     let cancelled = false;
     const seq = writeSeq.current;
-    setWorkspacePresets(undefined);
-    setLoadState({ loading: true, error: false });
+    setState({ workspaceId, loading: true, error: false });
     fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
         const serverPresets = readSavedPresets(settings.saved_presets);
-        setWorkspacePresets(serverPresets);
-        setLoadState({ loading: false, error: false });
+        setState({ workspaceId, presets: serverPresets, loading: false, error: false });
       })
       .catch(() => {
         if (!cancelled && seq === writeSeq.current) {
-          setWorkspacePresets(undefined);
-          setLoadState({ loading: false, error: true });
+          setState({ workspaceId, loading: false, error: true });
         }
       });
     return () => {
       cancelled = true;
     };
   }, [workspaceId, attempt]);
-  const setWorkspacePresetsFromLocal = useCallback((next: SavedPreset[]) => {
-    writeSeq.current += 1;
-    setWorkspacePresets(next);
-    setLoadState({ loading: false, error: false });
-  }, []);
+  const setWorkspacePresetsFromLocal = useCallback(
+    (next: SavedPreset[]) => {
+      writeSeq.current += 1;
+      setState({ workspaceId, presets: next, loading: false, error: false });
+    },
+    [workspaceId],
+  );
+  const current = state.workspaceId === workspaceId;
   return {
-    workspacePresets,
+    workspacePresets: current ? state.presets : undefined,
     setWorkspacePresets: setWorkspacePresetsFromLocal,
-    ...loadState,
+    loading: current ? state.loading : true,
+    error: current ? state.error : false,
     retry,
   };
 }

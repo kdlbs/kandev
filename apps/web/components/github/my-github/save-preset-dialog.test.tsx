@@ -49,11 +49,16 @@ describe("SavePresetDialog persistence", () => {
     const onOpenChange = renderDialog(save);
     const submit = screen.getByRole("button", { name: "Save" });
     fireEvent.click(submit);
+    expect(screen.getByRole("button", { name: "Save" })).toBe(submit);
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status").textContent).toBe("Saving...");
     fireEvent.click(submit);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(save).toHaveBeenCalledTimes(1);
     expect(onOpenChange).not.toHaveBeenCalled();
     await act(async () => finish(true));
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

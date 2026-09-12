@@ -23,7 +23,7 @@ function PagePicker({ page, totalPages, onPageChange }: PagePickerProps) {
   const selectedPage = useRef<HTMLButtonElement>(null);
   const currentPageId = useId();
   return (
-    <Drawer open={open} onOpenChange={setOpen}>
+    <Drawer open={open} onOpenChange={setOpen} autoFocus>
       <DrawerTrigger asChild>
         <Button
           variant="outline"
@@ -39,6 +39,7 @@ function PagePicker({ page, totalPages, onPageChange }: PagePickerProps) {
         className="data-[vaul-drawer-direction=bottom]:max-h-[80dvh] overflow-hidden"
         aria-describedby={undefined}
         onOpenAutoFocus={(event) => {
+          if (!selectedPage.current) return;
           event.preventDefault();
           selectedPage.current?.focus({ preventScroll: true });
           selectedPage.current?.scrollIntoView({ block: "center" });

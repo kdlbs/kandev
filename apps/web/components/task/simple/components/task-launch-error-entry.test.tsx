@@ -10,6 +10,7 @@ const { requestMock, toastMock } = vi.hoisted(() => ({
   requestMock: vi.fn(),
   toastMock: vi.fn(),
 }));
+const launchErrorContext = vi.hoisted(() => ({ automaticRecovery: null as unknown }));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: requestMock }),
@@ -40,6 +41,25 @@ vi.mock("@/components/task/task-launch-branch-picker", () => ({
   ),
 }));
 
+vi.mock("@/components/task/chat/session-bootstrap-recovery-card", () => ({
+  SessionBootstrapRecoveryCard: ({
+    error,
+    automaticRecovery,
+  }: {
+    error: TaskStatusSummaryActiveError;
+    automaticRecovery?: { notice?: string | null; recoveryFailure?: { outcome: string } | null };
+  }) => (
+    <div data-testid="session-bootstrap-recovery-card">
+      {error.phase}
+      {automaticRecovery?.notice ?? ""}
+      {automaticRecovery?.recoveryFailure?.outcome ?? ""}
+    </div>
+  ),
+}));
+vi.mock("@/components/task/task-launch-error-context", () => ({
+  useTaskLaunchErrorContext: () => launchErrorContext,
+}));
+
 const TASK_ID = "task-1";
 const TASK_REPOSITORY_ID = "task-repo-1";
 const ERROR_STAMP = "launch-stamp-1";
@@ -62,7 +82,10 @@ beforeEach(() => {
   toastMock.mockReset();
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  launchErrorContext.automaticRecovery = null;
+});
 
 // eslint-disable-next-line max-lines-per-function -- shared recovery-entry fixtures keep these related flows together.
 describe("TaskLaunchErrorEntry", () => {
@@ -183,6 +206,67 @@ describe("TaskLaunchErrorEntry", () => {
     expect(screen.getByTestId(ERROR_ENTRY_TEST_ID)).toBeTruthy();
     expect(screen.getByText(error.preview)).toBeTruthy();
     expect(screen.queryByTestId("task-launch-retry_default-button")).toBeNull();
+  });
+
+  it("routes a session-owned bootstrap error to the recovery card", () => {
+    render(
+      <TaskChatLaunchError
+        taskId={TASK_ID}
+        workspaceId={WORKSPACE_ID}
+        sessionId="session-1"
+        statusSummary={{
+          revision: 2,
+          updated_at: OCCURRED_AT,
+          active_error: {
+            ...error,
+            session_id: "session-1",
+            phase: "bootstrap",
+            category: "generic_launch_failure",
+            recovery_actions: ["retry_launch"],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("session-bootstrap-recovery-card")).toBeTruthy();
+    expect(screen.queryByTestId(ERROR_ENTRY_TEST_ID)).toBeNull();
+  });
+
+  it("passes automatic recovery results into the detail recovery card", () => {
+    launchErrorContext.automaticRecovery = {
+      resumptionState: "error",
+      error: "Session recovery failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed",
+        resumeError: "raw resume failure",
+        restoreError: "raw restore failure",
+      },
+      resumeSession: vi.fn(),
+    };
+
+    render(
+      <TaskChatLaunchError
+        taskId={TASK_ID}
+        workspaceId={WORKSPACE_ID}
+        sessionId="session-1"
+        statusSummary={{
+          revision: 3,
+          updated_at: OCCURRED_AT,
+          active_error: {
+            ...error,
+            session_id: "session-1",
+            phase: "bootstrap",
+            category: "generic_launch_failure",
+            recovery_actions: ["retry_launch"],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).toContain(
+      "recovery_failed",
+    );
   });
 
   it("renders a task-wide launch error while a prior session is selected", () => {

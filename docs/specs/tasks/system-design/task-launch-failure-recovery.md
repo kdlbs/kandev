@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
 created: 2026-08-24
-updated: 2026-09-06
+updated: 2026-09-11
 owners:
   - cfl12
 ---
@@ -87,6 +87,52 @@ category, bounded details, and valid actions. A successful recovery clears the
 source error only after its write and relaunch or move succeed.
 
 ## Initial prompt admission
+
+### Asynchronous startup amendment
+
+Implemented by `Executor.handleAgentProcessStartFailure` and
+`Service.handleAgentStartFailed` must preserve the launch phase through the
+existing terminal path. After provider-specific auth/runtime handling and
+current-execution guards, persist one typed `last_agent_error` using the
+existing launch classification and stamp model. Do not first publish a raw
+`startErr.Error()` failure and then race to replace it with a safe record.
+
+Keep provider-specific recovery routes authoritative. Generic bootstrap errors
+use `generic_launch_failure` with safe structured operation/reason details.
+Known contribution access, transport, and destination reasons must remain
+distinguishable in the safe projection. Unknown errors use a neutral summary;
+do not guess their cause from an English substring in the frontend.
+
+Add bounded optional operation/attempt correlation fields to the existing
+error projection and recovery error envelope where required. The current
+execution guard and compare-and-set persistence must reject a successor
+execution race. Initial failure, session state, transcript marker, HTTP/boot
+projection, and live status summary carry the same stamp. A failed resume and
+its fallback restore retain separate sanitized causes for that attempt.
+Old records without the new fields remain readable with safe generic copy.
+
+The optional fields are `phase` (`bootstrap`), `execution_id`, `attempt_id`,
+and `causes`. An attempt ID identifies one resume and its optional fallback;
+each explicit retry gets a new ID. The server returns the attempt ID and error
+stamp in request errors and synthetic messages. IDs are bounded to 256 bytes.
+`causes` has at most two entries with `operation` (`resume` or
+`restore_workspace`), an allowlisted `code`, and a sanitized `detail` limited
+to 1024 UTF-8 bytes. Cause details and legacy details together stay within the
+existing 4096-byte details budget. Malformed optional fields are ignored.
+
+Safe contribution reason codes are `authentication_required`,
+`permission_denied`, `destination_invalid`, `source_branch_missing`,
+`transport_unavailable`, `timeout`, and `unknown`. Assign specific codes only
+from typed evidence at the operation boundary. The preflight's history-only
+reason is an admission result, not a durable agent error. Raw Git output and
+nested transport strings are not persisted as user-facing details.
+
+The [agent recovery design](../../agents/system-design/session-recovery-failures.md)
+owns the single recovery card and request-state composition. This extends the
+existing launch-card ownership to asynchronous bootstrap failures; it does not
+turn post-start provider errors into launch errors.
+
+### Existing prompt contract
 
 The lifecycle manager owns initial prompt submission after an agent process
 starts. Materialization and ACP submission errors occur inside that asynchronous
