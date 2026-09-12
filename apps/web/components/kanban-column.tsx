@@ -117,7 +117,8 @@ function columnCallbacksEqual(previous: KanbanColumnProps, next: KanbanColumnPro
     previous.onArchiveTask === next.onArchiveTask &&
     previous.onMoveTask === next.onMoveTask &&
     previous.onToggleSelect === next.onToggleSelect &&
-    previous.onSelectRange === next.onSelectRange
+    previous.onSelectRange === next.onSelectRange &&
+    previous.onCardKeyDown === next.onCardKeyDown
   );
 }
 
@@ -140,7 +141,12 @@ function kanbanColumnPropsEqual(previous: KanbanColumnProps, next: KanbanColumnP
     taskItemsEqual(previous.tasks, next.tasks) &&
     columnCallbacksEqual(previous, next) &&
     columnDisplayPropsEqual(previous, next) &&
-    externalLinkAvailabilityEqual(previous.externalLinkAvailability, next.externalLinkAvailability)
+    externalLinkAvailabilityEqual(
+      previous.externalLinkAvailability,
+      next.externalLinkAvailability,
+    ) &&
+    previous.activeTaskId === next.activeTaskId &&
+    previous.keyboardDraft === next.keyboardDraft
   );
 }
 

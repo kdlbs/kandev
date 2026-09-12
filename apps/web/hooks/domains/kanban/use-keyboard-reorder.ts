@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Task } from "@/components/kanban-card";
 import { moveOneStep, type ArrowDirection } from "@/lib/kanban/keyboard-reorder";
@@ -56,6 +56,8 @@ export function useKeyboardReorder(workflowId: string, tasks: Task[]) {
   const { t } = useTranslation("kanban");
   const [pickedUp, setPickedUp] = useState<PickedUp | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
 
   const announcePosition = useCallback(
     (title: string, order: string[], taskId: string) => {
@@ -73,7 +75,7 @@ export function useKeyboardReorder(workflowId: string, tasks: Task[]) {
 
   const pickUp = useCallback(
     (task: Task) => {
-      const bandInfo = bandOrderFor(tasks, task.workflowStepId, task.id);
+      const bandInfo = bandOrderFor(tasksRef.current, task.workflowStepId, task.id);
       if (!canPickUp(bandInfo, task.workflowStepId, isBandPending)) return;
       setPickedUp({
         taskId: task.id,
@@ -83,7 +85,7 @@ export function useKeyboardReorder(workflowId: string, tasks: Task[]) {
       });
       announcePosition(task.title, bandInfo.order, task.id);
     },
-    [tasks, isBandPending, announcePosition],
+    [isBandPending, announcePosition],
   );
 
   const move = useCallback(
