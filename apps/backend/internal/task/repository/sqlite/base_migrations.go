@@ -384,6 +384,19 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_plan_revisions.workflow_step_name", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_name TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_plan_revisions.workflow_step_color", `ALTER TABLE task_plan_revisions ADD COLUMN workflow_step_color TEXT NOT NULL DEFAULT ''`)
 
+	// The allocated marker-bearing position set for a step entry
+	// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.4/.9): an ordered, comma-separated
+	// list of the positions allocateStepEntryIfPending claimed markers for,
+	// computed once at allocation time and never re-derived from the live
+	// on_enter declaration. Existing rows (created before this column
+	// existed) backfill to '' — deliberately not reconstructed from the
+	// current step definition, which may have changed since that entry was
+	// allocated.
+	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
+
+	// Checked last so a failure on any required migration above --
+	// including this file's own marker_positions column -- fails startup
+	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required task migration: %w", err)
 	}
