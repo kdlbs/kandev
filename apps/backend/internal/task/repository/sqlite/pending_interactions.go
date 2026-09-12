@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
@@ -64,25 +63,19 @@ func buildPendingInteractionQuery(
 	kindConditions, kindArgs := pendingInteractionKindClauses(filter.Kinds)
 	predicate, orderBy := currentTurnAuthority(driverName, "turn_row")
 
-	query := fmt.Sprintf(
-		pendingInteractionQueryTemplate,
-		scopedSessions,
-		orderBy,
-		predicate,
-		nonTerminalSessionPredicate("turn_row"),
-		pendingIDExpr,
-		models.MessageTypeClarificationRequest,
-		statusExpr,
-		models.InteractionStatusPending,
-		pendingInteractionColumns,
-		pendingIDExpr,
-		models.MessageTypeClarificationRequest,
-		pendingInteractionColumns,
-		statusExpr,
-		pendingActionMessageOrder(driverName, "m"),
-		models.MessageTypePermissionRequest,
-		models.InteractionStatusPending,
-	)
+	query := renderPendingInteractionQuery(pendingInteractionQueryParts{
+		scopedSessions:              scopedSessions,
+		currentTurnOrder:            orderBy,
+		currentTurnPredicate:        predicate,
+		nonTerminalSessionPredicate: nonTerminalSessionPredicate("turn_row"),
+		pendingIDExpr:               pendingIDExpr,
+		clarificationMessageType:    string(models.MessageTypeClarificationRequest),
+		statusExpr:                  statusExpr,
+		pendingStatus:               string(models.InteractionStatusPending),
+		pendingInteractionColumns:   pendingInteractionColumns,
+		permissionOrder:             pendingActionMessageOrder(driverName, "m"),
+		permissionMessageType:       string(models.MessageTypePermissionRequest),
+	})
 	if kindConditions != "" {
 		query = "SELECT * FROM (" + query + ") interactions WHERE " + kindConditions
 		args = append(args, kindArgs...)
@@ -91,7 +84,40 @@ func buildPendingInteractionQuery(
 	return query, args
 }
 
-// pendingInteractionQueryTemplate is the format string behind
+// pendingInteractionQueryParts names every dynamic SQL fragment in the
+// pending-interaction template. Named replacement keeps a template edit from
+// silently shifting a long positional fmt.Sprintf argument list.
+type pendingInteractionQueryParts struct {
+	scopedSessions              string
+	currentTurnOrder            string
+	currentTurnPredicate        string
+	nonTerminalSessionPredicate string
+	pendingIDExpr               string
+	clarificationMessageType    string
+	statusExpr                  string
+	pendingStatus               string
+	pendingInteractionColumns   string
+	permissionOrder             string
+	permissionMessageType       string
+}
+
+func renderPendingInteractionQuery(parts pendingInteractionQueryParts) string {
+	return strings.NewReplacer(
+		"{{scoped_sessions}}", parts.scopedSessions,
+		"{{current_turn_order}}", parts.currentTurnOrder,
+		"{{current_turn_predicate}}", parts.currentTurnPredicate,
+		"{{non_terminal_session_predicate}}", parts.nonTerminalSessionPredicate,
+		"{{pending_id_expr}}", parts.pendingIDExpr,
+		"{{clarification_message_type}}", parts.clarificationMessageType,
+		"{{status_expr}}", parts.statusExpr,
+		"{{pending_status}}", parts.pendingStatus,
+		"{{pending_interaction_columns}}", parts.pendingInteractionColumns,
+		"{{permission_order}}", parts.permissionOrder,
+		"{{permission_message_type}}", parts.permissionMessageType,
+	).Replace(pendingInteractionQueryTemplate)
+}
+
+// pendingInteractionQueryTemplate is the named template behind
 // buildPendingInteractionQuery. current_turn resolves its turn through
 // currentTurnAuthority, the same predicate and ordering every other
 // current-turn resolution site in this package uses, so this query and the
@@ -100,7 +126,7 @@ func buildPendingInteractionQuery(
 // (TestListPendingInteractionsAgreesWithPendingActionProjection) fails if the
 // two ever disagree on a session.
 const pendingInteractionQueryTemplate = `
-		WITH scoped_sessions AS (%s),
+		WITH scoped_sessions AS ({{scoped_sessions}}),
 		current_turn AS (
 			SELECT task_session_id, turn_id
 			FROM (
@@ -108,47 +134,47 @@ const pendingInteractionQueryTemplate = `
 				       id AS turn_id,
 				       ROW_NUMBER() OVER (
 				         PARTITION BY task_session_id
-				         ORDER BY %s
+				         ORDER BY {{current_turn_order}}
 				       ) AS rn
 				FROM task_session_turns turn_row
 				WHERE turn_row.task_session_id IN (SELECT id FROM scoped_sessions)
-				  AND %s
-				  AND %s
+				  AND {{current_turn_predicate}}
+				  AND {{non_terminal_session_predicate}}
 			) ranked
 			WHERE rn = 1
 		),
 		pending_bundles AS (
-			SELECT DISTINCT m.task_session_id, %s AS pending_id
+			SELECT DISTINCT m.task_session_id, {{pending_id_expr}} AS pending_id
 			FROM task_session_messages m
 			JOIN current_turn current
 			  ON current.task_session_id = m.task_session_id
 			 AND current.turn_id = m.turn_id
-			WHERE m.type = '%s'
-			  AND COALESCE(%s, '') IN ('', '%s')
+			WHERE m.type = '{{clarification_message_type}}'
+			  AND COALESCE({{status_expr}}, '') IN ('', '{{pending_status}}')
 		),
 		pending_clarifications AS (
-			SELECT %s
+			SELECT {{pending_interaction_columns}}
 			FROM task_session_messages m
 			JOIN current_turn current
 			  ON current.task_session_id = m.task_session_id
 			 AND current.turn_id = m.turn_id
 			JOIN pending_bundles bundle
 			  ON bundle.task_session_id = m.task_session_id
-			 AND bundle.pending_id = %s
-			WHERE m.type = '%s'
+			 AND bundle.pending_id = {{pending_id_expr}}
+			WHERE m.type = '{{clarification_message_type}}'
 		),
 		ranked_permissions AS (
-			SELECT %s,
-			       COALESCE(%s, '') AS permission_status,
+			SELECT {{pending_interaction_columns}},
+			       COALESCE({{status_expr}}, '') AS permission_status,
 			       ROW_NUMBER() OVER (
 			         PARTITION BY m.task_session_id
-			         ORDER BY m.created_at DESC, %s DESC
+			         ORDER BY m.created_at DESC, {{permission_order}} DESC
 			       ) AS rn
 			FROM task_session_messages m
 			JOIN current_turn current
 			  ON current.task_session_id = m.task_session_id
 			 AND current.turn_id = m.turn_id
-			WHERE m.type = '%s'
+			WHERE m.type = '{{permission_message_type}}'
 		)
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id,
 		       content, requests_input, type, metadata, created_at, updated_at
@@ -157,7 +183,7 @@ const pendingInteractionQueryTemplate = `
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id,
 		       content, requests_input, type, metadata, created_at, updated_at
 		FROM ranked_permissions
-		WHERE rn = 1 AND permission_status IN ('', '%s')
+		WHERE rn = 1 AND permission_status IN ('', '{{pending_status}}')
 	`
 
 // pendingInteractionSessionScope builds the scoped_sessions subquery. Session

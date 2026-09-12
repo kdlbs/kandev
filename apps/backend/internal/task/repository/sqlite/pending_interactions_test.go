@@ -2,11 +2,48 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestRenderPendingInteractionQueryReplacesNamedParts(t *testing.T) {
+	query := renderPendingInteractionQuery(pendingInteractionQueryParts{
+		scopedSessions:              "scoped-sessions",
+		currentTurnOrder:            "current-turn-order",
+		currentTurnPredicate:        "current-turn-predicate",
+		nonTerminalSessionPredicate: "non-terminal-session-predicate",
+		pendingIDExpr:               "pending-id-expr",
+		clarificationMessageType:    "clarification-message-type",
+		statusExpr:                  "status-expr",
+		pendingStatus:               "pending-status",
+		pendingInteractionColumns:   "pending-interaction-columns",
+		permissionOrder:             "permission-order",
+		permissionMessageType:       "permission-message-type",
+	})
+	if strings.Contains(query, "{{") {
+		t.Fatalf("rendered query contains an unresolved named placeholder: %s", query)
+	}
+	for _, want := range []string{
+		"scoped-sessions",
+		"current-turn-order",
+		"current-turn-predicate",
+		"non-terminal-session-predicate",
+		"pending-id-expr",
+		"clarification-message-type",
+		"status-expr",
+		"pending-status",
+		"pending-interaction-columns",
+		"permission-order",
+		"permission-message-type",
+	} {
+		if !strings.Contains(query, want) {
+			t.Errorf("rendered query does not contain replacement %q", want)
+		}
+	}
+}
 
 func createInteractionMessage(
 	t *testing.T,
