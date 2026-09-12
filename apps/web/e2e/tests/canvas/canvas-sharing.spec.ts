@@ -21,10 +21,20 @@ test.describe("Canvas sharing", () => {
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
       canvasId = seeded.canvas.id;
-      const active = await promoteCanvas(
-        apiClient,
-        await approvePendingCanvas(apiClient, seeded.canvas),
-      );
+      const approved = await approvePendingCanvas(apiClient, seeded.canvas);
+
+      await testPage.goto(canvasHref(approved.id));
+      await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 30_000 });
+      await testPage.getByRole("button", { name: "Share canvas", exact: true }).click();
+      const taskDialog = testPage.getByRole("dialog").last();
+      await expect(taskDialog).toBeVisible();
+      await taskDialog.getByRole("button", { name: "Prepare downloads", exact: true }).click();
+      await expect(taskDialog.getByTestId("canvas-export-review")).toBeVisible({
+        timeout: 30_000,
+      });
+      await taskDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+      const active = await promoteCanvas(apiClient, approved);
 
       await testPage.goto(canvasHref(active.id));
       await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 30_000 });

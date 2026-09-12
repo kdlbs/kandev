@@ -5,6 +5,8 @@ const prepareCanvasInstall = vi.fn();
 const confirmCanvasInstall = vi.fn();
 const cancelCanvasInstall = vi.fn();
 const uploadCanvasInstall = vi.fn();
+const WORKSPACE_ID = "workspace-1";
+const FIRST_URL = "https://example.test/one.tar.gz";
 
 vi.mock("@/lib/api/domains/canvas-distribution-api", () => ({
   prepareCanvasInstall: (...args: unknown[]) => prepareCanvasInstall(...args),
@@ -20,7 +22,7 @@ afterEach(() => cleanup());
 function review(id: string) {
   return {
     preparation_id: id,
-    workspace_id: "workspace-1",
+    workspace_id: WORKSPACE_ID,
     metadata: {
       package_id: "canvas-one",
       version: "1.0.0",
@@ -53,11 +55,11 @@ describe("useCanvasInstall", () => {
       resolveFirst = resolve;
     });
     prepareCanvasInstall.mockReturnValueOnce(first).mockResolvedValueOnce(review("second"));
-    const { result } = renderHook(() => useCanvasInstall("workspace-1"));
+    const { result } = renderHook(() => useCanvasInstall(WORKSPACE_ID));
 
     let firstRequest: Promise<unknown> | undefined;
     await act(async () => {
-      firstRequest = result.current.prepareUrl("https://example.test/one.tar.gz");
+      firstRequest = result.current.prepareUrl(FIRST_URL);
     });
     await act(async () => {
       await result.current.prepareUrl("https://example.test/two.tar.gz");
@@ -74,10 +76,10 @@ describe("useCanvasInstall", () => {
   it("confirms the archive digest shown by the review", async () => {
     prepareCanvasInstall.mockResolvedValueOnce(review("one"));
     confirmCanvasInstall.mockResolvedValueOnce({ canvas: { id: "canvas-1" }, receipt: {} });
-    const { result } = renderHook(() => useCanvasInstall("workspace-1"));
+    const { result } = renderHook(() => useCanvasInstall(WORKSPACE_ID));
 
     await act(async () => {
-      await result.current.prepareUrl("https://example.test/one.tar.gz");
+      await result.current.prepareUrl(FIRST_URL);
     });
     await act(async () => {
       await result.current.confirm();
@@ -85,5 +87,41 @@ describe("useCanvasInstall", () => {
 
     expect(confirmCanvasInstall).toHaveBeenCalledWith("one", "archive-one");
     await waitFor(() => expect(result.current.result?.canvas.id).toBe("canvas-1"));
+  });
+
+  it("invalidates a staged review and cancels its server preparation", async () => {
+    prepareCanvasInstall.mockResolvedValueOnce(review("one"));
+    const { result } = renderHook(() => useCanvasInstall(WORKSPACE_ID));
+
+    await act(async () => {
+      await result.current.prepareUrl(FIRST_URL);
+    });
+    act(() => result.current.invalidate());
+
+    expect(result.current.review).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(cancelCanvasInstall).toHaveBeenCalledWith("one");
+  });
+
+  it("does not restore an inspection that finishes after source editing", async () => {
+    let resolveInspection: (value: ReturnType<typeof review>) => void = () => undefined;
+    const inspection = new Promise<ReturnType<typeof review>>((resolve) => {
+      resolveInspection = resolve;
+    });
+    prepareCanvasInstall.mockReturnValueOnce(inspection);
+    const { result } = renderHook(() => useCanvasInstall("workspace-1"));
+
+    let request: Promise<unknown> | undefined;
+    await act(async () => {
+      request = result.current.prepareUrl("https://example.test/one.tar.gz");
+    });
+    act(() => result.current.invalidate());
+    resolveInspection(review("one"));
+    await act(async () => {
+      await request;
+    });
+
+    expect(result.current.review).toBeNull();
+    expect(result.current.loading).toBe(false);
   });
 });

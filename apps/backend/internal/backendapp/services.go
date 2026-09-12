@@ -338,6 +338,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		)
 		canvasDistributionSvc.SetKandevVersion(version)
 		canvasDistributionSvc.SetInstallReceiptStore(canvasRepo)
+		canvasDistributionSvc.SetArtifactQuota(pluginsSvc.Instances())
 		if pluginsSvc != nil {
 			canvasDistributionSvc.SetCatalogResolver(pluginsSvc.Marketplace())
 		}

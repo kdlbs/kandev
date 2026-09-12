@@ -172,6 +172,7 @@
   "packageDigest": "包摘要",
   "archiveDigest": "归档摘要",
   "source": "来源",
+  "destination": "目标位置",
   "previewInstallIndependent": "预览图片是 registry 元数据，不属于包或其权限。",
   "confirmInstall": "确认安装",
   "installingCanvas": "正在安装画布…",

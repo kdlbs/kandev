@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	plugininstances "github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/webapp"
 )
@@ -37,6 +38,14 @@ type artifactWriterWithCreated interface {
 
 type artifactRemover interface {
 	Remove(webapp.Artifact) error
+}
+
+// ArtifactQuota is the shared durable admission mechanism used by both
+// authoring and marketplace installation. Reservations are held until the
+// install transaction has either committed or failed.
+type ArtifactQuota interface {
+	ReserveBytes(context.Context, string, int64, int64, int64) (plugininstances.Reservation, error)
+	ReleaseBytes(context.Context, string) error
 }
 
 type CanvasInstaller interface {
@@ -353,6 +362,16 @@ func (s *DistributionService) installPreparedPackage(ctx context.Context, userID
 	writer, ok := s.artifacts.(ArtifactWriter)
 	if !ok {
 		return InstallResult{}, ErrInstallUnavailable
+	}
+	quota := s.artifactQuota
+	var reservation plugininstances.Reservation
+	if quota != nil {
+		var err error
+		reservation, err = quota.ReserveBytes(ctx, preparation.WorkspaceID, pkg.ExpandedBytes, plugininstances.WorkspaceArtifactLimitBytes, plugininstances.InstallationArtifactLimitBytes)
+		if err != nil {
+			return InstallResult{}, err
+		}
+		defer func() { _ = quota.ReleaseBytes(context.WithoutCancel(ctx), reservation.ID) }()
 	}
 	artifact, created, err := putInstallArtifact(writer, pkg)
 	if err != nil {

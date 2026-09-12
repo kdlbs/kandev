@@ -14,6 +14,12 @@ export function useCanvasShare(canvas: Canvas | null) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const generation = useRef(0);
+  const reviewRef = useRef<ExportReview | null>(null);
+
+  const updateReview = useCallback((next: ExportReview | null) => {
+    reviewRef.current = next;
+    setReview(next);
+  }, []);
 
   const prepare = useCallback(
     async (metadata?: DistributionMetadata) => {
@@ -21,17 +27,18 @@ export function useCanvasShare(canvas: Canvas | null) {
       const current = ++generation.current;
       setLoading(true);
       setError(null);
+      updateReview(null);
       try {
         const next = await prepareCanvasExport(canvas.id, {
           workspace_id: canvas.workspace_id,
           expected_release_id: canvas.active_release_id,
           metadata,
         });
-        if (generation.current === current) setReview(next);
+        if (generation.current === current) updateReview(next);
         return next;
       } catch (reason) {
         if (generation.current === current) {
-          setReview(null);
+          updateReview(null);
           setError(reason);
         }
         throw reason;
@@ -39,7 +46,7 @@ export function useCanvasShare(canvas: Canvas | null) {
         if (generation.current === current) setLoading(false);
       }
     },
-    [canvas],
+    [canvas, updateReview],
   );
 
   const download = useCallback(
@@ -70,17 +77,32 @@ export function useCanvasShare(canvas: Canvas | null) {
 
   const cancel = useCallback(async () => {
     generation.current += 1;
-    if (review) await cancelCanvasExport(review.preparation_id).catch(() => undefined);
-    setReview(null);
+    const currentReview = reviewRef.current;
+    if (currentReview) {
+      await cancelCanvasExport(currentReview.preparation_id).catch(() => undefined);
+    }
+    updateReview(null);
     setError(null);
-  }, [review]);
+  }, [updateReview]);
 
-  const reset = useCallback(() => {
+  const invalidate = useCallback(() => {
     generation.current += 1;
+    const currentReview = reviewRef.current;
+    reviewRef.current = null;
     setReview(null);
     setError(null);
     setLoading(false);
+    if (currentReview) {
+      void cancelCanvasExport(currentReview.preparation_id).catch(() => undefined);
+    }
   }, []);
 
-  return { review, loading, error, prepare, download, cancel, reset };
+  const reset = useCallback(() => {
+    generation.current += 1;
+    updateReview(null);
+    setError(null);
+    setLoading(false);
+  }, [updateReview]);
+
+  return { review, loading, error, prepare, download, cancel, reset, invalidate };
 }

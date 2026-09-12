@@ -89,11 +89,24 @@ type DistributionService struct {
 	authorize     WorkspaceAuthorizer
 	preparations  *PreparationStore
 	installMu     sync.Mutex
+	artifactQuota ArtifactQuota
 	receipts      map[string]InstallReceipt
 	receiptStore  InstallReceiptStore
 	httpClient    *http.Client
 	catalog       CatalogResolver
 	kandevVersion string
+}
+
+// SetArtifactQuota wires the durable storage admission store used by
+// marketplace installs. Production composition supplies the same instance
+// store used by canvas authoring.
+func (s *DistributionService) SetArtifactQuota(quota ArtifactQuota) {
+	if s == nil {
+		return
+	}
+	s.installMu.Lock()
+	s.artifactQuota = quota
+	s.installMu.Unlock()
 }
 
 func NewDistributionService(canvases CanvasReader, releases ReleaseReader, artifacts ArtifactReader, authorize WorkspaceAuthorizer, preparations *PreparationStore) *DistributionService {
@@ -258,7 +271,7 @@ func (s *DistributionService) loadExportSnapshot(ctx context.Context, request Ex
 
 func validExportCanvas(item *Canvas, request ExportRequest) bool {
 	return item != nil && item.WorkspaceID == request.WorkspaceID &&
-		item.ScopeKind == ScopeWorkspace && item.Status == StatusActive &&
+		(item.ScopeKind == ScopeWorkspace || item.ScopeKind == ScopeTask) && item.Status == StatusActive &&
 		item.ActiveReleaseID != "" && item.ActiveReleaseStatus == ValidationValid
 }
 
@@ -345,6 +358,9 @@ func exportManifest(data json.RawMessage, metadata ExportMetadata) (*manifest.Ma
 	value.ID, value.Version = metadata.PackageID, metadata.Version
 	value.DisplayName, value.Description, value.Author = metadata.DisplayName, metadata.Description, metadata.Author
 	value.MinKandevVersion, value.RepoURL = metadata.MinKandevVersion, metadata.RepoURL
+	if len(value.UI.WebApps) > 0 && !containsString(value.UI.WebApps[0].Placements, manifest.WebAppPlacementWorkspace) {
+		value.UI.WebApps[0].Placements = append(value.UI.WebApps[0].Placements, manifest.WebAppPlacementWorkspace)
+	}
 	value.Distribution = &manifest.Distribution{SchemaVersion: manifest.DistributionSchemaVersion, Kind: manifest.DistributionKindCanvas, License: metadata.License, SourceMode: metadata.SourceMode}
 	return &value, nil
 }

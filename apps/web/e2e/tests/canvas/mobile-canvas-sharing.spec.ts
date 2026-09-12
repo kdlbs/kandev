@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { expectTouchControl } from "../../helpers/control-sizing";
 import {
   approvePendingCanvas,
   canvasHref,
@@ -35,6 +36,8 @@ test.describe("Canvas sharing on mobile", () => {
 
       const drawer = testPage.getByRole("dialog").last();
       await expect(drawer).toBeVisible();
+      await expectTouchControl(drawer.getByLabel("Package ID", { exact: true }));
+      await expectTouchControl(drawer.getByRole("combobox", { name: "Source mode" }));
       const prepare = drawer.getByRole("button", { name: "Prepare downloads", exact: true });
       await expect(prepare).toBeVisible();
       expect((await prepare.boundingBox())?.height).toBeGreaterThanOrEqual(44);

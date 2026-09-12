@@ -103,4 +103,17 @@ describe("useCanvasShare", () => {
     expect(result.current.review).toBeNull();
     expect(result.current.loading).toBe(false);
   });
+
+  it("invalidates a staged export and cancels its server preparation", async () => {
+    const { result } = renderHook(() => useCanvasShare(canvas));
+
+    await act(async () => {
+      await result.current.prepare({ license: "MIT" });
+    });
+    act(() => result.current.invalidate());
+
+    expect(result.current.review).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(cancelCanvasExport).toHaveBeenCalledWith("prep-1");
+  });
 });

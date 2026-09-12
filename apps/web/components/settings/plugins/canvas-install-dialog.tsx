@@ -36,11 +36,13 @@ export function CanvasInstallDialog({
   open,
   onOpenChange,
   workspaceId,
+  workspaceName,
   entry,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string;
+  workspaceName?: string;
   entry: MarketplaceEntry | null;
 }) {
   const { t } = useTranslation();
@@ -55,11 +57,16 @@ export function CanvasInstallDialog({
       install.reset();
       return;
     }
+    install.invalidate();
     setMode(entry ? "url" : "upload");
     setFile(null);
     setUrl("");
     install.reset();
-  }, [entry, open]);
+  }, [entry?.id, entry?.version, open, install.invalidate, install.reset]);
+
+  useEffect(() => {
+    if (open) install.invalidate();
+  }, [open, workspaceId, install.invalidate]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) void install.cancel();
@@ -67,6 +74,21 @@ export function CanvasInstallDialog({
   };
 
   const close = () => handleOpenChange(false);
+
+  const updateMode = (nextMode: InstallMode) => {
+    install.invalidate();
+    setMode(nextMode);
+  };
+
+  const updateFile = (nextFile: File | null) => {
+    install.invalidate();
+    setFile(nextFile);
+  };
+
+  const updateUrl = (nextUrl: string) => {
+    install.invalidate();
+    setUrl(nextUrl);
+  };
 
   const inspect = async () => {
     if (entry) {
@@ -109,7 +131,7 @@ export function CanvasInstallDialog({
               type="button"
               variant={mode === "upload" ? "secondary" : "outline"}
               className="min-h-11 flex-1 cursor-pointer"
-              onClick={() => setMode("upload")}
+              onClick={() => updateMode("upload")}
             >
               {t("plugins:uploadBundle")}
             </Button>
@@ -117,7 +139,7 @@ export function CanvasInstallDialog({
               type="button"
               variant={mode === "url" ? "secondary" : "outline"}
               className="min-h-11 flex-1 cursor-pointer"
-              onClick={() => setMode("url")}
+              onClick={() => updateMode("url")}
             >
               {t("plugins:directLink")}
             </Button>
@@ -129,7 +151,7 @@ export function CanvasInstallDialog({
                 id="canvas-install-file"
                 type="file"
                 accept={CANVAS_BUNDLE_ACCEPT}
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => updateFile(event.target.files?.[0] ?? null)}
                 className="min-h-11 cursor-pointer"
               />
             </label>
@@ -139,7 +161,7 @@ export function CanvasInstallDialog({
               <Input
                 id="canvas-install-url"
                 value={url}
-                onChange={(event) => setUrl(event.target.value)}
+                onChange={(event) => updateUrl(event.target.value)}
                 placeholder={t("plugins:bundleUrlPlaceholder")}
                 className="min-h-11"
                 inputMode="url"
@@ -159,7 +181,9 @@ export function CanvasInstallDialog({
           {t("plugins:inspectingBundle")}
         </p>
       )}
-      {install.review && !install.result && <InstallReviewCard review={install.review} />}
+      {install.review && !install.result && (
+        <InstallReviewCard review={install.review} workspaceName={workspaceName} />
+      )}
       {install.result && (
         <div
           className="space-y-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4"
@@ -235,8 +259,10 @@ export function CanvasInstallDialog({
 
 function InstallReviewCard({
   review,
+  workspaceName,
 }: {
   review: NonNullable<ReturnType<typeof useCanvasInstall>["review"]>;
+  workspaceName?: string;
 }) {
   const { t } = useTranslation();
   const metadata = review.metadata;
@@ -270,6 +296,26 @@ function InstallReviewCard({
         )}
         <dt className="text-muted-foreground">{t("plugins:source")}</dt>
         <dd>{review.origin_kind}</dd>
+        <dt className="text-muted-foreground">{t("plugins:destination")}</dt>
+        <dd>
+          {workspaceName ?? t("plugins:workspace")} ({review.workspace_id})
+        </dd>
+        <dt className="text-muted-foreground">{t("canvases:description")}</dt>
+        <dd>{metadata.description}</dd>
+        <dt className="text-muted-foreground">{t("canvases:author")}</dt>
+        <dd>{metadata.author}</dd>
+        <dt className="text-muted-foreground">{t("canvases:license")}</dt>
+        <dd>{metadata.license}</dd>
+        <dt className="text-muted-foreground">{t("canvases:sourceMode")}</dt>
+        <dd>{metadata.source_mode}</dd>
+        <dt className="text-muted-foreground">{t("canvases:minKandevVersion")}</dt>
+        <dd>{metadata.min_kandev_version}</dd>
+        {metadata.repo_url && (
+          <>
+            <dt className="text-muted-foreground">{t("canvases:repositoryUrl")}</dt>
+            <dd className="break-all">{metadata.repo_url}</dd>
+          </>
+        )}
       </dl>
       <div className="space-y-2">
         <h4 className="text-sm font-medium">{t("plugins:packagePermissions")}</h4>
@@ -281,7 +327,10 @@ function InstallReviewCard({
             </div>
           ))}
         </div>
-        {review.permissions.shared_state && <p className="text-xs">{t("canvases:sharedState")}</p>}
+        <div className="text-xs">
+          <p className="text-muted-foreground">{t("canvases:sharedState")}</p>
+          <p>{review.permissions.shared_state ? t("canvases:yes") : t("plugins:none")}</p>
+        </div>
       </div>
     </section>
   );
