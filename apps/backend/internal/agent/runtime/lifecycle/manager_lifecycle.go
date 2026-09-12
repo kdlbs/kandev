@@ -50,21 +50,26 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
+			originalWorkspacePath := getMetadataString(ri.Metadata, MetadataKeyOriginalWorkspacePath)
+			if originalWorkspacePath == "" {
+				originalWorkspacePath = ri.WorkspacePath
+			}
 			execution := &AgentExecution{
-				ID:                   ri.InstanceID,
-				TaskID:               ri.TaskID,
-				SessionID:            ri.SessionID,
-				ContainerID:          ri.ContainerID,
-				ContainerIP:          ri.ContainerIP,
-				WorkspacePath:        ri.WorkspacePath,
-				RuntimeName:          ri.RuntimeName,
-				Status:               v1.AgentStatusRunning,
-				StartedAt:            time.Now(),
-				metadata:             ri.Metadata,
-				agentctl:             ri.Client,
-				standaloneInstanceID: ri.StandaloneInstanceID,
-				standalonePort:       ri.StandalonePort,
-				promptDoneCh:         make(chan PromptCompletionSignal, 1),
+				ID:                    ri.InstanceID,
+				TaskID:                ri.TaskID,
+				SessionID:             ri.SessionID,
+				ContainerID:           ri.ContainerID,
+				ContainerIP:           ri.ContainerIP,
+				WorkspacePath:         ri.WorkspacePath,
+				OriginalWorkspacePath: originalWorkspacePath,
+				RuntimeName:           ri.RuntimeName,
+				Status:                v1.AgentStatusRunning,
+				StartedAt:             time.Now(),
+				metadata:              ri.Metadata,
+				agentctl:              ri.Client,
+				standaloneInstanceID:  ri.StandaloneInstanceID,
+				standalonePort:        ri.StandalonePort,
+				promptDoneCh:          make(chan PromptCompletionSignal, 1),
 			}
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(

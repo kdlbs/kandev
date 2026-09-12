@@ -20,6 +20,8 @@ const revisionSelectCols = `id, task_id, revision_number, title, content, author
 // and is the fallback for unknown values when persisting plan history rows.
 const authorKindAgent = "agent"
 
+const authorKindUser = "user"
+
 const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, comments_revision, implementation_started_at, implementation_started_session_id, implementation_started_by`
 
 // CreateTaskPlan creates a new task plan.

@@ -199,11 +199,14 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 	}
 
 	payload := ACPSessionCreatedPayload{
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentProfileID:   execution.ID,
-		AgentExecutionID: execution.ID,
-		ACPSessionID:     sessionID,
+		TaskID:                    execution.TaskID,
+		SessionID:                 execution.SessionID,
+		AgentProfileID:            execution.ID,
+		AgentExecutionID:          execution.ID,
+		ACPSessionID:              sessionID,
+		DeliveryStreamID:          execution.DeliveryStreamID,
+		DeliveryIncarnationID:     execution.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: execution.DeliveryHarnessGeneration,
 	}
 
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)
@@ -241,6 +244,10 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		PromptGeneration:        event.PromptGeneration,
 		TurnID:                  event.TurnID,
 		Data:                    event.Data,
+		CanonicalProjection:     event.CanonicalProjection,
+		MessageID:               event.CanonicalMessageID,
+		IsAppend:                event.CanonicalMessageAppend,
+		MessageType:             canonicalMessageType(event),
 		Normalized:              event.NormalizedPayload,
 		AvailableCommands:       event.AvailableCommands,
 		ToolCallContents:        event.ToolCallContents,

@@ -392,8 +392,10 @@ func (s *workflowStore) applyTransition(
 		); err != nil {
 			return fmt.Errorf("update task workflow step: %w", err)
 		}
-	} else if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
+	} else if applied, err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
+	} else if !applied {
+		return nil
 	}
 
 	// Pass the pre-move workflow ID through so cross-workflow transitions
@@ -578,9 +580,22 @@ func (s *workflowStore) applyTransitionIfAtStepRaw(
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
-		ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
-	)
+	var applied bool
+	if effect := workflowEffectFromContext(ctx); effect != nil {
+		if effectRepo, ok := s.repo.(workflowMoveAdmissionCASEffectRepository); ok {
+			applied, err = effectRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
+				ctx, task, expectedStepID, toStepID, targetStep.WIPLimit, effect,
+			)
+		} else {
+			applied, err = casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+				ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
+			)
+		}
+	} else {
+		applied, err = casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+			ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
+		)
+	}
 	if err != nil {
 		return nil, "", false, fmt.Errorf("update task workflow step (CAS): %w", err)
 	}
@@ -609,16 +624,24 @@ func markDeferredMoveApplied(task *models.Task, moveID string) error {
 	return nil
 }
 
-func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) (bool, error) {
 	if targetStep == nil {
-		return s.repo.UpdateTask(ctx, task)
+		return true, s.repo.UpdateTask(ctx, task)
+	}
+	if effect := workflowEffectFromContext(ctx); effect != nil {
+		if effectRepo, ok := s.repo.(workflowMoveAdmissionEffectRepository); ok {
+			_, applied, err := effectRepo.UpdateTaskWithWorkflowStepAdmissionAndEffect(
+				ctx, task, targetStep.ID, targetStep.WIPLimit, effect,
+			)
+			return applied, err
+		}
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
-		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
+		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
 	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
-	return err
+	return true, err
 }
 
 func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {

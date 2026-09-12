@@ -189,11 +189,15 @@ type CreateRequest struct {
 	// Each WorkspaceTracker reads its entry at startup and uses it as the
 	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
 	// disables the override.
-	BaseBranches             map[string]string                         `json:"base_branches,omitempty"`
-	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
-	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
-	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
-	WorkspaceSourceRoots     []string                                  `json:"workspace_source_roots,omitempty"`
+	BaseBranches              map[string]string                         `json:"base_branches,omitempty"`
+	ComparisonTargets         map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
+	RemoteContributions       map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
+	ContributionDestinations  map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
+	WorkspaceSourceRoots      []string                                  `json:"workspace_source_roots,omitempty"`
+	DurableJournalPath        string                                    `json:"durable_journal_path,omitempty"`
+	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

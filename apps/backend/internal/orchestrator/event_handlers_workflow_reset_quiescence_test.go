@@ -313,6 +313,37 @@ func TestResetAgentContext_ResetMarkerPrecedesLifecycleCancellationWait(t *testi
 	}
 }
 
+func TestLifecyclePromptAdmissionChecksRecoveryBeforeClaim(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, session := newActiveResetTestService(t)
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	if err := repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "recovery-block-1",
+		SessionID:          session.ID,
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: 0,
+		Reason:             "unknown_prompt_outcome",
+		State:              models.RecoveryBlockOpen,
+	}); err != nil {
+		t.Fatalf("persist recovery block: %v", err)
+	}
+
+	_, _, _, _, err := svc.claimLifecycleSessionRunning(ctx, session.TaskID, session.ID, "")
+	if !errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("lifecycle admission error = %v, want %v", err, ErrSessionRecoveryRequired)
+	}
+	current, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if current.State != session.State {
+		t.Fatalf("session state = %q, want unchanged %q", current.State, session.State)
+	}
+}
+
 // TestResetAgentContext_SerializesPromptAdmission stages a prompt immediately
 // before its final guarded claim, then starts reset while that claim is paused.
 // If reset wins the shared guard, the marker rejects the prompt while reset is

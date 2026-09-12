@@ -66,6 +66,16 @@ type Client struct {
 	// session/reset, or session/load responses. Lifecycle policy evaluation can
 	// use it before the corresponding session_models event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
+
+	// durableDelivery records the agentctl transport capability returned during
+	// initialize. It is separate from ACP capabilities because it describes the
+	// retained agentctl-to-backend journal rather than the native harness.
+	durableDelivery *DurableDeliveryInfo
+
+	// lastDeliverySubmissionID is the immutable agentctl record returned for
+	// the most recent accepted prompt. It lets lifecycle reconcile a disconnect
+	// even when no terminal event reached the backend yet.
+	lastDeliverySubmissionID string
 }
 
 func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {

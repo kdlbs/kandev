@@ -44,6 +44,23 @@ type automationRunBinding interface {
 	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
 }
 
+type automationRecoveryRunBinding interface {
+	ParkRunForRecovery(
+		ctx context.Context,
+		runID, taskID, blockID, sessionID, prompt, metadataJSON, workflowStepID string,
+		action automation.ThreadAction,
+		reason string,
+	) error
+	ListRecoveryRuns(ctx context.Context, blockID string) ([]*automation.AutomationRun, error)
+}
+
+type automationRecoveryRequest struct {
+	sessionID      string
+	prompt         string
+	metadataJSON   string
+	workflowStepID string
+}
+
 type automationRunDispatcher interface {
 	DispatchRun(
 		ctx context.Context,
@@ -691,6 +708,7 @@ func (s *Service) dispatchAutomationRun(
 	reason, operation string,
 	dispatch func() (automation.RunDispatch, error),
 	onFailure func(),
+	recovery *automationRecoveryRequest,
 ) bool {
 	if runID == "" {
 		return false
@@ -702,6 +720,27 @@ func (s *Service) dispatchAutomationRun(
 	if err := dispatcher.DispatchRun(ctx, runID, action, reason, dispatch); err == nil {
 		return true
 	} else {
+		if isSessionRecoveryRequiredError(err) {
+			if parkErr := s.parkAutomationRunForRecovery(
+				ctx, automationID, taskID, sessionID, runID, action, reason, recovery, err,
+			); parkErr != nil {
+				if onFailure != nil {
+					onFailure()
+				}
+				if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, parkErr.Error()) {
+					s.markAutomationRunTerminal(ctx, taskID, false, parkErr.Error())
+				}
+				s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
+				s.logger.Error("failed to park automation run for session recovery",
+					zap.String("operation", operation), zap.String("automation_id", automationID),
+					zap.String("task_id", taskID), zap.String("run_id", runID), zap.Error(parkErr))
+				return true
+			}
+			s.logger.Info("parked automation run for explicit session recovery",
+				zap.String("operation", operation), zap.String("automation_id", automationID),
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			return true
+		}
 		if onFailure != nil {
 			onFailure()
 		}
@@ -711,6 +750,175 @@ func (s *Service) dispatchAutomationRun(
 	}
 	s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
 	return true
+}
+
+func (s *Service) parkAutomationRunForRecovery(
+	ctx context.Context,
+	automationID, taskID, sessionID, runID string,
+	action automation.ThreadAction,
+	reason string,
+	recovery *automationRecoveryRequest,
+	launchErr error,
+) error {
+	binding, ok := s.automationService.(automationRecoveryRunBinding)
+	if !ok {
+		return fmt.Errorf("automation service cannot persist recovery binding for %s", runID)
+	}
+	block, err := s.automationRecoveryBlock(ctx, sessionID, recovery, launchErr)
+	if err != nil {
+		return err
+	}
+	if recovery == nil {
+		recovery = &automationRecoveryRequest{}
+	}
+	if recovery.sessionID == "" {
+		recovery.sessionID = block.SessionID
+	}
+	return binding.ParkRunForRecovery(
+		ctx, runID, taskID, block.ID, recovery.sessionID, recovery.prompt,
+		recovery.metadataJSON, recovery.workflowStepID, action, reason,
+	)
+}
+
+func (s *Service) automationRecoveryBlock(
+	ctx context.Context,
+	sessionID string,
+	recovery *automationRecoveryRequest,
+	launchErr error,
+) (*models.SessionRecoveryBlock, error) {
+	var recoveryErr *sessionRecoveryRequiredError
+	if !errors.As(launchErr, &recoveryErr) || recoveryErr.Block == nil {
+		return nil, fmt.Errorf("session recovery error has no persisted block")
+	}
+	block := recoveryErr.Block
+	if block.ID != "" {
+		return block, nil
+	}
+	lookupSessionID := recoverySessionID(sessionID, recovery, block.SessionID)
+	if lookupSessionID == "" {
+		return nil, fmt.Errorf("session recovery block identity is unavailable")
+	}
+	resolvedBlock, err := s.GetOpenSessionRecoveryBlock(ctx, lookupSessionID)
+	if err != nil {
+		return nil, err
+	}
+	block = resolvedBlock
+	if block == nil || block.ID == "" {
+		return nil, fmt.Errorf("session recovery block identity is unavailable")
+	}
+	return block, nil
+}
+
+func recoverySessionID(sessionID string, recovery *automationRecoveryRequest, blockSessionID string) string {
+	if recovery != nil && recovery.sessionID != "" {
+		return recovery.sessionID
+	}
+	if sessionID != "" {
+		return sessionID
+	}
+	return blockSessionID
+}
+
+// resumeAutomationRunsAfterRecovery replays only the runs owned by the block
+// that the operator just resolved. A run remains open until DispatchRun binds
+// a new exact identity; a second recovery failure parks it on the new block.
+func (s *Service) resumeAutomationRunsAfterRecovery(ctx context.Context, block *models.SessionRecoveryBlock) error {
+	if block == nil || block.ID == "" || s.automationService == nil {
+		return nil
+	}
+	binding, ok := s.automationService.(automationRecoveryRunBinding)
+	if !ok {
+		return nil
+	}
+	runs, err := binding.ListRecoveryRuns(ctx, block.ID)
+	if err != nil {
+		return fmt.Errorf("list automation runs parked on recovery block %s: %w", block.ID, err)
+	}
+	for _, run := range runs {
+		s.resumeParkedAutomationRun(ctx, block, run)
+	}
+	return nil
+}
+
+func (s *Service) resumeParkedAutomationRun(ctx context.Context, block *models.SessionRecoveryBlock, run *automation.AutomationRun) {
+	if run == nil {
+		return
+	}
+	a, loadErr := s.automationService.GetAutomation(ctx, run.AutomationID)
+	if loadErr != nil || a == nil {
+		reason := "automation recovery owner unavailable"
+		if loadErr != nil {
+			reason = fmt.Sprintf("%s: %v", reason, loadErr)
+		}
+		s.failParkedAutomationRun(ctx, run, reason)
+		return
+	}
+	task, taskErr := s.repo.GetTask(ctx, run.TaskID)
+	if taskErr != nil || task == nil {
+		reason := "automation recovery task unavailable"
+		if taskErr != nil {
+			reason = taskErr.Error()
+		}
+		s.failParkedAutomationRun(ctx, run, reason)
+		return
+	}
+	action := run.ThreadAction
+	if action == "" {
+		action = automation.ThreadActionCreated
+	}
+	if run.RecoveryPrompt != "" {
+		s.resumeParkedAutomationContinuation(ctx, block, run, a, task, action)
+		return
+	}
+	workflowStepID := run.RecoveryWorkflowStepID
+	if workflowStepID == "" {
+		workflowStepID = task.WorkflowStepID
+	}
+	s.autoStartAutomationTaskForRun(ctx, a, task, workflowStepID, run.ID, action, run.ThreadReason)
+}
+
+func (s *Service) resumeParkedAutomationContinuation(
+	ctx context.Context,
+	block *models.SessionRecoveryBlock,
+	run *automation.AutomationRun,
+	a *automation.Automation,
+	task *models.Task,
+	action automation.ThreadAction,
+) {
+	sessionID := run.RecoverySessionID
+	if sessionID == "" {
+		sessionID = block.SessionID
+	}
+	session, sessionErr := s.repo.GetTaskSession(ctx, sessionID)
+	if sessionErr != nil || session == nil {
+		reason := "automation recovery session unavailable"
+		if sessionErr != nil {
+			reason = sessionErr.Error()
+		}
+		s.failParkedAutomationRun(ctx, run, reason)
+		return
+	}
+	metadata := make(map[string]interface{})
+	if run.RecoveryMetadataJSON != "" && run.RecoveryMetadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(run.RecoveryMetadataJSON), &metadata); err != nil {
+			s.failParkedAutomationRun(ctx, run, fmt.Sprintf("invalid automation recovery metadata: %v", err))
+			return
+		}
+	}
+	s.dispatchAutomationContinuation(ctx, a, task, session, run.RecoveryPrompt, metadata, run.ID, action, run.ThreadReason)
+}
+
+func (s *Service) failParkedAutomationRun(ctx context.Context, run *automation.AutomationRun, reason string) {
+	if run == nil {
+		return
+	}
+	if reason == "" {
+		reason = "automation recovery could not resume the run"
+	}
+	if !s.markExactAutomationRunTerminal(ctx, run.ID, "", "", false, reason) {
+		s.logger.Warn("failed to settle parked automation run after recovery",
+			zap.String("run_id", run.ID), zap.String("reason", reason))
+	}
 }
 
 func (s *Service) cleanupFailedAutomationTask(ctx context.Context, automationID, taskID string, action automation.ThreadAction) {
@@ -750,6 +958,13 @@ func (s *Service) bindAutomationRun(
 }
 
 func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automation.Automation, task *models.Task, session *models.TaskSession, prompt string, metadata map[string]interface{}, runID string, action automation.ThreadAction, reason string) {
+	metadataJSON := "{}"
+	if encoded, err := json.Marshal(metadata); err == nil {
+		metadataJSON = string(encoded)
+	} else {
+		s.logger.Warn("failed to serialize automation recovery metadata",
+			zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.Error(err))
+	}
 	var snapshot *automationContinuationMetadataSnapshot
 	restore := func() {
 		if snapshot == nil {
@@ -775,12 +990,22 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 		}
 		return result, nil
 	}
-	if s.dispatchAutomationRun(ctx, a.ID, task.ID, session.ID, runID, action, reason, "continuation", dispatch, restore) {
+	if s.dispatchAutomationRun(ctx, a.ID, task.ID, session.ID, runID, action, reason, "continuation", dispatch, restore, &automationRecoveryRequest{
+		sessionID:    session.ID,
+		prompt:       prompt,
+		metadataJSON: metadataJSON,
+	}) {
 		return
 	}
 
 	dispatchResult, err := dispatch()
 	if err != nil {
+		if isSessionRecoveryRequiredError(err) {
+			s.logger.Info("parked automation continuation for explicit session recovery",
+				zap.String("automation_id", a.ID), zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID), zap.Error(err))
+			return
+		}
 		s.logger.Error("failed to dispatch automation continuation",
 			zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
 		if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, err.Error()) {
@@ -848,12 +1073,17 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID, runID string, action automation.ThreadAction, reason string) {
 	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
 		return s.startAutomationTask(ctx, a, task, workflowStepID)
-	}, nil) {
+	}, nil, &automationRecoveryRequest{workflowStepID: workflowStepID}) {
 		return
 	}
 
 	dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID)
 	if err != nil {
+		if isSessionRecoveryRequiredError(err) {
+			s.logger.Info("parked automation task for explicit session recovery",
+				zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.Error(err))
+			return
+		}
 		s.logger.Error("failed to auto-start automation task",
 			zap.String("task_id", task.ID), zap.Error(err))
 		// The run row was written before the launch, so a start that never

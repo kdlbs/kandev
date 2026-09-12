@@ -19,10 +19,11 @@ import (
 const previousStableTag = "v0.93.0"
 
 type upgradeManifest struct {
-	Tag                       string           `json:"tag"`
-	SourceCommit              string           `json:"source_commit"`
-	Fixtures                  []upgradeFixture `json:"fixtures"`
-	KnownMissingRequiredStore []string         `json:"known_missing_required_stores"`
+	Tag                        string              `json:"tag"`
+	SourceCommit               string              `json:"source_commit"`
+	Fixtures                   []upgradeFixture    `json:"fixtures"`
+	KnownMissingRequiredStore  []string            `json:"known_missing_required_stores"`
+	KnownMissingRequiredTables map[string][]string `json:"known_missing_required_tables"`
 }
 
 type upgradeFixture struct {
@@ -48,6 +49,9 @@ func TestUpgradeFixtureManifest(t *testing.T) {
 	}
 	if len(manifest.Fixtures) != 2 {
 		t.Fatalf("manifest fixtures = %d, want SQLite and PostgreSQL", len(manifest.Fixtures))
+	}
+	if err := validateKnownMissingRequiredTableMetadata(manifest.KnownMissingRequiredStore, manifest.KnownMissingRequiredTables); err != nil {
+		t.Fatalf("manifest partial-store metadata: %v", err)
 	}
 	seenEngines := make(map[testconformance.EngineName]bool)
 	for _, fixture := range manifest.Fixtures {
@@ -161,8 +165,11 @@ func TestPreviousStableUpgrade(t *testing.T) {
 			if err := applyFixture(t, database, fixture); err != nil {
 				t.Fatalf("apply %s fixture: %v", engine, err)
 			}
-			if err := validateKnownMissingRequiredStores(database, manifest.KnownMissingRequiredStore); err != nil {
+			if err := validateKnownMissingRequiredStores(database, manifest.KnownMissingRequiredStore, manifest.KnownMissingRequiredTables); err != nil {
 				t.Fatalf("fixture store inventory: %v", err)
+			}
+			if err := validateKnownMissingRequiredTables(database, manifest.KnownMissingRequiredStore, manifest.KnownMissingRequiredTables); err != nil {
+				t.Fatalf("fixture table inventory: %v", err)
 			}
 			if err := checkSentinels(database, fixture); err != nil {
 				t.Fatalf("fixture sentinels before initialization: %v", err)
@@ -389,9 +396,12 @@ func checkSentinels(engine testconformance.Engine, fixture upgradeFixture) error
 	return nil
 }
 
-func validateKnownMissingRequiredStores(engine testconformance.Engine, expected []string) error {
+func validateKnownMissingRequiredStores(engine testconformance.Engine, expected []string, partial map[string][]string) error {
 	actual := make([]string, 0)
 	for _, descriptor := range requiredstores.Catalog() {
+		if _, hasPartialExpectation := partial[descriptor.ID]; hasPartialExpectation {
+			continue
+		}
 		present := true
 		for _, table := range descriptor.RequiredTables {
 			if exists, err := requiredTableExists(engine, table); err != nil {
@@ -411,6 +421,85 @@ func validateKnownMissingRequiredStores(engine testconformance.Engine, expected 
 	sort.Strings(want)
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		return fmt.Errorf("known missing required stores = %v, want %v", got, want)
+	}
+	return nil
+}
+
+func validateKnownMissingRequiredTableMetadata(complete []string, partial map[string][]string) error {
+	completeSet := make(map[string]struct{}, len(complete))
+	for _, id := range complete {
+		if _, duplicate := completeSet[id]; duplicate {
+			return fmt.Errorf("manifest lists duplicate missing required store %q", id)
+		}
+		completeSet[id] = struct{}{}
+	}
+	descriptors := make(map[string]requiredstores.Descriptor, len(requiredstores.Catalog()))
+	for _, descriptor := range requiredstores.Catalog() {
+		descriptors[descriptor.ID] = descriptor
+	}
+	for id, tables := range partial {
+		descriptor, ok := descriptors[id]
+		if !ok {
+			return fmt.Errorf("manifest lists partial tables for unknown store %q", id)
+		}
+		if _, complete := completeSet[id]; complete {
+			return fmt.Errorf("manifest lists partial tables for complete-missing store %q", id)
+		}
+		if len(tables) == 0 {
+			return fmt.Errorf("manifest lists no partial tables for store %q", id)
+		}
+		allowed := make(map[string]struct{}, len(descriptor.RequiredTables))
+		for _, table := range descriptor.RequiredTables {
+			allowed[table] = struct{}{}
+		}
+		seen := make(map[string]struct{}, len(tables))
+		for _, table := range tables {
+			if _, ok := allowed[table]; !ok {
+				return fmt.Errorf("manifest lists unknown required table %s.%s", id, table)
+			}
+			if _, duplicate := seen[table]; duplicate {
+				return fmt.Errorf("manifest lists duplicate required table %s.%s", id, table)
+			}
+			seen[table] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func validateKnownMissingRequiredTables(engine testconformance.Engine, complete []string, expected map[string][]string) error {
+	completeSet := make(map[string]struct{}, len(complete))
+	for _, id := range complete {
+		completeSet[id] = struct{}{}
+	}
+	actual := make(map[string][]string)
+	for _, descriptor := range requiredstores.Catalog() {
+		if _, complete := completeSet[descriptor.ID]; complete {
+			continue
+		}
+		for _, table := range descriptor.RequiredTables {
+			exists, err := requiredTableExists(engine, table)
+			if err != nil {
+				return fmt.Errorf("check %s.%s: %w", descriptor.ID, table, err)
+			}
+			if !exists {
+				actual[descriptor.ID] = append(actual[descriptor.ID], table)
+			}
+		}
+	}
+	for id := range actual {
+		sort.Strings(actual[id])
+	}
+	for id := range expected {
+		sort.Strings(expected[id])
+	}
+	if len(actual) != len(expected) {
+		return fmt.Errorf("partial missing required tables = %v, want %v", actual, expected)
+	}
+	for id, tables := range actual {
+		want, ok := expected[id]
+		if !ok || strings.Join(tables, "\x00") != strings.Join(want, "\x00") {
+			return fmt.Errorf("partial missing required tables = %v, want %v", actual, expected)
+		}
 	}
 	return nil
 }

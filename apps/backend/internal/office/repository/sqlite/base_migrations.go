@@ -52,6 +52,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateProviderRouting(); err != nil {
 		return err
 	}
+	if err := r.migrateSessionRecoveryColumns(); err != nil {
+		return err
+	}
 	if err := r.migrateContinuationScope(); err != nil {
 		return err
 	}
@@ -63,6 +66,35 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
 	if err := r.migrate.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateSessionRecoveryColumns adds the indexed reference from an Office run
+// to the task-owned recovery block. Existing routing rows remain unchanged and
+// the columns stay NULL until a launch actually requires recovery.
+func (r *Repository) migrateSessionRecoveryColumns() error {
+	for _, migration := range []struct {
+		name   string
+		column string
+		stmt   string
+	}{
+		{name: "runs.session_recovery_block_id", column: "session_recovery_block_id", stmt: "ALTER TABLE runs ADD COLUMN session_recovery_block_id TEXT"},
+		{name: "runs.session_recovery_reason", column: "session_recovery_reason", stmt: "ALTER TABLE runs ADD COLUMN session_recovery_reason TEXT"},
+	} {
+		exists, err := db.ColumnExists(r.db, "runs", migration.column)
+		if err != nil {
+			return fmt.Errorf("inspect runs.%s: %w", migration.column, err)
+		}
+		if !exists {
+			if err := r.migrate.Apply(migration.name, migration.stmt); err != nil {
+				return err
+			}
+		}
+	}
+	if err := r.migrate.Apply("runs.session_recovery_block_index",
+		`CREATE INDEX IF NOT EXISTS idx_runs_session_recovery_block ON runs(session_recovery_block_id) WHERE session_recovery_block_id IS NOT NULL`); err != nil {
 		return err
 	}
 	return nil

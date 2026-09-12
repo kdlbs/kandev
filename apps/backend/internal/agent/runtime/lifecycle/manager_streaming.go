@@ -270,11 +270,33 @@ func (m *Manager) publishStreamingContentNow(
 	content string,
 	isAppend bool,
 ) {
+	m.publishStreamingContentNowWithProjection(execution, eventType, messageID, content, isAppend, false)
+}
+
+func (m *Manager) publishCanonicalStreamingContentNow(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+) {
+	m.publishStreamingContentNowWithProjection(execution, eventType, messageID, content, isAppend, true)
+}
+
+func (m *Manager) publishStreamingContentNowWithProjection(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+	canonicalProjection bool,
+) {
 	event := AgentStreamEventData{
-		Type:      eventType,
-		Text:      content,
-		MessageID: messageID,
-		IsAppend:  isAppend,
+		Type:                eventType,
+		Text:                content,
+		MessageID:           messageID,
+		IsAppend:            isAppend,
+		CanonicalProjection: canonicalProjection,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"

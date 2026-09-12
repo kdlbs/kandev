@@ -1956,6 +1956,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		WorkspaceReuseRequired: workspaceReuseRequired,
 		McpProviders:           deriveMCPProviders(allRepos),
 	}
+	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
+		return nil, executorConfig{}, err
+	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
 	if execConfig.ExecutorID != "" {

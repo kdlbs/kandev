@@ -94,11 +94,14 @@ type AgentctlEventPayload struct {
 // canonical key the watcher / orchestrator uses, added so downstream code
 // (resume-token CAS) can rely on a single field name across event types.
 type ACPSessionCreatedPayload struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentProfileID   string `json:"agent_profile_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	ACPSessionID     string `json:"acp_session_id"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentProfileID            string `json:"agent_profile_id"`
+	AgentExecutionID          string `json:"agent_execution_id"`
+	ACPSessionID              string `json:"acp_session_id"`
+	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
@@ -145,19 +148,20 @@ func (p PrepareCompletedEventPayload) GetSessionID() string {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type             string                 `json:"type"`
-	ACPSessionID     string                 `json:"acp_session_id,omitempty"`
-	Text             string                 `json:"text,omitempty"`
-	ToolCallID       string                 `json:"tool_call_id,omitempty"`
-	ToolName         string                 `json:"tool_name,omitempty"`
-	ToolTitle        string                 `json:"tool_title,omitempty"`
-	ToolStatus       string                 `json:"tool_status,omitempty"`
-	Error            string                 `json:"error,omitempty"`
-	ProviderError    *streams.ProviderError `json:"provider_error,omitempty"`
-	SessionStatus    string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
-	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
-	TurnID           string                 `json:"turn_id,omitempty"`
-	Data             interface{}            `json:"data,omitempty"`
+	Type                string                 `json:"type"`
+	ACPSessionID        string                 `json:"acp_session_id,omitempty"`
+	Text                string                 `json:"text,omitempty"`
+	ToolCallID          string                 `json:"tool_call_id,omitempty"`
+	ToolName            string                 `json:"tool_name,omitempty"`
+	ToolTitle           string                 `json:"tool_title,omitempty"`
+	ToolStatus          string                 `json:"tool_status,omitempty"`
+	Error               string                 `json:"error,omitempty"`
+	ProviderError       *streams.ProviderError `json:"provider_error,omitempty"`
+	SessionStatus       string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
+	PromptGeneration    uint64                 `json:"prompt_generation,omitempty"`
+	TurnID              string                 `json:"turn_id,omitempty"`
+	Data                interface{}            `json:"data,omitempty"`
+	CanonicalProjection bool                   `json:"canonical_projection,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.

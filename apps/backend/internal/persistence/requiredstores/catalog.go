@@ -40,7 +40,12 @@ type Descriptor struct {
 // of the database contract and must be initialized before readiness.
 var catalog = []Descriptor{
 	{ID: "schema-meta", OwnerPackage: "internal/persistence", RequiredTables: []string{"kandev_meta"}},
-	{ID: "task", OwnerPackage: "internal/task/repository/sqlite", RequiredTables: []string{"workspaces", "tasks", "task_workflow_session_bindings"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
+	{ID: "task", OwnerPackage: "internal/task/repository/sqlite", RequiredTables: []string{
+		"workspaces", "tasks", "harness_session_generations", "session_restore_attempts",
+		"session_continuation_snapshots", "session_recovery_blocks", "agent_delivery_submissions",
+		"agent_delivery_inbox", "agent_delivery_cursors", "agent_delivery_effects",
+		"task_workflow_session_bindings",
+	}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "workflow", OwnerPackage: "internal/workflow/repository", RequiredTables: []string{"workflow_templates", "workflow_steps"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "analytics", OwnerPackage: "internal/analytics/repository", RequiredTables: []string{"tasks"}, DependsOn: []string{"task", "workflow"}, Capabilities: []Capability{CapabilityTimestamp}},
 	{ID: "agent-settings", OwnerPackage: "internal/agent/settings/store", RequiredTables: []string{"agents", "agent_profiles"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -114,6 +115,51 @@ func TestSendErrorEventWithProviderErrorCarriesSafeDetails(t *testing.T) {
 	}
 	if event.ProviderError == nil || event.ProviderError.ModelID != "kimi-k3" {
 		t.Fatalf("provider error = %+v", event.ProviderError)
+	}
+}
+
+func TestManagerCanSteerDeliveryOnlyForLiveTrackedSubmission(t *testing.T) {
+	m := NewManager(&config.InstanceConfig{
+		WorkDir:            t.TempDir(),
+		SessionID:          "session-steer",
+		InstanceID:         "instance-steer",
+		DurableJournalPath: t.TempDir() + "/delivery.bbolt",
+	}, newTestLogger(t))
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = deliveryJournal.Close() })
+	ctx := context.Background()
+	submission := journal.Submission{
+		ID:                "prompt:steer",
+		SessionID:         "session-steer",
+		IncarnationID:     "session-steer",
+		HarnessGeneration: 1,
+		Hash:              "hash-steer",
+		Payload:           []byte("steer"),
+	}
+	if _, err := deliveryJournal.PutSubmission(ctx, submission); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deliveryJournal.TransitionSubmission(ctx, submission.ID, journal.SubmissionAccepted, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deliveryJournal.TransitionSubmission(ctx, submission.ID, journal.SubmissionDispatching, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	m.TrackDeliverySubmission(submission.ID, 42)
+	if !m.CanSteerDelivery(ctx, 42) {
+		t.Fatal("live tracked submission was not steerable")
+	}
+	if !m.DeliverySubmissionMatches(ctx, submission.ID, submission.Hash) {
+		t.Fatal("matching immutable submission was not reconciled")
+	}
+	if m.DeliverySubmissionMatches(ctx, submission.ID, "different-hash") {
+		t.Fatal("conflicting immutable submission was reconciled")
+	}
+	if m.CanSteerDelivery(ctx, 99) {
+		t.Fatal("unknown prompt generation was steerable")
 	}
 }
 

@@ -435,6 +435,16 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.streamManager.setMCPHandler(handler)
 }
 
+// SetAgentDeliveryRepository wires the backend inbox used by retained
+// agentctl streams. The repository is optional for isolated runtimes and
+// legacy embedders; when present, reconnects resume from the projected cursor.
+func (m *Manager) SetAgentDeliveryRepository(repository AgentDeliveryRepository) {
+	if m == nil || m.streamManager == nil {
+		return
+	}
+	m.streamManager.setAgentDeliveryRepository(repository)
+}
+
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
 // tool calls.
 //

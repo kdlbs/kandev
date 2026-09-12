@@ -333,6 +333,12 @@ func buildRunRouting(
 	if run.RoutingBlockedStatus != nil {
 		out.BlockedStatus = string(*run.RoutingBlockedStatus)
 	}
+	if run.SessionRecoveryBlockID != nil {
+		out.SessionRecoveryBlockID = *run.SessionRecoveryBlockID
+	}
+	if run.SessionRecoveryReason != nil {
+		out.SessionRecoveryReason = *run.SessionRecoveryReason
+	}
 	if run.EarliestRetryAt != nil && !run.EarliestRetryAt.IsZero() {
 		s := run.EarliestRetryAt.UTC().Format(time.RFC3339)
 		out.EarliestRetryAt = &s
@@ -354,6 +360,12 @@ func runHasRoutingSnapshot(run *models.Run) bool {
 		return true
 	}
 	if run.RoutingBlockedStatus != nil && *run.RoutingBlockedStatus != "" {
+		return true
+	}
+	if run.SessionRecoveryBlockID != nil && *run.SessionRecoveryBlockID != "" {
+		return true
+	}
+	if run.SessionRecoveryReason != nil && *run.SessionRecoveryReason != "" {
 		return true
 	}
 	return false

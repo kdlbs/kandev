@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -30,6 +31,16 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	// chunk observed before an atomic reset is detached with the old turn,
 	// while one observed after reset is retained for the replacement turn.
 	m.appendAssistantHistoryChunk(execution, event.Text)
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContentNow(
+			execution,
+			"message_streaming",
+			event.CanonicalMessageID,
+			event.Text,
+			event.CanonicalMessageAppend,
+		)
+		return
+	}
 	if event.ProtocolMessageID != "" {
 		m.flushPendingLegacyMessage(execution)
 		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text)
@@ -64,6 +75,16 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 // handleReasoningEvent handles a "reasoning" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
+		return
+	}
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContentNow(
+			execution,
+			thinkingStreamingEventType,
+			event.CanonicalMessageID,
+			event.ReasoningText,
+			event.CanonicalMessageAppend,
+		)
 		return
 	}
 	if event.ProtocolMessageID != "" {
@@ -328,6 +349,9 @@ func setProviderError(execution *AgentExecution, providerError *streams.Provider
 
 // handleCompleteEvent handles a "complete" agent event: flushes buffers, marks state, and signals SendPrompt.
 func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+	}
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -621,11 +645,16 @@ func (m *Manager) handleStreamDisconnect(
 
 		var claimed bool
 		var updated *AgentExecution
+		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
 		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 			if current != execution || current.promptGeneration != promptGeneration {
 				return
 			}
 			current.Status = v1.AgentStatusFailed
+			if uncertainSubmissionID != "" {
+				current.FailureCode = "DURABLE_DELIVERY_UNCERTAIN"
+				current.FailureDetails = uncertainSubmissionID
+			}
 			updated = current
 			claimed = true
 		})
@@ -692,9 +721,17 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 }
 
 func (m *Manager) publishStreamDisconnectError(execution *AgentExecution, err error) {
+	message := "agent stream disconnected: " + err.Error()
+	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" {
+		message = fmt.Sprintf(
+			"%s: agent stream disconnected; reconcile submission %q before retrying",
+			ErrUncertainPromptDelivery,
+			submissionID,
+		)
+	}
 	m.eventPublisher.PublishAgentctlEvent(
 		context.Background(), events.AgentctlError, execution,
-		"agent stream disconnected: "+err.Error(),
+		message,
 	)
 }
 

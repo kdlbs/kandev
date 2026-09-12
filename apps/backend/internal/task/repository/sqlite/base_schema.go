@@ -31,6 +31,8 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initSessionContinuitySchema,
+		r.initAgentDeliverySchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
@@ -798,7 +800,7 @@ func (r *Repository) backfillInitialPlanRevisions() error {
 	for _, x := range pending {
 		authorKind := x.createdBy
 		// Match CreateTaskPlan (plan.go) and the task_plan_revisions column DEFAULT 'agent'.
-		if authorKind != "user" && authorKind != authorKindAgent {
+		if authorKind != authorKindUser && authorKind != authorKindAgent {
 			authorKind = authorKindAgent
 		}
 		_, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`

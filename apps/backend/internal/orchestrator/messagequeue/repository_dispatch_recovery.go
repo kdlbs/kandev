@@ -15,11 +15,14 @@ import (
 
 // PendingQueueDispatch records an ordinary queue row removed for at-least-once
 // delivery. Accepted selects acknowledgement rather than restoration during
-// startup. A crash after agent acceptance but before Accepted commits can
-// deliver the same prompt again; the agent protocol has no idempotency key.
+// startup. Durable-v1 claims carry a stable submission identity; legacy claims
+// retain their existing uncertain crash semantics until explicitly reconciled.
 type PendingQueueDispatch struct {
-	Message  QueuedMessage
-	Accepted bool
+	Message      QueuedMessage
+	Accepted     bool
+	Protocol     string
+	SubmissionID string
+	PayloadHash  string
 }
 
 const queueDispatchRecoverySchema = `
@@ -29,6 +32,9 @@ const queueDispatchRecoverySchema = `
 		attempt_id   TEXT NOT NULL,
 		message_json TEXT NOT NULL,
 		accepted     INTEGER NOT NULL DEFAULT 0,
+		protocol_mode TEXT NOT NULL DEFAULT 'legacy',
+		submission_id TEXT NOT NULL DEFAULT '',
+		payload_hash TEXT NOT NULL DEFAULT '',
 		created_at   TIMESTAMP NOT NULL
 	)
 `
@@ -41,6 +47,21 @@ func (r *sqliteRepository) ensureQueueDispatchRecoverySchema(ctx context.Context
 		ALTER TABLE queue_dispatch_claims ADD COLUMN attempt_id TEXT NOT NULL DEFAULT ''
 	`); err != nil && !internaldb.IsDuplicateColumnError(err) {
 		return fmt.Errorf("add queue dispatch attempt id: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx, `
+		ALTER TABLE queue_dispatch_claims ADD COLUMN protocol_mode TEXT NOT NULL DEFAULT 'legacy'
+	`); err != nil && !internaldb.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add queue dispatch protocol mode: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx, `
+		ALTER TABLE queue_dispatch_claims ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''
+	`); err != nil && !internaldb.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add queue dispatch submission id: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx, `
+		ALTER TABLE queue_dispatch_claims ADD COLUMN payload_hash TEXT NOT NULL DEFAULT ''
+	`); err != nil && !internaldb.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add queue dispatch payload hash: %w", err)
 	}
 	rows, err := r.db.QueryxContext(ctx, `SELECT entry_id FROM queue_dispatch_claims WHERE attempt_id = ''`)
 	if err != nil {
@@ -79,14 +100,17 @@ func (r *sqliteRepository) persistQueueDispatchClaimTx(
 	msg *QueuedMessage,
 ) error {
 	msg.dispatchAttemptID = uuid.NewString()
+	msg.setDeliverySubmission(DeliveryProtocolPending, "queue:"+msg.dispatchAttemptID, "")
 	messageJSON, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal queue dispatch claim: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO queue_dispatch_claims (entry_id, session_id, attempt_id, message_json, created_at)
-		VALUES (?, ?, ?, ?, ?)
-	`), msg.ID, msg.SessionID, msg.dispatchAttemptID, string(messageJSON), time.Now().UTC()); err != nil {
+		INSERT INTO queue_dispatch_claims
+			(entry_id, session_id, attempt_id, message_json, protocol_mode, submission_id, payload_hash, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), msg.ID, msg.SessionID, msg.dispatchAttemptID, string(messageJSON), msg.deliveryProtocol,
+		msg.deliverySubmissionID, msg.deliveryPayloadHash, time.Now().UTC()); err != nil {
 		return fmt.Errorf("persist queue dispatch claim: %w", err)
 	}
 	return nil
@@ -97,7 +121,7 @@ func (r *sqliteRepository) ListPendingQueueDispatches(ctx context.Context) ([]Pe
 		return nil, err
 	}
 	rows, err := r.db.QueryxContext(ctx, `
-		SELECT attempt_id, message_json, accepted
+		SELECT attempt_id, message_json, accepted, protocol_mode, submission_id, payload_hash
 		FROM queue_dispatch_claims ORDER BY created_at, entry_id
 	`)
 	if err != nil {
@@ -106,9 +130,9 @@ func (r *sqliteRepository) ListPendingQueueDispatches(ctx context.Context) ([]Pe
 	defer func() { _ = rows.Close() }()
 	var pending []PendingQueueDispatch
 	for rows.Next() {
-		var attemptID, messageJSON string
+		var attemptID, messageJSON, protocol, submissionID, payloadHash string
 		var accepted int
-		if err := rows.Scan(&attemptID, &messageJSON, &accepted); err != nil {
+		if err := rows.Scan(&attemptID, &messageJSON, &accepted, &protocol, &submissionID, &payloadHash); err != nil {
 			return nil, fmt.Errorf("scan pending queue dispatch: %w", err)
 		}
 		var msg QueuedMessage
@@ -116,8 +140,12 @@ func (r *sqliteRepository) ListPendingQueueDispatches(ctx context.Context) ([]Pe
 			return nil, fmt.Errorf("unmarshal pending queue dispatch: %w", err)
 		}
 		msg.dispatchAttemptID = attemptID
+		msg.setDeliverySubmission(protocol, submissionID, payloadHash)
 		msg.reservationGenerationsCaptured = true
-		pending = append(pending, PendingQueueDispatch{Message: msg, Accepted: accepted != 0})
+		pending = append(pending, PendingQueueDispatch{
+			Message: msg, Accepted: accepted != 0,
+			Protocol: protocol, SubmissionID: submissionID, PayloadHash: payloadHash,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate pending queue dispatch: %w", err)
@@ -131,15 +159,18 @@ func (r *sqliteRepository) transferPendingQueueDispatchesTx(
 	oldSessionID, newSessionID string,
 ) error {
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
-		SELECT entry_id, message_json FROM queue_dispatch_claims WHERE session_id = ?
+			SELECT entry_id, message_json FROM queue_dispatch_claims WHERE session_id = ?
 	`), oldSessionID)
 	if err != nil {
 		return fmt.Errorf("list transferred queue dispatch claims: %w", err)
 	}
 	type claimUpdate struct {
-		entryID     string
-		attemptID   string
-		messageJSON string
+		entryID      string
+		attemptID    string
+		messageJSON  string
+		protocol     string
+		submissionID string
+		payloadHash  string
 	}
 	var updates []claimUpdate
 	for rows.Next() {
@@ -155,6 +186,8 @@ func (r *sqliteRepository) transferPendingQueueDispatchesTx(
 		}
 		msg.SessionID = newSessionID
 		attemptID := uuid.NewString()
+		msg.dispatchAttemptID = attemptID
+		msg.setDeliverySubmission(DeliveryProtocolPending, "queue:"+attemptID, "")
 		updatedJSON, err := json.Marshal(msg)
 		if err != nil {
 			_ = rows.Close()
@@ -162,6 +195,8 @@ func (r *sqliteRepository) transferPendingQueueDispatchesTx(
 		}
 		updates = append(updates, claimUpdate{
 			entryID: entryID, attemptID: attemptID, messageJSON: string(updatedJSON),
+			protocol: msg.deliveryProtocol, submissionID: msg.deliverySubmissionID,
+			payloadHash: msg.deliveryPayloadHash,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -173,9 +208,11 @@ func (r *sqliteRepository) transferPendingQueueDispatchesTx(
 	}
 	for _, update := range updates {
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			UPDATE queue_dispatch_claims SET session_id = ?, attempt_id = ?, message_json = ?
+			UPDATE queue_dispatch_claims
+			SET session_id = ?, attempt_id = ?, message_json = ?, protocol_mode = ?, submission_id = ?, payload_hash = ?
 			WHERE entry_id = ? AND session_id = ?
-		`), newSessionID, update.attemptID, update.messageJSON, update.entryID, oldSessionID); err != nil {
+			`), newSessionID, update.attemptID, update.messageJSON, update.protocol,
+			update.submissionID, update.payloadHash, update.entryID, oldSessionID); err != nil {
 			return fmt.Errorf("transfer queue dispatch claim: %w", err)
 		}
 	}
@@ -296,6 +333,41 @@ func (r *sqliteRepository) MarkPendingQueueDispatchAccepted(
 	if affected != 1 {
 		return ErrQueueDispatchClaimChanged
 	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) SetPendingQueueDispatchDelivery(
+	ctx context.Context,
+	msg *QueuedMessage,
+	protocol, submissionID, payloadHash string,
+) error {
+	if msg == nil || msg.dispatchAttemptID == "" {
+		return ErrQueueDispatchClaimChanged
+	}
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return err
+	}
+	tx, err := r.beginSessionMutationTx(ctx, msg.SessionID, "set queue dispatch delivery")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queue_dispatch_claims
+		SET protocol_mode = ?, submission_id = ?, payload_hash = ?
+		WHERE entry_id = ? AND session_id = ? AND attempt_id = ? AND accepted = 0
+	`), protocol, submissionID, payloadHash, msg.ID, msg.SessionID, msg.dispatchAttemptID)
+	if err != nil {
+		return fmt.Errorf("set queue dispatch delivery: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set queue dispatch delivery rows affected: %w", err)
+	}
+	if affected != 1 {
+		return ErrQueueDispatchClaimChanged
+	}
+	msg.setDeliverySubmission(protocol, submissionID, payloadHash)
 	return tx.Commit()
 }
 

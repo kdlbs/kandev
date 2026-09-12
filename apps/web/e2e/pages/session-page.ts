@@ -656,7 +656,10 @@ export class SessionPage {
 
   /** "Resume session" button shown after agent crash. */
   recoveryResumeButton(): Locator {
-    return this.page.getByTestId("recovery-resume-button");
+    // A failed session can render both its persisted action-message control and
+    // the current session banner control. The banner is the actionable surface
+    // for page-level recovery, and it is rendered after the transcript.
+    return this.page.getByTestId("recovery-resume-button").last();
   }
 
   /** Error returned by a manual session recovery action. */
@@ -686,7 +689,7 @@ export class SessionPage {
 
   /** "Start fresh session" button shown after agent crash. */
   recoveryFreshButton(): Locator {
-    return this.page.getByTestId("recovery-fresh-button");
+    return this.page.getByTestId("recovery-fresh-button").last();
   }
 
   /** Terminal-state banner shown when the active session has completed. */

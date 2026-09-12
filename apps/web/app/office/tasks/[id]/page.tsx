@@ -677,6 +677,7 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const preferredSessionId = searchParams.get("session_id") ?? undefined;
   // Office shell defaults to simple. Both `?advanced` (Phase 7) and the
   // legacy `?mode=advanced` flip to advanced.
   const mode: TaskBodyMode = resolveTaskBodyMode(
@@ -738,7 +739,11 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
   };
 
   const advancedSlot = hasSession ? (
-    <TaskAdvancedMode task={task} onToggleSimple={() => setMode("simple")} />
+    <TaskAdvancedMode
+      task={task}
+      onToggleSimple={() => setMode("simple")}
+      preferredSessionId={preferredSessionId}
+    />
   ) : (
     <OfficeSimplePane
       task={task}

@@ -1971,6 +1971,7 @@
   "sessionBootstrapCauseUnknown": "The startup operation could not be completed.",
   "resumeFailedWorkspaceReadOnly": "Workspace restored in read-only mode",
   "continueOnNewBranch": "Continue on a new branch",
+  "continueFromHistory": "Continue from saved history",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",
   "sessionStatusGenerating": "Generating",
   "branchDisabledLocalExecutor": "The local executor uses your repository's current checkout, so the branch can't change here. Toggle 'Fork a new branch' to pick a different base.",

@@ -33,6 +33,7 @@ require (
 	github.com/tiktoken-go/tokenizer v0.8.1
 	github.com/tuzig/vt10x v0.0.0-20231206072048-370e51642bf7
 	github.com/yuin/goldmark v1.7.13
+	go.etcd.io/bbolt v1.3.11
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0

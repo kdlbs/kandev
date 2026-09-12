@@ -5379,6 +5379,58 @@ func TestStartTask_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	assert.False(t, launchCalled)
 }
 
+func TestStartTask_OfficeRecoveryBlockStopsAutonomousLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	task, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	task.ProjectID = "office-project"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "office-runner"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "block-1",
+		SessionID:          "session1",
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: 0,
+		Reason:             "native_state_missing",
+		State:              models.RecoveryBlockOpen,
+	}))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", Title: "Office task", State: v1.TaskStateInProgress,
+	}
+	launchCalled := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalled = true
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, validOfficeRuntimeEnv(),
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrSessionRecoveryRequired)
+	assert.False(t, launchCalled)
+
+	block, err := repo.GetOpenSessionRecoveryBlock(ctx, "session1", incarnationID, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "block-1", block.ID)
+}
+
 func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

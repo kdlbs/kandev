@@ -56,6 +56,31 @@ func TestCatalog(t *testing.T) {
 	}
 }
 
+func TestTaskCatalogIncludesDurableSessionTables(t *testing.T) {
+	var task Descriptor
+	for _, descriptor := range Catalog() {
+		if descriptor.ID == "task" {
+			task = descriptor
+			break
+		}
+	}
+	if task.ID == "" {
+		t.Fatal("task descriptor is missing")
+	}
+	want := map[string]struct{}{
+		"harness_session_generations": {}, "session_restore_attempts": {},
+		"session_continuation_snapshots": {}, "session_recovery_blocks": {},
+		"agent_delivery_submissions": {}, "agent_delivery_inbox": {},
+		"agent_delivery_cursors": {}, "agent_delivery_effects": {},
+	}
+	for _, table := range task.RequiredTables {
+		delete(want, table)
+	}
+	if len(want) != 0 {
+		t.Fatalf("task descriptor is missing durable tables: %v", want)
+	}
+}
+
 func TestValidateCatalogRejectsInvalidDescriptors(t *testing.T) {
 	tests := []struct {
 		name    string

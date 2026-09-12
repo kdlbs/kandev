@@ -4,6 +4,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -42,6 +43,62 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 		return
 	}
 	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "")
+	s.persistInitialHarnessGeneration(ctx, data)
+}
+
+// persistInitialHarnessGeneration records the first native conversation for a
+// session incarnation. Explicit context continuation owns its generation CAS;
+// this handler only fills the absent initial row and never overwrites a newer
+// generation observed from a replacement execution.
+func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watcher.ACPSessionEventData) {
+	if data.DeliveryHarnessGeneration == 0 || s.repo == nil {
+		return
+	}
+	store, ok := s.repo.(sessionContinuityStore)
+	if !ok {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || session == nil {
+		if err != nil {
+			s.logger.Warn("failed to load session for harness generation",
+				zap.String("session_id", data.SessionID), zap.Error(err))
+		}
+		return
+	}
+	incarnationID := data.DeliveryIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.QueueIncarnationID
+	}
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	if current, currentErr := store.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID); currentErr == nil && current != nil {
+		return
+	} else if currentErr != nil && !errors.Is(currentErr, models.ErrTaskSessionNotFound) {
+		s.logger.Warn("failed to inspect current harness generation",
+			zap.String("session_id", data.SessionID), zap.Error(currentErr))
+		return
+	}
+	now := time.Now().UTC()
+	committed, err := store.CommitHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID:         session.ID,
+		IncarnationID:     incarnationID,
+		Generation:        int64(data.DeliveryHarnessGeneration),
+		NativeSessionID:   data.ACPSessionID,
+		AgentType:         session.AgentProfileID,
+		OriginalWorkspace: session.WorkspacePath,
+		CurrentWorkspace:  session.WorkspacePath,
+		CreationReason:    "native_started",
+		CreatedAt:         now,
+		CommittedAt:       now,
+	}, 0)
+	if err != nil || !committed {
+		s.logger.Warn("failed to persist initial harness generation",
+			zap.String("session_id", data.SessionID),
+			zap.Int64("generation", int64(data.DeliveryHarnessGeneration)),
+			zap.Error(err))
+	}
 }
 
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.

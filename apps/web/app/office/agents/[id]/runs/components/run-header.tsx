@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import Link from "@/components/routing/app-link";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { RunDetail } from "@/lib/api/domains/office-extended-api";
 import { formatDollars } from "@/lib/utils";
@@ -69,7 +70,7 @@ export function RunHeader({ run }: Props) {
   return (
     <div className="rounded-lg border border-border p-4 space-y-3" data-testid="run-header">
       <TopRow run={run} />
-      <RoutingStrip routing={run.routing} />
+      <RoutingStrip routing={run.routing} taskId={run.task_id} sessionId={sessionId} />
       <StatsGrid run={run} />
       <TokensRow run={run} />
       {isFailed && run.error_message && <ErrorBanner message={run.error_message} />}
@@ -87,7 +88,15 @@ export function RunHeader({ run }: Props) {
 // Only present when the run went through the routing path. The full
 // per-attempt panel lives in route-attempt-list and is not duplicated
 // here; this strip just calls out resolved vs intended + block state.
-function RoutingStrip({ routing }: { routing?: RunDetail["routing"] }) {
+function RoutingStrip({
+  routing,
+  taskId,
+  sessionId,
+}: {
+  routing?: RunDetail["routing"];
+  taskId?: string;
+  sessionId?: string;
+}) {
   const { t } = useTranslation();
   if (!routing) return null;
   const resolved = routing.resolved_provider_id ?? "";
@@ -115,13 +124,69 @@ function RoutingStrip({ routing }: { routing?: RunDetail["routing"] }) {
           <span className="font-mono">{intended}</span>
         </div>
       )}
-      {blocked !== "" && <RoutingBlockBadge status={blocked} retryAt={routing.earliest_retry_at} />}
+      {blocked !== "" && (
+        <RoutingBlockBadge
+          status={blocked}
+          retryAt={routing.earliest_retry_at}
+          taskId={taskId}
+          sessionId={sessionId}
+          reason={routing.session_recovery_reason}
+        />
+      )}
     </div>
   );
 }
 
-function RoutingBlockBadge({ status, retryAt }: { status: string; retryAt?: string }) {
+function RoutingBlockBadge({
+  status,
+  retryAt,
+  taskId,
+  sessionId,
+  reason,
+}: {
+  status: string;
+  retryAt?: string;
+  taskId?: string;
+  sessionId?: string;
+  reason?: string;
+}) {
   const { t } = useTranslation();
+  if (status === "session_recovery_required") {
+    const recoveryHref =
+      taskId && sessionId
+        ? `/office/tasks/${taskId}?advanced&session_id=${encodeURIComponent(sessionId)}`
+        : undefined;
+    return (
+      <div
+        className="flex flex-col items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/30 sm:flex-row sm:items-center sm:justify-between"
+        data-testid="run-session-recovery-required"
+      >
+        <div className="min-w-0 space-y-1">
+          <Badge variant="destructive">{t("office:sessionRecoveryRequired")}</Badge>
+          <p className="text-xs text-red-700 dark:text-red-300">
+            {t("office:sessionRecoveryDescription")}
+          </p>
+          {reason && (
+            <p className="break-words text-xs text-muted-foreground">
+              {t("office:sessionRecoveryReason", { reason })}
+            </p>
+          )}
+        </div>
+        {recoveryHref && (
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="min-h-11 shrink-0 cursor-pointer sm:min-h-9"
+          >
+            <Link href={recoveryHref} data-testid="run-session-recovery-link">
+              {t("office:openSessionRecovery")}
+            </Link>
+          </Button>
+        )}
+      </div>
+    );
+  }
   if (status === "blocked_provider_action_required") {
     return (
       <Badge variant="destructive" data-testid="run-routing-blocked">

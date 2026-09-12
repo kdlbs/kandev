@@ -268,8 +268,45 @@ type QueuedMessage struct {
 	reservationLifecycleGeneration int64
 	reservationGenerationsCaptured bool
 	reservationIdentity            QueueSessionIdentity
-	reservationToken               string
-	reservationExpiresAt           time.Time
+
+	// deliveryProtocol, deliverySubmissionID, and deliveryPayloadHash are the
+	// durable-delivery identity selected for an ordinary queue claim. They stay
+	// out of the public queue JSON and are carried by the claim record instead.
+	deliveryProtocol     string
+	deliverySubmissionID string
+	deliveryPayloadHash  string
+	reservationToken     string
+	reservationExpiresAt time.Time
+}
+
+const (
+	// DeliveryProtocolPending is the claim state before the active peer has
+	// completed capability negotiation.
+	DeliveryProtocolPending = "pending"
+	// DeliveryProtocolV1 identifies the retained journal protocol.
+	DeliveryProtocolV1 = "durable_v1"
+	// DeliveryProtocolLegacy identifies a peer that cannot provide retained
+	// delivery. Its uncertain crash outcome is never treated as v1 work.
+	DeliveryProtocolLegacy = "legacy"
+)
+
+// DeliverySubmission returns the claim's protocol and immutable submission
+// identity. The values are empty for queue implementations without durable
+// claim persistence.
+func (m *QueuedMessage) DeliverySubmission() (protocol, submissionID, payloadHash string) {
+	if m == nil {
+		return "", "", ""
+	}
+	return m.deliveryProtocol, m.deliverySubmissionID, m.deliveryPayloadHash
+}
+
+func (m *QueuedMessage) setDeliverySubmission(protocol, submissionID, payloadHash string) {
+	if m == nil {
+		return
+	}
+	m.deliveryProtocol = protocol
+	m.deliverySubmissionID = submissionID
+	m.deliveryPayloadHash = payloadHash
 }
 
 // QueueRemovalResult is the atomic outcome of a user-driven queue deletion.

@@ -8,6 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type deferredDispatchError struct{}
+
+func (deferredDispatchError) Error() string { return "session recovery required" }
+
+func (deferredDispatchError) DispatchDeferred() string { return "native_session_unavailable" }
+
 func TestAutomationSchemaIncludesContinuationAndRunBindingColumns(t *testing.T) {
 	store := setupTestStore(t)
 
@@ -17,12 +23,51 @@ func TestAutomationSchemaIncludesContinuationAndRunBindingColumns(t *testing.T) 
 			`SELECT COUNT(*) FROM pragma_table_info('automations') WHERE name = ?`, column))
 		require.Equal(t, 1, count, "automations.%s must be persisted", column)
 	}
-	for _, column := range []string{"session_id", "turn_id", "thread_action", "thread_reason", "display_title"} {
+	for _, column := range []string{"session_id", "turn_id", "thread_action", "thread_reason", "display_title", "recovery_block_id", "recovery_session_id", "recovery_prompt", "recovery_metadata", "recovery_workflow_step_id"} {
 		var count int
 		require.NoError(t, store.db.Get(&count,
 			`SELECT COUNT(*) FROM pragma_table_info('automation_runs') WHERE name = ?`, column))
 		require.Equal(t, 1, count, "automation_runs.%s must be persisted", column)
 	}
+}
+
+func TestAutomationRunRecoveryBindingIsDurableAndClearsOnBind(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "recovery", Enabled: true}
+	require.NoError(t, store.CreateAutomation(ctx, a))
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusTriggered,
+		TriggerData:  json.RawMessage(`{"prompt":"hello"}`),
+	}
+	require.NoError(t, store.CreateRun(ctx, run))
+	require.NoError(t, store.BindRunTask(ctx, run.ID, "task-recovery"))
+	require.NoError(t, store.ParkRunForRecovery(
+		ctx, run.ID, "task-recovery", "block-1", "session-recovery", "hello",
+		`{"automation_id":"automation-1"}`, "step-recovery", ThreadActionCreated, "new task",
+	))
+
+	parked, err := store.ListRecoveryRuns(ctx, "block-1")
+	require.NoError(t, err)
+	require.Len(t, parked, 1)
+	require.Equal(t, "session-recovery", parked[0].RecoverySessionID)
+	require.Equal(t, "hello", parked[0].RecoveryPrompt)
+	require.Equal(t, "step-recovery", parked[0].RecoveryWorkflowStepID)
+	require.Equal(t, `{"automation_id":"automation-1"}`, parked[0].RecoveryMetadataJSON)
+
+	require.NoError(t, store.BindRun(ctx, run.ID, "task-recovery", "session-recovery", "turn-recovery", ThreadActionCreated, "new task"))
+	bound, err := store.GetRun(ctx, run.ID)
+	require.NoError(t, err)
+	require.Empty(t, bound.RecoveryBlockID)
+	require.Empty(t, bound.RecoverySessionID)
+	require.Empty(t, bound.RecoveryPrompt)
+	require.Equal(t, "{}", bound.RecoveryMetadataJSON)
+	require.Empty(t, bound.RecoveryWorkflowStepID)
+	parked, err = store.ListRecoveryRuns(ctx, "block-1")
+	require.NoError(t, err)
+	require.Empty(t, parked)
 }
 
 func TestAutomationSchemaIncludesTargetModeColumns(t *testing.T) {
@@ -350,4 +395,26 @@ func TestDispatchRunBindsExactIdentityAndRejectsStoppedAdmission(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrAutomationRunNotDispatchable)
 	require.False(t, called)
+}
+
+func TestDispatchRunLeavesDeferredRecoveryOpen(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "deferred", Enabled: true, MaxConcurrentRuns: 1}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	run := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+
+	called := false
+	err := svc.DispatchRun(ctx, run.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
+		called = true
+		return RunDispatch{}, deferredDispatchError{}
+	})
+
+	require.True(t, called)
+	require.ErrorIs(t, err, deferredDispatchError{})
+	got, getErr := svc.store.GetRun(ctx, run.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, RunStatusTriggered, got.Status)
+	require.Empty(t, got.TaskID)
 }

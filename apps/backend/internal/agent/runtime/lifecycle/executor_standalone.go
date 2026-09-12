@@ -117,6 +117,9 @@ func buildStandaloneCreateInstanceRequest(
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
 	}
 }
@@ -157,6 +160,13 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	createReq := buildStandaloneCreateInstanceRequest(
 		req, env, agentType, disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill, stripEnv,
 	)
+	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
+		location, err := resolveDurableJournal(req)
+		if err != nil {
+			return nil, fmt.Errorf("resolve retained delivery journal: %w", err)
+		}
+		createReq.DurableJournalPath = location.Path
+	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",
 		zap.String("instance_id", req.InstanceID),

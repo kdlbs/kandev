@@ -96,6 +96,19 @@ type RunDispatcher interface {
 	) error
 }
 
+// RunDispatchDeferred marks an error that must leave the admitted run open
+// for an explicit recovery action. The automation package deliberately keeps
+// this contract generic so the orchestrator can classify native-session
+// recovery without creating an import cycle.
+type RunDispatchDeferred interface {
+	DispatchDeferred() string
+}
+
+func isRunDispatchDeferred(err error) bool {
+	var deferred RunDispatchDeferred
+	return errors.As(err, &deferred)
+}
+
 func validateContinuationSettings(policy ContinuationPolicy, maxRuns int) error {
 	if policy == "" {
 		policy = ContinuationPolicyNewTask
@@ -1145,6 +1158,9 @@ func (s *Service) DispatchRun(
 
 	dispatchResult, err := dispatch()
 	if err != nil {
+		if isRunDispatchDeferred(err) {
+			return err
+		}
 		return s.markDispatchFailed(ctx, runID, err)
 	}
 	if dispatchResult.TaskID == "" || dispatchResult.SessionID == "" || dispatchResult.TurnID == "" {
@@ -1559,6 +1575,30 @@ func (s *Service) BindRunTask(ctx context.Context, runID, taskID string) error {
 	}
 	defer unlock()
 	return s.store.BindRunTask(ctx, runID, taskID)
+}
+
+// ParkRunForRecovery retains the exact dispatch inputs while a native session
+// recovery block is open. The per-automation lock prevents a stop or delete
+// from racing the park operation.
+func (s *Service) ParkRunForRecovery(
+	ctx context.Context,
+	runID, taskID, blockID, sessionID, prompt, metadataJSON, workflowStepID string,
+	action ThreadAction,
+	reason string,
+) error {
+	unlock, err := s.lockRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.store.ParkRunForRecovery(ctx, runID, taskID, blockID, sessionID, prompt, metadataJSON, workflowStepID, action, reason)
+}
+
+// ListRecoveryRuns returns open runs that await one resolved session block.
+// It is an internal reconciliation query and intentionally has no user
+// authorization layer.
+func (s *Service) ListRecoveryRuns(ctx context.Context, blockID string) ([]*AutomationRun, error) {
+	return s.store.ListRecoveryRuns(ctx, blockID)
 }
 
 func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {

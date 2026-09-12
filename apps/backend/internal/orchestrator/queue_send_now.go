@@ -58,6 +58,9 @@ func (s *Service) sendQueuedNow(ctx context.Context, identity *messagequeue.Queu
 	if s.messageQueue == nil {
 		return 0, errors.New("message queue is not configured")
 	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		return 0, err
+	}
 
 	turnBefore, err := s.captureSendNowTurn(ctx, sessionID)
 	if err != nil {
@@ -568,6 +571,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	references := entityrefs.NormalizePersisted(claim.Dispatch.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(claim.Dispatch.Content, references)
 	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(claim.Dispatch.Metadata))
+	deliveryProtocol, deliverySubmissionID, deliveryPayloadHash := claim.DeliverySubmission()
 	durablePlanComments := claim.HasDurablePlanComment()
 	if err := s.prepareSendNowTranscript(ctx, claim, attachments, durablePlanComments); err != nil {
 		return false, err
@@ -581,6 +585,14 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 			disableDispatchRetry: durablePlanComments,
 			afterDispatch: func() error {
 				return s.markSendNowClaimAcceptedWithRetry(ctx, claim)
+			},
+			deliveryProtocol:     deliveryProtocol,
+			deliverySubmissionID: deliverySubmissionID,
+			deliveryPayloadHash:  deliveryPayloadHash,
+			deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
+				return s.messageQueue.SetPendingSendNowClaimDelivery(
+					updateCtx, claim, protocol, submissionID, payloadHash,
+				)
 			},
 		})
 	return deliveryAttempted, err
@@ -752,6 +764,18 @@ func (s *Service) reconcilePendingSendNowClaimsOnStartup(ctx context.Context) er
 		var recoveryErr error
 		if pending.Accepted {
 			recoveryErr = s.acknowledgeSendNowClaimWithRetry(ctx, claim)
+		} else if _, supported := s.repo.(sessionRecoveryBlockStore); supported {
+			recoverySignal := &sessionRecoveryRequiredError{
+				Block: &models.SessionRecoveryBlock{Reason: "unknown_send_now_outcome"},
+			}
+			recoveryErr = s.recordSessionRecoveryBlock(
+				ctx, claim.Dispatch.SessionID, "send_now", recoverySignal,
+			)
+			if recoveryErr == nil {
+				s.logger.Warn("parked Send Now claim with unknown pre-crash delivery outcome",
+					zap.String("claim_id", claim.ClaimID),
+					zap.String("session_id", claim.Dispatch.SessionID))
+			}
 		} else {
 			recoveryErr = s.restoreSendNowClaimWithRetry(ctx, claim)
 		}
@@ -766,6 +790,38 @@ func (s *Service) reconcilePendingSendNowClaimsOnStartup(ctx context.Context) er
 			}
 		}
 		s.publishQueueStatusEvent(ctx, claim.Dispatch.SessionID)
+	}
+	return nil
+}
+
+func (s *Service) restorePendingSendNowClaimsForRecovery(ctx context.Context, sessionID string) error {
+	if s.messageQueue == nil || sessionID == "" || !s.messageQueue.PendingSendNowClaimPersistenceAvailable() {
+		return nil
+	}
+	claims, err := s.messageQueue.ListPendingSendNowClaims(ctx)
+	if err != nil {
+		return fmt.Errorf("list pending Send Now claims for recovery: %w", err)
+	}
+	for i := range claims {
+		pending := &claims[i]
+		claim := &pending.Claim
+		if claim.Dispatch.SessionID != sessionID {
+			continue
+		}
+		if pending.Accepted {
+			err = s.acknowledgeSendNowClaimWithRetry(ctx, claim)
+		} else {
+			err = s.restoreSendNowClaimWithRetry(context.WithoutCancel(ctx), claim)
+		}
+		if err != nil {
+			if !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
+				return fmt.Errorf("release pending Send Now claim for session %s: %w", sessionID, err)
+			}
+			if deleteErr := s.messageQueue.DeletePendingSendNowClaim(context.WithoutCancel(ctx), claim); deleteErr != nil &&
+				!errors.Is(deleteErr, messagequeue.ErrSendNowClaimChanged) {
+				return fmt.Errorf("discard superseded Send Now claim for session %s: %w", sessionID, deleteErr)
+			}
+		}
 	}
 	return nil
 }

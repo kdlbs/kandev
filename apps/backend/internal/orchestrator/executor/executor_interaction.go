@@ -316,24 +316,47 @@ var ErrSteerAttachmentMaterialization = lifecycle.ErrSteerAttachmentMaterializat
 // a thin nil-callback delegation for tests and any future caller that has no
 // dispatch callback to provide.
 func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.PromptWithDispatchCallback(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, preloadedSession...)
+	return e.PromptWithDispatchCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, "", preloadedSession...,
+	)
 }
 
 // PromptWithDispatchCallback invokes onDispatched after agentctl accepts the
 // prompt but before waiting for the turn to complete.
 func (e *Executor) PromptWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, false, preloadedSession...)
+	return e.PromptWithDispatchCallbackAndSubmissionID(
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, "", preloadedSession...,
+	)
+}
+
+// PromptWithDispatchCallbackAndSubmissionID carries a queue-owned submission
+// identity through the executor without changing ordinary prompt callers.
+func (e *Executor) PromptWithDispatchCallbackAndSubmissionID(
+	ctx context.Context,
+	taskID, sessionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	submissionID string,
+	preloadedSession ...*models.TaskSession,
+) (*PromptResult, error) {
+	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, false, submissionID, preloadedSession...)
 }
 
 // SteerWithDispatchCallback delivers a steer into a still-generating turn. It
 // always uses the dispatch-callback path: steering is a dispatch-and-continue
 // action, so the caller keeps admission serialized until agentctl accepts it.
 func (e *Executor) SteerWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, true, preloadedSession...)
+	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, true, "", preloadedSession...)
 }
 
 type promptAgentWithDispatchCallback interface {
 	PromptAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*PromptResult, error)
+}
+
+type promptAgentWithDispatchCallbackAndSubmissionID interface {
+	PromptAgentWithDispatchCallbackAndSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, func(), string) (*PromptResult, error)
 }
 
 // steerAgentWithDispatchCallback is the optional capability an agent manager
@@ -354,6 +377,7 @@ func (e *Executor) dispatchToAgent(
 	dispatchOnly bool,
 	onDispatched func(),
 	steer bool,
+	submissionID string,
 ) (*PromptResult, error) {
 	if steer {
 		steerer, ok := e.agentManager.(steerAgentWithDispatchCallback)
@@ -363,6 +387,13 @@ func (e *Executor) dispatchToAgent(
 		return steerer.SteerAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 	}
 	if onDispatched != nil {
+		if submissionID != "" {
+			if notifier, ok := e.agentManager.(promptAgentWithDispatchCallbackAndSubmissionID); ok {
+				return notifier.PromptAgentWithDispatchCallbackAndSubmissionID(
+					ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, submissionID,
+				)
+			}
+		}
 		notifier, ok := e.agentManager.(promptAgentWithDispatchCallback)
 		if !ok {
 			return nil, ErrPromptDispatchCallbackUnsupported
@@ -372,7 +403,7 @@ func (e *Executor) dispatchToAgent(
 	return e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 }
 
-func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), steer bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), steer bool, submissionID string, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -416,7 +447,7 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 		return result, err
 	}
 
-	result, err := e.dispatchToAgent(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, steer)
+	result, err := e.dispatchToAgent(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, steer, submissionID)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return nil, ErrExecutionNotFound
