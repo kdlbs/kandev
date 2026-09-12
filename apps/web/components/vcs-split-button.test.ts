@@ -8,6 +8,8 @@ import {
 } from "./vcs-split-button";
 import { buildSingleRepoContributionCallbacks } from "./vcs-split-button-parts";
 
+const SELECTED_PR_URL = "https://github.com/acme/widget-a/pull/42";
+
 /**
  * The VCS tooltips used to build their plural by hand:
  *
@@ -111,7 +113,7 @@ describe("vcs split-button remote action semantics", () => {
       handleMerge: vi.fn(),
       resolution: { requestReplace, requestUse },
       resolutionTarget,
-      selectedPR: { pr_url: "https://github.com/acme/widget-a/pull/42" },
+      selectedPR: { pr_url: SELECTED_PR_URL },
       openExternalLinkFn,
     });
 
@@ -122,25 +124,87 @@ describe("vcs split-button remote action semantics", () => {
 
     expect(requestReplace).toHaveBeenCalledWith(resolutionTarget);
     expect(requestUse).toHaveBeenCalledWith(resolutionTarget);
-    expect(openExternalLinkFn).toHaveBeenCalledWith("https://github.com/acme/widget-a/pull/42");
+    expect(openExternalLinkFn).toHaveBeenCalledWith(SELECTED_PR_URL);
   });
 
   it("scopes the single-repository menu callbacks to the blocked repository", () => {
     const onReplaceContribution = vi.fn();
     const onUseContribution = vi.fn();
     const onViewContribution = vi.fn();
+    const onCompareContribution = vi.fn();
     const callbacks = buildSingleRepoContributionCallbacks(
-      { onReplaceContribution, onUseContribution, onViewContribution },
+      { onReplaceContribution, onUseContribution, onViewContribution, onCompareContribution },
       "widget-a",
     );
 
     callbacks.onReplaceContribution();
     callbacks.onUseContribution();
     callbacks.onViewContribution();
+    callbacks.onCompareContribution();
 
     expect(onReplaceContribution).toHaveBeenCalledWith("widget-a");
     expect(onUseContribution).toHaveBeenCalledWith("widget-a");
     expect(onViewContribution).toHaveBeenCalledWith("widget-a");
+    expect(onCompareContribution).toHaveBeenCalledWith("widget-a");
+  });
+
+  it("normalizes a root checkout scope for single-repository menu callbacks", () => {
+    const onReplaceContribution = vi.fn();
+    const onUseContribution = vi.fn();
+    const onViewContribution = vi.fn();
+    const onCompareContribution = vi.fn();
+    const callbacks = buildSingleRepoContributionCallbacks(
+      { onReplaceContribution, onUseContribution, onViewContribution, onCompareContribution },
+      undefined,
+    );
+
+    callbacks.onReplaceContribution();
+    callbacks.onUseContribution();
+    callbacks.onViewContribution();
+    callbacks.onCompareContribution();
+
+    expect(onReplaceContribution).toHaveBeenCalledWith("");
+    expect(onUseContribution).toHaveBeenCalledWith("");
+    expect(onViewContribution).toHaveBeenCalledWith("");
+    expect(onCompareContribution).toHaveBeenCalledWith("");
+  });
+});
+
+describe("vcs split-button root repository scope", () => {
+  it("matches the root checkout scope when callbacks receive no repository name", async () => {
+    const requestReplace = vi.fn();
+    const requestUse = vi.fn();
+    const openExternalLinkFn = vi.fn().mockResolvedValue("browser");
+    const onCompareContribution = vi.fn();
+    const resolutionTarget = {
+      expectedRemoteHead: "a".repeat(40),
+      repo: "",
+      repositoryName: "testorg/testrepo",
+    };
+    const callbacks = buildVcsSplitCallbacks({
+      openCommitDialog: vi.fn(),
+      openPRDialog: vi.fn(),
+      handlePull: vi.fn(),
+      handlePush: vi.fn(),
+      handleRebase: vi.fn(),
+      handleMerge: vi.fn(),
+      resolution: { requestReplace, requestUse },
+      resolutionTarget,
+      selectedPR: { pr_url: SELECTED_PR_URL },
+      openExternalLinkFn,
+      onCompareContribution,
+    });
+
+    callbacks.onReplaceContribution();
+    callbacks.onUseContribution();
+    callbacks.onViewContribution();
+    callbacks.onCompareContribution();
+    await Promise.resolve();
+
+    expect(requestReplace).toHaveBeenCalledWith(resolutionTarget);
+    expect(requestUse).toHaveBeenCalledWith(resolutionTarget);
+    expect(openExternalLinkFn).toHaveBeenCalledWith(SELECTED_PR_URL);
+    expect(onCompareContribution).toHaveBeenCalledWith("");
   });
 });
 

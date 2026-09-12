@@ -35,13 +35,13 @@ export function RemoteContributionResolutionDialog({
 }: RemoteContributionResolutionDialogProps) {
   const { t } = useTranslation();
   const isReplace = action === "replace";
-  const title = t(isReplace ? "task:replacePRBranch" : "task:usePRVersion");
+  const title = t(isReplace ? "task:publishTaskVersion" : "task:restorePublishedPRVersion");
   const description = isReplace
-    ? t("task:replacePRBranchConfirmation", {
+    ? t("task:remoteContributionPublishConfirmation", {
         repository: repositoryName,
         head: expectedRemoteHead,
       })
-    : t("task:usePRVersionConfirmation", { head: expectedRemoteHead });
+    : t("task:remoteContributionRestoreConfirmation", { head: expectedRemoteHead });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-04
-updated: 2026-09-11
+updated: 2026-09-12
 owners:
   - product
 ---
@@ -42,8 +42,46 @@ user intent for destructive replacement, and evidence-based version comparison.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-002.4:** A task with multiple repositories shall start only when every required preflight passes or qualifies for the history-only resume exception. One qualifying repository shall not hide a blocking failure in another.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-002.5:** After resume, the existing Changes surface shall retain its provider/local version choices and their authorization conditions. A history-only rejection shall not create an agent failure or a recovery banner.
 
+## Amendment: branch history explanations
+
+Requirement 003 is implemented. Requirements 001 and 002 retain their current status.
+The task system owns this amendment because it owns checkout preservation and
+published-version choices across repositories and executors.
+
+### REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-003: Branch history explanations
+
+**Intent:** Explain differing histories without falsely attributing a change to
+the published branch or implying that a local rebase lost work.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.1:** When histories diverge, the system shall show “Task and PR histories differ” without assuming which side changed.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.2:** When current evidence identifies a completed local rebase from the published head, the explanation shall identify that local rebase. Missing, stale, ambiguous, or incomplete evidence shall retain neutral wording.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.3:** When exact counts are available, the explanation shall distinguish task commits, published commits, and newer base commits. Counts shall not imply content equivalence or lost work. Unavailable counts shall be omitted.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.4:** The first action shall be “Compare versions”. It shall reveal both version histories without changing Git state. Secondary actions shall be “Publish task version...” and “Restore published PR version...”.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.5:** Publication and restoration shall retain criteria 001.5 and 001.6. Confirmations shall explain replacement effects. A local-rebase explanation shall not relax authorization or claim that validation passed.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.6:** Desktop and phone users shall receive the same explanation, comparison, and resolution choices. Phone explanations shall be touch-accessible without hover. Dismissal shall restore focus. Long content shall remain inside the viewport.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.7:** An explanation shall belong to one selected repository, checkout branch, and PR. Changes to that identity or either head shall invalidate it. Explanations shall not fetch, rewrite, or publish Git history automatically.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-003.8:** All changed copy shall be localized. Loading or failed explanation requests shall preserve the usable Changes view and existing action policy. Aligned and linear histories shall retain their behavior.
+
+#### Exclusions
+
+Automatic reconciliation, validation orchestration, agent intent inference,
+content-based commit deduplication, and new provider support are excluded.
+Existing GitLab presentation exclusions remain in force.
+
+#### Design and delivery
+
+- [Branch history explanations design](../system-design/branch-history-explanations.md)
+- [Branch history explanations package](../../../plans/branch-history-explanations/plan.md)
+
 ## Delivery
 
 Requirement 002 is implemented. See the
 [contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md)
 for the admission tests and verification evidence.
+
+Requirement 003 is implemented. See the
+[branch history explanations package](../../../plans/branch-history-explanations/plan.md)
+for the bounded local-rebase observation, comparison-first UI, mobile parity, and rendered-flow
+verification evidence.

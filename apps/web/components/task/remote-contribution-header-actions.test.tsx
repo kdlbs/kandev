@@ -58,6 +58,13 @@ const relation: RemoteContributionRelation = {
   canUseRemote: true,
 };
 
+const HEADER_ACTION_TEST_IDS = {
+  compare: "header-compare-versions",
+  replace: "header-replace-pr-branch",
+  use: "header-use-pr-version",
+  view: "header-view-pr-version",
+} as const;
+
 function makeResolution() {
   return {
     isLoading: false,
@@ -88,19 +95,25 @@ describe("RemoteContributionHeaderActions", () => {
       />,
     );
 
+    const warning = screen.getByTestId("header-remote-contribution-warning");
+    expect(warning.getAttribute("aria-label")).toBe("Task and PR histories differ");
+    expect(warning.getAttribute("title")).toBe(
+      "The task and published PR histories differ. Compare before choosing a version.",
+    );
+    expect(screen.getByTestId(HEADER_ACTION_TEST_IDS.replace)).toBeTruthy();
+    expect(screen.getByTestId(HEADER_ACTION_TEST_IDS.use)).toBeTruthy();
+    expect(screen.getByTestId(HEADER_ACTION_TEST_IDS.compare)).toBeTruthy();
+    expect(screen.getByTestId(HEADER_ACTION_TEST_IDS.compare)).toHaveProperty("disabled", true);
+    expect(screen.getByTestId(HEADER_ACTION_TEST_IDS.view).textContent).toContain(
+      "Open PR on GitHub",
+    );
     expect(
-      screen.getByTestId("header-remote-contribution-warning").getAttribute("aria-label"),
-    ).toBe("PR branch changed");
-    expect(screen.getByTestId("header-replace-pr-branch")).toBeTruthy();
-    expect(screen.getByTestId("header-use-pr-version")).toBeTruthy();
-    expect(screen.getByTestId("header-view-pr-version").textContent).toContain("PR #901 version");
-    expect(
-      screen.getByRole("img", { name: /Replace the published PR branch/ }).getAttribute("title"),
+      screen.getByRole("img", { name: /Replace the published PR history/ }).getAttribute("title"),
     ).toBeNull();
     expect(screen.getAllByRole("tooltip").map((tooltip) => tooltip.textContent)).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("Replace the published PR branch"),
-        expect.stringContaining("Use the current PR version"),
+        expect.stringContaining("Replace the published PR history"),
+        expect.stringContaining("Replace the task checkout history"),
         expect.stringContaining("Open PR #901 version"),
       ]),
     );
@@ -109,5 +122,47 @@ describe("RemoteContributionHeaderActions", () => {
     fireEvent.click(screen.getByTestId("header-use-pr-version"));
     expect(resolution.requestReplace).toHaveBeenCalledOnce();
     expect(resolution.requestUse).toHaveBeenCalledOnce();
+  });
+
+  it("puts comparison before the version changing actions", () => {
+    render(
+      <RemoteContributionHeaderActions
+        relation={relation}
+        resolution={makeResolution()}
+        resolutionTarget={{
+          repo: "",
+          repositoryName: "testorg/testrepo",
+          expectedRemoteHead: relation.providerHead!,
+        }}
+        prUrl="https://github.com/testorg/testrepo/pull/901"
+        prNumber={901}
+      />,
+    );
+    const menu = screen.getByTestId("header-remote-contribution-menu");
+    const itemIds = Array.from(menu.querySelectorAll("[data-testid]")).map((item) =>
+      item.getAttribute("data-testid"),
+    );
+    expect(itemIds.indexOf(HEADER_ACTION_TEST_IDS.compare)).toBeLessThan(
+      itemIds.indexOf(HEADER_ACTION_TEST_IDS.replace),
+    );
+  });
+
+  it("keeps unavailable replacement actions disabled in the history menu", () => {
+    render(
+      <RemoteContributionHeaderActions
+        relation={{ ...relation, canReplaceRemote: false, canUseRemote: false }}
+        resolution={makeResolution()}
+        resolutionTarget={{
+          repo: "",
+          repositoryName: "testorg/testrepo",
+          expectedRemoteHead: relation.providerHead!,
+        }}
+        prUrl="https://github.com/testorg/testrepo/pull/901"
+        prNumber={901}
+      />,
+    );
+
+    expect(screen.getByTestId(HEADER_ACTION_TEST_IDS.replace)).toHaveProperty("disabled", true);
+    expect(screen.getByTestId(HEADER_ACTION_TEST_IDS.use)).toHaveProperty("disabled", true);
   });
 });

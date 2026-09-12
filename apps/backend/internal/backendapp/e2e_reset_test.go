@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
@@ -20,6 +22,16 @@ import (
 type e2eResetTaskDeleterStub struct {
 	taskID  string
 	options taskservice.DeleteTaskOptions
+}
+
+type e2eAttachTaskAuthorizerStub struct {
+	err    error
+	taskID string
+}
+
+func (s *e2eAttachTaskAuthorizerStub) AuthorizeTaskAccess(_ context.Context, taskID string) error {
+	s.taskID = taskID
+	return s.err
 }
 
 func (s *e2eResetTaskDeleterStub) DeleteTaskWithOptions(
@@ -43,6 +55,29 @@ func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
 	}
 	if !deleter.options.DiscardWorktreeChanges {
 		t.Fatal("E2E reset must discard disposable worktree changes")
+	}
+}
+
+func TestE2EAttachGitHubContributionRejectsUnauthorizedTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	authorizer := &e2eAttachTaskAuthorizerStub{err: errors.New("task is not visible")}
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Params = gin.Params{{Key: "id", Value: "other-task"}}
+	context.Request = httptest.NewRequest(
+		"POST",
+		"/api/v1/e2e/tasks/other-task/remote-contribution",
+		strings.NewReader(`{"pr_url":"https://github.com/testorg/testrepo/pull/1"}`),
+	)
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	handleE2EAttachGitHubContribution(nil, authorizer, nil, nil)(context)
+
+	if response.Code != 404 {
+		t.Fatalf("status = %d, want 404", response.Code)
+	}
+	if authorizer.taskID != "other-task" {
+		t.Fatalf("authorized task ID = %q, want other-task", authorizer.taskID)
 	}
 }
 

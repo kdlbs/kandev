@@ -34,50 +34,21 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
 import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
+import type { ContributionHistoryExplanationTarget } from "@/hooks/domains/session/use-contribution-history-explanation";
 import {
   type RemoteContributionResolutionTarget,
   type useRemoteContributionResolution,
 } from "./use-remote-contribution-resolution";
 import { RemoteContributionHeaderActions } from "./remote-contribution-header-actions";
 import { ComparisonTargetDisplay } from "./changes-panel-comparison-target";
+import { buildBranchRows, type BranchRow, type PerRepoStatus } from "./changes-panel-branch-rows";
 
-export type PerRepoStatus = {
-  repository_name: string;
-  branch: string | null;
-  ahead: number;
-  behind: number;
-  pullBehind?: number;
-  hasStaged: boolean;
-  hasUnstaged: boolean;
-};
-
-type BranchRow = {
-  repoLabel: string | null;
-  branch: string;
-  baseBranch: string;
-  repositoryName: string;
-};
+export type { PerRepoStatus } from "./changes-panel-branch-rows";
 
 type RenameBranchResult = {
   success: boolean;
   error?: string;
 };
-
-function buildBranchRows(
-  perRepoStatus: PerRepoStatus[],
-  baseBranchByRepo: Record<string, string> | undefined,
-  baseBranchFallback: string,
-  repoDisplayName: ((name: string) => string | undefined) | undefined,
-): BranchRow[] {
-  const named = perRepoStatus.filter((s) => s.repository_name !== "" && s.branch);
-  if (named.length <= 1) return [];
-  return named.map((s) => ({
-    repoLabel: repoDisplayName?.(s.repository_name) || s.repository_name,
-    branch: s.branch ?? "",
-    baseBranch: baseBranchByRepo?.[s.repository_name] || baseBranchFallback,
-    repositoryName: s.repository_name,
-  }));
-}
 
 function RenameBranchButton({
   branch,
@@ -525,6 +496,7 @@ type ChangesPanelHeaderProps = {
    *  hydrating — the picker falls back to a static label. */
   taskId: string | null;
   relation?: RemoteContributionRelation;
+  contributionHistoryTarget?: ContributionHistoryExplanationTarget | null;
   resolution?: ReturnType<typeof useRemoteContributionResolution>;
   resolutionTarget?: RemoteContributionResolutionTarget | null;
   remoteContributionUrl?: string;
@@ -559,6 +531,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     credentialDisplay,
     comparisonTargets,
     relation,
+    contributionHistoryTarget,
     resolution,
     resolutionTarget,
     remoteContributionUrl,
@@ -597,6 +570,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
           )}
           <RemoteContributionHeaderActions
             relation={relation}
+            contributionHistoryTarget={contributionHistoryTarget}
             resolution={resolution}
             resolutionTarget={resolutionTarget}
             prUrl={remoteContributionUrl}
