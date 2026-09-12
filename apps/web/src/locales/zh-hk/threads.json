@@ -1,5 +1,5 @@
 {
-  "gridHeightFallback": "網格需要更多高度。目前顯示為列布局。",
+  "gridHeightFallback": "網格需要更多高度。目前顯示為分列。",
   "collapseComposer": "隱藏訊息編輯器",
   "columnLabel": "{{title}} 的代理程式對話",
   "chooseThread": "選擇對話",

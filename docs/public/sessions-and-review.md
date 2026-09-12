@@ -111,7 +111,7 @@ controls hide when idle. Only the existing CI popover remains, when available.
 Hover over a chat or focus its tile with the keyboard to reveal the composer.
 The composer slides and fades in or out; reduced-motion settings make the
 change immediate. CI stays available throughout.
-Its normal **Cancel** control remains available there while an agent runs.
+The normal **Cancel** control remains available in the composer while an agent runs.
 
 Typing, attachments, focused menus, and pending send/upload/cancellation
 operations keep the composer open. Questions, permissions, and recovery
@@ -156,7 +156,7 @@ for confirmation preferences and cleanup consequences.
 Once you confirm **Archive**, its conversation disappears immediately while
 cleanup continues. With archive confirmation disabled, choosing **Archive** is
 enough. If the request fails, the task returns when your current filters and
-column limit allow, without taking focus from the thread you are using.
+chat limit allow, without taking focus from the thread you are using.
 
 If an action or view filter removes your current thread, Threads selects the
 next remaining thread, otherwise the previous one. If neither survives from

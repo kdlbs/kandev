@@ -1,5 +1,5 @@
 {
-  "gridHeightFallback": "网格需要更多高度。当前显示为列布局。",
+  "gridHeightFallback": "网格需要更多高度。当前显示为分列。",
   "collapseComposer": "隐藏消息编辑器",
   "columnLabel": "{{title}} 的智能体对话",
   "chooseThread": "选择对话",

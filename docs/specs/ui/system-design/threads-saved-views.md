@@ -134,7 +134,7 @@ The backend rejects these invalid values:
 - an empty view name;
 - more than 20 filter clauses in one view;
 - more than 200 selected task IDs in one view;
-- a numeric column limit outside 1 through 30;
+- a numeric chat limit outside 1 through 30;
 - an active or draft base ID that does not identify a saved view.
 
 The user-settings revision orders boot hydration, PATCH responses, and live
@@ -325,7 +325,7 @@ uses activity recency inside each group. Plain `WAITING_FOR_INPUT` does not
 become a person-action rank.
 
 The query fingerprint contains the active view ID, effective scope, filters,
-sort, and column limit. A fingerprint change or explicit Reapply sort action
+sort, and chat limit. A fingerprint change or explicit Reapply sort action
 increments the order-reset generation. The next render uses the complete
 sorted order.
 

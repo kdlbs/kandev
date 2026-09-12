@@ -11,7 +11,7 @@ owners:
 ## Overview
 
 Threads can contain many live task conversations. Users need direct control of
-which task columns appear, their order, and the maximum number of columns.
+which task conversations appear, their order, and the maximum number of chats.
 
 Threads saved views provide this control without changing sidebar task views.
 The UI system owns the interaction and query presentation. The task system
@@ -28,7 +28,7 @@ continues to own task and workflow state.
 - **Eligible task:** A non-archived task in the active workspace that satisfies
   the existing Threads deck eligibility contract and has a primary session.
 - **Admitted task:** An eligible task that matches the active view and is inside
-  its current column limit.
+  its current chat limit.
 - **View draft:** Unsaved changes to the active Threads view.
 
 ## Requirements
@@ -50,7 +50,7 @@ Threads views, so that I can change focus with one action.
   system shall provide and select one canonical `All threads` view.
 - **AC-UI-THREADS-SAVED-VIEWS-001.3:** `All threads` shall use all eligible
   tasks, the existing attention-first order, and a default limit of five
-  columns.
+  chats.
 - **AC-UI-THREADS-SAVED-VIEWS-001.4:** A user shall be able to create, rename,
   delete, switch, overwrite, duplicate with `Save as`, and discard changes to
   Threads views. Switching or reselecting a view shall not silently discard
@@ -107,10 +107,10 @@ bounded task data.
 - **AC-UI-THREADS-SAVED-VIEWS-002.13:** Filters shall support active errors,
   task labels, task origin, and tasks that have more than one agent session.
 
-### REQ-UI-THREADS-SAVED-VIEWS-003: Sort and column limit
+### REQ-UI-THREADS-SAVED-VIEWS-003: Sort and chat limit
 
 **Intent:** Give the user a predictable order and a hard bound on simultaneous
-task columns.
+chats.
 
 #### Acceptance criteria
 
@@ -120,9 +120,9 @@ task columns.
 - **AC-UI-THREADS-SAVED-VIEWS-003.2:** Every sort shall use task ID as its final
   deterministic tie-breaker.
 - **AC-UI-THREADS-SAVED-VIEWS-003.3:** A Threads view shall support no user
-  column limit or an integer limit from 1 through 30.
+  chat limit or an integer limit from 1 through 30.
 - **AC-UI-THREADS-SAVED-VIEWS-003.4:** The system shall apply task scope,
-  filters, sort, and then the column limit in that order.
+  filters, sort, and then the chat limit in that order.
 - **AC-UI-THREADS-SAVED-VIEWS-003.5:** When the limit is 3, the board shall
   mount at most three task-column shells for that view.
 - **AC-UI-THREADS-SAVED-VIEWS-003.6:** The view control shall show the admitted
@@ -135,13 +135,13 @@ task columns.
 - **AC-UI-THREADS-SAVED-VIEWS-003.9:** The user shall be able to reapply the
   active sort to the current matching set without changing the saved view.
 - **AC-UI-THREADS-SAVED-VIEWS-003.10:** A valid task deep link shall temporarily
-  admit and focus its task when the active view or column limit hides it.
+  admit and focus its task when the active view or chat limit hides it.
 - **AC-UI-THREADS-SAVED-VIEWS-003.11:** A temporary deep-link admission shall
-  count toward the column limit and shall not modify the saved task scope.
+  count toward the chat limit and shall not modify the saved task scope.
 - **AC-UI-THREADS-SAVED-VIEWS-003.12:** Each sort option shall include a
   visible description that explains the order that the option applies.
 - **AC-UI-THREADS-SAVED-VIEWS-003.13:** A new Threads view shall start with a
-  limit of five columns. The user can select another valid limit or no limit.
+  limit of five chats. The user can select another valid limit or no limit.
 
 ### REQ-UI-THREADS-SAVED-VIEWS-004: Responsive editor and recovery
 
