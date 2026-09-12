@@ -259,6 +259,17 @@ func (c QueueRunCallback) resolveParticipantRoleStepScoped(ctx context.Context, 
 	return ids, nil
 }
 
+// ResolveFanOutSeats exposes roleSeatsForFanOut to callers outside the
+// engine that must predict a queue_run_for_each_participant action's
+// resolved seats without going through HandleTrigger — office/scheduler's
+// cascade producer needs this to attach the same payload the engine-routed
+// fan-out would for the same (wave, agent) pair (AC-002.10/.16).
+func ResolveFanOutSeats(
+	ctx context.Context, store ParticipantStore, stepID, taskID, workflowID, role string,
+) ([]ParticipantInfo, error) {
+	return roleSeatsForFanOut(ctx, store, stepID, taskID, workflowID, role)
+}
+
 // roleSeatsForFanOut gathers the same participant population the quorum
 // guard counts (gatherParticipantSlate — per-task rows at any step, unioned
 // with template rows at the evaluating step), filters to role (deliberately

@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -201,6 +202,7 @@ type SchedulerService struct {
 	agentTypeResolver       func(profileID string) string
 	projectSkillDirResolver func(agentTypeID string) string
 	workflowStepGetter      WorkflowStepGetter
+	participantStore        engine.ParticipantStore
 }
 
 // WorkflowStepGetter resolves a workflow step by ID. Implemented by
@@ -215,6 +217,15 @@ type WorkflowStepGetter interface {
 // parity. Left nil, cascade wakes queue without a merged action payload.
 func (ss *SchedulerService) SetWorkflowStepGetter(g WorkflowStepGetter) {
 	ss.workflowStepGetter = g
+}
+
+// SetParticipantStore wires the participant seat resolution used for
+// queue_run_for_each_participant payload parity — the same
+// engine.ParticipantStore instance the workflow engine itself uses
+// (workflow/adapters.ParticipantAdapter in production). Left nil, cascade
+// never attaches a for-each-participant action's payload.
+func (ss *SchedulerService) SetParticipantStore(store engine.ParticipantStore) {
+	ss.participantStore = store
 }
 
 // NewSchedulerService creates a new SchedulerService.
@@ -391,15 +402,24 @@ func (ss *SchedulerService) QueueRunCtx(
 // Otherwise ExtraPayload's keys are overlaid onto the encoded object, then
 // c's own envelope fields are re-applied on top — workflow-authored content
 // keys win, but a workflow-authored payload can never redirect the run's
-// identity. This mirrors runs/service.runPayload's precedence, which copies
-// the caller's payload and then unconditionally re-asserts task_id,
-// workflow_step_id and agent_profile_id from the typed request: P1 never
-// goes through that function (it inserts via ss.repo.CreateRun directly),
-// so encodeRunContext is the only place that guarantee can be enforced for
-// the cascade path. Without it, a queue_run action's payload.task_id would
-// silently override task.ParentID and misdirect the wake to a foreign task
-// — task_id is what SchedulerIntegration.extractTaskID reads to check out
-// and budget the run.
+// identity. This mirrors runs/service.runPayload's precedence for task_id
+// and workflow_step_id: P1 never goes through that function (it inserts via
+// ss.repo.CreateRun directly), so encodeRunContext is the only place that
+// guarantee can be enforced for the cascade path. Without it, a queue_run
+// action's payload.task_id would silently override task.ParentID and
+// misdirect the wake to a foreign task — task_id is what
+// SchedulerIntegration.extractTaskID reads to check out and budget the run.
+//
+// Unlike runPayload, this does not re-assert agent_profile_id: RunContext
+// carries no typed recipient field to re-assert from (the run's actual
+// AgentProfileID column is set separately, from queueRun's own
+// agentInstanceID parameter, never from this payload). A workflow-authored
+// ExtraPayload["agent_profile_id"] therefore passes through unfiltered —
+// currently inert, since no reader in this codebase consults
+// payload["agent_profile_id"] for dispatch or routing (both use the DB
+// column instead). See
+// TestQueueRunCtx_ExtraPayloadAgentProfileID_PassesThroughUnfiltered, which
+// pins this as a known non-guarantee rather than an oversight.
 func encodeRunContext(c RunContext) (string, error) {
 	b, err := json.Marshal(c)
 	if err != nil {

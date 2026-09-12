@@ -709,13 +709,19 @@ func TestQueueRun_WakeWaveKey_DifferentAgentBothQueued(t *testing.T) {
 	}
 }
 
-// TestQueueRun_WakeCarryingRequest_NotCoalesced pins half of .002.14 — the
-// request side: a request carrying a wave identity is never merged into an
-// existing queued run, even one for a different parent addressed to the
-// same agent inside the coalescing window. Two independent rows must exist
-// afterward. (Both requests here also carry their own wave identity, so
-// this does not exercise CoalesceRun's row-side guard — see
-// TestQueueRun_ExistingWaveCarryingRow_NotMergedInto for that direction.)
+// TestQueueRun_WakeCarryingRequest_NotCoalesced exercises .002.14 with both
+// requests carrying their own wave identity, addressed to the same agent
+// inside the coalescing window. Two independent rows must exist afterward.
+// Both requests carrying a wave key means CoalesceRun's row-side guard
+// (`AND wake_wave_key = ”`) already excludes the first row as a merge
+// candidate on its own, so this test's assertion holds regardless of
+// whether the request-side guard (shouldCoalesceRun) does anything at all —
+// it does NOT isolate the request side despite the name. See
+// TestQueueRun_WakeCarryingRequest_NotCoalescedIntoNonWaveRow for the test
+// that isolates the request-side guard specifically (asymmetric setup: an
+// existing non-wave-carrying row, a wave-carrying second request), and
+// TestQueueRun_ExistingWaveCarryingRow_NotMergedInto for the row-side guard
+// in isolation (the reverse asymmetry).
 func TestQueueRun_WakeCarryingRequest_NotCoalesced(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()

@@ -1619,7 +1619,7 @@ func startSchedulingRuntime(
 	// Phase 4 (ADR-0004): wire the workflow engine's dependencies and a
 	// dispatcher so office event subscribers route through the engine
 	// unconditionally.
-	engineDispatcher := wireWorkflowEngineForOffice(
+	engineDispatcher, engineParticipants := wireWorkflowEngineForOffice(
 		orchestratorSvc, runProcessorSvc, services.Task, services.Workflow, repos, runsSvc, log,
 	)
 	if services.OfficeSvcs != nil {
@@ -1628,6 +1628,10 @@ func startSchedulingRuntime(
 		// cascade producer resolves the parent's current step directly,
 		// since it never goes through the engine.
 		services.OfficeSvcs.Scheduler.SetWorkflowStepGetter(services.Workflow)
+		// Same parity need for queue_run_for_each_participant: cascade must
+		// see the exact seats the engine's own fan-out would resolve, so it
+		// is wired the same engine.ParticipantStore instance.
+		services.OfficeSvcs.Scheduler.SetParticipantStore(engineParticipants)
 	}
 	// Start the runs scheduler (tick + signal listener). It drives
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.
@@ -1684,7 +1688,7 @@ func wireWorkflowEngineForOffice(
 	repos *Repositories,
 	runsSvc *runsservice.Service,
 	log *logger.Logger,
-) *officeenginedispatcher.Dispatcher {
+) (*officeenginedispatcher.Dispatcher, workflowengine.ParticipantStore) {
 	// Build the workflow-domain adapters.
 	participants := workflowadapters.NewParticipantAdapter(repos.Workflow)
 	decisions := workflowadapters.NewDecisionAdapter(repos.Workflow)
@@ -1722,7 +1726,7 @@ func wireWorkflowEngineForOffice(
 	eng := orchestratorSvc.WorkflowEngine()
 	if eng == nil {
 		log.Warn("workflow engine not initialised; office engine dispatcher disabled")
-		return nil
+		return nil, nil
 	}
 	// Build the dispatcher. The session resolver is the task repo,
 	// which exposes GetActiveTaskSessionByTaskID.
@@ -1733,7 +1737,7 @@ func wireWorkflowEngineForOffice(
 	repos.Task.SetStepEntryDispatcher(&engineStepEntryDispatcherAdapter{engineProvider: orchestratorSvc, log: log})
 	log.Info("step entry dispatcher wired for workflow engine")
 
-	return dispatcher
+	return dispatcher, participants
 }
 
 // workflowEngineProvider is the seam engineStepEntryDispatcherAdapter reads
