@@ -144,13 +144,15 @@ select **Save changes** once. GitHub App creation, import, and installation rema
 GitHub workflows. The help control beside **Task Git access** explains the effective credential
 path on desktop hover or focus and in a touch-accessible drawer on mobile.
 
-- **Managed workspace credentials** (an opt-in policy) uses the selected workspace PAT, named GitHub
-  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. Kandev
-  configures `agentctl` as Git's credential helper so an attached repository can redeem its
-  matching lease on demand; the returned credential is not written to the repository or Git
-  configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
-  PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
-  precedence for that task.
+- **Managed workspace credentials** is an explicit task-access policy. It is an opt-in choice for
+  new configuration, while a workspace created or upgraded before the executor default was
+  introduced may already have `managed` saved. Upgrades preserve that saved policy. Managed mode
+  uses the selected workspace PAT, named GitHub CLI account, or GitHub App through Kandev's
+  short-lived, task/repository-scoped broker. Kandev configures `agentctl` as Git's credential
+  helper so an attached repository can redeem its matching lease on demand. The returned
+  credential is not written to the repository or Git configuration. A separate broker-aware shim
+  handles `gh`. The task receives neither the stored PAT nor an App private key. An executor-profile
+  `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes precedence for that task.
 
 For a managed **Improve Kandev** task, Kandev keeps the task attached to the canonical
 `kdlbs/kandev` repository. Before the first launch, the workspace automation connection resolves
@@ -298,6 +300,63 @@ it.
 Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. Existing workspaces and their saved task-access policies are not rewritten by the new-workspace defaults. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
 
 Legacy shared resolution checks an authenticated host `gh` CLI first, then backend `GITHUB_TOKEN`, backend `GH_TOKEN`, and finally the old stored `GITHUB_TOKEN`/`github_token` secret. Those ambient sources are migration compatibility only; configure an explicit workspace connection to make identity and access deterministic.
+
+#### Recover task Git access after an upgrade
+
+Task Git access has its own saved policy. Older releases and the schema migration used `managed`
+as the compatibility default, while current new workspaces use **Inherit executor Git
+credentials**. An upgrade preserves the saved policy because the database does not record whether
+the managed value came from a migration or from an intentional selection. A healthy host `gh` login
+can coexist with a task that still uses managed access. A managed task can still fail because it
+cannot resolve its workspace connection. This is one possible cause of a task Git authentication
+failure. It does not explain every GitHub authentication error.
+
+See [Choose task Git credentials](#choose-task-git-credentials) for the two task-access modes
+and the credential paths each mode uses.
+
+To change the task policy, open **Settings > Workspaces > _Workspace_ > Integrations > GitHub**.
+If the workspace has an automation connection, choose **Change connection**. If it has no
+automation connection, choose **Connect GitHub**. Both entry points show **Task Git access**.
+Select the intended mode and choose **Save changes**. **Inherit executor Git credentials** makes
+Git use credentials available to the executor. **Managed workspace credentials** makes the
+workspace connection supply the task's GitHub credentials through Kandev. Saving this choice does
+not convert other workspaces or infer a choice from the current `gh` login or credential health.
+
+A disconnected workspace can open **Connect GitHub**, select **Inherit executor Git credentials**,
+and save only the task-access change. You do not need to enter a PAT or create, import, or install
+an App. The workspace remains disconnected from GitHub automation.
+
+Launch or resume the task after saving. After the launch or resume applies the policy, use **New
+terminal** to create a new shell process. If you cannot create a new terminal, destroy the old
+terminal before you create another. Hiding, parking, reopening, or reconnecting the same terminal
+can reuse its PTY and does not refresh its environment. For a Kandev-managed GitHub checkout used
+by a Local or Worktree task, inspect the origin inside the affected checkout:
+
+```bash
+git remote get-url origin
+```
+
+For linked worktrees, the common repository owns the remote configuration, so an origin change is
+shared by its linked checkouts.
+
+The v0.92.0 stable release introduced the prepared-origin and dynamic-protocol fixes. In v0.92.0
+and later, each Local or Worktree launch and resume re-evaluates the host `gh` clone protocol.
+It reconciles the origin of each Kandev-managed checkout before task preparation continues. This
+also covers a prepared workspace reused by a resumed task and does not require a backend restart.
+A repository registered from an existing local checkout is user-managed. Kandev leaves its origin
+unchanged, so the user owns its remote and matching Git credentials.
+
+For Local and Worktree tasks, Git runs as the operating-system account running the Kandev backend.
+Run `gh auth status --hostname github.com`. Inspect SSH agent access and credential helpers as that
+service user. A successful login for an interactive account does not prove that the service account
+can authenticate. If Git reports **detected dubious ownership**, reconcile the service account and
+managed checkout owner. Do not add `safe.directory=*` or change every repository's ownership.
+
+Docker, SSH, and cloud tasks run Git in their own executor environment. Configure the required Git,
+SSH, or provider credentials there. A host `gh` login does not transfer to a remote executor. The
+managed preflight validates the persisted GitHub repository identity and skips executor-inheritance
+mode. It does not test SSH or HTTPS transport authentication. A successful preflight or GitHub
+status check is therefore not proof that a task can clone, fetch, or push.
 
 For recovery:
 

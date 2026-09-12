@@ -1,7 +1,7 @@
 ---
 id: "01-document-upgrade-recovery"
 title: "Document GitHub credential upgrade recovery"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -88,4 +88,18 @@ The procedure must not suggest broad manual rewrites, token disclosure, or autom
 
 ## Results
 
-Pending. This work order requires a later explicit implementation request.
+Implemented the focused upgrade and recovery guidance in
+[`docs/public/integrations.md`](../../public/integrations.md). The guide now explains the
+historical `managed` compatibility default, current executor inheritance, preserved saved
+policies, conditional **Connect GitHub** and **Change connection** entry points, task-only
+executor recovery, fresh-terminal requirements, Local and Worktree origin reconciliation from
+v0.92.0, user-managed checkout ownership, service-user credentials, remote executor boundaries,
+and the limits of managed preflight. The cross-page summary in
+[`docs/public/use-kandev.md`](../../public/use-kandev.md) no longer describes managed access as the
+default for new workspaces.
+
+All three acceptance conditions pass by manual review. Public-doc tests (62), public-doc
+validation (46 pages), catalog validation, specification lint, focused Go tests, both backend and
+web builds, and `git diff --check` pass. A follow-up source review corrected the conditional
+connection entry point and the requirement to create a fresh terminal process; no builds or tests
+were rerun for that review.

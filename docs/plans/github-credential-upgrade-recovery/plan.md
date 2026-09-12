@@ -1,6 +1,6 @@
 ---
 created: 2026-09-12
-status: draft
+status: complete
 requirements:
   - REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001
 system_design:
@@ -116,13 +116,23 @@ The completed packages remain unchanged because this repair changes none of thei
 
 ## Work orders
 
-- [ ] [Task 01: Document upgrade recovery](task-01-document-upgrade-recovery.md).
+- [x] [Task 01: Document upgrade recovery](task-01-document-upgrade-recovery.md).
 
 ## Verification results
 
 Investigation: the focused Go command passed in both packages.
 Package validation passed: catalog validation (264 decisions, 818 specifications), specification lint, and `git diff --check`.
-Public documentation implementation: pending.
+Public documentation implementation completed in `docs/public/integrations.md` and
+`docs/public/use-kandev.md`. The integration guide now explains the historical `managed`
+compatibility default, preserved policies, conditional task-access entry points, task-only
+executor recovery, fresh-terminal requirements, service-user and checkout ownership boundaries,
+v0.92.0 origin reconciliation, remote-executor credentials, and the limits of managed preflight.
+Documentation validation passed: public-doc tests (62), public-doc validation (46 pages), and
+the three work-order acceptance conditions.
+Build validation passed: `make -C apps/backend build` and
+`pnpm --filter @kandev/web build`.
+Follow-up source review corrected the disconnected-workspace entry point and the fresh-terminal
+recovery instruction; no builds or tests were rerun for that review.
 No temporary tests, instances, or database mutations were needed.
 
 ## Risks
