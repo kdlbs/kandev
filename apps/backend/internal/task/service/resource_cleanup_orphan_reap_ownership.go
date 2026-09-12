@@ -201,12 +201,13 @@ func orphanReapFindOverlap(paths []orphanReapOwnedPath, root string) (owner stri
 	return "", false
 }
 
-// orphanReapFindContainment reports whether root is equal to or inside any
-// of paths, a narrower test than orphanReapFindOverlap's "equal to, inside,
-// or containing".
+// orphanReapFindContainment reports whether any of paths is equal to or
+// inside root (AC-TASKS-ORPHAN-REAP-003.4: another task's live worktree
+// nested inside this reap root blocks it), a narrower test than
+// orphanReapFindOverlap's bidirectional "equal to, inside, or containing".
 func orphanReapFindContainment(paths []orphanReapOwnedPath, root string) (owner string, found bool) {
 	for _, p := range paths {
-		if p.path == root || orphanReapPathWithinRoot(p.path, root) {
+		if p.path == root || orphanReapPathWithinRoot(root, p.path) {
 			return p.taskID, true
 		}
 	}

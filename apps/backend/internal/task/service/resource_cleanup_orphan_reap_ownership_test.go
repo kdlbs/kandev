@@ -108,7 +108,48 @@ func TestApplyOrphanReapOwnershipEmptyWorkspacePathNamesNoPath(t *testing.T) {
 
 // AC-TASKS-ORPHAN-REAP-003.4: a root equal to or inside another task's live
 // recorded execution's worktree is blocked.
-func TestApplyOrphanReapOwnershipBlocksRootInsideOtherTaskLiveWorktree(t *testing.T) {
+// AC-TASKS-ORPHAN-REAP-003.4: the worktree, not the root, is the thing that
+// must be equal to or inside the other -- another task's live worktree
+// nested inside this reap root blocks it (a child task's worktree
+// surviving the removal of a parent's directory it lived under).
+func TestApplyOrphanReapOwnershipBlocksRootContainingOtherTaskLiveWorktree(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+	mustCreateOrphanReapTask(t, repo, "task-other")
+
+	root := t.TempDir()
+	nestedWorktree := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nestedWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "exec-other", SessionID: "sess-other", TaskID: "task-other", ExecutorID: "executor-1",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+		WorktreePath: nestedWorktree,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	resolvedRoot := resolveOrphanReapPathBestEffort(root)
+	byRoot := map[string][]orphanReapCandidate{resolvedRoot: {newOrphanReapOwnershipCandidate(500, 1, resolvedRoot, resolvedRoot)}}
+	snap := []hostProcess{{PID: 500, PPID: 1, Cwd: resolvedRoot, Command: "sh"}}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+	if len(got) != 0 {
+		t.Fatalf("expected root to be blocked by another task's live worktree nested inside it, got %+v", got)
+	}
+	if len(snapshot.OrphanReapSkips) != 1 || snapshot.OrphanReapSkips[0].Root != resolvedRoot {
+		t.Fatalf("expected one root-level skip for %q, got %+v", resolvedRoot, snapshot.OrphanReapSkips)
+	}
+}
+
+// The mirror image of the above: this task's reap root nested inside
+// another task's live worktree is NOT a containment match under
+// AC-003.4's one-directional text (only AC-003.2's bidirectional session
+// overlap check reaches this shape).
+func TestApplyOrphanReapOwnershipDoesNotBlockRootNestedInsideOtherTaskLiveWorktree(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	mustCreateOrphanReapTask(t, repo, "task-a")
@@ -129,11 +170,11 @@ func TestApplyOrphanReapOwnershipBlocksRootInsideOtherTaskLiveWorktree(t *testin
 	snapshot := &taskResourceCleanupSnapshot{}
 
 	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
-	if len(got) != 0 {
-		t.Fatalf("expected root to be blocked by another task's live worktree, got %+v", got)
+	if len(got) != 1 {
+		t.Fatalf("expected root nested inside another task's worktree to remain signalable under AC-003.4, got %+v", got)
 	}
-	if len(snapshot.OrphanReapSkips) != 1 || snapshot.OrphanReapSkips[0].Root != root {
-		t.Fatalf("expected one root-level skip for %q, got %+v", root, snapshot.OrphanReapSkips)
+	if len(snapshot.OrphanReapSkips) != 0 {
+		t.Fatalf("expected no root-level skip, got %+v", snapshot.OrphanReapSkips)
 	}
 }
 
@@ -466,32 +507,33 @@ func TestApplyOrphanReapOwnershipFailsClosedOnUnresolvableExecutorWorktreePath(t
 
 // AC-TASKS-ORPHAN-REAP-003.2 vs 003.4: orphanReapFindOverlap matches "equal
 // to, inside, or containing" while orphanReapFindContainment only matches
-// the narrower "equal to or inside" -- a path nested inside root is an
-// overlap but not a containment.
+// the narrower "equal to or inside" (AC-003.4's own direction: another
+// task's worktree nested inside root blocks it) -- root nested inside
+// another task's path is an overlap but not a containment.
 func TestOrphanReapFindOverlapAndContainmentDiffer(t *testing.T) {
 	root := filepath.Join(string(filepath.Separator), "tasks", "root")
 
-	t.Run("path nested inside root: overlap yes, containment no", func(t *testing.T) {
+	t.Run("path nested inside root: both match", func(t *testing.T) {
 		nested := filepath.Join(root, "child")
 		paths := []orphanReapOwnedPath{{taskID: "other", path: nested}}
 
 		if _, found := orphanReapFindOverlap(paths, root); !found {
 			t.Fatalf("expected overlap to detect a path nested inside root")
 		}
-		if _, found := orphanReapFindContainment(paths, root); found {
-			t.Fatalf("expected containment to not match a path nested inside root")
+		if _, found := orphanReapFindContainment(paths, root); !found {
+			t.Fatalf("expected containment to detect another task's worktree nested inside root")
 		}
 	})
 
-	t.Run("root nested inside path: both match", func(t *testing.T) {
+	t.Run("root nested inside path: overlap yes, containment no", func(t *testing.T) {
 		ancestor := filepath.Dir(root)
 		paths := []orphanReapOwnedPath{{taskID: "other", path: ancestor}}
 
 		if _, found := orphanReapFindOverlap(paths, root); !found {
 			t.Fatalf("expected overlap to detect root nested inside path")
 		}
-		if _, found := orphanReapFindContainment(paths, root); !found {
-			t.Fatalf("expected containment to detect root nested inside path")
+		if _, found := orphanReapFindContainment(paths, root); found {
+			t.Fatalf("expected containment to not match root nested inside another task's path")
 		}
 	})
 
