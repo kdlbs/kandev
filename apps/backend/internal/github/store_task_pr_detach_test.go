@@ -80,6 +80,50 @@ func TestTaskPRDetachFiltersActiveRowsAndPersistsTombstone(t *testing.T) {
 	}
 }
 
+func TestTaskPRDetachRetiresOnlyExactAutomationAndCIState(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	var firstID string
+	for _, number := range []int{1, 2} {
+		pr := &TaskPR{
+			WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+			PRNumber: number, PRURL: "https://github.com/acme/demo/pull/1", PRTitle: "PR", HeadBranch: "feature", BaseBranch: "main", State: "open", CreatedAt: now,
+		}
+		if err := store.CreateTaskPR(ctx, pr); err != nil {
+			t.Fatalf("create PR %d: %v", number, err)
+		}
+		if number == 1 {
+			firstID = pr.ID
+		}
+		if _, err := store.db.ExecContext(ctx, `INSERT INTO github_task_pr_automation_options (task_id, repository_id, pr_number, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, "task-1", "repo-1", number, now, now); err != nil {
+			t.Fatalf("seed automation options for PR %d: %v", number, err)
+		}
+		if _, err := store.db.ExecContext(ctx, `INSERT INTO github_task_ci_pr_state (task_id, repository_id, pr_number, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, "task-1", "repo-1", number, now, now); err != nil {
+			t.Fatalf("seed CI state for PR %d: %v", number, err)
+		}
+	}
+
+	if _, changed, err := store.DetachTaskPR(ctx, firstID); err != nil || !changed {
+		t.Fatalf("detach first PR: changed=%v err=%v", changed, err)
+	}
+	for _, table := range []string{"github_task_pr_automation_options", "github_task_ci_pr_state"} {
+		var removed, retained int
+		if err := store.db.GetContext(ctx, &removed, `SELECT COUNT(*) FROM `+table+` WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, "task-1", "repo-1", 1); err != nil {
+			t.Fatalf("count removed %s rows: %v", table, err)
+		}
+		if err := store.db.GetContext(ctx, &retained, `SELECT COUNT(*) FROM `+table+` WHERE task_id = ? AND repository_id = ? AND pr_number = ?`, "task-1", "repo-1", 2); err != nil {
+			t.Fatalf("count retained %s rows: %v", table, err)
+		}
+		if removed != 0 || retained != 1 {
+			t.Errorf("%s rows after detach: removed=%d retained=%d, want 0 and 1", table, removed, retained)
+		}
+	}
+}
+
 func TestLegacyTaskPRRebuildPreservesDetachedAt(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

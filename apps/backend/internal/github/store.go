@@ -2260,7 +2260,25 @@ func (s *Store) ListTaskPRsByTaskIncludingDetached(ctx context.Context, taskID s
 // The bool return reports whether this call performed the transition.
 func (s *Store) DetachTaskPR(ctx context.Context, associationID string) (*TaskPR, bool, error) {
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var identity struct {
+		TaskID       string `db:"task_id"`
+		RepositoryID string `db:"repository_id"`
+		PRNumber     int    `db:"pr_number"`
+	}
+	if err := tx.GetContext(ctx, &identity, tx.Rebind(`SELECT task_id, repository_id, pr_number FROM github_task_prs WHERE id = ? AND detached_at IS NULL`), associationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			_ = tx.Rollback()
+			tp, getErr := s.GetTaskPRByID(ctx, associationID)
+			return tp, false, getErr
+		}
+		return nil, false, err
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(
 		`UPDATE github_task_prs SET detached_at = ?, updated_at = ?
 		 WHERE id = ? AND detached_at IS NULL`), now, now, associationID)
 	if err != nil {
@@ -2270,8 +2288,21 @@ func (s *Store) DetachTaskPR(ctx context.Context, associationID string) (*TaskPR
 	if err != nil {
 		return nil, false, err
 	}
-	tp, err := s.GetTaskPRByID(ctx, associationID)
-	return tp, count > 0, err
+	if count > 0 {
+		for _, table := range []string{"github_task_pr_automation_options", "github_task_ci_pr_state"} {
+			if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE task_id = ? AND repository_id = ? AND pr_number = ?`), identity.TaskID, identity.RepositoryID, identity.PRNumber); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+	var tp TaskPR
+	if err := tx.GetContext(ctx, &tp, tx.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs WHERE id = ? LIMIT 1`), associationID); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return &tp, count > 0, nil
 }
 
 // RestoreTaskPR clears a detached tombstone for an explicit link action and

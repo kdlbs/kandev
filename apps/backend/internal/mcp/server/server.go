@@ -1085,6 +1085,10 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
+			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
+				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
+		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
@@ -1382,6 +1386,40 @@ func (s *Server) registerPRAutomationTools() {
 		),
 		s.wrapHandler("report_pr_auto_fix_outcome_kandev", s.reportTaskPRAutoFixOutcomeHandler()),
 	)
+}
+
+func (s *Server) registerTaskPRLinkTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("link_task_pr_kandev", taskPRLinkToolOptions(false)...),
+		s.wrapHandler("link_task_pr_kandev", s.taskPRLinkHandler("link_task_pr_kandev")),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("unlink_task_pr_kandev", taskPRLinkToolOptions(false)...),
+		s.wrapHandler("unlink_task_pr_kandev", s.taskPRLinkHandler("unlink_task_pr_kandev")),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("replace_task_pr_kandev", taskPRLinkToolOptions(true)...),
+		s.wrapHandler("replace_task_pr_kandev", s.taskPRLinkHandler("replace_task_pr_kandev")),
+	)
+}
+
+func taskPRLinkToolOptions(replace bool) []mcp.ToolOption {
+	options := []mcp.ToolOption{
+		mcp.WithDescription("Manage an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number."),
+		mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("Target task identifier")),
+		mcp.WithString("provider", mcp.Required(), mcp.Description("Provider identity: github or gitlab")),
+		mcp.WithString("repository_id", mcp.Required(), mcp.Description("Canonical task repository identity")),
+		mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
+	}
+	if replace {
+		options[0] = mcp.WithDescription("Replace an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number. The old and new associations must use the same provider.")
+		options = append(options,
+			mcp.WithString("old_provider", mcp.Required(), mcp.Description("Current association provider identity: github or gitlab")),
+			mcp.WithString("old_repository_id", mcp.Required(), mcp.Description("Current association canonical repository identity")),
+			mcp.WithNumber("old_number", mcp.Required(), mcp.Description("Current pull request or merge request number")),
+		)
+	}
+	return options
 }
 
 func (s *Server) registerMRAutomationTools() {

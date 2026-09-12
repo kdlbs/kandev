@@ -748,3 +748,14 @@ func (s *Service) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*Task
 	}
 	return store.ListTaskMRsByTask(ctx, taskID)
 }
+
+// ListTaskMRsByTaskIDs surfaces GitLab MR associations grouped by task ID.
+func (s *Service) ListTaskMRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskMR, error) {
+	s.mu.RLock()
+	store := s.store
+	s.mu.RUnlock()
+	if store == nil {
+		return map[string][]*TaskMR{}, nil
+	}
+	return store.ListTaskMRsByTaskIDs(ctx, taskIDs)
+}

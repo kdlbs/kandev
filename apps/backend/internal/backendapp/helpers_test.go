@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/quickterminal"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	systemsvc "github.com/kandev/kandev/internal/system"
@@ -150,6 +151,48 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		if got := status[key]; got != want {
 			t.Errorf("status[%q] = %#v, want %#v", key, got, want)
 		}
+	}
+}
+
+func TestMCPTaskPRListerAdapterPreservesGitHubChangeFacts(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	draft := true
+	pr := &github.TaskPR{
+		TaskID:       "task-change-facts",
+		RepositoryID: "repo-change-facts",
+		PRNumber:     42,
+		PRURL:        "https://github.com/acme/api/pull/42",
+		PRTitle:      "Preserve exact facts",
+		State:        "open",
+		BaseBranch:   "main",
+		HeadBranch:   "feature/facts",
+		HeadSHA:      "head-sha-42",
+		IsDraft:      &draft,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	adapter := mcpTaskPRListerAdapter{gh: github.NewService(nil, "", nil, store, nil, nil)}
+	byTask, err := adapter.ListTaskPRsByTaskIDs(ctx, []string{pr.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskPRsByTaskIDs: %v", err)
+	}
+	infos := byTask[pr.TaskID]
+	if len(infos) != 1 {
+		t.Fatalf("infos = %#v, want one association", infos)
+	}
+	got := infos[0]
+	if got.RepositoryID != pr.RepositoryID || got.Number != pr.PRNumber || got.URL != pr.PRURL || got.Title != pr.PRTitle || got.State != pr.State || got.BaseRef != pr.BaseBranch || got.HeadRef != pr.HeadBranch {
+		t.Fatalf("adapter facts = %#v", got)
+	}
+	if got.Draft == nil || !*got.Draft {
+		t.Fatalf("Draft = %v, want true", got.Draft)
+	}
+	if got.HeadSHA != pr.HeadSHA {
+		t.Fatalf("HeadSHA = %q, want %q", got.HeadSHA, pr.HeadSHA)
 	}
 }
 

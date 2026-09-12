@@ -444,7 +444,9 @@
         "apps/backend/internal/github/app_registration_lifecycle_service.go",
         "apps/backend/internal/github/app_registration_import.go",
         "apps/web/lib/api/domains/github-auth-api.ts",
-        "apps/backend/internal/mcp/server/server.go"
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/mcp/handlers/task_change_link.go",
+        "apps/backend/internal/backendapp/task_change_link_coordinator.go"
       ],
       "tests": [
         "apps/web/components/app-sidebar/sections/integrations-section.test.tsx",
@@ -454,7 +456,9 @@
         "apps/backend/internal/github/controller_app_registration_test.go",
         "apps/backend/internal/github/app_registration_import_test.go",
         "apps/web/e2e/tests/settings/github-app-registration.spec.ts",
-        "apps/backend/internal/mcp/server/handlers_test.go"
+        "apps/backend/internal/mcp/server/handlers_test.go",
+        "apps/backend/internal/mcp/handlers/task_change_link_test.go",
+        "apps/backend/internal/backendapp/task_change_link_coordinator_test.go"
       ],
       "settingsRoutes": [
         "/settings/integrations",
@@ -468,6 +472,9 @@
       "mcpTools": [
         "get_task_mr_automation_kandev",
         "get_task_pr_automation_kandev",
+        "link_task_pr_kandev",
+        "replace_task_pr_kandev",
+        "unlink_task_pr_kandev",
         "report_pr_auto_fix_outcome_kandev",
         "update_task_mr_automation_kandev",
         "update_task_pr_automation_kandev"

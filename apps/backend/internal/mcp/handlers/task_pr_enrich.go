@@ -11,15 +11,39 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// TaskPRInfo is the decoupled view of a task↔PR association consumed by the
+// TaskPRInfo is the decoupled view of a task<->PR association consumed by the
 // MCP task-listing handlers. The cmd wiring adapts *github.Service.TaskPR into
 // this shape so this package does not depend on internal/github.
 type TaskPRInfo struct {
-	Number   int
-	URL      string
-	Title    string
-	State    string // open, closed, merged
-	MergedAt *time.Time
+	RepositoryID string
+	Number       int
+	URL          string
+	Title        string
+	State        string // open, closed, merged
+	Draft        *bool
+	BaseRef      string
+	BaseSHA      string
+	HeadRef      string
+	HeadSHA      string
+	MergedAt     *time.Time
+	ClosedAt     *time.Time
+}
+
+// TaskMRInfo is the decoupled view of a GitLab task<->MR association consumed
+// by the MCP task-listing handlers.
+type TaskMRInfo struct {
+	RepositoryID string
+	Number       int
+	URL          string
+	Title        string
+	State        string
+	Draft        bool
+	BaseRef      string
+	BaseSHA      string
+	HeadRef      string
+	HeadSHA      string
+	MergedAt     *time.Time
+	ClosedAt     *time.Time
 }
 
 // TaskPRLister returns PR associations grouped by task ID. Backed by
@@ -29,68 +53,132 @@ type TaskPRLister interface {
 	ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]TaskPRInfo, error)
 }
 
+// TaskMRLister returns MR associations grouped by task ID. Backed by
+// *gitlab.Service in production; left nil in contexts without GitLab.
+type TaskMRLister interface {
+	ListTaskMRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]TaskMRInfo, error)
+}
+
 // SetTaskPRLister wires the optional PR lister used to enrich task-listing
 // responses with associated pull requests.
 func (h *Handlers) SetTaskPRLister(l TaskPRLister) {
 	h.taskPRLister = l
 }
 
-// prsByTaskID looks up PR associations for the given task IDs via the wired
-// lister, mapping each to the shared v1.TaskPRSummary shape. Returns nil when
-// the lister is unset, there are no IDs, or the lookup fails (logged) — callers
-// treat a nil map as "no PRs to attach".
-func (h *Handlers) prsByTaskID(ctx context.Context, taskIDs []string) map[string][]v1.TaskPRSummary {
-	if h.taskPRLister == nil || len(taskIDs) == 0 {
-		return nil
+// SetTaskMRLister wires the optional MR lister used to enrich task-listing
+// responses with associated merge requests.
+func (h *Handlers) SetTaskMRLister(l TaskMRLister) {
+	h.taskMRLister = l
+}
+
+type taskChangeRequestsByID struct {
+	prs     map[string][]v1.TaskPRSummary
+	changes map[string][]v1.TaskChangeRequestSummary
+}
+
+func (h *Handlers) changeRequestsByTaskID(ctx context.Context, taskIDs []string) taskChangeRequestsByID {
+	out := taskChangeRequestsByID{
+		prs:     map[string][]v1.TaskPRSummary{},
+		changes: map[string][]v1.TaskChangeRequestSummary{},
 	}
+	if len(taskIDs) == 0 {
+		return out
+	}
+	if h.taskPRLister != nil {
+		h.addPRSummaries(ctx, taskIDs, out)
+	}
+	if h.taskMRLister != nil {
+		h.addMRSummaries(ctx, taskIDs, out)
+	}
+	return out
+}
+
+func (h *Handlers) addPRSummaries(ctx context.Context, taskIDs []string, out taskChangeRequestsByID) {
 	byTask, err := h.taskPRLister.ListTaskPRsByTaskIDs(ctx, taskIDs)
 	if err != nil {
 		h.logger.Warn("failed to list task PRs for MCP response", zap.Error(err))
-		return nil
+		return
 	}
-	out := make(map[string][]v1.TaskPRSummary, len(byTask))
 	for taskID, prs := range byTask {
-		if len(prs) == 0 {
-			continue
-		}
-		summaries := make([]v1.TaskPRSummary, 0, len(prs))
 		for _, pr := range prs {
-			summaries = append(summaries, v1.TaskPRSummary{
+			out.prs[taskID] = append(out.prs[taskID], v1.TaskPRSummary{
 				Number:   pr.Number,
 				URL:      pr.URL,
 				Title:    pr.Title,
 				State:    pr.State,
 				MergedAt: pr.MergedAt,
 			})
+			out.changes[taskID] = append(out.changes[taskID], v1.TaskChangeRequestSummary{
+				Provider:     "github",
+				RepositoryID: pr.RepositoryID,
+				Number:       pr.Number,
+				URL:          pr.URL,
+				Title:        pr.Title,
+				State:        pr.State,
+				Draft:        pr.Draft,
+				BaseRef:      pr.BaseRef,
+				HeadRef:      pr.HeadRef,
+				HeadSHA:      pr.HeadSHA,
+				MergedAt:     pr.MergedAt,
+				ClosedAt:     pr.ClosedAt,
+			})
 		}
-		out[taskID] = summaries
 	}
-	return out
 }
 
-// enrichTasksWithPRs populates dto.TaskDTO.PRs for each task from the wired
-// TaskPRLister. No-op when the lister is unset or there are no tasks.
+func (h *Handlers) addMRSummaries(ctx context.Context, taskIDs []string, out taskChangeRequestsByID) {
+	byTask, err := h.taskMRLister.ListTaskMRsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		h.logger.Warn("failed to list task MRs for MCP response", zap.Error(err))
+		return
+	}
+	for taskID, mrs := range byTask {
+		for _, mr := range mrs {
+			draft := mr.Draft
+			out.changes[taskID] = append(out.changes[taskID], v1.TaskChangeRequestSummary{
+				Provider:     "gitlab",
+				RepositoryID: mr.RepositoryID,
+				Number:       mr.Number,
+				URL:          mr.URL,
+				Title:        mr.Title,
+				State:        mr.State,
+				Draft:        &draft,
+				BaseRef:      mr.BaseRef,
+				BaseSHA:      mr.BaseSHA,
+				HeadRef:      mr.HeadRef,
+				HeadSHA:      mr.HeadSHA,
+				MergedAt:     mr.MergedAt,
+				ClosedAt:     mr.ClosedAt,
+			})
+		}
+	}
+}
+
+// enrichTasksWithPRs populates dto.TaskDTO.PRs for compatibility and
+// dto.TaskDTO.ChangeRequests with provider-neutral GitHub/GitLab links.
 func (h *Handlers) enrichTasksWithPRs(ctx context.Context, tasks []dto.TaskDTO) {
-	if h.taskPRLister == nil || len(tasks) == 0 {
+	if (h.taskPRLister == nil && h.taskMRLister == nil) || len(tasks) == 0 {
 		return
 	}
 	ids := make([]string, len(tasks))
 	for i := range tasks {
 		ids[i] = tasks[i].ID
 	}
-	byTask := h.prsByTaskID(ctx, ids)
+	byTask := h.changeRequestsByTaskID(ctx, ids)
 	for i := range tasks {
-		if prs := byTask[tasks[i].ID]; len(prs) > 0 {
+		if prs := byTask.prs[tasks[i].ID]; len(prs) > 0 {
 			tasks[i].PRs = prs
+		}
+		if changes := byTask.changes[tasks[i].ID]; len(changes) > 0 {
+			tasks[i].ChangeRequests = changes
 		}
 	}
 }
 
-// enrichRelatedTasksWithPRs populates RelatedTask.PRs across every relation
-// surface (the task itself, parent, children, siblings, blockers, blocked-by)
-// in a single batched lookup. No-op when the lister is unset.
+// enrichRelatedTasksWithPRs populates related-task PR compatibility data and
+// provider-neutral GitHub/GitLab change requests in one batched lookup.
 func (h *Handlers) enrichRelatedTasksWithPRs(ctx context.Context, related *service.RelatedTasks) {
-	if h.taskPRLister == nil || related == nil {
+	if (h.taskPRLister == nil && h.taskMRLister == nil) || related == nil {
 		return
 	}
 	nodes := []*service.RelatedTask{&related.Task, related.Parent}
@@ -99,9 +187,6 @@ func (h *Handlers) enrichRelatedTasksWithPRs(ctx context.Context, related *servi
 	nodes = append(nodes, related.Blockers...)
 	nodes = append(nodes, related.BlockedBy...)
 
-	// A task can appear in more than one relation group (e.g. both a sibling
-	// and a blocker), so dedup IDs before the lookup to avoid sending the same
-	// value twice to the lister's WHERE id IN (...) query.
 	ids := make([]string, 0, len(nodes))
 	seen := make(map[string]struct{}, len(nodes))
 	for _, n := range nodes {
@@ -114,16 +199,16 @@ func (h *Handlers) enrichRelatedTasksWithPRs(ctx context.Context, related *servi
 		seen[n.ID] = struct{}{}
 		ids = append(ids, n.ID)
 	}
-	byTask := h.prsByTaskID(ctx, ids)
-	if byTask == nil {
-		return
-	}
+	byTask := h.changeRequestsByTaskID(ctx, ids)
 	for _, n := range nodes {
 		if n == nil {
 			continue
 		}
-		if prs := byTask[n.ID]; len(prs) > 0 {
+		if prs := byTask.prs[n.ID]; len(prs) > 0 {
 			n.PRs = prs
+		}
+		if changes := byTask.changes[n.ID]; len(changes) > 0 {
+			n.ChangeRequests = changes
 		}
 	}
 }
