@@ -58,7 +58,7 @@ func (r *Repository) hideBuiltinWorkflows() error {
 	if err != nil {
 		return fmt.Errorf("build hidden workflow reconciliation: %w", err)
 	}
-	if _, err := r.db.Exec(r.db.Rebind(query), args...); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(query), args...); err != nil {
 		return fmt.Errorf("hide builtin workflows: %w", err)
 	}
 	return nil
@@ -79,7 +79,7 @@ func (r *Repository) healBuiltinWorkflowStepFlags() error {
 	for _, tmpl := range templates {
 		for _, step := range tmpl.Steps {
 			want := dialect.BoolToInt(step.AutoAdvanceRequiresSignal)
-			if _, err := r.db.Exec(r.db.Rebind(`
+			if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
 				UPDATE workflow_steps SET auto_advance_requires_signal = ?, updated_at = ?
 				WHERE name = ? AND auto_advance_requires_signal != ?
 				  AND workflow_id IN (SELECT id FROM workflows WHERE is_system = 1 AND workflow_template_id = ?)
@@ -93,7 +93,7 @@ func (r *Repository) healBuiltinWorkflowStepFlags() error {
 
 // ensureDefaultWorkspace creates a default workspace if none exists
 func (r *Repository) ensureDefaultWorkspace() error {
-	ctx := context.Background()
+	ctx := r.migrationContext()
 
 	var count int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM workspaces").Scan(&count); err != nil {
@@ -215,7 +215,7 @@ func (r *Repository) stampWorkspaceOfficeWorkflow(ctx context.Context, workspace
 
 // ensureDefaultExecutorsAndEnvironments creates default executors and environments if none exist
 func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
-	ctx := context.Background()
+	ctx := r.migrationContext()
 	if err := r.ensureDefaultExecutors(ctx); err != nil {
 		return err
 	}

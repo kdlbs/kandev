@@ -27,6 +27,9 @@ const (
 // is treated as terminal. The run is marked failed with the verbatim
 // error message, the consecutive-failure counter is incremented, and
 // when it crosses the effective threshold the agent is auto-paused.
+// It also stamps office_agent_runtime.last_run_finished_at the same as
+// the completed/stopped paths, so cooldown_sec paces the agent's next
+// heartbeat-driven fire regardless of why the previous run ended.
 //
 // No retry is scheduled — the user resolves via Resume session in the
 // chat or Mark fixed in the inbox.
@@ -50,6 +53,7 @@ func (s *Service) HandleAgentFailure(
 	// here keeps the agent out of a stuck "working" even if the failure
 	// bookkeeping that follows errors out.
 	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	s.stampRunFinished(ctx, run)
 
 	count, err := s.repo.IncrementAgentConsecutiveFailures(ctx, run.AgentProfileID)
 	if err != nil {

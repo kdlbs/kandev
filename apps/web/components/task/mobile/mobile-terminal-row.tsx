@@ -3,6 +3,8 @@
 import { IconTerminal2, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
+import { useRef } from "react";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { TerminalCloseInlineConfirmation } from "../terminal-close-inline-confirmation";
@@ -31,6 +33,8 @@ export function MobileTerminalRow({
   onConfirmClose,
 }: MobileTerminalRowProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const closeRef = useRef<HTMLButtonElement>(null);
   return (
     <div
       data-testid={`mobile-terminal-row-${terminal.id}`}
@@ -45,32 +49,39 @@ export function MobileTerminalRow({
       >
         <IconTerminal2 className="h-4 w-4 text-muted-foreground shrink-0" />
         <span className="text-sm truncate flex-1">{terminal.label}</span>
-        {isRunning && !isConfirming && (
+        {isRunning && (!isConfirming || isMobile) && (
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 leading-none">
             {t("task:running")}
           </span>
         )}
       </button>
-      {terminal.closable &&
-        (isConfirming ? (
+      {terminal.closable && (
+        <>
           <TerminalCloseInlineConfirmation
+            open={isConfirming}
+            terminalId={terminal.id}
+            terminalLabel={terminal.label}
+            focusReturnRef={closeRef}
             density="touch"
             testId="mobile-terminal-close-confirmation"
             onCancel={onCancelClose}
             onClose={onClose}
             onConfirm={onConfirmClose}
           />
-        ) : (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t("task:close2", { label: terminal.label })}
-            className="h-11 min-h-11 w-11 min-w-11 transition-[color,background-color,transform] duration-100 active:scale-[0.96]"
-            onClick={() => onAskClose(terminal)}
-          >
-            <IconX className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        ))}
+          {(!isConfirming || isMobile) && (
+            <Button
+              ref={closeRef}
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("task:close2", { label: terminal.label })}
+              className="h-11 min-h-11 w-11 min-w-11 transition-[color,background-color,transform] duration-100 active:scale-[0.96]"
+              onClick={() => onAskClose(terminal)}
+            >
+              <IconX className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          )}
+        </>
+      )}
     </div>
   );
 }

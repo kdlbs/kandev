@@ -71,7 +71,7 @@ func (r *KubernetesExecutor) bootstrapPod(
 }
 
 func kubernetesRuntimeEnvironment(req *ExecutorCreateRequest) map[string]string {
-	return map[string]string{
+	values := map[string]string{
 		"AGENTCTL_LISTEN_HOST":        kubernetesControlHost,
 		"AGENTCTL_PORT":               strconv.Itoa(int(kubeexecutor.DefaultAgentctlPort)),
 		"AGENTCTL_INSTANCE_PORT_BASE": strconv.Itoa(dockerAgentctlInstancePortBase),
@@ -83,6 +83,10 @@ func kubernetesRuntimeEnvironment(req *ExecutorCreateRequest) map[string]string 
 		kubernetesEnvAgentProfile:     req.OfficeAgentProfileID,
 		kubernetesEnvExecutionProfile: req.AgentProfileID,
 	}
+	if selectedCheckoutIsPullRequest(req.Metadata) {
+		values[selectedCheckoutMarker] = "1"
+	}
+	return values
 }
 
 func kubernetesAuthEnvironment(input map[string]string, nonce string) map[string]string {
@@ -224,7 +228,7 @@ func kubernetesPrepareScript(req *ExecutorCreateRequest) (string, error) {
 	if script == "" {
 		return ":\n", nil
 	}
-	script += KandevBranchCheckoutPostlude()
+	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		addition, err := scriptengine.RemoteContributionSetupScript(&binding)
 		if err != nil {

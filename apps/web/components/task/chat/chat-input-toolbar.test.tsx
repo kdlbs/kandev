@@ -3,6 +3,8 @@ import { render, screen, fireEvent, act, cleanup } from "@testing-library/react"
 import { StateProvider } from "@/components/state-provider";
 import type { TaskSession } from "@/lib/types/http";
 
+const MODEL_SELECTOR_TEST_ID = "mock-model-selector";
+
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
 }));
@@ -97,8 +99,19 @@ vi.mock("./implement-plan-button", () => ({
 }));
 
 vi.mock("./reset-context-button", () => ({
-  ResetContextButton: ({ presentation = "desktop" }: { presentation?: "desktop" | "mobile" }) => (
-    <button type="button" data-testid="reset-context-button" data-reset-presentation={presentation}>
+  ResetContextButton: ({
+    presentation = "desktop",
+    onConfirmationOpenChange,
+  }: {
+    presentation?: "desktop" | "mobile";
+    onConfirmationOpenChange?: (open: boolean) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="reset-context-button"
+      data-reset-presentation={presentation}
+      onClick={() => onConfirmationOpenChange?.(true)}
+    >
       Reset context
     </button>
   ),
@@ -207,6 +220,16 @@ function makeRunningSession(cancellationPending: boolean): TaskSession {
     updated_at: SESSION_TIMESTAMP,
   } as TaskSession;
 }
+
+it("keeps phone composer controls mounted while a reset sheet is open", () => {
+  responsiveMock.breakpoint = "mobile";
+  renderFullToolbar();
+  const model = screen.getByTestId(MODEL_SELECTOR_TEST_ID);
+  const submit = screen.getByTestId(SUBMIT_MESSAGE_BUTTON_TEST_ID);
+  fireEvent.click(screen.getByTestId("reset-context-button"));
+  expect(model.isConnected).toBe(true);
+  expect(submit.isConnected).toBe(true);
+});
 
 describe("ChatInputToolbar backend cancellation state", () => {
   it("renders backend-owned pending state after store hydration", () => {
@@ -477,9 +500,9 @@ describe("ChatInputToolbar responsive wrapper", () => {
     );
     expect(screen.getByTestId("toolbar-item-enhance")).toBeTruthy();
     expect(screen.getByTestId("mock-mode-selector").className).toContain("max-w-[46vw]");
-    expect(screen.getByTestId("mock-model-selector").className).toContain("max-w-[56vw]");
-    expect(screen.getByTestId("mock-model-selector").className).toContain("min-w-0");
-    expect(screen.getByTestId("mock-model-selector").className).toContain("overflow-hidden");
+    expect(screen.getByTestId(MODEL_SELECTOR_TEST_ID).className).toContain("max-w-[56vw]");
+    expect(screen.getByTestId(MODEL_SELECTOR_TEST_ID).className).toContain("min-w-0");
+    expect(screen.getByTestId(MODEL_SELECTOR_TEST_ID).className).toContain("overflow-hidden");
   });
 
   it("keeps the compact sessions control on tablet layouts", () => {

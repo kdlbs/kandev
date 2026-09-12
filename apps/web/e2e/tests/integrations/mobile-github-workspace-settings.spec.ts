@@ -2,6 +2,38 @@ import { test, expect } from "../../fixtures/test-base";
 import { stubGitHubRateLimits } from "./github-rate-limit-fixture";
 
 test.describe("GitHub workspace settings on mobile", () => {
+  test("keeps PR discovery failure in the limits drawer until recovery", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    const fixture = await stubGitHubRateLimits(testPage, seedData.workspaceId);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
+
+    const automation = testPage.getByTestId("github-workspace-automation");
+    await expect(automation.getByTestId("github-pr-discovery-health").first()).toContainText(
+      "PR discovery failed",
+    );
+    const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
+    const rateLimitHelpBox = await rateLimitHelp.boundingBox();
+    expect(rateLimitHelpBox).not.toBeNull();
+    await rateLimitHelp.tap();
+    const drawer = testPage.getByRole("dialog", { name: "GitHub API limits" });
+    await expect(drawer).toContainText("PR discovery failed");
+    await expect(drawer).toContainText("Invalid query");
+    await expect(drawer).toContainText("API rate limit: 3,210 of 5,000 requests remaining");
+    await testPage.keyboard.press("Escape");
+
+    fixture.recoverPRDiscovery();
+    await automation.getByRole("button", { name: "Refresh GitHub connection" }).tap();
+    await expect(automation.getByTestId("github-pr-discovery-health")).toHaveCount(0);
+  });
+
   test("configures task Git access in the connection drawer", async ({
     testPage,
     apiClient,

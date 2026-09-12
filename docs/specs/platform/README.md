@@ -21,6 +21,9 @@ This system owns startup and shutdown contracts, process and port-independent
 runtime safety, configuration precedence, diagnostics, notifications,
 localization, feature toggles, health, and shared session recovery services.
 
+Settings discovery and interface parity belong to Platform. Each settings domain
+retains ownership of its values, validation, authority, and persistence.
+
 ## Exclusions
 
 - Executor-specific runtime environments belong to the [executor
@@ -31,7 +34,8 @@ localization, feature toggles, health, and shared session recovery services.
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents. Use the catalog command to find them.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
 
 ## Related systems
 

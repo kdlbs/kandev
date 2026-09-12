@@ -207,6 +207,10 @@ describe("computeCanConnect on ended sessions", () => {
     expect(computeCanConnect("shell", "env-1", "session-1", true)).toBe(false);
   });
 
+  it("connects a shell terminal after workspace restoration", () => {
+    expect(computeCanConnect("shell", "env-1", "session-1", true, true)).toBe(true);
+  });
+
   it("still connects a shell terminal for a live environment", () => {
     expect(computeCanConnect("shell", "env-1", "session-1", false)).toBe(true);
   });
@@ -276,6 +280,11 @@ describe("computeTerminalPaneState", () => {
 
   it("still reports ended when a socket happens to be open", () => {
     expect(computeTerminalPaneState("shell", true, true)).toBe("ended");
+  });
+
+  it("reports a restored shell as connected or connecting instead of ended", () => {
+    expect(computeTerminalPaneState("shell", true, false, true)).toBe("connecting");
+    expect(computeTerminalPaneState("shell", true, true, true)).toBe("connected");
   });
 
   it("reports connecting only while a live session is not yet attached", () => {

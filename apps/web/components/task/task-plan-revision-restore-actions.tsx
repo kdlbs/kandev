@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, type RefObject } from "react";
 import { IconRestore } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import type { TaskPlanRevision } from "@/lib/types/http";
 
 type RevisionRestoreProps = {
@@ -22,6 +23,43 @@ type RevisionRestoreProps = {
 type RevisionRestoreActionProps = RevisionRestoreProps & {
   onRevertRequest: (revision: TaskPlanRevision) => void;
 };
+
+export function MobileRevisionRestoreConfirmation({
+  taskId,
+  target,
+  isSaving,
+  anchorRef,
+  onClose,
+  onRevert,
+}: {
+  taskId: string;
+  target: TaskPlanRevision | null;
+  isSaving: boolean;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  onRevert: (revision: TaskPlanRevision) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const version = target?.revision_number;
+  return (
+    <MobileActionConfirmation
+      open={target !== null}
+      targetKey={`${taskId}:${target?.id}`}
+      title={t("task:restoreToVersionConfirm", { version })}
+      subject={target?.title}
+      description={t("task:restoreToVersionDescription", { version })}
+      cancelLabel={t("common:cancel")}
+      confirmLabel={t("task:restoreVersion", { version })}
+      confirmTestId="plan-revision-restore-confirm"
+      focusReturnRef={anchorRef}
+      disabled={isSaving}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      onConfirm={() => (target ? onRevert(target) : undefined)}
+    />
+  );
+}
 
 export function RevisionRestoreAction({
   revision,
@@ -49,7 +87,7 @@ export function RevisionRestoreAction({
           size="sm"
           variant="ghost"
           disabled={isSaving}
-          className="h-7 px-2 text-xs cursor-pointer shrink-0 gap-1"
+          className="h-11 md:h-7 px-2 text-xs cursor-pointer shrink-0 gap-1"
           onClick={(event) => {
             event.stopPropagation();
             onRevertRequest(revision);

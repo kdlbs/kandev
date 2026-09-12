@@ -45,4 +45,3 @@ migration state.
 - [Office](../office): builds autonomous workflows on task primitives.
 - [UI](../ui): owns presentation-specific task surfaces.
 - [Workspaces](../workspaces): owns repositories and task worktrees.
-

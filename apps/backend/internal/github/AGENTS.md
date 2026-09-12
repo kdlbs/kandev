@@ -18,10 +18,12 @@ Retain one searching watch per session/repository and one watch per discovered P
 
 Watches cannot cover every task PR because sessions can disappear and users can link PRs by URL.
 Keep the orphan sweep in `service_pr_unwatched.go`.
-It reconciles unwatched `github_task_prs` rows and writes lifecycle fields only:
-`state`, `merged_at`, and `closed_at`.
+It reconciles unwatched `github_task_prs` rows and writes lifecycle fields,
+the current `head_sha`, and stored `workflow_attention` when already present.
 Exclude terminal and detached rows to bound the sweep.
-Check and review aggregates belong to the watch-driven path that fetches their evidence.
+Actions workflow reads belong to watched sync and feedback paths; the orphan
+sweep does not collect new workflow evidence. Check and review aggregates belong
+to the watch-driven path that fetches their evidence.
 The REST PR response alone cannot supply those aggregates.
 
 The backend is the only writer of `github_task_prs`.

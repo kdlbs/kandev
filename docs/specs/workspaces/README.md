@@ -29,10 +29,10 @@ Git state.
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents. Use the catalog command to find them.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
 
 ## Related systems
 
 - [Tasks](../tasks/README.md): consumes workspace repositories and worktrees.
 - [Integrations](../integrations/README.md): supplies remote repository identity.
-

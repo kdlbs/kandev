@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, type RefObject } from "react";
+import { useEffect, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useSubtaskCountState, type SubtaskCountResult } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, type CleanupSummary } from "./task-cleanup-summary";
@@ -39,6 +39,8 @@ export type TaskArchiveConfirmationProps = {
   confirmTestId?: string;
   /** Render a simple confirmation inside an existing action surface. */
   inline?: boolean;
+  /** Wrap only simple inline choices; complex confirmations replace the surface. */
+  renderInline?: (content: ReactNode) => ReactNode;
   /** Use the contained dialog even when classification resolves without descendants. */
   forceDialog?: boolean;
 };
@@ -225,27 +227,32 @@ type ArchiveConfirmationContentProps = ArchiveDialogProps & {
   confirmTaskArchive: boolean;
   forceDialog: boolean;
   isFinePointer: boolean;
+  isMobile: boolean;
   taskIsInFlight: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   inline: boolean;
+  renderInline?: (content: ReactNode) => ReactNode;
 };
 
 function ArchiveConfirmationContent({
   confirmTaskArchive,
   forceDialog,
   isFinePointer,
+  isMobile,
   taskIsInFlight,
   anchorRef,
   focusReturnRef,
   focusBoundaryRef,
   inline,
+  renderInline = (content) => content,
   subtaskClassification,
   ...dialogProps
 }: ArchiveConfirmationContentProps) {
   const { t } = useTranslation();
   const shouldUseDialog =
+    isMobile ||
     forceDialog ||
     !confirmTaskArchive ||
     dialogProps.isBulkOperation ||
@@ -264,10 +271,10 @@ function ArchiveConfirmationContent({
 
   if (subtaskClassification.status !== "resolved") {
     if (inline) {
-      return (
+      return renderInline(
         <span data-testid="task-archive-classifying" className="text-xs text-muted-foreground">
           {t("common:loading")}
-        </span>
+        </span>,
       );
     }
     if (!isFinePointer) return null;
@@ -282,7 +289,7 @@ function ArchiveConfirmationContent({
 
   const confirm = () => dialogProps.onConfirm({ cascade: false });
   if (inline || !isFinePointer) {
-    return (
+    return renderInline(
       <ArchiveConfirmCopy
         taskTitle={dialogProps.taskTitle}
         executorType={dialogProps.executorType}
@@ -292,7 +299,7 @@ function ArchiveConfirmationContent({
         onClose={() => dialogProps.onOpenChange(false)}
         onConfirm={confirm}
         confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
-      />
+      />,
     );
   }
 
@@ -333,27 +340,34 @@ export function TaskArchiveConfirmation({
   onConfirm,
   confirmTestId = DEFAULT_CONFIRM_TEST_ID,
   inline = false,
+  renderInline,
   forceDialog = false,
 }: TaskArchiveConfirmationProps) {
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile, changed } = useConfirmationBoundary(
+    open,
+    taskId ?? taskIds?.join(",") ?? "archive",
+    onOpenChange,
+  );
   const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
   const classification = useSubtaskCountState(open && confirmTaskArchive, taskId, taskIds);
   const storeInFlight = useTaskInFlight(taskId, taskIds, open && confirmTaskArchive);
   const taskIsInFlight = Boolean(isInFlight) || storeInFlight;
 
-  if (!open) return null;
+  if (!open || changed) return null;
 
   return (
     <ArchiveConfirmationContent
       confirmTaskArchive={confirmTaskArchive}
       forceDialog={forceDialog}
       isFinePointer={isFinePointer}
+      isMobile={isMobile}
       taskIsInFlight={taskIsInFlight}
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
       restoreFocusOnConfirm={restoreFocusOnConfirm}
       focusBoundaryRef={focusBoundaryRef}
       inline={inline}
+      renderInline={renderInline}
       onOpenChange={onOpenChange}
       taskTitle={taskTitle}
       isBulkOperation={isBulkOperation}

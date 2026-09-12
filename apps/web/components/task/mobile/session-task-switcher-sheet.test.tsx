@@ -6,9 +6,14 @@ import {
   MobileTaskList,
   useTaskSheetSelectionController,
 } from "@/components/task/mobile/session-task-switcher-sheet";
+import type { MobileTaskListProps } from "@/components/task/mobile/session-task-switcher-sheet";
 import { selectTaskFromSheet } from "@/components/task/mobile/session-task-switcher-sheet-selection";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import type { TaskSession } from "@/lib/types/http";
+import { useState } from "react";
+import { DrawerTitle } from "@kandev/ui/drawer";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { TaskSwitcherDrawer } from "./task-switcher-drawer";
 
 const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
@@ -75,6 +80,45 @@ function task(id: string): TaskSwitcherItem {
     workflowStepTitle: "Build",
   };
 }
+
+it("keeps the Tasks drawer as the sole modal during confirmation and restores its list", () => {
+  const previousWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  function Tasks() {
+    const [confirm, setConfirm] = useState(false);
+    return (
+      <TaskSwitcherDrawer open onOpenChange={vi.fn()}>
+        <DrawerTitle>Tasks</DrawerTitle>
+        <input aria-label="Task filter" defaultValue="Work in progress" />
+        <button onClick={() => setConfirm(true)}>Archive target</button>
+        <MobileActionConfirmation
+          open={confirm}
+          onOpenChange={setConfirm}
+          targetKey="task"
+          title="Archive task?"
+          subject="Target"
+          cancelLabel="Cancel"
+          confirmLabel="Archive"
+          onConfirm={vi.fn()}
+        />
+      </TaskSwitcherDrawer>
+    );
+  }
+  const view = render(<Tasks />);
+  try {
+    const drawer = screen.getByRole("dialog", { name: "Tasks" });
+    const input = screen.getByRole("textbox", { name: "Task filter" });
+    fireEvent.click(screen.getByRole("button", { name: "Archive target" }));
+    expect(screen.getByRole("dialog", { name: "Archive task?" })).toBe(drawer);
+    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+    expect(screen.queryByRole("textbox", { name: "Task filter" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("textbox", { name: "Task filter" })).toBe(input);
+  } finally {
+    view.unmount();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+  }
+});
 
 describe("MobileTaskList", () => {
   beforeEach(() => {
@@ -166,6 +210,53 @@ describe("MobileTaskList", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
 
     expect(onEditTask).toHaveBeenCalledWith(editableTask);
+  });
+});
+
+describe("MobileTaskList move options", () => {
+  it("hands move options to the owning mobile task surface", async () => {
+    const onRequestMoveOptions = vi.fn();
+    const props: MobileTaskListProps = {
+      tasks: [task("movable")],
+      workflows: [{ id: "workflow-1", name: "Workflow" }],
+      stepsByWorkflowId: {
+        "workflow-1": [
+          { id: "step-1", title: "Build" },
+          { id: "step-2", title: "Review" },
+        ],
+      },
+      activeTaskId: null,
+      selectedTaskId: null,
+      onSelectTask: vi.fn(),
+      onArchiveTask: vi.fn(),
+      onDeleteTask: vi.fn(),
+      onDetachTask: vi.fn(),
+      deletingTaskId: null,
+      onRequestMoveOptions,
+    };
+
+    render(
+      <ToastProvider>
+        <MobileTaskList {...props} />
+      </ToastProvider>,
+    );
+
+    const row = screen
+      .getByText("Task movable")
+      .closest<HTMLElement>("[data-testid='sidebar-task-item']");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByRole("button", { name: "Task actions" }));
+    const moveTo = await screen.findByTestId("task-context-move-to");
+    fireEvent.pointerMove(moveTo, { pointerType: "mouse" });
+    const step = await screen.findByTestId("task-context-step-step-2");
+    fireEvent.pointerMove(step, {
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByTestId("task-context-step-options-step-2"));
+
+    expect(onRequestMoveOptions).toHaveBeenCalledOnce();
+    expect(onRequestMoveOptions).toHaveBeenCalledWith("movable", "workflow-1", "step-2");
+    expect(screen.queryByTestId("workflow-move-options")).toBeNull();
   });
 });
 

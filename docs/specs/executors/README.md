@@ -30,7 +30,13 @@ failure and recovery contracts.
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents. Use the catalog command to find them.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
+
+The [Kubernetes executor foundation](../kubernetes-executor/spec.md) remains
+the current lifecycle contract. The three Kubernetes pairs own additive
+presets, launch diagnostics, and retained-compute visibility. They do not
+replace the foundation's resource ownership, recovery, or cleanup rules.
 
 ## Related systems
 

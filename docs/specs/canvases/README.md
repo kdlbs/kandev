@@ -4,7 +4,7 @@ owner: canvases
 specification_version: 1
 status: draft
 migration: complete
-last_updated: 2026-09-08
+last_updated: 2026-09-10
 ---
 
 # Canvases
@@ -19,6 +19,7 @@ remains authoritative for task data and permissions.
 
 ## Related context
 
+- [Runtime and permission fix plan](../../plans/canvas-runtime-permission-fixes/plan.md)
 - [Agent MCP discovery guidance](../agents/system-design/mcp-tool-discovery-guidance.md)
 - [MCP discovery and canvas prompt plan](../../plans/mcp-discovery-canvas-prompts/plan.md)
 - [GitHub Copilot App Canvas reference](../../copilot-canvas-reference.md)

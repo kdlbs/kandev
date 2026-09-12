@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/profiles"
+	"github.com/kandev/kandev/internal/startup"
 
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
@@ -339,7 +340,14 @@ func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCl
 	ctx, cancel := context.WithCancel(context.Background())
 	addCleanup(func() error { cancel(); return nil })
 
-	// 4. Initialize event bus (in-memory for unified mode, or NATS if configured)
+	return runWithBootstrap(ctx, cfg, log, func(ctx context.Context) bool {
+		return initializeApplication(ctx, cfg, log, addCleanup, runCleanups)
+	})
+}
+
+func initializeApplication(ctx context.Context, cfg *config.Config, log *logger.Logger,
+	addCleanup func(func() error), runCleanups func()) bool {
+	// Initialize the event bus only after the liveness listener is available.
 	eventBusProvider, cleanup, err := events.Provide(cfg, log)
 	if err != nil {
 		log.Error("Failed to initialize event bus", zap.Error(err))
@@ -348,7 +356,7 @@ func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCl
 	addCleanup(cleanup)
 	eventBus := eventBusProvider.Bus
 
-	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups, cancel)
+	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups, workerCancelFromContext(ctx))
 }
 
 // applyStartupRuntimeFlags resolves persisted runtime-flag overrides and
@@ -376,7 +384,7 @@ func startServices( //nolint:cyclop
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
 	runCleanups func(),
-	cancelContext context.CancelFunc,
+	cancelWorkers context.CancelFunc,
 ) bool {
 	// ============================================
 	// TASK SERVICE
@@ -385,7 +393,7 @@ func startServices( //nolint:cyclop
 
 	dbPool, repos, repoCleanups, err := provideRepositories(ctx, cfg, log, Version)
 	if err != nil {
-		log.Error("Failed to initialize repositories", zap.Error(err))
+		log.Error("Failed to initialize repositories", zap.Error(err), zap.String("phase", string(startup.FromContext(ctx).Snapshot().Phase)))
 		return false
 	}
 	for _, c := range repoCleanups {
@@ -525,7 +533,7 @@ func startServices( //nolint:cyclop
 	}
 
 	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
-		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups, cancelContext)
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups, cancelWorkers)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -546,7 +554,7 @@ func startAgentInfrastructure(
 	agentRegistry *registry.Registry,
 	agentctlBinaryPath string,
 	runCleanups func(),
-	cancelContext context.CancelFunc,
+	cancelWorkers context.CancelFunc,
 ) bool {
 	restoreCleanups := make([]func() error, 0)
 	var databaseQuiesce func() error
@@ -680,6 +688,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
 	}
+	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,
@@ -857,7 +866,7 @@ func startAgentInfrastructure(
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
-		func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelContext, restoreCleanups, databaseQuiesce)
+		func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers, restoreCleanups, databaseQuiesce)
 }
 
 // startOrchestratorAndAutomationConsumers establishes the startup chain in
@@ -895,7 +904,7 @@ func closeBoundListeners(server *http.Server, listeners *serverListeners, log *l
 		return
 	}
 	listeners.Stop()
-	if err := server.Close(); err != nil {
+	if err := server.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Warn("failed to close HTTP listeners after startup failure", zap.Error(err))
 	}
 }
@@ -922,7 +931,7 @@ func startGatewayAndServe(
 	agentctlBinaryPath string,
 	addCleanup func(func() error),
 	runCleanups func(),
-	cancelContext context.CancelFunc,
+	cancelWorkers context.CancelFunc,
 	restoreCleanups []func() error,
 	databaseQuiesce func() error,
 ) bool {
@@ -998,19 +1007,9 @@ func startGatewayAndServe(
 		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
 
-	var (
-		handler   *handlerSwitch
-		server    *http.Server
-		listeners *serverListeners
-	)
-	bindListeners := func() error {
-		h, s, l, err := bindBootstrapListeners(cfg, log, Version)
-		if err != nil {
-			return err
-		}
-		handler, server, listeners = h, s, l
-		return nil
-	}
+	bootstrap := ctx.Value(bootstrapContextKey{}).(*bootstrapRuntime)
+	handler, server, listeners := bootstrap.handler, bootstrap.server, bootstrap.listeners
+	bindListeners := func() error { startup.SetPhase(ctx, startup.RecoveringSessions); return ctx.Err() }
 
 	if err := startOrchestratorAndAutomationConsumers(
 		bindListeners,
@@ -1034,7 +1033,7 @@ func startGatewayAndServe(
 			log.Info("GitHub poller started")
 		},
 	); err != nil {
-		if !errors.Is(err, errServerBindFailed) {
+		if shouldLogStartupOrchestratorError(err) {
 			log.Error("Failed to start orchestrator", zap.Error(err))
 		}
 		closeBoundListeners(server, listeners, log)
@@ -1081,7 +1080,7 @@ func startGatewayAndServe(
 				workers = append(workers, restoreCleanups[i])
 			}
 			restoreQuiesceErr = quiesceForRestore(
-				cancelContext,
+				cancelWorkers,
 				scheduling.Stop,
 				orchestratorSvc.Stop,
 				func() error { return stopLifecycleManager(lifecycleMgr, log) },
@@ -1202,7 +1201,7 @@ func startGatewayAndServe(
 	}
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
-	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterSystemNotifications(processRuntimeContext(ctx), eventBus, gateway.Hub, log)
 	gateways.RegisterAgentRuntimeNotifications(ctx, eventBus, gateway.Hub, func() (any, bool) {
 		if agentRuntimeAvailability == nil {
 			return nil, false
@@ -1252,9 +1251,16 @@ func startGatewayAndServe(
 	// publishReadiness for why the order matters and
 	// TestPublishReadinessFlipsReadyBeforeSwappingHandler for the regression
 	// test pinning it.
-	publishReadiness(func() { ready.Store(true) }, func() { handler.Store(builtServer.Handler) })
+	if !bootstrap.beginReadinessPublication(ctx) {
+		return false
+	}
+	publishReadiness(func() {
+		ready.Store(true)
+		bootstrap.ready.Store(true)
+	}, func() { handler.Store(builtServer.Handler) })
 
-	awaitShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	startup.SetPhase(ctx, startup.Ready)
+	awaitShutdown(ctx, server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
 }
 
@@ -2428,6 +2434,7 @@ func buildHTTPServer(
 
 // awaitShutdown waits for an OS signal then performs graceful shutdown.
 func awaitShutdown(
+	ctx context.Context,
 	server *http.Server,
 	listeners *serverListeners,
 	scheduling *schedulingRuntime,
@@ -2439,6 +2446,23 @@ func awaitShutdown(
 	// ============================================
 	// GRACEFUL SHUTDOWN
 	// ============================================
+	shutdownCtx := processContextFromContext(ctx)
+	if shutdownCtx == nil {
+		shutdownCtx = ctx
+	}
+	if controller := startupSignalControllerFromContext(ctx); controller != nil {
+		sig := controller.wait(shutdownCtx)
+		if sig == nil {
+			log.Info("Shutdown context canceled without OS signal", zap.Int("pid", os.Getpid()))
+			return
+		}
+		log.Info("Received shutdown signal",
+			zap.String("signal", sig.String()),
+			zap.Int("pid", os.Getpid()))
+		runGracefulShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
+		return
+	}
+
 	quit := make(chan os.Signal, 2)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	log.Debug("shutdown signal handler armed",
@@ -2458,6 +2482,12 @@ func awaitShutdown(
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
 	runGracefulShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
+}
+
+func shouldLogStartupOrchestratorError(err error) bool {
+	return !errors.Is(err, errServerBindFailed) &&
+		!errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded)
 }
 
 // migrateDefaultUtilityProfile upgrades the portable user's legacy default

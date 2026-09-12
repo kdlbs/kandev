@@ -324,6 +324,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if branches := collectBaseBranches(req); len(branches) > 0 {
 		metadata[MetadataKeyBaseBranches] = branches
 	}
+	setSelectedCheckoutMetadata(req, metadata)
 	return metadata
 }
 
@@ -1417,6 +1418,9 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
 	_, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		if err := m.ensureLaunchSessionStillActive(sharedCtx, req.SessionID, executionAdmissionAgent); err != nil {
+			return nil, err
+		}
 		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -1437,16 +1441,6 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if execution.AgentCommand != "" {
 			return nil, nil
 		}
-		// Workspace-only executions can be created from a session row that stores
-		// the task assignee. The launch request carries the acting Office identity,
-		// so refresh it before the execution starts emitting events.
-		if req.AgentProfileID != "" {
-			execution.OfficeAgentProfileID = req.AgentProfileID
-			// Persist the acting identity while the workspace-only execution is
-			// being promoted, so a restart before the first stream event can
-			// restore the same attribution.
-			m.persistExecutorRunning(context.WithoutCancel(sharedCtx), execution)
-		}
 		agentTypeName, profileInfo, err := m.resolveAgentProfile(sharedCtx, req)
 		if err != nil {
 			return nil, err
@@ -1461,6 +1455,9 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.MetadataSnapshot())
 		cmds, err := m.buildAgentCommandWithContext(sharedCtx, req, profileInfo, agentConfig, preferNative)
 		if err != nil {
+			return nil, err
+		}
+		if err := m.ensureLaunchSessionStillActive(sharedCtx, req.SessionID, executionAdmissionAgent); err != nil {
 			return nil, err
 		}
 		execution.AgentCommand = cmds.initial
@@ -1484,6 +1481,13 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 				execution.IsPassthrough = false
 				return nil, err
 			}
+		}
+		// Workspace-only executions can be created from a session row that stores
+		// the task assignee. The launch request carries the acting Office identity,
+		// so persist it only after the final agent-launch admission succeeds.
+		if req.AgentProfileID != "" {
+			execution.OfficeAgentProfileID = req.AgentProfileID
+			m.persistExecutorRunning(context.WithoutCancel(sharedCtx), execution)
 		}
 		m.logger.Info("promoted workspace-only execution to agent execution",
 			zap.String("execution_id", execution.ID),
@@ -1701,10 +1705,11 @@ func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, w
 	}
 	for index, repository := range repositories {
 		candidate := workspacePath
+		entry := workspaceRepositoryEntryName(repository.RepoName)
 		if index > 0 {
-			candidate = filepath.Join(workspacePath, repository.RepoName)
+			candidate = filepath.Join(workspacePath, entry)
 		} else if len(repositories) > 1 && validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath) != nil {
-			candidate = filepath.Join(workspacePath, repository.RepoName)
+			candidate = filepath.Join(workspacePath, entry)
 		}
 		// A missing worktree during ACP resume must reach WorktreePreparer.
 		// It classifies a deleted branch and returns the typed recovery error
@@ -1718,6 +1723,19 @@ func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, w
 		}
 	}
 	return nil
+}
+
+// workspaceRepositoryEntryName returns the directory segment below the task
+// root that holds a repository's checkout. A launch spec carries the
+// repository's display name, which may contain path separators or a drive
+// letter; the worktree manager sanitizes it before creating the directory, so
+// admission has to resolve the same segment or it inspects a path that was
+// never written. An unusable name is left as-is for the caller to reject.
+func workspaceRepositoryEntryName(repoName string) string {
+	if sanitized := worktree.SanitizeRepoDirName(repoName); sanitized != "" {
+		return sanitized
+	}
+	return repoName
 }
 
 func shouldDeferMissingWorktreeResumeValidation(req *LaunchRequest, workspacePath string) bool {
@@ -1777,7 +1795,7 @@ func (m *Manager) registerAndPublishExecution(
 	execInstance *ExecutorInstance,
 	sessionID string,
 ) error {
-	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during runtime creation")
 		return err
 	}
@@ -1807,7 +1825,7 @@ func (m *Manager) registerAndPublishExecution(
 		return errors.Join(fmt.Errorf("persist execution registration: %w", err), secretCleanupErr)
 	}
 
-	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		if errors.Is(err, errTaskCleanupActive) {
 			m.rollbackRegisteredLaunchForTaskCleanup(rt, execInstance, execution)
 		} else {
@@ -1841,7 +1859,11 @@ func (m *Manager) registerAndPublishExecution(
 // durable cleanup-intent check is the admission boundary between them: either
 // launch persists first and cleanup's final inventory observes it, or cleanup
 // persists first and launch rolls the runtime back.
-func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID string) error {
+func (m *Manager) ensureLaunchSessionStillActive(
+	ctx context.Context,
+	sessionID string,
+	purpose executionAdmissionPurpose,
+) error {
 	if m.executorProfileReader == nil || sessionID == "" {
 		return nil
 	}
@@ -1851,6 +1873,11 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	}
 	if session == nil {
 		return fmt.Errorf("verify session before registering execution: session %q not found", sessionID)
+	}
+	if purpose == executionAdmissionWorkspaceOnly {
+		if err := m.ensureWorkspaceTaskAdmission(ctx, session); err != nil {
+			return err
+		}
 	}
 	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, session.TaskID)
 	if err != nil {
@@ -1869,14 +1896,47 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	if session == nil {
 		return fmt.Errorf("reverify session after task cleanup admission: session %q not found", sessionID)
 	}
+	if purpose == executionAdmissionWorkspaceOnly {
+		if err := m.ensureWorkspaceTaskAdmission(ctx, session); err != nil {
+			return err
+		}
+	}
+	return validateLaunchSessionState(sessionID, session, purpose)
+}
+
+func validateLaunchSessionState(
+	sessionID string,
+	session *models.TaskSession,
+	purpose executionAdmissionPurpose,
+) error {
 	switch session.State {
 	case models.TaskSessionStateCancelled,
 		models.TaskSessionStateCompleted,
 		models.TaskSessionStateFailed:
+		if purpose == executionAdmissionWorkspaceOnly {
+			return nil
+		}
 		return fmt.Errorf("verify session before registering execution: session %q is %s: %w", sessionID, session.State, ErrSessionTerminal)
 	default:
 		return nil
 	}
+}
+
+func (m *Manager) ensureWorkspaceTaskAdmission(ctx context.Context, session *models.TaskSession) error {
+	if session == nil || session.TaskID == "" {
+		return fmt.Errorf("workspace restore has ambiguous task ownership")
+	}
+	task, err := m.executorProfileReader.GetTask(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("verify task before registering workspace execution: %w", err)
+	}
+	if task == nil || task.ID == "" || task.ID != session.TaskID {
+		return fmt.Errorf("verify task before registering workspace execution: task %q not found", session.TaskID)
+	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("verify task before registering workspace execution: task %q is archived: %w", session.TaskID, ErrSessionTerminal)
+	}
+	return nil
 }
 
 // rollbackRegisteredLaunchForTaskCleanup cannot assume the session is

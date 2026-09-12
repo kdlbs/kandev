@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-09-06
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -27,8 +28,11 @@ fallback, and failure recovery.
   DevOps UI that owns a saved task view and its delete action.
 - **Fine-pointer confirmation:** A compact confirmation anchored to the delete
   action that opened it.
-- **Coarse-pointer confirmation:** An in-place confirmation inside the current
-  drawer, sheet, menu, or editor.
+- **Phone confirmation:** A focused step in the current sheet/dialog or a
+  compact standalone bottom sheet, as specified by
+  [mobile action confirmations](mobile-action-confirmations.md).
+- **Tablet coarse-pointer confirmation:** An in-place confirmation inside the
+  current drawer, sheet, menu, or editor.
 
 ## Requirements
 
@@ -62,13 +66,15 @@ before deleting it, so that an accidental action does not discard my filters.
   because a view is built in, is the protected last view, or is temporarily
   disabled by an existing mutation shall remain unavailable and shall not open
   confirmation.
-- **AC-UI-SAVED-TASK-VIEW-DELETION-001.6:** With a fine pointer, confirmation
+- **AC-UI-SAVED-TASK-VIEW-DELETION-001.6:** Outside phone widths, with a fine pointer, confirmation
   shall be anchored to the initiating delete action, stay within the viewport,
   and keep its owning menu, popover, or editor available until the user decides.
-- **AC-UI-SAVED-TASK-VIEW-DELETION-001.7:** With a coarse pointer, confirmation
-  shall replace the relevant row or action region inside the existing surface.
-  It shall not stack another drawer, sheet, or modal, and its actions shall be
-  visible without hover and at least 44 by 44 CSS pixels.
+- **AC-UI-SAVED-TASK-VIEW-DELETION-001.7:** On phones, confirmation shall use a
+  focused step in an existing sheet/dialog or a compact bottom sheet from a
+  page. The saved-view row shall retain its normal geometry, and Cancel shall
+  restore the origin. Tablet coarse-pointer confirmation shall retain its
+  current in-place surface. Neither path shall stack modal surfaces, and both
+  shall expose actions without hover with at least 44-pixel touch targets.
 - **AC-UI-SAVED-TASK-VIEW-DELETION-001.8:** The delete trigger and confirmation
   shall be keyboard and screen-reader operable. The target name shall be
   programmatically available, Cancel shall receive initial confirmation focus,

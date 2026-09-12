@@ -39,14 +39,14 @@ func (r *Repository) initDesktopDiscoverySchema() error {
 	if err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(desktopDiscoverySchemaDDL); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), desktopDiscoverySchemaDDL); err != nil {
 		return err
 	}
 	required := 0
 	if legacyInstallation {
 		required = 1
 	}
-	_, err = r.db.Exec(r.db.Rebind(`
+	_, err = r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
 		INSERT INTO desktop_discovery_migration (id, home_confirmation_required, updated_at)
 		VALUES (1, ?, ?)
 		ON CONFLICT (id) DO NOTHING

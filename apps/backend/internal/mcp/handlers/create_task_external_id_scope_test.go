@@ -32,7 +32,7 @@ func TestHandleCreateTask_ExternalIDWithDefaultWorkspaceDedupes(t *testing.T) {
 	require.NoError(t, err)
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 
-	first, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	first, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workflow_id":      workflows[0].ID,
 		"title":            "Task",
 		"description":      "Do the thing",
@@ -48,7 +48,7 @@ func TestHandleCreateTask_ExternalIDWithDefaultWorkspaceDedupes(t *testing.T) {
 	require.NoError(t, json.Unmarshal(first.Payload, &firstResult))
 	firstID := firstResult["id"].(string)
 
-	retry, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	retry, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workflow_id":      workflows[0].ID,
 		"title":            "Retry",
 		"description":      "Do the thing",
@@ -91,6 +91,14 @@ func TestHandleCreateTask_ExternalIDCrossWorkspaceDeniedByIdentityScope(t *testi
 		ID: "task-a-stream", WorkspaceID: "ws-a", WorkflowID: "wf-a",
 		Title: "Stream owner task", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
 	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-a-stream",
+		TaskID:    "task-a-stream",
+		State:     models.TaskSessionStateRunning,
+		IsPrimary: true,
+		StartedAt: now,
+		UpdatedAt: now,
+	}))
 
 	// Workspace B, owned by a different user, already holds a settled task
 	// under the external_id the agent is about to try.
@@ -115,6 +123,8 @@ func TestHandleCreateTask_ExternalIDCrossWorkspaceDeniedByIdentityScope(t *testi
 	resolver := mcpscope.NewResolver(repo, identities, func() bool { return true }, testLogger(t))
 	scopedCtx, err := resolver.Scope(ctx, "task-a-stream")
 	require.NoError(t, err)
+	scopedCtx, err = resolver.ScopePrincipal(scopedCtx, "task-a-stream", "session-a-stream")
+	require.NoError(t, err)
 
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	resp, err := h.handleCreateTask(scopedCtx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
@@ -127,6 +137,7 @@ func TestHandleCreateTask_ExternalIDCrossWorkspaceDeniedByIdentityScope(t *testi
 		"external_id":      "ext-cross",
 	}))
 	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeNotFound)
 	assert.Equal(t, ws.MessageTypeError, resp.Type, "user A's agent must not reach user B's workspace via external_id")
 	assert.NotContains(t, string(resp.Payload), bResult.Task.ID, "the denial must not leak B's task id")
 	assert.NotContains(t, string(resp.Payload), "B's secret task", "the denial must not leak B's task title")
@@ -134,4 +145,19 @@ func TestHandleCreateTask_ExternalIDCrossWorkspaceDeniedByIdentityScope(t *testi
 	tasksInB, err := repo.ListTasks(ctx, "wf-b")
 	require.NoError(t, err)
 	require.Len(t, tasksInB, 1, "the denied call must not have created a second task in B's workspace")
+
+	allowed, err := h.handleCreateTask(scopedCtx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     "ws-a",
+		"workflow_id":      "wf-a",
+		"title":            "Same-user control",
+		"description":      "the owner can create in the source workspace",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+		"external_id":      "ext-same-user-control",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, allowed.Type, "same-user creation should remain allowed: %s", allowed.Payload)
+	tasksInA, err := repo.ListTasks(ctx, "wf-a")
+	require.NoError(t, err)
+	require.Len(t, tasksInA, 2)
 }

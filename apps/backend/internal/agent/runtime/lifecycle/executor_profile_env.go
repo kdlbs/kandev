@@ -12,6 +12,7 @@ import (
 // executor profile selected for a session. Production launch safety requires
 // the task repository implementation wired via SetExecutorProfileReader.
 type ExecutorProfileReader interface {
+	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)

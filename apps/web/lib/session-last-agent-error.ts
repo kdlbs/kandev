@@ -3,11 +3,16 @@ import {
   normalizeTaskLaunchRecoveryActions,
   type TaskLaunchRecoveryAction,
 } from "@/lib/types/task-launch-error";
+import type { AgentErrorCause } from "@/lib/types/task-status-summary";
 
 export type LastAgentError = {
   message: string;
   occurredAt?: string;
   agentExecutionId?: string;
+  executionId?: string;
+  phase?: string;
+  attemptId?: string;
+  causes?: AgentErrorCause[];
   /** Adapter-validated provider remediation URL; never derived from prose. */
   remediationUrl?: string;
   code?: string;
@@ -72,6 +77,10 @@ function readOptionalAgentErrorFields(
     "agent_execution_id",
     "agentExecutionId",
   ]);
+  const executionId = readFirstOptionalString(record, ["execution_id", "executionId"]);
+  const phase = readFirstOptionalString(record, ["phase"]);
+  const attemptId = readFirstOptionalString(record, ["attempt_id", "attemptId"]);
+  const causes = readAgentErrorCauses(record.causes);
   const remediationUrl = readFirstOptionalString(record, ["remediation_url", "remediationUrl"]);
   const recoveryActions = normalizeTaskLaunchRecoveryActions(
     record.recovery_actions ?? record.recoveryActions,
@@ -84,6 +93,10 @@ function readOptionalAgentErrorFields(
   const structured = readStructuredFailureMetadata(record);
   if (occurredAt) result.occurredAt = occurredAt;
   if (agentExecutionId) result.agentExecutionId = agentExecutionId;
+  if (executionId) result.executionId = executionId;
+  if (phase) result.phase = phase;
+  if (attemptId) result.attemptId = attemptId;
+  if (causes.length > 0) result.causes = causes;
   if (remediationUrl) result.remediationUrl = remediationUrl;
   if (recoveryActions.length > 0) result.recoveryActions = recoveryActions;
   if (taskRepositoryId) result.taskRepositoryId = taskRepositoryId;
@@ -91,6 +104,21 @@ function readOptionalAgentErrorFields(
   if (structured.code) result.code = structured.code;
   if (structured.details) result.details = structured.details;
   return result;
+}
+
+function readAgentErrorCauses(value: unknown): AgentErrorCause[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((cause): cause is Record<string, unknown> =>
+      Boolean(cause && typeof cause === "object"),
+    )
+    .slice(0, 2)
+    .map((cause) => ({
+      ...(typeof cause.operation === "string" ? { operation: cause.operation } : {}),
+      ...(typeof cause.code === "string" ? { code: cause.code } : {}),
+      ...(typeof cause.detail === "string" ? { detail: cause.detail } : {}),
+    }))
+    .filter((cause) => Boolean(cause.operation || cause.code || cause.detail));
 }
 
 function readStructuredFailureMetadata(record: Record<string, unknown>) {

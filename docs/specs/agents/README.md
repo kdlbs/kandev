@@ -31,11 +31,13 @@ surface shared by task and Office consumers.
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents. Use the catalog command to find them.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
 
 ## Related systems
 
+- [Settings parity](../platform/requirements/agent-settings-parity.md): owns the
+  shared discovery and interface contract. Agents retain profile data ownership.
 - [Tasks](../tasks/README.md): consumes agent profiles for task execution.
 - [Office](../office/README.md): consumes agent identities for autonomous work.
 - [Platform](../platform/README.md): owns shared process and runtime services.
-

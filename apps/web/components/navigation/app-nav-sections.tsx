@@ -8,6 +8,7 @@ import {
   IconMoon,
   IconStethoscope,
   IconSun,
+  IconLayoutList,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
@@ -27,9 +28,10 @@ import { MOBILE_MENU_UTILITY_SECTIONS } from "@/lib/navigation/surface-policy";
 import type { NavSection } from "@/lib/navigation/types";
 import { useRouter } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
+import { useTaskViewNavigation } from "./use-task-view-navigation";
 
 /**
- * Dialog-backed rows in the shared nav block (Improve Kandev, Health issues).
+ * Overlay-backed rows in the shared nav block (Task views, Improve Kandev, Health issues).
  * Hoisted out of `AppNavSections` because the sections render inside a
  * Sheet/Drawer that unmounts on close: a dialog owned there would vanish the
  * moment the menu closes. The host renders `dialogs` as a sibling of its menu
@@ -39,10 +41,13 @@ export type AppNavDialogControls = {
   showHealthRow: boolean;
   openImproveKandev: () => void;
   openHealthDialog: () => void;
+  openTaskViews?: () => void;
+  onMenuCloseAutoFocus?: (event: Event) => void;
   dialogs: ReactNode;
 };
 
 export function useAppNavDialogs(closeMenu: () => void): AppNavDialogControls {
+  const taskViews = useTaskViewNavigation(closeMenu);
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const health = useSystemHealthIndicator();
@@ -63,6 +68,7 @@ export function useAppNavDialogs(closeMenu: () => void): AppNavDialogControls {
   // mount, and this hook now sits behind every page's topbar.
   const dialogs = (
     <>
+      {taskViews.dialog}
       {improveOpen && (
         <ImproveKandevDialog
           open
@@ -81,7 +87,14 @@ export function useAppNavDialogs(closeMenu: () => void): AppNavDialogControls {
     </>
   );
 
-  return { showHealthRow: health.hasIssues, openImproveKandev, openHealthDialog, dialogs };
+  return {
+    showHealthRow: health.hasIssues,
+    openImproveKandev,
+    openHealthDialog,
+    dialogs,
+    openTaskViews: taskViews.openTaskViews,
+    onMenuCloseAutoFocus: taskViews.onMenuCloseAutoFocus,
+  };
 }
 
 type AppNavSectionsProps = {
@@ -108,8 +121,8 @@ type AppNavSectionsProps = {
 /**
  * The global navigation block every mobile menu shares: primary destinations,
  * plugin pages, integrations, and the utility tail (Status, Stats, Settings,
- * Improve Kandev, Health issues). All rows come from the navigation manifest,
- * so a new destination appears on every surface at once.
+ * Improve Kandev, Health issues). Route destinations come from the navigation
+ * manifest; Task views and other overlay actions share the hoisted controls.
  */
 export function AppNavSections({
   onNavigate,
@@ -118,12 +131,23 @@ export function AppNavSections({
   workspaceActions,
   controls,
 }: AppNavSectionsProps) {
+  const { t } = useTranslation();
   const omit = new Set(omitSections);
   return (
     <>
       {workspaceActions}
       {!omit.has("primary") && (
         <PrimaryNavSection onNavigate={onNavigate} omitDestinations={omitDestinations} />
+      )}
+      {controls.openTaskViews && (
+        <Button
+          variant="outline"
+          className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
+          onClick={controls.openTaskViews}
+        >
+          <IconLayoutList className="h-4 w-4 shrink-0" />
+          {t("sidebar:taskViews")}
+        </Button>
       )}
       {!omit.has("plugins") && <MobilePluginNavSection onNavigate={onNavigate} />}
       {!omit.has("integrations") && <MobileIntegrationsSection onNavigate={onNavigate} />}

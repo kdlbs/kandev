@@ -29,12 +29,11 @@ dashboard projections, and Office testing contracts.
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents. Use the catalog command to find them.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
 
 ## Related systems
 
 - [Tasks](../tasks/README.md): supplies durable work and workflow primitives.
 - [Agents](../agents/README.md): supplies agent profiles and permission policy.
 - [Integrations](../integrations/README.md): supplies provider connections.
-
-

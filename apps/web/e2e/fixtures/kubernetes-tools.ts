@@ -210,10 +210,10 @@ function requireBuildArtifacts(): void {
 function buildRuntimeImage(tag: string): void {
   requireBuildArtifacts();
   const context = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-kubernetes-e2e-image-"));
+  // The pinned CI runtime already contains the lifecycle tools used by the
+  // backend. Reusing it keeps compatibility jobs independent of live package
+  // mirror resolution on each hosted runner.
   const dockerfile = `FROM ${KUBERNETES_E2E_BASE_IMAGE}
-RUN apt-get update \\
- && apt-get install -y --no-install-recommends ca-certificates curl git \\
- && rm -rf /var/lib/apt/lists/*
 COPY kandev /usr/local/bin/kandev
 COPY agentctl-linux-amd64 /usr/local/bin/agentctl-linux-amd64
 COPY mock-agent-linux-amd64 /usr/local/bin/mock-agent

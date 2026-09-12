@@ -4,6 +4,7 @@ import { expect, type Page } from "@playwright/test";
 import type { BackendContext } from "../../fixtures/backend";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 export class CanvasFixtureUnavailable extends Error {
@@ -540,6 +541,13 @@ export async function publishTaskCanvas({
     )
     .toBe(true);
   if (!publishedCanvas) throw new Error("The canvas publish response was empty.");
+  await waitForSessionDone(
+    apiClient,
+    taskId,
+    taskSessionId,
+    "The canvas publishing session did not finish before interaction coverage.",
+    45_000,
+  );
   return publishedCanvas;
 }
 
