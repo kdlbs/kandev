@@ -139,6 +139,17 @@ type AgentExecution struct {
 	agentctlOverride          atomic.Pointer[agentctl.Client]
 	agentctlLifecycleMu       sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
+	// contextResetMu owns the reset attempt boundary. While a session reset is
+	// in flight, fresh-session setup events are retained until the lifecycle
+	// manager has committed the new ACP session. A timed-out attempt discards
+	// those events and fences all later provider use until an explicit restart
+	// succeeds.
+	contextResetMu               sync.Mutex
+	contextResetInFlight         bool
+	contextResetFenced           bool
+	contextResetFenceReason      string
+	contextResetRecoveryInFlight bool
+	contextResetEvents           []agentctl.AgentEvent
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.

@@ -544,7 +544,6 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.sessionTransitionMu.Lock()
-	defer a.sessionTransitionMu.Unlock()
 
 	a.mu.RLock()
 	previous, conn := a.sessionID, a.acpConn
@@ -552,9 +551,14 @@ func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer
 
 	newID, err := a.newSession(ctx, mcpServers)
 	if err != nil {
+		a.sessionTransitionMu.Unlock()
 		return "", err
 	}
-	a.closeSupersededSessionLocked(ctx, conn, previous, newID)
+	// session/new has committed the replacement session. Superseded-session
+	// cleanup is best effort and has its own bounded context, so it must not
+	// hold the reset request open while a provider ignores session/close.
+	a.sessionTransitionMu.Unlock()
+	go a.closeSupersededSession(ctx, conn, previous, newID)
 	return newID, nil
 }
 

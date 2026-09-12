@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	freshSessionModelStateWait = 2 * time.Second
-	freshSessionModelStatePoll = 10 * time.Millisecond
+	freshSessionModelStateWait      = 2 * time.Second
+	freshSessionModelStatePoll      = 10 * time.Millisecond
+	resetAgentContextRequestTimeout = 10 * time.Second
 )
 
 // WasSessionInitialized reports whether the execution completed ACP session setup.
@@ -105,6 +106,9 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return nil, err
+	}
 	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
 	if err != nil {
 		return nil, err
@@ -112,6 +116,11 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
 	m.setRuntimeInterest(execution.SessionID, true)
+	if err := execution.contextResetAdmissionError(); err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
 	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
@@ -131,6 +140,9 @@ func (m *Manager) SteerAgentWithDispatchCallback(ctx context.Context, executionI
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return nil, err
+	}
 	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
 	if err != nil {
 		return nil, err
@@ -138,6 +150,11 @@ func (m *Manager) SteerAgentWithDispatchCallback(ctx context.Context, executionI
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
 	m.setRuntimeInterest(execution.SessionID, true)
+	if err := execution.contextResetAdmissionError(); err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
 	result, err := m.sessionManager.SendPromptSteerWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
@@ -361,6 +378,9 @@ func (m *Manager) SetSessionMode(ctx context.Context, executionID, _ string, mod
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
@@ -390,6 +410,9 @@ func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID stri
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
 	}
 
 	if execution.PassthroughProcessID != "" {
@@ -423,6 +446,9 @@ func (m *Manager) SetSessionConfigOption(ctx context.Context, executionID, confi
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
 	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
@@ -797,6 +823,9 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	if execution.PassthroughProcessID != "" {
 		return m.RestartAgentProcess(ctx, executionID)
 	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
+	}
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
@@ -826,7 +855,11 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		releaseClient()
 		m.logger.Info("cannot resolve agent config for session reset, falling back to process restart",
 			zap.String("execution_id", executionID), zap.Error(err))
-		return m.restartAgentProcess(ctx, executionID, &runtimeConfig)
+		if restartErr := m.restartAgentProcess(ctx, executionID, &runtimeConfig); restartErr != nil {
+			execution.failContextReset(true, restartErr.Error())
+			return restartErr
+		}
+		return nil
 	}
 
 	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
@@ -834,20 +867,62 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		releaseClient()
 		m.logger.Warn("cannot resolve MCP servers for session reset, falling back to process restart",
 			zap.String("execution_id", executionID), zap.Error(err))
-		return m.restartAgentProcess(ctx, executionID, &runtimeConfig)
+		if restartErr := m.restartAgentProcess(ctx, executionID, &runtimeConfig); restartErr != nil {
+			execution.failContextReset(true, restartErr.Error())
+			return restartErr
+		}
+		return nil
 	}
 
-	// Try session-level reset (only ACP adapters support this)
-	newSessionID, err := client.ResetSession(ctx, execution.WorkspacePath, mcpServers)
+	// Mark the provider request boundary before sending session/reset. Setup
+	// events emitted by a server-side session/new are retained until the new
+	// session is committed, while all other events are suppressed. If the
+	// caller deadline wins, the buffered setup events are discarded and the
+	// execution remains fenced against late provider effects.
+	if err := execution.beginContextReset(); err != nil {
+		releaseClient()
+		return err
+	}
+
+	// Try session-level reset (only ACP adapters support this). The provider
+	// request has its own bound so an unanswered response cannot hold the
+	// execution lifecycle lock indefinitely.
+	resetCtx, cancelReset := context.WithTimeout(ctx, resetAgentContextRequestTimeout)
+	newSessionID, err := client.ResetSession(resetCtx, execution.WorkspacePath, mcpServers)
+	resetErr := resetCtx.Err()
+	cancelReset()
 	releaseClient()
+	// A successful session/new response is authoritative even if the request
+	// context becomes done while the adapter is returning. In particular, the
+	// adapter may still be doing detached superseded-session cleanup after it
+	// has committed the replacement. Only an unsuccessful RPC can turn the
+	// request deadline into an uncertain reset that needs fencing.
 	if err != nil {
+		if resetErr != nil {
+			resetFailure := fmt.Errorf("agent session reset request ended with %w", resetErr)
+			if err != nil {
+				resetFailure = fmt.Errorf("%w: %v", resetFailure, err)
+			}
+			execution.failContextReset(true, resetFailure.Error())
+			return resetFailure
+		}
+		execution.failContextReset(false, err.Error())
 		m.logger.Info("session reset not supported, falling back to process restart",
 			zap.String("execution_id", executionID), zap.Error(err))
-		return m.restartAgentProcess(ctx, executionID, &runtimeConfig)
+		if restartErr := m.restartAgentProcess(ctx, executionID, &runtimeConfig); restartErr != nil {
+			execution.failContextReset(true, restartErr.Error())
+			return restartErr
+		}
+		return nil
+	}
+	if newSessionID == "" {
+		err := errors.New("agent session reset returned an empty session ID")
+		execution.failContextReset(true, err.Error())
+		return err
 	}
 
 	// Success — update execution state without restarting process
-	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+	if err := m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.ACPSessionID = newSessionID
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
@@ -860,7 +935,13 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		default:
 		}
 		exec.dispatchedPromptPending.Store(false)
-	})
+	}); err != nil {
+		execution.failContextReset(true, err.Error())
+		return fmt.Errorf("commit reset session state: %w", err)
+	}
+	for _, event := range execution.finishContextReset(newSessionID) {
+		m.handleAgentEvent(execution, event)
+	}
 
 	// Restore the complete captured configuration. A strict-mode model that is
 	// rejected by the fresh session fails the reset explicitly instead of
@@ -871,14 +952,17 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	}
 	if err := m.restoreSessionRuntimeConfig(ctx, execution, newSessionID, runtimeConfig); err != nil {
 		restoreErr := fmt.Errorf("failed to restore session runtime configuration after reset: %w", err)
+		execution.failContextReset(true, restoreErr.Error())
 		m.updateExecutionError(executionID, restoreErr.Error())
 		m.persistExecutorRunning(context.WithoutCancel(ctx), execution)
 		return restoreErr
 	}
 	if err := m.updateStatusAndPersist(ctx, executionID, v1.AgentStatusReady); err != nil {
+		resetErr := fmt.Errorf("failed to mark reset agent ready: %w", err)
+		execution.failContextReset(true, resetErr.Error())
 		m.updateExecutionError(executionID, "failed to mark reset agent ready: "+err.Error())
 		m.persistExecutorRunning(context.WithoutCancel(ctx), execution)
-		return fmt.Errorf("failed to mark reset agent ready: %w", err)
+		return resetErr
 	}
 
 	m.logger.Info("agent context reset via session (no process restart)",
@@ -1142,7 +1226,13 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	return m.restartAgentProcess(ctx, executionID, nil)
+	err := m.restartAgentProcess(ctx, executionID, nil)
+	if err != nil {
+		execution.finishContextResetRecovery(false, err.Error())
+		return err
+	}
+	execution.finishContextResetRecovery(true, "")
+	return nil
 }
 
 // restartAgentProcess restarts an ACP process. When runtimeConfigOverride is
@@ -1319,6 +1409,13 @@ func cloneSessionRuntimeConfig(config models.SessionRuntimeConfig) models.Sessio
 }
 
 func (m *Manager) resetAgentRestartState(executionID string, commands agentCommands) {
+	if execution, exists := m.executionStore.Get(executionID); exists && execution.contextResetFencedState() {
+		// The old reset outcome is fenced until this explicit restart owns the
+		// replacement. Streams are closed before this state reset, so setup
+		// events from the new process may be admitted while the fence remains in
+		// place; finishContextResetRecovery clears it only after restart success.
+		execution.beginContextResetRecovery()
+	}
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.ACPSessionID = ""
 		exec.Status = v1.AgentStatusStarting

@@ -258,15 +258,21 @@ func TestResetSessionClosesSupersededSessionWhenAdvertised(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 
+	capture.closeStarted = make(chan struct{})
 	secondID, err := adapter.ResetSession(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ResetSession: %v", err)
+	}
+	select {
+	case <-capture.closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("reset cleanup did not reach session/close")
 	}
 	if secondID == firstID {
 		t.Fatalf("ResetSession returned the same session id %q twice", secondID)
 	}
 
-	closes := capture.recordedCloseRequests()
+	closes := waitForCloseRequests(t, capture, 1)
 	if len(closes) != 1 {
 		t.Fatalf("CloseSession called %d times, want 1", len(closes))
 	}
@@ -353,6 +359,7 @@ func TestResetSessionSucceedsWhenCloseSessionErrors(t *testing.T) {
 	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
 	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
 	capture.closeErr = errors.New("close failed")
+	capture.closeStarted = make(chan struct{})
 
 	firstID, err := adapter.NewSession(context.Background(), nil)
 	if err != nil {
@@ -366,7 +373,12 @@ func TestResetSessionSucceedsWhenCloseSessionErrors(t *testing.T) {
 	if newID == "" {
 		t.Fatal("ResetSession returned an empty session id")
 	}
-	closes := capture.recordedCloseRequests()
+	select {
+	case <-capture.closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("reset cleanup did not reach session/close")
+	}
+	closes := waitForCloseRequests(t, capture, 1)
 	if len(closes) != 1 {
 		t.Fatalf("CloseSession called %d times, want 1", len(closes))
 	}
@@ -399,6 +411,15 @@ func TestResetSessionSerializesConcurrentLoadDuringClose(t *testing.T) {
 		t.Fatal("reset did not reach session/close")
 	}
 
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("ResetSession: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ResetSession remained blocked by superseded-session cleanup")
+	}
+
 	loadDone := make(chan error, 1)
 	go func() {
 		loadDone <- adapter.LoadSession(context.Background(), firstID, nil)
@@ -412,14 +433,6 @@ func TestResetSessionSerializesConcurrentLoadDuringClose(t *testing.T) {
 
 	close(capture.releaseClose)
 	select {
-	case err := <-resetDone:
-		if err != nil {
-			t.Fatalf("ResetSession: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("reset did not complete")
-	}
-	select {
 	case <-capture.loadStarted:
 	case <-time.After(time.Second):
 		t.Fatal("LoadSession did not reach the provider after reset cleanup")
@@ -432,6 +445,18 @@ func TestResetSessionSerializesConcurrentLoadDuringClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("LoadSession did not complete after reset cleanup")
 	}
+}
+
+func waitForCloseRequests(t *testing.T, capture *sessionRequestCaptureAgent, want int) []acpsdk.CloseSessionRequest {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if closes := capture.recordedCloseRequests(); len(closes) >= want {
+			return closes
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return capture.recordedCloseRequests()
 }
 
 func newSessionRequestCaptureAdapter(t *testing.T, capabilities acpsdk.McpCapabilities) (*Adapter, *sessionRequestCaptureAgent) {

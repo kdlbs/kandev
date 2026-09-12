@@ -104,6 +104,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
+	}
 	defer func() {
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()

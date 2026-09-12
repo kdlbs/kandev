@@ -855,7 +855,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 
 func (m *Manager) handleAgentEventWithAttempt(
 	execution *AgentExecution,
-	event agentctl.AgentEvent,
+		event agentctl.AgentEvent,
 	attemptID string,
 ) {
 	event.AttemptID = attemptID
@@ -866,6 +866,13 @@ func (m *Manager) handleAgentEventWithAttempt(
 		m.logger.Debug("dropping live event: already applied via retained turn outcome",
 			zap.String("execution_id", execution.ID),
 			zap.Int64("control_turn_id", event.ControlTurnID))
+		return
+	}
+	if execution.bufferOrDropContextResetEvent(event) {
+		m.logger.Debug("ignoring agent event at context reset boundary",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_type", event.Type),
+			zap.String("session_id", event.SessionID))
 		return
 	}
 	if m.handleMCPAttachmentEvent(execution, &event, attemptID) {

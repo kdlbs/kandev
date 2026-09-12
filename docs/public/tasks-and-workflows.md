@@ -545,8 +545,13 @@ end behavior.
 When **Reset agent context** creates a fresh ACP session, Kandev preserves the
 selected ACP model, permission mode, and provider options. It restores these
 settings before the next automatic prompt. If the provider rejects a setting,
-the restoration fails and Kandev does not send the destination step's automatic
-prompt.
+the reset fails, or the provider does not answer the reset request, Kandev
+leaves the session waiting for input. It does not send the destination step's
+automatic prompt. The conversation keeps a visible previous-agent-error notice
+with the reset cause. To recover, delete the affected conversation from its
+session actions, then create a new session for the task. The task workspace and
+files remain available to the new session. See [Sessions and review](sessions-and-review.md)
+for the session actions and mobile session picker.
 
 The WIP check also applies when a task is created. It runs for an explicit
 `workflow_step_id` and for the workflow's resolved start step, and the
