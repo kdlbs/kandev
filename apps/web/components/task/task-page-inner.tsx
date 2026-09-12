@@ -109,6 +109,7 @@ function resolveCurrentStepId(
 }
 
 function buildTaskTopBarProps(params: {
+  task: Task | null;
   taskProps: ReturnType<typeof resolveTaskProps>;
   actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
@@ -132,6 +133,7 @@ function buildTaskTopBarProps(params: {
     workflowSteps,
     currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
     workflowId: taskProps.workflowId,
+    taskState: params.task?.state ?? null,
     workspaceId: taskProps.workspaceId,
     projectId: taskProps.projectId,
     issueUrl: taskProps.issueUrl,
@@ -325,6 +327,7 @@ function useTaskPageDerivedProps({
     agentctlStatus,
   });
   const topBarProps = buildTaskTopBarProps({
+    task,
     taskProps,
     actionsMenuBoardRow,
     workflowSteps,

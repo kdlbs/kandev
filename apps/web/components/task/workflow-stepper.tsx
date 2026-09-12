@@ -17,15 +17,23 @@ import {
   usePresentationToken,
   useWorkflowStepMove,
 } from "@/hooks/domains/kanban/use-workflow-step-move";
+import {
+  useWorkflowStepProgress,
+  type WorkflowStepProgress,
+} from "@/hooks/domains/kanban/use-workflow-step-progress";
 import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { useTranslation } from "react-i18next";
 import {
   MinimalWorkflowStepper,
-  StepCircleIndicator,
   canMoveToStep,
   getStepLabelClass,
   type WorkflowStepperStep,
 } from "./workflow-step-disclosure";
+import {
+  StepProgressDetails,
+  workflowStepProgressTranslationKey,
+} from "./workflow-step-progress-details";
+import { StepCircleIndicator } from "./workflow-step-marker";
 
 type Step = WorkflowStepperStep;
 
@@ -34,6 +42,7 @@ type WorkflowStepperProps = {
   currentStepId: string | null;
   taskId?: string | null;
   workflowId?: string | null;
+  taskState?: string | null;
   isArchived?: boolean;
   onMoveStart?: () => void;
   onMoveError?: (error: unknown) => void;
@@ -44,6 +53,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   currentStepId,
   taskId,
   workflowId,
+  taskState,
   isArchived,
   onMoveStart,
   onMoveError,
@@ -54,12 +64,19 @@ const WorkflowStepper = memo(function WorkflowStepper({
   // over from the earlier presentation the same way a preview close-and-reopen
   // does for the kanban preview header.
   const presentationToken = usePresentationToken(taskId ?? null);
-  const { movingToStepId, handleMove } = useWorkflowStepMove({
+  const { movingToStepId, progressingToStepId, handleMove } = useWorkflowStepMove({
     taskId,
     workflowId,
+    currentStepId,
+    taskState,
     presentationToken,
     onMoveStart,
     onMoveError,
+  });
+  const { progressByStepId, agentLabelsByProfileId } = useWorkflowStepProgress({
+    taskId,
+    currentStepId,
+    movingToStepId: progressingToStepId ?? movingToStepId,
   });
 
   const sortedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
@@ -90,6 +107,8 @@ const WorkflowStepper = memo(function WorkflowStepper({
           workflowId={workflowId}
           movingToStepId={movingToStepId}
           onMove={handleMove}
+          progressByStepId={progressByStepId}
+          agentLabelsByProfileId={agentLabelsByProfileId}
         />
       ) : (
         <>
@@ -104,6 +123,13 @@ const WorkflowStepper = memo(function WorkflowStepper({
                 taskId={taskId}
                 workflowId={workflowId}
                 movingToStepId={movingToStepId}
+                progress={progressByStepId[step.id]}
+                pendingLabel={
+                  progressByStepId[step.id]?.isPending
+                    ? t(workflowStepProgressTranslationKey(progressByStepId[step.id].status))
+                    : undefined
+                }
+                agentLabelsByProfileId={agentLabelsByProfileId}
                 onMove={handleMove}
               />
             ))}
@@ -131,6 +157,9 @@ function WorkflowStepItem({
   taskId,
   workflowId,
   movingToStepId,
+  progress,
+  pendingLabel,
+  agentLabelsByProfileId,
   onMove,
 }: {
   step: Step;
@@ -140,6 +169,9 @@ function WorkflowStepItem({
   taskId?: string | null;
   workflowId?: string | null;
   movingToStepId: string | null;
+  progress?: WorkflowStepProgress;
+  pendingLabel?: string;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
@@ -157,28 +189,41 @@ function WorkflowStepItem({
 
   return (
     <div className="flex items-center">
-      {index > 0 && <StepConnector isActive={isCompleted || isCurrent} />}
+      {index > 0 && (
+        <StepConnector
+          isActive={isCompleted || isCurrent}
+          testId={`workflow-step-connector-${step.id}`}
+        />
+      )}
       <HoverCard openDelay={200} closeDelay={100}>
         <HoverCardTrigger asChild>
-          <div
+          <button
+            type="button"
             data-testid={`workflow-step-${step.name}`}
             aria-current={isCurrent ? "step" : undefined}
             className={cn(
-              "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-default",
+              "m-0 flex items-center gap-1.5 rounded-md border-0 bg-transparent p-0 px-2 py-0.5 text-left text-xs whitespace-nowrap transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
             )}
           >
-            <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
+            <StepCircleIndicator
+              isCurrent={isCurrent}
+              isCompleted={isCompleted}
+              isPending={progress?.isPending}
+              pendingLabel={pendingLabel}
+            />
             <span className={cn("text-xs leading-none", getStepLabelClass(isCurrent, isCompleted))}>
               {step.name}
             </span>
-          </div>
+          </button>
         </HoverCardTrigger>
         <StepHoverContent
           step={step}
           isCurrent={isCurrent}
           canMove={canMove}
           isMoving={movingToStepId === step.id}
+          progress={progress}
+          agentLabelsByProfileId={agentLabelsByProfileId}
           onMove={onMove}
         />
       </HoverCard>
@@ -187,9 +232,12 @@ function WorkflowStepItem({
 }
 
 /** Connector line between steps */
-function StepConnector({ isActive }: { isActive: boolean }) {
+function StepConnector({ isActive, testId }: { isActive: boolean; testId?: string }) {
   return (
-    <div className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")} />
+    <div
+      data-testid={testId}
+      className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")}
+    />
   );
 }
 
@@ -199,12 +247,16 @@ function StepHoverContent({
   isCurrent,
   canMove,
   isMoving,
+  progress,
+  agentLabelsByProfileId,
   onMove,
 }: {
   step: Step;
   isCurrent: boolean;
   canMove: boolean;
   isMoving: boolean;
+  progress?: WorkflowStepProgress;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
@@ -218,6 +270,14 @@ function StepHoverContent({
       {canMove && <StepMoveControls step={step} isMoving={isMoving} onMove={onMove} />}
       {isCurrent && (
         <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
+      )}
+      {progress && (
+        <StepProgressDetails
+          progress={progress}
+          agentProfileId={step.agent_profile_id}
+          agentLabelsByProfileId={agentLabelsByProfileId}
+          testId={`workflow-step-progress-${step.id}`}
+        />
       )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
     </HoverCardContent>

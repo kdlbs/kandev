@@ -1,8 +1,13 @@
 "use client";
 
-import { forwardRef, useEffect, useState, type ComponentPropsWithoutRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useState,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
 import { cn } from "@kandev/ui/lib/utils";
-import { Button } from "@kandev/ui/button";
 import {
   Drawer,
   DrawerContent,
@@ -12,20 +17,23 @@ import {
   DrawerTrigger,
 } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { IconAdjustments, IconArrowRight, IconChevronDown } from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
-import {
-  WorkflowMoveOptionsFields,
-  useWorkflowMoveOptionsForm,
-  workflowMoveOptionsPayload,
-} from "./workflow-move-options";
+import { WorkflowMoveOptionsFields, useWorkflowMoveOptionsForm } from "./workflow-move-options";
 import {
   useCompactWorkflowDisclosure,
   type CompactWorkflowDisclosureControls,
 } from "./workflow-step-disclosure-controls";
+import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
+import {
+  StepProgressDetails,
+  workflowStepProgressTranslationKey,
+} from "./workflow-step-progress-details";
+import { StepCircleIndicator } from "./workflow-step-marker";
+import { StepDisclosureRowActions } from "./workflow-step-disclosure-actions";
 import { useTranslation } from "react-i18next";
 
 /** Move callback shared by every compact-disclosure surface. A revealed,
@@ -57,9 +65,14 @@ type MinimalWorkflowStepperProps = {
   workflowId?: string | null;
   movingToStepId: string | null;
   onMove: DisclosureMove;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
   /** Notified whenever the disclosure surface opens or closes. */
   onDisclosureOpenChange?: (open: boolean) => void;
 };
+
+const EMPTY_PROGRESS_BY_STEP_ID: Readonly<Record<string, WorkflowStepProgress>> = {};
+const EMPTY_AGENT_LABELS_BY_PROFILE_ID: Readonly<Record<string, string>> = {};
 
 export function MinimalWorkflowStepper({
   sortedSteps,
@@ -69,6 +82,8 @@ export function MinimalWorkflowStepper({
   workflowId,
   movingToStepId,
   onMove,
+  progressByStepId = EMPTY_PROGRESS_BY_STEP_ID,
+  agentLabelsByProfileId = EMPTY_AGENT_LABELS_BY_PROFILE_ID,
   onDisclosureOpenChange,
 }: MinimalWorkflowStepperProps) {
   const { t } = useTranslation();
@@ -93,6 +108,7 @@ export function MinimalWorkflowStepper({
         current={current}
         currentIndex={currentIndex}
         total={sortedSteps.length}
+        progress={progressByStepId[current.id]}
       />
     );
   }
@@ -107,6 +123,8 @@ export function MinimalWorkflowStepper({
       workflowId={workflowId}
       movingToStepId={movingToStepId}
       onMove={onMove}
+      progressByStepId={progressByStepId}
+      agentLabelsByProfileId={agentLabelsByProfileId}
       onDisclosureOpenChange={onDisclosureOpenChange}
     />
   );
@@ -116,13 +134,23 @@ type CompactWorkflowTriggerProps = ComponentPropsWithoutRef<"button"> & {
   current: Step;
   currentIndex: number;
   total: number;
+  progress?: WorkflowStepProgress;
   usesTouchDrawer: boolean;
   controls: CompactWorkflowDisclosureControls;
 };
 
 const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTriggerProps>(
   function CompactWorkflowTrigger(
-    { current, currentIndex, total, usesTouchDrawer, controls, className, ...buttonProps },
+    {
+      current,
+      currentIndex,
+      total,
+      progress,
+      usesTouchDrawer,
+      controls,
+      className,
+      ...buttonProps
+    },
     ref,
   ) {
     const { t } = useTranslation();
@@ -154,7 +182,12 @@ const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTrig
           className,
         )}
       >
-        <MinimalStepContents current={current} currentIndex={currentIndex} total={total} />
+        <MinimalStepContents
+          current={current}
+          currentIndex={currentIndex}
+          total={total}
+          progress={progress}
+        />
         {usesTouchDrawer && (
           <IconChevronDown
             data-testid="workflow-stepper-touch-disclosure-cue"
@@ -176,6 +209,8 @@ function CompactWorkflowStepDisclosure({
   workflowId,
   movingToStepId,
   onMove,
+  progressByStepId,
+  agentLabelsByProfileId,
   onDisclosureOpenChange,
 }: {
   sortedSteps: Step[];
@@ -186,9 +221,10 @@ function CompactWorkflowStepDisclosure({
   workflowId: string;
   movingToStepId: string | null;
   onMove: DisclosureMove;
+  progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
   onDisclosureOpenChange?: (open: boolean) => void;
 }) {
-  const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const controls = useCompactWorkflowDisclosure();
   useEffect(() => {
@@ -205,6 +241,7 @@ function CompactWorkflowStepDisclosure({
       current={current}
       currentIndex={currentIndex}
       total={sortedSteps.length}
+      progress={progressByStepId[current.id]}
       usesTouchDrawer={usesTouchDrawer}
       controls={controls}
     />
@@ -223,9 +260,37 @@ function CompactWorkflowStepDisclosure({
       workflowId={workflowId}
       movingToStepId={movingToStepId}
       isTouchSurface={usesTouchDrawer}
+      progressByStepId={progressByStepId}
+      agentLabelsByProfileId={agentLabelsByProfileId}
       onMove={handleDisclosureMove}
     />
   );
+
+  return (
+    <CompactWorkflowDisclosureSurface
+      trigger={trigger}
+      content={content}
+      controls={controls}
+      usesTouchDrawer={usesTouchDrawer}
+      stepCount={sortedSteps.length}
+    />
+  );
+}
+
+function CompactWorkflowDisclosureSurface({
+  trigger,
+  content,
+  controls,
+  usesTouchDrawer,
+  stepCount,
+}: {
+  trigger: ReactNode;
+  content: ReactNode;
+  controls: CompactWorkflowDisclosureControls;
+  usesTouchDrawer: boolean;
+  stepCount: number;
+}) {
+  const { t } = useTranslation();
 
   if (usesTouchDrawer) {
     return (
@@ -234,9 +299,7 @@ function CompactWorkflowStepDisclosure({
         <DrawerContent className="max-h-[80dvh]">
           <DrawerHeader className="shrink-0 text-left">
             <DrawerTitle>{t("task:moveTo")}</DrawerTitle>
-            <DrawerDescription>
-              {t("task:stepCount", { count: sortedSteps.length })}
-            </DrawerDescription>
+            <DrawerDescription>{t("task:stepCount", { count: stepCount })}</DrawerDescription>
           </DrawerHeader>
           {content}
         </DrawerContent>
@@ -272,17 +335,24 @@ function MinimalStepIndicator({
   current,
   currentIndex,
   total,
+  progress,
 }: {
   current: Step;
   currentIndex: number;
   total: number;
+  progress?: WorkflowStepProgress;
 }) {
   return (
     <div
       data-testid="workflow-stepper-minimal"
       className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
     >
-      <MinimalStepContents current={current} currentIndex={currentIndex} total={total} />
+      <MinimalStepContents
+        current={current}
+        currentIndex={currentIndex}
+        total={total}
+        progress={progress}
+      />
     </div>
   );
 }
@@ -291,12 +361,18 @@ function MinimalStepContents({
   current,
   currentIndex,
   total,
+  progress,
 }: {
   current: Step;
   currentIndex: number;
   total: number;
+  progress?: WorkflowStepProgress;
 }) {
+  const { t } = useTranslation();
   const displayIndex = currentIndex >= 0 ? currentIndex : 0;
+  const pendingLabel = progress?.isPending
+    ? t(workflowStepProgressTranslationKey(progress.status))
+    : undefined;
   return (
     <>
       <div
@@ -304,7 +380,12 @@ function MinimalStepContents({
         aria-current={currentIndex >= 0 ? "step" : undefined}
         className="flex min-w-0 items-center gap-1.5 text-xs"
       >
-        <StepCircleIndicator isCurrent={currentIndex >= 0} isCompleted={false} />
+        <StepCircleIndicator
+          isCurrent={currentIndex >= 0}
+          isCompleted={false}
+          isPending={progress?.isPending}
+          pendingLabel={pendingLabel}
+        />
         <span className="min-w-0 truncate text-xs font-medium leading-none text-foreground">
           {current.name}
         </span>
@@ -326,6 +407,8 @@ function StepDisclosureBody({
   workflowId,
   movingToStepId,
   isTouchSurface,
+  progressByStepId,
+  agentLabelsByProfileId,
   onMove,
 }: {
   sortedSteps: Step[];
@@ -335,6 +418,8 @@ function StepDisclosureBody({
   workflowId: string;
   movingToStepId: string | null;
   isTouchSurface: boolean;
+  progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: DisclosureMove;
 }) {
   return (
@@ -365,6 +450,8 @@ function StepDisclosureBody({
             isMoving={movingToStepId === step.id}
             movePending={movingToStepId !== null}
             isTouchSurface={isTouchSurface}
+            progress={progressByStepId[step.id]}
+            agentLabelsByProfileId={agentLabelsByProfileId}
             onMove={onMove}
           />
         );
@@ -389,6 +476,8 @@ function StepDisclosureRow({
   isMoving,
   movePending,
   isTouchSurface,
+  progress,
+  agentLabelsByProfileId,
   onMove,
 }: {
   step: Step;
@@ -398,6 +487,8 @@ function StepDisclosureRow({
   isMoving: boolean;
   movePending: boolean;
   isTouchSurface: boolean;
+  progress?: WorkflowStepProgress;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: DisclosureMove;
 }) {
   const { t } = useTranslation();
@@ -413,7 +504,16 @@ function StepDisclosureRow({
     >
       <div className="flex min-h-11 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
+          <StepCircleIndicator
+            isCurrent={isCurrent}
+            isCompleted={isCompleted}
+            isPending={progress?.isPending}
+            pendingLabel={
+              progress?.isPending
+                ? t(workflowStepProgressTranslationKey(progress.status))
+                : undefined
+            }
+          />
           <span
             className={cn("min-w-0 truncate text-xs", getStepLabelClass(isCurrent, isCompleted))}
           >
@@ -427,39 +527,27 @@ function StepDisclosureRow({
           </span>
         ) : (
           canMove && (
-            <div className="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                data-testid={`workflow-step-disclosure-options-${step.id}`}
-                size="sm"
-                variant="ghost"
-                aria-expanded={showOptions}
-                aria-label={t("task:workflowMoveOptions")}
-                className={cn(
-                  "shrink-0 cursor-pointer rounded-sm px-2 text-muted-foreground",
-                  buttonSizeClass,
-                  showOptions && "bg-muted/60 text-foreground",
-                )}
-                onClick={() => setShowOptions((value) => !value)}
-              >
-                <IconAdjustments className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                type="button"
-                data-testid={`workflow-step-disclosure-move-${step.id}`}
-                size="sm"
-                variant="default"
-                className={cn("shrink-0 cursor-pointer rounded-sm px-2.5 text-xs", buttonSizeClass)}
-                disabled={movePending}
-                onClick={() => void onMove(step.id, workflowMoveOptionsPayload(draft))}
-              >
-                <IconArrowRight className="h-3 w-3" />
-                {isMoving ? t("task:moving") : t("task:moveHere")}
-              </Button>
-            </div>
+            <StepDisclosureRowActions
+              stepId={step.id}
+              isMoving={isMoving}
+              movePending={movePending}
+              showOptions={showOptions}
+              buttonSizeClass={buttonSizeClass}
+              draft={draft}
+              onToggleOptions={() => setShowOptions((value) => !value)}
+              onMove={onMove}
+            />
           )
         )}
       </div>
+      {progress && (
+        <StepProgressDetails
+          progress={progress}
+          agentProfileId={step.agent_profile_id}
+          agentLabelsByProfileId={agentLabelsByProfileId}
+          testId={`workflow-step-progress-${step.id}`}
+        />
+      )}
       {canMove && !isCurrent && showOptions && (
         <div
           className="pb-1 pl-4 pr-1"
@@ -488,46 +576,6 @@ export function canMoveToStep(params: {
 }): boolean {
   if (params.isArchived || params.isCurrent || !params.taskId || !params.workflowId) return false;
   return params.isAdjacent || !!params.allowManualMove;
-}
-
-export type StepMarkerState = "current" | "completed" | "upcoming";
-
-export function StepCircleIndicator({
-  isCurrent,
-  isCompleted,
-}: {
-  isCurrent: boolean;
-  isCompleted: boolean;
-}) {
-  let state: StepMarkerState = "upcoming";
-  if (isCurrent) state = "current";
-  else if (isCompleted) state = "completed";
-  if (isCurrent) {
-    return (
-      <span
-        data-marker-state={state}
-        className="relative flex items-center justify-center shrink-0"
-      >
-        <span className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary/40" />
-        <span className="h-2 w-2 rounded-full bg-primary" />
-      </span>
-    );
-  }
-  if (isCompleted) {
-    return (
-      <span
-        data-marker-state={state}
-        className="relative flex items-center justify-center shrink-0"
-      >
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-      </span>
-    );
-  }
-  return (
-    <span data-marker-state={state} className="relative flex items-center justify-center shrink-0">
-      <span className="h-2 w-2 rounded-full border border-muted-foreground/40" />
-    </span>
-  );
 }
 
 export function getStepLabelClass(isCurrent: boolean, isCompleted: boolean): string {

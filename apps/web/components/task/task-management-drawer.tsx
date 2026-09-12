@@ -25,6 +25,11 @@ import { taskMoveOptions, stepHasAutoStart, type TaskMoveStep } from "./task-mov
 import { taskLinkMenuOptions } from "./task-switcher-link-menu";
 import { useTaskPluginLinkActions } from "./task-session-sidebar-link-actions";
 import type { TaskManagementMenuProps } from "./task-management-menu";
+import { StepProgressDetails } from "./workflow-step-progress-details";
+import {
+  useWorkflowStepProgress,
+  type WorkflowStepProgress,
+} from "@/hooks/domains/kanban/use-workflow-step-progress";
 
 export type TaskManagementDrawerProps = TaskManagementMenuProps & {
   onCloseAutoFocus: (event: Event) => void;
@@ -170,11 +175,15 @@ function StepChoices({
   currentStepId,
   disabled,
   onSelect,
+  progressByStepId,
+  agentLabelsByProfileId,
 }: {
   steps: TaskMoveStep[];
   currentStepId?: string;
   disabled?: boolean;
   onSelect: (stepId: string) => void;
+  progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
 }) {
   const { t } = useTranslation();
   return steps.map((step) => (
@@ -184,13 +193,23 @@ function StepChoices({
       disabled={disabled || step.id === currentStepId}
       onClick={() => onSelect(step.id)}
     >
-      <span className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{step.title}</span>
-        {step.id === currentStepId && (
-          <span className="shrink-0 text-xs text-muted-foreground">{t("task:current2")}</span>
-        )}
-        {stepHasAutoStart(step) && (
-          <span className="shrink-0 text-xs text-muted-foreground">{t("task:autoStart")}</span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{step.title}</span>
+          {step.id === currentStepId && (
+            <span className="shrink-0 text-xs text-muted-foreground">{t("task:current2")}</span>
+          )}
+          {stepHasAutoStart(step) && (
+            <span className="shrink-0 text-xs text-muted-foreground">{t("task:autoStart")}</span>
+          )}
+        </span>
+        {progressByStepId[step.id] && (
+          <StepProgressDetails
+            progress={progressByStepId[step.id]}
+            agentProfileId={step.agent_profile_id ?? undefined}
+            agentLabelsByProfileId={agentLabelsByProfileId}
+            testId={`task-context-step-progress-${step.id}`}
+          />
         )}
       </span>
     </Choice>
@@ -220,10 +239,14 @@ function DrawerChoices({
   page,
   setPage,
   props,
+  progressByStepId,
+  agentLabelsByProfileId,
 }: {
   page: Page;
   setPage: (page: Page) => void;
   props: TaskManagementDrawerProps;
+  progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
 }) {
   const { t } = useTranslation();
   const { task, workflows, stepsByWorkflowId, disabled, onMove, linkActions, closeMenu } = props;
@@ -237,6 +260,8 @@ function DrawerChoices({
         steps={currentSteps}
         currentStepId={task.workflowStepId}
         disabled={disabled}
+        progressByStepId={progressByStepId}
+        agentLabelsByProfileId={agentLabelsByProfileId}
         onSelect={(stepId) => {
           if (task.workflowId) onMove(task.workflowId, stepId);
         }}
@@ -247,6 +272,8 @@ function DrawerChoices({
       <StepChoices
         steps={stepsByWorkflowId[page.workflowId] ?? []}
         disabled={disabled}
+        progressByStepId={progressByStepId}
+        agentLabelsByProfileId={agentLabelsByProfileId}
         onSelect={(stepId) => onMove(page.workflowId, stepId)}
       />
     );
@@ -376,6 +403,16 @@ function RootChoices({
 
 export function TaskManagementDrawer(props: TaskManagementDrawerProps) {
   const { t } = useTranslation();
+  const { progressByStepId, agentLabelsByProfileId } = useWorkflowStepProgress({
+    taskId: props.task.id,
+    currentStepId: props.task.workflowStepId,
+    taskProjection: {
+      id: props.task.id,
+      state: props.task.state,
+      primarySessionId: props.task.primarySessionId,
+      primarySessionState: props.task.sessionState,
+    },
+  });
   const [page, setPage] = useState<Page>("root");
   const [focusChoiceId, setFocusChoiceId] = useState<string>();
   const navigate = (next: Page) => {
@@ -412,7 +449,13 @@ export function TaskManagementDrawer(props: TaskManagementDrawerProps) {
       focusChoiceId={focusChoiceId}
       onBack={page === "root" ? undefined : back}
     >
-      <DrawerChoices page={page} setPage={navigate} props={props} />
+      <DrawerChoices
+        page={page}
+        setPage={navigate}
+        props={props}
+        progressByStepId={progressByStepId}
+        agentLabelsByProfileId={agentLabelsByProfileId}
+      />
     </TaskManagementSheet>
   );
 }

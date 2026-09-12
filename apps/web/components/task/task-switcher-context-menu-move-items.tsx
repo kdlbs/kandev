@@ -2,6 +2,7 @@
 
 import { TaskMoveContextMenuItems } from "@/components/task/task-move-context-menu";
 import type { TaskContextMenuItemsProps } from "./task-switcher-context-menu";
+import { useWorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
 
 export function TaskMoveItems({
   task,
@@ -23,8 +24,9 @@ export function TaskMoveItems({
   actingIds: string[];
   actingOnSelection: boolean;
 }) {
-  if (!task.workflowId) return null;
   const workflowId = task.workflowId;
+  const { progressByStepId, agentLabelsByProfileId } = useTaskMoveProgress(task, actingOnSelection);
+  if (!workflowId) return null;
   const runSelectionMove = (
     targetWorkflowId: string,
     stepId: string,
@@ -74,6 +76,8 @@ export function TaskMoveItems({
         actingIds.length === 1 && onSubmitWithOptions ? onSubmitWithOptions : undefined
       }
       isMoving={moveOptionsBusy}
+      progressByStepId={progressByStepId}
+      agentLabelsByProfileId={agentLabelsByProfileId}
       onSendToWorkflow={(targetWorkflowId, stepId) => {
         if (actingOnSelection) {
           runSelectionMove(targetWorkflowId, stepId, "workflow");
@@ -86,4 +90,20 @@ export function TaskMoveItems({
       }}
     />
   );
+}
+
+function useTaskMoveProgress(task: TaskContextMenuItemsProps["task"], actingOnSelection: boolean) {
+  const taskProjection = actingOnSelection
+    ? null
+    : {
+        id: task.id,
+        state: task.state,
+        primarySessionId: task.primarySessionId,
+        primarySessionState: task.sessionState,
+      };
+  return useWorkflowStepProgress({
+    taskId: actingOnSelection ? null : task.id,
+    currentStepId: actingOnSelection ? null : task.workflowStepId,
+    taskProjection,
+  });
 }
