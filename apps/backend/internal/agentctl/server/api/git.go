@@ -278,14 +278,17 @@ func (s *Server) handleGitContributionHistoryExplanation(c *gin.Context) {
 		})
 		return
 	}
-	for field, value := range map[string]string{
-		"branch":               req.Branch,
-		"expected_local_head":  req.ExpectedLocalHead,
-		"expected_remote_head": req.ExpectedRemoteHead,
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{name: "branch", value: req.Branch},
+		{name: "expected_local_head", value: req.ExpectedLocalHead},
+		{name: "expected_remote_head", value: req.ExpectedRemoteHead},
 	} {
-		if value == "" {
+		if required.value == "" {
 			c.JSON(http.StatusBadRequest, process.GitOperationResult{
-				Success: false, Operation: "contribution_history_explanation", Error: field + " is required",
+				Success: false, Operation: "contribution_history_explanation", Error: required.name + " is required",
 			})
 			return
 		}
