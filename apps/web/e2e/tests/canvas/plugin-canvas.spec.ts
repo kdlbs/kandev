@@ -1,12 +1,17 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForSessionDone } from "../../helpers/session";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { SessionPage } from "../../pages/session-page";
 import {
+  canvasHref,
   enableCanvasFeature,
   expectCanvasFrameFillsHost,
+  listCanvasReleases,
   removeCanvas,
   seedTaskCanvas,
+  waitForSessionWorkspace,
+  writeCanvasSource,
 } from "./canvas-fixture";
 
 test.describe("Plugin-backed canvases in the desktop task workbench", () => {
@@ -340,6 +345,103 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
       expect(contextFailures).toBe(1);
     } finally {
       await testPage.unroute("**/_kandev/v1/context");
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      await releaseFeature();
+    }
+  });
+
+  test("keeps the desktop release review wide without scrolling two permissions", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    await testPage.setViewportSize({ width: 1280, height: 720 });
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let canvasId: string | undefined;
+    try {
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true, {
+        noPermissions: true,
+      });
+      canvasId = seeded.canvas.id;
+
+      const workspacePath = await waitForSessionWorkspace(
+        apiClient,
+        seeded.taskId,
+        seeded.taskSessionId,
+      );
+      writeCanvasSource(workspacePath, seeded.canvas, { minimalPermissions: true });
+      const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
+        canvas_id: seeded.canvas.id,
+        source_path: `.kandev/canvases/${seeded.canvas.id}`,
+      })})`;
+      const reviewSession = await apiClient.launchSession({
+        task_id: seeded.taskId,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        workflow_step_id: seedData.startStepId,
+        prompt: `e2e:delay(2500)\n${publishScript}`,
+      });
+      const reviewWorkspacePath = await waitForSessionWorkspace(
+        apiClient,
+        seeded.taskId,
+        reviewSession.session_id,
+      );
+      writeCanvasSource(reviewWorkspacePath, seeded.canvas, { minimalPermissions: true });
+      await waitForSessionDone(
+        apiClient,
+        seeded.taskId,
+        reviewSession.session_id,
+        "The permission-increasing canvas publication did not finish.",
+        45_000,
+      );
+      let pendingReleaseId: string | undefined;
+      await expect
+        .poll(
+          async () => {
+            const releases = await listCanvasReleases(apiClient, canvasId!);
+            pendingReleaseId = releases.find(
+              (release) => release.validation_status === "pending_permission",
+            )?.id;
+            return pendingReleaseId ?? null;
+          },
+          {
+            timeout: 30_000,
+            message: "The permission-increasing canvas release did not pend.",
+          },
+        )
+        .not.toBeNull();
+      expect(pendingReleaseId).toBeTruthy();
+
+      await testPage.goto(canvasHref(canvasId));
+      const releasesButton = testPage.getByRole("button", {
+        name: "Releases and permissions",
+        exact: true,
+      });
+      await expect(releasesButton).toBeVisible({
+        timeout: 20_000,
+      });
+      await releasesButton.click();
+
+      const dialog = testPage.getByTestId("canvas-releases-dialog");
+      await expect(dialog).toBeVisible();
+      const dialogBox = await dialog.boundingBox();
+      expect(dialogBox?.width).toBeGreaterThanOrEqual(720);
+      expect(dialogBox?.width).toBeLessThanOrEqual(780);
+
+      const permissions = dialog.getByTestId("canvas-permission-summary");
+      await expect(permissions).toBeVisible();
+      await expect(permissions.locator("li")).toHaveCount(2);
+      const scrollMetrics = await dialog
+        .getByTestId("canvas-release-review-scroll")
+        .evaluate((element) => ({
+          clientHeight: element.clientHeight,
+          scrollHeight: element.scrollHeight,
+        }));
+      expect(scrollMetrics.scrollHeight).toBeLessThanOrEqual(scrollMetrics.clientHeight);
+    } finally {
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await releaseFeature();
     }
