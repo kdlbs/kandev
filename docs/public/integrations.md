@@ -98,6 +98,17 @@ connection leaves compatibility mode permanently.
 
 The status panel identifies the selected source, verified actor, connection state, and any missing App capabilities. When GitHub has reported quota data, use **Show GitHub API limits** to inspect the remaining API requests, GraphQL query points, Search requests, and reset times for that workspace connection. The disclosure appears as a tooltip on desktop and a tap-accessible drawer on touch devices. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
 
+#### Troubleshoot PR discovery
+
+The **PR discovery failed** warning is separate from the quota values:
+
+- A full quota report does not prove that PR discovery works. Check the warning's reason and last failure time.
+- **Invalid query** means Kandev rejected the provider request. The warning remains until a newer discovery attempt succeeds.
+- **Rate limited** means the provider delayed discovery. Kandev waits for the reported or calculated retry time instead of repeating the same request.
+- A warning for one workspace or repository does not mark another workspace healthy or unhealthy. Replacing the workspace connection starts a new credential-scoped health state.
+
+When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
+
 ### Automation and personal identity
 
 PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.

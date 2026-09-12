@@ -258,6 +258,13 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
+// WorkflowMovePreflight validates the destination lifecycle before a task
+// move is committed. The orchestrator owns the credential and session-target
+// checks, while the task service owns the move transaction.
+type WorkflowMovePreflight interface {
+	PreflightWorkflowStepMove(ctx context.Context, taskID string, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
+}
+
 // workflowStepLister is an optional extension used to find WIP steps that
 // pull work from a feeder when new work arrives in that feeder.
 type workflowStepLister interface {
@@ -424,6 +431,7 @@ type Service struct {
 	workflowStepCreator             WorkflowStepCreator
 	workspaceBootstrapper           WorkspaceBootstrapper
 	workflowStepGetter              WorkflowStepGetter
+	workflowMovePreflight           WorkflowMovePreflight
 	startStepResolver               StartStepResolver
 	stepHistoryRecorder             StepHistoryRecorder
 	contributionDestinationPreparer ContributionDestinationPreparer
@@ -715,6 +723,13 @@ func (s *Service) SetWorkspaceDefaultsInitializer(initializer WorkspaceDefaultsI
 // SetWorkflowStepGetter wires the workflow step getter for MoveTask.
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
+}
+
+// SetWorkflowMovePreflight wires the orchestrator's synchronous destination
+// lifecycle validation for task moves. It is optional for standalone task
+// service users and tests.
+func (s *Service) SetWorkflowMovePreflight(preflight WorkflowMovePreflight) {
+	s.workflowMovePreflight = preflight
 }
 
 // SetStartStepResolver wires the start step resolver for CreateTask.

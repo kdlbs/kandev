@@ -20,8 +20,10 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -970,6 +972,13 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	return true, nil
 }
 
+// Inner descriptor keys for the one-shot MetaKeyWorkflowMovePending marker.
+const (
+	pendingMoveFromStepIDKey = "from_step_id"
+	pendingMoveIDKey         = "move_id"
+	pendingMoveOptionsKey    = "options"
+)
+
 func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	ctx context.Context,
 	task *models.Task,
@@ -1060,6 +1069,21 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 			if _, exists := task.Metadata[models.MetaKeyQueuedMoveExitPending]; !exists {
 				task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
 			}
+		}
+	}
+	// A deferred move that cannot enter because the target is full has already
+	// consumed its pending-move row in this transaction. Keep its one-shot
+	// options on the queued task before the task update and pending-row delete
+	// commit, so promotion cannot observe the destination without its options.
+	if deferredMove != nil && !admitted && deferredMove.Move.EntryOptions != nil {
+		encoded, err := workflowmove.EncodeEntryOptionsJSON(deferredMove.Move.EntryOptions)
+		if err != nil {
+			return false, false, fmt.Errorf("encode deferred workflow move options: %w", err)
+		}
+		task.Metadata[models.MetaKeyWorkflowMovePending] = map[string]interface{}{
+			pendingMoveFromStepIDKey: expectedStepID,
+			pendingMoveIDKey:         deferredMove.Move.MoveID,
+			pendingMoveOptionsKey:    string(encoded),
 		}
 	}
 	metadata, err := json.Marshal(task.Metadata)
@@ -1598,6 +1622,9 @@ func (r *Repository) DetachTask(ctx context.Context, taskID string) (bool, error
 	if lockedParentID != parentID || lockedGroupID != groupID {
 		return false, fmt.Errorf("detach task %s: hierarchy changed concurrently", taskID)
 	}
+	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, taskID); err != nil {
+		return false, err
+	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(detachTaskQuery(r.db.DriverName())), time.Now().UTC(), taskID)
 	if err != nil {
@@ -1786,6 +1813,11 @@ func (r *Repository) applyDetachedWorkspaceStewardship(
 	groupID, taskID string,
 	state detachedWorkspaceStewardship,
 ) error {
+	if state.environmentID != "" {
+		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, state.environmentID); err != nil {
+			return err
+		}
+	}
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_workspace_group_members SET role = 'member'
@@ -2083,6 +2115,9 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 	}
 	if !found {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	}
+	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, id); err != nil {
+		return "", err
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {

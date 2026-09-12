@@ -1,5 +1,6 @@
 import {
   buildArchiveEntry,
+  buildGroupedMenuEntries,
   buildDeleteEntry,
   buildKanbanCardMenuEntries,
   resolvePluginMenuContext,
@@ -37,12 +38,13 @@ function buildArchivedTaskActionsMenuEntries({
     disabled: isProcessing,
     context: resolvePluginMenuContext(pluginMenuContext),
   });
-  const entries: KanbanCardMenuEntry[] = [...pluginEntries];
-  if (pluginEntries.length > 0) {
-    entries.push({ kind: "separator", key: "delete-separator" });
-  }
-  entries.push(buildDeleteEntry({ isDeleting, isProcessing, onDelete }));
-  return entries;
+  return buildGroupedMenuEntries([
+    { key: "plugins", entries: pluginEntries },
+    {
+      key: "remove",
+      entries: [buildDeleteEntry({ isDeleting, isProcessing, onDelete })],
+    },
+  ]);
 }
 
 function buildUnresolvedRowTaskActionsMenuEntries({
@@ -54,13 +56,20 @@ function buildUnresolvedRowTaskActionsMenuEntries({
   pluginMenuContext,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const isProcessing = Boolean(disabled || isDeleting || isArchiving);
-  return [
-    ...buildPrimaryPluginEntries({
-      disabled: isProcessing,
-      context: resolvePluginMenuContext(pluginMenuContext),
-    }),
-    buildArchiveEntry({ isArchiving, isProcessing, onArchive }),
-    { kind: "separator", key: "delete-separator" },
-    buildDeleteEntry({ isDeleting, isProcessing, onDelete }),
-  ];
+  return buildGroupedMenuEntries([
+    {
+      key: "plugins",
+      entries: buildPrimaryPluginEntries({
+        disabled: isProcessing,
+        context: resolvePluginMenuContext(pluginMenuContext),
+      }),
+    },
+    {
+      key: "remove",
+      entries: [
+        buildArchiveEntry({ isArchiving, isProcessing, onArchive }),
+        buildDeleteEntry({ isDeleting, isProcessing, onDelete }),
+      ],
+    },
+  ]);
 }

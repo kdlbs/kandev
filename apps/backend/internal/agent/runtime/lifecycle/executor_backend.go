@@ -268,6 +268,7 @@ const (
 	MetadataKeySSHRemoteSessionDir     = "ssh_remote_session_dir"
 	MetadataKeySSHRemoteAgentctlPort   = "ssh_remote_agentctl_port"
 	MetadataKeySSHRemoteAgentctlPID    = "ssh_remote_agentctl_pid"
+	MetadataKeySSHAgentctlInstanceID   = "ssh_remote_agentctl_instance_id"
 	MetadataKeySSHLocalForwardPort     = "ssh_local_forward_port"
 	MetadataKeySSHRemoteAgentctlURL    = "ssh_remote_agentctl_url"
 	MetadataKeySSHRuntimeAPILocalURL   = "ssh_runtime_api_local_url"
@@ -319,6 +320,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteSessionDir:     true,
 	MetadataKeySSHRemoteAgentctlPort:   true,
 	MetadataKeySSHRemoteAgentctlPID:    true,
+	MetadataKeySSHAgentctlInstanceID:   true,
 	MetadataKeySSHLocalForwardPort:     true,
 	MetadataKeySSHRemoteAgentctlURL:    true,
 	MetadataKeySSHRuntimeAPILocalURL:   true,
@@ -379,6 +381,8 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyAllowUserNamespaces:      true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
+	metadataCheckoutBranch:              true,
+	metadataCheckoutRef:                 true,
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
@@ -406,6 +410,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteSessionDir:             true,
 	MetadataKeySSHRemoteAgentctlPort:           true,
 	MetadataKeySSHRemoteAgentctlPID:            true,
+	MetadataKeySSHAgentctlInstanceID:           true,
 	MetadataKeySSHLocalForwardPort:             true,
 	MetadataKeySSHRemoteAgentctlURL:            true,
 	MetadataKeySSHRuntimeAPILocalURL:           true,

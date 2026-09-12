@@ -220,6 +220,26 @@ export type DeleteTaskParams = {
   discardWorktreeChanges?: boolean;
 };
 
+export type TaskDeletePreflightResponse = {
+  requires_discard_consent: boolean;
+};
+
+export async function getTaskDeletePreflight(
+  taskIds: string[],
+  cascade: boolean,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
+    ...options,
+    cache: "no-store",
+    init: {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds, cascade }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
 export async function deleteTask(
   taskId: string,
   params?: DeleteTaskParams,
@@ -237,14 +257,58 @@ export async function deleteTask(
   });
 }
 
+/** One-shot values applied when a task enters the destination workflow step. */
+export type WorkflowMoveEntryOptions = {
+  reset_context?: boolean;
+  instructions?: string;
+  skip_step_prompt?: boolean;
+};
+
+export type MoveTaskPayload = {
+  workflow_id: string;
+  workflow_step_id: string;
+  position: number;
+  entry_options?: WorkflowMoveEntryOptions | null;
+};
+
+/** Move response fields added by the one-shot entry-options transport. */
+export type WorkflowMoveResponse = MoveTaskResponse & {
+  entry_options?: WorkflowMoveEntryOptions;
+};
+
+/**
+ * Converts form values into the wire contract. Blank text has no one-shot
+ * effect, and an absent/empty object keeps the legacy destination-only body.
+ */
+export function normalizeWorkflowMoveEntryOptions(
+  options: WorkflowMoveEntryOptions | null | undefined,
+): WorkflowMoveEntryOptions | undefined {
+  if (!options) return undefined;
+
+  const normalized: WorkflowMoveEntryOptions = {};
+  if (options.reset_context === true) normalized.reset_context = true;
+  if (options.skip_step_prompt === true) normalized.skip_step_prompt = true;
+
+  const instructions = options.instructions?.trim();
+  if (instructions) normalized.instructions = instructions;
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export async function moveTask(
   taskId: string,
-  payload: { workflow_id: string; workflow_step_id: string; position: number },
+  payload: MoveTaskPayload,
   options?: ApiRequestOptions,
-) {
-  return fetchJson<MoveTaskResponse>(`/api/v1/tasks/${taskId}/move`, {
+): Promise<WorkflowMoveResponse> {
+  const { entry_options, ...destination } = payload;
+  const normalizedEntryOptions = normalizeWorkflowMoveEntryOptions(entry_options);
+  const requestPayload = normalizedEntryOptions
+    ? { ...destination, entry_options: normalizedEntryOptions }
+    : destination;
+
+  return fetchJson<WorkflowMoveResponse>(`/api/v1/tasks/${taskId}/move`, {
     ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { method: "POST", body: JSON.stringify(requestPayload), ...(options?.init ?? {}) },
   });
 }
 

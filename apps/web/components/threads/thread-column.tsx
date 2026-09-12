@@ -12,6 +12,7 @@ import { selectThreadSessionId } from "@/lib/threads/thread-session-selection";
 import { resolveThreadColumnStatus, type ThreadStatus } from "@/lib/threads/thread-session-status";
 import { ThreadConversation } from "./thread-conversation";
 import { ThreadSessionStatusIcon, ThreadSessionSwitcher } from "./thread-session-switcher";
+import { ThreadTaskMenuButton, useThreadTaskContextMenu } from "./thread-task-actions";
 import {
   MobileThreadColumnHeader,
   type MobileThreadNavigation,
@@ -232,6 +233,7 @@ function ThreadColumnHeader({
   mobileNavigation?: MobileThreadNavigation;
 }) {
   const { t } = useTranslation();
+  const onContextMenu = useThreadTaskContextMenu(thread.taskId);
   if (mobileNavigation) {
     return (
       <MobileThreadColumnHeader
@@ -246,7 +248,7 @@ function ThreadColumnHeader({
     );
   }
   return (
-    <header className="flex flex-col gap-1 border-b px-3 py-2">
+    <header className="flex flex-col gap-1 border-b px-3 py-2" onContextMenu={onContextMenu}>
       <div className="flex items-start gap-2">
         <ThreadSessionStatusIcon
           status={status}
@@ -256,15 +258,18 @@ function ThreadColumnHeader({
         <p className="min-w-0 flex-1 truncate text-sm font-medium" title={thread.title}>
           {thread.title}
         </p>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0 cursor-pointer"
-          aria-label={t("threads:openTask")}
-          onClick={() => onOpenTask(thread.taskId)}
-        >
-          <IconArrowsMaximize className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 cursor-pointer"
+            aria-label={t("threads:openTask")}
+            onClick={() => onOpenTask(thread.taskId)}
+          >
+            <IconArrowsMaximize className="h-3.5 w-3.5" />
+          </Button>
+          <ThreadTaskMenuButton taskId={thread.taskId} />
+        </div>
       </div>
       <ThreadMeta
         thread={thread}

@@ -1173,6 +1173,8 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	// while the ID still pointed at the stale row — a mismatch downstream
 	// reconcilers and progress events would key off the wrong env.
 	info.TaskEnvironmentID = env.ID
+	info.EnvironmentOwnerTaskID = env.TaskID
+	info.OwnershipGeneration = env.OwnershipGeneration
 	if info.ExecutorProfileID == "" {
 		info.ExecutorProfileID = env.ExecutorProfileID
 	}

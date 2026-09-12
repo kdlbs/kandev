@@ -1532,6 +1532,31 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }
 
+func TestLaunch_DoesNotPromoteWorkspaceExecutionAfterSessionTerminalizes(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-terminal",
+		AgentName: "auggie",
+	}}
+	mgr.SetExecutorProfileReader(&staleLaunchAdmissionReader{})
+
+	existing := &AgentExecution{
+		ID:             "exec-terminal",
+		SessionID:      "session-terminalization-race",
+		TaskID:         "task-terminalization-race",
+		AgentProfileID: "profile-terminal",
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         existing.TaskID,
+		SessionID:      existing.SessionID,
+		AgentProfileID: existing.AgentProfileID,
+	})
+	require.ErrorIs(t, err, ErrSessionTerminal)
+	require.Empty(t, existing.AgentCommand, "terminal session must not be promoted")
+}
+
 func TestLaunch_PromotesWorkspaceOnlyExecutionAppliesMCPProviders(t *testing.T) {
 	var gotProviders []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1908,6 +1933,10 @@ type launchRegistrationGateReader struct {
 	release          chan struct{}
 }
 
+func (r *launchRegistrationGateReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	return &models.Task{ID: id}, nil
+}
+
 type launchRegistrationWriter struct {
 	upserted  chan struct{}
 	deleted   atomic.Int32
@@ -2158,6 +2187,10 @@ type staleLaunchAdmissionReader struct {
 	reads atomic.Int32
 }
 
+func (*staleLaunchAdmissionReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	return &models.Task{ID: id}, nil
+}
+
 func (r *staleLaunchAdmissionReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
 	state := models.TaskSessionStateStarting
 	if r.reads.Add(1) > 1 {
@@ -2183,7 +2216,7 @@ func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T
 	reader := &staleLaunchAdmissionReader{}
 	mgr.SetExecutorProfileReader(reader)
 
-	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race")
+	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race", executionAdmissionAgent)
 	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
 		t.Fatalf("ensureLaunchSessionStillActive error = %v, want terminal-session validation", err)
 	}

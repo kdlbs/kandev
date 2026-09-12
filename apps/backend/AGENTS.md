@@ -97,6 +97,14 @@ apps/backend/
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
 
+Canvas creation authority is recorded only by the trusted task authoring
+adapter. It binds the workspace owner, creating session, task scope, and
+policy version to a new draft. The first valid static web-app release may
+consume that single-use authority for exact task-scoped grants in the same
+transaction as release insertion and activation. Existing drafts, imports,
+later permission increases, and revoked grants remain on the human review
+path. Never use source metadata or a manifest trust field as authority.
+
 ## Key Concepts
 
 **Orchestrator** coordinates task execution:

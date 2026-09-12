@@ -70,7 +70,11 @@ export function GitHubAccessHelp({
             {description}
           </DrawerDescription>
         </DrawerHeader>
-        {content && <div className="px-4 pb-4">{content}</div>}
+        {content && (
+          <div className="max-h-[min(60dvh,32rem)] overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            {content}
+          </div>
+        )}
       </DrawerContent>
     </Drawer>
   );

@@ -681,6 +681,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
 	}
+	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,

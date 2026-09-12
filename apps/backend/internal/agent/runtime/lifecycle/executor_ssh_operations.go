@@ -688,7 +688,7 @@ func buildSSHCreateInstanceRequest(
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
-		Env:                        sshRemoteContributionEnv(req, agentctlBin),
+		Env:                        selectedCheckoutAgentEnv(sshRemoteContributionEnv(req, agentctlBin), req.Metadata),
 	}
 }
 
