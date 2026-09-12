@@ -1064,6 +1064,11 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
+	// sessionCeiling is the instance-wide admission controller for agent
+	// session launches. Its ceiling is resolved once here, at construction,
+	// and is constant for the lifetime of the process.
+	sessionCeiling *sessionCeilingController
+
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
 	// reconcileDependencyLaunchesOnStartup after the watcher and scheduler
@@ -1634,6 +1639,7 @@ func NewService(
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
 		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
+		sessionCeiling:               newSessionCeilingForRepo(repo, svcLogger.Zap()),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
 		taskParkedStates:             make(map[string]*taskParkedState),

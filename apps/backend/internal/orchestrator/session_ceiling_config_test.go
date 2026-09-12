@@ -4,6 +4,10 @@ import (
 	"runtime"
 	"strconv"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestDefaultSessionCeilingIsHalfTheCoresWithAFloorOfTwo(t *testing.T) {
@@ -85,5 +89,40 @@ func TestResolveSessionCeilingDefaultMatchesThisHost(t *testing.T) {
 	}
 	if want < 2 {
 		t.Fatalf("default ceiling %s is below the floor of 2", strconv.Itoa(want))
+	}
+}
+
+// AC-18a: the ceiling is resolved from maxConcurrentSessionsEnvVar once, at
+// controller construction, rather than read ad hoc by callers.
+func TestNewSessionCeilingControllerFromEnvUsesTheOperatorValue(t *testing.T) {
+	t.Setenv(maxConcurrentSessionsEnvVar, "3")
+	c := newSessionCeilingControllerFromEnv(nil, zap.NewNop())
+	if c.ceiling != 3 {
+		t.Fatalf("ceiling = %d, want 3", c.ceiling)
+	}
+}
+
+func TestNewSessionCeilingControllerFromEnvFallsBackToDefaultWhenUnset(t *testing.T) {
+	t.Setenv(maxConcurrentSessionsEnvVar, "")
+	c := newSessionCeilingControllerFromEnv(nil, zap.NewNop())
+	want := defaultSessionCeiling(runtime.NumCPU())
+	if c.ceiling != want {
+		t.Fatalf("ceiling = %d, want default %d", c.ceiling, want)
+	}
+}
+
+// AC-20: a set-but-unparseable value takes the default and is reported at WARN,
+// distinguishing it from the silent unset case above.
+func TestNewSessionCeilingControllerFromEnvWarnsOnRejectedValue(t *testing.T) {
+	t.Setenv(maxConcurrentSessionsEnvVar, "not-a-number")
+	core, logs := observer.New(zapcore.WarnLevel)
+	c := newSessionCeilingControllerFromEnv(nil, zap.New(core))
+
+	want := defaultSessionCeiling(runtime.NumCPU())
+	if c.ceiling != want {
+		t.Fatalf("ceiling = %d, want default %d", c.ceiling, want)
+	}
+	if n := logs.FilterMessageSnippet("could not be parsed").Len(); n != 1 {
+		t.Fatalf("expected exactly one WARN about the rejected value, got %d: %v", n, logs.All())
 	}
 }

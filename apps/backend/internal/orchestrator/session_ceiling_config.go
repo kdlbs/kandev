@@ -1,8 +1,12 @@
 package orchestrator
 
 import (
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // maxConcurrentSessionsEnvVar is the only source of an operator-supplied session
@@ -42,4 +46,47 @@ func resolveSessionCeiling(raw string, numCPU int) (ceiling int, rejected string
 		return defaultSessionCeiling(numCPU), raw
 	}
 	return parsed, ""
+}
+
+// newSessionCeilingControllerFromEnv resolves maxConcurrentSessionsEnvVar exactly
+// once, at controller construction, and builds the controller from the result.
+// A rejected raw value is logged at WARN here rather than propagated, since this
+// is the only production call site and the caller has nothing further to do with
+// it besides log it.
+func newSessionCeilingControllerFromEnv(lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
+	ceiling, rejected := resolveSessionCeiling(os.Getenv(maxConcurrentSessionsEnvVar), runtime.NumCPU())
+	if rejected != "" {
+		effectiveLogger := logger
+		if effectiveLogger == nil {
+			effectiveLogger = zap.NewNop()
+		}
+		effectiveLogger.Warn("session ceiling environment value could not be parsed; using the derived default",
+			zap.String("env_var", maxConcurrentSessionsEnvVar),
+			zap.String("value", rejected),
+			zap.Int("default", ceiling))
+	}
+	return newSessionCeilingController(ceiling, lister, logger)
+}
+
+// newSessionCeilingForRepo builds the controller the service owns, binding the
+// repository as the persisted half of its population source.
+//
+// The repository is reached through a narrow consumer-side interface and a type
+// assertion, following the idiom the other repository consumers in this package
+// use. That idiom degrades silently, and here the degraded state is dangerous
+// rather than merely reduced: an unbound controller still answers, but it counts
+// only its own in-process reservations, so every session already running on the
+// instance is invisible to it and the ceiling admits without bound. A build-time
+// assertion covers the production repository; this warning covers everything else.
+func newSessionCeilingForRepo(repo interface{}, logger *zap.Logger) *sessionCeilingController {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	lister, ok := repo.(admittedSessionLister)
+	if !ok {
+		logger.Warn("repository cannot enumerate admitted sessions; the session ceiling will count only in-process reservations",
+			zap.String("env_var", maxConcurrentSessionsEnvVar))
+		lister = nil
+	}
+	return newSessionCeilingControllerFromEnv(lister, logger)
 }
