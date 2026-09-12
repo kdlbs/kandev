@@ -1,9 +1,9 @@
 import type { StoreApi } from "zustand";
-import { createTaskPlanComment } from "@/lib/api/domains/plan-comment-api";
+import { createTaskPlanComment, updateTaskPlanComment } from "@/lib/api/domains/plan-comment-api";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
 import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
 import { planCommentRecoveryDelay } from "@/lib/plan-comment-recovery";
-import { useCommentsStore } from "@/lib/state/slices/comments";
+import { useCommentsStore, type PlanComment } from "@/lib/state/slices/comments";
 import {
   readLegacyPlanComments,
   removeAcknowledgedLegacyPlanComment,
@@ -11,13 +11,38 @@ import {
 } from "@/lib/state/slices/comments/persistence";
 import type { PlanCommentMigrationState } from "@/lib/state/slices/session/types";
 import type { AppState } from "@/lib/state/store";
+import type { TaskPlanComment, TaskPlanCommentSnapshot } from "@/lib/types/http";
 import { WebSocketRequestError } from "@/lib/ws/request-error";
 
 type Failure = PlanCommentMigrationState["failure"];
-type PendingRecord = { record: LegacyPlanCommentRecord; acknowledgedPlanId?: string };
+type PendingRecord = { record: LegacyPlanCommentRecord; acknowledged?: TaskPlanComment };
 type Discovery = { sessionIds: string[]; complete: boolean; loading: boolean };
 
 const recoveries = new WeakMap<StoreApi<AppState>, Map<string, PlanCommentMigration>>();
+
+function legacyAnchor(comment: PlanComment) {
+  const anchorFrom = comment.from ?? 0;
+  return {
+    selectedText: comment.selectedText,
+    anchorFrom,
+    anchorTo: comment.to ?? anchorFrom + Math.max(1, comment.selectedText.length),
+  };
+}
+
+function sameAnchor(persisted: TaskPlanComment, comment: PlanComment) {
+  const anchor = legacyAnchor(comment);
+  return (
+    persisted.selected_text === anchor.selectedText &&
+    persisted.anchor_from === anchor.anchorFrom &&
+    persisted.anchor_to === anchor.anchorTo
+  );
+}
+
+function acknowledgeLegacyRecord({ sessionId, comment }: LegacyPlanCommentRecord): Failure {
+  if (!removeAcknowledgedLegacyPlanComment(sessionId, comment)) return "transient";
+  useCommentsStore.getState().forgetMigratedPlanComment(sessionId, comment.id);
+  return null;
+}
 
 function classifyFailure(error: unknown): Failure {
   if (planCommentAdmissionConflict(error)) return "conflict";
@@ -72,6 +97,7 @@ export class PlanCommentMigration {
   }
 
   wake() {
+    if (!this.ready()) return this.inFlight;
     if (Date.now() - this.lastWakeAt < 250) return this.inFlight;
     this.lastWakeAt = Date.now();
     this.dueAt = 0;
@@ -137,9 +163,8 @@ export class PlanCommentMigration {
     for (const record of records) {
       const key = `${record.sessionId}:${record.comment.id}`;
       const known = this.pending.get(key);
-      if (!known || JSON.stringify(known.record.comment) !== JSON.stringify(record.comment)) {
-        this.pending.set(key, { record });
-      }
+      if (known) known.record = record;
+      else this.pending.set(key, { record });
     }
   }
 
@@ -172,8 +197,13 @@ export class PlanCommentMigration {
   }
 
   private kick(): Promise<void> | undefined {
-    if (!this.consumers.size || this.inFlight) return this.inFlight;
+    if (!this.consumers.size) return this.inFlight;
     this.scan();
+    if (this.inFlight) {
+      const state = this.store.getState().taskPlans.commentsMigrationByTaskId[this.taskId];
+      this.publish(state?.status ?? "idle");
+      return this.inFlight;
+    }
     if (this.failure === "conflict" || this.failure === "rejected") {
       this.publish("failed");
       return;
@@ -184,8 +214,8 @@ export class PlanCommentMigration {
       this.publish("complete");
       return;
     }
-    if (this.pending.size && !this.plan() && !this.refreshPlan) {
-      this.publish(this.plan() === null ? "waiting_for_plan" : "idle");
+    if (this.pending.size && this.plan() === null && !this.refreshPlan) {
+      this.publish("waiting_for_plan");
       return;
     }
     if (!this.ready()) {
@@ -214,7 +244,7 @@ export class PlanCommentMigration {
   }
 
   private async discover(generation: number) {
-    if (this.refreshPlan) {
+    if (this.refreshPlan || (this.pending.size > 0 && this.plan() === undefined)) {
       const next = await getTaskPlan(this.taskId);
       if (!this.current(generation)) return;
       this.refreshPlan = false;
@@ -275,35 +305,66 @@ export class PlanCommentMigration {
     planId: string,
     generation: number,
   ): Promise<Failure> {
-    const { sessionId, comment } = pending.record;
+    const record = pending.record;
+    const { comment } = record;
     try {
-      if (pending.acknowledgedPlanId !== planId) {
-        const anchorFrom = comment.from ?? 0;
-        const snapshot = await createTaskPlanComment({
+      const acknowledged =
+        pending.acknowledged?.plan_id === planId ? pending.acknowledged : undefined;
+      if (acknowledged && !sameAnchor(acknowledged, comment)) return "conflict";
+      if (!acknowledged || acknowledged.body !== comment.text) {
+        const input = {
           taskId: this.taskId,
           planId,
           id: comment.id,
           body: comment.text,
-          selectedText: comment.selectedText,
-          anchorFrom,
-          anchorTo: comment.to ?? anchorFrom + Math.max(1, comment.selectedText.length),
-        });
+        };
+        const snapshot = acknowledged
+          ? await updateTaskPlanComment({ ...input, expectedVersion: acknowledged.version })
+          : await createTaskPlanComment({ ...input, ...legacyAnchor(comment) });
         if (!this.current(generation)) return "transient";
         this.store.getState().setTaskPlanComments(this.taskId, snapshot);
-        pending.acknowledgedPlanId = planId;
+        if (!this.recordAcknowledgement(pending, planId, comment, snapshot)) return "conflict";
       }
       if (!this.current(generation)) return "transient";
-      if (!removeAcknowledgedLegacyPlanComment(sessionId, comment)) return "transient";
-      useCommentsStore.getState().forgetMigratedPlanComment(sessionId, comment.id);
-      return null;
+      return acknowledgeLegacyRecord(record);
     } catch (error) {
       if (!this.current(generation)) return "transient";
-      const snapshot = planCommentAdmissionConflict(error)?.snapshot;
-      if (snapshot) this.store.getState().setTaskPlanComments(this.taskId, snapshot);
-      if (error instanceof WebSocketRequestError && error.code === "not_found")
-        this.refreshPlan = true;
-      return classifyFailure(error);
+      return this.handleUploadFailure(error, pending, planId, record);
     }
+  }
+
+  private handleUploadFailure(
+    error: unknown,
+    pending: PendingRecord,
+    planId: string,
+    record: LegacyPlanCommentRecord,
+  ): Failure {
+    const snapshot = planCommentAdmissionConflict(error)?.snapshot;
+    if (snapshot) this.store.getState().setTaskPlanComments(this.taskId, snapshot);
+    if (
+      snapshot &&
+      pending.acknowledged?.plan_id === planId &&
+      this.recordAcknowledgement(pending, planId, record.comment, snapshot)
+    ) {
+      return acknowledgeLegacyRecord(record);
+    }
+    if (error instanceof WebSocketRequestError && error.code === "not_found")
+      this.refreshPlan = true;
+    return classifyFailure(error);
+  }
+
+  private recordAcknowledgement(
+    pending: PendingRecord,
+    planId: string,
+    comment: PlanComment,
+    snapshot: TaskPlanCommentSnapshot,
+  ) {
+    if (snapshot.task_id !== this.taskId || snapshot.plan_id !== planId) return false;
+    const persisted = snapshot.comments.find((row) => row.id === comment.id);
+    if (!persisted || persisted.body !== comment.text || !sameAnchor(persisted, comment))
+      return false;
+    pending.acknowledged = persisted;
+    return true;
   }
 }
 

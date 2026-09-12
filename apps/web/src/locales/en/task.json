@@ -2090,7 +2090,6 @@
   "planCommentNotReadyToRun": "This plan comment is still being saved. Try Run again.",
   "planCommentsChangedRetry": "The plan comments changed. Review them and send again.",
   "primarySessionChangedRetry": "The primary session changed. Try Run again.",
-  "restoringSavedPlanComments": "Restoring saved plan comments...",
   "planCommentMigrationFailed": "Some saved plan comments could not be restored.",
   "planCommentMigrationNeedsPlan": "Create or restore a plan to recover saved comments.",
   "planCommentMigrationPending": "Saved plan comments are still being restored. Connection issues retry automatically; your message is kept."

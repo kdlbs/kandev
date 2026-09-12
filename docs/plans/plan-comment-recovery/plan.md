@@ -215,9 +215,18 @@ Implementation is complete. The final focused suite passes all 130 tests across
 validation, and public-doc validation pass. The final desktop build passes all
 four browser scenarios. The final phone rerun also passed all four scenarios
 against that fresh build after a rebuild was terminated before tests started.
-Both desktop and phone captured states were inspected; draft retention, partial
+The states captured on desktop and phone were inspected; draft retention, partial
 recovery, Retry sizing, and absence of horizontal overflow were verified.
 The work order records the final results and the scoped public-guide update.
+
+PR review follow-up on 2026-09-12 adds regressions for unknown-plan failures,
+known-session discovery, concurrent local edits, resume coalescing, retained
+locales, and stale loading flags. The focused suite now passes 145 tests across
+the same 13 files; 24 locale-generator tests also pass. Changed-file lint,
+typecheck, i18n, specification and public-doc checks pass. The
+[work order](task-01-recover-plan-comment-context.md#pr-review-follow-up-2026-09-12)
+records review dispositions and scoped validation. Remote CI/review completion
+remains an exact-head delivery check, not a claim made by this tracked plan.
 
 ## Risks
 

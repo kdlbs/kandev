@@ -6,7 +6,10 @@ import type { TaskPlan, TaskPlanCommentSnapshot } from "@/lib/types/http";
 import { WebSocketRequestError } from "@/lib/ws/request-error";
 import { planCommentMigrationFor } from "./plan-comment-migration";
 
-const api = vi.hoisted(() => ({ createTaskPlanComment: vi.fn() }));
+const api = vi.hoisted(() => ({
+  createTaskPlanComment: vi.fn(),
+  updateTaskPlanComment: vi.fn(),
+}));
 const plans = vi.hoisted(() => ({ getTaskPlan: vi.fn() }));
 vi.mock("@/lib/api/domains/plan-comment-api", () => api);
 vi.mock("@/lib/api/domains/plan-api", () => plans);
@@ -15,6 +18,7 @@ const TASK = "task-1";
 const SESSION = "session-1";
 const PLAN = "plan-1";
 const DATE = "2026-09-02T00:00:00Z";
+const EDITED_BODY = "Edited feedback";
 const plan: TaskPlan = {
   id: PLAN,
   task_id: TASK,
@@ -84,12 +88,32 @@ function deferred() {
   return { promise, resolve };
 }
 
+function editedSnapshot(body = EDITED_BODY, version = 2): TaskPlanCommentSnapshot {
+  return { ...snapshot, revision: version, comments: [{ ...snapshot.comments[0], body, version }] };
+}
+
+async function acknowledgeDuringLocalEdit(edited = { ...comment, text: EDITED_BODY }) {
+  write();
+  const pending = deferred();
+  api.createTaskPlanComment
+    .mockReturnValueOnce(pending.promise)
+    .mockRejectedValue(new WebSocketRequestError("UUID already used", "plan_comments_changed"));
+  const fixture = setup();
+  await settle();
+  write([edited]);
+  fixture.recovery.update({ sessionIds: [SESSION], complete: true, loading: false });
+  pending.resolve(snapshot);
+  await settle();
+  return fixture;
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.resetAllMocks();
   window.sessionStorage.clear();
   releases = [];
   api.createTaskPlanComment.mockResolvedValue(snapshot);
+  plans.getTaskPlan.mockResolvedValue(plan);
 });
 afterEach(() => {
   for (const release of releases) release();
@@ -98,6 +122,22 @@ afterEach(() => {
 });
 
 describe("task-scoped plan comment recovery", () => {
+  it("resolves an unknown plan without relying on an ordinary comment loader", async () => {
+    write();
+    const store = createAppStore();
+    store.getState().setConnectionStatus("connected");
+    const recovery = planCommentMigrationFor(store, TASK);
+    releases.push(recovery.attach(vi.fn()));
+    recovery.update({ sessionIds: [SESSION], complete: true, loading: false });
+    await settle();
+    expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK]).toMatchObject({
+      status: "complete",
+      pendingCount: 0,
+    });
+    expect(plans.getTaskPlan).toHaveBeenCalledOnce();
+    expect(saved()).toEqual([]);
+  });
+
   // @covers AC-TASKS-PLAN-COMMENTS-004.2, AC-TASKS-PLAN-COMMENTS-004.6
   it("uses three connected attempts then bounded background backoff with the original UUID", async () => {
     write();
@@ -189,6 +229,45 @@ describe("task-scoped plan comment recovery", () => {
 });
 
 describe("legacy recovery identity", () => {
+  it("surfaces exhausted plan lookup failures for known drafts and later recovers", async () => {
+    write();
+    plans.getTaskPlan.mockRejectedValue(new Error("offline"));
+    const store = createAppStore();
+    store.getState().setConnectionStatus("connected");
+    const recovery = planCommentMigrationFor(store, TASK);
+    releases.push(recovery.attach(vi.fn()));
+    recovery.update({ sessionIds: [SESSION], complete: true, loading: false });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(plans.getTaskPlan).toHaveBeenCalledTimes(3);
+    expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK]).toMatchObject({
+      status: "failed",
+      pendingCount: 1,
+      failure: "transient",
+    });
+    expect(saved()).toEqual([comment]);
+    plans.getTaskPlan.mockResolvedValue(plan);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK]).toMatchObject({
+      status: "complete",
+      pendingCount: 0,
+    });
+    expect(saved()).toEqual([]);
+  });
+
+  it("does not let a hidden wake suppress the immediate visible retry", async () => {
+    write();
+    api.createTaskPlanComment.mockRejectedValueOnce(new Error("offline"));
+    const { recovery, state } = setup();
+    await settle();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await recovery.wake();
+    visibility.mockReturnValue("visible");
+    await recovery.wake();
+    expect(api.createTaskPlanComment).toHaveBeenCalledTimes(2);
+    expect(state()).toMatchObject({ status: "complete", pendingCount: 0 });
+  });
+
   it("does not acknowledge a stale generation after a plan is deleted and restored", async () => {
     write();
     const old = deferred();
@@ -205,6 +284,63 @@ describe("legacy recovery identity", () => {
     next.resolve(snapshot);
     await settle();
     expect(saved()).toEqual([]);
+  });
+});
+
+describe("legacy edits during acknowledgement", () => {
+  it("updates an acknowledged body at its original UUID and exact version", async () => {
+    api.updateTaskPlanComment.mockResolvedValue(editedSnapshot());
+    const { store, state } = await acknowledgeDuringLocalEdit();
+    expect(saved()).toEqual([{ ...comment, text: EDITED_BODY }]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(state()).toMatchObject({ status: "complete", pendingCount: 0 });
+    expect(store.getState().taskPlans.commentsByTaskId[TASK]).toEqual(editedSnapshot());
+    expect(api.createTaskPlanComment).toHaveBeenCalledOnce();
+    expect(api.updateTaskPlanComment).toHaveBeenCalledWith({
+      taskId: TASK,
+      planId: PLAN,
+      id: comment.id,
+      expectedVersion: 1,
+      body: EDITED_BODY,
+    });
+    expect(saved()).toEqual([]);
+  });
+
+  it("retains local feedback without overwriting a conflicting server edit", async () => {
+    const remote = editedSnapshot("Another client's feedback", 3);
+    api.updateTaskPlanComment.mockRejectedValue(
+      new WebSocketRequestError("Changed version", "plan_comments_changed", { snapshot: remote }),
+    );
+    const { store, state } = await acknowledgeDuringLocalEdit();
+    await vi.advanceTimersByTimeAsync(121000);
+    expect(api.updateTaskPlanComment).toHaveBeenCalledOnce();
+    expect(state()).toMatchObject({ status: "failed", pendingCount: 1, failure: "conflict" });
+    expect(saved()).toEqual([{ ...comment, text: EDITED_BODY }]);
+    expect(store.getState().taskPlans.commentsByTaskId[TASK]).toEqual(remote);
+  });
+
+  it("reconciles an accepted update whose response was lost", async () => {
+    api.updateTaskPlanComment.mockRejectedValueOnce(new Error("response lost")).mockRejectedValue(
+      new WebSocketRequestError("Changed version", "plan_comments_changed", {
+        snapshot: editedSnapshot(),
+      }),
+    );
+    const { state } = await acknowledgeDuringLocalEdit();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(state()).toMatchObject({ status: "complete", pendingCount: 0 });
+    expect(api.createTaskPlanComment).toHaveBeenCalledOnce();
+    expect(api.updateTaskPlanComment).toHaveBeenCalledTimes(2);
+    expect(saved()).toEqual([]);
+  });
+
+  it("does not reinterpret a changed legacy selection as a body-only update", async () => {
+    const edited = { ...comment, text: EDITED_BODY, selectedText: "Other step" };
+    const { state } = await acknowledgeDuringLocalEdit(edited);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(state()).toMatchObject({ status: "failed", pendingCount: 1, failure: "conflict" });
+    expect(api.createTaskPlanComment).toHaveBeenCalledOnce();
+    expect(api.updateTaskPlanComment).not.toHaveBeenCalled();
+    expect(saved()).toEqual([edited]);
   });
 });
 

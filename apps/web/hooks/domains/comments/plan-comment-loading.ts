@@ -25,6 +25,10 @@ class PlanCommentLoader {
     private errorMessage: string,
   ) {}
 
+  setErrorMessage(errorMessage: string) {
+    this.errorMessage = errorMessage;
+  }
+
   attach() {
     this.consumers++;
     if (!this.unsubscribe) this.observe();
@@ -66,6 +70,7 @@ class PlanCommentLoader {
   }
 
   wake() {
+    if (!this.ready()) return this.inFlight ?? Promise.resolve();
     if (Date.now() - this.lastWakeAt < 250) return this.inFlight ?? Promise.resolve();
     this.lastWakeAt = Date.now();
     return this.load(true);
@@ -142,7 +147,7 @@ class PlanCommentLoader {
     } catch {
       this.failedRead(generation, expectedEpoch);
     } finally {
-      this.finishRead(expectedEpoch);
+      this.finishRead();
     }
   }
 
@@ -157,8 +162,7 @@ class PlanCommentLoader {
     }, planCommentRecoveryDelay(this.failures));
   }
 
-  private finishRead(epoch: number) {
-    if (epoch !== this.planEpoch) return;
+  private finishRead() {
     const current = this.store.getState();
     current.setTaskPlanLoading(this.taskId, false);
     current.setTaskPlanCommentsLoading(this.taskId, false);
@@ -179,6 +183,6 @@ export function planCommentLoaderFor(
   if (!loader) {
     loader = new PlanCommentLoader(store, taskId, errorMessage);
     tasks.set(taskId, loader);
-  }
+  } else loader.setErrorMessage(errorMessage);
   return loader;
 }

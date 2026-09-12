@@ -2090,8 +2090,7 @@
   "planCommentNotReadyToRun": "此計劃評論仍在儲存。請再次執行。",
   "planCommentsChangedRetry": "計劃評論已更改。請檢查後重新傳送。",
   "primarySessionChangedRetry": "主工作階段已更改。請再次執行。",
-  "restoringSavedPlanComments": "正在恢復已儲存的計劃評論...",
   "planCommentMigrationFailed": "無法恢復部分已儲存的計劃評論。",
   "planCommentMigrationNeedsPlan": "請建立或恢復計劃，以恢復已儲存的評論。",
-  "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。連接出錯時會自動重試；您的訊息會保留。"
+  "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。連線出錯時會自動重試；您的訊息會保留。"
 }

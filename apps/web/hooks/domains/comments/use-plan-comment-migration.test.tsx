@@ -5,10 +5,12 @@ import { useCommentsStore } from "@/lib/state/slices/comments";
 import { COMMENTS_STORAGE_PREFIX } from "@/lib/state/slices/comments/persistence";
 import type { DiffComment, PlanComment } from "@/lib/state/slices/comments";
 import type { TaskPlan, TaskPlanComment, TaskPlanCommentSnapshot } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
 import { WebSocketRequestError } from "@/lib/ws/request-error";
 
 const api = vi.hoisted(() => ({
   createTaskPlanComment: vi.fn(),
+  updateTaskPlanComment: vi.fn(),
   getTaskPlanComments: vi.fn(),
 }));
 const sessionsHook = vi.hoisted(() => ({
@@ -28,6 +30,7 @@ import { usePlanCommentMigration } from "./use-plan-comment-migration";
 
 const TASK_ID = "task-1";
 const PLAN_ID = "plan-1";
+const FOREIGN_SESSION = "foreign-session";
 const PLAN_TIMESTAMP = "2026-09-02T00:00:00Z";
 
 const taskPlan: TaskPlan = {
@@ -78,7 +81,7 @@ function serverComment(comment: PlanComment, version = 1): TaskPlanComment {
     body: comment.text,
     selected_text: comment.selectedText,
     anchor_from: comment.from ?? 0,
-    anchor_to: comment.to ?? comment.selectedText.length,
+    anchor_to: comment.to ?? (comment.from ?? 0) + Math.max(1, comment.selectedText.length),
     version,
     created_at: comment.createdAt,
     updated_at: comment.createdAt,
@@ -122,6 +125,7 @@ function useHarness() {
 describe("usePlanCommentMigration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    sessionsHook.sessions = [{ id: "session-1" }, { id: "session-2" }];
     sessionsHook.isLoaded = true;
     sessionsHook.error = null;
     sessionsHook.loadSessions.mockResolvedValue(undefined);
@@ -299,6 +303,39 @@ describe("usePlanCommentMigration", () => {
     rerender();
 
     await waitFor(() => expect(result.current.migration.status).toBe("complete"));
+  });
+
+  it("protects already-hydrated task drafts when the session list is unavailable", async () => {
+    sessionsHook.sessions = [];
+    sessionsHook.isLoaded = false;
+    sessionsHook.error = "offline";
+    const legacy = legacyPlanComment("comment-1", "session-1");
+    const unrelated = legacyPlanComment("comment-2", FOREIGN_SESSION);
+    writeSession("session-1", [legacy]);
+    writeSession(FOREIGN_SESSION, [unrelated]);
+    const { result } = renderHook(useHarness, { wrapper });
+    act(() => {
+      result.current.store.getState().setConnectionStatus("disconnected");
+      for (const [id, task_id] of [
+        ["session-1", TASK_ID],
+        [FOREIGN_SESSION, "other-task"],
+      ]) {
+        result.current.store.getState().setTaskSession({
+          id: toSessionId(id),
+          task_id: toTaskId(task_id),
+          state: "WAITING_FOR_INPUT",
+          started_at: PLAN_TIMESTAMP,
+          updated_at: PLAN_TIMESTAMP,
+        });
+      }
+    });
+    expect(
+      result.current.store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID],
+    ).toBeUndefined();
+    expect(result.current.migration.pendingCount).toBe(1);
+    expect(result.current.migration.isBlocking).toBe(true);
+    expect(readSession("session-1")).toEqual([legacy]);
+    expect(readSession(FOREIGN_SESSION)).toEqual([unrelated]);
   });
 
   it("failed plan discovery does not block plain Send before or after a null plan", async () => {

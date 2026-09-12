@@ -129,7 +129,8 @@ async function seedRecoveryTask({ apiClient, seedData }: RecoveryOptions, withPl
       { timeout: 60_000 },
     )
     .toBe(true);
-  if (withPlan) await expect.poll(() => apiClient.getTaskPlan(task.id)).not.toBeNull();
+  if (withPlan)
+    await expect.poll(() => apiClient.getTaskPlan(task.id), { timeout: 30_000 }).not.toBeNull();
   return { ...task, session_id: task.session_id };
 }
 
@@ -160,7 +161,7 @@ export async function assertPlainSendDuringRecovery(options: RecoveryOptions, wi
     "task.plan.comments.list",
   ]);
   const { session, editor } = await showComposer(testPage, task.id);
-  await expect.poll(control.rejected).toBeGreaterThan(0);
+  await expect.poll(control.rejected, { timeout: 15_000 }).toBeGreaterThan(0);
   const notice = testPage.getByTestId("plan-comment-migration-notice");
   await expect(notice).toHaveCount(0);
   const message = "Plain message while comment reads are unavailable";
@@ -262,7 +263,7 @@ export async function assertLegacyRecoveryPreservesDraft(options: RecoveryOption
     window.dispatchEvent(new Event("pageshow"));
     document.dispatchEvent(new Event("visibilitychange"));
   });
-  await expect.poll(control.succeeded).toBe(2);
+  await expect.poll(control.succeeded, { timeout: 15_000 }).toBe(2);
   await expect(session.activeChat().getByText("2 plan comments", { exact: true })).toBeVisible();
   await expect(notice).toHaveCount(0);
   await expect(editor).toHaveText(message);
@@ -278,6 +279,7 @@ export async function assertLegacyRecoveryPreservesDraft(options: RecoveryOption
       task.session_id,
     ),
   ).toEqual([diff]);
+  expect(control.succeeded()).toBe(2);
   await submit(session, mobile);
   await expect
     .poll(

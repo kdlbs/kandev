@@ -6,7 +6,7 @@ import { PlanCommentMigrationNotice } from "./plan-comment-migration-notice";
 afterEach(cleanup);
 
 describe("plan comment recovery feedback", () => {
-  it.each(["idle", "running", "retrying", "complete", "failed"] as const)(
+  it.each(["idle", "running", "retrying", "complete", "failed", "waiting_for_plan"] as const)(
     "stays quiet for empty %s recovery",
     (status) => {
       render(
@@ -39,6 +39,20 @@ describe("plan comment recovery feedback", () => {
       />,
     );
     expect(screen.getByRole("alert")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("offers Retry with a status notice when saved feedback needs a plan", () => {
+    const retry = vi.fn();
+    render(
+      <PlanCommentMigrationNotice
+        {...planCommentRecovery({ status: "waiting_for_plan", pendingCount: 1, failure: null })}
+        retry={retry}
+      />,
+    );
+    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledOnce();
   });

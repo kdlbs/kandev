@@ -270,3 +270,46 @@ The first sandboxed browser build could not write the Go cache. The same
 isolated managed runner succeeded with escalated build-cache/local-server access.
 No user's running instance was mutated. No delegation was used. At the local
 implementation handoff, the changes were not yet committed or published.
+
+### PR review follow-up (2026-09-12)
+
+Review regressions now cover unknown-plan lookup and exhausted lookup retries,
+already-hydrated task sessions when list discovery fails, hidden/visible wake
+coalescing in both coordinators, same-plan hydration invalidating a read, and
+locale changes with a retained loader. Identified drafts publish their pending
+count even while discovery is in flight. Concurrent body edits retain the
+acknowledged row/version and use conditional updates; changed anchors, remote
+conflicts, and lost responses cannot silently discard local feedback.
+
+Added the missing waiting-for-plan notice/Retry and attention-projection cases,
+strengthened disconnected-read coverage, removed the unused restoration key
+from all six catalogs, and generated the Taiwan connection-term correction
+through a reviewed key override. Explicit browser setup/recovery timeouts retain
+the exact two-successful-uploads assertion, including after recovery settles:
+this fixture acknowledges two drafts and must detect redundant acknowledged
+uploads. Kept the two small private registries separate: the loader refreshes
+localized errors on reuse, while migration retains acknowledgement state. No
+shared eviction policy is introduced.
+
+The focused 13-file command in Verification passes 145 tests. Changed-file
+ESLint (zero warnings), web typecheck, i18n checks/ratchet, full specification
+lint, and the public-doc validator pass. The locale conversion command was
+`pnpm run i18n:zh-hant --namespace task`; unrelated generated terminology was
+not retained. Its 24 tests pass with
+`pnpm test -- scripts/convert-zh-cn-to-zh-hant.test.mjs`. The first attempt used
+the wrong test runner; the Vitest subprocess test then hit sandbox `EPERM` and
+passed with subprocess access. Temporary diagnostics were removed.
+
+The existing public recovery guidance already covers these corrections. Only
+the internal design needs the acknowledged-version reconciliation clarification;
+no ownership, backend payload, or admission boundary changed. Exact-head remote
+review/check evidence remains a separate delivery gate.
+
+Final local browser verification passed all four Chromium scenarios (1.0m) and
+all four Pixel 5 scenarios (48.8s), with zero retries. The fresh desktop command
+used `pnpm e2e:run --project chromium tests/session/task-plan-comments.spec.ts -- --retries=0`;
+the phone used `pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-task-plan-comments.spec.ts -- --retries=0`
+against those unchanged assets. Both ran with
+`GOCACHE=/tmp/pr-3616-go-cache.J336QV` after the shared cache lost a compilation
+artifact before tests started. The isolated rebuild succeeded; no cache or
+application change was needed outside the task-owned test environment.

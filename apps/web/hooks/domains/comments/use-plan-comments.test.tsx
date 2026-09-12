@@ -142,10 +142,14 @@ describe("usePlanComments loading", () => {
   });
 
   it("does not request plan comments on foreground events while disconnected", async () => {
-    renderHook(useTwoTaskCommentConsumers, { wrapper });
+    const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
+    await act(async () => result.current.store.getState().setTaskPlan(TASK_ID, taskPlan));
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(planApi.getTaskPlan).not.toHaveBeenCalled();
     expect(api.getTaskPlanComments).not.toHaveBeenCalled();
+    await act(async () => result.current.store.getState().setConnectionStatus("connected"));
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(api.getTaskPlanComments).toHaveBeenCalled());
   });
 
   it("loads the current plan before comments when only a task composer is mounted", async () => {

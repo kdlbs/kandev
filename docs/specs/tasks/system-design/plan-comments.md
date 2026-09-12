@@ -23,7 +23,7 @@ the superseded [Plan Comment Drafts design](../../ui/system-design/plan-comment-
 Other comment sources remain session-scoped and keep their existing browser
 persistence and client-side formatting.
 
-The recovery refinements are pending in the
+The recovery refinements are implemented by the
 [Plan comment recovery package](../../../plans/plan-comment-recovery/plan.md).
 The existing persistence, task ownership, and atomic admission boundaries remain
 the basis for implementation.
@@ -362,8 +362,12 @@ For a task with identified drafts:
    already supplies an authoritative snapshot; reconcile it by task, plan ID,
    and revision before acknowledging the exact stored record.
 3. Re-read after acknowledgement and retain failed or concurrently edited rows.
-   Retry only unresolved rows. A conflict snapshot alone does not acknowledge
-   the conflicting local body.
+   Keep the acknowledged row/version when its legacy body changes, and reconcile
+   that body with the existing version-checked update API, never another create
+   for the same UUID. Changed anchors or conflicting server edits remain pending;
+   do not overwrite them. A lost update response can reconcile only when the
+   authoritative row matches the intended body and anchor. A conflict snapshot
+   alone does not acknowledge a different local body.
 4. Complete migration when every identified row has been acknowledged. Do not
    append an unconditional list request: a failed background snapshot refresh
    must not undo successful migration or keep an empty migration blocked.
