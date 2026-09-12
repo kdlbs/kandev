@@ -33,13 +33,13 @@ func StepOrderLess(left, right *Task) bool {
 
 func stepOrderPriorityRank(priority string) int {
 	switch priority {
-	case "critical":
+	case TaskPriorityCritical:
 		return 0
-	case "high":
+	case TaskPriorityHigh:
 		return 1
-	case "medium":
+	case TaskPriorityMedium:
 		return 2
-	case "low":
+	case TaskPriorityLow:
 		return 3
 	default:
 		return 4

@@ -144,7 +144,7 @@ func (r *Repository) initSchema() error {
 	// per-step monotonic counter, incremented once per committed reorder in
 	// the same serialized section that renumbers the step. Starts at 0 for
 	// every existing row so a never-reordered step is not a special case.
-	r.migrate.Apply("workflow_steps.order_revision", `ALTER TABLE workflow_steps ADD COLUMN order_revision INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("workflow_steps.order_revision", `ALTER TABLE workflow_steps ADD COLUMN order_revision INTEGER NOT NULL DEFAULT 0`)
 
 	// Phase 2 — multi-agent participation tables. Empty rows for a step
 	// preserve today's single-agent behaviour, so existing kanban
