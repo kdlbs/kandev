@@ -270,6 +270,48 @@ func TestInjectRuntimeBootstrapSkipsTemplateContent(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeBootstrapRejectsUnclosedHTMLTemplate(t *testing.T) {
+	for _, entry := range []string{
+		`<template><p>Hello`,
+		`<div><template><script>window.__template = true;</script></div>`,
+	} {
+		if _, err := injectRuntimeBootstrap([]byte(entry)); !errors.Is(err, ErrRuntimeBootstrapUnavailable) {
+			t.Fatalf("injectRuntimeBootstrap(%q) error = %v, want %v", entry, err, ErrRuntimeBootstrapUnavailable)
+		}
+	}
+}
+
+func TestInjectRuntimeBootstrapDoesNotTreatForeignTemplateAsInert(t *testing.T) {
+	entry := `<svg><template><script>window.__svg = true;</script></template></svg><script src="./app.js"></script>`
+	result, err := injectRuntimeBootstrap([]byte(entry))
+	if err != nil {
+		t.Fatalf("injectRuntimeBootstrap: %v", err)
+	}
+	body := string(result)
+	bootstrap := `<script src="./_kandev/host-runtime.js"></script>`
+	bootstrapIndex := strings.Index(body, bootstrap)
+	foreignScript := strings.Index(body, `<script>window.__svg = true;</script>`)
+	if bootstrapIndex < 0 || foreignScript < 0 || bootstrapIndex >= foreignScript {
+		t.Fatalf("host bootstrap was inserted after foreign executable script: %q", body)
+	}
+}
+
+func TestInjectRuntimeBootstrapTracksHTMLTemplateAfterForeignBreakout(t *testing.T) {
+	entry := `<svg><p><template><script>window.__template = true;</script></template></p></svg><script src="./app.js"></script>`
+	result, err := injectRuntimeBootstrap([]byte(entry))
+	if err != nil {
+		t.Fatalf("injectRuntimeBootstrap: %v", err)
+	}
+	body := string(result)
+	bootstrap := `<script src="./_kandev/host-runtime.js"></script>`
+	bootstrapIndex := strings.Index(body, bootstrap)
+	templateScript := strings.Index(body, `<script>window.__template = true;</script>`)
+	authoredScript := strings.Index(body, `<script src="./app.js">`)
+	if bootstrapIndex <= templateScript || bootstrapIndex >= authoredScript {
+		t.Fatalf("host bootstrap was inserted inside HTML template content: %q", body)
+	}
+}
+
 func TestRuntimeBootstrapFailureDoesNotKeepArtifactContentLength(t *testing.T) {
 	archive := canvasArchive(t, map[string]string{
 		"manifest.yaml": staticManifestYAML,
