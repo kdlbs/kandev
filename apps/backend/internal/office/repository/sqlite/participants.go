@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
@@ -612,9 +613,11 @@ const displacedRunCancelReason = "participant_seat_claimed"
 // SQLite-flavoured and the server dialect needs dialect.JSONExtract, which
 // is why this selector lives here rather than in the shared runs writer
 // (mirrors CancelRunsForTasks in tree_holds.go).
-func (r *Repository) CancelDisplacedParticipantRun(ctx context.Context, taskID, stepID, agentProfileID string) (int64, error) {
+func (r *Repository) CancelDisplacedParticipantRun(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) ([]runssqlite.CancelledRun, error) {
 	if taskID == "" || stepID == "" || agentProfileID == "" {
-		return 0, nil
+		return nil, nil
 	}
 	driver := r.db.DriverName()
 	selector := fmt.Sprintf(

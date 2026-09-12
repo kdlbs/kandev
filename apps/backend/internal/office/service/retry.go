@@ -95,15 +95,23 @@ func isRetryStale(run *models.Run) (bool, string) {
 	return false, ""
 }
 
-// cancelRetry cancels a run that is too stale to retry.
+// cancelRetry cancels a run that is too stale to retry. Terminal-shape
+// recording and the OfficeRunProcessed broadcast only happen when the
+// cancel actually applied: a run another writer already finished or
+// failed must not be reported to subscribers as cancelled.
 func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason string) error {
 	s.logger.Info("cancelling stale run retry",
 		zap.String("run_id", run.ID),
 		zap.String("reason", reason))
-	if err := s.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := s.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		return err
 	}
 	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if !cancelled {
+		return nil
+	}
+	s.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
 	s.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	return nil
 }
@@ -113,10 +121,17 @@ func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason strin
 func (s *Service) escalateFailure(
 	ctx context.Context, run *models.Run, runErr error,
 ) error {
-	if err := s.FailRun(ctx, run.ID); err != nil {
+	wrote, err := s.FailRun(ctx, run.ID)
+	if err != nil {
 		return fmt.Errorf("fail run: %w", err)
 	}
 	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if !wrote {
+		// Already terminal via another writer (e.g. a concurrent cancel)
+		// between the retry decision and this write — nothing left to
+		// escalate (Review round 3, R3-1).
+		return nil
+	}
 
 	agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID)
 	if err != nil {
@@ -158,10 +173,17 @@ func (s *Service) failRunNoEscalation(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	cause budgetDeferralCause, policyID string,
 ) error {
-	if err := s.FailRun(ctx, run.ID); err != nil {
+	wrote, err := s.FailRun(ctx, run.ID)
+	if err != nil {
 		return fmt.Errorf("fail run: %w", err)
 	}
 	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if !wrote {
+		// Already terminal via another writer (e.g. a concurrent cancel)
+		// between the budget decision and this write — nothing left to
+		// report (Review round 3, R3-1).
+		return nil
+	}
 
 	fields := map[string]string{activityFieldCeiling: ceilingNotDetermined}
 	if policyID != "" {

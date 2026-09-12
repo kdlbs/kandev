@@ -266,20 +266,33 @@ func (r *Repository) SetWorkspaceAgentFailureThreshold(
 	return err
 }
 
-// MarkRunFailed sets a run row to status=failed with a verbatim
-// error message and stamps finished_at. Idempotent: re-marking is a
-// no-op when the run is already in the same state.
+// MarkRunFailed sets a run row to status=failed with a verbatim error
+// message and stamps finished_at. Guarded to status = 'claimed'
+// (Review round 3, R3-1): every caller reaches this after reading a
+// claimed run, so without the guard a cancel that commits in between
+// would have its 'cancelled' status and finished_at overwritten by
+// this write. Returns wrote=false — the same "nothing changed" signal
+// runs/repository/sqlite.FinishRun gives its callers — when the row
+// was no longer claimed, whether because it was already marked failed
+// or because it reached a different terminal state first.
 func (r *Repository) MarkRunFailed(
 	ctx context.Context, runID, errorMessage string,
-) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
 		SET status = 'failed',
 		    error_message = ?,
 		    finished_at = COALESCE(finished_at, ?)
-		WHERE id = ?
+		WHERE id = ? AND status = 'claimed'
 	`), errorMessage, time.Now().UTC(), runID)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // DismissInboxItem records a per-user dismissal. Idempotent — a second

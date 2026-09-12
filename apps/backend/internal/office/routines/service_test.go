@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -716,9 +717,13 @@ func TestDispatch_LastRunAt(t *testing.T) {
 		t.Fatal("expected last_run_at to be set after a materialised fire")
 	}
 	firstStamp := *afterFirst.LastRunAt
+	time.Sleep(2 * time.Millisecond)
 
-	// Second fire is skipped (run1's task is still open) — last_run_at
-	// must not advance for a fire that didn't materialise.
+	// Second fire is skipped (run1's task is still open), but
+	// AC-OFFICE-LOOP-LIVENESS-001.1 advances last_run_at for every
+	// dispatch regardless of disposition — the write runs before
+	// applyConcurrencyPolicy can short-circuit into skipped/coalesced,
+	// so a skip still counts as evidence the loop is alive.
 	run2, err := svc.FireManual(ctx, routine.ID, nil)
 	if err != nil {
 		t.Fatalf("second fire: %v", err)
@@ -730,7 +735,7 @@ func TestDispatch_LastRunAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get routine: %v", err)
 	}
-	if !afterSecond.LastRunAt.Equal(firstStamp) {
-		t.Errorf("last_run_at changed from %v to %v after a skipped fire", firstStamp, afterSecond.LastRunAt)
+	if !afterSecond.LastRunAt.After(firstStamp) {
+		t.Errorf("last_run_at did not advance on a skipped fire: before %v, after %v", firstStamp, afterSecond.LastRunAt)
 	}
 }

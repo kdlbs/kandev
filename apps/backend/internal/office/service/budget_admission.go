@@ -172,7 +172,18 @@ func (si *SchedulerIntegration) finishPolicyBlock(
 	} else {
 		incBudgetBlockedByLimit(provenance)
 	}
-	_ = si.svc.FinishRun(ctx, run.ID, outcome)
+	wrote, err := si.svc.FinishRun(ctx, run.ID, outcome)
+	if err != nil {
+		si.logger.Error("failed to finish policy-blocked run",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return false
+	}
+	if !wrote {
+		// Another writer already moved the run out of claimed between the
+		// admission decision and this write; it did not actually end via a
+		// budget block, so there is nothing to log (Review round 3, R3-1).
+		return false
+	}
 
 	fields := map[string]string{"degraded": strconv.FormatBool(p.Degraded)}
 	if p.IsDefault {
@@ -197,11 +208,21 @@ func (si *SchedulerIntegration) cancelBudgetRun(
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 
-	if err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := si.svc.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
-	} else {
-		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
+		return false
 	}
+	if !cancelled {
+		// Another writer already moved the run out of claimed between the
+		// admission decision and this write; it did not actually end via
+		// this cancellation, so there is nothing to classify, publish, or
+		// log.
+		return false
+	}
+
+	si.svc.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
+	si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 
 	fields := map[string]string{activityFieldCeiling: ceilingNotDetermined}
 	for k, v := range extraFields {
@@ -383,11 +404,17 @@ func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, 
 	incBudgetCancelledNoWorkspace(provenance)
 	si.cleanupWorkspaceLookupRun(ctx, run)
 
-	if err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace"); err != nil {
+	cancelled, err := si.svc.repo.CancelRun(ctx, run.ID, "no_resolvable_workspace")
+	if err != nil {
 		si.logger.Error("failed to cancel run", zap.String("run_id", run.ID), zap.Error(err))
-	} else {
-		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
+		return
 	}
+	if !cancelled {
+		return
+	}
+
+	si.svc.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
+	si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	si.svc.LogActivityWithRun(ctx, "", "scheduler", "office-scheduler",
 		"run_budget_workspace_unresolvable", "run", run.ID,
 		mustJSON(map[string]string{activityFieldCeiling: ceilingNotDetermined}), run.ID, "")
@@ -409,9 +436,17 @@ func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context,
 
 	if run.RetryCount >= MaxRetryCount {
 		incBudgetFailedWorkspaceLookup(provenance)
-		if err := si.svc.FailRun(ctx, run.ID); err != nil {
+		wrote, err := si.svc.FailRun(ctx, run.ID)
+		if err != nil {
 			si.logger.Error("failed to fail run without escalation",
 				zap.String("run_id", run.ID), zap.Error(err))
+			return
+		}
+		if !wrote {
+			// Already terminal via another writer (e.g. a concurrent
+			// cancel) between the lookup failure and this write; it did
+			// not actually end via this failure, so there is nothing to
+			// log (Review round 3, R3-1).
 			return
 		}
 		si.svc.LogActivityWithRun(ctx, "", "system", "scheduler",

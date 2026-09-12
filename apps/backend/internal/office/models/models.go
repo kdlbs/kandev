@@ -485,6 +485,13 @@ type Run struct {
 	// EarliestRetryAt is the earliest moment a parked run should be re-
 	// resolved. Set only when at least one degraded route is auto-retryable.
 	EarliestRetryAt *time.Time `json:"earliest_retry_at,omitempty" db:"earliest_retry_at"`
+
+	// CausationID is copied from the agent_wakeup_requests row that
+	// created this run (REQ-OFFICE-LOOP-LIVENESS-002). "" means
+	// uncorrelated — either a legacy pre-migration row or a run created
+	// off a wake that never carried an id. Never a join/group-by key
+	// without excluding "" first.
+	CausationID string `json:"causation_id,omitempty" db:"causation_id"`
 }
 
 // RouteAttempt records one provider attempt inside a Run. Each fallback
@@ -598,6 +605,11 @@ type RoutineRun struct {
 	StartedAt           *time.Time       `json:"started_at" db:"started_at"`
 	CompletedAt         *time.Time       `json:"completed_at" db:"completed_at"`
 	CreatedAt           time.Time        `json:"created_at" db:"created_at"`
+	// CausationID is minted once per fire in dispatchRoutineRun
+	// (REQ-OFFICE-LOOP-LIVENESS-002) — the origin id every wakeup
+	// request and run this fire produces carries forward. "" only for
+	// rows written before this feature.
+	CausationID string `json:"causation_id,omitempty" db:"causation_id"`
 }
 
 // ApprovalType constants for approval request types.

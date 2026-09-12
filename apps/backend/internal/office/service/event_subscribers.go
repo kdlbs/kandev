@@ -421,14 +421,6 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		}
 		return err
 	}
-	// Lifecycle: terminal "complete" event for the run detail Events log.
-	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
-		"task_id":    data.TaskID,
-		"session_id": data.SessionID,
-	})
-	s.markRoutingSuccess(ctx, run)
-	s.recordRunOutputSummary(ctx, run, *data)
-	s.warnIfReviewDecisionMissing(ctx, run)
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -438,10 +430,35 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
 	// eventually reclaims it, instead of releasing a lock for a run that
 	// never actually reached a terminal state.
-	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
+	wrote, err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed)
+	if err != nil {
 		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return err
 	}
+	if !wrote {
+		// The run reached a terminal state through another writer (e.g. a
+		// concurrent cancel) between resolveLifecycleRun's read and this
+		// write — it never actually held the checkout from this call's
+		// point of view, so releasing it here would steal a live lock the
+		// same way an unconditional release would (Review round 3, R3-1).
+		// The agent may still be stuck "working" from the launch though.
+		// The completion side effects below (timeline event, routing
+		// health, output summary, review-decision warning) must not run
+		// either: this run did not actually complete from this call's
+		// point of view, so persisting them would attribute another
+		// writer's outcome (e.g. a cancel) with this one's evidence
+		// (CodeRabbit, PR fixup round 2).
+		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+		return nil
+	}
+	// Lifecycle: terminal "complete" event for the run detail Events log.
+	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
+		"task_id":    data.TaskID,
+		"session_id": data.SessionID,
+	})
+	s.markRoutingSuccess(ctx, run)
+	s.recordRunOutputSummary(ctx, run, *data)
+	s.warnIfReviewDecisionMissing(ctx, run)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
@@ -507,6 +524,12 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 	rd.MarkRunSuccessHealth(ctx, run, agent)
 }
 
+// runEventFieldAgentID is the run-event payload key for an agent id.
+// Named to avoid a duplicate-literal lint failure — "agent_id" also
+// appears as a JSON struct tag elsewhere in this file, and those two
+// uses are otherwise unrelated to each other.
+const runEventFieldAgentID = "agent_id"
+
 // handleTasklessAgentCompleted attributes a taskless run completion,
 // finishes the run, and refreshes the per-agent, per-scope continuation
 // summary so the next fire has bridge context. The
@@ -540,12 +563,6 @@ func (s *Service) handleTasklessAgentCompleted(
 		}
 		return err
 	}
-	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
-		"agent_id":   data.AgentID,
-		"session_id": data.SessionID,
-	})
-	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
-	s.recordRunOutputSummary(ctx, run, *data)
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
 	// actually launched. Taskless runs typically carry no task_id, so this
 	// is a no-op in the common case, but call it for the same reason as
@@ -553,9 +570,26 @@ func (s *Service) handleTasklessAgentCompleted(
 	//
 	// Finish before releasing, same as handleAgentCompleted: a failed
 	// FinishRun must not still give up the checkout.
-	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
+	wrote, err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed)
+	if err != nil {
 		return err
 	}
+	if !wrote {
+		// Already terminal via another writer — see handleAgentCompleted's
+		// matching branch (Review round 3, R3-1). The completion side
+		// effects below must not run either: this run did not actually
+		// complete from this call's point of view, so recording them
+		// (timeline event, continuation summary, output summary) would
+		// attribute another writer's outcome with this one's evidence
+		// (CodeRabbit, PR fixup round 2).
+		return nil
+	}
+	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
+		runEventFieldAgentID: data.AgentID,
+		"session_id":         data.SessionID,
+	})
+	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
+	s.recordRunOutputSummary(ctx, run, *data)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
@@ -708,8 +742,15 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// rate-limit-retry callers; we deliberately do NOT call into it
 	// here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
-	if err := s.HandleAgentFailure(ctx, run, errMsg); err != nil {
+	wrote, err := s.HandleAgentFailure(ctx, run, errMsg)
+	if err != nil {
 		return err
+	}
+	if !wrote {
+		// Already terminal via another writer — waking the CEO agent
+		// over a run that never actually failed would be a false alarm
+		// (Review round 3, R3-1).
+		return nil
 	}
 	s.dispatchAgentErrorTrigger(ctx, run, data.TaskID, data.SessionID, errMsg)
 	return nil

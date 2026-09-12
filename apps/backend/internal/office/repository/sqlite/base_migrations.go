@@ -62,10 +62,40 @@ func (r *Repository) runMigrations() error {
 	r.migrateParentWakeReceiptColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateLoopLivenessCausationID()
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
 	return nil
+}
+
+// migrateLoopLivenessCausationID adds the causation_id correlation
+// column to all three rows in the wake-to-run chain
+// (REQ-OFFICE-LOOP-LIVENESS-002): the routine fire, the wakeup request
+// it produces, and the run the wakeup request produces. "" rather than
+// NULL, because every existing row predates this feature and a reader
+// must treat "legacy" and "uncorrelated" identically. Each column gets
+// its own partial index (excluding "") so a backward correlation walk
+// from a run to its originating fire is a direct lookup on every
+// dialect, not a table scan — NFR-2 is symmetric with the forward walk.
+func (r *Repository) migrateLoopLivenessCausationID() {
+	_ = r.migrate.Apply("office_routine_runs.causation_id",
+		`ALTER TABLE office_routine_runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_office_routine_runs_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_office_routine_runs_causation_id
+			ON office_routine_runs(causation_id) WHERE causation_id != ''`)
+
+	_ = r.migrate.Apply("agent_wakeup_requests.causation_id",
+		`ALTER TABLE agent_wakeup_requests ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_agent_wakeup_requests_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_agent_wakeup_requests_causation_id
+			ON agent_wakeup_requests(causation_id) WHERE causation_id != ''`)
+
+	_ = r.migrate.Apply("runs.causation_id",
+		`ALTER TABLE runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_runs_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_runs_causation_id
+			ON runs(causation_id) WHERE causation_id != ''`)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases

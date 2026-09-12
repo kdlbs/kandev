@@ -44,7 +44,11 @@ func (si *SchedulerIntegration) evaluateRunStaleness(
 	return false, "", nil
 }
 
-// cancelStaleRun marks the run cancelled, logs the event, and releases any checkout.
+// cancelStaleRun marks the run cancelled, logs the event, and releases
+// any checkout. Terminal-shape recording, the OfficeRunProcessed
+// broadcast, and the activity log entry only happen when the cancel
+// actually applied: a run another writer already finished or failed
+// must not be reported as cancelled.
 func (si *SchedulerIntegration) cancelStaleRun(
 	ctx context.Context,
 	run *models.Run,
@@ -60,12 +64,18 @@ func (si *SchedulerIntegration) cancelStaleRun(
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 
-	if err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := si.svc.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		si.logger.Error("failed to cancel stale run",
 			zap.String("run_id", run.ID), zap.Error(err))
-	} else {
-		si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
+		return
 	}
+	if !cancelled {
+		return
+	}
+
+	si.svc.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
+	si.svc.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 
 	si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 		"scheduler", "office-scheduler",

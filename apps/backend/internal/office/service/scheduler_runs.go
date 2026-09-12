@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
 // ClaimNextRun atomically claims the next eligible run from the queue.
@@ -28,6 +29,11 @@ func (s *Service) ClaimNextRun(ctx context.Context) (*models.Run, error) {
 		zap.String("id", req.ID),
 		zap.String("agent", req.AgentProfileID),
 		zap.String("reason", req.Reason))
+	workspaceID := LoopUnattributedWorkspace
+	if agent, err := s.GetAgentFromConfig(ctx, req.AgentProfileID); err == nil && agent != nil {
+		workspaceID = agent.WorkspaceID
+	}
+	IncLoopRunClaimed(workspaceID)
 	return req, nil
 }
 
@@ -37,7 +43,12 @@ func (s *Service) ClaimNextRun(ctx context.Context) (*models.Run, error) {
 // an OfficeRunProcessed bus event. The run row is fetched first so the
 // published payload carries enough context (agent, task, comment, reason)
 // for downstream WS consumers to scope updates.
-func (s *Service) FinishRun(ctx context.Context, id, outcome string) error {
+//
+// Returns wrote=false when the guarded write was a no-op — the run was
+// no longer claimed (already terminal via a concurrent writer, e.g. a
+// cancel) by the time this statement ran — so there is nothing to
+// classify or publish (Review round 3, R3-1).
+func (s *Service) FinishRun(ctx context.Context, id, outcome string) (bool, error) {
 	return s.transitionRunTerminal(ctx, id, RunStatusFinished, &outcome)
 }
 
@@ -45,17 +56,26 @@ func (s *Service) FinishRun(ctx context.Context, id, outcome string) error {
 // OfficeRunProcessed event. outcome is written as NULL: a failed run is
 // bucketed by RunCountsByDayForAgent on status alone and never reaches the
 // outcome-derived buckets, so no value from the five-value vocabulary is
-// invented for it. See FinishRun for the lifecycle contract.
-func (s *Service) FailRun(ctx context.Context, id string) error {
+// invented for it. See FinishRun for the lifecycle contract and the
+// wrote=false no-op case.
+func (s *Service) FailRun(ctx context.Context, id string) (bool, error) {
 	return s.transitionRunTerminal(ctx, id, RunStatusFailed, nil)
 }
 
 // transitionRunTerminal updates the run row to the given terminal status
 // and outcome (nil writes SQL NULL) and emits OfficeRunProcessed.
-// Pre-fetching the run keeps the published payload self-contained even
-// when the caller doesn't hold a reference to the model. Publish errors
-// are logged at debug and swallowed; persistence errors are returned to
-// the caller.
+// FinishRun returns the row as it stands right after that write (via
+// RETURNING), so the published payload and the terminal-shape
+// classification both read the same statement that persisted the change —
+// neither depends on a separate read succeeding independently of it.
+// Publish errors are logged at debug and swallowed; persistence errors are
+// returned to the caller.
+//
+// FinishRun's guarded write (status = 'claimed') returns a nil run when
+// another writer already moved the row to a different terminal state
+// between the caller's read and this statement — nothing to classify or
+// publish in that case, so this returns wrote=false without touching
+// recordTerminalShape or publishRunProcessed (Review round 3, R3-1).
 //
 // Deliberately does NOT release the task checkout: transitionRunTerminal
 // is reached by every terminal run, including ones that never held the
@@ -67,24 +87,68 @@ func (s *Service) FailRun(ctx context.Context, id string) error {
 // for the SAME agent + task races a first run that is genuinely still
 // executing and holds the checkout — that second run's release matches
 // the first run's own checkout_agent_id and steals its own live lock out
-// from under it (Review round 3, BLOCKING FINDING 1). Callers that KNOW
-// their run actually held the checkout call releaseTaskCheckoutForRun
-// explicitly instead: handleAgentCompleted / handleTasklessAgentCompleted
-// (event_subscribers.go) for the launched-run completion path, and
-// HandleAgentFailure (failure.go) for the launched-run failure path.
-func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, outcome *string) error {
-	run, getErr := s.repo.GetRunByID(ctx, id)
-	if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
-		s.logger.Debug("get run for terminal transition failed",
-			zap.String("run_id", id),
-			zap.String("status", status),
-			zap.Error(getErr))
+// from under it. Callers that KNOW their run actually held the checkout
+// call releaseTaskCheckoutForRun explicitly instead, and only when this
+// method reports wrote=true: handleAgentCompleted /
+// handleTasklessAgentCompleted (event_subscribers.go) for the
+// launched-run completion path, and HandleAgentFailure (failure.go) for
+// the launched-run failure path.
+func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, outcome *string) (bool, error) {
+	run, err := s.repo.FinishRun(ctx, id, status, outcome)
+	if err != nil {
+		return false, err
 	}
-	if err := s.repo.FinishRun(ctx, id, status, outcome); err != nil {
-		return err
+	if run == nil {
+		return false, nil
 	}
+	s.recordTerminalShape(ctx, run, status, outcome)
 	s.publishRunProcessed(ctx, id, status, run)
-	return nil
+	return true, nil
+}
+
+// recordTerminalShape classifies the just-persisted terminal transition
+// (REQ-OFFICE-LOOP-LIVENESS-005) and increments office_loop_terminal_total
+// by the resulting shape. run is nil when transitionRunTerminal's
+// pre-fetch failed; there is nothing to classify in that case. The
+// workspace label falls back to LoopUnattributedWorkspace when the
+// owning agent can't be resolved, matching AC-003.8 — never dropped,
+// never guessed into a real workspace's totals.
+func (s *Service) recordTerminalShape(ctx context.Context, run *models.Run, status string, outcome *string) {
+	if run == nil {
+		return
+	}
+	activationInstant, activationPublished := s.repo.LoopLivenessActivation()
+	shape := ClassifyTerminalRun(status, outcome, run.SessionID, run.RequestedAt, activationInstant, activationPublished)
+	workspaceID := LoopUnattributedWorkspace
+	if agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID); err == nil && agent != nil {
+		workspaceID = agent.WorkspaceID
+	}
+	IncLoopTerminal(workspaceID, string(shape))
+}
+
+// recordTerminalShapesForCancelledRuns classifies and counts one
+// cancelled-transition shape per row a bulk cancel (CancelRunsForTasks,
+// BulkCancelRuns) actually persisted — a bulk write covers rows whose
+// session_id can differ per row (a claimed run may have already launched),
+// so each row is classified individually rather than assuming one shape
+// for the whole batch.
+func (s *Service) recordTerminalShapesForCancelledRuns(ctx context.Context, cancelled []runssqlite.CancelledRun) {
+	for _, row := range cancelled {
+		s.recordTerminalShape(ctx, &models.Run{
+			AgentProfileID: row.AgentProfileID,
+			SessionID:      row.SessionID,
+			RequestedAt:    row.RequestedAt,
+		}, RunStatusCancelled, nil)
+	}
+}
+
+// RecordCancelledRunTerminalShapes is recordTerminalShapesForCancelledRuns,
+// exported for the dashboard package's TerminalShapeRecorder seam — a
+// dashboard-driven cancellation (displaced participant) reaches the same
+// counter every other cancellation path reaches, without a second,
+// divergence-prone classification implementation in dashboard.
+func (s *Service) RecordCancelledRunTerminalShapes(ctx context.Context, cancelled []runssqlite.CancelledRun) {
+	s.recordTerminalShapesForCancelledRuns(ctx, cancelled)
 }
 
 // releaseTaskCheckoutForRun releases the run's task checkout. Call this

@@ -260,6 +260,7 @@ func (a *routineWakeupAdapter) CreateWakeupRequest(
 		Reason:         req.Reason,
 		Payload:        req.Payload,
 		RequestedAt:    req.RequestedAt,
+		CausationID:    req.CausationID,
 	}
 	if req.IdempotencyKey != "" {
 		row.IdempotencyKey = sql.NullString{String: req.IdempotencyKey, Valid: true}
