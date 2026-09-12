@@ -81,10 +81,12 @@ func (s *Service) signalOrphanReapCandidates(
 	if len(pending) == 0 {
 		return nil
 	}
+	graceTimer := time.NewTimer(orphanReapGraceDelay)
+	defer graceTimer.Stop()
 	select {
 	case <-ctx.Done():
 		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, pending)
-	case <-time.After(orphanReapGraceDelay):
+	case <-graceTimer.C:
 	}
 
 	killPending := s.sendOrphanReapSigkills(ctx, taskID, pending, snapshot, verifier, signaler)
@@ -94,10 +96,12 @@ func (s *Service) signalOrphanReapCandidates(
 	if len(killPending) == 0 {
 		return nil
 	}
+	settleTimer := time.NewTimer(orphanReapSettleDelay)
+	defer settleTimer.Stop()
 	select {
 	case <-ctx.Done():
 		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending)
-	case <-time.After(orphanReapSettleDelay):
+	case <-settleTimer.C:
 	}
 
 	return s.resolveOrphanReapSurvivors(ctx, taskID, killPending, snapshot, verifier, signaler)

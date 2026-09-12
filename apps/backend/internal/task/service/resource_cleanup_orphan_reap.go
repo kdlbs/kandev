@@ -257,8 +257,10 @@ func (s *Service) runOrphanReapPhase(
 	s.recordOrphanReapAggregateOutcome(job.TaskID, snapshot, toSignal)
 	if capped {
 		retErrs = append(retErrs, errOrphanReapCandidateBoundReached)
-		s.logger.Warn("orphan reap candidate bound reached; remainder deferred",
-			zap.String("task_id", job.TaskID), zap.Int("bound", orphanReapMaxCandidates))
+		if s.logger != nil {
+			s.logger.Warn("orphan reap candidate bound reached; remainder deferred",
+				zap.String("task_id", job.TaskID), zap.Int("bound", orphanReapMaxCandidates))
+		}
 		orphanReapCounters.Add(orphanReapCounterCapReached, 1)
 	}
 	return retErrs
@@ -429,15 +431,17 @@ func (s *Service) persistOrphanReapProgressBestEffort(
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
-		s.logger.Warn("encode resource snapshot after failed cleanup attempt",
-			zap.String("job_id", job.ID), zap.Error(err))
+		if s.logger != nil {
+			s.logger.Warn("encode resource snapshot after failed cleanup attempt",
+				zap.String("job_id", job.ID), zap.Error(err))
+		}
 		return
 	}
 	persistCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
 	if _, err := s.resourceCleanups.UpdateClaimedTaskResourceCleanupSnapshot(
 		persistCtx, job.ID, job.Attempts, string(encoded),
-	); err != nil {
+	); err != nil && s.logger != nil {
 		s.logger.Warn("persist resource snapshot after failed cleanup attempt",
 			zap.String("job_id", job.ID), zap.Error(err))
 	}
