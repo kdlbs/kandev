@@ -27,14 +27,8 @@ const kandevTestFixtureEnv = "KANDEV_TEST_FIXTURE"
 const gitFetchRaceRealGitEnv = "KANDEV_GIT_FETCH_RACE_REAL_GIT"
 const gitFetchRaceWorktreeEnv = "KANDEV_GIT_FETCH_RACE_WORKTREE"
 const contributionHistoryGitShimModeEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_MODE"
-const contributionHistoryGitShimArgsFileEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_ARGS_FILE"
-const contributionHistoryGitShimHeadEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_HEAD"
 const contributionHistoryGitShimRealGitEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_REAL_GIT"
-const (
-	contributionHistoryGitShimBound    = "reflog-bound"
-	contributionHistoryGitShimOverflow = "reflog-overflow"
-	contributionHistoryGitShimTimeout  = "reflog-timeout"
-)
+const contributionHistoryGitShimTimeout = "reflog-timeout"
 const legacyGitLabHostEnv = "GITLAB_HOST"
 
 // TestMain branches into fixture-binary mode when the activation env var
@@ -263,33 +257,9 @@ func runGitFetchRaceFixture() {
 
 func runContributionHistoryGitShim(mode string) {
 	args := os.Args[1:]
-	if len(args) >= 2 && args[0] == "reflog" && args[1] == "show" {
-		switch mode {
-		case contributionHistoryGitShimBound:
-			argsFile := os.Getenv(contributionHistoryGitShimArgsFileEnv)
-			if argsFile == "" {
-				fmt.Fprintln(os.Stderr, "contribution history shim: missing args file")
-				os.Exit(2)
-			}
-			if err := os.WriteFile(argsFile, []byte(strings.Join(args, "\x1f")), 0o600); err != nil {
-				fmt.Fprintf(os.Stderr, "contribution history shim: write args: %v\n", err)
-				os.Exit(2)
-			}
-			os.Exit(1)
-		case contributionHistoryGitShimOverflow:
-			head := os.Getenv(contributionHistoryGitShimHeadEnv)
-			if head == "" {
-				fmt.Fprintln(os.Stderr, "contribution history shim: missing head")
-				os.Exit(2)
-			}
-			for i := 0; i <= 200; i++ {
-				_, _ = fmt.Fprintf(os.Stdout, "%s\x1fnoise\n", head)
-			}
-			os.Exit(0)
-		case contributionHistoryGitShimTimeout:
-			time.Sleep(time.Hour)
-			os.Exit(0)
-		}
+	if len(args) >= 2 && args[0] == "reflog" && args[1] == "show" && mode == contributionHistoryGitShimTimeout {
+		time.Sleep(time.Hour)
+		os.Exit(0)
 	}
 
 	realGit := os.Getenv(contributionHistoryGitShimRealGitEnv)

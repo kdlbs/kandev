@@ -42,10 +42,11 @@ type GitOperationResult struct {
 
 // GitOperator executes git operations in a workspace directory.
 type GitOperator struct {
-	workDir          string
-	logger           *logger.Logger
-	workspaceTracker *WorkspaceTracker
-	environment      func() []string
+	workDir                            string
+	logger                             *logger.Logger
+	workspaceTracker                   *WorkspaceTracker
+	environment                        func() []string
+	contributionHistoryCommandOverride func(context.Context, ...string) (string, error)
 	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
 	// Empty for the workspace-root operator. Stamped on emitted commit
 	// notifications so the frontend can group commits per repo.
