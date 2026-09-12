@@ -174,6 +174,10 @@ export type KanbanState = {
     issueUrl?: string;
     issueNumber?: number;
     statusSummary?: TaskStatusSummary | null;
+    /** Whether the executor profile can be switched right now. Never gap-filled on merge. */
+    runnerEditable?: boolean;
+    /** Machine-readable reason for `runnerEditable`. Never gap-filled on merge. */
+    runnerIneligibleReason?: string;
   }>;
   isLoading?: boolean;
 };

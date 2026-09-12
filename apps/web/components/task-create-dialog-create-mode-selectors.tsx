@@ -26,6 +26,8 @@ type CreateModeSelectorsProps = {
   selectedAgentProfileName: string | null;
   effectiveWorkflowName: string | null;
   executorProfileName: string | null;
+  runnerEditable: boolean;
+  runnerIneligibleReason: string;
 };
 
 /**
@@ -52,6 +54,8 @@ export function CreateModeSelectors(props: CreateModeSelectorsProps) {
       selectedAgentProfileName={props.selectedAgentProfileName}
       effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
+      runnerEditable={props.runnerEditable}
+      runnerIneligibleReason={props.runnerIneligibleReason}
       AgentSelectorComponent={AgentSelector}
       ExecutorProfileSelectorComponent={ExecutorProfileSelector}
     />

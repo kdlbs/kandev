@@ -673,6 +673,10 @@ func (r *phase4TaskRepo) ReleaseTaskExternalID(context.Context, string, string) 
 	r.panicNotUsed("ReleaseTaskExternalID")
 	return nil, nil
 }
+func (r *phase4TaskRepo) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
+	r.panicNotUsed("SwitchTaskRunner")
+	return nil, nil
+}
 
 func TestWorkspacePolicy_MetadataBlock(t *testing.T) {
 	pol := WorkspacePolicy{

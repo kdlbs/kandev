@@ -187,6 +187,9 @@ func (m *mockRepository) SettleTaskExternalID(_ context.Context, _, _ string, _ 
 func (m *mockRepository) ReleaseTaskExternalID(_ context.Context, _, _ string) (*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
+	return nil, nil
+}
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }
@@ -551,6 +554,9 @@ func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.Ex
 func (m *mockRepository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	return nil
 }
@@ -600,6 +606,9 @@ func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*mo
 }
 func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	return nil, nil
+}
+func (m *mockRepository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }
 func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
 	return nil

@@ -10,13 +10,17 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/securityutil"
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 // UpdateTaskRepositoryComparisonTarget atomically persists a provider-owned
 // target on the exact task-repository attachment. It never changes the
-// attachment's checkout or base branch.
+// attachment's checkout or base branch. It mutates the link in place and
+// bumps task_repositories.updated_at, so it takes the owning task's row
+// lock: a concurrent runner switch's compatibility re-check must resolve
+// fully before or fully after this write.
 func (r *Repository) UpdateTaskRepositoryComparisonTarget(
 	ctx context.Context,
 	id string,
@@ -37,6 +41,10 @@ func (r *Repository) UpdateTaskRepositoryComparisonTarget(
 	taskRepo, err := r.getTaskRepositoryForUpdate(ctx, tx, id)
 	if err != nil {
 		return nil, false, err
+	}
+	if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskRepo.TaskID); lockErr != nil &&
+		!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+		return nil, false, lockErr
 	}
 	current, present, err := models.LoadComparisonTarget(taskRepo.Metadata)
 	if err != nil {
@@ -98,7 +106,10 @@ func applyComparisonTarget(
 
 // UpdateTaskRepositoryBaseBranchAndClearComparisonTarget applies a user
 // selected comparison branch while removing provider-owned target state in
-// the same transaction. This also handles selecting the same visible branch.
+// the same transaction. This also handles selecting the same visible
+// branch. It mutates the link in place and bumps
+// task_repositories.updated_at, so it takes the owning task's row lock,
+// same reason as UpdateTaskRepositoryComparisonTarget above.
 func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	ctx context.Context,
 	id string,
@@ -116,6 +127,10 @@ func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	taskRepo, err := r.getTaskRepositoryForUpdate(ctx, tx, id)
 	if err != nil {
 		return nil, false, err
+	}
+	if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskRepo.TaskID); lockErr != nil &&
+		!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+		return nil, false, lockErr
 	}
 	_, present, err := models.LoadComparisonTarget(taskRepo.Metadata)
 	if err != nil {

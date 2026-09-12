@@ -18,6 +18,8 @@ import { ApiError } from "@/lib/api/client";
 import { getTaskDependencyCycle } from "@/lib/api/domains/task-dependencies-api";
 import { isTaskDependencyUpdateFailure } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
+import { switchTaskRunner } from "@/lib/api/domains/task-runner-api";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -31,6 +33,7 @@ import {
   validateCreateInputs,
   hasPendingAttachmentUploads,
   toMessageAttachments,
+  RUNNER_INELIGIBLE_REASON_KEYS,
 } from "@/components/task-create-dialog-helpers";
 import { hasRegisteredRepositoryProviderCandidate } from "@/lib/plugins/repository-provider-url-resolution";
 
@@ -85,12 +88,70 @@ const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
   repository_selection_unavailable: "task:repositorySelectionUnavailable",
 };
 
+/**
+ * Wraps a rejected `task.runner` switch: the save issues no other call once
+ * this throws, so `performTaskUpdate` never reaches `updateTask`.
+ */
+class RunnerSwitchRejectedError extends Error {
+  constructor(readonly cause: unknown) {
+    super("runner switch rejected");
+  }
+}
+
+/**
+ * Wraps a failure in the sequence AFTER a runner switch already committed:
+ * the switch is not rolled back, so this exists to tell that state apart
+ * from an ordinary save failure.
+ */
+class TaskUpdateAfterRunnerSwitchError extends Error {
+  constructor(readonly cause: unknown) {
+    super("task update failed after runner switch committed");
+  }
+}
+
+/**
+ * Wraps a session-launch failure that follows an already-committed task
+ * save: the save is not rolled back, so this exists to tell that state
+ * apart from an ordinary save failure and keep the dialog reporting the
+ * truth (saved, but the agent didn't start) instead of a silent success.
+ */
+class LaunchAfterTaskUpdateError extends Error {
+  constructor(readonly cause: unknown) {
+    super("session launch failed after task update committed");
+  }
+}
+
+// Maps a rejected task.runner switch to outcome-specific text: a typed
+// mutability conflict reuses the same reason copy as the read-side
+// projection; an untyped outcome (invalid, not-found,
+// evaluation-unavailable) gets text for that class instead of the raw wire
+// code.
+function runnerSwitchErrorMessage(error: unknown): string {
+  if (error instanceof WebSocketRequestError) {
+    const errorCode =
+      typeof error.details?.error_code === "string" ? error.details.error_code : undefined;
+    if (errorCode === "target_cannot_materialize_repository") {
+      return t("task:runnerConflictTargetCannotMaterializeRepository");
+    }
+    const reasonKey = errorCode ? RUNNER_INELIGIBLE_REASON_KEYS[errorCode] : undefined;
+    if (reasonKey) return t(reasonKey);
+    if (error.code === "NOT_FOUND") return t("task:runnerSwitchNotFound");
+    if (error.code === "VALIDATION_ERROR") return t("task:runnerSwitchInvalid");
+    if (error.code === "UNAVAILABLE") return t("task:runnerReasonEvaluationUnavailable");
+  }
+  return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
 export function taskSubmitErrorMessage(error: unknown): string {
   if (isTaskDependencyUpdateFailure(error)) {
     const cycle = getTaskDependencyCycle(error.cause);
     if (cycle?.length) return t("task:dependencyCycleError", { cycle: cycle.join(" -> ") });
     return t("task:dependencyUpdateFailed");
   }
+  if (error instanceof RunnerSwitchRejectedError) return runnerSwitchErrorMessage(error.cause);
+  if (error instanceof TaskUpdateAfterRunnerSwitchError)
+    return t("task:runnerSwitchPartiallySaved");
+  if (error instanceof LaunchAfterTaskUpdateError) return t("task:launchFailedAfterTaskSaved");
   if (error instanceof ApiError) {
     const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
     if (key) return t(key);
@@ -136,12 +197,74 @@ function areEditDependenciesReady(
   return !isEditMode || editDependencies?.ready !== false;
 }
 
+// Only a final selection that differs from what the dialog seeded (stored
+// profile or resolved default) counts as a user change; reverting back to
+// the seeded value issues no switch.
+function computeRunnerChanged(
+  seededExecutorProfileId: string | null,
+  executorProfileId: string,
+): boolean {
+  return (
+    seededExecutorProfileId !== null &&
+    executorProfileId !== "" &&
+    executorProfileId !== seededExecutorProfileId
+  );
+}
+
+// Issued first. A rejection here must leave every other field unsaved, so
+// the caller never reaches the rest of the save sequence.
+async function issueRunnerSwitchIfChanged(
+  runnerChanged: boolean,
+  taskId: string,
+  executorProfileId: string,
+): Promise<void> {
+  if (!runnerChanged) return;
+  try {
+    await switchTaskRunner(taskId, executorProfileId);
+  } catch (error) {
+    throw new RunnerSwitchRejectedError(error);
+  }
+}
+
+type SaveEditedTaskFieldsArgs = {
+  editingTask: { id: string };
+  updatePayload: Parameters<typeof updateTask>[1];
+  trimmedDescription: string;
+  runnerChanged: boolean;
+} & Omit<EditDependencySaveArgs, "updatedTask">;
+
+// A runner switch that already committed is never rolled back; tag a
+// failure here so the caller can report the true partial state instead of
+// implying the whole save was rejected.
+async function saveEditedTaskFields({
+  editingTask,
+  updatePayload,
+  trimmedDescription,
+  runnerChanged,
+  ...dependencySaveArgs
+}: SaveEditedTaskFieldsArgs) {
+  try {
+    const updatedTask = await updateTask(editingTask.id, updatePayload);
+    await saveEditedTaskDependencies({ ...dependencySaveArgs, updatedTask });
+    return { updatedTask, trimmedDescription };
+  } catch (error) {
+    if (runnerChanged) throw new TaskUpdateAfterRunnerSwitchError(error);
+    throw error;
+  }
+}
+
 async function shouldKeepEditDialogOpen(
   error: unknown,
   refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
 ): Promise<boolean> {
   if (isRepositorySelectionError(error)) return true;
   if (isTaskDependencyUpdateFailure(error)) return true;
+  // A rejected switch, or a later call failing after the switch already
+  // committed, both need the user back in the dialog to see the reason and
+  // retry.
+  if (error instanceof RunnerSwitchRejectedError) return true;
+  if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
+  if (error instanceof LaunchAfterTaskUpdateError) return true;
   return refreshStaleBranchPolicies(error);
 }
 
@@ -172,6 +295,7 @@ export function useTaskSubmitHandlers({
   agentProfileId,
   executorId,
   executorProfileId,
+  seededExecutorProfileId,
   editingTask,
   onSuccess,
   onCreateSession,
@@ -422,6 +546,10 @@ export function useTaskSubmitHandlers({
     if (!areEditDependenciesReady(isEditMode, editDependencies)) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
+
+    const runnerChanged = computeRunnerChanged(seededExecutorProfileId, executorProfileId);
+    await issueRunnerSwitchIfChanged(runnerChanged, editingTask.id, executorProfileId);
+
     const description = isStartedEdit
       ? (editingTask.description ?? "")
       : (descriptionInputRef.current?.getValue() ?? "");
@@ -435,16 +563,17 @@ export function useTaskSubmitHandlers({
       ...(!isStartedEdit && repositoriesDirty && { repositories: repositoriesPayload }),
     };
 
-    const updatedTask = await updateTask(editingTask.id, updatePayload);
-    await saveEditedTaskDependencies({
+    return saveEditedTaskFields({
+      editingTask,
+      updatePayload,
+      trimmedDescription,
+      runnerChanged,
       editDependencies,
-      updatedTask,
       isStartedEdit,
       descriptionInputRef,
       setTaskName,
       setHasDescription,
     });
-    return { updatedTask, trimmedDescription };
   }, [
     editingTask,
     taskName,
@@ -456,6 +585,8 @@ export function useTaskSubmitHandlers({
     isEditMode,
     setTaskName,
     setHasDescription,
+    executorProfileId,
+    seededExecutorProfileId,
   ]);
 
   const handleEditSubmit = useCallback(async () => {
@@ -486,7 +617,11 @@ export function useTaskSubmitHandlers({
             );
           }
         } catch (error) {
-          console.error("[TaskCreateDialog] failed to start agent:", error);
+          // The task save already committed by this point (performTaskUpdate
+          // resolved above); the launch is the last call in AC-004.4c's
+          // ordered sequence, so its failure must be reported as a partial
+          // save rather than swallowed into an apparent full success.
+          throw new LaunchAfterTaskUpdateError(error);
         }
       }
 

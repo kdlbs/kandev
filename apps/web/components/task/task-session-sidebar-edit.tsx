@@ -19,6 +19,9 @@ export type SidebarTaskEditTarget = {
   state?: Task["state"];
   repositoryId?: string;
   repositories?: TaskRepositorySnapshot[];
+  primaryExecutorProfileId?: string;
+  runnerEditable?: boolean;
+  runnerIneligibleReason?: string;
 };
 
 export function buildSidebarTaskEditTarget(
@@ -38,6 +41,9 @@ export function buildSidebarTaskEditTarget(
     state: sourceTask.state,
     repositoryId: sourceTask.repositoryId ?? undefined,
     repositories: sourceTask.repositories,
+    primaryExecutorProfileId: sourceTask.primaryExecutorProfileId ?? undefined,
+    runnerEditable: sourceTask.runnerEditable,
+    runnerIneligibleReason: sourceTask.runnerIneligibleReason,
   };
 }
 
@@ -96,6 +102,9 @@ export function SidebarTaskEditDialog({
               state: target.state,
               repositoryId: target.repositoryId,
               repositories: target.repositories,
+              primaryExecutorProfileId: target.primaryExecutorProfileId,
+              runnerEditable: target.runnerEditable,
+              runnerIneligibleReason: target.runnerIneligibleReason,
             }
           : null
       }

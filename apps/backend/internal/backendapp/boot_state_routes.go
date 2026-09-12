@@ -815,6 +815,10 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"parkedOnBackgroundWork": task.ParkedOnBackgroundWork,
 		"parkedRevision":         task.ParkedRevision,
 		"parkedEpoch":            task.ParkedEpoch,
+		// Runner-mutability projection: this is a camelCase whitelist, so an
+		// evaluated verdict is invisible on first paint until it is listed here.
+		"runnerEditable":         task.RunnerEditable,
+		"runnerIneligibleReason": task.RunnerIneligibleReason,
 	}
 }
 

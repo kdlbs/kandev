@@ -308,6 +308,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setExecutorId: () => undefined,
     executorProfileId: "executor-profile-1",
     setExecutorProfileId: () => undefined,
+    setExecutorProfileIdFromSeed: () => undefined,
+    seededExecutorProfileId: null,
     discoveredRepositories: [],
     setDiscoveredRepositories: () => undefined,
     discoverReposLoading: false,

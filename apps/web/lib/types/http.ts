@@ -496,6 +496,14 @@ export type Task = ActiveSubagentCountFields & {
   status_summary?: TaskStatusSummary | null;
   /** Explicitly clears a cached status summary. Omission keeps partial-response semantics. */
   status_summary_invalidated?: boolean;
+  /**
+   * Whether the task's executor profile can be switched right now (nothing has
+   * materialized yet). Always present on an enriched read; not gap-filled on
+   * merge (an omitted value reads as ineligible, never as the cached one).
+   */
+  runner_editable?: boolean;
+  /** Machine-readable reason for `runner_editable`; always present alongside it. */
+  runner_ineligible_reason?: string;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.

@@ -437,6 +437,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// already-open clients rather than being pinned by preserveOmittedField.
 		"workspace_orphaned": models.WorkspaceOrphaned(task.Metadata),
 	}
+	// runner_editable/runner_ineligible_reason mirror the task projection's
+	// always-present contract: never omitted, so a client merging this event
+	// never mistakes an absent key for a retained stale value.
+	runnerView := s.runnerMutabilityEventView(ctx, task)
+	data["runner_editable"] = runnerView.Editable
+	data["runner_ineligible_reason"] = runnerView.Reason
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339Nano)

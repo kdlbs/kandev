@@ -439,6 +439,8 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
+	wsGroupMembership               WorkspaceGroupMembershipReader
+	executorCapabilityProber        ExecutorCapabilityProber
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	sessionRunningChecker           SessionRunningChecker
 	remoteBranchLister              RemoteBranchLister

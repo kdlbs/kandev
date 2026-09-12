@@ -117,6 +117,52 @@ export function computeIsTaskStarted(
   return editingTask.state !== "TODO" && editingTask.state !== "CREATED";
 }
 
+/**
+ * Whether the executor-profile selector should be offered for editing.
+ * Create mode always offers it — there is no task yet for a mutability
+ * verdict to apply to. Edit mode defers entirely to the projected
+ * `runner_editable`, never to workflow state; an absent projection fails
+ * closed.
+ */
+export function computeRunnerEditable(
+  isEditMode: boolean,
+  editingTask?: { runnerEditable?: boolean } | null,
+): boolean {
+  if (!isEditMode) return true;
+  return editingTask?.runnerEditable ?? false;
+}
+
+/**
+ * Machine-readable reason to present when {@link computeRunnerEditable}
+ * returns false. Falls back to the same retriable class the backend uses
+ * when a projection could not be evaluated.
+ */
+export function computeRunnerIneligibleReason(
+  editingTask?: { runnerIneligibleReason?: string } | null,
+): string {
+  return editingTask?.runnerIneligibleReason ?? "evaluation_unavailable";
+}
+
+/**
+ * Maps a projected `runner_ineligible_reason`, or the matching
+ * `details.error_code` on a rejected `task.runner` switch, to the i18n key
+ * presented to the user. Closed vocabulary; a code this dialog doesn't
+ * recognize (a future reason it predates) falls back to the same retriable
+ * copy as an evaluation failure rather than an empty message or a raw code.
+ */
+export const RUNNER_INELIGIBLE_REASON_KEYS: Record<string, string> = {
+  task_archived: "task:runnerReasonTaskArchived",
+  no_repository: "task:runnerReasonNoRepository",
+  multiple_repositories: "task:runnerReasonMultipleRepositories",
+  session_exists: "task:runnerReasonSessionExists",
+  environment_exists: "task:runnerReasonEnvironmentExists",
+  executor_running: "task:runnerReasonExecutorRunning",
+  workspace_folder_attached: "task:runnerReasonWorkspaceFolderAttached",
+  workspace_path_set: "task:runnerReasonWorkspacePathSet",
+  workspace_group_member: "task:runnerReasonWorkspaceGroupMember",
+  workspace_binding_not_independent: "task:runnerReasonWorkspaceBindingNotIndependent",
+};
+
 export function shouldShowTaskTitleField(
   isCreateMode: boolean,
   isEditMode: boolean,

@@ -78,3 +78,30 @@ var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 // did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+
+// ErrRunnerMutabilityConflict wraps one of the ten ordered mutability reason
+// codes rejecting a runner switch. Reason is always a member of the same
+// closed vocabulary the projection uses, never "eligible" and never empty.
+type ErrRunnerMutabilityConflict struct {
+	Reason string
+}
+
+func (e *ErrRunnerMutabilityConflict) Error() string {
+	return "runner switch rejected: " + e.Reason
+}
+
+// ErrRunnerCompatibilityConflict reports that the mutability gate passed but
+// the target runner cannot materialize the task's repository. Unlike
+// ErrRunnerMutabilityConflict this code is never projected on the task's
+// runner_ineligible_reason field — it describes the target, not the task.
+var ErrRunnerCompatibilityConflict = errors.New("target cannot materialize repository")
+
+// ErrExecutorProfileNotFound reports that no executor profile row matched
+// the supplied id.
+var ErrExecutorProfileNotFound = errors.New("executor profile not found")
+
+// ErrRunnerEvaluationUnavailable reports that a runner switch could not be
+// decided or applied — a failed read, a failed lock acquisition, a stale
+// compatibility-gate snapshot, a failed metadata write, or a failed commit.
+// It is the one retriable outcome: a caller may repeat the request.
+var ErrRunnerEvaluationUnavailable = errors.New("runner switch evaluation unavailable")

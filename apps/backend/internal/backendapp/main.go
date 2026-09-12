@@ -614,6 +614,7 @@ func startAgentInfrastructure(
 	services.Task.SetWorkspaceSourceProviderRefresher(newTaskMCPProviderRefresher(repos.Task, lifecycleMgr, log))
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 	services.Task.SetAgentComparisonTargetPusher(lifecycleMgr)
+	services.Task.SetExecutorCapabilityProber(lifecycleMgr)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,
