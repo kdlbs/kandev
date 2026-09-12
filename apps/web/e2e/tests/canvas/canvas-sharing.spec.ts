@@ -21,7 +21,9 @@ test.describe("Canvas sharing", () => {
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
       canvasId = seeded.canvas.id;
-      const approved = await approvePendingCanvas(apiClient, seeded.canvas);
+      const approved = seeded.canvas.pending_release
+        ? await approvePendingCanvas(apiClient, seeded.canvas)
+        : seeded.canvas;
 
       await testPage.goto(canvasHref(approved.id));
       await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 30_000 });
