@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -1635,17 +1636,25 @@ func bulkMoveLockStepIDs(tasks []*models.Task, targetStepID string) []string {
 // ordinal), then within one source step that step's admitted band in step
 // order followed by its queued band in step order.
 func (s *Service) orderTasksForBulkMove(ctx context.Context, tasks []*models.Task) ([]*models.Task, error) {
-	if s.workflowStepGetter == nil {
-		return nil, fmt.Errorf("workflow step getter not configured")
-	}
 	stepOrdinals := make(map[string]int, len(tasks))
+	if s.workflowStepGetter == nil {
+		// No ordinal source: fall back to submission order rather than
+		// aborting the batch — every task groups under its own step with an
+		// equal (zero) ordinal, so bulkMoveSubmissionOrder's per-step
+		// StepOrderLess sort still applies within each source step.
+		return bulkMoveSubmissionOrder(tasks, stepOrdinals), nil
+	}
 	for _, task := range tasks {
 		if _, ok := stepOrdinals[task.WorkflowStepID]; ok {
 			continue
 		}
 		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve source step %s: %w", task.WorkflowStepID, err)
+			// An empty or dangling source step (e.g. deleted concurrently)
+			// must not abort every other task's move: order it last rather
+			// than failing the whole batch.
+			stepOrdinals[task.WorkflowStepID] = math.MaxInt32
+			continue
 		}
 		stepOrdinals[task.WorkflowStepID] = step.Position
 	}
