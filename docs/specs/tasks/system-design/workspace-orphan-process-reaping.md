@@ -134,10 +134,11 @@ narrowest unit each governs (AC-003.6):
   (see [Observability](#observability)).
 - A root equal to, inside, or **containing** another task's live session
   workspace is blocked (`orphanReapFindOverlap`, bidirectional — AC-003.2).
-- A root equal to or **inside** another task's live recorded execution's
-  worktree is blocked (`orphanReapFindContainment`, one-directional —
-  AC-003.4). This asymmetry (containing vs. inside-only) is the literal text
-  of the two ACs, not an implementation choice; see
+- A root is blocked when another task's live recorded execution's worktree
+  is equal to or **inside** it (`orphanReapFindContainment`, one-directional
+  — AC-003.4). This asymmetry (AC-003.2's bidirectional containing-or-inside
+  vs. AC-003.4's inside-only) is the literal text of the two ACs, not an
+  implementation choice; see
   [F22](#f22-ac-0034-vs-ac-0032-asymmetric-containment-implemented-as-specified).
 - A candidate whose PID or ancestor PID is another task's `local_pid` is
   skipped (AC-003.3), and every candidate is checked against a protected set

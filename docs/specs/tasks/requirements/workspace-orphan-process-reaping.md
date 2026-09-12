@@ -58,8 +58,9 @@ not "the processes Kandev recorded are gone".
   local task workspace path and confirmed it absent, the system shall record that
   path, resolved before removal while it still existed, as a reap root in the
   job's durable resource snapshot, and run the reap phase against it. A root
-  persists for the life of the job, so a later attempt acts on the roots recorded
-  by the attempt that removed them; no attempt after the first removes anything.
+  persists for the life of the job, recorded by whichever attempt actually
+  removes and confirms it, not necessarily the first; no later attempt
+  records it again.
 - **AC-TASKS-ORPHAN-REAP-001.2:** When a candidate holds a reap root and passes
   every check in `REQ-TASKS-ORPHAN-REAP-003`, the system shall terminate it under
   `REQ-TASKS-ORPHAN-REAP-004`.
