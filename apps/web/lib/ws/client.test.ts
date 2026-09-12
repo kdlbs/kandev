@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { WebSocketClient, WebSocketRequestError } from "./client";
+import { WebSocketClient, WebSocketRequestError, WebSocketRequestTimeoutError } from "./client";
 
 type SentRequest = {
   id: string;
@@ -8,6 +8,9 @@ type SentRequest = {
   action: string;
   payload: unknown;
 };
+
+const SESSION_ID = "sess-1";
+const SESSION_SUBSCRIBE_ACTION = "session.subscribe";
 
 class FakeWebSocket {
   static readonly OPEN = 1;
@@ -66,7 +69,9 @@ function connectClient(options?: ConstructorParameters<typeof WebSocketClient>[2
 }
 
 function sessionSubscribeRequest(socket: FakeWebSocket, index = 0) {
-  const request = socket.sent.filter((message) => message.action === "session.subscribe")[index];
+  const request = socket.sent.filter((message) => message.action === SESSION_SUBSCRIBE_ACTION)[
+    index
+  ];
   if (!request) throw new Error("No session.subscribe request was sent");
   return request;
 }
@@ -89,10 +94,70 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// eslint-disable-next-line max-lines-per-function -- the readiness suite covers the shared lifecycle contract.
 describe("session subscription readiness", () => {
+  it("accepts a registration acknowledgement that arrives after seven seconds", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient();
+    const subscription = client.subscribeSessionWithReady(SESSION_ID);
+
+    await vi.advanceTimersByTimeAsync(7000);
+    acknowledge(socket, sessionSubscribeRequest(socket));
+
+    await expect(subscription.ready).resolves.toBeUndefined();
+    subscription.unsubscribe();
+  });
+
+  it("recovers timed out registration without a visibility change", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient();
+    const subscription = client.subscribeSessionWithReady(SESSION_ID);
+
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(
+      socket.sent.filter((message) => message.action === SESSION_SUBSCRIBE_ACTION),
+    ).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    const retryRequest = sessionSubscribeRequest(socket, 1);
+    acknowledge(socket, retryRequest);
+
+    await expect(subscription.ready).resolves.toBeUndefined();
+    subscription.unsubscribe();
+  });
+
+  it("stops after the bounded registration retry budget", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient();
+    const subscription = client.subscribeSessionWithReady(SESSION_ID);
+
+    await vi.advanceTimersByTimeAsync(21000);
+
+    await expect(subscription.ready).rejects.toBeInstanceOf(WebSocketRequestTimeoutError);
+    expect(
+      socket.sent.filter((message) => message.action === SESSION_SUBSCRIBE_ACTION),
+    ).toHaveLength(2);
+    subscription.unsubscribe();
+  });
+
+  it("cancels a scheduled registration retry when the last consumer unsubscribes", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient();
+    const subscription = client.subscribeSessionWithReady(SESSION_ID);
+
+    await vi.advanceTimersByTimeAsync(10000);
+    subscription.unsubscribe();
+    await expect(subscription.ready).rejects.toThrow("Session subscription released");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(
+      socket.sent.filter((message) => message.action === SESSION_SUBSCRIBE_ACTION),
+    ).toHaveLength(1);
+  });
+
   it("resolves only after the server acknowledges the registration", async () => {
     const { client, socket } = connectClient();
-    const subscription = client.subscribeSessionWithReady("sess-1");
+    const subscription = client.subscribeSessionWithReady(SESSION_ID);
     const request = sessionSubscribeRequest(socket);
     let ready = false;
 
@@ -111,11 +176,13 @@ describe("session subscription readiness", () => {
 
   it("shares one in-flight acknowledgement between ref-counted consumers", async () => {
     const { client, socket } = connectClient();
-    const first = client.subscribeSessionWithReady("sess-1");
-    const second = client.subscribeSessionWithReady("sess-1");
+    const first = client.subscribeSessionWithReady(SESSION_ID);
+    const second = client.subscribeSessionWithReady(SESSION_ID);
 
     expect(second.ready).toBe(first.ready);
-    expect(socket.sent.filter((message) => message.action === "session.subscribe")).toHaveLength(1);
+    expect(
+      socket.sent.filter((message) => message.action === SESSION_SUBSCRIBE_ACTION),
+    ).toHaveLength(1);
 
     acknowledge(socket, sessionSubscribeRequest(socket));
     await expect(second.ready).resolves.toBeUndefined();
@@ -126,7 +193,7 @@ describe("session subscription readiness", () => {
 
   it("allows a failed registration to be retried with fresh readiness", async () => {
     const { client, socket } = connectClient();
-    const subscription = client.subscribeSessionWithReady("sess-1");
+    const subscription = client.subscribeSessionWithReady(SESSION_ID);
     const firstRequest = sessionSubscribeRequest(socket);
 
     socket.receive({
@@ -136,7 +203,7 @@ describe("session subscription readiness", () => {
     });
     await expect(subscription.ready).rejects.toThrow("session is not ready");
 
-    const retry = client.resubscribeSession("sess-1");
+    const retry = client.resubscribeSession(SESSION_ID);
     const retryRequest = sessionSubscribeRequest(socket, 1);
     expect(retry).not.toBe(subscription.ready);
 
@@ -148,7 +215,7 @@ describe("session subscription readiness", () => {
   it("tracks the re-registration after reconnect", async () => {
     vi.useFakeTimers();
     const { client, socket } = connectClient({ enabled: true, initialDelay: 0, maxAttempts: 1 });
-    const initial = client.subscribeSessionWithReady("sess-1");
+    const initial = client.subscribeSessionWithReady(SESSION_ID);
     acknowledge(socket, sessionSubscribeRequest(socket));
     await expect(initial.ready).resolves.toBeUndefined();
 
@@ -157,9 +224,9 @@ describe("session subscription readiness", () => {
     const reconnectedSocket = FakeWebSocket.latest();
     reconnectedSocket.open();
 
-    const reconnected = client.subscribeSessionWithReady("sess-1");
+    const reconnected = client.subscribeSessionWithReady(SESSION_ID);
     const reconnectRequest = sessionSubscribeRequest(reconnectedSocket, 0);
-    expect(reconnectRequest.payload).toEqual({ session_id: "sess-1" });
+    expect(reconnectRequest.payload).toEqual({ session_id: SESSION_ID });
     expect(reconnected.ready).not.toBe(initial.ready);
 
     acknowledge(reconnectedSocket, reconnectRequest);
@@ -255,12 +322,12 @@ describe("session subscription reconnect recovery", () => {
   it("keeps queued hydration behind the reconnect subscription acknowledgement", async () => {
     vi.useFakeTimers();
     const { client, socket } = connectClient({ enabled: true, initialDelay: 0, maxAttempts: 1 });
-    const initial = client.subscribeSessionWithReady("sess-1");
+    const initial = client.subscribeSessionWithReady(SESSION_ID);
     acknowledge(socket, sessionSubscribeRequest(socket));
     await expect(initial.ready).resolves.toBeUndefined();
 
     socket.close();
-    const reconnectReadiness = client.getSessionSubscriptionReadiness("sess-1");
+    const reconnectReadiness = client.getSessionSubscriptionReadiness(SESSION_ID);
     let readinessResolved = false;
     void reconnectReadiness.then(() => {
       readinessResolved = true;
@@ -269,7 +336,7 @@ describe("session subscription reconnect recovery", () => {
       id: "hydration-1",
       type: "request",
       action: "message.list",
-      payload: { session_id: "sess-1" },
+      payload: { session_id: SESSION_ID },
     });
     await Promise.resolve();
     expect(readinessResolved).toBe(false);
@@ -279,7 +346,7 @@ describe("session subscription reconnect recovery", () => {
     reconnectedSocket.open();
 
     expect(reconnectedSocket.sent.map((message) => message.action)).toEqual([
-      "session.subscribe",
+      SESSION_SUBSCRIBE_ACTION,
       "message.list",
     ]);
     const reconnectRequest = sessionSubscribeRequest(reconnectedSocket);
@@ -296,7 +363,7 @@ describe("session subscription reconnect recovery", () => {
 
   it("rejects an active readiness when reconnect recovery is disabled", async () => {
     const { client, socket } = connectClient({ enabled: false });
-    const subscription = client.subscribeSessionWithReady("sess-1");
+    const subscription = client.subscribeSessionWithReady(SESSION_ID);
     socket.close();
 
     await expect(subscription.ready).rejects.toThrow("WebSocket connection closed");

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-12
-status: draft
+status: complete
 requirements:
   - REQ-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-002
   - REQ-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001
@@ -133,18 +133,35 @@ The new shared helper is `e2e/helpers/session-entry-recovery.ts`.
 
 ## Work orders
 
-- [ ] [Task 01: Recover entry requests](task-01-entry-recovery.md)
-- [ ] [Task 02: Present conversation recovery](task-02-recovery-feedback.md)
+- [x] [Task 01: Recover entry requests](task-01-entry-recovery.md)
+- [x] [Task 02: Present conversation recovery](task-02-recovery-feedback.md)
 
 ## Verification results
 
-Implementation pending. Design-package checks passed:
+Implementation complete. Design-package checks and implementation checks passed:
 
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check -- docs/specs docs/plans/session-entry-recovery docs/plans/session-subscription-recovery`: passed.
-- Public docs impact: design-only package. Public documentation remains unchanged until implementation.
-No production or permanent test changes are part of this design package.
+- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx`: 158 tests passed across 9 files.
+- `cd apps/web && pnpm run typecheck`: passed.
+- The zero-warning ESLint commands listed in both work-order Results: passed.
+- `cd apps/web && pnpm run i18n:zh-hant`: passed; generated the Traditional Chinese pair.
+- `cd apps/web && pnpm run i18n:check`: passed; all five complete catalogs and pseudo locale are synchronized.
+- `cd apps/web && pnpm run i18n:ratchet`: passed; no new untranslated copy.
+- `cd apps/web && pnpm e2e:run --project chromium tests/session/session-entry-recovery.spec.ts tests/session/session-resume-recovery.spec.ts`: 5 passed, including the production web build.
+- `cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-session-entry-recovery.spec.ts tests/session/mobile-session-resume-recovery.spec.ts`: 2 passed, including phone touch geometry and overflow checks.
+- `git diff --check`: passed.
+- Public documentation impact: no public docs change is required for this recovery behavior.
+
+Review remediation validation:
+
+- Status restoration and backend error-payload regressions passed, including the assertion that a
+  permanent status error does not launch a session.
+- Deferred history generation regressions passed for terminal fetch, session A to B navigation,
+  session A to B to A re-entry, unmount-safe finalization, and fresh manual Retry.
+- The focused recovery suite passed 163 tests across 9 files after remediation; typecheck,
+  zero-warning ESLint, and formatting checks passed.
 
 ## Risks
 

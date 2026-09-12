@@ -27,6 +27,8 @@ function makeParams(
     } as never,
     setIsLoading: vi.fn(),
     setIsWaitingForInitialMessages: vi.fn(),
+    setHistoryStatus: vi.fn(),
+    setHistoryError: vi.fn(),
     initialFetchStartRef: { current: null },
     lastFetchedSessionIdRef: { current: null },
     fetchAndStoreMessages,
@@ -80,7 +82,7 @@ describe("doFetchMessages", () => {
     expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
   });
 
-  it("clears hook gates when an active fetch becomes stale before settling", async () => {
+  it("releases store bookkeeping without finalizing stale hook gates", async () => {
     const result = deferred<Message[]>();
     const setMessagesLoading = vi.fn();
     const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
@@ -91,8 +93,34 @@ describe("doFetchMessages", () => {
     result.resolve([]);
     await fetch;
 
-    expect(params.setIsLoading).toHaveBeenLastCalledWith(false);
-    expect(params.setIsWaitingForInitialMessages).toHaveBeenLastCalledWith(false);
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(true);
+    expect(params.setIsWaitingForInitialMessages).toHaveBeenLastCalledWith(true);
     expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
+  it("preserves cached messages when the history request fails", async () => {
+    const setMessages = vi.fn();
+    const setMessagesLoading = vi.fn();
+    const store = {
+      getState: () => ({ setMessages, setMessagesLoading }),
+    } as unknown as Parameters<typeof doFetchMessages>[0]["store"];
+    const lastFetchedSessionIdRef = { current: null as string | null };
+    const initialFetchStartRef = { current: null as number | null };
+
+    await doFetchMessages({
+      taskSessionId: SESSION_ID,
+      store,
+      setIsLoading: vi.fn(),
+      setIsWaitingForInitialMessages: vi.fn(),
+      setHistoryStatus: vi.fn(),
+      setHistoryError: vi.fn(),
+      initialFetchStartRef,
+      lastFetchedSessionIdRef,
+      fetchAndStoreMessages: vi.fn().mockRejectedValue(new Error("history unavailable")),
+      onError: vi.fn(),
+    });
+
+    expect(setMessages).not.toHaveBeenCalled();
+    expect(lastFetchedSessionIdRef.current).toBeNull();
   });
 });

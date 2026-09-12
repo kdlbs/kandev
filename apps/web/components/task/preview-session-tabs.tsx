@@ -13,7 +13,11 @@ import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summa
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
-import { EnsureSessionErrorEmptyState, SessionRecoveryFeedback } from "./ensure-session-error";
+import {
+  EnsureSessionErrorEmptyState,
+  getSessionRecoveryRetry,
+  SessionRecoveryFeedback,
+} from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { PreviewSessionTabMenu } from "./preview-session-tab-menu";
 import { SessionTabDialogs } from "./session-tab-menu";
@@ -278,7 +282,7 @@ function PreviewSessionRecoverySurface({
       error={resumption.error}
       notice={resumption.notice}
       recoveryFailure={resumption.recoveryFailure}
-      onRetry={() => void resumption.resumeSession()}
+      onRetry={getSessionRecoveryRetry(resumption)}
       retryDisabled={
         resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
       }
@@ -678,7 +682,7 @@ function PreviewNoSessionsState({
           error={resumption.error}
           notice={resumption.notice}
           recoveryFailure={resumption.recoveryFailure}
-          onRetry={() => void resumption.resumeSession()}
+          onRetry={getSessionRecoveryRetry(resumption)}
           retryDisabled={
             resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
           }

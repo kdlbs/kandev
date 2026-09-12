@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- session resumption cases share one lifecycle harness. */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockRequest = vi.fn();
 const mockSetTaskSession = vi.fn();
@@ -42,6 +42,11 @@ const LATER_AT = "2026-01-02T00:00:00.000Z";
 const RESUME_TRANSPORT_ERROR = "Resume transport failed";
 const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
 
+afterEach(() => {
+  vi.useRealTimers();
+  mockRequest.mockReset();
+});
+
 import {
   resumeWithSilentFallback,
   useSessionResumption,
@@ -49,6 +54,7 @@ import {
   type ResumptionState,
   type SessionRecoveryFailure,
 } from "./use-session-resumption";
+import { WebSocketRequestTimeoutError } from "@/lib/ws/client";
 
 type SetterCalls = {
   resumptionStates: ResumptionState[];
@@ -368,6 +374,7 @@ describe("resumeWithSilentFallback", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- status and recovery cases share one lifecycle harness.
 describe("useSessionResumption", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -394,6 +401,166 @@ describe("useSessionResumption", () => {
 
     await waitFor(() => expect(mockSetTaskSession).toHaveBeenCalled());
     expect(mockSetTaskSession).toHaveBeenCalledWith(expect.objectContaining({ updated_at: "" }));
+  });
+
+  it("retries a timed out status check before processing the response", async () => {
+    vi.useFakeTimers();
+    mockRequest
+      .mockRejectedValueOnce(new WebSocketRequestTimeoutError(STATUS_ACTION))
+      .mockResolvedValueOnce({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: false,
+        needs_resume: false,
+      });
+
+    renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+    expect(mockRequest).toHaveBeenNthCalledWith(
+      1,
+      STATUS_ACTION,
+      { task_id: TASK_ID, session_id: SESSION_ID },
+      10000,
+    );
+    expect(mockSetTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({ state: "WAITING_FOR_INPUT" }),
+    );
+  });
+
+  it("surfaces a status timeout as status-unavailable feedback after the retry budget", async () => {
+    vi.useFakeTimers();
+    mockRequest
+      .mockRejectedValueOnce(new WebSocketRequestTimeoutError(STATUS_ACTION))
+      .mockRejectedValueOnce(new WebSocketRequestTimeoutError(STATUS_ACTION));
+
+    const { result } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.resumptionState).toBe("error");
+    expect(result.current.error).toBeNull();
+    expect(result.current.recoveryFailure).toEqual({
+      outcome: "status_unavailable",
+      kind: "timeout",
+      statusError: "WebSocket request timed out: task.session.status",
+    });
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "RUNNING",
+      is_agent_running: true,
+      is_resumable: false,
+      needs_resume: false,
+    });
+    await act(async () => {
+      await result.current.retrySessionStatus();
+    });
+
+    expect(mockRequest).toHaveBeenCalledTimes(3);
+    expect(mockRequest).not.toHaveBeenCalledWith(
+      LAUNCH_ACTION,
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(result.current.recoveryFailure).toBeNull();
+    expect(result.current.resumptionState).toBe("running");
+  });
+
+  it("keeps a workspace restore failure as launch feedback with a launch retry", async () => {
+    mockRequest
+      .mockResolvedValueOnce({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: false,
+        needs_resume: false,
+        needs_workspace_restore: true,
+      })
+      .mockRejectedValueOnce(new Error(WORKSPACE_RESTORE_ERROR));
+
+    const { result } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+
+    await waitFor(() => expect(result.current.error).toBe(WORKSPACE_RESTORE_ERROR));
+    expect(result.current.resumptionState).toBe("error");
+    expect(result.current.recoveryFailure).toBeNull();
+    expect(mockRequest).toHaveBeenNthCalledWith(
+      2,
+      LAUNCH_ACTION,
+      expect.objectContaining({ intent: "restore_workspace" }),
+      expect.any(Number),
+    );
+
+    mockRequest.mockResolvedValueOnce({
+      success: true,
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      state: "STARTING",
+    });
+    await act(async () => {
+      await result.current.resumeSession();
+    });
+
+    expect(mockRequest).toHaveBeenNthCalledWith(
+      3,
+      LAUNCH_ACTION,
+      expect.objectContaining({ intent: "resume" }),
+      expect.any(Number),
+    );
+  });
+
+  it("keeps a backend status error visible after a timeout retry without launching", async () => {
+    vi.useFakeTimers();
+    mockRequest
+      .mockRejectedValueOnce(new WebSocketRequestTimeoutError(STATUS_ACTION))
+      .mockRejectedValueOnce(new WebSocketRequestTimeoutError(STATUS_ACTION));
+
+    const { result } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: false,
+      needs_resume: false,
+      error: "session not found",
+    });
+    await act(async () => {
+      await result.current.retrySessionStatus();
+    });
+
+    expect(result.current.resumptionState).toBe("error");
+    expect(result.current.error).toBe("session not found");
+    expect(result.current.recoveryFailure).toBeNull();
+    expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(0);
   });
 
   it("refreshes the status and embedded editor capability after a successful resume", async () => {
@@ -428,10 +595,14 @@ describe("useSessionResumption", () => {
     await waitFor(() => {
       expect(result.current.sessionStatus?.capabilities?.embedded_vscode).toBe(true);
     });
-    expect(mockRequest).toHaveBeenLastCalledWith(STATUS_ACTION, {
-      task_id: TASK_ID,
-      session_id: SESSION_ID,
-    });
+    expect(mockRequest).toHaveBeenLastCalledWith(
+      STATUS_ACTION,
+      {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+      },
+      10000,
+    );
   });
 
   it("clears stale feedback when an external recovery makes the live session active", async () => {
@@ -567,10 +738,14 @@ describe("useSessionResumption prevent-auto-start gate", () => {
     renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
 
     await waitFor(() => {
-      expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
-        task_id: TASK_ID,
-        session_id: SESSION_ID,
-      });
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        {
+          task_id: TASK_ID,
+          session_id: SESSION_ID,
+        },
+        10000,
+      );
     });
     // The skip branch must consult the live row (RUNNING) and refuse.
     expect(mockSetResumeSkipped).not.toHaveBeenCalled();
@@ -607,10 +782,14 @@ describe("useSessionResumption monotonic terminal hydration", () => {
     renderHook(() => useSessionResumption("t1", "s1"));
 
     await waitFor(() => {
-      expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
-        task_id: "t1",
-        session_id: "s1",
-      });
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        {
+          task_id: "t1",
+          session_id: "s1",
+        },
+        10000,
+      );
     });
     // The stale COMPLETED must not overwrite the newer live FAILED.
     expect(mockSetTaskSession).not.toHaveBeenCalledWith(
@@ -639,10 +818,14 @@ describe("useSessionResumption monotonic terminal hydration", () => {
     renderHook(() => useSessionResumption("t1", "s1"));
 
     await waitFor(() => {
-      expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
-        task_id: "t1",
-        session_id: "s1",
-      });
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        {
+          task_id: "t1",
+          session_id: "s1",
+        },
+        10000,
+      );
     });
     // The stale STARTING must not overwrite the newer live FAILED.
     expect(mockSetTaskSession).not.toHaveBeenCalledWith(
@@ -698,10 +881,14 @@ describe("useSessionResumption monotonic terminal hydration", () => {
     renderHook(() => useSessionResumption("t1", "s1"));
 
     await waitFor(() => {
-      expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
-        task_id: "t1",
-        session_id: "s1",
-      });
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        {
+          task_id: "t1",
+          session_id: "s1",
+        },
+        10000,
+      );
     });
     // WAITING_FOR_INPUT means the agent is alive; a stale older response must
     // not downgrade it to a stopped-looking state.
@@ -736,10 +923,14 @@ describe("useSessionResumption completed-session admission", () => {
       renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
 
       await waitFor(() => {
-        expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
-          task_id: TASK_ID,
-          session_id: SESSION_ID,
-        });
+        expect(mockRequest).toHaveBeenCalledWith(
+          STATUS_ACTION,
+          {
+            task_id: TASK_ID,
+            session_id: SESSION_ID,
+          },
+          10000,
+        );
       });
       expect(mockRequest).not.toHaveBeenCalledWith(
         LAUNCH_ACTION,
@@ -807,10 +998,14 @@ describe("useSessionResumption stale-callback guard after navigation", () => {
     );
 
     await waitFor(() => {
-      expect(mockRequest).toHaveBeenCalledWith(STATUS_ACTION, {
-        task_id: TASK_ID,
-        session_id: SESSION_ID,
-      });
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        {
+          task_id: TASK_ID,
+          session_id: SESSION_ID,
+        },
+        10000,
+      );
     });
 
     // Navigate to another session before the first status response resolves.

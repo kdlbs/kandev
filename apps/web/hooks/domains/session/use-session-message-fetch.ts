@@ -2,6 +2,7 @@ import { useEffect, type MutableRefObject } from "react";
 
 import type { useAppStoreApi } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
+import type { MessageHistoryStatus } from "./use-message-fetch-state";
 
 type SessionMessageStore = ReturnType<typeof useAppStoreApi>;
 
@@ -103,14 +104,18 @@ type DoFetchMessagesParams = {
   store: SessionMessageStore;
   setIsLoading: (value: boolean) => void;
   setIsWaitingForInitialMessages: (value: boolean) => void;
+  setHistoryStatus: (value: MessageHistoryStatus) => void;
+  setHistoryError: (value: unknown) => void;
   initialFetchStartRef: MutableRefObject<number | null>;
   lastFetchedSessionIdRef: MutableRefObject<string | null>;
+  // eslint-disable-next-line max-params -- hydration guards and retry feedback share one fetch contract.
   fetchAndStoreMessages: (
     sessionId: string,
     store: SessionMessageStore,
     isActive?: () => boolean,
     hydrationRef?: SessionHydrationRef,
     hydrationKey?: string,
+    onRetry?: () => void,
   ) => Promise<Message[]>;
   onError?: (error: unknown) => void;
   isActive?: () => boolean;
@@ -123,6 +128,8 @@ export async function doFetchMessages({
   store,
   setIsLoading,
   setIsWaitingForInitialMessages,
+  setHistoryStatus,
+  setHistoryError,
   initialFetchStartRef,
   lastFetchedSessionIdRef,
   fetchAndStoreMessages,
@@ -134,33 +141,37 @@ export async function doFetchMessages({
   if (isInactive(isActive)) return;
   beginSessionFetch(taskSessionId);
   setIsLoading(true);
+  const isInitialHistoryFetch = lastFetchedSessionIdRef.current !== taskSessionId;
+  if (isInitialHistoryFetch) {
+    setHistoryStatus("loading");
+    setHistoryError(null);
+  }
   store.getState().setMessagesLoading(taskSessionId, true);
   if (initialFetchStartRef.current === null) {
     initialFetchStartRef.current = Date.now();
     setIsWaitingForInitialMessages(true);
   }
   try {
-    const fetched = await fetchAndStoreMessages(
-      taskSessionId,
-      store,
-      isActive,
-      hydrationRef,
-      hydrationKey,
+    await fetchAndStoreMessages(taskSessionId, store, isActive, hydrationRef, hydrationKey, () =>
+      setHistoryStatus("retrying"),
     );
     if (isInactive(isActive)) return;
     lastFetchedSessionIdRef.current = taskSessionId;
-    if (fetched.length > 0) setIsWaitingForInitialMessages(false);
+    setHistoryStatus("ready");
+    setHistoryError(null);
+    setIsWaitingForInitialMessages(false);
   } catch (error) {
     if (isInactive(isActive)) return;
     if (onError) onError(error);
     else console.error("Failed to fetch messages:", error);
-    store.getState().setMessages(taskSessionId, []);
-    lastFetchedSessionIdRef.current = taskSessionId;
+    setHistoryStatus("unavailable");
+    setHistoryError(error);
   } finally {
+    const active = !isInactive(isActive);
     if (endSessionFetch(taskSessionId)) {
       store.getState().setMessagesLoading(taskSessionId, false);
-      setIsLoading(false);
+      if (active) setIsLoading(false);
     }
-    setIsWaitingForInitialMessages(false);
+    if (active) setIsWaitingForInitialMessages(false);
   }
 }

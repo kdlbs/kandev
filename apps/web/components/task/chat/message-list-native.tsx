@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- native transcript composition owns scrolling. */
+
 import { useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } from "react";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
@@ -264,6 +266,9 @@ type NativeMessageListBodyProps = {
   isLoadingMore: boolean;
   isInitialLoading: boolean;
   showLoadingState: boolean;
+  historyStatus: MessageListProps["historyStatus"];
+  historyError: MessageListProps["historyError"];
+  onRetryHistory: MessageListProps["onRetryHistory"];
   retryLoadMore: () => void;
   showRecovery: boolean;
   sentinelRef: (node: HTMLDivElement | null) => void;
@@ -470,6 +475,9 @@ function NativeMessageListBody({
   isLoadingMore,
   isInitialLoading,
   showLoadingState,
+  historyStatus,
+  historyError,
+  onRetryHistory,
   retryLoadMore,
   showRecovery,
   sentinelRef,
@@ -495,6 +503,11 @@ function NativeMessageListBody({
         messagesLoading={messagesLoading}
         isInitialLoading={isInitialLoading}
         messagesCount={messages.length}
+        sessionId={sessionId}
+        sessionState={sessionState}
+        historyStatus={historyStatus}
+        historyError={historyError}
+        onRetryHistory={onRetryHistory}
         onLoadMore={retryLoadMore}
         showRecovery={showRecovery}
       />
@@ -557,6 +570,9 @@ export const NativeMessageList = memo(
       sessionId,
       messagesLoading,
       historyRefreshPending = false,
+      historyStatus = "ready",
+      historyError = null,
+      onRetryHistory,
       isWorking,
       sessionState,
       worktreePath,
@@ -673,6 +689,9 @@ export const NativeMessageList = memo(
           isLoadingMore={isLoadingMore}
           isInitialLoading={isInitialLoading}
           showLoadingState={showLoadingState}
+          historyStatus={historyStatus}
+          historyError={historyError}
+          onRetryHistory={onRetryHistory}
           retryLoadMore={retryLoadMore}
           showRecovery={showRecovery}
           sentinelRef={sentinelRef}

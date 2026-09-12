@@ -174,6 +174,31 @@ describe("EnsureSessionErrorBanner", () => {
     expect(screen.getByText("Resume attempt")).toBeTruthy();
     expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
   });
+
+  it("renders status failures as compact retryable feedback with collapsed details", () => {
+    const onRetry = vi.fn();
+    render(
+      <SessionRecoveryFeedback
+        error={null}
+        notice={null}
+        onRetry={onRetry}
+        recoveryFailure={{
+          outcome: "status_unavailable",
+          kind: "timeout",
+          statusError: "WebSocket request timed out: task.session.status",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Session status is unavailable.")).toBeTruthy();
+    expect(screen.queryByText("Couldn't start a session")).toBeNull();
+    const details = screen.getByTestId("session-status-details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    fireEvent.click(screen.getByTestId("session-status-details-summary"));
+    expect(screen.getByText("WebSocket request timed out: task.session.status")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("session-status-retry"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("EnsureSessionErrorEmptyState", () => {

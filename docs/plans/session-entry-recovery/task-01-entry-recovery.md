@@ -1,7 +1,7 @@
 ---
 id: "01-entry-recovery"
 title: "Recover entry requests"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -95,4 +95,34 @@ Ref-count churn, duplicate mutation admission, timer leaks, and stale response w
 
 ## Results
 
-Pending.
+Implemented typed WebSocket timeout classification, the 10-second session-entry deadline, and
+bounded shared subscription recovery. Status and history reads now retry typed timeouts within
+the design budget, while permanent errors remain distinct. History retains cached rows until a
+successful snapshot and exposes explicit recovery state for the presentation task.
+
+Verification:
+
+- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx` — 158 tests passed across 9 files.
+- `cd apps/web && pnpm run typecheck` — passed.
+- `cd apps/web && pnpm exec eslint --max-warnings 0 lib/ws/client.ts lib/ws/request-error.ts hooks/domains/session/use-session-messages.ts hooks/domains/session/use-session-message-fetch.ts hooks/domains/session/use-message-fetch-state.ts hooks/domains/session/use-session-subscription-retry.ts hooks/domains/session/use-session-resumption.ts` — passed.
+- `git diff --check` — passed.
+
+The implementation preserves acknowledgement-before-history ordering, cancels obsolete retry
+timers, and does not retry session mutations.
+
+Review remediation (complete):
+
+- Status request failures are classified before resume processing. Workspace-restore and launch
+  failures keep their launch recovery action, while status responses with `error` or an archive
+  outcome remain visible and never start a session.
+- History feedback now carries a session and connection generation through subscription,
+  terminal-state, entry, visibility, settle, running-backfill, and manual-retry fetches. Stale
+  completions release the original session's store bookkeeping without changing the active hook
+  state.
+- Manual history Retry clears the settled hydration marker before fetching, so it always requests a
+  fresh snapshot while preserving cached rows until that snapshot succeeds.
+- Added regressions for workspace-restore failure classification, timeout-then-error status
+  responses, A-to-B and A-to-B-to-A deferred history races, terminal-state fetches, and fresh
+  manual history retry.
+- Focused remediation validation: 163 tests passed across 9 files; typecheck and zero-warning
+  ESLint passed.
