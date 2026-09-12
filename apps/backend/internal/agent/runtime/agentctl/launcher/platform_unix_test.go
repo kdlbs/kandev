@@ -49,7 +49,7 @@ func TestLauncherForceKillSignalsProcessGroup(t *testing.T) {
 	childPIDFile := filepath.Join(tmp, "child.pid")
 	cmd := exec.Command("sh", "-c", `sleep 30 & echo $! > "$CHILD_PID_FILE"; wait`)
 	cmd.Env = append(os.Environ(), "CHILD_PID_FILE="+childPIDFile)
-	cmd.SysProcAttr = buildSysProcAttr()
+	cmd.SysProcAttr = buildSysProcAttr(false)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start command: %v", err)
 	}

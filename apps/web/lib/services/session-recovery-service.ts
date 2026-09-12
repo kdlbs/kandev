@@ -18,6 +18,12 @@ export type BranchRecoveryDetails = WebSocketRequestErrorDetails & {
   session_id?: string;
 };
 
+export type SessionRecoveryGuardDetails = WebSocketRequestErrorDetails & {
+  kind: "session_recovery_in_progress" | "session_recovery_unstoppable";
+  retryable: boolean;
+  session_id?: string;
+};
+
 type RecoveryResponse = { success?: boolean; error?: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,6 +46,45 @@ export function branchRecoveryDetails(error: unknown): BranchRecoveryDetails | n
     return null;
   }
   return error.details as BranchRecoveryDetails;
+}
+
+/** Returns the startup recovery guard's refusal reason, if the launch/recover was refused because of it. */
+export function sessionRecoveryGuardDetails(error: unknown): SessionRecoveryGuardDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (
+    error.details.kind !== "session_recovery_in_progress" &&
+    error.details.kind !== "session_recovery_unstoppable"
+  ) {
+    return null;
+  }
+  return error.details as SessionRecoveryGuardDetails;
+}
+
+/** Minimal shape both `useTranslation()`'s `t` and the module-level `t` satisfy. */
+type Translator = (key: string, options?: Record<string, unknown>) => string;
+
+/** Translates the guard's stable `kind` into the copy this session view shows. */
+export function sessionRecoveryGuardMessage(
+  details: SessionRecoveryGuardDetails,
+  t: Translator,
+): string {
+  if (details.kind === "session_recovery_in_progress") {
+    return t("task:sessionRecoveryGuardInProgress");
+  }
+  return t("task:sessionRecoveryGuardUnstoppable");
+}
+
+/** Resolves a thrown request failure to a user-facing message, preferring the
+ *  recovery guard's translated reason over the raw backend/transport text. */
+export function resolveRequestErrorMessage(
+  error: unknown,
+  t: Translator,
+  fallback = t("common:unknownError"),
+): string {
+  const guard = sessionRecoveryGuardDetails(error);
+  if (guard) return sessionRecoveryGuardMessage(guard, t);
+  if (error instanceof Error) return error.message;
+  return fallback;
 }
 
 /** Converts unknown request failures into an Error for an inline recovery alert. */

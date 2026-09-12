@@ -137,8 +137,11 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
-		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
-			return recoveryResponse, responseErr
+		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
+			return guardResponse, responseErr
+		}
+		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
+			return archivedResponse, responseErr
 		}
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
@@ -260,6 +263,23 @@ func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, er
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), branchRecoveryErr.Details())
 }
 
+// sessionRecoveryGuardConflictResponse surfaces the startup recovery guard's
+// two distinct refusal reasons: a retryable in-progress recovery maps to
+// CONFLICT (the caller should retry once recovery resolves), and a
+// non-retryable unstoppable-agent condition maps to UNAVAILABLE (only a
+// backend restart clears it).
+func sessionRecoveryGuardConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var guardErr *orchestrator.SessionRecoveryGuardError
+	if !errors.As(err, &guardErr) {
+		return nil, nil
+	}
+	code := ws.ErrorCodeUnavailable
+	if guardErr.Retryable {
+		code = ws.ErrorCodeConflict
+	}
+	return ws.NewError(msg.ID, msg.Action, code, err.Error(), guardErr.Details())
+}
+
 func taskArchivedConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
 	if !errors.Is(err, executor.ErrTaskArchived) {
 		return nil, nil
@@ -304,6 +324,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if recoveryResponse, responseErr := branchRecoveryConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
+		}
+		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
+			return guardResponse, responseErr
 		}
 		h.logger.Error("failed to recover session",
 			zap.String("task_id", req.TaskID),

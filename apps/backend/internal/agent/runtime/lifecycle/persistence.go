@@ -73,6 +73,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	if execution.OfficeAgentProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	}
 	running := &models.ExecutorRunning{
 		ID:                 execution.SessionID,
 		SessionID:          execution.SessionID,
@@ -454,6 +460,28 @@ func (m *Manager) deleteExecutorRunningRow(ctx context.Context, sessionID, expec
 // fresh state (acceptable for first-time inserts).
 type executorRunningReader interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+}
+
+// executorRunningLister is the optional read-side used to enumerate the
+// startup recovery inventory: every live (non-terminal) executors_running row
+// on the standalone control server (worktree/local executors). A writer that
+// doesn't implement it has no recovery candidates to offer.
+type executorRunningLister interface {
+	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
+// ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
+// every live standalone executors_running row, read at startup step 3 before
+// any control-server contact, so the recovery guard can be taken against it
+// (discovery H). Best-effort: a writer that doesn't support listing yields no
+// candidates rather than an error, matching this file's other optional
+// capabilities.
+func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(executorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningLiveStandalone(ctx)
 }
 
 type executorRunningCASWriter interface {

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
@@ -273,6 +274,29 @@ func (r *Repository) ListExecutorsRunningIdle(ctx context.Context, cutoff time.T
 		WHERE status <> ? AND updated_at <= ?
 		ORDER BY updated_at DESC
 	`), models.ExecutorRunningStatusStopped, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorRunningRows(rows)
+}
+
+// ListExecutorsRunningLiveStandalone returns every non-terminal executors_running
+// row whose runtime is the standalone control server (worktree/local executors).
+// Used by startup recovery to build the guard/correlation inventory at step 3,
+// before any control-server contact (discovery H).
+func (r *Repository) ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE runtime = ? AND status NOT IN (?, ?, ?)
+		ORDER BY updated_at DESC
+	`), agentruntime.RuntimeStandalone,
+		models.ExecutorRunningStatusStopped, models.ExecutorRunningStatusComplete, models.ExecutorRunningStatusFailed)
 	if err != nil {
 		return nil, err
 	}

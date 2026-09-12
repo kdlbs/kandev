@@ -1945,6 +1945,8 @@
   "resumeFailedWorkspaceReadOnly": "工作区已以只读模式还原",
   "continueOnNewBranch": "在新分支上继续",
   "restoreReadOnlyWorkspace": "还原只读工作区",
+  "sessionRecoveryGuardInProgress": "此会话的代理在后端重启后仍在协调中。此状态会自动解除，请稍后再试。",
+  "sessionRecoveryGuardUnstoppable": "后端重启后无法停止此会话之前的代理进程。请重启后端以解除此状态，然后重试。",
   "gitOperationFailedGeneric": "操作失败",
   "invalidGitHubUrl": "GitHub 链接无效 - 应为 github.com/owner/repo 或 .../pull/123",
   "invalidRegex": "正则表达式无效",

@@ -54,6 +54,9 @@ func (h *Handler) patch(c *gin.Context) {
 		} else if errors.Is(err, ErrUnknownFlag) {
 			status = http.StatusNotFound
 			msg = "runtime flag not found"
+		} else if errors.Is(err, ErrFlagUnavailable) {
+			status = http.StatusConflict
+			msg = "runtime flag is unavailable on this host"
 		}
 		c.JSON(status, gin.H{"error": msg})
 		return

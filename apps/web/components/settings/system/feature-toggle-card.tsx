@@ -5,7 +5,8 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Switch } from "@kandev/ui/switch";
-import { IconFlask, IconLock, IconRefresh } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconAlertTriangle, IconFlask, IconLock, IconRefresh } from "@tabler/icons-react";
 import type { TFunction } from "i18next";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -27,7 +28,8 @@ export function FeatureToggleCard({
   onReset,
 }: FeatureToggleCardProps) {
   const { t } = useTranslation();
-  const disabled = saving || flag.env_locked || !flag.mutable;
+  const unavailable = flag.availability?.available === false;
+  const disabled = saving || flag.env_locked || !flag.mutable || unavailable;
   return (
     <SettingsCard isDirty={isDirty} data-testid={`feature-toggle-${flag.key}`}>
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -41,19 +43,18 @@ export function FeatureToggleCard({
           </CardTitle>
           <p className="text-sm text-muted-foreground">{flag.description}</p>
         </div>
-        <Switch
-          checked={flag.effective_value}
-          data-settings-dirty={isDirty}
+        <FeatureToggleSwitch
+          flag={flag}
           disabled={disabled}
-          onCheckedChange={onChange}
-          aria-label={t("system:featureToggleSwitchLabel", { label: flag.label })}
-          className="cursor-pointer disabled:cursor-not-allowed"
+          isDirty={isDirty}
+          onChange={onChange}
         />
       </CardHeader>
       <CardContent className="space-y-3">
         {flag.risk_description && (
           <p className="text-sm leading-6 text-muted-foreground">{flag.risk_description}</p>
         )}
+        {unavailable && <UnavailableNotice flag={flag} />}
         <FlagMetadata flag={flag} />
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button
@@ -88,8 +89,72 @@ function FlagBadges({ flag }: { flag: RuntimeFlagState }) {
         </Badge>
       )}
       {flag.kind === "debug" && <Badge variant="outline">{t("system:featureToggleDebug")}</Badge>}
+      {flag.availability?.available === false && (
+        <Badge variant="outline" className="gap-1 text-muted-foreground">
+          <IconAlertTriangle className="h-3 w-3" />
+          {t("system:featureToggleUnavailable")}
+        </Badge>
+      )}
     </>
   );
+}
+
+function FeatureToggleSwitch({
+  flag,
+  disabled,
+  isDirty,
+  onChange,
+}: {
+  flag: RuntimeFlagState;
+  disabled: boolean;
+  isDirty: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const unavailable = flag.availability?.available === false;
+  const switchEl = (
+    <Switch
+      checked={flag.effective_value}
+      data-settings-dirty={isDirty}
+      disabled={disabled}
+      onCheckedChange={onChange}
+      aria-label={t("system:featureToggleSwitchLabel", { label: flag.label })}
+      className="cursor-pointer disabled:cursor-not-allowed"
+    />
+  );
+  if (!unavailable) return switchEl;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex">
+          {switchEl}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="left" className="max-w-xs text-xs leading-relaxed">
+        {unavailableReasonMessage(flag.availability?.reason_code, t)}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function UnavailableNotice({ flag }: { flag: RuntimeFlagState }) {
+  const { t } = useTranslation();
+  return (
+    <p className="flex items-start gap-2 text-sm leading-6 text-amber-700">
+      <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      {unavailableReasonMessage(flag.availability?.reason_code, t)}
+    </p>
+  );
+}
+
+/** reason_code is a stable identifier the backend defines; unknown/future
+    codes fall back to a generic unavailable message rather than showing
+    nothing or a raw code to the user. */
+function unavailableReasonMessage(reasonCode: string | undefined, t: TFunction): string {
+  if (reasonCode === "platform_unsupported") {
+    return t("system:featureToggleUnavailablePlatform");
+  }
+  return t("system:featureToggleUnavailableGeneric");
 }
 
 function FlagMetadata({ flag }: { flag: RuntimeFlagState }) {

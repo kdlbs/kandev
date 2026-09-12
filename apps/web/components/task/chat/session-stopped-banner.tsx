@@ -22,7 +22,10 @@ import {
   type SessionRecoveryBusyAction,
   type SessionRecoveryActions,
 } from "@/hooks/domains/session/use-session-recovery-actions";
-import type { BranchRecoveryDetails } from "@/lib/services/session-recovery-service";
+import type {
+  BranchRecoveryDetails,
+  SessionRecoveryGuardDetails,
+} from "@/lib/services/session-recovery-service";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
 
@@ -45,6 +48,7 @@ function StoppedRecoveryFeedback({
   recoveryError,
   recoveryNotice,
   branchDetails,
+  guardDetails,
   busyAction,
   onRetry,
   onRestore,
@@ -54,6 +58,7 @@ function StoppedRecoveryFeedback({
   recoveryError: Error | null;
   recoveryNotice: string | null;
   branchDetails: BranchRecoveryDetails | null;
+  guardDetails: SessionRecoveryGuardDetails | null;
   busyAction: SessionRecoveryBusyAction;
   onRetry: () => void;
   onRestore: () => void;
@@ -61,31 +66,38 @@ function StoppedRecoveryFeedback({
 }) {
   const { t } = useTranslation();
   if (!recoveryError && !recoveryNotice) return null;
+  // A non-retryable guard refusal will not clear until a backend restart, so
+  // retry/restore/new-branch would only reproduce the same refusal.
+  const guardBlocksRetry = guardDetails !== null && !guardDetails.retryable;
   const restoreAction = {
     label: t("task:restoreReadOnlyWorkspace"),
     onClick: onRestore,
     testId: "recovery-restore-workspace-button",
-    disabled: busyAction !== null,
+    disabled: busyAction !== null || guardBlocksRetry,
   };
+  // A guard refusal has no alternative action: showing "restore" beside it would
+  // just reproduce the same refusal, so only branch-loss gets an alternative.
+  let primaryAction: typeof restoreAction | undefined = restoreAction;
+  if (branchDetails) {
+    primaryAction = {
+      label: t("task:continueOnNewBranch"),
+      onClick: onNewBranch,
+      testId: "recovery-new-branch-button",
+      disabled: busyAction !== null,
+    };
+  } else if (guardDetails) {
+    primaryAction = undefined;
+  }
   return (
     <>
       {recoveryError ? (
         <EnsureSessionErrorBanner
           error={recoveryError}
           onRetry={onRetry}
-          retryDisabled={busyAction !== null}
+          retryDisabled={busyAction !== null || guardBlocksRetry}
           workspaceId={workspaceId}
           compact
-          action={
-            branchDetails
-              ? {
-                  label: t("task:continueOnNewBranch"),
-                  onClick: onNewBranch,
-                  testId: "recovery-new-branch-button",
-                  disabled: busyAction !== null,
-                }
-              : restoreAction
-          }
+          action={primaryAction}
           secondaryAction={branchDetails ? restoreAction : undefined}
           testId="session-recovery-error"
         />
@@ -134,6 +146,7 @@ function RecoverableSessionActions({
     busyAction,
     recoveryError,
     branchDetails,
+    guardDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,
@@ -161,6 +174,7 @@ function RecoverableSessionActions({
         recoveryError={recoveryError}
         recoveryNotice={recoveryNotice}
         branchDetails={branchDetails}
+        guardDetails={guardDetails}
         busyAction={busyAction}
         onRetry={handleRetry}
         onRestore={() => void handleRestore()}
@@ -199,6 +213,7 @@ function CompletedSessionActions({
     busyAction,
     recoveryError,
     branchDetails,
+    guardDetails,
     recoveryNotice,
     handleRecover,
     handleRestore,
@@ -218,6 +233,7 @@ function CompletedSessionActions({
         recoveryError={recoveryError}
         recoveryNotice={recoveryNotice}
         branchDetails={branchDetails}
+        guardDetails={guardDetails}
         busyAction={busyAction}
         onRetry={handleRetry}
         onRestore={() => void handleRestore()}

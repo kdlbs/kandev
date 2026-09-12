@@ -762,3 +762,8 @@ jobs:
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
+
+      # Pure GOOS-branch logic (no syscalls), but it must actually observe
+      # Windows to prove the unavailable branch, not just compile under it.
+      - name: Test Windows agent-survival flag availability
+        run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags

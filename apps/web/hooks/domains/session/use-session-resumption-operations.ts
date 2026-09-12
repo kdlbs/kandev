@@ -10,6 +10,10 @@ import {
   type TaskId,
   type TaskSessionState,
 } from "@/lib/types/http";
+import {
+  sessionRecoveryGuardDetails,
+  sessionRecoveryGuardMessage,
+} from "@/lib/services/session-recovery-service";
 import { isLaunchStateRegression } from "@/lib/session-state";
 import { t } from "@/lib/i18n";
 import { WebSocketRequestError } from "@/lib/ws/client";
@@ -341,6 +345,18 @@ export async function resumeWithSilentFallback(
   }
   if (resumeAttempt.archived) {
     clearArchiveRecovery(setters);
+    startingProjection?.rollback();
+    return false;
+  }
+  // The startup recovery guard refuses every launch for this session, so a
+  // restore_workspace fallback would fail identically. Skip it and show the
+  // guard's own distinct, retryable-or-not message instead of the generic
+  // "resume and restore both failed" combination.
+  const resumeGuardDetails = sessionRecoveryGuardDetails(resumeAttempt.error);
+  if (resumeGuardDetails) {
+    setters.setResumptionState("error");
+    setters.setNotice?.(null);
+    setters.setError(sessionRecoveryGuardMessage(resumeGuardDetails, t));
     startingProjection?.rollback();
     return false;
   }

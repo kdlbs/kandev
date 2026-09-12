@@ -106,6 +106,15 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # Agent survival across a backend restart (worktree/local executors only).
+  # Off in every profile: it replaces the standalone control server's
+  # kill-on-restart safeguard with an adoption handshake, and is unavailable
+  # on Windows. E2E specs that need it set the env var per-spec.
+  KANDEV_FEATURES_AGENT_SURVIVAL:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

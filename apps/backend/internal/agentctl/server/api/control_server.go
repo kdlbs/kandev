@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -19,26 +21,68 @@ import (
 // ControlServer provides instance management endpoints on the control port.
 // It exposes the same API regardless of deployment context (Docker or host).
 // Each instance runs its own HTTP server with agent-specific endpoints.
+// adoptionOnlyPaths lists control-server routes where a superseded
+// credential remains valid on the adoption-only terms of
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.7/-002.9, until confirmed. Every other
+// authenticated route accepts only the current highest-numbered rotation's
+// credential.
+var adoptionOnlyPaths = map[string]bool{
+	"/api/v1/ownership/rotate":   true,
+	"/api/v1/ownership/shutdown": true,
+}
+
 type ControlServer struct {
-	cfg     *config.Config
-	instMgr *instance.Manager
-	logger  *logger.Logger
-	router  *gin.Engine
+	cfg               *config.Config
+	instMgr           *instance.Manager
+	logger            *logger.Logger
+	router            *gin.Engine
+	ownership         *ownershipState
+	credentials       *credentialState
+	shutdownRequested chan struct{}
+	shutdownOnce      sync.Once
+	unownedPeriod     time.Duration
+	reaperStop        chan struct{}
+	reaperStopOnce    sync.Once
+	reaperWG          sync.WaitGroup
+
+	// decideUnownedShutdown is the reaper's shutdown decision, defaulted to
+	// ownership.TryBeginShutdownIfUnownedFor. Tests override it to pin the
+	// exact call the reaper makes rather than only observing its side
+	// effects, so reverting to a stale two-call sequence (check then latch,
+	// instead of the atomic check-and-latch) fails a test even though it
+	// would still pass every other reaper assertion.
+	decideUnownedShutdown func(time.Duration) bool
 }
 
 // NewControlServer creates a new ControlServer for instance management.
 func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger.Logger) *ControlServer {
 	gin.SetMode(gin.ReleaseMode)
 
-	cs := &ControlServer{
-		cfg:     cfg,
-		instMgr: instMgr,
-		logger:  log.WithFields(zap.String("component", "control-server")),
-		router:  gin.New(),
+	csLogger := log.WithFields(zap.String("component", "control-server"))
+	unownedPeriod, adjustments := ownershipperiod.Resolve(cfg.UnownedPeriod, cfg.IdleTimeout)
+	for _, reason := range adjustments {
+		csLogger.Warn(reason,
+			zap.Duration("configured_unowned_period", cfg.UnownedPeriod),
+			zap.Duration("idle_timeout", cfg.IdleTimeout),
+			zap.Duration("effective_unowned_period", unownedPeriod))
 	}
 
+	cs := &ControlServer{
+		cfg:               cfg,
+		instMgr:           instMgr,
+		logger:            csLogger,
+		router:            gin.New(),
+		ownership:         newOwnershipState(),
+		credentials:       newCredentialState(cfg.AuthToken),
+		shutdownRequested: make(chan struct{}),
+		unownedPeriod:     unownedPeriod,
+		reaperStop:        make(chan struct{}),
+	}
+
+	cs.decideUnownedShutdown = cs.ownership.TryBeginShutdownIfUnownedFor
+
 	cs.router.Use(httpmw.RequestLogger(cs.logger, "agentctl-control"))
-	cs.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/auth/handshake"))
+	cs.router.Use(controlCredentialAuth(cs.credentials, adoptionOnlyPaths, "/health", "/auth/handshake", "/identity", "/ownership/prove"))
 
 	cs.setupRoutes()
 	return cs
@@ -49,6 +93,30 @@ func (m *ControlServer) Router() http.Handler {
 	return m.router
 }
 
+// CredentialSource exposes this control server's single rotating credential
+// so a per-instance Server can authenticate its own requests and streams
+// against it instead of a static per-instance token (design 01 "Single
+// driver", AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). Wire it via
+// Server.SetCredentialSource before an instance starts accepting requests.
+func (m *ControlServer) CredentialSource() InstanceCredentialSource {
+	return m.credentials
+}
+
+// ShutdownRequested returns a channel that closes exactly once the
+// ownership-shutdown operation (AC-EXECUTORS-CONTROL-OWNERSHIP-002.9) has
+// been invoked. The run loop (cmd/agentctl/main.go) selects on this
+// alongside its OS-signal and parent-death triggers and runs the same
+// stop-every-instance-and-exit sequence.
+func (m *ControlServer) ShutdownRequested() <-chan struct{} {
+	return m.shutdownRequested
+}
+
+// requestShutdown signals ShutdownRequested exactly once. Safe to call more
+// than once (a repeated ownership-shutdown call is a no-op beyond the first).
+func (m *ControlServer) requestShutdown() {
+	m.shutdownOnce.Do(func() { close(m.shutdownRequested) })
+}
+
 func (m *ControlServer) setupRoutes() {
 	// Health check
 	m.router.GET("/health", m.handleHealth)
@@ -56,13 +124,27 @@ func (m *ControlServer) setupRoutes() {
 	// Bootstrap handshake — nonce-authenticated, returns the self-generated auth token
 	m.router.POST("/auth/handshake", m.handleHandshake)
 
+	// Identity/capability — unauthenticated, decides adoption compatibility
+	m.router.GET("/identity", m.handleIdentity)
+
+	// Ownership proof — unauthenticated, establishes to an adopting backend
+	// that this process holds the credential before that backend sends it
+	m.router.POST("/ownership/prove", m.handleOwnershipProve)
+
 	// Instance management API - same endpoints regardless of mode
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
 	api.GET("/instances", m.handleListInstances)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
+	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
+	api.GET("/ownership/details", m.handleOwnershipDetails)
+	api.POST("/ownership/claim", m.handleOwnershipClaim)
+	api.POST("/ownership/rotate", m.handleCredentialRotate)
+	api.POST("/ownership/confirm", m.handleCredentialConfirm)
+	api.POST("/ownership/shutdown", m.handleOwnershipShutdown)
 }
 
 func (m *ControlServer) handleSubprocessAdmission(c *gin.Context) {
@@ -104,6 +186,7 @@ func (m *ControlServer) handleHandshake(c *gin.Context) {
 		return
 	}
 
+	m.ownership.Renew()
 	m.logger.Info("bootstrap handshake completed, auth token issued",
 		zap.String("nonce_fingerprint", commonconfig.NonceFingerprint(req.Nonce)))
 	c.JSON(http.StatusOK, gin.H{"token": token})
@@ -141,7 +224,7 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 
 func (m *ControlServer) handleListInstances(c *gin.Context) {
 	instances := m.instMgr.ListInstances()
-	c.JSON(http.StatusOK, instances)
+	c.JSON(http.StatusOK, gin.H{"instances": instances})
 }
 
 func (m *ControlServer) handleGetInstance(c *gin.Context) {

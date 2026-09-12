@@ -746,17 +746,16 @@ func (a *Adapter) emitSetModelEvent(
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
 	}
-	sent := a.sendUpdateLocked(event)
-	closed := a.closed
 	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetModel",
 		zap.String("session_id", sessionID),
 		zap.String("model_id", modelID),
 	)
-	if !sent && !closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-	}
+	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
+	// than drops on a full updatesCh and must run without a.mu held -- see
+	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	a.sendUpdate(event)
 }
 
 // currentModelFromConfig returns the CurrentValue of the model-shaped
@@ -1142,12 +1141,11 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 		}
 		delete(a.contextSamples, sessionID)
 	}
-	sent := a.sendUpdateLocked(event)
-	closed := a.closed
 	a.mu.Unlock()
-	if !sent && !closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-	}
+	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
+	// than drops on a full updatesCh and must run without a.mu held -- see
+	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	a.sendUpdate(event)
 }
 
 // emitSetConfigOptionEvent emits a session_models convergence event after a
@@ -1213,8 +1211,6 @@ func (a *Adapter) emitSetConfigOptionEvent(
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
 	}
-	sent := a.sendUpdateLocked(event)
-	closed := a.closed
 	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetConfigOption",
@@ -1222,9 +1218,10 @@ func (a *Adapter) emitSetConfigOptionEvent(
 		zap.String("config_id", configID),
 		zap.String("value", value),
 	)
-	if !sent && !closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-	}
+	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
+	// than drops on a full updatesCh and must run without a.mu held -- see
+	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	a.sendUpdate(event)
 }
 
 // isModelConfigID reports whether configID identifies the model-shaped

@@ -20,6 +20,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -612,7 +613,7 @@ func kubernetesProfileConfigFromMetadata(metadata map[string]interface{}) (kubee
 	return kubeexecutor.ParseProfileConfig(values)
 }
 
-func (r *KubernetesExecutor) RecoverInstances(context.Context) ([]*ExecutorInstance, error) {
+func (r *KubernetesExecutor) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 

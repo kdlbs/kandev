@@ -29,6 +29,7 @@ func (r *Repository) initSchema() error {
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
+		r.initControlServerRecordSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
@@ -162,6 +163,28 @@ const taskResourceCleanupSchemaDDL = `
 
 func (r *Repository) initTaskResourceCleanupSchema() error {
 	_, err := r.db.Exec(taskResourceCleanupSchemaDDL)
+	return err
+}
+
+// control_server_records is the single installation-scoped durable record of
+// the standalone agentctl control server (see models.ControlServerRecord).
+// The id CHECK enforces exactly one row, the same singleton pattern used by
+// dynamic_installation_keys above.
+const controlServerRecordSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS control_server_records (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		endpoint TEXT NOT NULL,
+		server_identity TEXT NOT NULL,
+		credential_secret_id TEXT NOT NULL,
+		capabilities TEXT NOT NULL DEFAULT '[]',
+		diagnostic_log_path TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
+`
+
+func (r *Repository) initControlServerRecordSchema() error {
+	_, err := r.db.Exec(controlServerRecordSchemaDDL)
 	return err
 }
 

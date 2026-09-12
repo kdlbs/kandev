@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ErrExecutorNotFound is returned when a runtime doesn't exist in the registry.
@@ -116,10 +117,13 @@ func (r *ExecutorRegistry) CloseAll() {
 	}
 }
 
-// RecoverAll recovers instances from all registered runtimes.
+// RecoverAll recovers instances from all registered runtimes. records is the
+// live standalone recovery-inventory read at startup step 3
+// (AC-EXECUTORS-SURVIVAL-002.8); it is passed to every registered runtime
+// unchanged, and only the standalone runtime acts on it today.
 // Returns all recovered instances and any error encountered.
 // If multiple runtimes fail, only the last error is returned.
-func (r *ExecutorRegistry) RecoverAll(ctx context.Context) ([]*ExecutorInstance, error) {
+func (r *ExecutorRegistry) RecoverAll(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	r.mu.RLock()
 	backends := make(map[executor.Name]ExecutorBackend, len(r.backends))
 	for name, rt := range r.backends {
@@ -131,7 +135,7 @@ func (r *ExecutorRegistry) RecoverAll(ctx context.Context) ([]*ExecutorInstance,
 	var lastErr error
 
 	for name, rt := range backends {
-		instances, err := rt.RecoverInstances(ctx)
+		instances, err := rt.RecoverInstances(ctx, records)
 		if err != nil {
 			r.logger.Error("failed to recover instances from runtime",
 				zap.String("runtime", string(name)),

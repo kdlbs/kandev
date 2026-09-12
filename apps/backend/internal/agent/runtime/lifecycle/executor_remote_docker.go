@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // RemoteDockerExecutor implements Runtime for remote Docker-based agent execution.
@@ -57,7 +58,7 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 	return fmt.Errorf("remote_docker runtime is not yet implemented")
 }
 
-func (r *RemoteDockerExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
+func (r *RemoteDockerExecutor) RecoverInstances(ctx context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	// Remote docker instances are not recovered on restart.
 	// The containers on remote hosts are ephemeral.
 	return nil, nil

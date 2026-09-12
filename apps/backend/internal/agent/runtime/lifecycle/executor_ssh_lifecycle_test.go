@@ -75,7 +75,7 @@ func TestSSHExecutorStaticSurface(t *testing.T) {
 	if exec.GetInteractiveRunner() != nil {
 		t.Fatal("SSH has no host-side interactive runner")
 	}
-	instances, err := exec.RecoverInstances(context.Background())
+	instances, err := exec.RecoverInstances(context.Background(), nil)
 	if err != nil || instances != nil {
 		t.Fatalf("RecoverInstances() = %v, %v; want nil, nil", instances, err)
 	}

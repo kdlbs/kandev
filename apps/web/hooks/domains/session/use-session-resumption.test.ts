@@ -43,12 +43,12 @@ const RESUME_TRANSPORT_ERROR = "Resume transport failed";
 const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
 
 import {
-  resumeWithSilentFallback,
   useSessionResumption,
   type ResumeStateSetter,
   type ResumptionState,
   type SessionRecoveryFailure,
 } from "./use-session-resumption";
+import { resumeWithSilentFallback } from "./use-session-resumption-operations";
 
 type SetterCalls = {
   resumptionStates: ResumptionState[];

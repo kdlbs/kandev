@@ -1969,6 +1969,8 @@
   "resumeFailedWorkspaceReadOnly": "Workspace restored in read-only mode",
   "continueOnNewBranch": "Continue on a new branch",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",
+  "sessionRecoveryGuardInProgress": "This session's agent is still being reconciled after the backend restarted. This clears automatically; try again in a few seconds.",
+  "sessionRecoveryGuardUnstoppable": "This session's previous agent process couldn't be stopped after the backend restarted. Restart the backend to clear this, then try again.",
   "sessionStatusGenerating": "Generating",
   "branchDisabledLocalExecutor": "The local executor uses your repository's current checkout, so the branch can't change here. Toggle 'Fork a new branch' to pick a different base.",
   "branchDisabledNoBranches": "No branches available for this repository.",

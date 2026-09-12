@@ -138,6 +138,18 @@ type AgentEvent struct {
 	// ownership from cross-subject event ordering.
 	TurnID string `json:"turn_id,omitempty"`
 
+	// ControlTurnID is the control-server-assigned turn identifier
+	// (AC-EXECUTORS-SURVIVAL-004.1), stamped onto a terminal event at the
+	// same point the control server retains it as that instance's turn
+	// outcome (internal/agentctl/server/process.recordTerminalOutcome). Zero
+	// means "not retained" -- the sequence that assigns it starts at 1
+	// (instance.Manager.turnIDSeq). AC-EXECUTORS-SURVIVAL-004.4 requires the
+	// dedup decision between a retrieved outcome and a live-delivered event
+	// for the same turn to be made on this identifier, since it -- unlike
+	// PromptGeneration -- travels on both observations and survives a
+	// restart that resets the backend's own in-memory generation counter.
+	ControlTurnID int64 `json:"control_turn_id,omitempty"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.

@@ -109,12 +109,10 @@ func runMain() int {
 		cfg.Port = *portFlag
 	}
 
+	applySIGPIPEDisposition(cfg, signal.Ignore)
+
 	// Initialize logger
-	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:      cfg.LogLevel,
-		Format:     cfg.LogFormat,
-		OutputPath: "stdout",
-	})
+	log, err := logger.NewLogger(resolveRunLoggingConfig(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		return 1
@@ -206,6 +204,13 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Create instance manager
 	instMgr := instance.NewManager(cfg, log)
 
+	// Declared here and assigned below, before any instance can actually be
+	// created: the server factory closure reads controlServer.CredentialSource()
+	// lazily (at CreateInstance time, not at SetServerFactory time), so the
+	// forward reference is safe as long as controlServer is assigned before
+	// the first instance is created.
+	var controlServer *api.ControlServer
+
 	// Set the server factory to create API servers for each instance
 	instMgr.SetServerFactory(func(instCfg *config.InstanceConfig, procMgr *process.Manager, instLog *logger.Logger) http.Handler {
 		// Create MCP backend client for bidirectional communication through agent stream
@@ -225,11 +230,15 @@ func run(cfg *config.Config, log *logger.Logger) {
 		instLog.Info("MCP server enabled (channel-based)",
 			zap.String("session_id", instCfg.SessionID))
 
-		return api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog).Router()
+		srv := api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog)
+		srv.SetCredentialSource(controlServer.CredentialSource())
+		return srv.Router()
 	})
 
 	// Create control server
-	controlServer := api.NewControlServer(cfg, instMgr, log)
+	controlServer = api.NewControlServer(cfg, instMgr, log)
+	stopUnownedReaper := startUnownedReaperIfEnabled(cfg, controlServer)
+	defer stopUnownedReaper()
 
 	// Start HTTP server. When no auth token is configured (auth disabled),
 	// ListenHost binds to loopback only so the unauthenticated command/shell/
@@ -261,8 +270,9 @@ func run(cfg *config.Config, log *logger.Logger) {
 	// Returns a channel that closes when the parent dies.
 	parentDied := monitorParentLiveness(log)
 
-	// Wait for shutdown signal (OS signal or parent death)
-	waitForShutdown(log, parentDied, func(ctx context.Context) {
+	// Wait for shutdown signal (OS signal, parent death, or an authenticated
+	// ownership-shutdown operation from an adopting/owning backend).
+	waitForShutdown(log, parentDied, controlServer.ShutdownRequested(), func(ctx context.Context) {
 		// Flush pending traces before stopping instances
 		if err := shared.ShutdownTracing(ctx); err != nil {
 			log.Error("error shutting down tracing", zap.Error(err))
@@ -280,23 +290,24 @@ func run(cfg *config.Config, log *logger.Logger) {
 	})
 }
 
-// waitForShutdown waits for a shutdown trigger (OS signal or parent death) and
-// runs the cleanup function. parentDied may be nil when no parent monitor is active.
-func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, cleanup func(ctx context.Context)) {
+// waitForShutdown waits for a shutdown trigger (OS signal, parent death, or
+// an ownership-shutdown operation) and runs the cleanup function. parentDied
+// may be nil when no parent monitor is active. ownershipShutdown may be nil
+// in tests that don't exercise a control server.
+func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, ownershipShutdown <-chan struct{}, cleanup func(ctx context.Context)) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	if parentDied == nil {
-		// No parent monitor — wait for OS signal only.
-		sig := <-sigCh
+	// A nil channel (no parent monitor, no control server) blocks forever in
+	// a select, so that case is simply never chosen -- no separate branching
+	// needed for the "not active" cases.
+	select {
+	case sig := <-sigCh:
 		log.Info("received signal", zap.String("signal", sig.String()))
-	} else {
-		select {
-		case sig := <-sigCh:
-			log.Info("received signal", zap.String("signal", sig.String()))
-		case <-parentDied:
-			log.Warn("parent process died, initiating shutdown")
-		}
+	case <-parentDied:
+		log.Warn("parent process died, initiating shutdown")
+	case <-ownershipShutdown:
+		log.Warn("ownership-shutdown operation invoked, initiating shutdown")
 	}
 
 	log.Info("shutting down agentctl...")

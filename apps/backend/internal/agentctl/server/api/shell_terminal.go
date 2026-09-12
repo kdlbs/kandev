@@ -75,6 +75,9 @@ func (s *Server) handleShellTerminalStreamWS(c *gin.Context) {
 	}
 	defer func() { _ = conn.Close() }()
 
+	releaseFencing := closeOnCredentialInvalidation(c, conn)
+	defer releaseFencing()
+
 	s.logger.Info("terminal shell WebSocket connected", zap.String("terminal_id", terminalID))
 
 	// Subscribe to shell output

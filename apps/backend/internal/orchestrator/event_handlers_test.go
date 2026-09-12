@@ -287,19 +287,23 @@ type mockAgentManager struct {
 	// optional rowLivenessProber so reconciliation tests can drive runtime-aware
 	// liveness per row. Nil → the mock is not a prober and reconciliation treats
 	// every row as Unknown.
-	rowLivenessFn          func(*models.ExecutorRunning) models.ProcessLiveness
-	resolveProfileInfo     *executor.AgentProfileInfo
-	resolveProfileErr      error
-	restartProcessCalls    []string // tracks execution IDs passed to RestartAgentProcess
-	restartProcessErr      error
-	promptErr              error
-	promptResult           *executor.PromptResult
-	promptAcceptedOnError  bool
-	promptAgentFunc        func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
-	launchAgentFunc        func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
-	startAgentProcessCalls []string
-	startAgentProcessErr   error
-	startAgentProcessFunc  func(context.Context, string) error
+	rowLivenessFn func(*models.ExecutorRunning) models.ProcessLiveness
+	// newStandaloneLivenessScopeCalls counts NewStandaloneLivenessScope
+	// invocations, letting a test assert a reconciliation pass takes exactly
+	// one enumeration and reuses it across every row.
+	newStandaloneLivenessScopeCalls int
+	resolveProfileInfo              *executor.AgentProfileInfo
+	resolveProfileErr               error
+	restartProcessCalls             []string // tracks execution IDs passed to RestartAgentProcess
+	restartProcessErr               error
+	promptErr                       error
+	promptResult                    *executor.PromptResult
+	promptAcceptedOnError           bool
+	promptAgentFunc                 func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
+	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	startAgentProcessCalls          []string
+	startAgentProcessErr            error
+	startAgentProcessFunc           func(context.Context, string) error
 
 	// probeBackgroundWorkloadsFunc, when non-nil, overrides
 	// ProbeBackgroundWorkloads's default Unknown/nil response.
@@ -660,6 +664,21 @@ func (m *mockAgentManager) RowLiveness(row *models.ExecutorRunning) models.Proce
 		return m.rowLivenessFn(row)
 	}
 	return models.ProcessLivenessUnknown
+}
+
+// NewStandaloneLivenessScope and RowLivenessScoped make the mock satisfy the
+// orchestrator's optional standaloneLivenessScoper alongside rowLivenessProber.
+// The mock has no real enumeration to scope, so it returns a nil placeholder
+// scope and RowLivenessScoped simply delegates to the existing RowLiveness/
+// rowLivenessFn machinery -- every existing rowLivenessFn-based test keeps its
+// exact behavior without change.
+func (m *mockAgentManager) NewStandaloneLivenessScope(_ context.Context) interface{} {
+	m.newStandaloneLivenessScopeCalls++
+	return nil
+}
+
+func (m *mockAgentManager) RowLivenessScoped(row *models.ExecutorRunning, _ interface{}) models.ProcessLiveness {
+	return m.RowLiveness(row)
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	if m.resolveProfileErr != nil {

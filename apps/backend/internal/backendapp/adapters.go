@@ -325,6 +325,23 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
+// wrapSessionRecoveryGuardError translates the raw lifecycle recovery-guard
+// sentinels into an orchestrator.SessionRecoveryGuardError so callers outside
+// internal/agent/runtime/ can distinguish a retryable in-progress recovery
+// from a non-retryable unstoppable-agent condition without importing
+// lifecycle directly. Errors that are not guard-related pass through
+// unchanged.
+func wrapSessionRecoveryGuardError(err error, sessionID string) error {
+	switch {
+	case errors.Is(err, lifecycle.ErrSessionRecoveryGuarded):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: true}
+	case errors.Is(err, lifecycle.ErrSessionUnstoppableAgent):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: false}
+	default:
+		return err
+	}
+}
+
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
 	// fall back to RepositoryURL (legacy: this carries a local filesystem path
@@ -343,7 +360,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
 	if err != nil {
-		return nil, err
+		return nil, wrapSessionRecoveryGuardError(err, req.SessionID)
 	}
 
 	// Extract worktree info from metadata if available
@@ -627,13 +644,29 @@ func normalizeRuntimeStopError(err error) error {
 }
 
 // RowLiveness classifies the liveness of the OS process backing an
-// executors_running row using the runtime-aware host-local probe. It is the
-// orchestrator's window into the platform-split liveness check (kept in the
-// lifecycle package) used by startup reconciliation
-// (#1597 runtime-aware liveness). A local check never runs against a
+// executors_running row. It is the orchestrator's window into the
+// platform-split liveness check (kept in the lifecycle package) used outside
+// a reconciliation pass — e.g. the single-session idle reclaim path — and
+// always takes its own fresh adopted-server enumeration for a standalone row
+// rather than reusing one a pass cached (see RowLivenessScoped for the
+// pass-scoped sibling). A local/enumeration check never runs against a
 // remote/SSH row — such rows return Unknown.
 func (a *lifecycleAdapter) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
-	return lifecycle.RowProcessLiveness(row)
+	return a.mgr.RowLiveness(row)
+}
+
+// NewStandaloneLivenessScope takes one adopted-server enumeration for reuse
+// across every row of a single reconciliation pass (design 02 "Persistence":
+// "It has two kinds of caller, and only one of them is a pass"). Satisfies
+// the orchestrator's optional standaloneLivenessScoper capability.
+func (a *lifecycleAdapter) NewStandaloneLivenessScope(ctx context.Context) interface{} {
+	return a.mgr.NewStandaloneLivenessScope(ctx)
+}
+
+// RowLivenessScoped classifies row's liveness reusing scope (from
+// NewStandaloneLivenessScope) instead of taking a fresh enumeration.
+func (a *lifecycleAdapter) RowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness {
+	return a.mgr.RowLivenessScoped(row, scope)
 }
 
 // GetAgentStatus returns the status of an agent execution

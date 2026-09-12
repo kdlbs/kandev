@@ -726,6 +726,16 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// retrackedSessionCheck reports whether the lifecycle manager
+	// successfully re-tracked a session during this backend's own startup
+	// recovery pass (AC-EXECUTORS-SURVIVAL-003.1). Consulted by startup
+	// reconciliation so a session whose agent survived the restart skips
+	// "backend died mid-turn" cleanup. Nil (unwired, or agent survival
+	// disabled) preserves today's behavior -- every active session is
+	// reconciled as if its agent died with the backend. See
+	// SetRetrackedSessionChecker.
+	retrackedSessionCheck func(sessionID string) bool
+
 	// routeActionHandler is owned by the dynamic conductor composition. The
 	// orchestrator only validates/authorizes the request and returns the
 	// authoritative route snapshot; concrete and dynamic callers share this
@@ -1972,6 +1982,27 @@ func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessio
 // than a session. Same contract: nil for identity-less internal callers.
 func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+// SetRetrackedSessionChecker installs the lifecycle manager's query for
+// AC-EXECUTORS-SURVIVAL-003.1: whether a session was successfully
+// re-tracked during this backend's own startup recovery pass. Wired from
+// backendapp after the lifecycle manager's synchronous Start() has already
+// completed, so every session's outcome is decided before this service's
+// own Start() runs startup reconciliation. Nil (unwired) preserves today's
+// behavior.
+func (s *Service) SetRetrackedSessionChecker(check func(sessionID string) bool) {
+	s.retrackedSessionCheck = check
+}
+
+// wasSessionRetracked applies the configured retrackedSessionCheck. Nil
+// checker or empty sessionID is treated as "not retracked" -- today's
+// unconditional reconciliation, the correct default.
+func (s *Service) wasSessionRetracked(sessionID string) bool {
+	if s.retrackedSessionCheck == nil || sessionID == "" {
+		return false
+	}
+	return s.retrackedSessionCheck(sessionID)
 }
 
 // authorizeSession applies the configured per-user session check. No-op when
@@ -3286,6 +3317,10 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	s.logger.Info("reconciling sessions on startup (lazy recovery)", zap.Int("count", len(runningExecutors)))
 
 	report := newStartupCleanupReport()
+	// One adopted-server enumeration, reused for every row of this pass
+	// (design 02 "Persistence": "it has two kinds of caller, and only one of
+	// them is a pass") -- taken once here rather than per-row.
+	scope := s.newStandaloneLivenessScope(ctx)
 	var remoteRecords []executor.RemoteStatusPollRequest
 	for _, running := range runningExecutors {
 		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
@@ -3298,7 +3333,7 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 				Metadata:         running.Metadata,
 			})
 		}
-		s.reconcileOneSessionOnStartup(ctx, running, report)
+		s.reconcileOneSessionOnStartup(ctx, running, report, scope)
 	}
 	report.flush(s.logger)
 
@@ -3309,7 +3344,7 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 }
 
 // reconcileOneSessionOnStartup adjusts DB state for a single session without launching agents.
-func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport) {
+func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := running.SessionID
 	if sessionID == "" {
 		return
@@ -3318,7 +3353,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {
-			s.handleMissingSessionOnStartup(ctx, running, report)
+			s.handleMissingSessionOnStartup(ctx, running, report, scope)
 			return
 		}
 		s.logger.Warn("failed to load session for reconciliation; preserving executor record",
@@ -3330,7 +3365,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	previousState := session.State
 
 	// Handle terminal and never-started states (reuse existing cleanup logic)
-	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState, report); skip {
+	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState, report, scope); skip {
 		return
 	}
 	if previousState == models.TaskSessionStateCreated {
@@ -3357,7 +3392,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		// dead local_pid. If the local process is confirmed dead, repair the row
 		// in place — resume_token/worktree are preserved (RowMustBePreserved
 		// treats IDLE as resumable). Remote rows report Unknown and are untouched.
-		if s.rowLiveness(running) == models.ProcessLivenessDead {
+		if s.rowLivenessScoped(running, scope) == models.ProcessLivenessDead {
 			s.repairDeadRowLiveness(ctx, running)
 		}
 		s.logger.Info("session reconciled for lazy recovery (idle, no state change)",
@@ -3368,7 +3403,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		return
 	}
 
-	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session)
+	s.reconcileActiveSessionOnStartup(ctx, running, sessionID, previousState, session, scope)
 }
 
 func (s *Service) reconcileActiveSessionOnStartup(
@@ -3377,10 +3412,23 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	sessionID string,
 	previousState models.TaskSessionState,
 	session *models.TaskSession,
+	scope interface{},
 ) {
+	// AC-EXECUTORS-SURVIVAL-003.1: the lifecycle manager's re-tracking
+	// outcome for sessionID is already decided by the time this runs (its
+	// Start() is synchronous and completes before this service's own Start()
+	// is ever called). A re-tracked session's agent survived the restart and
+	// is already running under this backend, so none of the "backend died
+	// mid-turn" reconciliation below applies to it
+	// (AC-EXECUTORS-SURVIVAL-003.2/.3/.4/.5).
+	retracked := s.wasSessionRetracked(sessionID)
+
 	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
-	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
-	if previousState != models.TaskSessionStateWaitingForInput {
+	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user
+	// opens it) -- unless the session was re-tracked, in which case it is
+	// still genuinely running and AC-EXECUTORS-SURVIVAL-003.3 requires
+	// leaving it in that state.
+	if !retracked && previousState != models.TaskSessionStateWaitingForInput {
 		s.updateTaskSessionStateWithHook(
 			ctx,
 			running.TaskID,
@@ -3392,7 +3440,11 @@ func (s *Service) reconcileActiveSessionOnStartup(
 			session,
 		)
 	}
-	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
+	// AC-EXECUTORS-SURVIVAL-003.4: a re-tracked session's open turn is still
+	// live, not abandoned.
+	if !retracked {
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
+	}
 
 	// PRESERVE executors_running.agent_execution_id post-restart. The in-memory
 	// process is gone, but the stored ID still serves as a "this session was
@@ -3405,8 +3457,9 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// in-memory Add on the next launch, closing the divergence window we set out
 	// to fix in this refactor.
 
-	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
-	if running.TaskID != "" {
+	// Ensure task is in REVIEW state (not stuck IN_PROGRESS) -- skipped for a
+	// re-tracked session's task, per AC-EXECUTORS-SURVIVAL-003.5.
+	if !retracked && running.TaskID != "" {
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
@@ -3425,11 +3478,14 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// Mark the task interrupted when its session was mid-turn when the backend
 	// died (STARTING/RUNNING) so task-list surfaces can show the red
 	// interruption icon. WAITING_FOR_INPUT sessions were idle, not interrupted.
+	// A re-tracked session's task was never actually interrupted -- its agent
+	// kept running across the restart -- so this is skipped for it per
+	// AC-EXECUTORS-SURVIVAL-003.2.
 	// The write is archive-atomic (SetTaskMetadataKeyIfNotArchived), so an
 	// archive that commits after this check cannot leave a stale marker on an
 	// archived task. The marker is cleared when a session of the task next
 	// enters STARTING/RUNNING (see updateTaskSessionStateWithHook).
-	if running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
+	if !retracked && running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
 		if _, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); setErr != nil {
 			s.logger.Warn("failed to mark task interrupted on startup",
 				zap.String("task_id", running.TaskID),
@@ -3444,7 +3500,7 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// cleared) so it never keeps claiming a live process (#1597 expected behavior).
 	// resume_token/worktree are preserved by the repair. Remote rows report Unknown
 	// and are left to their own runtime's status poll.
-	if s.rowLiveness(running) == models.ProcessLivenessDead {
+	if s.rowLivenessScoped(running, scope) == models.ProcessLivenessDead {
 		s.repairDeadRowLiveness(ctx, running)
 	}
 
@@ -3452,17 +3508,18 @@ func (s *Service) reconcileActiveSessionOnStartup(
 		zap.String("session_id", sessionID),
 		zap.String("task_id", running.TaskID),
 		zap.String("previous_state", string(previousState)),
+		zap.Bool("retracked", retracked),
 		zap.Bool("has_resume_token", running.ResumeToken != ""),
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 }
 
-func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport) {
+func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := running.SessionID
 	executionID := strings.TrimSpace(running.AgentExecutionID)
 	if executionID == "" || s.agentManager == nil {
 		decision := startupCleanupDecision{
 			disposition:    startupCleanupDispositionPreserved,
-			liveness:       processLivenessClass(s.rowLiveness(running)),
+			liveness:       processLivenessClass(s.rowLivenessScoped(running, scope)),
 			stopErrorClass: "missing_stop_handle",
 			expected:       true,
 		}
@@ -3478,7 +3535,7 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 		// invariant, so the orphan row does not survive restarts forever. Any
 		// other error (alive/unknown/remote row, or a non-not-found failure) is
 		// preserved and left for a later attempt.
-		decision := classifyStartupCleanup(err, s.rowLiveness(running))
+		decision := classifyStartupCleanup(err, s.rowLivenessScoped(running, scope))
 		if !decision.proceed {
 			if decision.expected {
 				report.recordExpected(running, decision)
@@ -3522,7 +3579,7 @@ func isTaskSessionNotFound(err error) bool {
 
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
 // Returns true if the session should be skipped (no further processing needed).
-func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport) bool {
+func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport, scope interface{}) bool {
 	sessionID := session.ID
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
@@ -3531,7 +3588,7 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
 		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
-		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup", report) {
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup", report, scope) {
 			return true
 		}
 		// Resume-safety invariant: prune the row only if it is not still resumable
@@ -3541,14 +3598,14 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 		s.pruneOrRepairExecutorRow(ctx, running, previousState)
 		return true
 	case models.TaskSessionStateFailed:
-		s.handleFailedSessionOnStartup(ctx, session, running, report)
+		s.handleFailedSessionOnStartup(ctx, session, running, report, scope)
 		return true
 	}
 	return false
 }
 
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
-func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport) {
+func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
@@ -3576,7 +3633,7 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
-		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup", report) {
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup", report, scope) {
 			return
 		}
 		// Prune only subject to the resume-safety invariant (a lingering
@@ -3594,10 +3651,10 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 // (alive/unknown/remote row, or a non-not-found failure) preserves the row for a
 // later attempt. A row with no stoppable handle proceeds only when its local
 // process liveness is confirmed dead; alive and Unknown rows remain durable.
-func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string, report *startupCleanupReport) bool {
+func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string, report *startupCleanupReport, scope interface{}) bool {
 	executionID := strings.TrimSpace(running.AgentExecutionID)
 	if executionID == "" || s.agentManager == nil {
-		liveness := s.rowLiveness(running)
+		liveness := s.rowLivenessScoped(running, scope)
 		decision := startupCleanupDecision{
 			disposition:    startupCleanupDispositionPreserved,
 			liveness:       processLivenessClass(liveness),
@@ -3623,7 +3680,7 @@ func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *mod
 	if err == nil {
 		return true
 	}
-	decision := classifyStartupCleanup(err, s.rowLiveness(running))
+	decision := classifyStartupCleanup(err, s.rowLivenessScoped(running, scope))
 	if !decision.proceed {
 		fields := append(startupCleanupFields(running, decision), zap.String("reason", reason))
 		if decision.expected {

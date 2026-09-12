@@ -787,7 +787,7 @@ func instanceID(instance *ExecutorInstance) string {
 // Recovery semantics are documented in the spec; persisted metadata keys
 // (ssh_host / ssh_user / ssh_remote_agentctl_port / etc.) are honored by
 // ResumeRemoteInstance below.
-func (r *SSHExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+func (r *SSHExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 

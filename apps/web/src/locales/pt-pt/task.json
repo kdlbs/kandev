@@ -1945,6 +1945,8 @@
   "resumeFailedWorkspaceReadOnly": "Workspace restaurado em modo só de leitura",
   "continueOnNewBranch": "Continuar numa nova branch",
   "restoreReadOnlyWorkspace": "Restaurar workspace só de leitura",
+  "sessionRecoveryGuardInProgress": "O agente desta sessão ainda está a ser reconciliado após o reinício do backend. Isto resolve-se automaticamente; tente novamente daqui a alguns segundos.",
+  "sessionRecoveryGuardUnstoppable": "Não foi possível parar o processo do agente anterior desta sessão após o reinício do backend. Reinicie o backend para resolver isto e tente novamente.",
   "gitOperationFailedGeneric": "A operação falhou",
   "invalidGitHubUrl": "URL do GitHub inválido - esperava-se github.com/owner/repo ou .../pull/123",
   "invalidRegex": "Expressão regular inválida",

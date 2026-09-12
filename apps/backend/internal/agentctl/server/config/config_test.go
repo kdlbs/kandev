@@ -41,6 +41,49 @@ func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
 	}
 }
 
+// TestLoadWithStartupPropagatesAgentSurvivalEnabled pins that
+// Config.AgentSurvivalEnabled is copied directly from the managed contract in
+// both directions -- unlike UnownedPeriod/DetachedEventLimit, false is not
+// "unresolved" here (a managed launch always sets Configured=true), so it
+// must not be treated as "keep agentctl's own default".
+func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
+	base := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	}
+
+	enabled := base
+	enabled.AgentSurvivalEnabled = true
+	cfg, err := LoadWithStartup(enabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if !cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = false, want true when the startup contract enables it")
+	}
+
+	disabled := base
+	disabled.AgentSurvivalEnabled = false
+	cfg, err = LoadWithStartup(disabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true, want false when the startup contract disables it")
+	}
+}
+
+// TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
+// (unmanaged) launch -- Load(), no startup contract -- never engages the
+// capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".
+func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
+	cfg := Load()
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true from Load() with no startup contract, want false")
+	}
+}
+
 func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
 		McpProviders: []string{" GITLAB ", "unsupported", "github", "github"},

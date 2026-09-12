@@ -36,6 +36,17 @@ import (
 const (
 	windowsOS  = "windows"
 	pathEnvKey = "PATH"
+
+	defaultUnownedPeriod      = 10 * time.Minute
+	defaultDetachedEventLimit = 100
+
+	// diagnosticLogFileName is the fixed name of agentctl's own detached
+	// diagnostic log file (AC-EXECUTORS-SURVIVAL-001.3). It lives under
+	// HomeDir/logs alongside the backend's own "backend-logs.log" and the
+	// per-session ACP debug logs under logs/acp/ -- a distinct file, so two
+	// processes never rotate the same file or share one set of rollover
+	// journals.
+	diagnosticLogFileName = "agentctl-diagnostic.log"
 )
 
 // Config is the agentctl configuration.
@@ -110,6 +121,50 @@ type Config struct {
 
 	// OTLPEndpoint is the resolved endpoint used by agentctl transport tracing.
 	OTLPEndpoint string
+
+	// UnownedPeriod is how long this control server tolerates having no
+	// owning backend before it stops its instances and exits. Sourced from
+	// KANDEV_ACP_UNOWNED_PERIOD (default 10m). Only meaningful when the
+	// agent-survival capability is active; unused otherwise.
+	UnownedPeriod time.Duration
+
+	// DetachedEventLimit bounds the per-instance retained-event count while
+	// this control server has no owning backend attached. Sourced from
+	// KANDEV_ACP_DETACHED_EVENT_LIMIT (default 100). Only meaningful when the
+	// agent-survival capability is active; unused otherwise.
+	DetachedEventLimit int
+
+	// HomeDir is the resolved Kandev root directory this agentctl process was
+	// started for. It is installation identity: the adopting backend compares
+	// it against its own resolved home before ever authenticating, per design
+	// 01's "Ownership identity and credential". Reported on GET /identity.
+	HomeDir string
+
+	// ServerIdentity is an opaque value generated once per process launch,
+	// echoed on GET /identity and compared by the adopting backend, never
+	// logged. It answers "is this the process a previous launch started",
+	// distinct from AuthToken which answers "is the caller authorized".
+	ServerIdentity string
+
+	// DiagnosticLogPath is the durable file agentctl's own diagnostic
+	// output is written to while it may be running detached from any
+	// backend (AC-EXECUTORS-SURVIVAL-001.3). Derived from HomeDir with a
+	// fixed filename -- the sink adds no configuration key and no
+	// environment variable of its own. Empty only when HomeDir itself
+	// could not be resolved. Echoed on GET /identity so an adopting or
+	// freshly-spawning backend records it into the control-server record
+	// without independently re-deriving the same path formula.
+	DiagnosticLogPath string
+
+	// AgentSurvivalEnabled is whether the agent-survival capability is
+	// engaged for this launch, copied directly from the managed startup
+	// contract (never "unresolved" the way UnownedPeriod/DetachedEventLimit
+	// can be -- a managed launch always states it, and false is the
+	// legitimate "disabled" answer). An unmanaged/direct launch (Load(),
+	// no startup contract) always resolves this to false. Gates
+	// StartUnownedReaper, the detached diagnostic log sink switch, and the
+	// launcher-side kill-path removal (Layer 5.9).
+	AgentSurvivalEnabled bool
 
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
@@ -228,6 +283,11 @@ type InstanceConfig struct {
 	// NotificationQueueCapacity is the ACP inbound notification queue size
 	// inherited from the server startup contract.
 	NotificationQueueCapacity int
+
+	// DetachedEventLimit bounds the per-instance retained-event count
+	// (AC-EXECUTORS-SURVIVAL-001.6), inherited from the server startup
+	// contract. It sizes the process manager's updates channel buffer.
+	DetachedEventLimit int
 
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
@@ -355,11 +415,28 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	idleReaperInterval := getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute)
 	notificationQueueCapacity := getEnvInt("KANDEV_ACP_NOTIF_QUEUE", 131072)
 	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	unownedPeriod := getEnvDuration("KANDEV_ACP_UNOWNED_PERIOD", defaultUnownedPeriod)
+	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
+	homeDir := resolveHomeDir()
+	agentSurvivalEnabled := false
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
 		notificationQueueCapacity = startup.NotificationQueueCapacity
 		otlpEndpoint = startup.OTLPEndpoint
+		// Zero means the caller did not resolve these (an older backend, or
+		// one built before agent survival existed) — keep the env/built-in
+		// value already computed above rather than adopting zero.
+		if startup.UnownedPeriod != 0 {
+			unownedPeriod = startup.UnownedPeriod
+		}
+		if startup.DetachedEventLimit != 0 {
+			detachedEventLimit = startup.DetachedEventLimit
+		}
+		// Unlike the two tunables above, false is a meaningful resolved
+		// answer here (every managed launch states it), so it is copied
+		// unconditionally rather than guarded by a zero-value check.
+		agentSurvivalEnabled = startup.AgentSurvivalEnabled
 	}
 
 	cfg := &Config{
@@ -387,6 +464,12 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		IdleReaperInterval:        idleReaperInterval,
 		NotificationQueueCapacity: notificationQueueCapacity,
 		OTLPEndpoint:              otlpEndpoint,
+		UnownedPeriod:             unownedPeriod,
+		DetachedEventLimit:        detachedEventLimit,
+		HomeDir:                   homeDir,
+		ServerIdentity:            generateSelfToken(),
+		DiagnosticLogPath:         resolveDiagnosticLogPath(homeDir),
+		AgentSurvivalEnabled:      agentSurvivalEnabled,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -459,6 +542,37 @@ func (c *Config) ConsumeNonce(nonce string) string {
 	return c.AuthToken
 }
 
+// resolveHomeDir determines the Kandev root directory this agentctl process
+// was started for, honoring KANDEV_HOME_DIR (already the Kandev root) ahead
+// of $HOME so dev/e2e isolation and Docker/K8s roots resolve consistently.
+// This duplicates adapter/transport/shared.resolveACPLogDir's precedence
+// rather than importing it: config is a leaf package with no dependency on
+// adapter/transport/shared, and pulling that dependency in for one four-line
+// primitive would invert the layering.
+func resolveHomeDir() string {
+	if home := os.Getenv("KANDEV_HOME_DIR"); home != "" {
+		return home
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".kandev")
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return ""
+}
+
+// resolveDiagnosticLogPath derives agentctl's own detached diagnostic log
+// path from the resolved home directory (AC-EXECUTORS-SURVIVAL-001.3): a
+// fixed filename under HomeDir/logs, not an operator-configurable value.
+// Empty when homeDir itself could not be resolved.
+func resolveDiagnosticLogPath(homeDir string) string {
+	if homeDir == "" {
+		return ""
+	}
+	return filepath.Join(homeDir, "logs", diagnosticLogFileName)
+}
+
 // generateSelfToken creates a cryptographically random 32-byte hex-encoded token.
 func generateSelfToken() string {
 	b := make([]byte, 32)
@@ -484,6 +598,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		LogFormat:                 c.LogFormat,
 		ProcessBufferMaxBytes:     c.Defaults.ProcessBufferMaxBytes,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		DetachedEventLimit:        c.DetachedEventLimit,
 		VscodeCommand:             c.VscodeCommand,
 		McpMode:                   "task",
 		AuthToken:                 c.AuthToken,

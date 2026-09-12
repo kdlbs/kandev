@@ -104,6 +104,27 @@ func TestBuildRunningFromExecutionPreservesPriorExecutorIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildRunningFromExecutionPersistsOfficeAgentProfileID(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		OfficeAgentProfileID: "office-profile-9",
+	}, nil)
+
+	if got := running.Metadata[MetadataKeyOfficeAgentProfileID]; got != "office-profile-9" {
+		t.Fatalf("Metadata[%q] = %v, want office-profile-9", MetadataKeyOfficeAgentProfileID, got)
+	}
+}
+
+func TestBuildRunningFromExecutionOmitsOfficeAgentProfileIDForNonOfficeLaunch(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+	}, nil)
+
+	if _, ok := running.Metadata[MetadataKeyOfficeAgentProfileID]; ok {
+		t.Fatal("Metadata should not carry an office_agent_profile_id key for a non-Office launch")
+	}
+}
+
 func TestBuildRunningFromExecutionBindsResumeTokenToExecutionProfile(t *testing.T) {
 	prior := &models.ExecutorRunning{
 		ExecutionProfileID: "codex-profile",

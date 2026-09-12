@@ -17,8 +17,8 @@ including local, container, and SSH execution boundaries.
 ## Ownership
 
 This system owns executor profiles, environment construction, SSH lifecycle,
-runtime resource admission, process and port safety, and executor-specific
-failure and recovery contracts.
+runtime resource admission, process and port safety, agent process lifetime
+across a backend restart, and executor-specific failure and recovery contracts.
 
 ## Exclusions
 
@@ -35,6 +35,10 @@ failure and recovery contracts.
 
 
 
+- [Agent survival across a backend restart](requirements/agent-survival-across-restart.md)
+- [Survived session state and capability gating](requirements/agent-survival-session-state.md)
+- [Standalone control-server ownership](requirements/standalone-control-server-ownership.md)
+- [Standalone control-server single driver and unowned lifetime](requirements/standalone-control-server-single-driver.md)
 - [Executor-Profile Environment Precedence](requirements/executor-profile-env-precedence.md)
 - [Port collision and backend ownership safety](requirements/port-collision-safety.md)
 - [SSH Executor](requirements/ssh-executor.md)
@@ -49,6 +53,9 @@ failure and recovery contracts.
 
 
 
+- [Agent survival across a backend restart Part 1](system-design/agent-survival-across-restart-01.md)
+- [Agent survival across a backend restart Part 2](system-design/agent-survival-across-restart-02.md)
+- [Agent survival across a backend restart Part 3](system-design/agent-survival-across-restart-03.md)
 - [Executor-Profile Environment Precedence System Design Part 1](system-design/executor-profile-env-precedence-01.md)
 - [Executor-Profile Environment Precedence System Design Part 2](system-design/executor-profile-env-precedence-02.md)
 - [Executor-Profile Environment Precedence System Design Part 3](system-design/executor-profile-env-precedence-03.md)

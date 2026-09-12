@@ -20,3 +20,7 @@ func closePipeOnStartFailure(_ *os.File, _ *exec.Cmd) {}
 
 // closeChildPipeEnd is a no-op on Windows (no pipe to close).
 func closeChildPipeEnd(_ *exec.Cmd) {}
+
+// clearInheritedLivenessPipeEnv is a no-op on Windows: setupLivenessPipe
+// never sets KANDEV_PARENT_PIPE_FD here, so there is nothing to strip.
+func clearInheritedLivenessPipeEnv(_ *exec.Cmd) {}

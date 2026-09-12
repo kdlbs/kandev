@@ -11,6 +11,8 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
   asRecoveryError: (error: unknown, fallback: string) =>
     error instanceof Error ? error : new Error(fallback),
   branchRecoveryDetails: () => null,
+  sessionRecoveryGuardDetails: () => null,
+  sessionRecoveryGuardMessage: () => "",
   requestSessionRecover: mocks.requestSessionRecover,
   restoreSessionWorkspace: mocks.restoreSessionWorkspace,
 }));

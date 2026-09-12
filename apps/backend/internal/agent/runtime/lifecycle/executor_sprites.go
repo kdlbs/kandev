@@ -587,7 +587,7 @@ func (r *SpritesExecutor) buildInstanceResult(
 	}
 }
 
-func (r *SpritesExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+func (r *SpritesExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 

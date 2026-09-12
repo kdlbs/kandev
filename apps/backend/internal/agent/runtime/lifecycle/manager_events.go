@@ -239,7 +239,13 @@ func (m *Manager) claimPromptCompletion(
 	claim.locked = true
 	claimed := false
 	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
-		if current != execution || current.promptGeneration != event.PromptGeneration {
+		if current != execution {
+			return
+		}
+		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
+			current.promptGeneration = event.PromptGeneration
+		}
+		if current.promptGeneration != event.PromptGeneration {
 			return
 		}
 		if current.promptCompletionGeneration == event.PromptGeneration {
@@ -744,6 +750,17 @@ func (m *Manager) handlePromptHandoffEvent(
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	// AC-EXECUTORS-SURVIVAL-004.4: a terminal event whose ControlTurnID
+	// matches the outcome this execution already applied from a retained
+	// read during re-tracking is the live redelivery design 03 describes --
+	// agentctl's parked send of the exact same event, finally unblocked by
+	// this stream attaching -- and must be dropped, not reprocessed.
+	if execution.isRecoveryDuplicateEvent(&event) {
+		m.logger.Debug("dropping live event: already applied via retained turn outcome",
+			zap.String("execution_id", execution.ID),
+			zap.Int64("control_turn_id", event.ControlTurnID))
+		return
+	}
 	if event.Type == streams.EventTypeMCPAttachment {
 		if event.MCPAttachmentAttempt != nil {
 			if event.MCPAttachmentAttempt.ExecutionID != "" && event.MCPAttachmentAttempt.ExecutionID != execution.ID {

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -335,7 +336,7 @@ func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
 		t.Fatalf("StopInstance reason = %q, want %q", mock.stopReason, StopReasonBackendShutdown)
 	}
 }
-func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
+func (m *mockStopTracker) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 func (m *mockStopTracker) GetInteractiveRunner() *process.InteractiveRunner {
@@ -400,9 +401,10 @@ func TestManager_StartSeedsRecoveredExecution(t *testing.T) {
 	execRegistry.Register(&MockExecutor{
 		name: executor.NameStandalone,
 		recoverInstances: []*ExecutorInstance{{
-			InstanceID: "exec-recovered",
-			TaskID:     "task-recovered",
-			Client:     client,
+			InstanceID:     "exec-recovered",
+			TaskID:         "task-recovered",
+			AgentProfileID: "profile-1",
+			Client:         client,
 		}},
 	})
 	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
@@ -422,5 +424,41 @@ func TestManager_StartSeedsRecoveredExecution(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for recovered execution base-branch seed")
+	}
+}
+
+// TestManagerStartRefusesRecoveredExecutionWithEmptyTaskID pins Review round
+// 3, finding 3: a recovered instance whose TaskID is empty (the
+// recovery-inventory record's declared source answered with nothing --
+// executor_standalone.go's buildRecoveredInstances no longer falls back to
+// the instance's own claim) is authoritatively missing a required value
+// (AC-EXECUTORS-SURVIVAL-002.4): it must never be published as a tracked
+// execution, and is instead stopped through the AC-EXECUTORS-SURVIVAL-002.6
+// stop path.
+func TestManagerStartRefusesRecoveredExecutionWithEmptyTaskID(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	mockExec := &MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID:  "exec-no-task",
+			TaskID:      "",
+			SessionID:   "session-no-task",
+			RuntimeName: executor.NameStandalone,
+		}},
+	}
+	execRegistry.Register(mockExec)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	t.Cleanup(func() { _ = mgr.Stop() })
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if _, ok := mgr.GetExecution("exec-no-task"); ok {
+		t.Fatal("an execution with an empty TaskID must not be tracked")
+	}
+	if len(mockExec.stopInstanceCalls) != 1 || mockExec.stopInstanceCalls[0].InstanceID != "exec-no-task" {
+		t.Fatalf("stopInstanceCalls = %+v, want the unreconstructable instance stopped", mockExec.stopInstanceCalls)
 	}
 }

@@ -6,8 +6,11 @@ import {
   branchRecoveryDetails,
   requestSessionRecover,
   restoreSessionWorkspace,
+  sessionRecoveryGuardDetails,
+  sessionRecoveryGuardMessage,
   type BranchRecoveryDetails,
   type SessionRecoveryAction,
+  type SessionRecoveryGuardDetails,
 } from "@/lib/services/session-recovery-service";
 
 export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null;
@@ -36,6 +39,42 @@ function combineRecoveryErrors(
   );
 }
 
+function guardOrFallbackError(
+  cause: unknown,
+  guard: SessionRecoveryGuardDetails | null,
+  translate: TFunction,
+  fallback: string,
+): Error {
+  if (guard) return new Error(sessionRecoveryGuardMessage(guard, translate));
+  return asRecoveryError(cause, fallback);
+}
+
+type RecoveryOperation = { requestKey: string; operationId: number };
+
+/** Fences in-flight recovery calls so a stale response cannot write newer state. */
+function useRecoveryOperationFence(requestKey: string) {
+  const activeRequestKeyRef = useRef(requestKey);
+  const operationGenerationRef = useRef(0);
+  if (activeRequestKeyRef.current !== requestKey) {
+    activeRequestKeyRef.current = requestKey;
+    operationGenerationRef.current += 1;
+  }
+
+  const beginOperation = useCallback(
+    (): RecoveryOperation => ({ requestKey, operationId: ++operationGenerationRef.current }),
+    [requestKey],
+  );
+
+  const isCurrentOperation = useCallback(
+    (operation: RecoveryOperation) =>
+      activeRequestKeyRef.current === operation.requestKey &&
+      operationGenerationRef.current === operation.operationId,
+    [],
+  );
+
+  return { beginOperation, isCurrentOperation };
+}
+
 /** Owns shared manual recovery state while a failed session remains visible. */
 // eslint-disable-next-line max-lines-per-function -- the hook owns one coherent recovery state machine.
 export function useSessionRecoveryActions({
@@ -45,16 +84,12 @@ export function useSessionRecoveryActions({
 }: SessionRecoveryActionsOptions) {
   const { t } = useTranslation();
   const requestKey = `${taskId}\u0000${sessionId}\u0000${errorStamp ?? ""}`;
-  const activeRequestKeyRef = useRef(requestKey);
-  const operationGenerationRef = useRef(0);
-  if (activeRequestKeyRef.current !== requestKey) {
-    activeRequestKeyRef.current = requestKey;
-    operationGenerationRef.current += 1;
-  }
+  const { beginOperation, isCurrentOperation } = useRecoveryOperationFence(requestKey);
   const [busyAction, setBusyAction] = useState<SessionRecoveryBusyAction>(null);
   const [resumeError, setResumeError] = useState<Error | null>(null);
   const [restoreError, setRestoreError] = useState<Error | null>(null);
   const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
+  const [guardDetails, setGuardDetails] = useState<SessionRecoveryGuardDetails | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [manualRecoveryFailure, setManualRecoveryFailure] =
@@ -65,46 +100,35 @@ export function useSessionRecoveryActions({
     setResumeError(null);
     setRestoreError(null);
     setBranchDetails(null);
+    setGuardDetails(null);
     setLastFailedAction(null);
     setRecoveryNotice(null);
     setManualRecoveryFailure(null);
   }, [requestKey]);
 
-  const beginOperation = useCallback(
-    (action: SessionRecoveryBusyAction) => {
-      const operationId = ++operationGenerationRef.current;
-      setBusyAction(action);
-      return { requestKey, operationId };
-    },
-    [requestKey],
-  );
-
-  const isCurrentOperation = useCallback(
-    (operation: { requestKey: string; operationId: number }) =>
-      activeRequestKeyRef.current === operation.requestKey &&
-      operationGenerationRef.current === operation.operationId,
-    [],
-  );
-
   const recoveryError = combineRecoveryErrors(resumeError, restoreError, t);
 
   const handleRecover = useCallback(
     async (action: SessionRecoveryAction) => {
-      const operation = beginOperation(action);
+      const operation = beginOperation();
+      setBusyAction(action);
       try {
         await requestSessionRecover(taskId, sessionId, action, t("task:failedToResumeSession"));
         if (!isCurrentOperation(operation)) return false;
         setResumeError(null);
         setRestoreError(null);
         setBranchDetails(null);
+        setGuardDetails(null);
         setLastFailedAction(null);
         setRecoveryNotice(null);
         setManualRecoveryFailure(null);
       } catch (cause) {
         if (!isCurrentOperation(operation)) return false;
-        setResumeError(asRecoveryError(cause, t("task:failedToResumeSession")));
+        const guard = sessionRecoveryGuardDetails(cause);
+        setResumeError(guardOrFallbackError(cause, guard, t, t("task:failedToResumeSession")));
         setRestoreError(null);
-        setBranchDetails(branchRecoveryDetails(cause));
+        setBranchDetails(guard ? null : branchRecoveryDetails(cause));
+        setGuardDetails(guard);
         setLastFailedAction(action);
         setRecoveryNotice(null);
         setManualRecoveryFailure({ operation: "resume" });
@@ -118,7 +142,8 @@ export function useSessionRecoveryActions({
   );
 
   const handleRestore = useCallback(async () => {
-    const operation = beginOperation("restore");
+    const operation = beginOperation();
+    setBusyAction("restore");
     setRestoreError(null);
     try {
       await restoreSessionWorkspace(taskId, sessionId, t("task:failedToRestoreWorkspace"));
@@ -126,18 +151,21 @@ export function useSessionRecoveryActions({
       setResumeError(null);
       setRestoreError(null);
       setBranchDetails(null);
+      setGuardDetails(null);
       setLastFailedAction(null);
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
       setManualRecoveryFailure(null);
     } catch (cause) {
       if (!isCurrentOperation(operation)) return;
-      setRestoreError(asRecoveryError(cause, t("task:failedToRestoreWorkspace")));
+      const guard = sessionRecoveryGuardDetails(cause);
+      setRestoreError(guardOrFallbackError(cause, guard, t, t("task:failedToRestoreWorkspace")));
+      setGuardDetails(guard ?? guardDetails);
       setRecoveryNotice(null);
       setManualRecoveryFailure({ operation: "restore_workspace" });
     } finally {
       if (isCurrentOperation(operation)) setBusyAction(null);
     }
-  }, [beginOperation, isCurrentOperation, sessionId, taskId, t]);
+  }, [beginOperation, guardDetails, isCurrentOperation, sessionId, taskId, t]);
 
   const handleRetry = useCallback(() => {
     return handleRecover(lastFailedAction ?? "resume");
@@ -151,6 +179,7 @@ export function useSessionRecoveryActions({
     busyAction,
     recoveryError,
     branchDetails,
+    guardDetails,
     recoveryNotice,
     manualRecoveryFailure,
     handleRecover,
