@@ -233,6 +233,12 @@ export function useStepReorder() {
         }
       } finally {
         state.setBandReorderPending(stepId, band, false);
+        // reconcileAndApply already clears this on every path that runs it;
+        // this covers the one it cannot reach, when the workflow snapshot
+        // was removed (e.g. navigation away) while the request was in
+        // flight, so a withheld order never leaks into this band's next
+        // reorder.
+        state.setWithheldReorder(stepId, band, null);
       }
     },
     [store, toast, t],

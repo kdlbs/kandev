@@ -339,3 +339,46 @@ describe("useStepReorder — failure handling", () => {
     expect(reorderStepTasks).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("useStepReorder — withheld-order cleanup", () => {
+  it("clears a withheld order for the band when the workflow snapshot disappears before the request settles", async () => {
+    const { promise, reject } = deferred<{
+      workflow_step_id: string;
+      revision: number;
+      tasks: Array<{ id: string; position: number }>;
+    }>();
+    reorderStepTasks.mockReturnValue(promise);
+    const { result } = renderHook(() => useStepReorder());
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.reorderBand({
+        workflowId: WORKFLOW_ID,
+        stepId: STEP_ID,
+        band: "admitted",
+        draggedId: "c",
+        visibleOrderAfterMove: ["c", "a", "b"],
+      });
+    });
+
+    // A published order arrives and is withheld while this request is
+    // in flight (AC.27), then the user navigates away, removing the
+    // workflow's snapshot entirely.
+    storeState.kanbanMulti.withheldReorderByBandKey[`${STEP_ID}:admitted`] = {
+      revision: 5,
+      tasks: [
+        { id: "a", position: 0 },
+        { id: "c", position: 1 },
+        { id: "b", position: 2 },
+      ],
+    };
+    delete (storeState.kanbanMulti.snapshots as Record<string, unknown>)[WORKFLOW_ID];
+
+    await act(async () => {
+      reject(new ApiError("network error", 0, {}));
+      await pending;
+    });
+
+    expect(storeState.kanbanMulti.withheldReorderByBandKey[`${STEP_ID}:admitted`]).toBeUndefined();
+  });
+});
