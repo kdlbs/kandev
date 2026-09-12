@@ -324,7 +324,8 @@ func sourceFileExtensionAllowed(name string) bool {
 		return true
 	}
 	switch strings.ToLower(path.Ext(name)) {
-	case ".css", ".html", ".htm", ".js", ".jsx", ".mjs", ".cjs", ".json", ".map", ".md", ".txt", ".ts", ".tsx", ".yaml", ".yml", ".lock", ".toml", sourceEnvExample:
+	case ".css", ".html", ".htm", ".js", ".jsx", ".mjs", ".cjs", ".json", ".map", ".md", ".txt", ".ts", ".tsx", ".yaml", ".yml", ".lock", ".toml",
+		".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".eot", sourceEnvExample:
 		return true
 	default:
 		return false

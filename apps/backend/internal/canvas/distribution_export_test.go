@@ -1,6 +1,7 @@
 package canvas
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -28,6 +29,9 @@ func TestPrepareExportBuildsOneReleaseBoundBundleAndSource(t *testing.T) {
 	if review.Metadata.SourceMode != manifest.SourceModeStatic {
 		t.Fatalf("metadata = %+v", review.Metadata)
 	}
+	if !hasExportFile(review.Files, "ui/logo.svg") || !hasExportFile(review.Files, "ui/body.woff2") {
+		t.Fatalf("runtime assets missing from export inventory: %+v", review.Files)
+	}
 	if releases.lastID != "release-1" {
 		t.Fatalf("release lookup = %q, want release-1", releases.lastID)
 	}
@@ -38,8 +42,52 @@ func TestPrepareExportBuildsOneReleaseBoundBundleAndSource(t *testing.T) {
 	if _, err := webapp.ValidateDistributionPackage(bytes.NewReader(bundle.Data)); err != nil {
 		t.Fatalf("downloaded bundle validation error = %v", err)
 	}
+	source, err := service.DownloadExport(context.Background(), "user-1", review.PreparationID, ExportSource)
+	if err != nil {
+		t.Fatalf("DownloadExport(source) error = %v", err)
+	}
+	if _, err := zip.NewReader(bytes.NewReader(source.Data), int64(len(source.Data))); err != nil {
+		t.Fatalf("downloaded source validation error = %v", err)
+	}
 	if !sameReleaseID(review, "release-1") {
 		t.Fatal("review is not bound to the expected release")
+	}
+}
+
+func TestPrepareExportAllowsTaskCanvasWithPortableWorkspacePlacement(t *testing.T) {
+	service, releases, canvases := newDistributionExportTestService(t)
+	var sourceManifest manifest.Manifest
+	if err := json.Unmarshal(releases.release.ManifestJSON, &sourceManifest); err != nil {
+		t.Fatalf("unmarshal source manifest: %v", err)
+	}
+	sourceManifest.UI.WebApps[0].Placements = []string{manifest.WebAppPlacementTask}
+	if err := sourceManifest.Validate(); err != nil {
+		t.Fatalf("task source manifest should remain locally valid: %v", err)
+	}
+	releases.release.ManifestJSON, _ = json.Marshal(sourceManifest)
+	canvases.canvas.ScopeKind = ScopeTask
+
+	review, err := service.PrepareExport(context.Background(), ExportRequest{
+		UserID: "user-1", WorkspaceID: "workspace-1", CanvasID: "canvas-1", ExpectedReleaseID: "release-1",
+		Metadata: ExportMetadata{PackageID: "canvas-board", Version: "1.2.3", DisplayName: "Board", Description: "A board", Author: "Kandev", License: "MIT", SourceMode: manifest.SourceModeStatic, MinKandevVersion: "1.0.0"},
+	})
+	if err != nil {
+		t.Fatalf("PrepareExport() error = %v", err)
+	}
+	if canvases.canvas.ScopeKind != ScopeTask {
+		t.Fatalf("task canvas scope changed to %q during export", canvases.canvas.ScopeKind)
+	}
+	bundle, err := service.DownloadExport(context.Background(), "user-1", review.PreparationID, ExportBundle)
+	if err != nil {
+		t.Fatalf("DownloadExport() error = %v", err)
+	}
+	pkg, err := webapp.ValidateDistributionPackage(bytes.NewReader(bundle.Data))
+	if err != nil {
+		t.Fatalf("downloaded task bundle validation error = %v", err)
+	}
+	placements := pkg.Manifest.UI.WebApps[0].Placements
+	if !containsString(placements, manifest.WebAppPlacementWorkspace) {
+		t.Fatalf("exported placements = %v, want workspace-canvas", placements)
 	}
 }
 
@@ -98,6 +146,67 @@ func TestPrepareInstallRejectsExpectedDigestMismatch(t *testing.T) {
 	_, err = service.PrepareInstall(context.Background(), InstallRequest{UserID: "user-1", WorkspaceID: "workspace-1", OriginKind: "upload", ExpectedDigest: "wrong", Bundle: bundle.Data})
 	if !errors.Is(err, ErrPackageDigestMismatch) {
 		t.Fatalf("PrepareInstall() error = %v, want ErrPackageDigestMismatch", err)
+	}
+}
+
+func TestConfirmInstallChecksDurableArtifactQuotaBeforeWriting(t *testing.T) {
+	exportService, _, _ := newDistributionExportTestService(t)
+	export, err := exportService.PrepareExport(context.Background(), ExportRequest{
+		UserID: "user-1", WorkspaceID: "workspace-1", CanvasID: "canvas-1", ExpectedReleaseID: "release-1",
+		Metadata: ExportMetadata{PackageID: "canvas-board", Version: "1.2.3", DisplayName: "Board", Description: "A board", Author: "Kandev", License: "MIT", SourceMode: manifest.SourceModeStatic, MinKandevVersion: "1.0.0"},
+	})
+	if err != nil {
+		t.Fatalf("PrepareExport() error = %v", err)
+	}
+	bundle, err := exportService.DownloadExport(context.Background(), "user-1", export.PreparationID, ExportBundle)
+	if err != nil {
+		t.Fatalf("DownloadExport() error = %v", err)
+	}
+	installer := &fakeDistributionInstaller{}
+	artifactWriter := &fakeDistributionArtifactWriter{}
+	quota := &fakeDistributionQuota{reserveErr: plugininstances.ErrWorkspaceStorageLimit}
+	service := NewDistributionService(installer, &fakeDistributionReleaseReader{}, artifactWriter, func(context.Context, string) error { return nil }, exportService.preparations)
+	service.SetArtifactQuota(quota)
+	review, err := service.PrepareInstall(context.Background(), InstallRequest{UserID: "user-1", WorkspaceID: "workspace-1", OriginKind: "upload", Bundle: bundle.Data})
+	if err != nil {
+		t.Fatalf("PrepareInstall() error = %v", err)
+	}
+	_, err = service.ConfirmInstall(context.Background(), "user-1", review.PreparationID, InstallConfirmation{ExpectedDigest: review.Digest, Approved: true})
+	if !errors.Is(err, plugininstances.ErrWorkspaceStorageLimit) {
+		t.Fatalf("ConfirmInstall() error = %v, want workspace storage limit", err)
+	}
+	if artifactWriter.next != 0 || installer.created != 0 || quota.released != 0 {
+		t.Fatalf("quota failure left writes behind: artifacts=%d installs=%d releases=%d", artifactWriter.next, installer.created, quota.released)
+	}
+}
+
+func TestConfirmInstallReleasesDurableArtifactReservationAfterInstall(t *testing.T) {
+	exportService, _, _ := newDistributionExportTestService(t)
+	export, err := exportService.PrepareExport(context.Background(), ExportRequest{
+		UserID: "user-1", WorkspaceID: "workspace-1", CanvasID: "canvas-1", ExpectedReleaseID: "release-1",
+		Metadata: ExportMetadata{PackageID: "canvas-board", Version: "1.2.3", DisplayName: "Board", Description: "A board", Author: "Kandev", License: "MIT", SourceMode: manifest.SourceModeStatic, MinKandevVersion: "1.0.0"},
+	})
+	if err != nil {
+		t.Fatalf("PrepareExport() error = %v", err)
+	}
+	bundle, err := exportService.DownloadExport(context.Background(), "user-1", export.PreparationID, ExportBundle)
+	if err != nil {
+		t.Fatalf("DownloadExport() error = %v", err)
+	}
+	quota := &fakeDistributionQuota{}
+	installer := &fakeDistributionInstaller{}
+	writer := &fakeDistributionArtifactWriter{}
+	service := NewDistributionService(installer, &fakeDistributionReleaseReader{}, writer, func(context.Context, string) error { return nil }, exportService.preparations)
+	service.SetArtifactQuota(quota)
+	review, err := service.PrepareInstall(context.Background(), InstallRequest{UserID: "user-1", WorkspaceID: "workspace-1", OriginKind: "upload", Bundle: bundle.Data})
+	if err != nil {
+		t.Fatalf("PrepareInstall() error = %v", err)
+	}
+	if _, err := service.ConfirmInstall(context.Background(), "user-1", review.PreparationID, InstallConfirmation{ExpectedDigest: review.Digest, Approved: true}); err != nil {
+		t.Fatalf("ConfirmInstall() error = %v", err)
+	}
+	if quota.released != 1 || writer.next != 1 || installer.created != 1 {
+		t.Fatalf("reservation cleanup = released %d, artifacts %d, installs %d", quota.released, writer.next, installer.created)
 	}
 }
 
@@ -187,6 +296,23 @@ func (f *fakeDistributionArtifactWriter) Put(pkg *webapp.Package) (webapp.Artifa
 	return webapp.Artifact{Digest: pkg.Digest, RelativePath: "releases/" + pkg.Digest, Bytes: pkg.ExpandedBytes, Available: true}, nil
 }
 
+type fakeDistributionQuota struct {
+	reserveErr error
+	released   int
+}
+
+func (f *fakeDistributionQuota) ReserveBytes(context.Context, string, int64, int64, int64) (plugininstances.Reservation, error) {
+	if f.reserveErr != nil {
+		return plugininstances.Reservation{}, f.reserveErr
+	}
+	return plugininstances.Reservation{ID: "reservation-1"}, nil
+}
+
+func (f *fakeDistributionQuota) ReleaseBytes(context.Context, string) error {
+	f.released++
+	return nil
+}
+
 type fakeDistributionInstaller struct {
 	created int
 	canvas  *Canvas
@@ -239,7 +365,14 @@ func newDistributionExportTestService(t *testing.T) (*DistributionService, *fake
 		ManifestJSON: manifestJSON, ValidationStatus: plugininstances.ValidationValid, CreatedAt: time.Now().UTC(),
 	}}
 	canvases := &fakeDistributionCanvasReader{canvas: &Canvas{ID: "canvas-1", WorkspaceID: "workspace-1", ScopeKind: ScopeWorkspace, Status: StatusActive, ActiveReleaseID: "release-1", ActiveReleaseStatus: ValidationValid}}
-	files := map[string][]byte{"manifest.yaml": []byte("legacy"), "ui/index.html": []byte("<html></html>")}
+	files := map[string][]byte{
+		"manifest.yaml":   []byte("legacy"),
+		"ui/index.html":   []byte("<html></html>"),
+		"ui/logo.svg":     []byte("<svg></svg>"),
+		"ui/body.woff2":   []byte("font-bytes"),
+		"ui/theme.css":    []byte("body { color: red; }"),
+		"ui/runtime.json": []byte(`{"ready":true}`),
+	}
 	preparations, err := NewPreparationStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewPreparationStore: %v", err)
@@ -249,3 +382,12 @@ func newDistributionExportTestService(t *testing.T) (*DistributionService, *fake
 }
 
 func sameReleaseID(review ExportReview, id string) bool { return review.ReleaseID == id }
+
+func hasExportFile(files []ExportFile, path string) bool {
+	for _, file := range files {
+		if file.Path == path {
+			return true
+		}
+	}
+	return false
+}

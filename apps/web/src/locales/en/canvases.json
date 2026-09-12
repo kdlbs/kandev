@@ -112,6 +112,17 @@
   "downloadsReady": "Downloads are ready",
   "packageId": "Package ID",
   "packageVersion": "Package version",
+  "distributionMetadata": "Distribution metadata",
+  "distributionMetadataHelp": "Review and complete the package identity before downloads are prepared.",
+  "displayName": "Display name",
+  "description": "Description",
+  "author": "Author",
+  "license": "License",
+  "sourceMode": "Source mode",
+  "sourceModeStatic": "Static application",
+  "sourceModeProject": "Project source",
+  "minKandevVersion": "Minimum Kandev version",
+  "repositoryUrl": "Repository URL",
   "fileInventory": "File inventory",
   "fileCount_one": "{{count}} file",
   "fileCount_other": "{{count}} files",
@@ -135,5 +146,6 @@
   "examplePackageId": "my-canvas",
   "exampleRepository": "your-org/my-canvas",
   "examplePreviewUrl": "https://cdn.example.com/my-canvas-cover.webp",
-  "examplePreviewAlt": "Canvas overview"
+  "examplePreviewAlt": "Canvas overview",
+  "yes": "Yes"
 }

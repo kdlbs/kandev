@@ -172,6 +172,7 @@
   "packageDigest": "Digest do pacote",
   "archiveDigest": "Digest do arquivo",
   "source": "Origem",
+  "destination": "Destino",
   "previewInstallIndependent": "As imagens de pré-visualização são metadados do registry. Não fazem parte do pacote nem das suas permissões.",
   "confirmInstall": "Confirmar instalação",
   "installingCanvas": "A instalar o canvas…",

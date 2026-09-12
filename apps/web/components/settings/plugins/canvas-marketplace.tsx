@@ -18,6 +18,20 @@ import { CanvasMarketplaceDetail } from "./canvas-marketplace-detail";
 
 const ALL_CATEGORIES = "__all__";
 
+export function resolveCanvasMarketplaceWorkspaceId(
+  currentWorkspaceId: string,
+  activeWorkspaceId: string | null | undefined,
+  workspaces: ReadonlyArray<{ id: string }>,
+): string {
+  if (workspaces.some((workspace) => workspace.id === currentWorkspaceId)) {
+    return currentWorkspaceId;
+  }
+  if (activeWorkspaceId && workspaces.some((workspace) => workspace.id === activeWorkspaceId)) {
+    return activeWorkspaceId;
+  }
+  return workspaces[0]?.id ?? "";
+}
+
 // eslint-disable-next-line max-lines-per-function, complexity -- One marketplace surface owns filtering, detail, and install transitions.
 export function CanvasMarketplace() {
   const { t } = useTranslation();
@@ -34,10 +48,13 @@ export function CanvasMarketplace() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
 
   useEffect(() => {
-    if (activeWorkspaceId && workspaces.some((workspace) => workspace.id === activeWorkspaceId)) {
-      setWorkspaceId(activeWorkspaceId);
-    } else if (!workspaces.some((workspace) => workspace.id === workspaceId)) {
-      setWorkspaceId(workspaces[0]?.id ?? "");
+    const nextWorkspaceId = resolveCanvasMarketplaceWorkspaceId(
+      workspaceId,
+      activeWorkspaceId,
+      workspaces,
+    );
+    if (nextWorkspaceId !== workspaceId) {
+      setWorkspaceId(nextWorkspaceId);
     }
   }, [activeWorkspaceId, workspaceId, workspaces]);
 
@@ -81,6 +98,7 @@ export function CanvasMarketplace() {
               if (!open) setInstallEntry(null);
             }}
             workspaceId={workspaceId}
+            workspaceName={workspaces.find((workspace) => workspace.id === workspaceId)?.name}
             entry={installEntry}
           />
         )}
@@ -240,6 +258,7 @@ export function CanvasMarketplace() {
             if (!open) setInstallEntry(null);
           }}
           workspaceId={workspaceId}
+          workspaceName={workspaces.find((workspace) => workspace.id === workspaceId)?.name}
           entry={installEntry}
         />
       )}

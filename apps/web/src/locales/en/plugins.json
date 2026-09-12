@@ -172,6 +172,7 @@
   "packageDigest": "Package digest",
   "archiveDigest": "Archive digest",
   "source": "Source",
+  "destination": "Destination",
   "previewInstallIndependent": "Preview images are registry metadata. They are not part of the package or its permissions.",
   "confirmInstall": "Confirm installation",
   "installingCanvas": "Installing canvas…",

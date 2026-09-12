@@ -112,6 +112,17 @@
   "downloadsReady": "下载已准备好",
   "packageId": "包 ID",
   "packageVersion": "包版本",
+  "distributionMetadata": "分发元数据",
+  "distributionMetadataHelp": "准备下载前，请检查并补充包身份信息。",
+  "displayName": "显示名称",
+  "description": "描述",
+  "author": "作者",
+  "license": "许可证",
+  "sourceMode": "源模式",
+  "sourceModeStatic": "静态应用",
+  "sourceModeProject": "项目源代码",
+  "minKandevVersion": "最低 Kandev 版本",
+  "repositoryUrl": "代码仓库 URL",
   "fileInventory": "文件清单",
   "fileCount_one": "{{count}} 个文件",
   "fileCount_other": "{{count}} 个文件",
@@ -135,5 +146,6 @@
   "examplePackageId": "我的画布",
   "exampleRepository": "你的组织/我的画布",
   "examplePreviewUrl": "https://cdn.example.cn/my-canvas-cover.webp",
-  "examplePreviewAlt": "画布概览"
+  "examplePreviewAlt": "画布概览",
+  "yes": "是"
 }

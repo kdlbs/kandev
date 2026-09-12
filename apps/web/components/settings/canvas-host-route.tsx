@@ -364,6 +364,34 @@ function useCanvasHost(canvasId: string) {
   };
 }
 
+type CanvasHostEditOptions = {
+  canvas: Canvas | null;
+  router: ReturnType<typeof useRouter>;
+  setEditing: (editing: boolean) => void;
+  setMenuOpen: (open: boolean) => void;
+  onError: (reason: unknown) => void;
+};
+
+async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void> {
+  const { canvas, router, setEditing, setMenuOpen, onError } = options;
+  if (!canvas) return;
+  setEditing(true);
+  try {
+    const response = await startCanvasEdit(canvas.id);
+    if (response.task_id) {
+      const query = response.session_id
+        ? `?sessionId=${encodeURIComponent(response.session_id)}`
+        : "";
+      router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
+    }
+  } catch (reason: unknown) {
+    onError(reason);
+  } finally {
+    setEditing(false);
+    setMenuOpen(false);
+  }
+}
+
 export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -385,24 +413,14 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
   const [shareOpen, setShareOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  const edit = async () => {
-    if (!canvas) return;
-    setEditing(true);
-    try {
-      const response = await startCanvasEdit(canvas.id);
-      if (response.task_id) {
-        const query = response.session_id
-          ? `?sessionId=${encodeURIComponent(response.session_id)}`
-          : "";
-        router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
-      }
-    } catch (reason: unknown) {
-      setHostError(canvasErrorMessage(reason, t, "canvases:actionFailed"));
-    } finally {
-      setEditing(false);
-      setMenuOpen(false);
-    }
-  };
+  const edit = () =>
+    editCanvasFromHost({
+      canvas,
+      router,
+      setEditing,
+      setMenuOpen,
+      onError: (reason) => setHostError(canvasErrorMessage(reason, t, "canvases:actionFailed")),
+    });
 
   const selectCanvas = useCallback(
     (nextCanvas: Canvas) => {

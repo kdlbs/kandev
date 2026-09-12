@@ -112,6 +112,17 @@
   "downloadsReady": "Ďōŵńĺōàďś àŕē ŕēàďŷ",
   "packageId": "Ƥàćķàĝē ĨĎ",
   "packageVersion": "Ƥàćķàĝē vēŕśĩōń",
+  "distributionMetadata": "Ďĩśţŕĩƀũţĩōń ḿēţàďàţà",
+  "distributionMetadataHelp": "Ŕēvĩēŵ àńď ćōḿƥĺēţē ţĥē ƥàćķàĝē ĩďēńţĩţŷ ƀēƒōŕē ďōŵńĺōàďś àŕē ƥŕēƥàŕēď.",
+  "displayName": "Ďĩśƥĺàŷ ńàḿē",
+  "description": "Ďēśćŕĩƥţĩōń",
+  "author": "Àũţĥōŕ",
+  "license": "Ĺĩćēńśē",
+  "sourceMode": "Śōũŕćē ḿōďē",
+  "sourceModeStatic": "Śţàţĩć àƥƥĺĩćàţĩōń",
+  "sourceModeProject": "Ƥŕōĵēćţ śōũŕćē",
+  "minKandevVersion": "Ḿĩńĩḿũḿ Ķàńďēv vēŕśĩōń",
+  "repositoryUrl": "Ŕēƥōśĩţōŕŷ ŨŔĹ",
   "fileInventory": "Ƒĩĺē ĩńvēńţōŕŷ",
   "fileCount_one": "{{count}} ƒĩĺē",
   "fileCount_other": "{{count}} ƒĩĺēś",
@@ -135,5 +146,6 @@
   "examplePackageId": "ḿŷ-ćàńvàś",
   "exampleRepository": "ŷōũŕ-ōŕĝ/ḿŷ-ćàńvàś",
   "examplePreviewUrl": "ĥţţƥś://ćďń.ēxàḿƥĺē.ćōḿ/ḿŷ-ćàńvàś-ćōvēŕ.ŵēƀƥ",
-  "examplePreviewAlt": "Ćàńvàś ōvēŕvĩēŵ"
+  "examplePreviewAlt": "Ćàńvàś ōvēŕvĩēŵ",
+  "yes": "Ŷēś"
 }

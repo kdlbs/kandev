@@ -9,32 +9,43 @@ import {
   uploadCanvasInstall,
 } from "@/lib/api/domains/canvas-distribution-api";
 
+// eslint-disable-next-line max-lines-per-function -- Preparation, invalidation, and confirmation share one generation guard.
 export function useCanvasInstall(workspaceId: string) {
   const [review, setReview] = useState<InstallReview | null>(null);
   const [result, setResult] = useState<InstallResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const generation = useRef(0);
+  const reviewRef = useRef<InstallReview | null>(null);
 
-  const begin = useCallback(async (operation: () => Promise<InstallReview>) => {
-    const current = ++generation.current;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const next = await operation();
-      if (generation.current === current) setReview(next);
-      return next;
-    } catch (reason) {
-      if (generation.current === current) {
-        setReview(null);
-        setError(reason);
-      }
-      throw reason;
-    } finally {
-      if (generation.current === current) setLoading(false);
-    }
+  const updateReview = useCallback((next: InstallReview | null) => {
+    reviewRef.current = next;
+    setReview(next);
   }, []);
+
+  const begin = useCallback(
+    async (operation: () => Promise<InstallReview>) => {
+      const current = ++generation.current;
+      setLoading(true);
+      setError(null);
+      updateReview(null);
+      setResult(null);
+      try {
+        const next = await operation();
+        if (generation.current === current) updateReview(next);
+        return next;
+      } catch (reason) {
+        if (generation.current === current) {
+          updateReview(null);
+          setError(reason);
+        }
+        throw reason;
+      } finally {
+        if (generation.current === current) setLoading(false);
+      }
+    },
+    [updateReview],
+  );
 
   const prepareUrl = useCallback(
     (bundleUrl: string) =>
@@ -64,6 +75,7 @@ export function useCanvasInstall(workspaceId: string) {
 
   const confirm = useCallback(async () => {
     if (!review) return null;
+    const current = generation.current;
     setLoading(true);
     setError(null);
     try {
@@ -71,31 +83,48 @@ export function useCanvasInstall(workspaceId: string) {
         review.preparation_id,
         review.archive_sha256 ?? review.sha256,
       );
-      setResult(next);
+      if (generation.current === current) setResult(next);
       return next;
     } catch (reason) {
-      setError(reason);
+      if (generation.current === current) setError(reason);
       throw reason;
     } finally {
-      setLoading(false);
+      if (generation.current === current) setLoading(false);
     }
   }, [review]);
 
   const cancel = useCallback(async () => {
-    if (!review) return;
     generation.current += 1;
-    await cancelCanvasInstall(review.preparation_id).catch(() => undefined);
-    setReview(null);
+    const currentReview = reviewRef.current;
+    if (currentReview) {
+      await cancelCanvasInstall(currentReview.preparation_id).catch(() => undefined);
+    }
+    updateReview(null);
     setResult(null);
-  }, [review]);
+    setError(null);
+    setLoading(false);
+  }, [updateReview]);
 
-  const reset = useCallback(() => {
+  const invalidate = useCallback(() => {
     generation.current += 1;
+    const currentReview = reviewRef.current;
+    reviewRef.current = null;
     setReview(null);
     setResult(null);
     setError(null);
     setLoading(false);
+    if (currentReview) {
+      void cancelCanvasInstall(currentReview.preparation_id).catch(() => undefined);
+    }
   }, []);
+
+  const reset = useCallback(() => {
+    generation.current += 1;
+    updateReview(null);
+    setResult(null);
+    setError(null);
+    setLoading(false);
+  }, [updateReview]);
 
   return {
     review,
@@ -108,5 +137,6 @@ export function useCanvasInstall(workspaceId: string) {
     confirm,
     cancel,
     reset,
+    invalidate,
   };
 }

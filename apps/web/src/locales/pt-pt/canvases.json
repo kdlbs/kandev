@@ -112,6 +112,17 @@
   "downloadsReady": "Transferências prontas",
   "packageId": "ID do pacote",
   "packageVersion": "Versão do pacote",
+  "distributionMetadata": "Metadados de distribuição",
+  "distributionMetadataHelp": "Reveja e complete a identidade do pacote antes de preparar as transferências.",
+  "displayName": "Nome de apresentação",
+  "description": "Descrição",
+  "author": "Autor",
+  "license": "Licença",
+  "sourceMode": "Modo de origem",
+  "sourceModeStatic": "Aplicação estática",
+  "sourceModeProject": "Código-fonte do projeto",
+  "minKandevVersion": "Versão mínima do Kandev",
+  "repositoryUrl": "URL do repositório",
   "fileInventory": "Inventário de ficheiros",
   "fileCount_one": "{{count}} ficheiro",
   "fileCount_other": "{{count}} ficheiros",
@@ -135,5 +146,6 @@
   "examplePackageId": "o-meu-canvas",
   "exampleRepository": "a-sua-org/o-meu-canvas",
   "examplePreviewUrl": "https://cdn.exemplo.pt/o-meu-canvas-capa.webp",
-  "examplePreviewAlt": "Visão geral do canvas"
+  "examplePreviewAlt": "Visão geral do canvas",
+  "yes": "Sim"
 }

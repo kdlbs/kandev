@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	canvasservice "github.com/kandev/kandev/internal/canvas"
+	plugininstances "github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/webapp"
 )
 
@@ -261,13 +262,18 @@ func canvasDistributionErrorStatus(err error) (int, string) {
 		return http.StatusServiceUnavailable, "install_unavailable"
 	case errors.Is(err, canvasservice.ErrInstallReceiptNotFound):
 		return http.StatusNotFound, "install_not_found"
-	case errors.Is(err, canvasservice.ErrPreparationLimit):
+	case errors.Is(err, canvasservice.ErrPreparationLimit), isCanvasStorageLimitError(err):
 		return http.StatusConflict, "storage_limit_reached"
 	case isCanvasSourceUnavailableError(err):
 		return http.StatusConflict, "source_unavailable"
 	default:
 		return http.StatusInternalServerError, "internal_error"
 	}
+}
+
+func isCanvasStorageLimitError(err error) bool {
+	return errors.Is(err, plugininstances.ErrWorkspaceStorageLimit) ||
+		errors.Is(err, plugininstances.ErrInstallationStorageLimit)
 }
 
 func isCanvasInvalidInstallError(err error) bool {
