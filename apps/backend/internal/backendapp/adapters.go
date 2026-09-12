@@ -1042,10 +1042,12 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContext(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared,
 	)
 }
 
@@ -1059,12 +1061,33 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
-		canvasGuidanceResolved, includeCanvasGuidance,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt
+// forwards a first direct prompt whose task brief was admitted and persisted
+// before launch.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
 	)
 }
 

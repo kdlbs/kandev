@@ -240,6 +240,8 @@ type CreateTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   agent_profile_id?: string;
+  /** Prepare a CREATED session without launching the agent. */
+  prepare_session?: boolean;
   session_target?: WorkflowSessionTarget | null;
   executor_profile_id?: string;
   repository_ids?: string[];
@@ -309,6 +311,7 @@ function buildCreateTaskBody(
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
   setIf(body, "agent_profile_id", options.agent_profile_id);
+  if (options.prepare_session) body.prepare_session = true;
   if (options.session_target !== undefined) body.session_target = options.session_target;
   setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
@@ -530,39 +533,7 @@ export class ApiClient {
   async createTask(
     workspaceId: string,
     title: string,
-    opts?: {
-      description?: string;
-      workflow_id?: string;
-      workflow_step_id?: string;
-      /** Stored in task.Metadata so auto_start_agent can pick it up on on_enter. */
-      agent_profile_id?: string;
-      session_target?: WorkflowSessionTarget | null;
-      /** Executor profile used when the task session is prepared. */
-      executor_profile_id?: string;
-      /** Repository IDs to associate with the task (required for agent execution). */
-      repository_ids?: string[];
-      /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
-      repositories?: TaskRepositoryInput[];
-      /** When true, task is placed at position 0 regardless of is_start_step. */
-      plan_mode?: boolean;
-      /** Start the task with the immutable autopilot MCP/prompt contract. */
-      autopilot?: boolean;
-      /** Extra metadata to store on the task. */
-      metadata?: Record<string, unknown>;
-      /** Parent task ID for subtasks. */
-      parent_id?: string;
-      /** Workspace sharing policy used by parent/child task trees. */
-      workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
-      /** Existing group required when workspace_mode is shared_group. */
-      workspace_group_id?: string;
-      attachments?: MessageAttachmentInput[];
-      /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
-      blocked_by?: string[];
-      /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
-      start_when_unblocked?: boolean;
-      /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
-      priority?: TaskPriority;
-    },
+    opts?: CreateTaskOpts,
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
   }

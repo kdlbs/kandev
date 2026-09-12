@@ -299,6 +299,7 @@ type DirectPromptStarter interface {
 		attachments []v1.MessageAttachment,
 		references []v1.EntityReference,
 		promptReferenceContext string,
+		promptReferencesPrepared bool,
 	) (*executor.TaskExecution, error)
 }
 
@@ -315,6 +316,23 @@ type DirectPromptStarterWithCanvasGuidance interface {
 		attachments []v1.MessageAttachment,
 		references []v1.EntityReference,
 		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		canvasGuidanceResolved, includeCanvasGuidance bool,
+	) (*executor.TaskExecution, error)
+}
+
+// DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt starts a prepared
+// direct-message session without reapplying workflow replacement semantics to
+// a prompt that already contains the task brief and user instruction.
+type DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt interface {
+	StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
 		canvasGuidanceResolved, includeCanvasGuidance bool,
 	) (*executor.TaskExecution, error)
 }
@@ -3792,6 +3810,12 @@ func (s *Service) QueueUserPrompt(
 		return err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
+	if deferFastPath, _ := queueMetadata[MetaKeyInitialTaskBriefDispatchPending].(bool); deferFastPath {
+		// A later first-message contender is already durably queued. Let the
+		// admitted candidate launch first; the normal agent-ready/boot-ready
+		// drains will deliver this entry in FIFO order.
+		return nil
+	}
 
 	// T2: enqueue-side fast-path drain. The user's WIP wait is a
 	// first-class contract (the dispatcher gates on

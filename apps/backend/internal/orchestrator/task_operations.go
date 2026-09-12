@@ -512,10 +512,12 @@ func (s *Service) StartCreatedSessionWithPromptContext(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 ) (*executor.TaskExecution, error) {
 	return s.startCreatedSession(
 		ctx, taskID, sessionID, agentProfileID, prompt,
-		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, startCreatedSessionOptions{},
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		startCreatedSessionOptions{promptReferencesPrepared: promptReferencesPrepared},
 	)
 }
 
@@ -530,14 +532,41 @@ func (s *Service) StartCreatedSessionWithPromptContextAndCanvasGuidance(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
 ) (*executor.TaskExecution, error) {
 	return s.startCreatedSession(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
 		startCreatedSessionOptions{
-			canvasGuidanceResolved: canvasGuidanceResolved,
-			includeCanvasGuidance:  includeCanvasGuidance,
+			canvasGuidanceResolved:   canvasGuidanceResolved,
+			includeCanvasGuidance:    includeCanvasGuidance,
+			promptReferencesPrepared: promptReferencesPrepared,
+		},
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt
+// starts a prepared direct-message session with a prompt whose visible task
+// brief and instruction were already admitted and persisted together.
+func (s *Service) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		startCreatedSessionOptions{
+			canvasGuidanceResolved:   canvasGuidanceResolved,
+			includeCanvasGuidance:    includeCanvasGuidance,
+			promptReferencesPrepared: promptReferencesPrepared,
+			preserveDirectPrompt:     true,
 		},
 	)
 }
@@ -576,6 +605,10 @@ type startCreatedSessionOptions struct {
 	// locally because no earlier producer has made a trusted decision.
 	canvasGuidanceResolved bool
 	includeCanvasGuidance  bool
+	// promptReferencesPrepared records that the caller accepted the exact
+	// server-owned expansion snapshot, including an empty snapshot.
+	promptReferencesPrepared bool
+	preserveDirectPrompt     bool
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -762,10 +795,19 @@ func (s *Service) startCreatedSession(
 	planModeActive := planMode
 	if !options.promptAlreadyComposed {
 		var generatedPromptReferenceContext string
-		effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContext(
-			ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-			planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
-		)
+		if options.preserveDirectPrompt {
+			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
+				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
+				options.promptReferencesPrepared, true,
+			)
+		} else {
+			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
+				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
+				options.promptReferencesPrepared, false,
+			)
+		}
 		if generatedPromptReferenceContext != "" {
 			// The workflow helper preserves a direct message's acceptance-time
 			// context. Auto-started workflow prompts have no prior context, so their
@@ -2209,6 +2251,26 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 	skipStepPrompt bool,
 	trustedPromptContext string,
 ) (string, bool, string) {
+	return s.applyWorkflowAndPlanModeWithPromptContextOptions(
+		ctx, prompt, taskID, sessionID, workflowStepID, planMode,
+		isEphemeral, isPassthrough, skipStepPrompt, trustedPromptContext, false, false,
+	)
+}
+
+func (s *Service) applyWorkflowAndPlanModeWithPromptContextOptions(
+	ctx context.Context,
+	prompt string,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+	planMode bool,
+	isEphemeral bool,
+	isPassthrough bool,
+	skipStepPrompt bool,
+	trustedPromptContext string,
+	promptReferencesPrepared bool,
+	preserveDirectPrompt bool,
+) (string, bool, string) {
 	effectivePrompt := prompt
 	promptReferenceContext := ""
 	if isPassthrough && trustedPromptContext != "" {
@@ -2234,29 +2296,16 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 		} else if step != nil {
 			workflowPromptComposed = true
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			if trustedPromptContext != "" {
-				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContext(
-					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, trustedPromptContext,
-				)
-			} else {
-				effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
-					ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
-				)
-			}
+			effectivePrompt, promptReferenceContext = s.buildWorkflowStepPrompt(
+				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
+				trustedPromptContext, promptReferencesPrepared, preserveDirectPrompt,
+			)
 		}
 	}
 	if !workflowPromptComposed {
-		if trustedPromptContext != "" {
-			trustedBlock := sysprompt.Wrap(trustedPromptContext)
-			if !strings.Contains(effectivePrompt, trustedBlock) {
-				effectivePrompt += "\n\n" + trustedBlock
-			}
-			promptReferenceContext = trustedPromptContext
-		} else {
-			effectivePrompt, promptReferenceContext = s.expandPromptReferencesWithContext(
-				ctx, effectivePrompt, isPassthrough,
-			)
-		}
+		effectivePrompt, promptReferenceContext = s.applyDirectPromptReferenceContext(
+			ctx, effectivePrompt, isPassthrough, trustedPromptContext, promptReferencesPrepared,
+		)
 	}
 
 	if planMode && !stepHasPlanMode {
@@ -2267,6 +2316,52 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 	}
 
 	return effectivePrompt, planMode || stepHasPlanMode, promptReferenceContext
+}
+
+func (s *Service) applyDirectPromptReferenceContext(
+	ctx context.Context,
+	prompt string,
+	isPassthrough bool,
+	trustedPromptContext string,
+	promptReferencesPrepared bool,
+) (string, string) {
+	if trustedPromptContext != "" {
+		trustedBlock := sysprompt.Wrap(trustedPromptContext)
+		if !strings.Contains(prompt, trustedBlock) {
+			prompt += "\n\n" + trustedBlock
+		}
+		return prompt, trustedPromptContext
+	}
+	if promptReferencesPrepared {
+		// An accepted empty snapshot is authoritative. Re-expanding here
+		// would observe saved-prompt definitions changed after admission.
+		return prompt, ""
+	}
+	return s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
+}
+
+func (s *Service) buildWorkflowStepPrompt(
+	ctx context.Context,
+	basePrompt string,
+	step *wfmodels.WorkflowStep,
+	taskID string,
+	sessionID string,
+	isPassthrough bool,
+	skipStepPrompt bool,
+	trustedPromptContext string,
+	promptReferencesPrepared bool,
+	preserveDirectPrompt bool,
+) (string, string) {
+	if trustedPromptContext != "" {
+		return s.buildWorkflowPromptWithTrustedContextOptions(
+			ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
+			trustedPromptContext, preserveDirectPrompt, promptReferencesPrepared,
+		)
+	}
+	return s.buildWorkflowPromptWithContextOptions(
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, preserveDirectPrompt,
+		promptReferencesPrepared,
+	)
 }
 
 // backfillInitialUserMessageIfMissing records the task's description as the
@@ -2368,8 +2463,26 @@ func (s *Service) buildWorkflowPromptWithContext(
 	isPassthrough bool,
 	skipStepPrompt bool,
 ) (string, string) {
-	return s.buildWorkflowPromptWithTrustedContext(
+	return s.buildWorkflowPromptWithContextOptions(
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, false,
+		false,
+	)
+}
+
+func (s *Service) buildWorkflowPromptWithContextOptions(
+	ctx context.Context,
+	basePrompt string,
+	step *wfmodels.WorkflowStep,
+	taskID string,
+	sessionID string,
+	isPassthrough bool,
+	skipStepPrompt bool,
+	preserveDirectPrompt bool,
+	promptReferencesPrepared bool,
+) (string, string) {
+	return s.buildWorkflowPromptWithTrustedContextOptions(
 		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, "",
+		preserveDirectPrompt, promptReferencesPrepared,
 	)
 }
 
@@ -2387,6 +2500,24 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 	skipStepPrompt bool,
 	trustedPromptContext string,
 ) (string, string) {
+	return s.buildWorkflowPromptWithTrustedContextOptions(
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
+		trustedPromptContext, false, false,
+	)
+}
+
+func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
+	ctx context.Context,
+	basePrompt string,
+	step *wfmodels.WorkflowStep,
+	taskID string,
+	sessionID string,
+	isPassthrough bool,
+	skipStepPrompt bool,
+	trustedPromptContext string,
+	preserveDirectPrompt bool,
+	promptReferencesPrepared bool,
+) (string, string) {
 	_ = sessionID
 	var parts []string
 
@@ -2398,7 +2529,7 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 	// fallback for this one entry; only the workflow-level block above (and any
 	// one-time move instructions appended by the caller) remain.
 	if !skipStepPrompt {
-		parts = append(parts, stepPromptBody(step, taskID, basePrompt))
+		parts = append(parts, stepPromptBodyWithOptions(step, taskID, basePrompt, preserveDirectPrompt))
 	}
 
 	joined := strings.Join(parts, "\n\n")
@@ -2409,6 +2540,9 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 		}
 		return joined, trustedPromptContext
 	}
+	if promptReferencesPrepared {
+		return joined, ""
+	}
 	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 }
 
@@ -2417,12 +2551,19 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 // without that placeholder used verbatim, or the base prompt when the step has
 // no prompt of its own.
 func stepPromptBody(step *wfmodels.WorkflowStep, taskID, basePrompt string) string {
+	return stepPromptBodyWithOptions(step, taskID, basePrompt, false)
+}
+
+func stepPromptBodyWithOptions(step *wfmodels.WorkflowStep, taskID, basePrompt string, preserveDirectPrompt bool) string {
 	if step.Prompt == "" {
 		return basePrompt
 	}
 	interpolatedPrompt := sysprompt.InterpolatePlaceholders(step.Prompt, taskID)
 	if strings.Contains(interpolatedPrompt, "{{task_prompt}}") {
 		return strings.Replace(interpolatedPrompt, "{{task_prompt}}", basePrompt, 1)
+	}
+	if preserveDirectPrompt && strings.TrimSpace(basePrompt) != "" {
+		return interpolatedPrompt + "\n\n" + basePrompt
 	}
 	// A step prompt without {{task_prompt}} is treated as the full visible prompt.
 	return interpolatedPrompt

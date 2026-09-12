@@ -5291,6 +5291,11 @@ const metaKeyUserMessageRecorded = "user_message_recorded"
 // one prompt.
 const MetaKeyTurnStartAlreadyProcessed = "turn_start_already_processed"
 
+// MetaKeyInitialTaskBriefDispatchPending marks a queued user prompt that lost
+// the atomic initial-task-brief admission race. Its enqueue path must wait for
+// the admitted candidate to launch before attempting a fast-path drain.
+const MetaKeyInitialTaskBriefDispatchPending = "initial_task_brief_dispatch_pending"
+
 func turnStartAlreadyProcessed(metadata map[string]interface{}) bool {
 	processed, _ := metadata[MetaKeyTurnStartAlreadyProcessed].(bool)
 	return processed

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/kandev/kandev/internal/task/repository"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -38,8 +39,8 @@ type messageAddSwitchRepo struct {
 	tasks     map[string]*models.Task
 	sessions  map[string]*models.TaskSession
 	primaryID string
-	// messagesMu guards messages: async dispatch goroutines (e.g. a steer that
-	// falls back and writes an error message) can append while a test reads.
+	// messagesMu guards this fake's shared state: concurrent handler requests
+	// exercise the same repository methods while admission is being tested.
 	messagesMu        sync.Mutex
 	messages          []*models.Message
 	queuedMessage     *messagequeue.QueuedMessage
@@ -72,6 +73,8 @@ func (r *messageAddSwitchRepo) firstMessageContent() string {
 }
 
 func (r *messageAddSwitchRepo) GetMessage(_ context.Context, id string) (*models.Message, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	if r.idempotentMessage != nil && r.idempotentMessage.ID == id {
 		return r.idempotentMessage, nil
 	}
@@ -80,6 +83,8 @@ func (r *messageAddSwitchRepo) GetMessage(_ context.Context, id string) (*models
 
 // GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
 func (r *messageAddSwitchRepo) GetMessageWithPromptIndex(_ context.Context, id string) (*models.Message, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	r.messageLookupCalls++
 	messageVisible := r.idempotentMessageAfterLookup == 0 ||
 		r.messageLookupCalls >= r.idempotentMessageAfterLookup
@@ -90,14 +95,22 @@ func (r *messageAddSwitchRepo) GetMessageWithPromptIndex(_ context.Context, id s
 }
 
 func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	r.taskGetCalls++
 	if task, ok := r.tasks[id]; ok {
-		return task, nil
+		copy := *task
+		copy.Metadata = maps.Clone(task.Metadata)
+		copy.Repositories = append([]*models.TaskRepository(nil), task.Repositories...)
+		copy.WorkspaceFolders = append([]*models.TaskWorkspaceFolder(nil), task.WorkspaceFolders...)
+		return &copy, nil
 	}
 	return nil, sql.ErrNoRows
 }
 
 func (r *messageAddSwitchRepo) UpdateTaskState(_ context.Context, id string, state v1.TaskState) error {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	r.taskStateUpdateCalls++
 	if task, ok := r.tasks[id]; ok {
 		task.State = state
@@ -127,20 +140,25 @@ func (v *fakeReferenceSubmissionValidator) ValidateForSubmission(
 }
 
 type capturedFirstTurn struct {
-	content    string
-	references []v1.EntityReference
+	content                string
+	references             []v1.EntityReference
+	promptReferenceContext string
 }
 
 type firstTurnCaptureOrchestrator struct {
-	started          chan capturedFirstTurn
-	turnStartResult  orchestrator.ProcessOnTurnStartResult
-	queuedPromptCall *queuedPromptCall
-	queuedNotified   bool
+	started           chan capturedFirstTurn
+	turnStartResult   orchestrator.ProcessOnTurnStartResult
+	mu                sync.Mutex
+	turnStartCalls    int
+	queuedPromptCall  *queuedPromptCall
+	queuedPromptCalls []queuedPromptCall
+	queuedNotified    bool
 }
 
 type queuedPromptCall struct {
 	taskID, sessionID, prompt string
 	userMessageRecorded       bool
+	metadata                  map[string]interface{}
 }
 
 func (o *firstTurnCaptureOrchestrator) PromptTask(
@@ -168,18 +186,43 @@ func (o *firstTurnCaptureOrchestrator) StartCreatedSession(
 }
 
 func (o *firstTurnCaptureOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	o.mu.Lock()
+	o.turnStartCalls++
+	o.mu.Unlock()
 	return o.turnStartResult, nil
 }
 
-func (o *firstTurnCaptureOrchestrator) QueueUserPrompt(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, _ map[string]interface{}, userMessageRecorded bool) error {
-	o.queuedPromptCall = &queuedPromptCall{taskID: taskID, sessionID: sessionID, prompt: prompt, userMessageRecorded: userMessageRecorded}
+func (o *firstTurnCaptureOrchestrator) QueueUserPrompt(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
+	metadataCopy := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		metadataCopy[key] = value
+	}
+	call := queuedPromptCall{taskID: taskID, sessionID: sessionID, prompt: prompt, userMessageRecorded: userMessageRecorded, metadata: metadataCopy}
+	o.mu.Lock()
+	o.queuedPromptCall = &call
+	o.queuedPromptCalls = append(o.queuedPromptCalls, call)
+	o.mu.Unlock()
 	return nil
 }
 
 func (*firstTurnCaptureOrchestrator) MaxQueuedPromptsPerSession() int { return 10 }
 
 func (o *firstTurnCaptureOrchestrator) NotifyQueuedUserPrompt(context.Context, string, string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.queuedNotified = true
+}
+
+func (o *firstTurnCaptureOrchestrator) queueCalls() []queuedPromptCall {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]queuedPromptCall(nil), o.queuedPromptCalls...)
+}
+
+func (o *firstTurnCaptureOrchestrator) onTurnStartCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.turnStartCalls
 }
 
 func (o *firstTurnCaptureOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
@@ -365,6 +408,8 @@ func TestWSAddMessageRejectsEntityReferencesBeforeTaskMutation(t *testing.T) {
 }
 
 func (r *messageAddSwitchRepo) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	if r.getCalls == nil {
 		r.getCalls = make(map[string]int)
 	}
@@ -382,6 +427,8 @@ func (r *messageAddSwitchRepo) ClaimPromptableTaskSessionIfActive(
 	_ context.Context,
 	id string,
 ) (models.PromptableTaskSessionClaim, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	session, ok := r.sessions[id]
 	if !ok {
 		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
@@ -394,6 +441,8 @@ func (r *messageAddSwitchRepo) ClaimPromptableTaskSessionIfActive(
 }
 
 func (r *messageAddSwitchRepo) GetPrimarySessionByTaskID(_ context.Context, taskID string) (*models.TaskSession, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	session, ok := r.sessions[r.primaryID]
 	if !ok || session.TaskID != taskID {
 		return nil, sql.ErrNoRows
@@ -413,6 +462,8 @@ func (r *messageAddSwitchRepo) GetActiveTurnBySessionID(_ context.Context, _ str
 }
 
 func (r *messageAddSwitchRepo) CreateTurn(_ context.Context, turn *models.Turn) error {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
 	r.turns = append(r.turns, turn)
 	return nil
 }

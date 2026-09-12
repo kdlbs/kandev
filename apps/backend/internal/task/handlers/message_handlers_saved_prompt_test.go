@@ -101,6 +101,7 @@ func (o *savedPromptDeliveryOrchestrator) StartCreatedSessionWithPromptContext(
 	_ []v1.MessageAttachment,
 	_ []v1.EntityReference,
 	promptReferenceContext string,
+	_ bool,
 ) (*executor.TaskExecution, error) {
 	if o.independentlyResolvesCanvas {
 		includeCanvasGuidance, resolveErr := o.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
@@ -122,6 +123,7 @@ func (o *savedPromptDeliveryOrchestrator) StartCreatedSessionWithPromptContextAn
 	_ []v1.MessageAttachment,
 	_ []v1.EntityReference,
 	promptReferenceContext string,
+	_ bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
 ) (*executor.TaskExecution, error) {
 	o.started <- savedPromptStarted{
