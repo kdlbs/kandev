@@ -494,6 +494,8 @@ async function waitForPortForward(proc: ChildProcess, timeoutMs = 30_000): Promi
 }
 
 export function waitForInClusterBackendReady(baseUrl: string, proc?: ChildProcess): Promise<void> {
+  // /health only proves that the listener is bound; /ready gates API
+  // requests until the in-cluster backend has finished wiring routes.
   return waitForHealth(`${baseUrl}/ready`, 30_000, proc);
 }
 

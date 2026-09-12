@@ -15,10 +15,12 @@ import (
 	"github.com/kandev/kandev/internal/scriptengine"
 )
 
-const (
-	sshCleanupTimeout        = 60 * time.Second
-	sshPrepareOutputMaxLines = 20
-)
+const sshPrepareOutputMaxLines = 20
+
+// sshCleanupTimeout bounds the remote cleanup script a session stop issues.
+// A package-level variable, not a constant, so a backstop test need not wait
+// out real seconds (see executor_ssh_keepalive.go).
+var sshCleanupTimeout = 60 * time.Second
 
 func cloneSSHMetadata(metadata map[string]interface{}) map[string]interface{} {
 	if len(metadata) == 0 {
