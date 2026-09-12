@@ -34,6 +34,11 @@ This design owns plugin instances, immutable releases, capability grants,
 runtime tokens, web data access, shared instance state, and live browser
 events. The Canvases system owns canvas scope changes and user workflows.
 
+The [canvas distribution design](../../canvases/system-design/marketplace-sharing.md)
+adds a static distribution profile and an inert retained project-source subtree.
+Preview images belong to registry listings. The profile reuses this runtime boundary;
+native plugin package installation does not become a canvas import path.
+
 This design implements
 [ADR-2026-08-26-plugin-backed-web-app-canvases](../../../decisions/2026-08-26-plugin-backed-web-app-canvases.md).
 It extends the data boundary from

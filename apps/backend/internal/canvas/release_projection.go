@@ -1,15 +1,27 @@
 package canvas
 
 import (
+	"encoding/json"
 	"sort"
 
 	plugininstances "github.com/kandev/kandev/internal/plugins/instances"
+	"github.com/kandev/kandev/internal/plugins/manifest"
 )
 
 func releaseMetadata(release plugininstances.Release, scope string, grants []plugininstances.Grant) *ReleaseMetadata {
 	permissions := ReleasePermissionSummary(release)
+	seed := releaseManifestSeed(release.ManifestJSON)
 	return &ReleaseMetadata{
 		ID:                 release.ID,
+		PackageID:          seed.PackageID,
+		Version:            seed.Version,
+		DisplayName:        seed.DisplayName,
+		Description:        seed.Description,
+		Author:             seed.Author,
+		License:            seed.License,
+		SourceMode:         seed.SourceMode,
+		MinKandevVersion:   seed.MinKandevVersion,
+		RepoURL:            seed.RepoURL,
 		PackageDigest:      release.PackageDigest,
 		ValidationStatus:   release.ValidationStatus,
 		ValidationError:    release.ValidationError,
@@ -23,6 +35,39 @@ func releaseMetadata(release plugininstances.Release, scope string, grants []plu
 		ProtocolVersion:    release.ProtocolVersion,
 		CreatedAt:          release.CreatedAt,
 	}
+}
+
+type manifestSeed struct {
+	PackageID        string
+	Version          string
+	DisplayName      string
+	Description      string
+	Author           string
+	License          string
+	SourceMode       string
+	MinKandevVersion string
+	RepoURL          string
+}
+
+func releaseManifestSeed(data json.RawMessage) manifestSeed {
+	var value manifest.Manifest
+	if err := json.Unmarshal(data, &value); err != nil {
+		return manifestSeed{}
+	}
+	seed := manifestSeed{
+		PackageID:        value.ID,
+		Version:          value.Version,
+		DisplayName:      value.DisplayName,
+		Description:      value.Description,
+		Author:           value.Author,
+		MinKandevVersion: value.MinKandevVersion,
+		RepoURL:          value.RepoURL,
+	}
+	if value.Distribution != nil {
+		seed.License = value.Distribution.License
+		seed.SourceMode = value.Distribution.SourceMode
+	}
+	return seed
 }
 
 func effectiveGrantProjection(instance plugininstances.Instance, summary PermissionSummary, grants []plugininstances.Grant) []GrantProjection {

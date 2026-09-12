@@ -57,7 +57,99 @@ CREATE TABLE IF NOT EXISTS canvas_lifecycle_admission (
 );
 INSERT INTO canvas_lifecycle_admission (id, version)
 VALUES (1, 1) ON CONFLICT (id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS canvas_install_receipts (
+  preparation_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  canvas_id TEXT NOT NULL UNIQUE,
+  workspace_id TEXT NOT NULL,
+  package_id TEXT NOT NULL,
+  package_version TEXT NOT NULL,
+  package_digest TEXT NOT NULL,
+  source_id TEXT NOT NULL DEFAULT '',
+  repository_url TEXT NOT NULL DEFAULT '',
+  origin_kind TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_install_receipts_workspace
+  ON canvas_install_receipts(workspace_id, created_at, preparation_id);
 `
+
+func (r *Repository) GetInstallReceipt(ctx context.Context, preparationID, userID string) (InstallReceipt, error) {
+	if strings.TrimSpace(preparationID) == "" || strings.TrimSpace(userID) == "" {
+		return InstallReceipt{}, ErrInstallReceiptNotFound
+	}
+	var row struct {
+		PreparationID  string `db:"preparation_id"`
+		UserID         string `db:"user_id"`
+		CanvasID       string `db:"canvas_id"`
+		WorkspaceID    string `db:"workspace_id"`
+		PackageID      string `db:"package_id"`
+		PackageVersion string `db:"package_version"`
+		PackageDigest  string `db:"package_digest"`
+		SourceID       string `db:"source_id"`
+		RepositoryURL  string `db:"repository_url"`
+		OriginKind     string `db:"origin_kind"`
+		CreatedAt      string `db:"created_at"`
+	}
+	err := r.ro.GetContext(ctx, &row, r.ro.Rebind(`SELECT preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, source_id, repository_url, origin_kind, created_at FROM canvas_install_receipts WHERE preparation_id = ? AND user_id = ?`), preparationID, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InstallReceipt{}, ErrInstallReceiptNotFound
+	}
+	if err != nil {
+		return InstallReceipt{}, err
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
+	if err != nil {
+		return InstallReceipt{}, err
+	}
+	return InstallReceipt{PreparationID: row.PreparationID, UserID: row.UserID, CanvasID: row.CanvasID, WorkspaceID: row.WorkspaceID, PackageID: row.PackageID, Version: row.PackageVersion, Digest: row.PackageDigest, SourceID: row.SourceID, RepositoryURL: row.RepositoryURL, OriginKind: row.OriginKind, CreatedAt: createdAt}, nil
+}
+
+func (r *Repository) CreateInstallReceiptTx(ctx context.Context, tx *sqlx.Tx, receipt InstallReceipt) error {
+	if strings.TrimSpace(receipt.PreparationID) == "" || strings.TrimSpace(receipt.UserID) == "" || strings.TrimSpace(receipt.CanvasID) == "" || strings.TrimSpace(receipt.WorkspaceID) == "" || strings.TrimSpace(receipt.PackageID) == "" || strings.TrimSpace(receipt.Version) == "" || strings.TrimSpace(receipt.Digest) == "" || strings.TrimSpace(receipt.OriginKind) == "" {
+		return ErrInstallInvalid
+	}
+	createdAt := receipt.CreatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	_, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO canvas_install_receipts (preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, source_id, repository_url, origin_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), receipt.PreparationID, receipt.UserID, receipt.CanvasID, receipt.WorkspaceID, receipt.PackageID, receipt.Version, receipt.Digest, receipt.SourceID, receipt.RepositoryURL, receipt.OriginKind, createdAt.Format(time.RFC3339Nano))
+	return err
+}
+
+func (r *Repository) CreateInstallReceipt(ctx context.Context, receipt InstallReceipt) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.CreateInstallReceiptTx(ctx, tx, receipt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) DeleteInstallReceiptTx(ctx context.Context, tx *sqlx.Tx, canvasID string) error {
+	if strings.TrimSpace(canvasID) == "" {
+		return ErrInvalidCanvas
+	}
+	_, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM canvas_install_receipts WHERE canvas_id = ?`), canvasID)
+	return err
+}
+
+// DeleteInstallReceipt removes the durable retry receipt for a canvas after
+// the canvas authority and plugin instance have been removed.
+func (r *Repository) DeleteInstallReceipt(ctx context.Context, canvasID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.DeleteInstallReceiptTx(ctx, tx, canvasID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // NewRepository constructs the canvas metadata repository on an existing
 // application database pool. Plugin instance schema initialization remains

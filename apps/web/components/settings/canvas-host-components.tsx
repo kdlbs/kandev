@@ -7,6 +7,7 @@ import {
   IconExternalLink,
   IconLayoutGrid,
   IconListDetails,
+  IconShare3,
   IconSparkles,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -213,12 +214,14 @@ export function CanvasDesktopActions({
   onEdit,
   onPromote,
   onReleases,
+  onShare,
 }: {
   canvas: Canvas;
   editing: boolean;
   onEdit: () => void;
   onPromote: () => void;
   onReleases: () => void;
+  onShare: () => void;
 }) {
   const { t } = useTranslation();
   const lifecycleLocked = canvas.status === "archived" || canvas.status === "disabled";
@@ -253,6 +256,16 @@ export function CanvasDesktopActions({
         <Button variant="outline" size="sm" className="cursor-pointer" onClick={onReleases}>
           <IconListDetails className="mr-1.5 h-3.5 w-3.5" />
           {t("canvases:releasesAndPermissions")}
+        </Button>
+      </CanvasDesktopActionTooltip>
+      <CanvasDesktopActionTooltip
+        description={t("canvases:shareCanvasDescription")}
+        disabled={false}
+        testId="canvas-action-share-tooltip-trigger"
+      >
+        <Button variant="outline" size="sm" className="cursor-pointer" onClick={onShare}>
+          <IconShare3 className="mr-1.5 h-3.5 w-3.5" />
+          {t("canvases:shareCanvas")}
         </Button>
       </CanvasDesktopActionTooltip>
       {canvas.scope_kind === "task" && (
@@ -469,6 +482,30 @@ function MobileCanvasPromoteAction({
   );
 }
 
+function MobileCanvasShareAction({
+  onShare,
+  t,
+}: {
+  onShare: () => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <MobileCanvasAction
+      description={t("canvases:shareCanvasDescription")}
+      testId="canvas-action-share-help"
+    >
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start cursor-pointer"
+        onClick={onShare}
+      >
+        <IconShare3 className="mr-2 h-4 w-4" />
+        {t("canvases:shareCanvas")}
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
 function MobileCanvasNewTabAction({ canvas, t }: { canvas: Canvas; t: (key: string) => string }) {
   return (
     <MobileCanvasAction
@@ -493,6 +530,7 @@ export function MobileCanvasActions({
   onEdit,
   onPromote,
   onReleases,
+  onShare,
   onSelectCanvas,
   editing,
 }: {
@@ -503,6 +541,7 @@ export function MobileCanvasActions({
   onEdit: () => void;
   onPromote: () => void;
   onReleases: () => void;
+  onShare: () => void;
   onSelectCanvas: (canvas: Canvas) => void;
   editing: boolean;
 }) {
@@ -529,6 +568,7 @@ export function MobileCanvasActions({
           <MobileCanvasEditAction canvas={canvas} editing={editing} onEdit={onEdit} t={t} />
         )}
         <MobileCanvasReleasesAction onReleases={onReleases} t={t} />
+        {canvas && <MobileCanvasShareAction onShare={onShare} t={t} />}
         {canvas?.scope_kind === "task" && (
           <MobileCanvasPromoteAction
             canvas={canvas}

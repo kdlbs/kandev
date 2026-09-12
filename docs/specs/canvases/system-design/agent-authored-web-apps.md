@@ -32,8 +32,8 @@ The Plugins system owns package validation, iframe isolation, data access,
 state, events, grants, and runtime tokens. This design uses
 [the isolated plugin web-application contract](../../plugins/system-design/isolated-web-app-contributions.md).
 
-This design supersedes
-[the declarative canvas design](collaborative-canvases.md).
+See [declarative canvas](collaborative-canvases.md) and
+[marketplace sharing](marketplace-sharing.md).
 
 ## Requirement mapping
 

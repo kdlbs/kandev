@@ -10,11 +10,13 @@ import { SettingsPageTemplate } from "@/components/settings/settings-page-templa
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { usePluginSetupStatus } from "@/hooks/domains/plugins/use-plugin-setup-status";
 import { usePluginUpdates } from "@/hooks/domains/plugins/use-plugin-updates";
 import { InstallPluginDialog } from "./install-plugin-dialog";
 import { MarketplaceBrowser } from "./marketplace-browser";
+import { CanvasMarketplace } from "./canvas-marketplace";
 import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
 import { PluginUpdateStatus } from "./plugin-update-status";
 import { usePluginActions } from "./use-plugin-actions";
@@ -29,6 +31,7 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
 export function PluginsSettings() {
   const { t } = useTranslation();
   const canManage = useIsAdmin();
+  const canvasesEnabled = useFeature("canvases");
   const { isFinePointer } = useResponsiveBreakpoint();
   const list = usePlugins();
   const actions = usePluginActions();
@@ -69,6 +72,15 @@ export function PluginsSettings() {
           <TabsTrigger value="browse" data-testid="plugins-tab-browse" className="cursor-pointer">
             {t("plugins:tabBrowse")}
           </TabsTrigger>
+          {canvasesEnabled && (
+            <TabsTrigger
+              value="canvases"
+              data-testid="plugins-tab-canvases"
+              className="cursor-pointer"
+            >
+              {t("plugins:tabCanvases")}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="installed" className="space-y-6">
@@ -86,6 +98,12 @@ export function PluginsSettings() {
         <TabsContent value="browse">
           <MarketplaceBrowser onInstallUrl={handleMarketplaceInstall} canManage={canManage} />
         </TabsContent>
+
+        {canvasesEnabled && (
+          <TabsContent value="canvases">
+            <CanvasMarketplace />
+          </TabsContent>
+        )}
       </Tabs>
 
       {canManage && (

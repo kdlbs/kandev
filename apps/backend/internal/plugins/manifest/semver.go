@@ -1,9 +1,31 @@
 package manifest
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
+
+// CheckMinimumKandevVersion enforces a package minimum against a stamped
+// release build. Development and git-describe builds deliberately skip the
+// check because they do not provide a trustworthy release boundary.
+func CheckMinimumKandevVersion(minVersion, runningVersion string) error {
+	if strings.TrimSpace(minVersion) == "" || strings.TrimSpace(runningVersion) == "" || strings.EqualFold(strings.TrimSpace(runningVersion), "dev") {
+		return nil
+	}
+	running, runningRelease := NormalizeReleaseVersion(runningVersion)
+	if !runningRelease {
+		return nil
+	}
+	minimum, minimumRelease := NormalizeReleaseVersion(minVersion)
+	if !minimumRelease {
+		return fmt.Errorf("plugins: min_kandev_version %q is not a release version", minVersion)
+	}
+	if CompareVersions(running, minimum) < 0 {
+		return fmt.Errorf("plugins: requires kandev >= %s, running %s", minVersion, runningVersion)
+	}
+	return nil
+}
 
 // NormalizeReleaseVersion returns a dotted numeric release version suitable
 // for compatibility comparisons. Kandev release builds are tagged `vX.Y.Z`,

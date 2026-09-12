@@ -38,12 +38,28 @@ type IndexSource struct {
 	URL  string `json:"url"`
 }
 
+// Preview is registry-owned listing presentation metadata. It never supplies
+// package identity, permissions, or install bytes.
+type Preview struct {
+	URL string `json:"url"`
+	Alt string `json:"alt"`
+}
+
+type PermissionSummary struct {
+	Reads           []string `json:"reads,omitempty"`
+	Writes          []string `json:"writes,omitempty"`
+	Events          []string `json:"events,omitempty"`
+	SharedState     bool     `json:"shared_state"`
+	ExternalOrigins []string `json:"external_origins,omitempty"`
+}
+
 // IndexEntry is one plugin as published in a source's index.json. This is the
 // hard fetch contract shared with the registry's index-build Action
 // (plugin-registry/build-index.mjs); additional/corporate sources must serve
 // the same shape. Missing/`null` optional fields decode to their zero value.
 type IndexEntry struct {
 	ID          string   `json:"id"`
+	Kind        string   `json:"kind,omitempty"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Author      string   `json:"author"`
@@ -51,12 +67,15 @@ type IndexEntry struct {
 	// IconURL is an absolute URL to the plugin's icon, resolved by the
 	// registry index-build from the plugin manifest's `icon` path. Empty
 	// when the plugin ships no icon; the UI falls back to a letter tile.
-	IconURL          string `json:"icon_url"`
-	RepoURL          string `json:"repo_url"`
-	Version          string `json:"version"`
-	MinKandevVersion string `json:"min_kandev_version"`
-	PackageURL       string `json:"package_url"`
-	PackageSHA256    string `json:"package_sha256"`
+	IconURL          string             `json:"icon_url"`
+	RepoURL          string             `json:"repo_url"`
+	Version          string             `json:"version"`
+	MinKandevVersion string             `json:"min_kandev_version"`
+	License          string             `json:"license,omitempty"`
+	PackageURL       string             `json:"package_url"`
+	PackageSHA256    string             `json:"package_sha256"`
+	Previews         []Preview          `json:"previews,omitempty"`
+	Permissions      *PermissionSummary `json:"permissions,omitempty"`
 	// Stars is a pointer so a `null` in index.json (the registry build emits
 	// null when a repo's star lookup failed) stays unknown rather than
 	// decoding to 0 — a known-zero repo and an unknown one must not collapse,
@@ -71,6 +90,7 @@ type IndexDocument struct {
 	GeneratedAt   string       `json:"generated_at"`
 	Source        IndexSource  `json:"source"`
 	Plugins       []IndexEntry `json:"plugins"`
+	warning       string
 }
 
 // CatalogEntry is an IndexEntry annotated with the source it came from and
@@ -98,8 +118,9 @@ type SourceStatus struct {
 
 // CatalogResult is the merged, deduped catalog across all enabled sources.
 type CatalogResult struct {
-	Plugins []CatalogEntry `json:"plugins"`
-	Sources []SourceStatus `json:"sources"`
+	Plugins  []CatalogEntry `json:"plugins"`
+	Canvases []CatalogEntry `json:"canvases"`
+	Sources  []SourceStatus `json:"sources"`
 }
 
 // InstalledPlugin is the minimal installed-plugin fact the catalog needs to
@@ -125,4 +146,5 @@ type Query struct {
 	Text     string
 	Category string
 	Sort     string // "stars" (default) | "name" | "recent"
+	Kind     string // "plugin" (default) | "canvas"
 }

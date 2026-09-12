@@ -137,7 +137,9 @@ export async function fetchBlob(pathOrUrl: string, options?: ApiRequestOptions):
 // interim-settings interlock token on mutating requests.
 function buildRequestHeaders(options?: ApiRequestOptions): Headers {
   const headers = requestHeaders(options?.init?.headers);
-  headers.set("Content-Type", "application/json");
+  const body = options?.init?.body;
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  if (!isFormData) headers.set("Content-Type", "application/json");
   if (isMutation(options?.init?.method)) {
     const token = readInterimSettingsInterlockToken();
     if (token) headers.set(interimSettingsInterlockHeader, token);
