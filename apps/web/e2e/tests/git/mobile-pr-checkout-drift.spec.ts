@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, restoreSeedRepositoryOrigin, type SeedData } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
@@ -151,6 +151,39 @@ function recoveryBranches(git: GitHelper): string[] {
     .filter(Boolean);
 }
 
+function restoreContributionHistoryRepository(
+  seedData: SeedData,
+  backend: { tmpDir: string },
+): void {
+  const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+  for (const command of ["git rebase --abort", "git merge --abort"]) {
+    try {
+      git.exec(command);
+    } catch {
+      // The fixture is normally idle when the test finishes.
+    }
+  }
+  git.exec("git checkout -f main");
+  git.exec("git clean -fd");
+  restoreSeedRepositoryOrigin(seedData);
+  git.exec(`git push --force origin ${seedData.repositoryBaselineOID}:refs/heads/main`);
+  git.exec("git fetch --no-tags origin main");
+  git.exec(`git reset --hard ${seedData.repositoryBaselineOID}`);
+  git.exec("git clean -fd");
+  for (const branch of ["feature/mobile-local-rebase", "kandev-e2e-mobile-published-history"]) {
+    try {
+      git.exec(`git branch -D ${branch}`);
+    } catch {
+      // Setup may have failed before creating this branch.
+    }
+    try {
+      git.exec(`git push origin --delete ${branch}`);
+    } catch {
+      // The branch may only exist locally.
+    }
+  }
+}
+
 async function swipeUpOnElement(page: Page, element: Locator): Promise<void> {
   const box = await element.boundingBox();
   if (!box) throw new Error("Changes scroll container has no bounding box");
@@ -174,6 +207,13 @@ async function swipeUpOnElement(page: Page, element: Locator): Promise<void> {
 
 test.describe("Mobile rewritten contribution history", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
+
+  test.afterEach(({ backend, seedData }) => {
+    // Local-rebase scenarios rewrite origin/main and create temporary refs.
+    // Restore both sides after every test, including assertion failures, so a
+    // later worker test cannot inherit the synthetic provider history.
+    restoreContributionHistoryRepository(seedData, backend);
+  });
 
   test.beforeEach(({ backend, seedData }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");

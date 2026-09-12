@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, restoreSeedRepositoryOrigin, type SeedData } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
@@ -408,11 +408,58 @@ function recoveryBranches(git: GitHelper): string[] {
     .filter(Boolean);
 }
 
+function restoreContributionHistoryRepository(
+  seedData: SeedData,
+  backend: { tmpDir: string },
+): void {
+  const git = new GitHelper(seedData.repositoryPath, {
+    ...process.env,
+    HOME: backend.tmpDir,
+    GIT_AUTHOR_NAME: "E2E Test",
+    GIT_AUTHOR_EMAIL: "e2e@test.local",
+    GIT_COMMITTER_NAME: "E2E Test",
+    GIT_COMMITTER_EMAIL: "e2e@test.local",
+  });
+  for (const command of ["git rebase --abort", "git merge --abort"]) {
+    try {
+      git.exec(command);
+    } catch {
+      // The fixture is normally idle when the test finishes.
+    }
+  }
+  git.exec("git checkout -f main");
+  git.exec("git clean -fd");
+  restoreSeedRepositoryOrigin(seedData);
+  git.exec(`git push --force origin ${seedData.repositoryBaselineOID}:refs/heads/main`);
+  git.exec("git fetch --no-tags origin main");
+  git.exec(`git reset --hard ${seedData.repositoryBaselineOID}`);
+  git.exec("git clean -fd");
+  for (const branch of ["feature/local-rebase-explanation", "kandev-e2e-published-history"]) {
+    try {
+      git.exec(`git branch -D ${branch}`);
+    } catch {
+      // Setup may have failed before creating this branch.
+    }
+    try {
+      git.exec(`git push origin --delete ${branch}`);
+    } catch {
+      // The branch may only exist locally.
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 test.describe("Git Changes Panel", () => {
+  test.afterEach(({ backend, seedData }) => {
+    // Local-rebase scenarios rewrite origin/main and create temporary refs.
+    // Restore both sides after every test, including assertion failures, so a
+    // later worker test cannot inherit the synthetic provider history.
+    restoreContributionHistoryRepository(seedData, backend);
+  });
+
   /**
    * Verifies that modified files appear in the unstaged section of the Changes panel.
    * Creates a task, modifies a file in the repository, and verifies the Changes panel

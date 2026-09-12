@@ -100,22 +100,13 @@ function HistoryExplanationBody({
   );
 }
 
-function HistoryMenuBody({
-  status,
-  explanation,
-  disabled,
-  descriptionMode,
-  surface,
-  onCompare,
-  onReplace,
-  onUse,
-  onView,
-  prNumber,
-  onCloseAutoFocus,
-}: {
+type HistoryMenuBodyProps = {
   status: "idle" | "loading" | "ready" | "unavailable";
   explanation: ContributionHistoryExplanation | null;
   disabled: boolean;
+  replaceDisabled: boolean;
+  useDisabled: boolean;
+  compareDisabled: boolean;
   descriptionMode: "tooltip" | "inline";
   surface: "menu" | "drawer";
   onCompare: () => void;
@@ -124,13 +115,42 @@ function HistoryMenuBody({
   onView?: () => void;
   prNumber?: number;
   onCloseAutoFocus: (event: Event) => void;
-}) {
-  const { t } = useTranslation();
-  const actions = (
+};
+
+type HistoryMenuActionsProps = Pick<
+  HistoryMenuBodyProps,
+  | "disabled"
+  | "replaceDisabled"
+  | "useDisabled"
+  | "compareDisabled"
+  | "descriptionMode"
+  | "surface"
+  | "onCompare"
+  | "onReplace"
+  | "onUse"
+  | "onView"
+  | "prNumber"
+>;
+
+function HistoryMenuActions({
+  disabled,
+  replaceDisabled,
+  useDisabled,
+  compareDisabled,
+  descriptionMode,
+  surface,
+  onCompare,
+  onReplace,
+  onUse,
+  onView,
+  prNumber,
+}: HistoryMenuActionsProps) {
+  return (
     <RemoteContributionActionItems
       disabled={disabled}
-      replaceDisabled={false}
-      useDisabled={false}
+      replaceDisabled={replaceDisabled}
+      useDisabled={useDisabled}
+      compareDisabled={compareDisabled}
       onCompareVersions={onCompare}
       onReplaceContribution={onReplace}
       onUseContribution={onUse}
@@ -144,6 +164,40 @@ function HistoryMenuBody({
       useLabelKey="task:restorePublishedPRVersion"
       replaceDescriptionKey="task:remoteContributionPublishDescription"
       useDescriptionKey="task:remoteContributionRestoreDescription"
+    />
+  );
+}
+
+function HistoryMenuBody({
+  status,
+  explanation,
+  disabled,
+  replaceDisabled,
+  useDisabled,
+  compareDisabled,
+  descriptionMode,
+  surface,
+  onCompare,
+  onReplace,
+  onUse,
+  onView,
+  prNumber,
+  onCloseAutoFocus,
+}: HistoryMenuBodyProps) {
+  const { t } = useTranslation();
+  const actions = (
+    <HistoryMenuActions
+      disabled={disabled}
+      replaceDisabled={replaceDisabled}
+      useDisabled={useDisabled}
+      compareDisabled={compareDisabled}
+      onCompare={onCompare}
+      onReplace={onReplace}
+      onUse={onUse}
+      onView={onView}
+      descriptionMode={descriptionMode}
+      surface={surface}
+      prNumber={prNumber}
     />
   );
   if (surface === "drawer") {
@@ -351,6 +405,9 @@ export function RemoteContributionHeaderActions({
       status={history.status}
       explanation={history.explanation}
       disabled={resolution.isLoading}
+      replaceDisabled={policy.replaceDisabled}
+      useDisabled={policy.useDisabled}
+      compareDisabled={!comparisonKey}
       descriptionMode={usesTouchDrawer ? "inline" : "tooltip"}
       surface={usesTouchDrawer ? "drawer" : "menu"}
       onCompare={menu.handleCompare}

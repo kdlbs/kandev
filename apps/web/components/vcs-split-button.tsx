@@ -278,7 +278,8 @@ function requestContributionComparisonForRepo(
   contributionHistoryTarget: ContributionHistoryExplanationTarget | null,
   addChanges: () => void,
 ): void {
-  if (resolutionTarget?.repo !== repo) return;
+  const repositoryScope = repo ?? "";
+  if (!resolutionTarget || resolutionTarget.repo !== repositoryScope) return;
   const key = contributionHistoryExplanationKey(contributionHistoryTarget);
   if (!key) return;
   requestContributionComparison(key);
@@ -333,22 +334,28 @@ export function buildVcsSplitCallbacks({
     onRebase: handleRebase,
     onMerge: handleMerge,
     onReplaceContribution: (repo?: string) => {
-      if (resolutionTarget && resolutionTarget.repo === repo) {
+      const repositoryScope = repo ?? "";
+      if (resolutionTarget && resolutionTarget.repo === repositoryScope) {
         resolution.requestReplace(resolutionTarget);
       }
     },
     onUseContribution: (repo?: string) => {
-      if (resolutionTarget && resolutionTarget.repo === repo) {
+      const repositoryScope = repo ?? "";
+      if (resolutionTarget && resolutionTarget.repo === repositoryScope) {
         resolution.requestUse(resolutionTarget);
       }
     },
     onViewContribution: (repo?: string) => {
-      if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
+      const repositoryScope = repo ?? "";
+      if (!resolutionTarget || resolutionTarget.repo !== repositoryScope || !selectedPR?.pr_url) {
+        return;
+      }
       void openLink(selectedPR.pr_url).catch(() => undefined);
     },
     onCompareContribution: (repo?: string) => {
-      if (resolutionTarget?.repo !== repo) return;
-      onCompareContribution?.(repo);
+      const repositoryScope = repo ?? "";
+      if (!resolutionTarget || resolutionTarget.repo !== repositoryScope) return;
+      onCompareContribution?.(repositoryScope);
     },
   };
 }

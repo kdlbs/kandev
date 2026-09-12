@@ -54,7 +54,7 @@ func registerE2EResetRoutes(
 	api := router.Group("/api/v1/e2e")
 	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, log))
 	if githubSvc != nil {
-		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, githubSvc, log))
+		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, taskSvc, githubSvc, log))
 	}
 	// Hidden-workflow factory: lets E2E tests cover the system-only
 	// workflow path (e.g. improve-kandev) without depending on the real
@@ -102,12 +102,17 @@ type e2eAttachGitHubContributionResponse struct {
 	RemoteName string                        `json:"remote_name"`
 }
 
+type e2eTaskAccessAuthorizer interface {
+	AuthorizeTaskAccess(context.Context, string) error
+}
+
 // handleE2EAttachGitHubContribution resolves a mock-provider PR and persists
 // the same server-authored binding that a remote-contribution task carries at
 // launch. It exists only in the mock-agent E2E surface so tests can prepare a
 // task before opening its session; callers cannot submit a writable binding.
 func handleE2EAttachGitHubContribution(
 	repo *sqliterepo.Repository,
+	authorizer e2eTaskAccessAuthorizer,
 	githubSvc *github.Service,
 	log *logger.Logger,
 ) gin.HandlerFunc {
@@ -119,7 +124,12 @@ func handleE2EAttachGitHubContribution(
 		}
 
 		ctx := c.Request.Context()
-		task, err := repo.GetTask(ctx, c.Param("id"))
+		taskID := c.Param("id")
+		if err := authorizer.AuthorizeTaskAccess(ctx, taskID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{errKey: "task not found"})
+			return
+		}
+		task, err := repo.GetTask(ctx, taskID)
 		if err != nil || task == nil {
 			c.JSON(http.StatusNotFound, gin.H{errKey: "task not found"})
 			return
