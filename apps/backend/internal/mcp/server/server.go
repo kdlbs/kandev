@@ -132,6 +132,15 @@ type Server struct {
 	pluginToolsMu              sync.Mutex
 	pluginTools                plugintools.Snapshot
 	pluginToolsReady           bool
+	guardedTTYAvailable        bool
+}
+
+// GuardedTTYAvailable returns the live bridge gate used when building the
+// model-facing tool catalog.
+func (s *Server) GuardedTTYAvailable() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.guardedTTYAvailable
 }
 
 // ServerOption configures the per-instance MCP transport.
@@ -816,6 +825,20 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.rebuildTools()
 }
 
+// SetGuardedTTYAvailable records whether the active agent adapter negotiated
+// the exact guarded-TTY bridge contract. The model-visible tool requires this
+// live gate in addition to the backend-owned profile capability.
+func (s *Server) SetGuardedTTYAvailable(available bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.guardedTTYAvailable == available {
+		return
+	}
+	s.guardedTTYAvailable = available
+	s.rebuildTools()
+}
+
 func sameProfile(left, right mcpprofile.Context) bool {
 	if left.Surface != right.Surface || len(left.Capabilities) != len(right.Capabilities) || len(left.Providers) != len(right.Providers) {
 		return false
@@ -1137,6 +1160,9 @@ func (s *Server) registerTools() {
 		if group.enabled(s.profile) {
 			group.register(s)
 		}
+	}
+	if s.guardedTTYAvailable && s.profile.HasCapability(mcpprofile.CapabilityGuardedTTYExec) {
+		s.registerGuardedTTYExecTool()
 	}
 	if s.profile.Surface != mcpprofile.SurfaceAutomation {
 		s.registerPluginTools()

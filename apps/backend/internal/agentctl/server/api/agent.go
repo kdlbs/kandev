@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -319,9 +321,87 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSAuthenticate(ctx, msg)
 	case "agent.session.reset":
 		return s.handleWSResetSession(ctx, msg)
+	case streams.GuardedTTYAgentAction:
+		return s.handleWSGuardedTTYExec(ctx, msg)
 	default:
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp
+	}
+}
+
+func (s *Server) handleWSGuardedTTYExec(ctx context.Context, msg *ws.Message) *ws.Message {
+	request, err := decodeGuardedTTYAgentRequest(msg.Payload)
+	if err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid guarded TTY request", nil)
+		return resp
+	}
+	if request.AttestationID == "" || request.ExecutionID != s.cfg.InstanceID ||
+		request.TaskID != s.cfg.TaskID || request.SessionID != s.cfg.SessionID ||
+		!streams.ValidateGuardedTTYArgv(request.Argv) {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "guarded TTY request identity mismatch", nil)
+		return resp
+	}
+	executor, activeACPSessionID, available := s.guardedTTYExecutor()
+	if !available {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "guarded TTY unavailable", nil)
+		return resp
+	}
+	receipt, err := executor.ExecuteGuardedTTY(ctx, streams.GuardedTTYBridgeRequest{
+		SessionID: activeACPSessionID,
+		Argv:      append([]string(nil), request.Argv...),
+	})
+	if err != nil || receipt == nil || receipt.ACPSessionID != activeACPSessionID {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "guarded TTY execution failed", nil)
+		return resp
+	}
+	receipt.AttestationID = request.AttestationID
+	receipt.ExecutionID = request.ExecutionID
+	receipt.TaskID = request.TaskID
+	receipt.SessionID = request.SessionID
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, receipt)
+	return resp
+}
+
+func decodeGuardedTTYAgentRequest(payload []byte) (streams.GuardedTTYAgentRequest, error) {
+	var request streams.GuardedTTYAgentRequest
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return request, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return request, errors.New("trailing guarded TTY request content")
+	}
+	return request, nil
+}
+
+func (s *Server) guardedTTYExecutor() (adapter.GuardedTTYExecutor, string, bool) {
+	transport := s.procMgr.GetAdapter()
+	if transport == nil {
+		return nil, "", false
+	}
+	executor, executorOK := transport.(adapter.GuardedTTYExecutor)
+	availability, availabilityOK := transport.(adapter.GuardedTTYAvailabilityProvider)
+	if !executorOK || !availabilityOK || !availability.GuardedTTYAvailable() {
+		return nil, "", false
+	}
+	activeSessionID := transport.GetSessionID()
+	return executor, activeSessionID, activeSessionID != ""
+}
+
+func (s *Server) setGuardedTTYUnavailable() {
+	if s.mcpServer != nil {
+		s.mcpServer.SetGuardedTTYAvailable(false)
+	}
+}
+
+func (s *Server) syncGuardedTTYAvailability(agentAdapter adapter.AgentAdapter) {
+	available := false
+	if provider, ok := agentAdapter.(adapter.GuardedTTYAvailabilityProvider); ok {
+		available = provider.GuardedTTYAvailable()
+	}
+	if s.mcpServer != nil {
+		s.mcpServer.SetGuardedTTYAvailable(available)
 	}
 }
 
@@ -413,12 +493,14 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
+	s.setGuardedTTYUnavailable()
 
 	if err := adapter.Initialize(ctx); err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp
 	}
+	s.syncGuardedTTYAvailability(adapter)
 
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
@@ -556,6 +638,7 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
+	s.setGuardedTTYUnavailable()
 
 	// Reset MCP backend client state to clear any pending requests from previous session.
 	// This prevents stale MCP requests from interfering with the new session.
@@ -579,6 +662,7 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp
 	}
+	s.syncGuardedTTYAvailability(adapter)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
 		Success:    true,
@@ -607,6 +691,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
+	s.setGuardedTTYUnavailable()
 
 	// Reset MCP backend client state to clear any pending requests from previous session.
 	// This prevents stale MCP requests from interfering with the loaded session.
@@ -630,6 +715,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		return resp
 	}
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
+	s.syncGuardedTTYAvailability(adapter)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
 		Success:    true,
@@ -906,6 +992,7 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent does not support session reset", nil)
 		return resp
 	}
+	s.setGuardedTTYUnavailable()
 
 	// If MCP server is enabled, prepend the local kandev MCP server to the list.
 	mcpServers := req.McpServers
@@ -922,6 +1009,7 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp
 	}
+	s.syncGuardedTTYAvailability(agentAdapter)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
 		Success:    true,

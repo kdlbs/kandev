@@ -1897,6 +1897,7 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
 	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
+	mcpHandlers.SetGuardedTTYExecutionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
 	// list_pending_questions_kandev / answer_question_kandev (external MCP

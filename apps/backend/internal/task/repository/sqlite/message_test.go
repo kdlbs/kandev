@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPermissionResolutionClaimAndFinalizeCAS(t *testing.T) {
@@ -129,6 +129,99 @@ func TestPermissionResolutionPostgresExpressionsUseJSONB(t *testing.T) {
 	extract := permissionJSONExtract("pgx", "metadata", "permission_resolution", "claim_id")
 	if !strings.Contains(extract, "COALESCE(NULLIF(metadata, ''), '{}')::jsonb") {
 		t.Fatalf("extract expression does not guard empty metadata: %s", extract)
+	}
+}
+
+func TestGuardedTTYAuditFinalizeCAS(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-tty", "session-tty", "turn-tty")
+	claim := models.GuardedTTYAuditClaim{
+		AttestationID: "attestation-1",
+		Execution: streams.MCPExecutionContext{
+			ExecutionID: "execution-1", TaskID: "task-tty", SessionID: "session-tty",
+		},
+		WorkspaceID:      "workspace-tty",
+		ActorUserID:      "user-tty",
+		AgentID:          streams.GuardedTTYAgentID,
+		PrincipalSurface: "kanban-task",
+		Argv:             []string{"stty", "-a"},
+		RequestedAt:      time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
+		Outcome:          models.GuardedTTYOutcomePending,
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            claim.AttestationID,
+		TaskID:        claim.Execution.TaskID,
+		TaskSessionID: claim.Execution.SessionID,
+		TurnID:        "turn-tty",
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeToolExecute,
+		Metadata:      map[string]interface{}{models.GuardedTTYAuditMetadataKey: claim},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	finalize := models.GuardedTTYAuditFinalize{
+		AttestationID:   claim.AttestationID,
+		Execution:       claim.Execution,
+		Outcome:         models.GuardedTTYOutcomeSucceeded,
+		ExitCode:        0,
+		OutputBytes:     123,
+		OutputSHA256:    "safe-digest",
+		CompletionCount: 1,
+		CompletedAt:     claim.RequestedAt.Add(time.Second),
+		ProviderMetadata: map[string]interface{}{
+			"method": "command/exec", "requested_tty": true, "dispatched_tty": true,
+		},
+	}
+
+	message, finalized, err := repo.FinalizeGuardedTTYExecution(ctx, finalize)
+	if err != nil || !finalized {
+		t.Fatalf("finalize = %+v, finalized=%v, err=%v", message, finalized, err)
+	}
+	audit, ok := models.GuardedTTYAuditFromMetadata(message.Metadata)
+	if !ok || audit.Outcome != models.GuardedTTYOutcomeSucceeded || audit.OutputSHA256 != "safe-digest" ||
+		audit.WorkspaceID != claim.WorkspaceID || audit.ActorUserID != claim.ActorUserID ||
+		audit.PrincipalSurface != claim.PrincipalSurface || audit.AgentID != claim.AgentID {
+		t.Fatalf("audit = %+v, ok=%v", audit, ok)
+	}
+	encoded, err := json.Marshal(audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "output\"") {
+		t.Fatalf("audit contains a raw output field: %s", encoded)
+	}
+
+	_, finalized, err = repo.FinalizeGuardedTTYExecution(ctx, finalize)
+	if err != nil || finalized {
+		t.Fatalf("duplicate finalize = %v, err=%v; want false", finalized, err)
+	}
+
+	wrong := finalize
+	wrong.Execution.ExecutionID = "execution-other"
+	message, finalized, err = repo.FinalizeGuardedTTYExecution(ctx, wrong)
+	if err != nil || finalized || message == nil {
+		t.Fatalf("wrong execution finalize = %+v, finalized=%v, err=%v", message, finalized, err)
+	}
+}
+
+func TestGuardedTTYPostgresExpressionsUseJSONB(t *testing.T) {
+	patch := guardedTTYPatchJSONExpression("pgx")
+	if strings.Contains(patch, "json_set") || strings.Contains(patch, "json_extract") {
+		t.Fatalf("guarded TTY patch uses SQLite JSON: %s", patch)
+	}
+	if !strings.Contains(patch, "jsonb_set") || !strings.Contains(patch, "::jsonb") {
+		t.Fatalf("guarded TTY patch does not use PostgreSQL JSONB: %s", patch)
+	}
+	for _, path := range [][]string{
+		{models.GuardedTTYAuditMetadataKey, "attestation_id"},
+		{models.GuardedTTYAuditMetadataKey, "execution", "execution_id"},
+		{models.GuardedTTYAuditMetadataKey, "outcome"},
+	} {
+		extract := permissionJSONExtract("pgx", "metadata", path...)
+		if !strings.Contains(extract, "COALESCE(NULLIF(metadata, ''), '{}')::jsonb") {
+			t.Fatalf("guarded TTY extract does not guard empty metadata: %s", extract)
+		}
 	}
 }
 

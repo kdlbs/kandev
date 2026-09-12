@@ -143,6 +143,13 @@ type Adapter struct {
 	// `capabilities.Meta` map would race.
 	promptQueueing bool
 
+	// guardedTTYAdvertised is derived only from the exact version-one initialize
+	// metadata. guardedTTYAvailable additionally requires a successful probe for
+	// the current session; both are kept under mu because model tool listing and
+	// nested execution may race ordinary prompt traffic.
+	guardedTTYAdvertised bool
+	guardedTTYAvailable  bool
+
 	// Update channel
 	updatesCh chan AgentEvent
 
@@ -570,6 +577,8 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
 	a.promptQueueing = promptQueueing
+	a.guardedTTYAdvertised = guardedTTYAdvertisementIsExact(a.agentID, resp.Meta)
+	a.guardedTTYAvailable = false
 	a.mu.Unlock()
 
 	// Emit agent capabilities event with prompt capabilities and auth methods

@@ -147,6 +147,20 @@ type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 }
 
+// GuardedTTYExecutor is implemented only by an adapter that has positively
+// negotiated the exact guarded-TTY bridge contract for its active session.
+// The request deliberately excludes caller-controlled execution settings.
+type GuardedTTYExecutor interface {
+	ExecuteGuardedTTY(context.Context, streams.GuardedTTYBridgeRequest) (*streams.GuardedTTYExecReceipt, error)
+}
+
+// GuardedTTYAvailabilityProvider reports whether the active session completed
+// exact guarded-TTY capability negotiation. Merely implementing execution is
+// insufficient to make the model-facing tool visible.
+type GuardedTTYAvailabilityProvider interface {
+	GuardedTTYAvailable() bool
+}
+
 // TurnStartRecorder is an optional interface implemented by adapters that
 // record a wall-clock turn-start timestamp per session, covering both a
 // human prompt dispatch and a synthetic ScheduleWakeup self-resume (spec

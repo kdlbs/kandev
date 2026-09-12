@@ -988,6 +988,56 @@ func (r *Repository) FinalizePermissionResolution(ctx context.Context, request m
 	return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalizeAlreadyFinal, Message: message}, nil
 }
 
+// FinalizeGuardedTTYExecution closes the exact pending attestation once. The
+// conditional update binds message, task, session, and execution identities;
+// a duplicate or mismatched writer leaves the durable record unchanged.
+func (r *Repository) FinalizeGuardedTTYExecution(ctx context.Context, request models.GuardedTTYAuditFinalize) (*models.Message, bool, error) {
+	patchJSON, err := json.Marshal(map[string]interface{}{
+		"outcome":           request.Outcome,
+		"exit_code":         request.ExitCode,
+		"output_bytes":      request.OutputBytes,
+		"output_sha256":     request.OutputSHA256,
+		"completion_count":  request.CompletionCount,
+		"completed_at":      request.CompletedAt.UTC().Format(time.RFC3339Nano),
+		"provider_metadata": request.ProviderMetadata,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("marshal guarded TTY finalization: %w", err)
+	}
+	driver := r.db.DriverName()
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = ?
+		WHERE id = ? AND task_id = ? AND task_session_id = ? AND type = 'tool_execute'
+		  AND %s = ? AND %s = ? AND %s = ?
+	`, guardedTTYPatchJSONExpression(driver),
+		permissionJSONExtract(driver, "metadata", models.GuardedTTYAuditMetadataKey, "attestation_id"),
+		permissionJSONExtract(driver, "metadata", models.GuardedTTYAuditMetadataKey, "execution", "execution_id"),
+		permissionJSONExtract(driver, "metadata", models.GuardedTTYAuditMetadataKey, "outcome"))
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), string(patchJSON), request.CompletedAt.UTC(),
+		request.AttestationID, request.Execution.TaskID, request.Execution.SessionID,
+		request.AttestationID, request.Execution.ExecutionID, string(models.GuardedTTYOutcomePending))
+	if err != nil {
+		return nil, false, fmt.Errorf("finalize guarded TTY execution: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, fmt.Errorf("finalize guarded TTY execution rows: %w", err)
+	}
+	message, getErr := r.GetMessage(ctx, request.AttestationID)
+	if getErr != nil {
+		return nil, false, fmt.Errorf("read guarded TTY audit: %w", getErr)
+	}
+	return message, rows == 1, nil
+}
+
+func guardedTTYPatchJSONExpression(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `jsonb_set(COALESCE(NULLIF(metadata, ''), '{}')::jsonb, '{guarded_tty_execution}', COALESCE(NULLIF(metadata, ''), '{}')::jsonb->'guarded_tty_execution' || ?::jsonb, true)::text`
+	}
+	return `json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.guarded_tty_execution', json_patch(COALESCE(json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.guarded_tty_execution'), '{}'), json(?)))`
+}
+
 func permissionClaimJSONExpression(driver string) string {
 	if dialect.IsPostgres(driver) {
 		return `jsonb_set(COALESCE(NULLIF(metadata, ''), '{}')::jsonb, '{permission_resolution}', ?::jsonb, true)::text`

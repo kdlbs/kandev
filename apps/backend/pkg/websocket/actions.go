@@ -527,6 +527,7 @@ const (
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
+	ActionMCPGuardedTTYExec              = "mcp.guarded_tty_exec"
 )
 
 const (

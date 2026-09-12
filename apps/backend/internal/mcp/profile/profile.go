@@ -27,6 +27,7 @@ const (
 	CapabilityTaskTitle      Capability = "task-title"
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
+	CapabilityGuardedTTYExec Capability = "guarded-tty-exec"
 	CapabilityCanvas         Capability = "canvas-authoring"
 )
 

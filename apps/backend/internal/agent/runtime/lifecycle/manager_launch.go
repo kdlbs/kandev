@@ -1050,7 +1050,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
-		McpProfile:                     reqWithWorktree.McpProfile,
+		McpProfile:                     guardedTTYProfileForAgent(reqWithWorktree.McpProfile, agentConfig.ID(), reqWithWorktree.IsPassthrough),
 		AuthToken:                      launchAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:          m.agentctlStartupConfig,

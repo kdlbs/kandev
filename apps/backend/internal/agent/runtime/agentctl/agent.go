@@ -53,6 +53,28 @@ type InitializeResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// GuardedTTYExec sends one attested, identity-bound TTY request to the exact
+// agentctl execution already owned by this client. It does not accept runtime
+// security controls; agentctl and the active ACP bridge derive those from the
+// guarded session.
+func (c *Client) GuardedTTYExec(
+	ctx context.Context,
+	request streams.GuardedTTYAgentRequest,
+) (*streams.GuardedTTYExecReceipt, error) {
+	resp, err := c.sendStreamRequest(ctx, streams.GuardedTTYAgentAction, request)
+	if err != nil {
+		return nil, fmt.Errorf("guarded TTY request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		return nil, fmt.Errorf("guarded TTY request denied")
+	}
+	var receipt streams.GuardedTTYExecReceipt
+	if err := resp.ParsePayload(&receipt); err != nil {
+		return nil, fmt.Errorf("failed to parse guarded TTY response: %w", err)
+	}
+	return &receipt, nil
+}
+
 // Initialize sends the ACP initialize request via the agent WebSocket stream.
 func (c *Client) Initialize(ctx context.Context, clientName, clientVersion string) (*AgentInfo, error) {
 	payload := struct {

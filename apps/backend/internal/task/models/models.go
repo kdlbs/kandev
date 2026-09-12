@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -1563,6 +1564,92 @@ type PermissionResolutionFinalizeRequest struct {
 type PermissionResolutionFinalizeResult struct {
 	Outcome PermissionResolutionFinalizeOutcome
 	Message *Message
+}
+
+type GuardedTTYOutcome string
+
+const (
+	GuardedTTYOutcomePending         GuardedTTYOutcome = "pending"
+	GuardedTTYOutcomeSucceeded       GuardedTTYOutcome = "succeeded"
+	GuardedTTYOutcomeStale           GuardedTTYOutcome = "stale"
+	GuardedTTYOutcomeTimedOut        GuardedTTYOutcome = "timeout"
+	GuardedTTYOutcomeCancelled       GuardedTTYOutcome = "cancelled"
+	GuardedTTYOutcomeOverflow        GuardedTTYOutcome = "overflow"
+	GuardedTTYOutcomeProviderFailure GuardedTTYOutcome = "provider_failure"
+)
+
+// GuardedTTYAuditClaim is persisted before any provider dispatch. Argv is the
+// bounded model request; security and executor fields come only from the
+// trusted lifecycle execution context.
+type GuardedTTYAuditClaim struct {
+	AttestationID    string                      `json:"attestation_id"`
+	Execution        streams.MCPExecutionContext `json:"execution"`
+	WorkspaceID      string                      `json:"workspace_id"`
+	ActorUserID      string                      `json:"actor_user_id,omitempty"`
+	AgentID          string                      `json:"agent_id"`
+	PrincipalSurface string                      `json:"principal_surface"`
+	Argv             []string                    `json:"argv"`
+	RequestedAt      time.Time                   `json:"requested_at"`
+	Outcome          GuardedTTYOutcome           `json:"outcome"`
+}
+
+// GuardedTTYDispatchRequest is the internal lifecycle request. Agentctl and
+// the provider bridge must not accept any model-controlled security fields.
+type GuardedTTYDispatchRequest struct {
+	AttestationID string
+	Execution     streams.MCPExecutionContext
+	Argv          []string
+}
+
+// GuardedTTYAuditFinalize contains provider evidence but intentionally omits
+// raw output. ProviderMetadata is restricted to non-secret dispatch identity.
+type GuardedTTYAuditFinalize struct {
+	AttestationID    string                      `json:"attestation_id"`
+	Execution        streams.MCPExecutionContext `json:"execution"`
+	Outcome          GuardedTTYOutcome           `json:"outcome"`
+	ExitCode         int                         `json:"exit_code"`
+	OutputBytes      int                         `json:"output_bytes"`
+	OutputSHA256     string                      `json:"output_sha256"`
+	CompletionCount  int                         `json:"completion_count"`
+	CompletedAt      time.Time                   `json:"completed_at"`
+	ProviderMetadata map[string]interface{}      `json:"provider_metadata"`
+}
+
+const GuardedTTYAuditMetadataKey = "guarded_tty_execution"
+
+// GuardedTTYAuditRecord is the durable merged claim/finalization projection.
+type GuardedTTYAuditRecord struct {
+	AttestationID    string                      `json:"attestation_id"`
+	Execution        streams.MCPExecutionContext `json:"execution"`
+	WorkspaceID      string                      `json:"workspace_id"`
+	ActorUserID      string                      `json:"actor_user_id,omitempty"`
+	AgentID          string                      `json:"agent_id"`
+	PrincipalSurface string                      `json:"principal_surface"`
+	Argv             []string                    `json:"argv"`
+	RequestedAt      time.Time                   `json:"requested_at"`
+	Outcome          GuardedTTYOutcome           `json:"outcome"`
+	ExitCode         int                         `json:"exit_code"`
+	OutputBytes      int                         `json:"output_bytes"`
+	OutputSHA256     string                      `json:"output_sha256"`
+	CompletionCount  int                         `json:"completion_count"`
+	CompletedAt      time.Time                   `json:"completed_at"`
+	ProviderMetadata map[string]interface{}      `json:"provider_metadata"`
+}
+
+func GuardedTTYAuditFromMetadata(metadata map[string]interface{}) (GuardedTTYAuditRecord, bool) {
+	value, ok := metadata[GuardedTTYAuditMetadataKey]
+	if !ok {
+		return GuardedTTYAuditRecord{}, false
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return GuardedTTYAuditRecord{}, false
+	}
+	var audit GuardedTTYAuditRecord
+	if err := json.Unmarshal(encoded, &audit); err != nil || audit.AttestationID == "" {
+		return GuardedTTYAuditRecord{}, false
+	}
+	return audit, true
 }
 
 // TaskPendingAction is the compact task-list projection for a session blocked
