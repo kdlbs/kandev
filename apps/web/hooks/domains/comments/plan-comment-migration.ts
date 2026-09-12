@@ -18,6 +18,8 @@ type Failure = PlanCommentMigrationState["failure"];
 type PendingRecord = { record: LegacyPlanCommentRecord; acknowledged?: TaskPlanComment };
 type Discovery = { sessionIds: string[]; complete: boolean; loading: boolean };
 
+// Keep one recovery per visited task for the store's lifetime, including across plan resets.
+// Last-detach releases timers and subscriptions, retaining pending drafts and acknowledgements.
 const recoveries = new WeakMap<StoreApi<AppState>, Map<string, PlanCommentMigration>>();
 
 function legacyAnchor(comment: PlanComment) {
@@ -76,6 +78,7 @@ export class PlanCommentMigration {
     private taskId: string,
   ) {}
 
+  /** Consumers of the same task must provide equivalent task-wide session discovery. */
   attach(discover: () => Promise<void>) {
     const consumer = Symbol();
     this.consumers.set(consumer, discover);
@@ -251,6 +254,7 @@ export class PlanCommentMigration {
       this.store.getState().setTaskPlan(this.taskId, next);
     }
     if (!this.discovery.complete && !this.discovery.loading) {
+      // One live consumer performs the shared discovery for all mounted surfaces.
       await this.consumers.values().next().value?.();
     }
   }

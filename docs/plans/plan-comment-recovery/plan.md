@@ -228,6 +228,11 @@ typecheck, i18n, specification and public-doc checks pass. The
 records review dispositions and scoped validation. Remote CI/review completion
 remains an exact-head delivery check, not a claim made by this tracked plan.
 
+Claude's follow-up suggestions are addressed with invariant comments for shared
+discovery, store-lifetime task caches, and authoritative cleanup readback. No
+executable behavior changed. All 55 focused tests across the five affected
+coordinator, hook, and persistence test files pass, as does changed-file ESLint.
+
 ## Risks
 
 - Unknown ownership must not be mistaken for task-owned feedback. Plain Send

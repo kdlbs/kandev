@@ -313,3 +313,30 @@ against those unchanged assets. Both ran with
 `GOCACHE=/tmp/pr-3616-go-cache.J336QV` after the shared cache lost a compilation
 artifact before tests started. The isolated rebuild succeeded; no cache or
 application change was needed outside the task-owned test environment.
+
+### Claude follow-up clarifications (2026-09-12)
+
+Documented that attached consumers provide equivalent task-wide discovery, that
+the registries retain one entry per visited task for the store's lifetime while
+last-detach releases timers/subscriptions, and that storage readback confirms
+cleanup. These are comment-only clarifications of the existing implementation;
+no new behavior, tests, public guidance, or mobile screenshots are needed.
+
+Focused validation from `apps/` passed all 55 tests across five files:
+
+```bash
+pnpm --filter @kandev/web test -- \
+  lib/state/slices/comments/persistence.test.ts \
+  hooks/domains/comments/plan-comment-migration.test.ts \
+  hooks/domains/comments/plan-comment-loading.test.ts \
+  hooks/domains/comments/use-plan-comment-migration.test.tsx \
+  hooks/domains/comments/use-plan-comments.test.tsx
+```
+
+From `apps/web`, the following ESLint command passed with zero warnings:
+
+```bash
+pnpm exec eslint hooks/domains/comments/plan-comment-loading.ts \
+  hooks/domains/comments/plan-comment-migration.ts \
+  lib/state/slices/comments/persistence.ts --max-warnings 0
+```

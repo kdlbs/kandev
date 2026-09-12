@@ -96,6 +96,7 @@ export function removeAcknowledgedLegacyPlanComment(
     values.splice(index, 1);
     if (values.length === 0) window.sessionStorage.removeItem(`${STORAGE_PREFIX}${sessionId}`);
     else window.sessionStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, JSON.stringify(values));
+    // Readback confirms cleanup; a completed write alone cannot acknowledge the draft's removal.
     const remaining = rawSessionComments(sessionId);
     return (
       remaining !== null && !remaining.some((value) => isRecord(value) && value.id === expected.id)

@@ -4,6 +4,8 @@ import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 import { planCommentRecoveryDelay } from "@/lib/plan-comment-recovery";
 import type { AppState } from "@/lib/state/store";
 
+// Keep one loader per visited task for the store's lifetime, including across plan resets.
+// Last-detach releases timers and subscriptions; remounts retain the same retry owner.
 const loaders = new WeakMap<StoreApi<AppState>, Map<string, PlanCommentLoader>>();
 
 /** Ordinary reads retain the last snapshot and never participate in Send admission. */
