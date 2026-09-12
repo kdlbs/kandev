@@ -35,6 +35,10 @@ If the cause remains uncertain, stop and ask the user.
 
 ## Phase 1: Reconcile specifications
 
+Run the `/interview-me` assumption check for intended behavior and repair scope.
+Reuse active acceptance criteria for clear regressions. Ask only about material
+choices that evidence and prior instructions do not settle.
+
 Read `docs/specs/README.md`, the owning system index, and the relevant
 requirement and system-design documents. Use the legacy catalog only when the
 system has not migrated.

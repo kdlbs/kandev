@@ -73,9 +73,10 @@ requirements. A new system needs a `README.md` based on the system template.
 
 ### 2. Confirm intent
 
-Use `/interview-me` when a missing product choice changes behavior, ownership,
-permissions, persistence, or a public contract. Do not hide an unresolved
-choice in a draft.
+Run the `/interview-me` assumption check, reusing answers from earlier phases.
+Resolve material choices before writing the affected contract. Preserve settled
+terminology and decision rationale in the owning artifacts through that skill.
+Do not hide an unresolved choice in a draft.
 
 ### 3. Write requirements
 
