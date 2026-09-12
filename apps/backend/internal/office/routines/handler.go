@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -150,6 +151,11 @@ func (h *Handler) runRoutine(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	run, err := h.svc.FireManual(c.Request.Context(), c.Param("id"), req.Variables)
 	if err != nil {
+		var notFiring *RoutineNotFiringError
+		if errors.As(err, &notFiring) {
+			c.JSON(http.StatusConflict, routineNotFiringBody(notFiring.Status))
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -251,6 +257,10 @@ func (h *Handler) fireWebhookTrigger(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "routine not found"})
 		return
 	}
+	if !models.RoutineStatus(routine.Status).CanFire() {
+		c.JSON(http.StatusConflict, routineNotFiringBody(routine.Status))
+		return
+	}
 
 	run, err := h.svc.DispatchRoutineRunWithIdempotencyKey(
 		ctx, routine, trigger, "webhook", vars, c.GetHeader("Idempotency-Key"))
@@ -259,6 +269,20 @@ func (h *Handler) fireWebhookTrigger(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"run_id": run.ID, "status": run.Status})
+}
+
+// routineNotFiringBody is the shared 409 body for a fire refused on
+// routine status, returned identically by the manual and webhook routes.
+// `error` is a human-readable fallback for a caller with no localized
+// copy; `error_code` is what a surface recognizes to select its own
+// localized message; `status` is the observed value, verbatim, so the
+// surface can interpolate it.
+func routineNotFiringBody(status string) gin.H {
+	return gin.H{
+		"error":      fmt.Sprintf("routine cannot fire: status is %q", status),
+		"error_code": RoutineNotFiringErrorCode,
+		"status":     status,
+	}
 }
 
 // redactTriggerSecrets clears the Secret field on each trigger to prevent

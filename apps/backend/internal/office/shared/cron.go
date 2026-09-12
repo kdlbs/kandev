@@ -30,6 +30,42 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 	return findNextMatch(spec, after.In(loc)), nil
 }
 
+// MatchesCronExpression reports whether t is a time the given cron
+// expression actually names, evaluated in the expression's timezone.
+// findNextMatch searches only 366 days ahead and, finding no match, falls
+// back to `after + 24h` with no error; this predicate is what a caller
+// checks a computed time against to catch that fallback rather than
+// treating it as a legitimate slot. Returns the same class of error
+// NextCronTime returns for a malformed expression or an unloadable
+// timezone.
+//
+// The comparison always happens in the trigger's timezone: NextCronTime
+// returns its result in UTC, but a cron expression names wall-clock values
+// in its own zone, so t is converted into that zone before any field is
+// compared. Comparing the UTC instant as handed in would read UTC
+// wall-clock fields against a spec written in another zone (0 9 * * * in
+// America/New_York is hour 13 in UTC, not hour 9) and reject every
+// non-UTC schedule.
+func MatchesCronExpression(expression, timezone string, t time.Time) (bool, error) {
+	fields := strings.Fields(expression)
+	if len(fields) != 5 {
+		return false, fmt.Errorf("expected 5 cron fields, got %d", len(fields))
+	}
+	loc := time.UTC
+	if timezone != "" {
+		var err error
+		loc, err = time.LoadLocation(timezone)
+		if err != nil {
+			return false, fmt.Errorf("invalid timezone %q: %w", timezone, err)
+		}
+	}
+	spec, err := parseCronSpec(fields)
+	if err != nil {
+		return false, err
+	}
+	return matchesSpec(spec, t.In(loc)), nil
+}
+
 type cronSpec struct {
 	minutes     []int
 	hours       []int

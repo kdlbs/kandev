@@ -40,6 +40,7 @@ type Repository interface {
 	GetTriggerByPublicID(ctx context.Context, publicID string) (*RoutineTrigger, error)
 	GetDueTriggers(ctx context.Context, now time.Time) ([]*RoutineTrigger, error)
 	ClaimTrigger(ctx context.Context, triggerID string, oldNextRunAt time.Time) (bool, error)
+	AdvanceTriggerWithoutFiring(ctx context.Context, triggerID string, oldNextRunAt, newNextRunAt time.Time) (bool, error)
 	UpdateTriggerNextRun(ctx context.Context, triggerID string, nextRunAt *time.Time) error
 	DeleteRoutineTrigger(ctx context.Context, id string) error
 
@@ -120,6 +121,7 @@ type RoutineService struct {
 	wakeup          WakeupEnqueuer
 	workflowEnsurer RoutineWorkflowEnsurer
 	taskCreator     RoutineTaskCreator
+	stuckLog        stuckTriggerLog
 }
 
 // NewRoutineService creates a new RoutineService.
@@ -388,13 +390,25 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	if trigger.NextRunAt == nil {
 		return nil
 	}
+	// Read the routine and decide before claiming. A read failure or a
+	// missing routine leaves the cursor untouched so the trigger stays due
+	// and the next tick retries — the read cannot tell "deleted" from
+	// "failed", so acting on either would permanently disarm a trigger
+	// whose routine is only temporarily unreadable.
+	routine, err := s.GetRoutineFromConfig(ctx, trigger.RoutineID)
+	if err != nil {
+		if s.stuckLog.shouldLog(trigger.ID, outcomeUnreadableRoutine) {
+			s.logger.Error("routine unreadable for due trigger",
+				zap.String("trigger_id", trigger.ID), zap.Error(err))
+		}
+		return nil
+	}
+	if !models.RoutineStatus(routine.Status).CanFire() {
+		return s.suppressCronSlot(ctx, trigger, routine, now)
+	}
 	claimed, err := s.repo.ClaimTrigger(ctx, trigger.ID, *trigger.NextRunAt)
 	if err != nil || !claimed {
 		return err
-	}
-	routine, err := s.GetRoutineFromConfig(ctx, trigger.RoutineID)
-	if err != nil {
-		return fmt.Errorf("get routine: %w", err)
 	}
 	// Catch-up cap: count how many cron ticks elapsed between the missed
 	// trigger.NextRunAt (inclusive) and now, capped at routine.CatchUpMax.
@@ -423,6 +437,65 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	}
 	_, err = s.DispatchRoutineRunWithMissed(ctx, routine, trigger, shared.RoutineSourceCron, nil, missedForPayload)
 	return err
+}
+
+// suppressCronSlot handles a due cron trigger for a routine that does not
+// hold a firing status: no claim, no run row, no wakeup, no task. The
+// cursor advances to the first slot the trigger's cron expression names
+// strictly after now, rather than by one slot from the old cursor, so a
+// suppression window collapses in one evaluation instead of being walked.
+func (s *RoutineService) suppressCronSlot(
+	ctx context.Context, trigger *RoutineTrigger, routine *Routine, now time.Time,
+) error {
+	next, err := s.computeSuppressionCursor(trigger, now)
+	if err != nil {
+		if s.stuckLog.shouldLog(trigger.ID, outcomeCursorNotAdvanced) {
+			s.logger.Warn("routine cursor not advanced",
+				zap.String("trigger_id", trigger.ID), zap.Error(err))
+		}
+		return nil
+	}
+	advanced, err := s.repo.AdvanceTriggerWithoutFiring(ctx, trigger.ID, *trigger.NextRunAt, next)
+	if err != nil {
+		if s.stuckLog.shouldLog(trigger.ID, outcomeCursorNotAdvanced) {
+			s.logger.Warn("routine cursor not advanced",
+				zap.String("trigger_id", trigger.ID), zap.Error(err))
+		}
+		return nil
+	}
+	if !advanced {
+		// Lost the compare-and-set: another evaluation already advanced
+		// this slot. Not a failure, so nothing is logged.
+		return nil
+	}
+	s.logger.Info("routine slot suppressed",
+		zap.String("routine_id", routine.ID),
+		zap.String("trigger_id", trigger.ID),
+		zap.String("status", routine.Status),
+		zap.Time("old_next_run_at", *trigger.NextRunAt),
+		zap.Time("new_next_run_at", next))
+	return nil
+}
+
+// computeSuppressionCursor computes the first slot the trigger's cron
+// expression names strictly after now, in the trigger's timezone, rejecting
+// a computed time the expression does not actually name. That check is
+// what catches NextCronTime's silent fallback to `after + 24h` for an
+// expression with no slot in its search horizon.
+func (s *RoutineService) computeSuppressionCursor(trigger *RoutineTrigger, now time.Time) (time.Time, error) {
+	next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, now)
+	if err != nil {
+		return time.Time{}, err
+	}
+	matches, err := shared.MatchesCronExpression(trigger.CronExpression, trigger.Timezone, next)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !matches {
+		return time.Time{}, fmt.Errorf(
+			"computed slot %s does not match cron expression %q", next, trigger.CronExpression)
+	}
+	return next, nil
 }
 
 const defaultCatchUpMax = 25
@@ -843,13 +916,20 @@ func (s *RoutineService) applyConcurrencyPolicy(
 	}
 }
 
-// FireManual dispatches a routine run from a manual trigger.
+// FireManual dispatches a routine run from a manual trigger. When the
+// routine does not hold a firing status it returns *RoutineNotFiringError
+// instead of dispatching — the gate sits here, on the routine this call
+// already read, rather than in the handler re-reading it, so the decision
+// and the dispatch share one read.
 func (s *RoutineService) FireManual(
 	ctx context.Context, routineID string, variableValues map[string]string,
 ) (*RoutineRun, error) {
 	routine, err := s.GetRoutineFromConfig(ctx, routineID)
 	if err != nil {
 		return nil, fmt.Errorf("get routine: %w", err)
+	}
+	if !models.RoutineStatus(routine.Status).CanFire() {
+		return nil, &RoutineNotFiringError{Status: routine.Status}
 	}
 	return s.DispatchRoutineRun(ctx, routine, nil, "manual", variableValues)
 }

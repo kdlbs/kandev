@@ -95,6 +95,27 @@ func (r *Repository) ClaimTrigger(ctx context.Context, triggerID string, oldNext
 	return rows > 0, err
 }
 
+// AdvanceTriggerWithoutFiring moves a trigger's cursor by compare-and-set
+// without recording a fire. Unlike ClaimTrigger, it never touches
+// last_fired_at: that column is evidence a fire happened, and a suppressed
+// slot must leave none. The oldNextRunAt predicate gives it the same
+// concurrency guarantee as ClaimTrigger — the loser of a race changes no
+// rows and returns false, nil.
+func (r *Repository) AdvanceTriggerWithoutFiring(
+	ctx context.Context, triggerID string, oldNextRunAt, newNextRunAt time.Time,
+) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_routine_triggers
+		SET next_run_at = ?, updated_at = ?
+		WHERE id = ? AND next_run_at = ?
+	`), newNextRunAt, time.Now().UTC(), triggerID, oldNextRunAt)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows > 0, err
+}
+
 // UpdateTriggerNextRun updates the next_run_at for a trigger.
 func (r *Repository) UpdateTriggerNextRun(ctx context.Context, triggerID string, nextRunAt *time.Time) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`

@@ -706,6 +706,7 @@
   "routineCreated": "Ŕōũţĩńē ćŕēàţēď",
   "routineDeleted": "Ŕōũţĩńē ďēĺēţēď",
   "routineFired": "Ŕōũţĩńē ƒĩŕēď",
+  "routineNotFiring": "Ćàńńōţ ŕũń: ŕōũţĩńē śţàţũś ĩś {{status}}",
   "routinePaused": "Ŕōũţĩńē ƥàũśēď",
   "routines": "Ŕōũţĩńēś",
   "routinesAutomaticallyCreateTasksOnA": "Ŕōũţĩńēś àũţōḿàţĩćàĺĺŷ ćŕēàţē ţàśķś ōń à śćĥēďũĺē ōŕ ŵēƀĥōōķ ţŕĩĝĝēŕ.",

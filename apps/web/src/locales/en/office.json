@@ -706,6 +706,7 @@
   "routineCreated": "Routine created",
   "routineDeleted": "Routine deleted",
   "routineFired": "Routine fired",
+  "routineNotFiring": "Cannot run: routine status is {{status}}",
   "routinePaused": "Routine paused",
   "routines": "Routines",
   "routinesAutomaticallyCreateTasksOnA": "Routines automatically create tasks on a schedule or webhook trigger.",
