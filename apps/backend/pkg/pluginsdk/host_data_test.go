@@ -43,6 +43,9 @@ type dataRecordingHost struct {
 	createdTask     Task
 	lastCreateInput CreateTaskInput
 	updatedTask     Task
+	relations       *TaskRelations
+	lastRelationWS  string
+	lastRelationID  string
 	lastUpdateInput UpdateTaskInput
 	movedOutcome    MoveTaskOutcome
 	lastMoveInput   MoveTaskInput
@@ -73,7 +76,10 @@ func (h *dataRecordingHost) EmitEvent(context.Context, string, map[string]any) e
 	return nil
 }
 
-func (h *dataRecordingHost) Tasks() TaskReader           { return dataRecordingTaskReader{h} }
+func (h *dataRecordingHost) Tasks() TaskReader { return dataRecordingTaskReader{h} }
+func (h *dataRecordingHost) TaskRelations() TaskRelationsReader {
+	return dataRecordingTaskRelationsReader{h}
+}
 func (h *dataRecordingHost) Sessions() SessionReader     { return dataRecordingSessionReader{h} }
 func (h *dataRecordingHost) Workspaces() WorkspaceReader { return dataRecordingWorkspaceReader{h} }
 func (h *dataRecordingHost) Workflows() WorkflowReader   { return dataRecordingWorkflowReader{h} }
@@ -90,6 +96,13 @@ func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string)
 }
 
 type dataRecordingTaskReader struct{ h *dataRecordingHost }
+
+type dataRecordingTaskRelationsReader struct{ h *dataRecordingHost }
+
+func (r dataRecordingTaskRelationsReader) Get(_ context.Context, workspaceID, taskID string) (*TaskRelations, error) {
+	r.h.lastRelationWS, r.h.lastRelationID = workspaceID, taskID
+	return r.h.relations, nil
+}
 
 func (r dataRecordingTaskReader) List(_ context.Context, filter TaskFilter, _ Page) ([]Task, *PageInfo, error) {
 	r.h.lastTaskFilter = filter
@@ -210,6 +223,20 @@ func TestHostData_TasksListAndGet(t *testing.T) {
 	_, err = host.Tasks().Get(context.Background(), "missing")
 	require.Error(t, err)
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestHostData_TaskRelations(t *testing.T) {
+	impl := &dataRecordingHost{relations: &TaskRelations{
+		Task:     RelationTask{ID: "task-1", WorkspaceID: "ws-1", Identifier: "K-1", Title: "Compact", State: "running"},
+		Children: []RelationTask{{ID: "task-2", WorkspaceID: "ws-1", Title: "Child", State: "queued"}},
+	}}
+	host := dialHostOverBufconn(t, impl)
+
+	relations, err := host.TaskRelations().Get(context.Background(), "ws-1", "task-1")
+	require.NoError(t, err)
+	require.Equal(t, impl.relations, relations)
+	require.Equal(t, "ws-1", impl.lastRelationWS)
+	require.Equal(t, "task-1", impl.lastRelationID)
 }
 
 // TestHostData_TaskWritesAndMessage proves the write RPCs (CreateTask,
@@ -434,6 +461,10 @@ func TestHostData_UnimplementedHostData_ReturnsUnimplemented(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 
 	_, err = host.Tasks().Get(context.Background(), "task-1")
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, err = host.TaskRelations().Get(context.Background(), "ws-1", "task-1")
 	require.Error(t, err)
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 

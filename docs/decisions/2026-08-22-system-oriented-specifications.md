@@ -79,4 +79,3 @@ sprawl.
 This option followed an external software-factory model. The term did not match
 Kandev terminology and implied a more rigid document than a living system
 design.
-
