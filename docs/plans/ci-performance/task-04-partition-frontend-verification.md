@@ -27,8 +27,10 @@ Adopt the smallest passing candidate and preserve the stable required frontend g
 
 ## In scope
 
-- Retain static checks/build in `frontend`; add a measured `frontend_tests` matrix.
-- Existing runner-plan family wiring, unique shard reports, and complete gate dependencies.
+- Retain static checks, unsharded tests, and build in `frontend` until the
+  adoption gate passes; keep the measured `frontend_tests` matrix as a candidate.
+- Existing runner-plan family schema, unique candidate shard reports, and the
+  stable required gate.
 - Compare test identities, median critical path, queue delay, retries, and runner minutes.
 
 ## Out of scope
@@ -89,12 +91,12 @@ Serial local shard commands prove selection only. Hosted comparable samples must
 
 ## Results
 
-Implemented 2026-09-12. The static frontend job keeps lint, typecheck, i18n
-checks, ratchets, and build. A two-instance `frontend_tests` matrix runs the
-unit suite with the production environment, unique JSON reports, and the
-existing external-runner planner. `Frontend Tests Passed` now requires the
-runner plan, change detection, static job, and every unit-test matrix result;
-failures and cancellations fail the gate while deliberate skips pass.
+Implemented 2026-09-12. The frontend job keeps lint, typecheck, i18n checks,
+ratchets, the unsharded unit suite, and build. The two-instance
+`frontend_tests` matrix remains a measured candidate and is not enabled until
+the hosted adoption gate passes. `Frontend Tests Passed` continues to require
+the runner plan, change detection, and the single frontend job; failures and
+cancellations fail the gate while deliberate skips pass.
 
 Local partition evidence, using the corrected `pnpm test -- --shard=...`
 invocation, is:
@@ -107,4 +109,4 @@ invocation, is:
 
 The four-shard candidate and three comparable hosted runs were not executed.
 The 30% critical-path and 25% runner-minute adoption decision therefore stays
-open; the two-shard workflow is recorded as a candidate pending hosted proof.
+open; the two-shard workflow remains a candidate pending hosted proof.

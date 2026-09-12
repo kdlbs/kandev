@@ -70,7 +70,9 @@ Task 01 uses job-level timeout fields and existing Claude workflow contract test
 Task 02 resolves the pnpm store in the actual frontend container.
 Task 03 separates Node-compatible files from browser tests and isolates multilingual setup.
 Task 04 uses native Vitest shards and the existing external-runner family schema.
-The `frontend` job keeps static checks and build. A new test matrix feeds the unchanged public `Frontend Tests Passed` gate.
+The `frontend` job keeps static checks, the unsharded unit suite, and build until
+the hosted adoption gate passes. A measured test matrix remains a candidate for
+the unchanged public `Frontend Tests Passed` gate.
 Tasks 05 and 06 produce bounded reports and procedures. They do not invent unmeasured code changes.
 See the system design for candidate-retention thresholds and failure behavior.
 
@@ -82,7 +84,7 @@ See the system design for candidate-retention thresholds and failure behavior.
 | 002.1–002.2 | `frontend-tests-workflow-contract_test.py`: resolved store wiring and lockfile install; hosted cache miss/save/hit evidence remains pending. |
 | 003.1 | `apps/web/scripts/vitest-project-selection.test.ts`: complete, disjoint file selection; unsharded versus merged two-shard identities. |
 | 003.2 | `vitest-environment.test.tsx`, focused `lib/i18n` tests, worker-budget tests, production-mode focused run, typecheck, and full unit suite. |
-| 003.3 | Frontend workflow contract cases for matrix placement, report publication, result handling, and deliberate skips. |
+| 003.3 | Frontend workflow contract cases for unsharded production-mode test placement, result handling, and deliberate skips. |
 | 004.1–004.2 | [Curated report](evidence.md) with attempt-specific timestamps and local two-shard identity evidence; hosted comparable performance remains pending. |
 | 004.3 | Existing runner planner and placement tests plus the runbook procedure with protected jobs, cost assumptions, and rollback. |
 

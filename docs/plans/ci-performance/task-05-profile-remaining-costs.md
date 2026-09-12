@@ -57,14 +57,21 @@ gh api --paginate "repos/kdlbs/kandev/actions/runs/$CI_RUN_ID/attempts/$CI_RUN_A
 gh api "repos/kdlbs/kandev/actions/runs/$CI_RUN_ID/artifacts?per_page=100"
 ```
 
-For a run that has the named E2E artifact:
+The artifact producer must publish an attempt-qualified name. Reject the
+unqualified `e2e-timing-diagnostics` name because a rerun can publish the same
+name for another attempt. Select and download only the exact name below:
 
 ```bash
 : "${CI_ARTIFACT_DIR:?Set an empty temporary artifact directory}"
-gh run download "$CI_RUN_ID" --repo kdlbs/kandev --name e2e-timing-diagnostics --dir "$CI_ARTIFACT_DIR"
+CI_ARTIFACT_NAME="e2e-timing-diagnostics-attempt-${CI_RUN_ATTEMPT}"
+ARTIFACTS_JSON="$(gh api "repos/kdlbs/kandev/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
+test "$(jq --arg name "$CI_ARTIFACT_NAME" '[.artifacts[] | select(.name == $name and .expired == false)] | length' <<<"$ARTIFACTS_JSON")" = 1
+gh run download "$CI_RUN_ID" --repo kdlbs/kandev --name "$CI_ARTIFACT_NAME" --dir "$CI_ARTIFACT_DIR"
 ```
 
-Check artifact provenance against the selected attempt. Do not mix retry attempts silently.
+Check the downloaded manifest against both `CI_RUN_ID` and `CI_RUN_ATTEMPT`.
+Reject the artifact when the exact name is absent, duplicated, expired, or the
+manifest identifies another run or attempt. Do not mix retry attempts silently.
 Select the Windows job ID from the jobs response, then use the job logs endpoint for package and compile timing.
 Delete owned temporary logs after the curated report is complete.
 

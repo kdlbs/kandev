@@ -120,7 +120,8 @@ retains ownership of its values, validation, authority, and persistence.
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
 
 ## Related systems
 

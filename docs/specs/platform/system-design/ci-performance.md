@@ -82,15 +82,19 @@ After setup measurements, benchmark two and four Vitest shards on the same runne
 Use built-in Vitest file sharding. Select two shards initially only if it passes the measurement gate below.
 Use four only when it provides a further measured benefit within the compute budget.
 
-Keep the existing `frontend` job for formatting, licenses, lint, typecheck, SDK checks, i18n checks, ratchets, and build.
-Add a `frontend_tests` matrix for unit tests after successful change detection.
-Both families retain the existing pinned container and independently install dependencies through the repaired cache.
-Each test shard retains `NODE_ENV: production` on the test command.
+Keep the existing `frontend` job for formatting, licenses, lint, typecheck, SDK checks, i18n checks, ratchets, the unsharded unit suite, and build until the adoption gate passes.
+After successful change detection and a passing measurement gate, an optional
+`frontend_tests` matrix may split unit tests. Until then, the matrix remains a
+candidate and must not become required CI.
+The active job and any measured candidate retain the existing pinned container
+and repaired cache. Each test command retains `NODE_ENV: production`.
 Run tests through the package script so `pretest` generation still executes.
 
-Register the matrix through `.github/actions/plan-external-runners` using its existing family schema.
-Use the standard tier without changing protected-job placement or percentage semantics.
-Extend `frontend-gate` to require the planner, change detection, `frontend`, and all test shards.
+If adopted, register the matrix through `.github/actions/plan-external-runners`
+using its existing family schema. Use the standard tier without changing
+protected-job placement or percentage semantics. Extend `frontend-gate` to
+require the planner, change detection, `frontend`, and all test shards only
+after adoption.
 Keep its public name `Frontend Tests Passed`, `if: always()`, and deliberate-skip handling.
 Keep `pull_request`, `push`, `merge_group`, and dispatch coverage. Do not add trigger-level path filters.
 

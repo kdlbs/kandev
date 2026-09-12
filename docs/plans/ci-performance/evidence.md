@@ -160,8 +160,8 @@ go test -race -v ./internal/agentctl/server/process/... \
    setup candidate and two-shard candidate with identical test identities.
    Retain the matrix only after three comparable hosted runs show at least a
    30% lower median frontend critical path and no more than 25% additional
-   runner minutes. Current branch work supplies the selection, matrix, report,
-   and gate contracts; hosted performance evidence is pending.
+   runner minutes. Current branch work supplies the selection and unsharded
+   gate contracts; the matrix and hosted performance evidence remain pending.
 2. **pnpm cache save and restore.** The path-validation failure is confirmed.
    Verify a cold install, a later compatible restore, and a cache-service
    failure with a successful frozen install. Do not use a cache hit as a proxy

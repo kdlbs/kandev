@@ -88,4 +88,4 @@ Validation:
 - `python3 .github/scripts/claude-code-review-workflow-contract_test.py` passed (10 tests).
 - `python3 .github/scripts/lint-action-pinning_test.py` passed (9 tests).
 - `git diff --check` passed.
-- `actionlint` is not installed in this workspace; the workflow syntax remains covered by the repository contract and pinning tests.
+- `actionlint` is not installed in this workspace; workflow syntax validation is pending. Repository contract and pinning tests cover workflow behavior and action references, not YAML parsing.

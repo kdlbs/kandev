@@ -56,7 +56,6 @@ jobs:
             [
               {"name":"changes","tier":"light"},
               {"name":"frontend","tier":"standard"},
-              {"name":"frontend_tests","tier":"standard","instances":[{"shard":1,"total":2},{"shard":2,"total":2}]},
               {"name":"frontend_gate","tier":"light"}
             ]
           burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
@@ -139,7 +138,7 @@ jobs:
             | python3 .github/scripts/changed-paths.py
 
   frontend:
-    name: Run Frontend Lint and Build
+    name: Run Frontend Lint, Tests, and Build
     needs: [changes, runner_plan]
     if: needs.changes.outputs.run == 'true'
     runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}
@@ -388,83 +387,16 @@ jobs:
 
           node scripts/check-new-e2e-sleeps.mjs --base "${BASE_SHA}"
 
-      - name: Build
-        run: pnpm --filter @kandev/web build
-
-  frontend_tests:
-    name: Frontend Unit Tests (${{ matrix.shard }}/${{ matrix.total }})
-    needs: [changes, runner_plan]
-    if: needs.changes.outputs.run == 'true'
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_tests_matrix }}
-    container: ghcr.io/kdlbs/kandev-ci:build-latest
-    defaults:
-      run:
-        shell: bash
-        working-directory: apps
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Mark workspace safe for git
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Resolve pnpm store path
-        id: pnpm-store
-        shell: bash
-        run: |
-          set -euo pipefail
-          STORE_PATH="$(pnpm store path --silent)"
-          PNPM_VERSION="$(pnpm --version)"
-          if [[ "${STORE_PATH}" != /* ]]; then
-            echo "pnpm returned a non-absolute store path: ${STORE_PATH}" >&2
-            exit 1
-          fi
-          mkdir -p "${STORE_PATH}"
-          printf 'path=%s\n' "${STORE_PATH}" >> "$GITHUB_OUTPUT"
-          printf 'version=%s\n' "${PNPM_VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Cache pnpm store
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        continue-on-error: true
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Keep the production environment guard in the matrix job. The image sets
-      # no NODE_ENV, so this reproduces the runtime value that exposed a deleted
-      # `NODE_ENV=test` pin in vitest.config.ts.
+      # Keep the production environment guard in the unsharded job. The image
+      # sets no NODE_ENV, so this reproduces the runtime value that exposed a
+      # deleted NODE_ENV=test pin in vitest.config.ts.
       - name: Run tests
         env:
           NODE_ENV: production
-          FRONTEND_TEST_SHARD: ${{ matrix.shard }}
-          FRONTEND_TEST_TOTAL: ${{ matrix.total }}
-        run: >-
-          pnpm --filter @kandev/web test --
-          --shard="${FRONTEND_TEST_SHARD}/${FRONTEND_TEST_TOTAL}"
-          --reporter=json
-          --outputFile="$RUNNER_TEMP/frontend-tests-${FRONTEND_TEST_SHARD}-${FRONTEND_TEST_TOTAL}.json"
+        run: pnpm --filter @kandev/web test
 
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: frontend-test-results-${{ matrix.shard }}-${{ matrix.total }}
-          path: ${{ runner.temp }}/frontend-tests-${{ matrix.shard }}-${{ matrix.total }}.json
-          if-no-files-found: ignore
-          retention-days: 30
+      - name: Build
+        run: pnpm --filter @kandev/web build
 
   # The required check. Runs on every event, including the ones where the
   # frontend verification jobs above are correctly skipped, so the merge queue
@@ -472,7 +404,7 @@ jobs:
   frontend-gate:
     name: Frontend Tests Passed
     runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}
-    needs: [changes, frontend, frontend_tests, runner_plan]
+    needs: [changes, frontend, runner_plan]
     if: always()
 
     steps:
@@ -481,7 +413,6 @@ jobs:
           RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
-          FRONTEND_TESTS_RESULT: ${{ needs.frontend_tests.result }}
         run: |
           set -euo pipefail
 
@@ -502,8 +433,4 @@ jobs:
             echo "Frontend job finished with result: ${FRONTEND_RESULT}" >&2
             exit 1
           fi
-          if [[ "${FRONTEND_TESTS_RESULT}" != "success" && "${FRONTEND_TESTS_RESULT}" != "skipped" ]]; then
-            echo "Frontend test matrix finished with result: ${FRONTEND_TESTS_RESULT}" >&2
-            exit 1
-          fi
-          echo "Change detection: ${CHANGES_RESULT}; frontend: ${FRONTEND_RESULT}; unit tests: ${FRONTEND_TESTS_RESULT}"
+          echo "Change detection: ${CHANGES_RESULT}; frontend: ${FRONTEND_RESULT}"
