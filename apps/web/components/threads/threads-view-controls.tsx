@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
   IconAdjustments,
+  IconAlertTriangle,
   IconArrowLeft,
   IconCheck,
   IconChevronDown,
@@ -24,6 +25,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { MobileListingContext } from "@/components/kanban/mobile-listing-context";
 import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
@@ -303,6 +305,7 @@ function MobileThreadsViewControls({
   onDismissSyncError,
 }: MobileThreadsViewControlsProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const activeViewName = threadViewName(activeView, t);
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState<"views" | "editor">("views");
@@ -330,7 +333,7 @@ function MobileThreadsViewControls({
 
   return (
     <>
-      {syncError && (
+      {syncError && !isMobile && (
         <ThreadViewSyncError
           error={syncError}
           mobile
@@ -338,19 +341,42 @@ function MobileThreadsViewControls({
           onDismiss={onDismissSyncError}
         />
       )}
-      <Button
-        type="button"
-        variant="outline"
-        className="min-h-11 max-w-[12rem] shrink-0 cursor-pointer gap-1 px-3 text-xs"
-        onClick={openViews}
-        aria-label={t("threads:viewPickerLabel", { name: activeViewName })}
-        data-testid="threads-mobile-view-trigger"
-        ref={triggerRef}
-      >
-        <IconAdjustments className="h-4 w-4 shrink-0" />
-        <span className="truncate">{activeViewName}</span>
-        <IconChevronDown className="h-3.5 w-3.5 shrink-0" />
-      </Button>
+      {isMobile ? (
+        <MobileListingContext
+          context={t("threads:title")}
+          label={activeViewName}
+          onClick={openViews}
+          aria-label={t("threads:viewPickerLabel", { name: activeViewName })}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          data-testid="threads-mobile-view-trigger"
+          ref={triggerRef}
+        />
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 min-w-0 max-w-[12rem] shrink cursor-pointer gap-1 px-3 text-xs"
+          onClick={openViews}
+          aria-label={t("threads:viewPickerLabel", { name: activeViewName })}
+          data-testid="threads-mobile-view-trigger"
+          ref={triggerRef}
+        >
+          <IconAdjustments className="h-4 w-4 shrink-0" />
+          <span className="truncate">{activeViewName}</span>
+          <IconChevronDown className="h-3.5 w-3.5 shrink-0" />
+        </Button>
+      )}
+      {syncError && isMobile && (
+        <span
+          role="status"
+          className="shrink-0 text-destructive"
+          data-testid="threads-mobile-view-sync-status"
+        >
+          <IconAlertTriangle aria-hidden="true" className="h-4 w-4" />
+          <span className="sr-only">{t("threads:failedToSyncViews")}</span>
+        </span>
+      )}
       <MobileConfirmationHost open={open} surface="drawer">
         {({ contentProps }) => (
           <Drawer
@@ -400,6 +426,14 @@ function MobileThreadsViewControls({
                   className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
                   data-testid="threads-mobile-view-drawer-scroll-region"
                 >
+                  {syncError && isMobile && (
+                    <ThreadViewSyncError
+                      error={syncError}
+                      mobile
+                      onRetry={onRetrySync}
+                      onDismiss={onDismissSyncError}
+                    />
+                  )}
                   {page === "views" ? (
                     <MobileThreadViewList
                       activeView={activeView}

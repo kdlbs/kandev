@@ -216,12 +216,13 @@ optimistic rollback stay in their current hooks. Session warnings remain
 shared with desktop. Full system alerts and explicit discard inputs are not
 replaced by this adapter.
 
-The filter shells in `app/github/github-page-client.tsx` and
-`app/gitlab/gitlab-page-client.tsx` share the presentation-only
-`components/integrations/integration-filters-sheet.tsx`. On phones it uses
-`Drawer`, so the picker and compact confirmation share a bottom surface with
-a fixed header and one scrollable list. Above the phone boundary it retains
-the right-hand `Sheet`. Existing selection, default, save and delete handlers
+GitHub's `components/github/my-github/mobile-views-picker.tsx` hosts the compact
+confirmation inside its Views drawer. Its delayed save handoff still waits for
+the drawer to release focus. GitLab's `app/gitlab/gitlab-page-client.tsx` uses
+the presentation-only `components/integrations/integration-filters-sheet.tsx`:
+a bottom `Drawer` on phones and the existing right-hand `Sheet` above the phone
+boundary. Each phone picker and confirmation share one surface, with a fixed
+header and one scrollable list. Selection, default, save and delete handlers
 stay with each provider; retain their close timing and test IDs.
 
 ## Mobile composition and accessibility

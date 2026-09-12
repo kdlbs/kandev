@@ -180,6 +180,7 @@ function NameInput({
   return (
     <Input
       ref={inputRef}
+      controlSize="none"
       autoFocus
       aria-label={mode === "rename" ? t("task:viewName") : t("task:newViewName")}
       value={value}

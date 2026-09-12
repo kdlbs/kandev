@@ -212,7 +212,8 @@ test.describe("Sidebar selection-aware context menu", () => {
 
     const confirm = sidebar.bulkDeleteConfirm();
     await expect(confirm).toBeVisible({ timeout: 5_000 });
-    await testPage.getByTestId("delete-discard-worktree-checkbox").click();
+    await expect(confirm).toBeEnabled();
+    await expect(testPage.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
     await confirm.click();
 
     await expect(sidebar.row(a.id)).not.toBeVisible({ timeout: 10_000 });

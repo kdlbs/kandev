@@ -55,6 +55,8 @@ function PopoverHarness({ onConfirm = vi.fn() }: { onConfirm?: () => void | Prom
       <TaskDetachConfirmPopover
         open={open}
         anchorRef={anchorRef}
+        focusReturnRef={anchorRef}
+        restoreFocusOnConfirm
         taskTitle="Child task"
         sharesParentWorkspace
         onOpenChange={setOpen}
@@ -101,6 +103,16 @@ describe("task detach confirmation adapters", () => {
     await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
     expect(shellClosed).toBe(true);
     expect(screen.queryByTestId("detach-task-inline-confirmation")).toBeNull();
+  });
+
+  it("returns focus to the menu trigger after confirmation", async () => {
+    const onConfirm = vi.fn();
+    render(<PopoverHarness onConfirm={onConfirm} />);
+
+    fireEvent.click(screen.getByTestId("detach-task-confirm"));
+
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("detach-anchor")));
   });
 
   it("keeps task-switcher detachment on its existing modal branch", async () => {

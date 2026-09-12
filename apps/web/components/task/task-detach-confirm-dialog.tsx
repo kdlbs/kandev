@@ -77,6 +77,7 @@ export type TaskDetachConfirmPopoverProps = TaskDetachConfirmationCopyProps & {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm?: boolean;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   onOpenChange: (open: boolean) => void;
   onCancel?: () => void;
@@ -87,6 +88,7 @@ export function TaskDetachConfirmPopover({
   open,
   anchorRef,
   focusReturnRef,
+  restoreFocusOnConfirm = false,
   focusBoundaryRef,
   taskTitle,
   sharesParentWorkspace,
@@ -100,6 +102,7 @@ export function TaskDetachConfirmPopover({
       open={open}
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
+      restoreFocusOnConfirm={restoreFocusOnConfirm}
       focusBoundaryRef={focusBoundaryRef}
       title={t(DETACH_TASK_FROM_PARENT_KEY)}
       description={
@@ -161,6 +164,7 @@ export type TaskDetachConfirmationSurfaceProps = TaskDetachConfirmationCopyProps
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
 };
@@ -170,6 +174,7 @@ export function TaskDetachConfirmationSurface({
   open,
   anchorRef,
   focusReturnRef,
+  restoreFocusOnConfirm = false,
   taskTitle,
   sharesParentWorkspace,
   onOpenChange,
@@ -182,6 +187,7 @@ export function TaskDetachConfirmationSurface({
       open={open}
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
+      restoreFocusOnConfirm={restoreFocusOnConfirm}
       focusBoundaryRef={anchorRef}
       taskTitle={taskTitle}
       sharesParentWorkspace={sharesParentWorkspace}

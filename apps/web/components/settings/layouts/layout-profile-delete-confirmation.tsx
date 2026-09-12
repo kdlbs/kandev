@@ -10,6 +10,7 @@ import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-p
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import type { SavedLayout } from "@/lib/types/http";
 
 type LayoutProfileDeleteConfirmationProps = {
@@ -106,9 +107,9 @@ function DeleteProfileButton({
         <Button
           ref={anchorRef}
           type="button"
-          size="icon-sm"
+          size="icon"
           variant="outline"
-          className="min-h-11 min-w-11 cursor-pointer md:min-h-8 md:min-w-8"
+          className={settingsActionClassName("cursor-pointer")}
           aria-label={t("settings:deleteLayoutProfile")}
           onClick={onClick}
           data-testid="layout-profile-delete"

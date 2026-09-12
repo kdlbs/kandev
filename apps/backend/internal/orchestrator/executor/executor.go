@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -98,6 +99,50 @@ type executorStore interface {
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
+// sessionMetadataKeyStateSetter is an optional repository capability. Legacy
+// test stores can keep their existing metadata API, while the SQL repository
+// can guard recovery markers against a concurrent stop or archive.
+type sessionMetadataKeyStateSetter interface {
+	SetSessionMetadataKeyIfState(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+		expectedState models.TaskSessionState,
+	) (bool, error)
+}
+
+// sessionMetadataErrorCASWriter is the optional persistence seam for
+// execution-scoped bootstrap errors. Production repositories implement both
+// operations atomically; legacy test stores can fall back to the ordinary
+// metadata setter after the executor's current-execution fence.
+type sessionMetadataErrorCASWriter interface {
+	SetSessionMetadataKeyIfAbsent(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+	) (bool, error)
+	SetSessionMetadataKeyIfStamp(
+		ctx context.Context,
+		sessionID, key, expectedStamp string,
+		value interface{},
+	) (bool, error)
+}
+
+// bootstrapFailureCommitter is the atomic repository boundary for an
+// asynchronous process-start failure. The expected state and error stamp are
+// captured immediately before the commit; the repository must also require
+// the execution row to still carry agentExecutionID before changing either
+// metadata or session state.
+type bootstrapFailureCommitter interface {
+	CommitBootstrapFailureIfCurrentExecution(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
+}
+
 // officeTaskSessionCreator lets repositories make Office-session origin
 // selection part of the insert transaction. Test and legacy stores can omit
 // it; the executor keeps a per-task fallback lock for those implementations.
@@ -110,6 +155,26 @@ type officeTaskSessionCreator interface {
 // stores can omit it; the executor keeps its existing best-effort fallback.
 type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
+}
+
+// Workflow-route-aware creators keep a prepared destination record in the
+// same transaction as session insertion. Repositories that do not expose the
+// specialized workspace variants retain the legacy creation path for tests
+// and older adapters.
+type workflowSessionRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkflowSessionRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type initialRuntimeSeedWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithInitialRuntimeSeedAndWorkflowRoute(context.Context, *models.TaskSession, *models.WorkflowSessionRoute) error
+}
+
+type workspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, *models.WorkflowSessionRoute) error
+}
+
+type sharedGroupWorkspaceBindingWorkflowRouteTaskSessionCreator interface {
+	CreateTaskSessionWithSharedGroupWorkspaceBindingAndWorkflowRoute(context.Context, *models.TaskSession, *models.TaskEnvironment, string, *models.WorkflowSessionRoute) error
 }
 
 // taskEnvironmentMaterializationFinalizer publishes a successfully prepared
@@ -736,6 +801,18 @@ type SessionStateTransitionFunc func(
 	onChanged func(),
 ) (changed bool, finalState models.TaskSessionState, err error)
 
+// BootstrapFailureTransitionFunc atomically commits a bootstrap error and
+// its FAILED session transition, then publishes the accepted transition.
+// expectedState and expectedStamp come from the executor's final ownership
+// read and are checked again by the repository commit.
+type BootstrapFailureTransitionFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (changed bool, finalState models.TaskSessionState, err error)
+
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
 // session-row updates such as metadata. expectedState is the state observed
@@ -748,6 +825,19 @@ type SessionStartingFunc func(
 	session *models.TaskSession,
 	expectedState models.TaskSessionState,
 	promoteTask bool,
+) error
+
+// SessionStartingWithOptionsFunc is the extended STARTING callback used by
+// explicit completed-conversation recovery. It keeps the legacy callback
+// shape available to lightweight executors and tests while carrying the
+// narrow permission needed for the guarded completed-state transition.
+type SessionStartingWithOptionsFunc func(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+	allowCompletedResume bool,
 ) error
 
 // ExecutionCleanupClaimFunc atomically claims forced cleanup for one exact
@@ -791,6 +881,16 @@ type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID 
 // the mark-review-done recovery action. The resolver owns workflow and PR
 // lookups; an error omits the action without blocking failure persistence.
 type LaunchFailureReviewEligibilityFunc func(ctx context.Context, taskID string) (bool, error)
+
+// WorktreeRecoveryAdmissionFunc is the legacy task-scoped recovery seam. It is
+// retained for lightweight adapters; production wiring uses the selected
+// environment callback below.
+type WorktreeRecoveryAdmissionFunc func(ctx context.Context, taskID string) error
+
+// SelectedWorktreeRecoveryAdmissionFunc decides whether the already-selected
+// task environment may launch. The returned admission remains held through the
+// external workspace-start boundary and is released by the executor.
+type SelectedWorktreeRecoveryAdmissionFunc func(context.Context, worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error)
 
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the
@@ -860,10 +960,18 @@ type Executor struct {
 	// accepted writes from terminal/no-op races.
 	onSessionStateTransition SessionStateTransitionFunc
 
+	// Atomic bootstrap-failure callback used by the orchestrator to commit the
+	// typed error, FAILED state, and corresponding publication as one ownership
+	// decision.
+	onBootstrapFailureTransition BootstrapFailureTransitionFunc
+
 	// Callback for STARTING writes that carry full session-row changes. Set by
 	// the orchestrator so launch/resume/model-switch transitions serialize with
 	// runtime task-state reconciliation.
 	onSessionStarting SessionStartingFunc
+	// Extended STARTING callback for explicit completed-session recovery. When
+	// present, it takes precedence over the legacy callback above.
+	onSessionStartingWithOptions SessionStartingWithOptionsFunc
 
 	// Callback for exact-execution forced cleanup arbitration. Set by the
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
@@ -893,6 +1001,10 @@ type Executor struct {
 	onLaunchFailed LaunchFailedFunc
 	// Optional resolver for the mark-review-done recovery action.
 	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
+	// Optional compatibility gate for legacy adapters.
+	worktreeRecoveryAdmission WorktreeRecoveryAdmissionFunc
+	// Selected environment gate used by production worktree recovery.
+	selectedWorktreeRecoveryAdmission SelectedWorktreeRecoveryAdmissionFunc
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
@@ -1141,6 +1253,18 @@ func (e *Executor) SetOnEarlyLaunchTaskStateReconcile(fn TaskRuntimeStateReconci
 	e.onEarlyLaunchTaskStateReconcile = fn
 }
 
+// SetWorktreeRecoveryAdmission installs the task-scoped linked-worktree
+// admission gate. Nil disables the optional integration for legacy callers.
+func (e *Executor) SetWorktreeRecoveryAdmission(fn WorktreeRecoveryAdmissionFunc) {
+	e.worktreeRecoveryAdmission = fn
+}
+
+// SetSelectedWorktreeRecoveryAdmission installs the environment-scoped
+// recovery gate used after executor and workspace selection.
+func (e *Executor) SetSelectedWorktreeRecoveryAdmission(fn SelectedWorktreeRecoveryAdmissionFunc) {
+	e.selectedWorktreeRecoveryAdmission = fn
+}
+
 // SetOnSessionStateChange sets a callback for session state changes.
 // This allows the orchestrator to route state changes through updateTaskSessionState
 // which updates the DB and publishes WebSocket events to the frontend.
@@ -1154,9 +1278,21 @@ func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 	e.onSessionStateTransition = fn
 }
 
+// SetOnBootstrapFailureTransition wires the atomic bootstrap-failure commit
+// used by asynchronous agent-process start failures.
+func (e *Executor) SetOnBootstrapFailureTransition(fn BootstrapFailureTransitionFunc) {
+	e.onBootstrapFailureTransition = fn
+}
+
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.
 func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
 	e.onSessionStarting = fn
+}
+
+// SetOnSessionStartingWithOptions sets the extended STARTING callback used by
+// explicit completed-session recovery.
+func (e *Executor) SetOnSessionStartingWithOptions(fn SessionStartingWithOptionsFunc) {
+	e.onSessionStartingWithOptions = fn
 }
 
 // SetOnExecutionCleanupClaim sets the exact-execution forced cleanup arbiter.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	internaldb "github.com/kandev/kandev/internal/db"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -44,6 +45,9 @@ func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessi
 		typed.identities[identity.SessionID] = identity
 		typed.mu.Unlock()
 	case *sqliteRepository:
+		if _, err := typed.db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (id TEXT PRIMARY KEY)`); err != nil {
+			t.Fatalf("create queue session authority: %v", err)
+		}
 		statements := []string{
 			`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, archived_at TIMESTAMP, updated_at TIMESTAMP)`,
 			`ALTER TABLE task_sessions ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`,
@@ -54,13 +58,16 @@ func seedQueueSessionIdentity(t *testing.T, repo Repository, identity QueueSessi
 				t.Fatalf("prepare queue session authority: %v", err)
 			}
 		}
-		if _, err := typed.db.Exec(`INSERT OR IGNORE INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)`, identity.TaskID); err != nil {
+		if _, err := typed.db.Exec(typed.db.Rebind(`
+			INSERT INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)
+			ON CONFLICT(id) DO NOTHING
+		`), identity.TaskID); err != nil {
 			t.Fatalf("seed queue task authority: %v", err)
 		}
-		if _, err := typed.db.Exec(`
+		if _, err := typed.db.Exec(typed.db.Rebind(`
 			INSERT INTO task_sessions (id, task_id, queue_incarnation_id) VALUES (?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id, queue_incarnation_id = excluded.queue_incarnation_id
-		`, identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
+		`), identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
 			t.Fatalf("seed queue session authority: %v", err)
 		}
 		typed.tasksTablePresent = true
@@ -692,7 +699,7 @@ func TestSQLiteRepository_DeletePreservesReservedLifecycleEntry(t *testing.T) {
 	if removed != 0 {
 		t.Fatalf("clear removed %d reserved entries, want 0", removed)
 	}
-	if err := repo.AcknowledgeByID(ctx, "s1", msg.ID); err != nil {
+	if err := repo.AcknowledgeReserved(ctx, reserved); err != nil {
 		t.Fatalf("acknowledge reserved entry after cancellation attempts: %v", err)
 	}
 }
@@ -715,7 +722,7 @@ func TestSQLiteRepository_CancellationReservationOrdering(t *testing.T) {
 	t.Run("reservation wins before clear", func(t *testing.T) {
 		repo := newTestSQLiteRepo(t)
 		ctx := context.Background()
-		msg := insertDurableLifecycleEntry(t, repo, "reserve-first")
+		_ = insertDurableLifecycleEntry(t, repo, "reserve-first")
 
 		reserved, err := repo.ReserveHead(ctx, "reserve-first")
 		if err != nil || reserved == nil {
@@ -725,10 +732,55 @@ func TestSQLiteRepository_CancellationReservationOrdering(t *testing.T) {
 		if err != nil || removed != 0 {
 			t.Fatalf("clear after reserve: removed=%d err=%v", removed, err)
 		}
-		if err := repo.AcknowledgeByID(ctx, "reserve-first", msg.ID); err != nil {
+		if err := repo.AcknowledgeReserved(ctx, reserved); err != nil {
 			t.Fatalf("acknowledge: %v", err)
 		}
 	})
+}
+func TestSQLiteRepository_PurgeSessionRemovesReservedLifecycleAndPendingMove(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqlRepo := repo.(*sqliteRepository)
+	ctx := context.Background()
+	_ = insertDurableLifecycleEntry(t, repo, "purge-session")
+	if err := repo.SetPendingMove(ctx, "purge-session", &PendingMove{TaskID: "t1"}); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	if err := repo.SetAutoRun(ctx, "purge-session", false); err != nil {
+		t.Fatalf("set auto-run: %v", err)
+	}
+	if reserved, err := repo.ReserveHead(ctx, "purge-session"); err != nil || reserved == nil {
+		t.Fatalf("reserve lifecycle entry: msg=%+v err=%v", reserved, err)
+	}
+
+	removed, err := repo.PurgeSession(ctx, "purge-session")
+	if err != nil {
+		t.Fatalf("purge session: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("purged rows = %d, want 1", removed)
+	}
+	entries, err := repo.ListBySession(ctx, "purge-session")
+	if err != nil {
+		t.Fatalf("list purged session: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("purged session retained entries: %+v", entries)
+	}
+	move, err := repo.GetPendingMove(ctx, "purge-session")
+	if err != nil {
+		t.Fatalf("get purged pending move: %v", err)
+	}
+	if move != nil {
+		t.Fatalf("purged session retained pending move: %+v", move)
+	}
+	var autoRun int
+	if err := sqlRepo.db.GetContext(ctx, &autoRun,
+		`SELECT auto_run FROM queue_session_state WHERE session_id = ?`, "purge-session"); err != nil {
+		t.Fatalf("read purged session policy: %v", err)
+	}
+	if autoRun != 1 {
+		t.Fatalf("purged session retained auto-run=%d, want 1", autoRun)
+	}
 }
 
 func insertDurableLifecycleEntry(t *testing.T, repo Repository, sessionID string) *QueuedMessage {
@@ -1036,6 +1088,42 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	got, err = repo.TakePendingMove(ctx, "s1")
 	if err != nil || got != nil {
 		t.Errorf("expected empty after take, got %+v err=%v", got, err)
+	}
+}
+
+func TestSQLiteRepository_PendingMoveEntryOptions(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	// A move without one-shot options round-trips as nil so pre-existing rows
+	// and ordinary moves decode back to an option-less move.
+	plain := &PendingMove{MoveID: "m-plain", TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A"}
+	if err := repo.SetPendingMove(ctx, "s-plain", plain); err != nil {
+		t.Fatalf("set plain: %v", err)
+	}
+	if got, err := repo.GetPendingMove(ctx, "s-plain"); err != nil || got == nil || got.EntryOptions != nil {
+		t.Fatalf("expected nil entry options, got %+v err=%v", got, err)
+	}
+
+	// A move with options round-trips every field through both Get and Take.
+	opts := &workflowmove.EntryOptions{ResetContext: true, Instructions: "carry on", SkipStepPrompt: true}
+	move := &PendingMove{MoveID: "m-opts", TaskID: "t2", WorkflowID: "w1", WorkflowStepID: "step-B", EntryOptions: opts}
+	if err := repo.SetPendingMove(ctx, "s-opts", move); err != nil {
+		t.Fatalf("set opts: %v", err)
+	}
+	got, err := repo.GetPendingMove(ctx, "s-opts")
+	if err != nil || got == nil || got.EntryOptions == nil {
+		t.Fatalf("expected entry options via get, got %+v err=%v", got, err)
+	}
+	if !got.EntryOptions.ResetContext || got.EntryOptions.Instructions != "carry on" || !got.EntryOptions.SkipStepPrompt {
+		t.Errorf("entry options not preserved via get: %+v", got.EntryOptions)
+	}
+	taken, err := repo.TakePendingMove(ctx, "s-opts")
+	if err != nil || taken == nil || taken.EntryOptions == nil {
+		t.Fatalf("expected entry options via take, got %+v err=%v", taken, err)
+	}
+	if !taken.EntryOptions.SkipStepPrompt || taken.EntryOptions.Instructions != "carry on" {
+		t.Errorf("entry options not preserved via take: %+v", taken.EntryOptions)
 	}
 }
 

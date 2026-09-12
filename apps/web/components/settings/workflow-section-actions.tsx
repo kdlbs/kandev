@@ -4,6 +4,7 @@ import { IconDownload, IconPlus, IconUpload } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { WorkflowSyncButton } from "@/components/settings/workflow-sync-section";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 type WorkflowSectionActionsProps = {
   onExport: () => void;
@@ -31,7 +32,7 @@ export function WorkflowSectionActions({
         size="sm"
         variant="outline"
         onClick={onExport}
-        className="cursor-pointer"
+        className={settingsActionClassName("cursor-pointer")}
       >
         <IconDownload className="h-4 w-4 mr-2" />
         {t("workflows:exportAll")}
@@ -41,7 +42,7 @@ export function WorkflowSectionActions({
         size="sm"
         variant="outline"
         onClick={onImport}
-        className="cursor-pointer"
+        className={settingsActionClassName("cursor-pointer")}
       >
         <IconUpload className="h-4 w-4 mr-2" />
         {t("workflows:import")}
@@ -50,7 +51,7 @@ export function WorkflowSectionActions({
         type="button"
         size="sm"
         onClick={onAdd}
-        className="cursor-pointer"
+        className={settingsActionClassName("cursor-pointer")}
         data-testid="add-workflow-button"
       >
         <IconPlus className="h-4 w-4 mr-2" />

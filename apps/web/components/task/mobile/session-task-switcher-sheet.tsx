@@ -10,22 +10,16 @@ import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
+import type { TaskMoveWorkflow } from "../task-move-context-menu";
+import { MobileTaskMoveOptionsSurface, useMobileTaskMoveOptions } from "./mobile-task-move-options";
 import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
-import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { applyView } from "@/lib/sidebar/apply-view";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { WorkspaceSwitcher } from "../workspace-switcher";
-import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { NewSubtaskDialog } from "../new-subtask-dialog";
-import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
-import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
-import { TaskDetachTargetConfirmDialog } from "../task-detach-confirm-dialog";
-import { TaskRenameDialog } from "../task-rename-dialog";
-import { SidebarLinkDialogs } from "../task-session-sidebar-dialogs";
 import {
   PluginTaskLinkActionSurfaceProvider,
   useSidebarLinkActions,
@@ -38,15 +32,18 @@ import {
 } from "./session-task-switcher-sheet-selection";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
-import { SidebarTaskEditDialog, useSidebarTaskEdit } from "../task-session-sidebar-edit";
-import { usePortForwardingVisibility } from "../port-forwarding-visibility-provider";
+import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
+import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-props";
+import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
+  navigate?: (taskId: string) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 };
 export function useTaskSheetSelectionController() {
   const [selectionController] = useState(createTaskSheetSelectionController);
@@ -58,7 +55,7 @@ export function useTaskSheetSelectionController() {
   );
   return selectionController;
 }
-function useMobileTaskLinking(workspaceId: string | null) {
+export function useMobileTaskLinking(workspaceId: string | null) {
   const store = useAppStoreApi();
   const actions = useSidebarLinkActions(store);
   const taskListHandlers = useSidebarTaskLinking(workspaceId, actions);
@@ -86,6 +83,8 @@ export type MobileTaskListProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
@@ -178,12 +177,7 @@ function TaskSwitcherSurfaceHeader({
         )}
         <div className="flex items-center gap-2">
           {workspaceId && <QuickChatSheetButton workspaceId={workspaceId} onClick={onQuickChat} />}
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1 cursor-pointer"
-            onClick={onNewTask}
-          >
+          <Button variant="outline" className="gap-1 cursor-pointer" onClick={onNewTask}>
             <IconPlus className="h-4 w-4" />
             {t("task:new")}
           </Button>
@@ -230,7 +224,67 @@ function surfaceAction<TArgs extends unknown[]>(
   };
 }
 
+function buildMobileTaskListSurfaceActions({
+  presentation,
+  onOpenChange,
+  actions,
+  rename,
+  edit,
+  linking,
+}: Pick<
+  TaskSwitcherSurfaceContentProps,
+  "presentation" | "onOpenChange" | "actions" | "rename" | "edit" | "linking"
+>): Pick<
+  MobileTaskListProps,
+  | "onEditTask"
+  | "onRenameTask"
+  | "onArchiveTask"
+  | "onDeleteTask"
+  | "onDetachTask"
+  | "onLinkPullRequest"
+  | "onLinkIssue"
+  | "onLinkMergeRequest"
+  | "onLinkJiraTicket"
+  | "onLinkLinearIssue"
+  | "onLinkSentryIssue"
+> {
+  return {
+    onEditTask: surfaceAction(presentation, onOpenChange, edit.handleEditTask),
+    onRenameTask: surfaceAction(presentation, onOpenChange, rename.handleRenameTask),
+    onArchiveTask: surfaceAction(presentation, onOpenChange, actions.handleArchiveTask),
+    onDeleteTask: surfaceAction(presentation, onOpenChange, actions.handleDeleteTask),
+    onDetachTask: surfaceAction(presentation, onOpenChange, actions.handleDetachTask),
+    onLinkPullRequest: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkPullRequest,
+    ),
+    onLinkIssue: surfaceAction(presentation, onOpenChange, linking.taskListHandlers.onLinkIssue),
+    onLinkMergeRequest: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkMergeRequest,
+    ),
+    onLinkJiraTicket: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkJiraTicket,
+    ),
+    onLinkLinearIssue: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkLinearIssue,
+    ),
+    onLinkSentryIssue: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkSentryIssue,
+    ),
+  };
+}
+
 type TaskSwitcherSurfaceContentProps = {
+  open: boolean;
   presentation: "sheet" | "drawer";
   workspaceId: string | null;
   onOpenChange: (open: boolean) => void;
@@ -244,26 +298,8 @@ type TaskSwitcherSurfaceContentProps = {
   linking: ReturnType<typeof useMobileTaskLinking>;
 };
 
-function MobileSubtaskDialog({
-  target,
-  onTargetChange,
-}: {
-  target: { id: string; title: string } | null;
-  onTargetChange: (next: { id: string; title: string } | null) => void;
-}) {
-  return (
-    <NewSubtaskDialog
-      open={target !== null}
-      onOpenChange={(open) => {
-        if (!open) onTargetChange(null);
-      }}
-      parentTaskId={target?.id ?? ""}
-      parentTaskTitle={target?.title ?? ""}
-    />
-  );
-}
-
 function TaskSwitcherSurfaceContent({
+  open,
   presentation,
   workspaceId,
   onOpenChange,
@@ -277,6 +313,29 @@ function TaskSwitcherSurfaceContent({
   linking,
 }: TaskSwitcherSurfaceContentProps) {
   const { t } = useTranslation();
+  const moveOptions = useMobileTaskMoveOptions({
+    open,
+    stepsByWorkflowId: data.stepsByWorkflowId,
+  });
+  if (moveOptions.moveOptionsStep && moveOptions.request) {
+    return (
+      <MobileTaskMoveOptionsSurface
+        presentation={presentation}
+        step={moveOptions.moveOptionsStep}
+        isMoving={moveOptions.isMoving}
+        onBack={moveOptions.handleClose}
+        onSubmit={moveOptions.handleSubmit}
+      />
+    );
+  }
+  const taskListActions = buildMobileTaskListSurfaceActions({
+    presentation,
+    onOpenChange,
+    actions,
+    rename,
+    edit,
+    linking,
+  });
   return (
     <>
       <TaskSwitcherSurfaceHeader
@@ -307,43 +366,13 @@ function TaskSwitcherSurfaceContent({
             activeTaskId={data.activeTaskId}
             selectedTaskId={data.selectedTaskId}
             onSelectTask={actions.handleSelectTask}
-            onEditTask={surfaceAction(presentation, onOpenChange, edit.handleEditTask)}
-            onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
+            onRequestMoveOptions={presentation === "drawer" ? moveOptions.handleRequest : undefined}
+            onBeforeMoveOptionsOpen={
+              presentation === "drawer" ? () => onOpenChange(false) : undefined
+            }
+            {...taskListActions}
             onCreateSubtask={onCreateSubtask}
-            onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
-            onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
-            onDetachTask={surfaceAction(presentation, onOpenChange, actions.handleDetachTask)}
             onNestTask={actions.handleNestTask}
-            onLinkPullRequest={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkPullRequest,
-            )}
-            onLinkIssue={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkIssue,
-            )}
-            onLinkMergeRequest={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkMergeRequest,
-            )}
-            onLinkJiraTicket={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkJiraTicket,
-            )}
-            onLinkLinearIssue={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkLinearIssue,
-            )}
-            onLinkSentryIssue={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkSentryIssue,
-            )}
             deletingTaskId={actions.deletingTaskId}
             archivingTaskId={actions.archivingTaskId}
             isArchiving={actions.isArchiving}
@@ -366,7 +395,9 @@ function PortForwardingTaskAction({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const { enabled, canToggle, isUpdating, togglePortForwarding } = usePortForwardingVisibility();
+  const visibility = useOptionalPortForwardingVisibility();
+  if (!visibility) return null;
+  const { enabled, canToggle, isUpdating, togglePortForwarding } = visibility;
 
   return (
     <div className="shrink-0 border-b border-border px-2 py-1">
@@ -389,103 +420,14 @@ function PortForwardingTaskAction({
   );
 }
 
-function TaskSwitcherDialogs({
-  dialogOpen,
-  onDialogOpenChange,
-  workspaceId,
-  workflowId,
-  data,
-  actions,
-  rename,
-  edit,
-  linking,
-  subtaskTarget,
-  onSubtaskTargetChange,
-}: {
-  dialogOpen: boolean;
-  onDialogOpenChange: (open: boolean) => void;
-  workspaceId: string | null;
-  workflowId: string | null;
-  data: ReturnType<typeof useSheetData>;
-  actions: ReturnType<typeof useSheetActions>;
-  rename: ReturnType<typeof useMobileTaskRename>;
-  edit: ReturnType<typeof useSidebarTaskEdit>;
-  linking: ReturnType<typeof useMobileTaskLinking>;
-  subtaskTarget: { id: string; title: string } | null;
-  onSubtaskTargetChange: (target: { id: string; title: string } | null) => void;
-}) {
-  return (
-    <>
-      <TaskCreateDialog
-        open={dialogOpen}
-        onOpenChange={onDialogOpenChange}
-        mode="create"
-        workspaceId={workspaceId}
-        workflowId={workflowId}
-        defaultStepId={data.dialogSteps[0]?.id ?? null}
-        steps={data.dialogSteps}
-        onSuccess={actions.handleTaskCreated}
-      />
-      <MobileSubtaskDialog target={subtaskTarget} onTargetChange={onSubtaskTargetChange} />
-      <SidebarTaskEditDialog
-        target={edit.editingTask}
-        onTargetChange={edit.setEditingTask}
-        workspaceId={workspaceId}
-        stepsByWorkflowId={data.stepsByWorkflowId}
-      />
-      <TaskArchiveConfirmDialog
-        open={actions.archivingTask !== null}
-        onOpenChange={(open) => {
-          if (!open) actions.setArchivingTask(null);
-        }}
-        taskTitle={actions.archivingTask?.title ?? ""}
-        taskId={actions.archivingTask?.id}
-        executorType={actions.archivingTask?.executorType}
-        isArchiving={actions.isArchiving}
-        onConfirm={({ cascade }) => actions.handleArchiveConfirm({ cascade })}
-      />
-      <TaskRenameDialog
-        open={rename.renamingTask !== null}
-        onOpenChange={(open) => {
-          if (!open) rename.setRenamingTask(null);
-        }}
-        currentTitle={rename.renamingTask?.title ?? ""}
-        onSubmit={rename.handleRenameSubmit}
-      />
-      <TaskDeleteConfirmDialog
-        open={actions.deletingTask !== null}
-        onOpenChange={(open) => {
-          if (!open) actions.setDeletingTask(null);
-        }}
-        taskTitle={actions.deletingTask?.title ?? ""}
-        taskId={actions.deletingTask?.id}
-        executorType={actions.deletingTask?.executorType}
-        isDeleting={actions.isDeleting}
-        onConfirm={({ cascade, discardWorktreeChanges }) =>
-          actions.handleDeleteConfirm({ cascade, discardWorktreeChanges })
-        }
-      />
-      <TaskDetachTargetConfirmDialog
-        target={actions.detachingTask}
-        detachingTaskId={actions.detachingTaskId}
-        onDismiss={() => actions.setDetachingTask(null)}
-        onConfirm={actions.handleDetachConfirm}
-      />
-      <SidebarLinkDialogs
-        actions={linking.actions}
-        repositories={linking.repositories}
-        workspaceId={workspaceId}
-      />
-    </>
-  );
-}
-
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
   workspaceId,
   workflowId,
   presentation = "sheet",
+  navigate,
+  onCloseAutoFocus,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
@@ -495,7 +437,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
   );
-  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController);
+  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController, navigate);
   const rename = useMobileTaskRename();
   const edit = useSidebarTaskEdit();
   const linking = useMobileTaskLinking(workspaceId);
@@ -514,6 +456,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
 
   const surfaceContent = (
     <TaskSwitcherSurfaceContent
+      open={open}
       presentation={presentation}
       workspaceId={workspaceId}
       onOpenChange={handleOpenChange}
@@ -533,7 +476,12 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
 
   const surface =
     presentation === "drawer" ? (
-      <TaskSwitcherDrawer key={workspaceId} open={open} onOpenChange={handleOpenChange}>
+      <TaskSwitcherDrawer
+        key={workspaceId}
+        open={open}
+        onOpenChange={handleOpenChange}
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         {surfaceContent}
       </TaskSwitcherDrawer>
     ) : (

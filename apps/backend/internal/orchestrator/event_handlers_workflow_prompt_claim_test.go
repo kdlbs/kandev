@@ -435,6 +435,7 @@ func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState 
 	stepGetter := newMockStepGetter()
 	sourceStep := &wfmodels.WorkflowStep{
 		ID: "step-source", WorkflowID: "wf1", Name: "Source", AgentProfileID: source.AgentProfileID,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 	}
 	stepGetter.steps[sourceStep.ID] = sourceStep
 	step := &wfmodels.WorkflowStep{
@@ -745,6 +746,7 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	// (which inherits dbTask.WorkflowStepID) is resolvable.
 	stepGetter.steps["step-source"] = &wfmodels.WorkflowStep{
 		ID: "step-source", WorkflowID: "wf1", Name: "Source", AgentProfileID: source.AgentProfileID,
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 	}
 	step := &wfmodels.WorkflowStep{
 		ID:             "step-implicit-switch",

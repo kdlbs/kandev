@@ -67,6 +67,9 @@ source progress, source completion, and source failure.
 The source identities are `workspaces`, `go_cache`, `quarantine`, `temporary_artifacts`, and
 `docker`. Disabled sources remain terminal and do not keep the scan active.
 
+The draft [database storage extension](storage-database-footprint.md) adds
+`database` and `database_backups` through the same source lifecycle.
+
 The workspace source will forward completed-root and byte progress from `filescan`. Other sources
 will report the finest stable progress that their provider can supply.
 

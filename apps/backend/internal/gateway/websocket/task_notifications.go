@@ -7,13 +7,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
-)
-
-const (
-	queueStatusScopeKey  = "queue_status_scope"
-	queueStatusScopeTask = "task"
 )
 
 type TaskEventBroadcaster struct {
@@ -55,6 +51,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskPlanDeleted, ws.ActionTaskPlanDeleted)
 	b.subscribe(eventBus, events.TaskPlanRevisionCreated, ws.ActionTaskPlanRevisionCreated)
 	b.subscribe(eventBus, events.TaskPlanReverted, ws.ActionTaskPlanReverted)
+	b.subscribe(eventBus, events.TaskPlanCommentsChanged, ws.ActionTaskPlanCommentsChanged)
 	b.subscribe(eventBus, events.TaskWalkthroughCreated, ws.ActionTaskWalkthroughCreated)
 	b.subscribe(eventBus, events.TaskWalkthroughUpdated, ws.ActionTaskWalkthroughUpdated)
 	b.subscribe(eventBus, events.TaskWalkthroughDeleted, ws.ActionTaskWalkthroughDeleted)
@@ -102,6 +99,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.GitHubTaskPRDeleted, ws.ActionGitHubTaskPRDeleted)
 	b.subscribe(eventBus, events.GitHubTaskCIOptionsUpdated, ws.ActionGitHubTaskCIOptionsUpdated)
 	b.subscribe(eventBus, events.GitHubRateLimitUpdated, ws.ActionGitHubRateLimitUpdated)
+	b.subscribe(eventBus, events.GitHubPRDiscoveryHealthUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated)
 	b.subscribe(eventBus, events.GitLabTaskMRUpdated, ws.ActionGitLabTaskMRUpdated)
 	b.subscribe(eventBus, events.GitLabTaskMROptionsUpdated, ws.ActionGitLabTaskMRAutomationUpdated)
 
@@ -247,6 +245,15 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	msg *ws.Message,
 ) error {
 	switch action {
+	case ws.ActionTaskPlanCommentsChanged:
+		taskID := extractStringField(data, "task_id")
+		if snapshot, ok := data.(*models.TaskPlanCommentSnapshot); ok {
+			taskID = snapshot.TaskID
+		}
+		if taskID != "" {
+			b.hub.BroadcastToTask(taskID, msg)
+		}
+		return nil
 	case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
 		// Workspace event payloads are the workspace DTO itself: the
 		// workspace ID lives under "id", not "workspace_id". Without this
@@ -290,13 +297,14 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 		return nil
 	case ws.ActionMessageQueueStatusChanged:
-		if sessionID != "" {
-			b.hub.BroadcastToSession(sessionID, msg)
+		// Queue status is session-scoped. An unscoped event cannot be safely
+		// attributed after a session is deleted, so fail closed rather than
+		// falling through to the global broadcast path.
+		if sessionID == "" {
 			return nil
 		}
-		if extractStringField(data, queueStatusScopeKey) == queueStatusScopeTask {
-			return nil
-		}
+		b.hub.BroadcastToSession(sessionID, msg)
+		return nil
 	case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
 		// Broadcast to the owning workspace's clients so prepare
 		// progress/warnings are available when the user navigates to the
@@ -304,7 +312,8 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
 	case ws.ActionGitHubTaskPRUpdated, ws.ActionGitHubTaskPRDeleted,
-		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated,
+		ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
 		// These payloads carry per-task PR/MR automation and lifecycle state. Fail closed
 		// (drop, don't fall back to a global broadcast) when workspace
 		// resolution came back empty and auth is enforced — an unattributed

@@ -33,6 +33,7 @@ type messengerTaskSvc interface {
 
 type messengerOrch interface {
 	GetMessageQueue() *messagequeue.Service
+	PublishQueueStatusEvent(ctx context.Context, sessionID string)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) (*orchexecutor.TaskExecution, error)
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*orchexecutor.TaskExecution, error)
@@ -96,7 +97,6 @@ func (a pluginsTaskMessengerAdapter) resolveSession(ctx context.Context, taskID,
 }
 
 // queueMessage appends the prompt to a running/starting session's FIFO queue
-// for delivery at its next turn boundary.
 func (a pluginsTaskMessengerAdapter) queueMessage(ctx context.Context, taskID string, session *taskmodels.TaskSession, text string, metadata map[string]interface{}) (plugins.PluginMessageResult, error) {
 	queue := a.orch.GetMessageQueue()
 	if queue == nil {
@@ -105,6 +105,7 @@ func (a pluginsTaskMessengerAdapter) queueMessage(ctx context.Context, taskID st
 	if _, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, text, "", messagequeue.QueuedByUser, false, nil, metadata); err != nil {
 		return plugins.PluginMessageResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
+	a.orch.PublishQueueStatusEvent(context.WithoutCancel(ctx), session.ID)
 	return plugins.PluginMessageResult{SessionID: session.ID, Status: "queued"}, nil
 }
 

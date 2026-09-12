@@ -11,12 +11,17 @@ owners:
 
 ## Scope
 
-UI owns responsive behavior; other systems own behavior/state.
+UI owns responsive behavior and reusable presentation preferences, including
+task-listing modes and Home destination choices. Other systems retain task,
+runtime, and workspace lifecycle/state ownership.
 
 ## Map
 
 ### Requirements
 
+- [Mobile task-view access](requirements/mobile-task-view-access.md)
+
+- [Control sizing](requirements/control-sizing.md)
 - [ACP model summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
 - [Adaptive Kanban](requirements/adaptive-kanban.md)
@@ -132,7 +137,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Task Layout Profiles](requirements/task-layout-profiles.md)
 - [Task Agent Tab Reconciliation](requirements/task-agent-tab-reconciliation.md)
 - [Threads Deck](requirements/threads-conversation-deck.md)
-- [Task listing](requirements/task-listing-display-preferences.md)
+- [Task Listing Display Preferences](requirements/task-listing-display-preferences.md)
 - [Task transcript history visibility](requirements/task-prompt-transcript-visibility.md)
 - [Task Review Shortcut Switcher](requirements/task-review-shortcut.md)
 - [Task Surface Refresh](requirements/task-surface-refresh.md)
@@ -152,6 +157,10 @@ UI owns responsive behavior; other systems own behavior/state.
 - [WebSocket Connectivity Warning](requirements/ws-connectivity-warning.md)
 
 ### Design
+
+- [Mobile task-view access](system-design/mobile-task-view-access.md)
+- [Agent launch prompt composer](system-design/agent-launch-prompt-composer.md)
+- [Control sizing](system-design/control-sizing.md)
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
 - [Clarification submit feedback](system-design/clarification-submit-feedback.md)
 - [Dialog containment](system-design/dialog-content-containment.md)
@@ -181,6 +190,8 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Native HTML File Preview](system-design/native-html-preview.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
 - [Mobile Action Confirmations](system-design/mobile-action-confirmations.md)
+- [Mobile workspace topbar](system-design/mobile-quick-chat-topbar.md)
+- [Mobile Menu Backdrops System Design](system-design/mobile-menu-backdrops.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)
 - [Repository Groups](system-design/sidebar-repository-grouping.md)
 - [Sidebar Automatic Task Colors](system-design/sidebar-automatic-task-colors.md)
@@ -189,6 +200,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Sidebar task row](system-design/sidebar-task-row-presentation.md)
 - [PR walkthrough](system-design/pr-walkthrough.md)
 - [PR Task Status Summary](system-design/pr-task-status-summary.md)
+- [Queued message editing](system-design/message-queue-edit.md)
 - [Prompt History Panel](system-design/prompt-history-panel.md)
 - [Quick Chat and terminal elevation](system-design/quick-chat-elevation.md)
 - [Quick Chat viewport layout](system-design/quick-chat-viewport-layout.md)
@@ -201,6 +213,7 @@ UI owns responsive behavior; other systems own behavior/state.
 - [Saved Task View Deletion Confirmation](system-design/saved-task-view-deletion-confirmation.md)
 - [Session](system-design/session-start-composer-readiness.md)
 - [Task Layout Profiles](system-design/task-layout-profiles.md)
+- [Task Listing Display Preferences](system-design/task-listing-display-preferences.md)
 - [Task surface](system-design/task-surface-render-isolation.md)
 - [Task Agent Tab Reconciliation](system-design/task-agent-tab-reconciliation.md)
 - [Threads Deck](system-design/threads-conversation-deck.md)

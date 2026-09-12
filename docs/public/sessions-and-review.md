@@ -40,7 +40,7 @@ The profile picker shows only profiles compatible with the task executor. If non
 | **Copy initial prompt** | Copies the first user message from the currently active session into the editable prompt field | A parallel approach; it is not guaranteed to be the task's original description, so inspect and edit it before launch |
 | **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field    | Continue or branch from work already discussed                                                                        |
 
-**Handoff** from an existing session opens the same dialog and selects a summary of that session. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
+**Handoff** from an existing session opens the same dialog with Blank context and an empty prompt. Select a session summary when you need earlier discussion. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
@@ -56,10 +56,12 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
-| **Handoff**        | Starts another session with a generated summary of this conversation                                                                                                       |
+| **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
-Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
+Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev shows one recovery card in the selected session's chat. It labels the safe cause, keeps technical details collapsed, and offers **Resume**, **Restore read-only workspace**, or **Start fresh session** when each action is valid.
+
+**Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. A successful restore keeps the recovery card visible until a later resume succeeds. Kandev keeps the card in the chat scroll area and uses stacked touch-sized actions on phones. A failure in another session or an unrelated provider error remains on its own existing surface.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
@@ -85,7 +87,36 @@ Threads shows one column for each task with an active primary agent session. The
 
 On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
 
+On a phone, each conversation fills the screen width. The topbar shows your
+position beside the view name; small decks also show page dots. Position follows
+your swipe, even while the next conversation is loading. Swipe sideways,
+or tap the task title to choose a thread
+from a bottom sheet. The picker also shows task status, workflow, and step.
+Tap the view name below **Threads** at the top to change views. Use the separate
+topbar menu button for Quick Chat, Quick Terminal, and system status.
+
+If a warning appears beside the view name on a phone, open the view picker to
+retry the failed saved-view update or dismiss the warning.
+
 Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+
+To manage the task without leaving Threads, select **Task actions** (the three
+dots beside **Open task**). On desktop, you can also right-click the task
+header; conversation text and editors keep their normal context menus.
+The menu offers **Priority**, **Move to**, **Send to workflow**, supported
+**Link** choices, **Archive**, and **Delete**, according to availability.
+
+On a phone, the choices open in an inset bottom sheet. Choose a workflow and
+then a step in the same sheet; **Back** returns to the previous choices.
+Actions apply to the task whose menu you opened, even if its selected session
+changes. Canceling a confirmation leaves the task unchanged. See
+[archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
+for confirmation preferences and cleanup consequences.
+
+If an action or view filter removes your current thread, Threads selects the
+next remaining thread, otherwise the previous one. If neither survives from
+the previous view, it selects the first thread in the new view. The empty view
+appears only when no threads remain. Your workspace and view settings stay in place.
 
 <details>
 <summary>Let agents coordinate sessions</summary>

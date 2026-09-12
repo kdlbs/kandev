@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { TASK_PRIORITY_LABEL_KEYS, TASK_PRIORITY_TOKENS } from "@/lib/tasks/task-priority";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { TaskPriority } from "@/lib/types/http";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 function PriorityInfo({ label, description }: { label: string; description: string }) {
   const usesTouchDrawer = useTouchDrawer();
@@ -23,7 +24,7 @@ function PriorityInfo({ label, description }: { label: string; description: stri
   const trigger = (
     <button
       type="button"
-      className="inline-flex h-11 min-h-11 w-11 min-w-11 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-6 md:min-h-6 md:w-6 md:min-w-6"
+      className={`${controlSizingClassName("icon")} cursor-pointer rounded-md border-0 bg-transparent p-0 text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
       aria-label={label}
       aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
@@ -85,8 +86,10 @@ export function TaskCreatePrioritySelect({
           id="task-create-priority-select"
           data-testid="task-create-priority-select"
           aria-label={priorityLabel}
-          className="h-11 min-h-11 w-32 border-border/60 bg-muted/30 hover:bg-muted/60 sm:h-8 sm:min-h-0"
-          size="sm"
+          className={controlSizingClassName(
+            "standard",
+            "w-32 border-border/60 bg-muted/30 hover:bg-muted/60",
+          )}
         >
           <SelectValue />
         </SelectTrigger>

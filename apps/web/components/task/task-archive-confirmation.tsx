@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, type RefObject } from "react";
+import { useEffect, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
@@ -34,10 +34,13 @@ export type TaskArchiveConfirmationProps = {
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm?: boolean;
   onConfirm: (values: ArchiveConfirmValues) => void | Promise<void>;
   confirmTestId?: string;
   /** Render a simple confirmation inside an existing action surface. */
   inline?: boolean;
+  /** Wrap only simple inline choices; complex confirmations replace the surface. */
+  renderInline?: (content: ReactNode) => ReactNode;
   /** Use the contained dialog even when classification resolves without descendants. */
   forceDialog?: boolean;
 };
@@ -110,6 +113,7 @@ function ArchiveConfirmPopover({
   anchorRef,
   focusReturnRef,
   focusBoundaryRef,
+  restoreFocusOnConfirm = false,
   taskTitle,
   executorType,
   isInFlight,
@@ -122,6 +126,7 @@ function ArchiveConfirmPopover({
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm?: boolean;
   taskTitle?: string;
   executorType?: string | null;
   isInFlight: boolean;
@@ -140,6 +145,7 @@ function ArchiveConfirmPopover({
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
       focusBoundaryRef={focusBoundaryRef ?? anchorRef}
+      restoreFocusOnConfirm={restoreFocusOnConfirm}
       title={t("task:archiveTaskTitle")}
       description={
         <ArchiveDescription taskTitle={taskTitle} cleanup={cleanup} taskIsInFlight={isInFlight} />
@@ -208,6 +214,7 @@ type ArchiveDialogProps = Pick<
   | "executorTypes"
   | "onConfirm"
   | "confirmTestId"
+  | "restoreFocusOnConfirm"
 > & {
   subtaskClassification: SubtaskCountResult;
 };
@@ -226,6 +233,7 @@ type ArchiveConfirmationContentProps = ArchiveDialogProps & {
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   inline: boolean;
+  renderInline?: (content: ReactNode) => ReactNode;
 };
 
 function ArchiveConfirmationContent({
@@ -238,6 +246,7 @@ function ArchiveConfirmationContent({
   focusReturnRef,
   focusBoundaryRef,
   inline,
+  renderInline = (content) => content,
   subtaskClassification,
   ...dialogProps
 }: ArchiveConfirmationContentProps) {
@@ -262,10 +271,10 @@ function ArchiveConfirmationContent({
 
   if (subtaskClassification.status !== "resolved") {
     if (inline) {
-      return (
+      return renderInline(
         <span data-testid="task-archive-classifying" className="text-xs text-muted-foreground">
           {t("common:loading")}
-        </span>
+        </span>,
       );
     }
     if (!isFinePointer) return null;
@@ -280,7 +289,7 @@ function ArchiveConfirmationContent({
 
   const confirm = () => dialogProps.onConfirm({ cascade: false });
   if (inline || !isFinePointer) {
-    return (
+    return renderInline(
       <ArchiveConfirmCopy
         taskTitle={dialogProps.taskTitle}
         executorType={dialogProps.executorType}
@@ -290,7 +299,7 @@ function ArchiveConfirmationContent({
         onClose={() => dialogProps.onOpenChange(false)}
         onConfirm={confirm}
         confirmTestId={dialogProps.confirmTestId ?? DEFAULT_CONFIRM_TEST_ID}
-      />
+      />,
     );
   }
 
@@ -300,6 +309,7 @@ function ArchiveConfirmationContent({
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
       focusBoundaryRef={focusBoundaryRef}
+      restoreFocusOnConfirm={dialogProps.restoreFocusOnConfirm}
       taskTitle={dialogProps.taskTitle}
       executorType={dialogProps.executorType}
       isInFlight={taskIsInFlight}
@@ -326,9 +336,11 @@ export function TaskArchiveConfirmation({
   anchorRef,
   focusReturnRef,
   focusBoundaryRef,
+  restoreFocusOnConfirm,
   onConfirm,
   confirmTestId = DEFAULT_CONFIRM_TEST_ID,
   inline = false,
+  renderInline,
   forceDialog = false,
 }: TaskArchiveConfirmationProps) {
   const { isFinePointer, isMobile, changed } = useConfirmationBoundary(
@@ -352,8 +364,10 @@ export function TaskArchiveConfirmation({
       taskIsInFlight={taskIsInFlight}
       anchorRef={anchorRef}
       focusReturnRef={focusReturnRef}
+      restoreFocusOnConfirm={restoreFocusOnConfirm}
       focusBoundaryRef={focusBoundaryRef}
       inline={inline}
+      renderInline={renderInline}
       onOpenChange={onOpenChange}
       taskTitle={taskTitle}
       isBulkOperation={isBulkOperation}

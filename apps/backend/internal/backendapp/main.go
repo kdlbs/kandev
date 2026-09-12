@@ -680,6 +680,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
 	}
+	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,
@@ -943,6 +944,7 @@ func startGatewayAndServe(
 		// be resolved while authentication is enforced.
 		services.Auth,
 		cfg.ResolvedHomeDir(),
+		func(fn func() error) { addCleanup(fn) },
 		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {
@@ -1469,6 +1471,10 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// Publish task.updated for Office status changes so WS-driven UI outside
+	// the Office board (All-Workflows kanban, task views, task/statussummary)
+	// sees the mutation instead of rendering stale state until a refetch.
+	services.OfficeSvcs.Dashboard.SetTaskLifecyclePublisher(services.Task)
 	// Human assignee writes from the office PATCH surface go through the task
 	// service, which authorizes the caller and validates the assignee. That
 	// route carries no :wsId, so it is not covered by the office

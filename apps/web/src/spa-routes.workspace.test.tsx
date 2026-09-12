@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 describe("SpaRoutes data-backed workspace context", () => {
-  it("passes the selected workspace to the kanban home client", () => {
+  it("passes the selected workspace to the kanban home client after bootstrap", async () => {
     mockGitHubWorkspaceBootstrap();
     window.history.replaceState({}, "", `/?workspaceId=${SELECTED_WORKSPACE_ID}`);
 
@@ -64,9 +64,11 @@ describe("SpaRoutes data-backed workspace context", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId("kanban-page").getAttribute("data-workspace-id")).toBe(
-      SELECTED_WORKSPACE_ID,
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId("kanban-page").getAttribute("data-workspace-id")).toBe(
+        SELECTED_WORKSPACE_ID,
+      );
+    });
   });
 
   it("keeps the currently active workspace when opening GitHub from another workspace", async () => {

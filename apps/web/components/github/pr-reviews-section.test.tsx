@@ -62,7 +62,9 @@ describe("ReviewsSection re-request action", () => {
 
     const action = screen.getByRole("button", { name: "Re-request review from octocat" });
     expect(action).toHaveProperty("disabled", true);
-    expect(action.className).toContain("min-h-11");
+    expect(action.className).toContain("h-7");
+    expect(action.className).toContain("max-md:h-11");
+    expect(action.className).toContain("[@media(pointer:coarse)]:h-11");
     fireEvent.click(action);
     expect(onReRequest).not.toHaveBeenCalled();
   });
@@ -86,7 +88,8 @@ describe("ReviewsSection re-request action", () => {
       name: `Re-request review from ${longLogin}`,
     });
     const author = screen.getByRole("link", { name: longLogin });
-    expect(action.className).toContain("min-h-11");
+    expect(action.className).toContain("max-md:h-11");
+    expect(action.className).toContain("[@media(pointer:coarse)]:h-11");
     expect(action.parentElement?.className).toContain("basis-full");
     expect(author.className).toContain("inline-block");
     expect(author.className).toContain("max-w-full");

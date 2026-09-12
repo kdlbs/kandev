@@ -53,6 +53,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | superseded by 2026-08-13-dynamic-agent-profile-routing | backend, frontend | 2026-07-15 |
 | 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
 | 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-22) | backend, frontend, infra | 2026-07-14 |
+| 2026-09-10-storage-overlap-attribution | [Attribute storage by measured files](2026-09-10-storage-overlap-attribution.md) | accepted | backend, frontend | 2026-09-10 |
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted (amended 2026-08-09) | frontend                    | 2026-07-14 |
 | 0047 | [Plugins read conversation content via a capability-gated Host RPC](0047-plugin-host-conversation-reads.md)                          | accepted   | backend, protocol           | 2026-07-21 |
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |
@@ -216,7 +217,8 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-24-unified-fork-approval-label | [Use One Maintainer Approval Label for Contributor PR Automation](2026-08-24-unified-fork-approval-label.md) | accepted | infra, workflow, security | 2026-08-24 |
 | 2026-08-25-required-worktree-refresh-fails-closed | [Required Worktree Refresh Fails Closed](2026-08-25-required-worktree-refresh-fails-closed.md) | accepted (amended 2026-08-31; local-worktree boundary superseded) | backend, security, operations | 2026-08-25 |
 | 2026-08-25-server-owned-declarative-canvases | [Server-owned declarative canvases](2026-08-25-server-owned-declarative-canvases.md) | superseded by 2026-08-26-plugin-backed-web-app-canvases | backend, frontend, protocol, security | 2026-08-25 |
-| 2026-08-26-plugin-backed-web-app-canvases | [Use plugin-backed web applications for canvases](2026-08-26-plugin-backed-web-app-canvases.md) | accepted | backend, frontend, protocol, plugins, security | 2026-08-26 |
+| 2026-08-26-plugin-backed-web-app-canvases | [Use plugin-backed web applications for canvases](2026-08-26-plugin-backed-web-app-canvases.md) | accepted (initial grants amended by 2026-09-10-canvas-creation-authority) | backend, frontend, protocol, plugins, security | 2026-08-26 |
+| 2026-09-10-canvas-creation-authority | [Authorize the owner's initial canvas release](2026-09-10-canvas-creation-authority.md) | accepted | backend, protocol, security | 2026-09-10 |
 | 2026-08-26-quick-chat-tab-order | [Store Quick Chat Tab Order as a User Preference](2026-08-26-quick-chat-tab-order.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-26-quick-chat-agent-titles | [Apply Agent-Generated Titles to Quick Chat](2026-08-26-quick-chat-agent-titles.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-27-bounded-agent-profile-recency | [Store Agent Profile Recency in Bounded Context Rows](2026-08-27-bounded-agent-profile-recency.md) | accepted | backend, frontend, protocol | 2026-08-27 |
@@ -234,6 +236,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-31-generic-plugin-host-boundary | [Generic plugin Host boundary](2026-08-31-generic-plugin-host-boundary.md) | proposed | backend, frontend, protocol, security, workflow | 2026-08-31 |
 | 2026-08-30-environment-owned-git-status | [Persist Current Git Status with the Task Environment](2026-08-30-environment-owned-git-status.md) | accepted | backend, frontend, protocol | 2026-08-31 |
 | 2026-08-31-explicit-new-branch-session-recovery | [Require Explicit User Action Before Continuing a Session on a Replacement Branch](2026-08-31-explicit-new-branch-session-recovery.md) | accepted | backend, frontend, protocol | 2026-08-31 |
+| 2026-09-10-worktree-metadata-recovery-boundary | [Bound Automatic Worktree Metadata Recovery](2026-09-10-worktree-metadata-recovery-boundary.md) | proposed | backend | 2026-09-10 |
 | 2026-08-31-local-worktree-refresh-best-effort | [Local Worktree Refresh Is Best Effort](2026-08-31-local-worktree-refresh-best-effort.md) | accepted | backend, security, operations | 2026-08-31 |
 | 2026-08-31-revoke-merge-approval-after-untrusted-push | [Revoke merge approval after an untrusted pull-request push](2026-08-31-revoke-merge-approval-after-untrusted-push.md) | accepted | workflow, security | 2026-08-31 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |
@@ -243,6 +246,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-01-server-owned-saved-prompt-expansion | [Keep Saved-Prompt Expansion Server-Owned](2026-09-01-server-owned-saved-prompt-expansion.md) | accepted | backend, frontend, protocol, security | 2026-09-01 |
 | 2026-09-01-passthrough-initial-prompt-turn-boundary | [Keep Passthrough Initial Prompt State in Lifecycle](2026-09-01-passthrough-initial-prompt-turn-boundary.md) | accepted | backend, workflow | 2026-09-01 |
 | 2026-09-02-automation-self-archive | [Permit Automation Self-Archive as Terminal Completion](2026-09-02-automation-self-archive.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-09-02 |
+| 2026-09-02-task-owned-plan-comments | [Persist Pending Plan Comments with the Task Plan](2026-09-02-task-owned-plan-comments.md) | accepted (amended 2026-09-09) | backend, frontend, protocol, persistence | 2026-09-02 |
 | 2026-09-02-separate-mcp-startup-and-tool-budgets | [Separate MCP Startup and Tool-Call Budgets](2026-09-02-separate-mcp-startup-and-tool-budgets.md) | proposed | backend, agents | 2026-09-02 |
 | 2026-09-03-separate-system-data-storage-pages | [Separate System Data and Storage Pages](2026-09-03-separate-system-data-storage-pages.md) | accepted | frontend | 2026-09-03 |
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
@@ -260,5 +264,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-05-trusted-browser-html-preview | [Treat HTML Preview as Trusted Workspace Code](2026-09-05-trusted-browser-html-preview.md) | accepted | frontend, backend, agentctl, security | 2026-09-05 |
 | 2026-09-07-activate-managed-runtime-defaults | [Activate Shipped Managed Runtime Defaults](2026-09-07-activate-managed-runtime-defaults.md) | accepted | backend, frontend, protocol | 2026-09-07 |
 | 2026-09-08-domain-owned-settings-catalog | [Discover settings through domain-owned contracts](2026-09-08-domain-owned-settings-catalog.md) | accepted | backend, frontend, protocol | 2026-09-08 |
+| 2026-09-09-task-completion-conversation-availability | [Separate task completion from conversation availability](2026-09-09-task-completion-conversation-availability.md) | accepted | workflow | 2026-09-09 |
 | 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |
 | 2026-09-10-mobile-confirmation-surfaces | [Focus mobile confirmation in one surface](2026-09-10-mobile-confirmation-surfaces.md) | accepted | frontend | 2026-09-10 |
+| 2026-09-11-contribution-resume-preflight | [Separate resume admission from push history readiness](2026-09-11-contribution-resume-preflight.md) | proposed | backend, protocol, security | 2026-09-11 |

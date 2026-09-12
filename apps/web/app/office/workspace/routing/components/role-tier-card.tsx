@@ -16,6 +16,7 @@ import { providerLabel } from "./provider-order-editor";
 import { TIER_NAME_KEYS } from "../../../lib/label-keys";
 import { firstProviderWithTier } from "./wake-reason-tier-card";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 // USE_WORKSPACE_DEFAULT is the sentinel used in the per-role tier dropdown
 // to mean "no role entry — use the workspace default tier." Persisting this
@@ -103,7 +104,7 @@ function RowLabel({ role, labelId }: { role: RoleMeta; labelId: string }) {
           <button
             type="button"
             aria-label={t("office:moreInfoAbout", { label: role.label })}
-            className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground"
+            className={`${controlSizingClassName("icon")} shrink-0 cursor-pointer text-muted-foreground hover:text-foreground`}
           >
             <IconInfoCircle className="h-3.5 w-3.5" />
           </button>
@@ -142,7 +143,10 @@ function TierSelect({
       onValueChange={(v) => onChange(v as Tier | typeof USE_WORKSPACE_DEFAULT)}
       disabled={disabled}
     >
-      <SelectTrigger aria-labelledby={ariaLabelledBy} className="min-h-11 w-[220px] cursor-pointer">
+      <SelectTrigger
+        aria-labelledby={ariaLabelledBy}
+        className={controlSizingClassName("standard", "w-[220px] cursor-pointer")}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

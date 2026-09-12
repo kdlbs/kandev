@@ -71,7 +71,8 @@ describe("Profile connection settings actions", () => {
     render(<ProfileConnectionSettingsAction executor={{ id: "executor/one", type: "ssh" }} />);
 
     const action = screen.getByRole("button", { name: /connection settings/i });
-    expect(action.className).toContain("min-h-11");
+    expect(action.className).toContain("h-7");
+    expect(action.className).toContain("max-md:h-11");
     fireEvent.click(action);
     expect(push).toHaveBeenCalledWith("/settings/executors/ssh/executor%2Fone");
   });

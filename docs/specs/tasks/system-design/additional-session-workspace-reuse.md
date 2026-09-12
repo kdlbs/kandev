@@ -114,6 +114,13 @@ inventory validation and filesystem validation:
 - the validated path belongs to the selected environment, not a stale session
   projection.
 
+The canonical inventory match for a slot is scoped per repository. The legacy
+empty-branch fallback stands in for a repository's branch slot only when that
+repository has no row carrying a non-empty branch slug; branch scoping does not
+depend on a worktree identifier, so a local-executor row with a branch and no
+worktree ID is already branch-scoped and suppresses the fallback for its own
+repository. A slot therefore never matches more than one row.
+
 Validation is read-only and uses the existing bounded Git inspection path. It
 does not read file contents or alter the index, HEAD, branch, tracked files, or
 untracked files. Remote executors validate through their executor-owned

@@ -306,6 +306,34 @@ func TestHandleMessageTask_CompletedSiblingDoesNotShadowTheLiveFallback(t *testi
 	assert.Equal(t, 0, orch.queue.GetStatus(context.Background(), retired.ID).Count)
 }
 
+// A task with no primary and no live session can still address its newest
+// completed conversation. The resolver pins that historical choice so the
+// dispatcher can perform explicit completed-session recovery on the same row.
+func TestResolveMessageTargetSession_NoPrimaryUsesNewestCompletedSession(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-completed-fallback", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-completed-fallback", WorkspaceID: "ws-completed-fallback", Name: "Board"}))
+	targetResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-completed-fallback", WorkflowID: "wf-completed-fallback", Title: "Target",
+	})
+	require.NoError(t, err)
+	older := addSession(t, repo, targetResult.Task.ID, "sess-completed-older", models.TaskSessionStateCompleted, 1)
+	newer := addSession(t, repo, targetResult.Task.ID, "sess-completed-newer", models.TaskSessionStateCompleted, 2)
+	require.NotEqual(t, older.ID, newer.ID)
+
+	h, _ := newMessageTaskHandler(t, svc, repo)
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
+		"task_id": targetResult.Task.ID,
+		"prompt":  "continue the conversation",
+	})
+	session, pinned, errResp := h.resolveMessageTargetSession(ctx, msg, targetResult.Task.ID, "")
+	require.Nil(t, errResp)
+	require.NotNil(t, session)
+	assert.Equal(t, newer.ID, session.ID)
+	assert.True(t, pinned)
+}
+
 // indexOfSession reports where a session lands in the resolver's walk order.
 func indexOfSession(t *testing.T, sessions []*models.TaskSession, sessionID string) int {
 	t.Helper()

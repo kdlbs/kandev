@@ -27,6 +27,7 @@ import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 function profileHref(agentName: string, profileId: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}/profiles/${encodeURIComponent(profileId)}`;
@@ -86,8 +87,8 @@ function ProfileRowActions({
         <Button
           ref={deleteAnchorRef}
           variant="ghost"
-          size="sm"
-          className="cursor-pointer min-h-11 min-w-11"
+          size="icon"
+          className={settingsActionClassName("cursor-pointer")}
           aria-label={t("agents:profileActions")}
           data-testid={`profile-actions-menu-${profile.id}`}
         >

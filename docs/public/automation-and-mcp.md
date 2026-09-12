@@ -20,6 +20,18 @@ Use workflow events for predictable transitions on existing work. Use a workspac
 
 Across Kandev's task, configuration, external, and Office MCP modes, each tool call is validated against that mode's live `tools/list` schema before its handler runs. Missing required fields, wrong types, declared constraint violations, and unknown top-level fields return a tool error without performing the requested action. A missing-field error names each absent schema property, but never echoes submitted argument values. Nested configuration maps still accept arbitrary keys when their schema defines them as open.
 
+## Task creation boundaries
+
+Task creation depends on the caller surface and the destination workspace:
+
+| Caller | Creation path | Allowed destination |
+| --- | --- | --- |
+| Kanban task session | `create_task_kandev` | Authorized Kanban workspaces |
+| Office run | Office skills and injected `$KANDEV_CLI kandev task create` | The Office workspace and runtime scope |
+| External MCP client | Existing `create_task_kandev` | Authorized Kanban or Office workspaces |
+
+Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
+
 ## Quick path
 
 - Use a **workflow event** for predictable transitions on existing tasks.
@@ -774,7 +786,11 @@ at runtime instead of assuming that a domain's full schema is present in the
 tool definition. Existing lifecycle tools and compatibility MCP tools remain
 available where documented.
 
-`export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
+`export_workflow_kandev` takes `workflow_id` and returns one version 2
+`kandev_workflow` JSON document with explicit step completion booleans. It omits
+instance IDs and timestamps. Pass its JSON text unchanged as `document` to
+`import_workflow_kandev` when it is within the existing 1 MiB import limit.
+Version 1 documents remain accepted for compatibility.
 
 ### Read a saved prompt
 

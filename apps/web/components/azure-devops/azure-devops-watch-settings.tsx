@@ -32,6 +32,7 @@ import type {
   AzureDevOpsWorkItemWatch,
   AzureDevOpsWorkItemWatchInput,
 } from "@/lib/types/azure-devops";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type Kind = "work-item" | "pull-request";
 
@@ -152,9 +153,8 @@ function WatchActions({
     <div className="flex flex-wrap gap-2">
       <Button
         type="button"
-        size="sm"
         variant="outline"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         onClick={onEdit}
         data-testid={`azure-${kind}-watch-edit-${watch.id}`}
       >
@@ -162,9 +162,8 @@ function WatchActions({
       </Button>
       <Button
         type="button"
-        size="sm"
         variant="outline"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         onClick={onToggle}
         data-testid={`azure-${kind}-watch-toggle-${watch.id}`}
       >
@@ -172,21 +171,14 @@ function WatchActions({
       </Button>
       <Button
         type="button"
-        size="sm"
         variant="outline"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         onClick={onTrigger}
         data-testid={`azure-${kind}-watch-trigger-${watch.id}`}
       >
         <IconPlayerPlay className="h-4 w-4" /> {t("azuredevops:runNow")}
       </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="min-h-11 cursor-pointer"
-        onClick={onReset}
-      >
+      <Button type="button" variant="outline" className="cursor-pointer" onClick={onReset}>
         <IconRefresh className="h-4 w-4" /> {t("common:reset")}
       </Button>
       <WatcherDeleteAction
@@ -408,7 +400,7 @@ function WatchEditor({
               value={pullRequest.status || "active"}
               onValueChange={(value) => set("status", value)}
             >
-              <SelectTrigger className="min-h-11">
+              <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               {/* `value` is the Azure DevOps pull-request status sent on the
@@ -508,7 +500,7 @@ function WatchEditor({
             value={current.cleanupPolicy}
             onValueChange={(value: AzureDevOpsCleanupPolicy) => set("cleanupPolicy", value)}
           >
-            <SelectTrigger className="min-h-11">
+            <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             {/* `value` is the persisted `AzureDevOpsCleanupPolicy`; only the
@@ -532,7 +524,7 @@ function WatchEditor({
       </div>
       <Button
         type="button"
-        className="min-h-11 w-full cursor-pointer"
+        className="w-full cursor-pointer"
         onClick={() => void submit()}
         disabled={saving}
       >
@@ -550,7 +542,7 @@ function WatchEditor({
               type="button"
               variant="ghost"
               size="icon"
-              className="min-h-11 min-w-11 cursor-pointer"
+              className={controlSizingClassName("icon", "cursor-pointer")}
               aria-label={t("azuredevops:closeWatchEditor")}
               data-testid="azure-watch-editor-close"
               onClick={() => onOpenChange(false)}
@@ -571,7 +563,7 @@ function WatchEditor({
             type="button"
             variant="ghost"
             size="icon"
-            className="min-h-11 min-w-11 cursor-pointer"
+            className={controlSizingClassName("icon", "cursor-pointer")}
             aria-label={t("azuredevops:closeWatchEditor")}
             data-testid="azure-watch-editor-close"
             onClick={() => onOpenChange(false)}
@@ -660,7 +652,7 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
         action={
           <Button
             type="button"
-            className="min-h-11 w-full cursor-pointer sm:w-auto"
+            className="w-full cursor-pointer sm:w-auto"
             onClick={() => setEditor({ kind: "pull-request" })}
             data-testid="azure-add-pull-request-watch"
           >
@@ -696,7 +688,7 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
         action={
           <Button
             type="button"
-            className="min-h-11 w-full cursor-pointer sm:w-auto"
+            className="w-full cursor-pointer sm:w-auto"
             onClick={() => setEditor({ kind: "work-item" })}
             data-testid="azure-add-work-item-watch"
           >

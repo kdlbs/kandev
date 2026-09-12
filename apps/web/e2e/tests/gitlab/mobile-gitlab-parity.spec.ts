@@ -317,6 +317,7 @@ test.describe("Mobile GitLab parity", () => {
 
     const gitLabItem = testPage.getByRole("menuitem", { name: "GitLab Merge Request" });
     await expect(gitLabItem).toBeVisible();
+    await expect(gitLabItem).toHaveCSS("min-height", "48px");
     await expectTouchTarget(gitLabItem, "GitLab merge request link action");
     const nestedMenu = gitLabItem.locator("xpath=ancestor::*[@role='menu'][1]");
     await nestedMenu.evaluate((element) =>

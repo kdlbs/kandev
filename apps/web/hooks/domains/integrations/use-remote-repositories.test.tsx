@@ -444,10 +444,12 @@ describe("useRemoteRepositories provider refreshes", () => {
     setBuiltInAvailability({ azureDevOps: false, gitlab: false });
     act(() => result.current.refresh?.());
 
-    await waitFor(() => expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(2);
+      expect(result.current.availableProviders).toEqual(["github"]);
+    });
     expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
     expect(mocks.listAzureDevOpsProjects).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(result.current.availableProviders).toEqual(["github"]));
   });
 
   it("keeps currently eligible providers available while a refresh is loading", async () => {

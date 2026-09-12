@@ -88,16 +88,18 @@ export function TaskDeleteItem({
   taskId,
   isDeleting,
   onDeleteTask,
+  showSeparator = true,
 }: {
   taskId: string;
   isDeleting?: boolean;
   onDeleteTask?: (taskId: string) => void;
+  showSeparator?: boolean;
 }) {
   const { t } = useTranslation();
   if (!onDeleteTask) return null;
   return (
     <>
-      <ContextMenuSeparator />
+      {showSeparator ? <ContextMenuSeparator /> : null}
       <ContextMenuItem
         variant="destructive"
         disabled={isDeleting}

@@ -3,8 +3,9 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001
+  - REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-002
 created: 2026-08-04
-updated: 2026-09-03
+updated: 2026-09-11
 owners:
   - product
 ---
@@ -19,6 +20,49 @@ This design record preserves the technical source for the capability mapped to R
 | Requirement | Design source |
 | --- | --- |
 | REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001 | Migrated legacy design detail below |
+| REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-002 | Contribution resume preflight |
+
+## Contribution resume preflight
+
+This amendment is implemented in the
+[fix package](../../../plans/contribution-resume-recovery/plan.md).
+The [resume preflight decision](../../../decisions/2026-09-11-contribution-resume-preflight.md)
+qualifies the startup preflight policy below for existing contribution sessions.
+Initial contribution creation retains its current validation and preflight gates.
+
+`GitOperator.PushPreflight` in `internal/agentctl/server/process/git.go`
+keeps a non-mutating probe against the validated contribution remote and exact
+source ref. Add an optional, preflight-specific reason to its result and the
+runtime agentctl client response. Preserve `Success=false` for a rejected push;
+never encode history rejection as a successful permission check.
+
+Run the probe with porcelain output and a controlled locale. Classify only the
+exact destination's rejected status with the Git reasons `fetch first` or
+`non-fast-forward` as `history_update_required`. Ref mismatch, mixed rejection,
+malformed output, authentication, remote rejection, and unknown results remain
+blocking. Preserve timeout and context cancellation. A missing remote branch
+is not history drift and must not be recreated implicitly on resume.
+Check source-ref existence with a bounded, noninteractive `ls-remote` against
+the validated remote during resume. An empty successful result means missing;
+a failed probe keeps its own failure. This prevents Git's successful dry run
+for a new branch from being mistaken for a valid existing contribution.
+
+`Manager.preflightRemoteContributionPushes` consumes the typed reason. Only an
+authorized resume of an existing contribution may continue after a history-only
+rejection. Carry explicit resume intent through cold launch and promotion of a
+workspace-only execution; an ACP token or empty repository key is insufficient
+evidence of intent. Every repository must qualify independently.
+
+The default repository routing key may be empty. Resolve display identity from
+the validated binding or task attachment; do not display `repository ""` or
+substitute another repository. Unknown identity uses a generic safe label and
+omits repository-specific actions.
+
+Do not add a second divergence warning. Existing Changes state owns provider
+history, ancestry classification, and version choices. Startup does not claim
+that a future push will succeed. Actual pushes keep all existing checks.
+Blocking startup failures use the
+[task launch failure projection](task-launch-failure-recovery.md).
 
 ## Migrated design source
 

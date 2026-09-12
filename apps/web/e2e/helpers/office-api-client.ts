@@ -93,11 +93,17 @@ export class OfficeApiClient {
     await this.request("DELETE", `/agents/${id}`);
   }
 
-  async updateAgentStatus(id: string, status: string): Promise<Record<string, unknown>> {
+  async updateAgentStatus(
+    id: string,
+    status: string,
+    pauseReason?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { status };
+    if (pauseReason !== undefined) body.pause_reason = pauseReason;
     const res = await this.request<{ agent: Record<string, unknown> }>(
       "PATCH",
       `/agents/${id}/status`,
-      { status },
+      body,
     );
     return res.agent ?? (res as unknown as Record<string, unknown>);
   }

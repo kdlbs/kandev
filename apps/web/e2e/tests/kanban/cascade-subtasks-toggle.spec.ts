@@ -245,12 +245,11 @@ test.describe("Kanban card delete — cascade subtasks toggle", () => {
     await expect(cascade).not.toBeChecked();
 
     const discard = testPage.getByTestId("delete-discard-worktree-checkbox");
-    await expect(discard).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Delete" })).toBeDisabled();
-    await discard.click();
-    await expect(dialog.getByRole("button", { name: "Delete" })).toBeEnabled();
+    const deleteAction = dialog.getByRole("button", { name: "Delete", exact: true });
+    await expect(deleteAction).toBeEnabled();
+    await expect(discard).toHaveCount(0);
 
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    await deleteAction.click();
 
     // Parent is gone, child survives (now reparented to root with no
     // subtask badge — the badge requires a live parent on the board).
@@ -290,13 +289,12 @@ test.describe("Kanban card delete — cascade subtasks toggle", () => {
     const cascade = testPage.getByTestId("delete-cascade-checkbox");
     await expect(cascade).toBeVisible();
     const discard = testPage.getByTestId("delete-discard-worktree-checkbox");
-    await expect(discard).toBeVisible();
-    await discard.click();
-    await expect(discard).toBeChecked();
+    const deleteAction = dialog.getByRole("button", { name: "Delete", exact: true });
+    await expect(deleteAction).toBeEnabled();
+    await expect(discard).toHaveCount(0);
     await cascade.click();
     await expect(cascade).toBeChecked();
-
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    await deleteAction.click();
 
     await expect(kanban.taskCardByTitle("Parent Delete Cascade")).not.toBeVisible({
       timeout: VISIBLE_TIMEOUT,

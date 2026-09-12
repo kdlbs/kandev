@@ -148,7 +148,7 @@ The above document checks were run during the design turn. Work order 01 now
 has passing rendered geometry, restoration, long-content and desktop checks;
 its results are recorded in that work order. Both work orders are implemented.
 
-After the final production edit:
+Historical verification before PR integration with the newer base:
 
 - Fresh `build:e2e`, typecheck, changed-file ESLint, Prettier and the i18n
   new-code ratchet passed. No user-facing copy or translation keys were added.
@@ -203,6 +203,33 @@ bash /tmp/kandev-mobile-test.MPZpbZ/stop.sh
 Known pre-existing limitation outside this correction: a general Tasks ellipsis
 CSS rule hides the entry at 640-767px with a coarse pointer. Wide hosted tests
 open in portrait and then rotate; they do not claim to fix that entry rule.
+
+## PR integration verification
+
+The base integration preserves the newer GitHub Views picker, fixed save action
+and focus-release handoff; Threads listing chrome and sync errors; shared
+control sizing; and picker close-focus callbacks. The extracted task-action
+dialog owner now supplies the task ID required by mobile detach confirmation.
+The design and mobile how-to name the current provider owners.
+
+Post-integration checks:
+
+- All 277 tests in the 37 changed unit-test files passed. A separate 31-file
+  host/GitHub/Threads/menu run passed 253 tests (overlapping coverage), and the
+  newly extracted task-action dialog owner's nine tests passed.
+- `pnpm run typecheck`, resolved-file ESLint with zero warnings, Prettier,
+  `pnpm run i18n:check`, architecture and harness lint passed.
+- Harness validator: 19 tests passed; specification validator: 36 tests passed;
+  all specs and 46 public docs pages validated; 62 public-doc validator tests passed.
+- Fresh managed backend, web and packaged-fixture builds passed. The full mobile
+  GitHub sidebar, action-confirmations and secrets specs passed all 16 tests.
+- A second one-worker, no-retry batch passed eight selected mobile cases in
+  Threads, sidebar views, GitLab, sessions, terminals and management confirmations.
+- Four desktop GitHub scope/saved-query and sidebar/Threads deletion checks
+  passed without retries against the same build.
+
+Remote CI and review verification remain pending until the integration commit
+is pushed. Earlier exact-head and screenshot evidence is superseded.
 
 ## Risks
 

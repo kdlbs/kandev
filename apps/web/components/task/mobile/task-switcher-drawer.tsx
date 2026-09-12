@@ -8,10 +8,12 @@ import {
 export function TaskSwitcherDrawer({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   children: ReactNode;
 }) {
   return (
@@ -19,6 +21,7 @@ export function TaskSwitcherDrawer({
       {({ contentProps }) => (
         <Drawer open={open} onOpenChange={onOpenChange}>
           <DrawerContent
+            onCloseAutoFocus={onCloseAutoFocus}
             {...contentProps}
             className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]"
           >

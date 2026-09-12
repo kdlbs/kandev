@@ -29,7 +29,8 @@ The same pattern applies to other inline confirmations:
 - Session deletion and terminal closing stay inside their open picker. Saved
   sidebar, Threads, GitHub, and GitLab views stay inside their filter/editor sheet.
   These sheets fit the confirmation's content instead of keeping the taller
-  picker or editor height. GitHub and GitLab phone filters also open from the bottom.
+  picker or editor height. GitHub's **Views** picker and GitLab's phone filters
+  also open from the bottom.
 - File deletion, chat context reset, plan revision restore, subtask detachment,
   and walkthrough discard use a compact sheet from the page. Resetting context
   inside Quick Chat stays in that dialog.

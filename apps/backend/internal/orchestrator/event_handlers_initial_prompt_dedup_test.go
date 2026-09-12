@@ -241,6 +241,39 @@ func TestWorkflowAutoStartPlanModeOnlyPromptForCreatedSession(t *testing.T) {
 	}
 }
 
+func TestWorkflowAutoStartEmptyPromptForCreatedSessionStartsAgent(t *testing.T) {
+	fixture := newInitialPromptDedupFixture(t, true, false)
+	fixture.session.State = models.TaskSessionStateCreated
+	fixture.session.AgentProfileID = "profile-initial-prompt-dedup"
+	if err := fixture.repo.UpdateTaskSession(context.Background(), fixture.session); err != nil {
+		t.Fatalf("update created session: %v", err)
+	}
+	fixture.svc.scheduler = scheduler.NewScheduler(
+		queue.NewTaskQueue(10), fixture.svc.executor, fixture.svc.taskRepo,
+		testLogger(), scheduler.SchedulerConfig{},
+	)
+	fixture.svc.activeTurns.Store(fixture.sessionID, "turn-initial-prompt-dedup")
+	startCalled := make(chan struct{})
+	fixture.agent.startAgentProcessFunc = func(_ context.Context, _ string) error {
+		close(startCalled)
+		return nil
+	}
+
+	if err := fixture.svc.autoStartStepPrompt(
+		context.Background(), fixture.taskID, fixture.session, fixture.step, "", false, true, nil,
+	); err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+	select {
+	case <-startCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("empty auto-start prompt did not launch the created session")
+	}
+	if got := len(fixture.messages.userMessages); got != 0 {
+		t.Fatalf("recorded user messages = %d, want 0", got)
+	}
+}
+
 func TestStartSessionForWorkflowStepPlanModeOnlyPrompt(t *testing.T) {
 	fixture := newInitialPromptDedupFixture(t, true, false)
 	fixture.step.Events.OnEnter = []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterEnablePlanMode}}
@@ -417,6 +450,30 @@ func (m *repositoryBackedMessageCreator) CreateUserMessage(
 		return err
 	}
 	return m.repo.CreateMessage(ctx, &models.Message{
+		TaskID:        taskID,
+		TaskSessionID: sessionID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorUser,
+		Content:       content,
+		Metadata:      metadata,
+	})
+}
+
+func (m *repositoryBackedMessageCreator) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	if _, err := m.repo.GetMessageWithPromptIndex(ctx, messageID); err == nil {
+		return nil
+	}
+	if err := m.mockMessageCreator.CreateUserMessageIdempotent(
+		ctx, messageID, taskID, content, sessionID, turnID, metadata,
+	); err != nil {
+		return err
+	}
+	return m.repo.CreateMessage(ctx, &models.Message{
+		ID:            messageID,
 		TaskID:        taskID,
 		TaskSessionID: sessionID,
 		TurnID:        turnID,

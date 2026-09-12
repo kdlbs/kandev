@@ -94,19 +94,18 @@ export function ListToolbar({
         <SortDropdown sort={sort} sortLabel={sortLabel} onSortChange={onSortChange} />
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon"
           onClick={onRefresh}
           disabled={loading}
-          className="cursor-pointer h-7 w-7"
+          className="cursor-pointer"
           title={t("jira:refresh")}
         >
           <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
         <Button
           variant={showJqlEditor ? "default" : "ghost"}
-          size="sm"
           onClick={onToggleJqlEditor}
-          className="cursor-pointer h-7 text-xs gap-1.5"
+          className="cursor-pointer text-xs gap-1.5"
           title={t("jira:toggleRawJqlEditor")}
         >
           <IconCode className="h-3.5 w-3.5" />
@@ -130,7 +129,7 @@ function SortDropdown({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="cursor-pointer h-7 text-xs gap-1.5">
+        <Button variant="ghost" className="cursor-pointer text-xs gap-1.5">
           <IconArrowsSort className="h-3.5 w-3.5" />
           {t("jira:sortLabelled", { label: sortLabel })}
         </Button>
@@ -160,7 +159,7 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={t("jira:searchTicketKeyOrText")}
-        className="h-8 text-xs pl-8"
+        className="text-xs pl-8"
       />
     </div>
   );
@@ -202,12 +201,7 @@ function ViewsDropdown({
   return (
     <Popover open={deletion.open} onOpenChange={deletion.onOpenChange}>
       <PopoverTrigger asChild>
-        <Button
-          ref={triggerRef}
-          variant="outline"
-          size="sm"
-          className="cursor-pointer min-h-11 md:min-h-8 text-xs gap-1.5"
-        >
+        <Button ref={triggerRef} variant="outline" className="cursor-pointer text-xs gap-1.5">
           <IconBookmark className="h-3.5 w-3.5" />
           {activeName ?? t("jira:noView")}
         </Button>
@@ -403,8 +397,7 @@ function SaveViewButton({ onSave }: { onSave: (name: string) => void }) {
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
-          className="cursor-pointer h-8 text-xs gap-1.5"
+          className="cursor-pointer text-xs gap-1.5"
           title={t("jira:saveCurrentFiltersAsAView")}
         >
           <IconPlus className="h-3.5 w-3.5" />
@@ -421,23 +414,13 @@ function SaveViewButton({ onSave }: { onSave: (name: string) => void }) {
             if (e.key === "Enter") submit();
           }}
           placeholder={t("jira:myOpenBugs")}
-          className="h-8 text-xs"
+          className="text-xs"
         />
         <div className="flex justify-end gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setOpen(false)}
-            className="cursor-pointer h-7 text-xs"
-          >
+          <Button variant="ghost" onClick={() => setOpen(false)} className="cursor-pointer text-xs">
             {t("common:cancel")}
           </Button>
-          <Button
-            size="sm"
-            onClick={submit}
-            disabled={!name.trim()}
-            className="cursor-pointer h-7 text-xs"
-          >
+          <Button onClick={submit} disabled={!name.trim()} className="cursor-pointer text-xs">
             {t("common:save")}
           </Button>
         </div>

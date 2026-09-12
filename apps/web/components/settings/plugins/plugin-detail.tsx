@@ -26,6 +26,7 @@ import { usePluginActions } from "./use-plugin-actions";
 import { usePluginConfigForm } from "./use-plugin-config-form";
 import type { PluginRecord } from "@/lib/types/plugins";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const PLUGINS_SETTINGS_HREF = "/settings/plugins";
 
@@ -247,7 +248,10 @@ function PluginDangerZone({
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer min-h-11 sm:min-h-0"
+          className={controlSizingClassName(
+            "compact",
+            "cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+          )}
           disabled={busy}
           onClick={() => actions.handleEnable(plugin)}
         >
@@ -258,7 +262,10 @@ function PluginDangerZone({
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer min-h-11 sm:min-h-0"
+          className={controlSizingClassName(
+            "compact",
+            "cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+          )}
           disabled={busy}
           onClick={() => actions.handleDisable(plugin)}
         >
@@ -270,7 +277,10 @@ function PluginDangerZone({
           ref={uninstallAnchorRef}
           variant="ghost"
           size="sm"
-          className="cursor-pointer min-h-11 text-destructive hover:text-destructive md:min-h-0"
+          className={controlSizingClassName(
+            "compact",
+            "cursor-pointer text-destructive hover:text-destructive max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+          )}
           disabled={busy}
           onClick={onUninstall}
         >

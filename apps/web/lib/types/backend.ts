@@ -1,4 +1,8 @@
-import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+import type {
+  TaskPlanCommentEventPayload,
+  TaskPlanEventPayload,
+  TaskPlanRevisionEventPayload,
+} from "./task-plan-events";
 import type { CaptureRequest } from "@/lib/logger/capture";
 
 export const SYSTEM_AGENT_RUNTIME_STATUS_CHANGED = "system.agent_runtime.status_changed" as const;
@@ -31,6 +35,7 @@ import type {
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type {
+  GitHubPRDiscoveryHealthUpdate,
   GitHubRateLimitUpdate,
   TaskCIAutomationOptions,
   TaskPR,
@@ -62,6 +67,7 @@ export type KanbanUpdatePayload = {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
     show_in_command_panel?: boolean;
+    auto_advance_requires_signal?: boolean;
     wip_limit?: number;
     pull_from_step_id?: string | null;
   }>;
@@ -247,7 +253,7 @@ export type RepositorySetPayload = {
   workspace_id: string;
   name?: string;
   description?: string;
-  repositories?: Array<{ repository_id: string; position: number }>;
+  repositories?: Array<{ repository_id: string; position: number; base_branch?: string }>;
   created_at?: string;
   updated_at?: string;
 };
@@ -290,6 +296,7 @@ export type StepPayload = {
   is_start_step?: boolean;
   allow_manual_move?: boolean;
   show_in_command_panel?: boolean;
+  auto_advance_requires_signal?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
@@ -394,7 +401,11 @@ export {
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
 
-export type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+export type {
+  TaskPlanCommentEventPayload,
+  TaskPlanEventPayload,
+  TaskPlanRevisionEventPayload,
+} from "./task-plan-events";
 
 export type TaskStatusSummaryUpdatedPayload = {
   task_id: string;
@@ -430,6 +441,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
     "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;
     "task.plan.deleted": BackendMessage<"task.plan.deleted", TaskPlanEventPayload>;
+    "task.plan.comments.changed": BackendMessage<
+      "task.plan.comments.changed",
+      TaskPlanCommentEventPayload
+    >;
     "task.plan.revision.created": BackendMessage<
       "task.plan.revision.created",
       TaskPlanRevisionEventPayload
@@ -548,6 +563,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
       TaskCIAutomationOptions
     >;
     "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
+    "github.pr_discovery_health.updated": BackendMessage<
+      "github.pr_discovery_health.updated",
+      GitHubPRDiscoveryHealthUpdate
+    >;
     "gitlab.task_mr.updated": BackendMessage<
       "gitlab.task_mr.updated",
       TaskMR & { workspace_id: string }

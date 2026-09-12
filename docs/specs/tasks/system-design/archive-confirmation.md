@@ -59,8 +59,10 @@ overview is the destination.
 
 The settings client keeps the previous value when persistence fails. Until
 settings load successfully, the client requires confirmation. If an archive
-fails after temporary navigation, the coordinator restores the original task
-and URL. Existing archive-surface error handling remains authoritative.
+fails after temporary navigation, recovery preserves any subsequent user
+navigation and restores only an available original task. The shared [removal
+coordinator](removal-navigation.md) defines the departure gate and
+uncertain-response recovery for local task actions.
 
 ## Persistence and compatibility
 
@@ -81,3 +83,4 @@ preference.
 
 - [Archive Confirmation Preference](../../../plans/archive-confirmation-preference/plan.md)
 - [Cascade Archive Navigation](../../../plans/cascade-archive-navigation/plan.md)
+- [Task removal navigation](../../../plans/task-removal-navigation/plan.md)

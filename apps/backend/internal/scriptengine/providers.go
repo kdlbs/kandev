@@ -165,7 +165,7 @@ func RepositoryProvider(
 		if branch == "" {
 			branch = getMetaString(metadata, "repository_branch")
 		}
-		vars["repository.branch"] = shellQuote(branch)
+		vars["repository.branch"] = shellQuote(repositoryBranchName(branch))
 
 		// repository.setup_script is a script FRAGMENT (intentional multi-line
 		// shell), not data — do NOT quote it.

@@ -42,6 +42,7 @@ func (r *Repository) initSchema() error {
 		r.healBuiltinWorkflowStepParticipantSeats,
 		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
+		r.ensureTaskEnvironmentRecoveryClaimsSchema,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
@@ -58,6 +59,35 @@ func (r *Repository) initSchema() error {
 	return nil
 }
 
+// ensureTaskEnvironmentRecoveryClaimsSchema creates the durable authority used
+// by automatic worktree recovery. It runs after the legacy worktree ownership
+// cutover because that cutover replaces task_environments on PostgreSQL.
+func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
+	if err := r.migrate.Apply("task_environment_recovery_claims.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_claims (
+			task_environment_id TEXT PRIMARY KEY,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create task environment recovery claim table: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_claims.operation_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_claims_operation
+			ON task_environment_recovery_claims(operation_id)`); err != nil {
+		return fmt.Errorf("create task environment recovery claim index: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task recovery claim migration: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) initDynamicRoutingSchema() error {
 	_, err := r.db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS dynamic_route_states (
@@ -69,6 +99,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			state TEXT NOT NULL DEFAULT 'selecting',
 			continuation_json TEXT NOT NULL DEFAULT '',
 			policy_state_json TEXT NOT NULL DEFAULT '',
+			legacy_active_backfill_applied INTEGER NOT NULL DEFAULT 1,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
@@ -232,11 +263,13 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			show_in_command_panel INTEGER DEFAULT 1,
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
-			profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
-			profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
-			stage_type TEXT NOT NULL DEFAULT 'custom',
-			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
+		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		stage_type TEXT NOT NULL DEFAULT 'custom',
+		session_target TEXT,
+		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
+			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`); err != nil {
@@ -524,9 +557,9 @@ func (r *Repository) initTaskSchema() error {
 // repositorySetsSchemaDDL declares the repository-set tables. It runs after
 // initCoreSchema so `workspaces` and `repositories` exist for the foreign keys.
 //
-// Membership positions are contiguous from zero and carry no branch: branch
-// choice belongs to a task (task_repositories), which is exactly what the user
-// still decides after applying a set.
+// Membership positions are contiguous from zero. A saved base branch is an
+// optional task-form default; checkout and task branch choices remain task
+// state.
 const repositorySetsSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS repository_sets (
 		id TEXT PRIMARY KEY,
@@ -544,6 +577,7 @@ const repositorySetsSchemaDDL = `
 		repository_set_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
 		position INTEGER NOT NULL DEFAULT 0,
+		base_branch TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (repository_set_id) REFERENCES repository_sets(id) ON DELETE CASCADE,
@@ -620,12 +654,41 @@ func (r *Repository) initPlansSchema() error {
 		created_by TEXT NOT NULL DEFAULT 'agent',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		comments_revision INTEGER NOT NULL DEFAULT 0,
 		implementation_started_at TIMESTAMP,
 		implementation_started_session_id TEXT,
 		implementation_started_by TEXT,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_task_plans_id_task_id ON task_plans(id, task_id);
+	CREATE TABLE IF NOT EXISTS task_plan_comments (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		body TEXT NOT NULL,
+		selected_text TEXT NOT NULL,
+		anchor_from INTEGER NOT NULL,
+		anchor_to INTEGER NOT NULL,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comments_task_order
+		ON task_plan_comments(task_id, created_at, id);
+	CREATE TABLE IF NOT EXISTS task_plan_comment_admissions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comment_admissions_task
+		ON task_plan_comment_admissions(task_id, plan_id);
 	`); err != nil {
 		return err
 	}

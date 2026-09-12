@@ -1,12 +1,8 @@
 "use client";
 
 import { IconFlag } from "@tabler/icons-react";
-import {
-  ContextMenuItem,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-} from "@kandev/ui/context-menu";
+import { ContextMenuItem, ContextMenuSub, ContextMenuSubTrigger } from "@kandev/ui/context-menu";
+import { TaskContextMenuSubContent as ContextMenuSubContent } from "./task-context-menu-sub-content";
 import { useTranslation } from "react-i18next";
 import {
   isTaskPriority,

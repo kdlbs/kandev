@@ -149,10 +149,11 @@ repository resources, so that I can understand the consequence before acting.
   archive-confirmation preference shall continue to bypass the surface.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.11:** When the task's executor
   projection is absent but task-owned worktree state may remain after the last
-  session ends, the delete confirmation shall fail closed by showing the same
-  explicit discard selection.
+  session ends, the delete confirmation shall inspect the retained worktrees
+  through the task cleanup contract. Missing executor metadata alone shall not
+  require discard consent.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.12:** When delete can remove one or more
-  task worktrees, the confirmation shall state that tracked and untracked local
+  dirty task worktrees, the confirmation shall state that tracked and untracked local
   changes will be permanently discarded. The destructive action shall require
   an explicit selection for this outcome.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.13:** When the backend rejects deletion
@@ -162,6 +163,10 @@ repository resources, so that I can understand the consequence before acting.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.14:** At phone widths, the discard
   selection shall remain inside the existing centered dialog and its scrolling
   body. Its label shall provide a touch target of at least 44 CSS px.
+
+Consent inspection, clean-workspace suppression, and failure recovery follow
+[task runtime cleanup](../../tasks/requirements/runtime-cleanup.md),
+`AC-TASKS-RUNTIME-CLEANUP-001.14` through `.17`.
 
 ## Out of scope
 

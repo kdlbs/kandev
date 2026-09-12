@@ -1302,6 +1302,97 @@ func (s *Service) transitionTaskSessionState(
 		// typed launch error can be durable but invisible in the task summary.
 		refreshed = s.refreshTaskSessionOr(ctx, sessionID, refreshed)
 	}
+	s.publishAcceptedTaskSessionState(
+		ctx,
+		taskID,
+		sessionID,
+		oldState,
+		nextState,
+		errorMessage,
+		authoritativeUpdatedAt,
+		refreshed,
+	)
+	return true, nextState, nil
+}
+
+// transitionBootstrapFailure commits the typed error and FAILED state through
+// the repository's execution-fenced boundary before publishing the accepted
+// transition. The prompt admission guard serializes this terminal settlement
+// with queued prompt dispatches just like the ordinary transition path.
+func (s *Service) transitionBootstrapFailure(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (bool, models.TaskSessionState, error) {
+	if s.messageQueue != nil {
+		heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string)
+		if heldSessionID != sessionID {
+			var changed bool
+			var finalState models.TaskSessionState
+			var err error
+			err = s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+				changed, finalState, err = s.transitionBootstrapFailure(
+					admittedCtx,
+					taskID,
+					sessionID,
+					agentExecutionID,
+					expectedState,
+					expectedStamp,
+					errorValue,
+				)
+				return err
+			})
+			return changed, finalState, err
+		}
+	}
+
+	committer, ok := s.repo.(bootstrapFailureCommitter)
+	if !ok {
+		return s.transitionTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message, nil)
+	}
+	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
+		ctx,
+		taskID,
+		sessionID,
+		agentExecutionID,
+		expectedState,
+		expectedStamp,
+		errorValue,
+	)
+	if err != nil || !changed {
+		return changed, expectedState, err
+	}
+	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
+	}
+	if refreshed == nil {
+		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
+	}
+	authoritativeUpdatedAt := updatedAt.UTC()
+	s.publishAcceptedTaskSessionState(
+		ctx,
+		taskID,
+		sessionID,
+		expectedState,
+		models.TaskSessionStateFailed,
+		errorValue.Message,
+		&authoritativeUpdatedAt,
+		refreshed,
+	)
+	return true, models.TaskSessionStateFailed, nil
+}
+
+func (s *Service) publishAcceptedTaskSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	oldState, nextState models.TaskSessionState,
+	errorMessage string,
+	authoritativeUpdatedAt *time.Time,
+	refreshed *models.TaskSession,
+) {
 	if isTerminalSessionState(nextState) {
 		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
 			s.logger.Error("failed to expire clarification on strict terminal transition; response claims remain quarantined",
@@ -1322,7 +1413,6 @@ func (s *Service) transitionTaskSessionState(
 	)
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
-	return true, nextState, nil
 }
 
 func (s *Service) persistStrictTaskSessionState(
@@ -1422,6 +1512,16 @@ func (s *Service) cancelActiveTaskSessionState(
 
 type activeTaskSessionCanceller interface {
 	CancelActiveTaskSession(ctx context.Context, sessionID, reason string) (bool, time.Time, error)
+}
+
+type bootstrapFailureCommitter interface {
+	CommitBootstrapFailureIfCurrentExecution(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
 }
 
 type conditionalTaskSessionStateUpdater interface {
@@ -1861,11 +1961,21 @@ func allowsSessionStartingRecovery(
 	nextState, expectedState, currentState models.TaskSessionState,
 	promoteTask bool,
 ) bool {
+	return allowsSessionStartingRecoveryWithPermission(
+		nextState, expectedState, currentState, promoteTask, false,
+	)
+}
+
+func allowsSessionStartingRecoveryWithPermission(
+	nextState, expectedState, currentState models.TaskSessionState,
+	promoteTask, allowCompletedResume bool,
+) bool {
 	return !promoteTask &&
 		nextState == models.TaskSessionStateStarting &&
 		currentState == expectedState &&
 		(expectedState == models.TaskSessionStateFailed ||
-			expectedState == models.TaskSessionStateCancelled)
+			expectedState == models.TaskSessionStateCancelled ||
+			(allowCompletedResume && expectedState == models.TaskSessionStateCompleted))
 }
 
 func (s *Service) setSessionStarting(
@@ -1874,6 +1984,18 @@ func (s *Service) setSessionStarting(
 	session *models.TaskSession,
 	expectedState models.TaskSessionState,
 	promoteTask bool,
+) error {
+	return s.setSessionStartingWithOptions(
+		ctx, taskID, session, expectedState, promoteTask, false,
+	)
+}
+
+func (s *Service) setSessionStartingWithOptions(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask, allowCompletedResume bool,
 ) error {
 	if session == nil {
 		return nil
@@ -1890,8 +2012,8 @@ func (s *Service) setSessionStarting(
 		if err != nil {
 			return err
 		}
-		allowedTerminalRecovery := allowsSessionStartingRecovery(
-			session.State, expectedState, current.State, promoteTask,
+		allowedTerminalRecovery := allowsSessionStartingRecoveryWithPermission(
+			session.State, expectedState, current.State, promoteTask, allowCompletedResume,
 		)
 		if isTerminalSessionState(current.State) && !allowedTerminalRecovery {
 			return &executor.SessionStateSupersededError{SessionID: session.ID, State: current.State}
@@ -2090,21 +2212,9 @@ func (s *Service) setSessionWaitingForInputWithHook(
 }
 
 // Child terminal receipts use the task's parent relationship and durable
-// clarification projection to decide whether a session can collapse to
-// COMPLETED. Root-task sibling sessions keep the original WAITING affordance.
-// setSessionWaitingForInputIfRequested is the terminal-receipt variant
-// of setSessionWaitingForInput. It only applies to subtasks (task.ParentID
-// non-empty) because the symptom it guards — "child WAITING_FOR_INPUT
-// after the agent's last turn had no active clarification" — only
-// arises for child tasks whose task or workflow step is terminal, not to
-// surface a UI prompt. Sibling sessions on a root task keep the original
-// affordance so a finishing session on a multi-session task still flips to
-// WAITING_FOR_INPUT.
-//
-// When a terminal task has no input request, collapse the session to
-// COMPLETED so the child row does not leak in a stuck active state. A clean
-// turn on a non-terminal child is not enough evidence for that collapse, so
-// it remains WAITING_FOR_INPUT.
+// clarification projection to preserve existing failure/cancellation cleanup.
+// Successful completion is independent from conversation access, so a
+// completed child remains WAITING_FOR_INPUT and can receive a follow-up.
 func (s *Service) setSessionWaitingForInputIfRequested(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -2145,9 +2255,9 @@ func (s *Service) setSessionWaitingForInputIfRequestedWithHook(
 		s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, onChanged, preloadedSession...)
 		return
 	}
-	taskTerminal := models.IsTerminalTaskState(task.State) || s.workflowStepIsTerminal(ctx, task.WorkflowStepID)
-	if len(activeClarifications) == 0 && taskTerminal {
-		s.logger.Debug("subtask terminal: skipping WAITING write; collapsing session to COMPLETED",
+	failedOrCancelled := task.State == v1.TaskStateFailed || task.State == v1.TaskStateCancelled
+	if len(activeClarifications) == 0 && failedOrCancelled {
+		s.logger.Debug("subtask failed or cancelled: skipping WAITING write; collapsing session to COMPLETED",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
 		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateCompleted, "", false)
@@ -2493,9 +2603,15 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if state == v1.TaskStateInProgress && task != nil && task.IsFromOffice {
 		return nil
 	}
+	if state == v1.TaskStateInProgress && task != nil && task.State == v1.TaskStateCompleted {
+		return nil
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
+	}
+	if state == v1.TaskStateInProgress && models.IsCompletionFollowUpSession(session.Metadata) {
+		return nil
 	}
 	if !runtimeSessionOwnsTaskState(session, state) {
 		return nil

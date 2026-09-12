@@ -465,14 +465,7 @@ func TestApplyMoveTaskImmediate_RollsBackExactHandoffAfterMoveFailure(t *testing
 	})
 	h := &Handlers{taskSvc: svc, messageQueue: queue, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{})
-	response, err := h.applyMoveTaskImmediate(ctx, msg, struct {
-		TaskID          string `json:"task_id"`
-		WorkflowID      string `json:"workflow_id"`
-		WorkflowStepID  string `json:"workflow_step_id"`
-		Position        int    `json:"position"`
-		Prompt          string `json:"prompt"`
-		SenderSessionID string `json:"sender_session_id"`
-	}{
+	response, err := h.applyMoveTaskImmediate(ctx, msg, moveTaskRequest{
 		TaskID: "task-rollback", WorkflowID: "missing-workflow",
 		WorkflowStepID: "missing-step", Prompt: "handoff",
 	}, session)
@@ -512,7 +505,13 @@ func (r *pendingMoveFailingQueuer) RemoveEntryForSession(
 	return nil, messagequeue.ErrEntryNotFound
 }
 
-func TestDeferMoveTask_RollsBackHandoffWhenPendingMovePersistenceFails(t *testing.T) {
+// TestDeferMoveTask_PendingMovePersistenceFailureLeavesQueueUntouched verifies
+// the deferred move path surfaces an internal error when SetPendingMove fails
+// and does not mutate the session queue. One-shot instructions now ride the
+// PendingMove's EntryOptions rather than a pre-queued hand-off, so there is no
+// hand-off message to roll back: the pre-existing queue entry must survive and
+// nothing may be removed.
+func TestDeferMoveTask_PendingMovePersistenceFailureLeavesQueueUntouched(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedRunningTask(
 		t, repo,
@@ -535,7 +534,7 @@ func TestDeferMoveTask_RollsBackHandoffWhenPendingMovePersistenceFails(t *testin
 	response, err := h.handleMoveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, response, ws.ErrorCodeInternalError)
-	require.Equal(t, []string{"queued-2"}, queue.removedIDs)
+	require.Empty(t, queue.removedIDs)
 	require.Len(t, queue.calls, 1)
 	assert.Equal(t, "preexisting", queue.calls[0].ID)
 }
@@ -1229,8 +1228,12 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
 	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
 	assert.NotEmpty(t, queue.pendingMoves[0].MoveID)
-	require.Len(t, queue.calls, 1)
-	assert.Equal(t, queue.pendingMoves[0].MoveID, queue.calls[0].Metadata[messagequeue.MetadataDeferredMoveID])
+	// The legacy prompt is folded into one-shot entry instructions carried on
+	// the PendingMove; no hand-off message is pre-queued at defer time —
+	// instructions ride the target-step entry overlay applied at turn-end.
+	require.NotNil(t, queue.pendingMoves[0].EntryOptions)
+	assert.Equal(t, "continue the work", queue.pendingMoves[0].EntryOptions.Instructions)
+	assert.Empty(t, queue.calls)
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {

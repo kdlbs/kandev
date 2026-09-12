@@ -8,6 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useKandevRestart } from "@/hooks/domains/system/use-kandev-restart";
 import { useRestartCapability } from "@/hooks/domains/system/use-restart-capability";
 import { RestartProgressDialog } from "@/components/settings/system/restart-progress-dialog";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function AgentRuntimeUnavailableAlert() {
   const agentRuntime = useAppStore((state) => state.agentRuntime);
@@ -41,8 +42,10 @@ function UnavailableAgentRuntimeContent() {
             {restartSupported ? (
               <Button
                 type="button"
-                size="sm"
-                className="h-11 w-full shrink-0 cursor-pointer sm:w-auto"
+                className={controlSizingClassName(
+                  "standard",
+                  "w-full shrink-0 cursor-pointer sm:w-auto",
+                )}
                 disabled={restart.isRestarting}
                 onClick={() => void restart.start()}
               >

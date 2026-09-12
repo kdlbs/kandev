@@ -188,7 +188,7 @@ function SecretListItemRowActions({
               // A Move removes the source; it must never run while that secret's
               // edit/create draft is open (the draft would outlive its row).
               disabled={isBusy || showCreate || isEditing}
-              className="min-h-11 cursor-pointer"
+              className="cursor-pointer"
               aria-label={t("settings:copyMoveSecretNamed", { name: secret.name })}
             >
               <IconCopy className="h-4 w-4" />
@@ -199,7 +199,7 @@ function SecretListItemRowActions({
               size="icon"
               onClick={onReveal}
               disabled={revealing || isBusy}
-              className="min-h-11 min-w-11 cursor-pointer"
+              className="cursor-pointer"
               aria-label={
                 revealed
                   ? t("settings:hideSecretNamed", { name: secret.name })
@@ -213,7 +213,7 @@ function SecretListItemRowActions({
               size="icon"
               onClick={() => onEdit(secret)}
               disabled={isBusy || showCreate || isEditing}
-              className="min-h-11 min-w-11 cursor-pointer"
+              className="cursor-pointer"
               aria-label={t("settings:editSecretNamed", { name: secret.name })}
             >
               <IconEdit className="h-4 w-4" />
@@ -288,7 +288,7 @@ function SecretListItemRowDeleteAction({
           size="icon"
           onClick={() => onDelete(secret)}
           disabled={isBusy}
-          className="min-h-11 min-w-11 cursor-pointer"
+          className="cursor-pointer"
           aria-label={t("settings:deleteSecretNamed", { name: secret.name })}
         >
           <IconTrash className="h-4 w-4" />

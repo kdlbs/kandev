@@ -155,6 +155,49 @@ describe("WorkspaceRepoChips branch policy preview", () => {
   });
 });
 
+describe("WorkspaceRepoChips saved base display", () => {
+  it("shows the saved base separately from a local executor checkout branch", () => {
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+    });
+
+    expect(screen.getByTestId("repo-chip-base-branch").textContent).toContain("develop");
+    expect(screen.getByTestId("branch-chip-trigger").textContent).toContain("feature/task");
+  });
+
+  it("edits the local executor saved base without changing checkout state", () => {
+    const onRowBaseBranchChange = vi.fn();
+    const onRowBranchChange = vi.fn();
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+      onRowBaseBranchChange,
+      onRowBranchChange,
+    });
+
+    fireEvent.click(screen.getByTestId("repo-chip-base-branch"));
+    fireEvent.click(screen.getByRole("option", { name: /Task default/ }));
+
+    expect(onRowBaseBranchChange).toHaveBeenCalledWith("r0", "");
+    expect(onRowBranchChange).not.toHaveBeenCalledWith("r0", "");
+  });
+});
+
 describe("WorkspaceRepoChips workspace markers", () => {
   it("marks another task row's workspace repository while keeping it selectable", () => {
     const onRowRepositoryChange = vi.fn();

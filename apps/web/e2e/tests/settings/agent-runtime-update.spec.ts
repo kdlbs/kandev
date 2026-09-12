@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { settledBoundingBox } from "../../helpers/settled-box";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
@@ -40,11 +41,7 @@ test.describe("managed agent runtime updates", () => {
     await expect(dialog).toBeVisible();
     const dialogBox = await settledBoundingBox(dialog);
     expect(dialogBox!.width).toBeGreaterThanOrEqual(640);
-    const selectorBox = await dialog
-      .getByTestId(`agent-update-version-${runtime.agentName}`)
-      .boundingBox();
-    expect(selectorBox).not.toBeNull();
-    expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
+    await expectControlHeight(dialog.getByTestId(`agent-update-version-${runtime.agentName}`), 28);
     const body = dialog.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
     await expect
       .poll(() => body.evaluate((element) => element.scrollHeight <= element.clientHeight))

@@ -120,7 +120,13 @@ tests; `apps/web/AGENTS.md` and scoped confirmation/Threads guidance.
 
 ## Results
 
-Implemented on 2026-09-11 after the explicit implementation request.
+Initially implemented on 2026-09-11 after the explicit implementation request.
+
+PR integration preserves the newer Threads listing-context trigger and sync
+status, fixed picker content, shared control sizing and close-focus handlers.
+The newly extracted task-action dialog owner passes the captured task ID to
+detach confirmation. Current post-integration checks are recorded in the parent
+plan; the original results below remain historical evidence.
 
 - RED: the Threads fixture measured a 581.59px sheet against a 436.2px compact
   limit. The failure was rendered geometry, not visibility or fixture setup.

@@ -2,9 +2,24 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
+
+type connectionIDContextKey struct{}
+
+// WithConnectionID binds an inbound message to its live WebSocket connection.
+// The value is server supplied and cannot be forged through a message payload.
+func WithConnectionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, connectionIDContextKey{}, id)
+}
+
+// ConnectionID returns the server-assigned WebSocket connection identifier.
+func ConnectionID(ctx context.Context) string {
+	id, _ := ctx.Value(connectionIDContextKey{}).(string)
+	return id
+}
 
 // MessageType represents the type of WebSocket message
 type MessageType string

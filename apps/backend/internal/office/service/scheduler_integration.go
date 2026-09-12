@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -201,12 +203,25 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		"reason":           run.Reason,
 	})
 
-	// Guard: check agent status.
+	// Guard: check agent status. AC-OFFICE-BUDGET-001.13 gives the two ways
+	// this lookup can fail different dispositions: a genuine "no such
+	// agent" (soft-deleted or never existed) is cancelled, never retried or
+	// escalated, since an orphaned run has no workspace and therefore no
+	// ceiling that could ever be evaluated; a transient lookup error is
+	// deferred/retried on the same terms as an evaluator fault and, at
+	// MaxRetryCount, failed without escalation (AC-OFFICE-BUDGET-006.4) --
+	// neither disposition may queue a run for any other agent
+	// (AC-OFFICE-BUDGET-001.17), so neither uses the generic
+	// HandleRunFailure/escalateFailure path, which does exactly that.
 	agent, err := si.svc.GetAgentFromConfig(ctx, agentInstanceID)
 	if err != nil {
 		si.logger.Error("failed to get agent instance",
 			zap.String("run_id", runID), zap.Error(err))
-		_ = si.svc.HandleRunFailure(ctx, run, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			si.cancelUnresolvableAgentRun(ctx, run)
+			return
+		}
+		si.deferWorkspaceLookupFailure(ctx, run)
 		return
 	}
 
@@ -254,8 +269,8 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		return
 	}
 
-	// Pre-execution budget check.
-	if !si.checkBudget(ctx, run, agent, taskID) {
+	// Pre-launch budget admission (AC-OFFICE-BUDGET-001.14's five gates).
+	if !si.admitRun(ctx, run, agent) {
 		return
 	}
 
@@ -831,38 +846,6 @@ func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, ru
 	}
 }
 
-// checkBudget runs pre-execution budget checks. Returns true if allowed.
-func (si *SchedulerIntegration) checkBudget(
-	ctx context.Context, run *models.Run,
-	agent *models.AgentInstance, taskID string,
-) bool {
-	projectID := si.extractProjectID(ctx, run.Payload)
-	allowed, reason, err := si.svc.CheckPreExecutionBudget(
-		ctx, agent.ID, projectID, agent.WorkspaceID)
-	if err != nil {
-		si.logger.Error("budget check failed",
-			zap.String("run_id", run.ID), zap.Error(err))
-		return true // fail-open on error
-	}
-	if !allowed {
-		si.logger.Info("run skipped (budget exceeded)",
-			zap.String("run_id", run.ID), zap.String("reason", reason))
-		si.releaseCheckoutIfNeeded(ctx, run)
-		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
-		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
-		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
-			"scheduler", "office-scheduler",
-			"run_budget_blocked", "run", run.ID,
-			mustJSON(map[string]string{
-				"agent":    agent.Name,
-				"agent_id": agent.ID,
-				"reason":   reason,
-			}), run.ID, "")
-		return false
-	}
-	return true
-}
-
 // releaseCheckoutIfNeeded releases the task checkout the given run may hold.
 // Delegates to the owner-scoped releaseTaskCheckoutForRun (Review round 3)
 // rather than the unscoped repo.ReleaseTaskCheckout: every call site here
@@ -935,6 +918,7 @@ func (si *SchedulerIntegration) buildPromptContext(
 ) *PromptContext {
 	parsed := ParseRunPayload(payload)
 	pc := &PromptContext{Reason: reason}
+	pc.OneTimeInstructions = parsed[RunPayloadOneTimeInstructionsKey]
 
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)

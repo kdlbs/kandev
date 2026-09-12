@@ -24,6 +24,9 @@ type MobilePickerSheetProps = {
   headerAction?: ReactNode;
   /** Replace the picker content with a confirmation step in this same drawer. */
   confirmationHost?: boolean;
+  onCloseAutoFocus?: (event: Event) => void;
+  /** Fixed content above the single scrolling picker region. */
+  fixedContent?: ReactNode;
   children: ReactNode;
 };
 
@@ -40,6 +43,8 @@ export function MobilePickerSheet({
   contentTestId,
   headerAction,
   confirmationHost = false,
+  onCloseAutoFocus,
+  fixedContent,
   children,
 }: MobilePickerSheetProps) {
   const content = (
@@ -51,6 +56,7 @@ export function MobilePickerSheet({
         </div>
         {description && <DrawerDescription>{description}</DrawerDescription>}
       </DrawerHeader>
+      {fixedContent}
       <div
         className="flex-1 min-h-0 max-h-[70dvh] overflow-y-auto px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]"
         data-testid={contentTestId}
@@ -65,7 +71,7 @@ export function MobilePickerSheet({
       <MobileConfirmationHost open={open} surface="drawer">
         {({ contentProps }) => (
           <Drawer open={open} onOpenChange={onOpenChange}>
-            <DrawerContent {...contentProps}>
+            <DrawerContent onCloseAutoFocus={onCloseAutoFocus} {...contentProps}>
               <MobileConfirmationHostBody>{content}</MobileConfirmationHostBody>
             </DrawerContent>
           </Drawer>
@@ -74,7 +80,7 @@ export function MobilePickerSheet({
     );
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent>{content}</DrawerContent>
+      <DrawerContent onCloseAutoFocus={onCloseAutoFocus}>{content}</DrawerContent>
     </Drawer>
   );
 }

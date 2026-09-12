@@ -12,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { Project, ProjectStatus } from "@/lib/state/slices/office/types";
 import { PROJECT_STATUS_LABEL_KEYS } from "../../lib/label-keys";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 // `labelKey`, not `label` — module scope freezes a `t()` at the boot locale.
 // The `value`s are the persisted project-status ids and stay untranslated.
@@ -67,7 +68,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
             setName(e.target.value);
             setDirty(true);
           }}
-          className="text-lg font-semibold h-9 px-2.5"
+          className={controlSizingClassName("standard", "text-lg font-semibold px-2.5")}
         />
         <Select
           value={status}
@@ -76,7 +77,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
             setDirty(true);
           }}
         >
-          <SelectTrigger className="w-[140px] data-[size=default]:h-9 cursor-pointer">
+          <SelectTrigger className={controlSizingClassName("standard", "w-[140px] cursor-pointer")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -88,7 +89,11 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
           </SelectContent>
         </Select>
         {dirty && (
-          <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            className={controlSizingClassName("standard", "cursor-pointer")}
+          >
             <IconDeviceFloppy className="h-4 w-4 mr-1" />
             {saving ? t("office:saving") : t("common:save")}
           </Button>

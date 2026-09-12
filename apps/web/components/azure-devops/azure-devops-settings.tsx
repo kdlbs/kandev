@@ -481,7 +481,7 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
           type="button"
           variant="destructive"
           onClick={() => setConfirmingRemove(true)}
-          className="min-h-11 w-full cursor-pointer sm:ml-auto sm:w-auto"
+          className="w-full cursor-pointer sm:ml-auto sm:w-auto"
           data-testid="azure-devops-delete-button"
         >
           <IconTrash className="h-4 w-4" />

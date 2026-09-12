@@ -12,6 +12,26 @@ import (
 
 const mcpKeyCallerTaskID = "caller_task_id"
 
+func nullableSessionTargetOption() mcp.ToolOption {
+	return func(tool *mcp.Tool) {
+		tool.InputSchema.Properties["session_target"] = map[string]interface{}{
+			"type":        []string{"object", "null"},
+			"description": "Optional session recipient: {kind: 'initial'} or {kind: 'step', step_id: '<earlier direct-profile step>'}. Set null to clear it.",
+		}
+	}
+}
+
+func copyWorkflowStepArguments(payload map[string]interface{}, args map[string]interface{}, keys ...string) {
+	for _, key := range keys {
+		if value, present := args[key]; present && value != nil {
+			payload[key] = value
+		}
+	}
+	if value, present := args["session_target"]; present {
+		payload["session_target"] = value
+	}
+}
+
 // --- Workflow config tools ---
 
 func (s *Server) registerConfigWorkflowTools() {
@@ -63,7 +83,7 @@ func (s *Server) registerConfigWorkflowTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("import_workflow_kandev",
-			mcp.WithDescription("Import one or more workflows into a workspace from a portable document. The document is the same YAML/JSON envelope produced by the workflow export (type: kandev_workflow, version: 1) and may contain multiple workflows. Workflows whose name already exists in the workspace are skipped. Returns the names that were created and skipped."),
+			mcp.WithDescription("Import one or more workflows into a workspace from a portable document. The document is the same YAML/JSON envelope produced by the workflow export (type: kandev_workflow, version: 2; version 1 is accepted) and may contain multiple workflows. Workflows whose name already exists in the workspace are skipped. Returns the names that were created and skipped."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID to import the workflows into")),
 			mcp.WithString(documentArg, mcp.Required(), mcp.Description("The portable workflow document as a YAML or JSON string (a kandev_workflow export envelope). Includes the workflows and their steps.")),
 		),
@@ -71,7 +91,7 @@ func (s *Server) registerConfigWorkflowTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("export_workflow_kandev",
-			mcp.WithDescription("Export one workflow as a portable version 1 kandev_workflow JSON document. The result contains one workflow and its steps without instance IDs or timestamps. Pass the JSON text unchanged as document to import_workflow_kandev (the import document limit is 1 MiB)."),
+			mcp.WithDescription("Export one workflow as a portable kandev_workflow JSON document. Targeted workflows use version 2; target-free workflows use version 1. The result contains one workflow and its steps without instance IDs or timestamps. Pass the JSON text unchanged as document to import_workflow_kandev (the import document limit is 1 MiB)."),
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithIdempotentHintAnnotation(true),
@@ -107,8 +127,10 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithBoolean("show_in_command_panel", mcp.Description("Show this step in the command panel")),
 			mcp.WithBoolean("auto_advance_requires_signal", mcp.Description("Require step_complete_kandev before on_turn_complete auto-advance transitions run")),
 			mcp.WithBoolean("cancel_triggers_turn_complete", mcp.Description("Run on_turn_complete actions when an explicit user cancellation occurs")),
+			mcp.WithBoolean("complete_task_on_enter", mcp.Description("Complete the task when it enters this final workflow step")),
 			mcp.WithNumber("wip_limit", mcp.Description("Work-in-progress limit for this step. 0 means unlimited.")),
 			mcp.WithString("pull_from_step_id", mcp.Description("Optional feeder workflow step ID to pull from when capacity opens.")),
+			nullableSessionTargetOption(),
 			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete. Each is an array of {type, config} objects.")),
 		),
 		s.wrapHandler("create_workflow_step_kandev", s.createWorkflowStepHandler()),
@@ -129,8 +151,10 @@ func (s *Server) registerConfigWorkflowStepTools() {
 			mcp.WithNumber("auto_archive_after_hours", mcp.Description("Auto-archive tasks after N hours in this step (0 to disable)")),
 			mcp.WithBoolean("auto_advance_requires_signal", mcp.Description("Require step_complete_kandev before on_turn_complete auto-advance transitions run")),
 			mcp.WithBoolean("cancel_triggers_turn_complete", mcp.Description("Run on_turn_complete actions when an explicit user cancellation occurs")),
+			mcp.WithBoolean("complete_task_on_enter", mcp.Description("Complete the task when it enters this final workflow step")),
 			mcp.WithNumber("wip_limit", mcp.Description("Work-in-progress limit for this step. 0 means unlimited.")),
 			mcp.WithString("pull_from_step_id", mcp.Description("Optional feeder workflow step ID to pull from when capacity opens.")),
+			nullableSessionTargetOption(),
 			mcp.WithObject("events", mcp.Description("Event-driven actions. Keys: on_enter, on_exit, on_turn_start, on_turn_complete.")),
 		),
 		s.wrapHandler("update_workflow_step_kandev", s.updateWorkflowStepHandler()),
@@ -338,12 +362,13 @@ func (s *Server) registerConfigTaskTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription("Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately."),
+			mcp.WithDescription(`Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately. Returns a move-result envelope: "disposition" is "applied" when the move committed immediately or "deferred" when it was recorded for turn-end, "task" is the moved (or target-step) task, and an optioned move also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
-			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at the new step. Mid-turn moves are always deferred; include a prompt when the next agent needs context (e.g. QA → review). Omit for self-moves like Work → Done.")),
+			mcp.WithString("prompt", mcp.Description("Legacy alias for entry_options.instructions. Optional hand-off message applied once when the task enters the new step. Supplying both this and entry_options.instructions is rejected. Omit for self-moves like Work → Done.")),
+			moveTaskEntryOptionsToolOption(),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
@@ -496,11 +521,7 @@ func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"position", "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
-			if args[key] != nil {
-				payload[key] = args[key]
-			}
-		}
+		copyWorkflowStepArguments(payload, args, "position", "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events")
 		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkflowStep, payload)
 	}
 }
@@ -522,11 +543,7 @@ func (s *Server) updateWorkflowStepHandler() server.ToolHandlerFunc {
 			payload["prompt"] = prompt
 		}
 		args := req.GetArguments()
-		for _, key := range []string{"is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "wip_limit", "pull_from_step_id", "events"} {
-			if args[key] != nil {
-				payload[key] = args[key]
-			}
-		}
+		copyWorkflowStepArguments(payload, args, "is_start_step", "allow_manual_move", "show_in_command_panel", "agent_profile_id", "profile_session_start_policy", "profile_session_end_policy", "auto_archive_after_hours", "auto_advance_requires_signal", "cancel_triggers_turn_complete", "complete_task_on_enter", "wip_limit", "pull_from_step_id", "events")
 		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkflowStep, payload)
 	}
 }
@@ -683,6 +700,11 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		}
 		if args := req.GetArguments(); args["position"] != nil {
 			payload["position"] = args["position"]
+		}
+		// entry_options is a nested object; forward it verbatim for the backend
+		// to normalize (fold the legacy prompt alias) and validate.
+		if args := req.GetArguments(); args["entry_options"] != nil {
+			payload["entry_options"] = args["entry_options"]
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPMoveTask, payload)
 	}

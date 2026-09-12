@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -111,7 +112,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 71
+	const wantSubscriptions = 73
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -246,6 +247,31 @@ func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_PlanCommentsAreTaskScoped(t *testing.T) {
+	hub := newTestHub(t)
+	first := newTestClient("first")
+	second := newTestClient("second")
+	registerTestClient(hub, first)
+	registerTestClient(hub, second)
+	hub.SubscribeToTask(first, "task-1")
+	hub.SubscribeToTask(second, "task-2")
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	snapshot := &models.TaskPlanCommentSnapshot{TaskID: "task-1", PlanID: "plan-1"}
+
+	require.NoError(t, broadcaster.broadcastEvent(context.Background(), bus.NewEvent(
+		events.TaskPlanCommentsChanged,
+		"test",
+		snapshot,
+	), ws.ActionTaskPlanCommentsChanged))
+
+	if !clientReceived(first) {
+		t.Fatal("task subscriber did not receive plan comments notification")
+	}
+	if clientReceived(second) {
+		t.Fatal("plan comments notification crossed the task boundary")
+	}
+}
+
 func TestTaskEventBroadcaster_DropsTaskScopedQueueStatusWithoutSession(t *testing.T) {
 	hub := newTestHub(t)
 	hub.setAuthPolicy(AuthPolicy{Enforced: func() bool { return true }})
@@ -288,6 +314,29 @@ func TestTaskEventBroadcaster_DropsUnscopedGitHubCIOptionsWhenAuthIsEnforced(t *
 	select {
 	case leaked := <-hub.broadcast:
 		t.Fatalf("unscoped GitHub CI options update was globally broadcast: %s", leaked.Action)
+	default:
+	}
+}
+func TestTaskEventBroadcaster_DropsUnscopedQueueStatus(t *testing.T) {
+	hub := newTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{Enforced: func() bool { return true }})
+	msg, err := ws.NewNotification(ws.ActionMessageQueueStatusChanged, map[string]any{
+		"task_id": "task-without-session",
+	})
+	require.NoError(t, err)
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+
+	require.NoError(t, broadcaster.routeBroadcast(
+		ws.ActionMessageQueueStatusChanged,
+		msg.Payload,
+		"",
+		"",
+		msg,
+	))
+
+	select {
+	case leaked := <-hub.broadcast:
+		t.Fatalf("unscoped queue status was globally broadcast: %s", leaked.Action)
 	default:
 	}
 }

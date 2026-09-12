@@ -122,7 +122,7 @@ bottom-picker precedent and `apps/web/AGENTS.md`.
 
 ## Results
 
-Implemented and verified on 2026-09-11. RED reproduced the missing bottom direction on the
+Initial implementation verified on 2026-09-11. RED reproduced the missing bottom direction on the
 GitLab phone filter: the current root had `data-side="right"` and no Vaul
 direction. Both providers now use a shared presentation-only
 `IntegrationFiltersSheet`, with an existing Drawer on phones and the retained
@@ -141,3 +141,10 @@ heading/action visibility assertions. All 16 targeted mobile cases passed on
 the final build, followed by four clean desktop confirmation/persistence checks
 through the guarded raw runner. Full results and actual bounds are in the
 parent plan. The existing mobile how-to was updated, and its validators pass.
+
+PR integration with the newer base moves GitHub hosting to its extracted
+`MobileViewsPicker`, preserving its fixed save action and delayed focus handoff.
+GitLab retains `IntegrationFiltersSheet`. The full seven-case mobile GitHub
+sidebar spec passes after integration, including save retry, kind switching,
+saved defaults, compact deletion and Cancel restoration. Current combined
+verification is recorded in the parent plan.

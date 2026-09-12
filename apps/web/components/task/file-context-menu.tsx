@@ -595,6 +595,7 @@ export function TreeNodeName({
     return (
       <Input
         ref={inputRef}
+        controlSize="none"
         value={rename.renameValue}
         onChange={(e) => rename.setRenameValue(e.target.value)}
         onKeyDown={rename.handleRenameKeyDown}
