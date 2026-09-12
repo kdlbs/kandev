@@ -43,6 +43,7 @@ export function PipelineDialogs({
         onDelete={onDeleteTask}
       />
       <TaskDetachConfirmationSurface
+        taskId={task.id}
         open={menu.showDetachConfirm}
         anchorRef={menu.detachAnchorRef}
         focusReturnRef={menu.detachFocusReturnRef}
