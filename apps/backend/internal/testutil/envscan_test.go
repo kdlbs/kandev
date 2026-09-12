@@ -87,6 +87,115 @@ func read() (string, bool) { return os.LookupEnv("BAR") }
 	}
 }
 
+// TestUncoveredEnvReadsUncoveredAliasedOSImport ensures a local import name
+// cannot hide an environment read from the hermetic-environment guard.
+func TestUncoveredEnvReadsUncoveredAliasedOSImport(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import stdos "os"
+
+func read() string { return stdos.Getenv("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one uncovered-name message, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "BAR") {
+		t.Fatalf("message %q does not name the uncovered variable", messages[0])
+	}
+}
+
+// TestUncoveredEnvReadsCoveredAliasedOSImport documents that alias resolution
+// uses the same scrub/exempt classification as the ordinary os import path.
+func TestUncoveredEnvReadsCoveredAliasedOSImport(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import stdos "os"
+
+func read() string { return stdos.Getenv("FOO") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, nil)
+	if len(messages) != 0 {
+		t.Fatalf("covered aliased read reported as uncovered: %v", messages)
+	}
+}
+
+// TestUncoveredEnvReadsIgnoresShadowedAliasedOSImport ensures a local binding
+// with the import's spelling does not turn an unrelated Getenv method into an
+// environment read.
+func TestUncoveredEnvReadsIgnoresShadowedAliasedOSImport(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import stdos "os"
+
+type reader struct{}
+
+func (reader) Getenv(string) string { return "" }
+
+func read(stdos reader) string { return stdos.Getenv("BAR") }
+func genuineRead() string { return stdos.Getenv("REAL") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 1 || !strings.Contains(messages[0], "REAL") {
+		t.Fatalf("expected only the genuine aliased os read, got %v", messages)
+	}
+}
+
+func TestUncoveredEnvReadsUncoveredDotImportedOS(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import . "os"
+
+func getenv() string { return Getenv("BAR") }
+func lookupenv() (string, bool) { return LookupEnv("BAZ") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 2 {
+		t.Fatalf("expected exactly two uncovered-name messages, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "BAR") || !strings.Contains(messages[1], "BAZ") {
+		t.Fatalf("messages %q do not name both uncovered variables", messages)
+	}
+}
+
+// TestUncoveredEnvReadsCoveredDotImportedOS documents that dot-imported reads
+// are classified against the caller's scrubbed and exempt environment names.
+func TestUncoveredEnvReadsCoveredDotImportedOS(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import . "os"
+
+func getenv() string { return Getenv("FOO") }
+func lookupenv() (string, bool) { return LookupEnv("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, []string{"BAR"})
+	if len(messages) != 0 {
+		t.Fatalf("covered dot-imported reads reported as uncovered: %v", messages)
+	}
+}
+
+// TestUncoveredEnvReadsIgnoresShadowedDotImportedOS ensures a local Getenv
+// binding does not turn an unrelated function value into an environment read.
+func TestUncoveredEnvReadsIgnoresShadowedDotImportedOS(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import . "os"
+
+func read(Getenv func(string) string) string { return Getenv("BAR") }
+func genuineRead() string { return Getenv("REAL") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 1 || !strings.Contains(messages[0], "REAL") {
+		t.Fatalf("expected only the genuine dot-imported os read, got %v", messages)
+	}
+}
+
 func TestUncoveredEnvReadsUnresolvableIdentifier(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 

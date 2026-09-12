@@ -3,8 +3,10 @@ package testutil
 import (
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,9 +21,9 @@ import (
 // scrub against silently falling behind new environment reads.
 //
 // os.Getenv and os.LookupEnv are always treated as environment reads. They are
-// matched on the literal identifier os, so a file that imports os under an
-// alias or through a dot import is not scanned; no file in this repository
-// does either, and a review of one that did would be the place to catch it.
+// matched by the file-local import name bound to the os package. Dot imports
+// are matched by bare Getenv and LookupEnv calls. Blank imports are not scanned
+// because they name no package.
 // Names are likewise resolved against package-level constants with no scope
 // analysis, so a local variable shadowing one of those constants resolves to
 // the constant's value rather than its own.
@@ -193,7 +195,7 @@ func callsExtraReader(files []*ast.File, name string) bool {
 
 func uncoveredEnvReadsInFile(fileSet *token.FileSet, file *ast.File, scan envScan) []string {
 	var messages []string
-	for _, call := range envReadCalls(file, scan.extraReaders) {
+	for _, call := range envReadCalls(fileSet, file, scan.extraReaders) {
 		name, resolved := resolveEnvName(call, scan.constants)
 		pos := fileSet.Position(call.Pos())
 		if !resolved {
@@ -295,14 +297,15 @@ func recordConstSpecs(constants packageConstants, specs []ast.Spec) {
 // first: pinning this to exactly one argument meant that adding a fallback
 // parameter to an accessor dropped all of its call sites from the scan without
 // failing a single test.
-func envReadCalls(file *ast.File, extraReaders map[string]bool) []*ast.CallExpr {
+func envReadCalls(fileSet *token.FileSet, file *ast.File, extraReaders map[string]bool) []*ast.CallExpr {
+	uses := typeUses(fileSet, file)
 	var calls []*ast.CallExpr
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok || len(call.Args) == 0 {
 			return true
 		}
-		if isEnvRead(call.Fun, extraReaders) {
+		if isEnvRead(call.Fun, uses, extraReaders) {
 			calls = append(calls, call)
 		}
 		return true
@@ -310,25 +313,49 @@ func envReadCalls(file *ast.File, extraReaders map[string]bool) []*ast.CallExpr 
 	return calls
 }
 
+// typeUses resolves identifier bindings within one file. A scanner only needs
+// import bindings here, so type errors in unrelated package code do not stop
+// it from distinguishing an os import from a local declaration with the same
+// spelling.
+func typeUses(fileSet *token.FileSet, file *ast.File) map[*ast.Ident]types.Object {
+	uses := make(map[*ast.Ident]types.Object)
+	config := types.Config{
+		Importer: importer.Default(),
+		Error:    func(error) {},
+	}
+	_, _ = config.Check(file.Name.Name, fileSet, []*ast.File{file}, &types.Info{Uses: uses})
+	return uses
+}
+
 // isEnvRead reports whether fun names os.Getenv, os.LookupEnv, or one of the
 // extraReaders. An extraReader matches on the trailing name alone, so both
 // receiver.environmentValue(x) and a bare environmentValue(x) count.
-func isEnvRead(fun ast.Expr, extraReaders map[string]bool) bool {
+func isEnvRead(fun ast.Expr, uses map[*ast.Ident]types.Object, extraReaders map[string]bool) bool {
 	switch target := fun.(type) {
 	case *ast.SelectorExpr:
 		if extraReaders[target.Sel.Name] {
 			return true
 		}
 		pkgIdent, ok := target.X.(*ast.Ident)
-		if !ok || pkgIdent.Name != "os" {
+		if !ok || !isOSPackageName(uses[pkgIdent]) {
 			return false
 		}
 		return target.Sel.Name == "Getenv" || target.Sel.Name == "LookupEnv"
 	case *ast.Ident:
-		return extraReaders[target.Name]
+		return extraReaders[target.Name] || (isOSReader(uses[target]) && (target.Name == "Getenv" || target.Name == "LookupEnv"))
 	default:
 		return false
 	}
+}
+
+func isOSPackageName(object types.Object) bool {
+	pkgName, ok := object.(*types.PkgName)
+	return ok && pkgName.Imported().Path() == "os"
+}
+
+func isOSReader(object types.Object) bool {
+	function, ok := object.(*types.Func)
+	return ok && function.Pkg() != nil && function.Pkg().Path() == "os"
 }
 
 func resolveEnvName(call *ast.CallExpr, constants packageConstants) (string, bool) {
