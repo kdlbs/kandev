@@ -190,8 +190,10 @@ func TestBootNeedsYouInbox_FlagOnWithBundles_SeedsRealCounts(t *testing.T) {
 	// unmodified time.Now() -- so the fixture must match that convention
 	// rather than normalizing to UTC, or the stored and compared timestamps
 	// carry different zone offsets and the TEXT-column ">" comparison stops
-	// being chronological.
-	snoozeUntil := time.Now().Add(time.Hour)
+	// being chronological. 24 hours out (not 1) keeps the expiry clear of a
+	// host's DST fall-back window, where a 1-hour offset can render to nearly
+	// the same local wall-clock text as the comparison time.
+	snoozeUntil := time.Now().Add(24 * time.Hour)
 	if err := harness.taskRepo.UpsertClarificationInboxSidecar(
 		ctx, userstore.DefaultUserID, snoozedPendingID, models.ClarificationSidecarSnoozed, &snoozeUntil, now,
 	); err != nil {

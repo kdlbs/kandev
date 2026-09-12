@@ -204,7 +204,10 @@ func NewHandlers(
 	}
 }
 
-// RegisterRoutes registers clarification HTTP routes.
+// RegisterRoutes registers clarification HTTP routes. needsYouInboxEnabled
+// gates only the /api/v1/clarification-inbox group: the original
+// /api/v1/clarification routes stay unconditional, matching every agent's
+// existing clarification-request/respond flow regardless of the flag.
 func RegisterRoutes(
 	router *gin.Engine,
 	store *Store,
@@ -216,6 +219,7 @@ func RegisterRoutes(
 	log *logger.Logger,
 	inboxTasks inboxTaskService,
 	inboxBundles inboxBundleStore,
+	needsYouInboxEnabled bool,
 ) {
 	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log, inboxTasks, inboxBundles)
 	api := router.Group("/api/v1/clarification")
@@ -225,11 +229,13 @@ func RegisterRoutes(
 	api.POST("/:id/respond", h.httpRespond)
 	api.POST("/:id/cancel", h.httpCancelRequest)
 
-	inbox := router.Group("/api/v1/clarification-inbox")
-	inbox.GET("", h.httpListInbox)
-	inbox.GET("/hidden", h.httpListInboxHidden)
-	inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
-	inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)
+	if needsYouInboxEnabled {
+		inbox := router.Group("/api/v1/clarification-inbox")
+		inbox.GET("", h.httpListInbox)
+		inbox.GET("/hidden", h.httpListInboxHidden)
+		inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
+		inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)
+	}
 }
 
 // CreateRequestBody is the request body for creating a clarification request.

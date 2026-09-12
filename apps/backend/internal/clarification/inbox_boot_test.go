@@ -59,6 +59,6 @@ func TestInboxBootSummary_HiddenSummaryErrorPropagates(t *testing.T) {
 
 	_, _, _, err := InboxBootSummary(context.Background(), bundles, "workspace-1", "user-1", testInboxNow)
 	if err == nil {
-		t.Fatal("expected the hidden-summary error to propagate rather than defaulting (F45's rule applies here too)")
+		t.Fatal("expected the hidden-summary error to propagate rather than defaulting")
 	}
 }

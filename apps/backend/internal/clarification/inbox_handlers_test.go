@@ -22,7 +22,7 @@ var testInboxNow = time.Date(2026, time.September, 12, 12, 0, 0, 0, time.UTC)
 
 // fakeInboxTasks is an inboxTaskService double: configurable workspace
 // authorization plus task/session lookups for the task_title/session_state
-// enrichment (F41).
+// enrichment.
 type fakeInboxTasks struct {
 	authzErr error
 	tasks    map[string]*taskmodels.Task
@@ -256,7 +256,7 @@ func TestHttpListInbox_Forbidden_403(t *testing.T) {
 }
 
 func TestHttpListInbox_HiddenCountQueryFails_500NotDefaulted(t *testing.T) {
-	// F45: a failing second bounded query fails the whole read rather than
+	// A failing second bounded query fails the whole read rather than
 	// defaulting hidden_count/next_snooze_expiry.
 	bundleCreatedAt := testInboxNow.Add(-time.Hour)
 	msgs := map[string][]*taskmodels.Message{
@@ -297,8 +297,9 @@ func TestHttpListInbox_MessagesFetchFails_500(t *testing.T) {
 func TestHttpListInbox_SuccessShape_RewritesQuestionIndexAndTrimsContext(t *testing.T) {
 	bundleCreatedAt := testInboxNow.Add(-time.Hour)
 	// Messages are seeded out of order (index 5 before index 3) and with a
-	// whitespace-only context on the first message, to exercise F44's
-	// server-side rank rewrite and F43's trim rule together.
+	// whitespace-only context on the first message, to exercise the
+	// server-side question_index rank rewrite and the context trim rule
+	// together.
 	msgs := map[string][]*taskmodels.Message{
 		"p1": {
 			{
@@ -358,7 +359,7 @@ func TestHttpListInbox_SuccessShape_RewritesQuestionIndexAndTrimsContext(t *test
 	}
 	// m-a (question_index 3) sorts before m-b (question_index 5); the server
 	// rewrites the emitted question_index to the 0-based rank within that
-	// order (F44).
+	// order.
 	if b.Messages[0].ID != "m-a" || b.Messages[1].ID != "m-b" {
 		t.Fatalf("message order = [%s, %s], want [m-a, m-b]", b.Messages[0].ID, b.Messages[1].ID)
 	}
