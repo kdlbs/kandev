@@ -24,10 +24,10 @@ import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-a
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
+import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import type { FileBrowserRow } from "./file-browser-hooks";
 import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
 import { InlineFileInput } from "./inline-file-input";
-import { renderSessionOrLoadState } from "./file-browser-load-state";
 import {
   FileContextMenu,
   useFileDeleteAction,
@@ -412,7 +412,7 @@ export function SearchResultsList({
 
 export { FileBrowserToolbar } from "./file-browser-toolbar";
 
-type FileBrowserContentAreaProps = {
+export type FileBrowserContentAreaProps = {
   isSearchActive: boolean;
   searchResults: string[] | null;
   isSessionFailed: boolean;
@@ -438,6 +438,9 @@ type FileBrowserContentAreaProps = {
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   onRetry: () => void;
+  workspaceRestoration?: WorkspaceRestorationAttempt | null;
+  onRestoreWorkspace?: () => void;
+  restoreWorkspaceDisabled?: boolean;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
@@ -506,7 +509,7 @@ function scheduleVirtualRowReveal(reveal: () => void): () => void {
   };
 }
 
-function FileTreeView(props: FileBrowserContentAreaProps) {
+export function FileTreeView(props: FileBrowserContentAreaProps) {
   if (!props.tree) return null;
   return <VirtualizedFileTreeView {...props} />;
 }
@@ -601,31 +604,4 @@ function VirtualizedFileTreeView(props: FileBrowserContentAreaProps) {
       })}
     </div>
   );
-}
-
-export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
-  const { t } = useTranslation();
-  if (props.isSearchActive && props.searchResults !== null) {
-    return (
-      <SearchResultsList
-        searchResults={props.searchResults}
-        fileStatuses={props.fileStatuses}
-        onOpenFile={props.onOpenFile}
-        showTouchActions={props.showTouchActions}
-        onAddToChatContext={props.onAddToChatContext}
-      />
-    );
-  }
-  const loadStateResult = renderSessionOrLoadState({
-    isSessionFailed: props.isSessionFailed,
-    sessionError: props.sessionError,
-    loadState: props.loadState,
-    isLoadingTree: props.isLoadingTree,
-    tree: props.tree,
-    loadError: props.loadError,
-    onRetry: props.onRetry,
-  });
-  if (loadStateResult) return loadStateResult;
-  if (props.tree) return <FileTreeView {...props} />;
-  return <div className="p-4 text-sm text-muted-foreground">{t("task:noFilesFound")}</div>;
 }

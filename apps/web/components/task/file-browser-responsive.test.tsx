@@ -27,6 +27,9 @@ vi.mock("@/components/state-provider", () => ({
       sessionWorktreesBySessionId: { itemsBySessionId: {} },
       workspaceFilesRefresh: { bySessionId: {} },
     }),
+  useAppStoreApi: () => ({
+    getState: () => ({ workspaceRestoration: { byEnvironmentId: {} } }),
+  }),
 }));
 vi.mock("@/hooks/use-open-session-folder", () => ({
   useOpenSessionFolder: () => ({ open: vi.fn() }),
@@ -80,8 +83,8 @@ vi.mock("./file-tree-editor-menu", () => ({
   FileTreeEditorProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("./file-context-menu", () => ({ useFileDeleteAction: () => null }));
-vi.mock("./file-browser-parts", async (importOriginal) => {
-  const actual = await importOriginal<typeof FileBrowserParts>();
+vi.mock("./file-browser-content-area", async () => {
+  const actual = await vi.importActual<typeof FileBrowserParts>("./file-browser-parts");
   return {
     ...actual,
     FileBrowserContentArea: ({

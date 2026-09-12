@@ -1,11 +1,13 @@
 package sqlite
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -107,7 +109,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	}
 	defer restoreForeignKeys()
 
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("cutover: begin tx: %w", err)
 	}
@@ -129,6 +131,7 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 		return err
 	}
 	cut := &worktreeCutover{
+		ctx:                       r.migrationContext(),
 		envs:                      make(map[string]*legacyEnv),
 		taskEnvs:                  make(map[string][]*legacyEnv),
 		sessions:                  make(map[string]*legacySession),
@@ -211,10 +214,10 @@ func (r *Repository) cutoverAcquireLocks(tx *sqlx.Tx) error {
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		return nil
 	}
-	if _, err := tx.Exec(`SET LOCAL lock_timeout = '30s'`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `SET LOCAL lock_timeout = '30s'`); err != nil {
 		return fmt.Errorf("cutover: set lock timeout: %w", err)
 	}
-	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, taskWorktreeCutoverLockID); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `SELECT pg_advisory_xact_lock($1)`, taskWorktreeCutoverLockID); err != nil {
 		return fmt.Errorf("cutover: acquire migration advisory lock: %w", err)
 	}
 	claimTable, err := r.columnExists(tx, "task_environment_recovery_claims", "task_environment_id")
@@ -227,7 +230,7 @@ func (r *Repository) cutoverAcquireLocks(tx *sqlx.Tx) error {
 	if claimTable {
 		lockTables += `, task_environment_recovery_claims`
 	}
-	if _, err := tx.Exec("LOCK TABLE " + lockTables + " IN ACCESS EXCLUSIVE MODE"); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), "LOCK TABLE "+lockTables+" IN ACCESS EXCLUSIVE MODE"); err != nil {
 		return fmt.Errorf("cutover: lock ownership tables: %w", err)
 	}
 	return nil
@@ -235,19 +238,11 @@ func (r *Repository) cutoverAcquireLocks(tx *sqlx.Tx) error {
 
 // tableExists reports whether a table exists on either database engine.
 func (r *Repository) tableExists(name string) (bool, error) {
-	var exists bool
-	var err error
-	if dialect.IsPostgres(r.db.DriverName()) {
-		err = r.db.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 FROM information_schema.tables
-				WHERE table_name = $1 AND table_schema = current_schema())`,
-			name).Scan(&exists)
-	} else {
-		err = r.db.QueryRow(
-			`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)`,
-			name).Scan(&exists)
-	}
+	return db.TableExists(r.db, name)
+}
+
+func (r *Repository) tableExistsContext(ctx context.Context, name string) (bool, error) {
+	exists, err := db.TableExistsContext(ctx, r.db, name)
 	if err != nil {
 		return false, fmt.Errorf("probe table %s: %w", name, err)
 	}
@@ -266,7 +261,7 @@ func (r *Repository) cutoverEnsureLegacyBranchSlug(tx *sqlx.Tx) error {
 	if has {
 		return nil
 	}
-	if _, err := tx.Exec(`ALTER TABLE task_session_worktrees ADD COLUMN branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `ALTER TABLE task_session_worktrees ADD COLUMN branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("cutover: add legacy branch_slug: %w", err)
 	}
 	return nil
@@ -274,19 +269,7 @@ func (r *Repository) cutoverEnsureLegacyBranchSlug(tx *sqlx.Tx) error {
 
 // columnExists reports whether a column exists on either database engine.
 func (r *Repository) columnExists(tx *sqlx.Tx, table, column string) (bool, error) {
-	var exists bool
-	var err error
-	if dialect.IsPostgres(r.db.DriverName()) {
-		err = tx.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 FROM information_schema.columns
-				WHERE table_name = $1 AND column_name = $2 AND table_schema = current_schema())`,
-			table, column).Scan(&exists)
-	} else {
-		err = tx.QueryRow(`SELECT EXISTS (
-			SELECT 1 FROM pragma_table_info(?) WHERE name = ?)`,
-			table, column).Scan(&exists)
-	}
+	exists, err := db.ColumnExistsContext(r.migrationContext(), tx, table, column)
 	if err != nil {
 		return false, fmt.Errorf("probe column %s.%s: %w", table, column, err)
 	}

@@ -113,6 +113,8 @@ export type BuildKanbanCardMenuEntriesArgs = {
   currentStepId?: string | null;
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, TaskMoveStep[]>;
+  /** Disables only move and send-to-workflow entries while a row-local move runs. */
+  moveDisabled?: boolean;
   disabled?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
@@ -347,6 +349,7 @@ export function buildKanbanCardMenuEntries({
   currentStepId,
   workflows,
   stepsByWorkflowId,
+  moveDisabled,
   disabled,
   isDeleting,
   isArchiving,
@@ -373,7 +376,6 @@ export function buildKanbanCardMenuEntries({
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
-
   const priorityEntry = buildPriorityMenuEntry({
     currentPriority,
     disabled: isProcessing,
@@ -383,15 +385,14 @@ export function buildKanbanCardMenuEntries({
   const moveToEntry = buildMoveToCurrentWorkflowSubmenu({
     steps: currentSteps,
     currentStepId,
-    disabled: isProcessing,
+    disabled: moveDisabled || isProcessing,
     onMoveToStep,
   });
-
   const sendToEntry = buildSendToWorkflowSubmenu({
     currentWorkflowId,
     workflows: visibleWorkflows,
     stepsByWorkflowId,
-    disabled: isProcessing,
+    disabled: moveDisabled || isProcessing,
     onSendToWorkflow,
   });
 

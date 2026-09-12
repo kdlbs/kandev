@@ -11,12 +11,6 @@ import React, {
 } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
-import { useSession } from "@/hooks/domains/session/use-session";
-import { useRepository } from "@/hooks/domains/workspace/use-repository";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useAppStore } from "@/components/state-provider";
-import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -28,18 +22,17 @@ import { FileBrowserHeader } from "./file-browser-header";
 import {
   insertNodeInTree,
   removeNodeFromTree,
-  FileBrowserContentArea,
   shouldShowFileTreeTouchActions,
 } from "./file-browser-parts";
+import { FileBrowserContentArea } from "./file-browser-content-area";
 import {
-  useFileBrowserSearch,
   useFileBrowserTree,
   useScrollPersistence,
   loadNodeChildren,
   toggleFolderExpand,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
-import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
+import { useFileBrowserData } from "./file-browser-data";
 import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
 import { FileUploadStatusList } from "./file-upload-status-list";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
@@ -389,71 +382,7 @@ function useKeyboardShortcuts(
   }, [containerRef, clearSelection, selectAll]);
 }
 
-export function getFileBrowserResetKey({
-  sessionId,
-  environmentId,
-  worktreeCount,
-  workspaceFilesRefresh,
-}: {
-  sessionId: string;
-  environmentId?: string | null;
-  worktreeCount: number;
-  workspaceFilesRefresh: number;
-}) {
-  return `${environmentId ?? sessionId}:${worktreeCount}:${workspaceFilesRefresh}`;
-}
-
-function useFileBrowserResetKey(sessionId: string, environmentId?: string | null) {
-  // Worktree count participates in the tree's reset key so an add_branch_to_task
-  // call that materializes a sibling worktree forces a fresh tree load.
-  const worktreeCount = useAppStore(
-    (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
-  );
-  const workspaceFilesRefresh = useAppStore(
-    (state) => state.workspaceFilesRefresh.bySessionId[sessionId] ?? 0,
-  );
-  return getFileBrowserResetKey({
-    sessionId,
-    environmentId,
-    worktreeCount,
-    workspaceFilesRefresh,
-  });
-}
-
-function useFileBrowserData(sessionId: string, environmentId: string | null | undefined) {
-  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
-  const repository = useRepository(session?.repository_id ?? null);
-  const gitStatus = useSessionGitStatus(sessionId);
-  const { open: openFolder } = useOpenSessionFolder(sessionId);
-  const { copied, copy: copyPath } = useCopyToClipboard(1000);
-  const search = useFileBrowserSearch(sessionId);
-  const resetKey = useFileBrowserResetKey(sessionId, environmentId);
-  const treeState = useFileBrowserTree(sessionId, resetKey);
-  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
-  const fileStatuses = useMemo(
-    () =>
-      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
-    [gitStatus?.files],
-  );
-  const paths = resolveFileBrowserPaths({
-    sessionWorktreePath: getFileBrowserSessionWorkspacePath(session),
-    repositoryLocalPath: repository?.local_path,
-    treePath: treeState.tree?.path,
-    treeLoaded: isTreeLoaded,
-  });
-  return {
-    isSessionFailed,
-    sessionError,
-    openFolder,
-    copied,
-    copyPath,
-    search,
-    treeState,
-    isTreeLoaded,
-    fileStatuses,
-    ...paths,
-  };
-}
+export { getFileBrowserResetKey } from "./file-browser-data";
 
 function useFileBrowserViewModel({
   sessionId,
@@ -491,6 +420,7 @@ function FileBrowserTreeContent({
   multiSelect,
   dnd,
   activeFilePath,
+  workspaceBlocked,
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
@@ -502,9 +432,11 @@ function FileBrowserTreeContent({
   handlers: ReturnType<typeof useFileBrowserHandlers>;
   multiSelect: ReturnType<typeof useSelectionInteractions>["multiSelect"];
   dnd: ReturnType<typeof useSelectionInteractions>["dnd"];
+  workspaceBlocked: boolean;
   showTouchActions: boolean;
 }) {
-  const { search, isSessionFailed, sessionError, treeState, fileStatuses } = data;
+  const { search, isSessionFailed, sessionError, treeState, fileStatuses, workspaceRestoration } =
+    data;
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   return (
     <ScrollArea
@@ -536,25 +468,28 @@ function FileBrowserTreeContent({
         visibleLoadingPaths={treeState.visibleLoadingPaths}
         onOpenFile={handlers.openFileByPath}
         onToggleExpand={handlers.toggleExpand}
-        onDeleteFile={onDeleteFile}
-        onRenameFile={onRenameFile}
+        onDeleteFile={workspaceBlocked ? undefined : onDeleteFile}
+        onRenameFile={workspaceBlocked ? undefined : onRenameFile}
         onDownloadFile={onDownloadFile}
-        onUploadFilesHere={onUploadFilesHere}
+        onUploadFilesHere={workspaceBlocked ? undefined : onUploadFilesHere}
         onAddToChatContext={handlers.handleAddToChatContext}
         showTouchActions={showTouchActions}
-        onCreateFileSubmit={handlers.handleCreateFileSubmit}
+        onCreateFileSubmit={workspaceBlocked ? () => undefined : handlers.handleCreateFileSubmit}
         onCancelCreate={handlers.handleCancelCreate}
         onRetry={() => void treeState.loadTree({ resetRetry: true })}
+        workspaceRestoration={workspaceRestoration.attempt}
+        onRestoreWorkspace={() => void workspaceRestoration.restore()}
+        restoreWorkspaceDisabled={workspaceRestoration.status === "pending"}
         setTree={treeState.setTree}
         isSelectedFn={multiSelect.isSelected}
         onSelect={multiSelect.handleClick}
         isDragging={dnd.isDragging}
         dragOverPath={dnd.dragOverPath}
-        onDragStart={dnd.handleDragStart}
-        onDragEnd={dnd.handleDragEnd}
-        onDragOver={dnd.handleDragOver}
-        onDragLeave={dnd.handleDragLeave}
-        onDrop={dnd.handleDrop}
+        onDragStart={workspaceBlocked ? undefined : dnd.handleDragStart}
+        onDragEnd={workspaceBlocked ? undefined : dnd.handleDragEnd}
+        onDragOver={workspaceBlocked ? undefined : dnd.handleDragOver}
+        onDragLeave={workspaceBlocked ? undefined : dnd.handleDragLeave}
+        onDrop={workspaceBlocked ? undefined : dnd.handleDrop}
         selectedCount={multiSelect.selectedPaths.size}
         selectedPaths={multiSelect.selectedPaths}
       />
@@ -590,6 +525,8 @@ export function FileBrowser({
     containerRef,
   });
   const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
+  const workspaceBlocked =
+    data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
   const { openPicker, uploads, elements } = useFileUploadEntryPoints(sessionId);
   const handleToolbarUpload = useCallback(
     (mode: "files" | "folder") => openPicker(mode, handlers.activeFolderPath ?? ""),
@@ -612,12 +549,12 @@ export function FileBrowser({
           copied={copied}
           expandedPathsSize={treeState.expandedPaths.size}
           onCopyPath={copyPath}
-          onStartCreate={onCreateFile ? handlers.handleStartCreate : undefined}
+          onStartCreate={!workspaceBlocked && onCreateFile ? handlers.handleStartCreate : undefined}
           onOpenFolder={openFolder}
           onCollapseAll={treeState.collapseAll}
-          showCreateButton={Boolean(onCreateFile)}
-          onUploadFiles={sessionId ? handleToolbarUpload : undefined}
-          onAddSources={onAddSources}
+          showCreateButton={!workspaceBlocked && Boolean(onCreateFile)}
+          onUploadFiles={!workspaceBlocked && sessionId ? handleToolbarUpload : undefined}
+          onAddSources={workspaceBlocked ? undefined : onAddSources}
           addSourcesButtonRef={addSourcesButtonRef}
           addSourcesDisabledReason={addSourcesDisabledReason}
         />
@@ -629,6 +566,7 @@ export function FileBrowser({
           multiSelect={multiSelect}
           dnd={dnd}
           activeFilePath={activeFilePath}
+          workspaceBlocked={workspaceBlocked}
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
           onDownloadFile={onDownloadFile}
