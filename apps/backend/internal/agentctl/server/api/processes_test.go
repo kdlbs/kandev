@@ -311,7 +311,7 @@ func TestHandleStopProcess_UnknownIDIsIdempotentSuccess(t *testing.T) {
 }
 
 // TestHandleStopProcess_RetiresRunningProcess asserts the stop reaches a
-// long-running command: the call returns success and the process is retired
+// long-running command: the call returns success and the process is eventually retired
 // from both the per-session list and the per-id fetch. A `sleep 120` that was
 // merely marked stopped would still be listed.
 func TestHandleStopProcess_RetiresRunningProcess(t *testing.T) {
@@ -338,6 +338,9 @@ func TestHandleStopProcess_RetiresRunningProcess(t *testing.T) {
 	if !body.Success || body.Error != "" {
 		t.Fatalf("stop reported failure: %+v", body)
 	}
+
+	// Stop acknowledges signalling; the runner retires the process asynchronously.
+	awaitProcessRetired(t, srv, id)
 
 	after := processRequest(t, srv, http.MethodGet, "/api/v1/processes?session_id=session-d", nil)
 	var remaining []process.ProcessInfo

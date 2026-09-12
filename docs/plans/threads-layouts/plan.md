@@ -530,6 +530,34 @@ lint passed. Exact-head post-commit checks, additional ordering probes, media,
 later-base synthetic integration, and remote CI/review outcomes are recorded
 in the external task plan; local passes do not establish remote CI success.
 
+## Process-stop CI test correction (2026-09-12)
+
+The backend API shard exposed a pre-existing test timing assumption:
+`TestHandleStopProcess_RetiresRunningProcess` checked for removal immediately
+after Stop returned. The runner's force-kill path acknowledges signalling
+before its wait goroutine retires the process. Existing runner tests already
+wait for that observable completion boundary.
+
+The test now uses its existing `awaitProcessRetired` helper before asserting
+an empty list and HTTP 404. Production lifecycle behavior, timeout values,
+public contracts, and UI are unchanged; no public-doc or specification change
+is needed. The related orphan-workspace cleanup PR does not change this API.
+
+A temporary signal-ignoring fixture reproduced the exact CI assertions in all
+three race-enabled attempts. With the retirement wait it passed 20 repetitions
+under `GOMAXPROCS=2` in 42.470 seconds. The temporary fixture was then removed.
+The final original fixture passed 20 repetitions in 2.014 seconds, and the
+complete API package passed three race-enabled runs in 64.467 seconds:
+
+```bash
+cd apps/backend
+GOTOOLCHAIN=go1.26.0 GOMAXPROCS=2 go test -race ./internal/agentctl/server/api -run '^TestHandleStopProcess_RetiresRunningProcess$' -count=20
+GOTOOLCHAIN=go1.26.0 GOMAXPROCS=2 go test -race ./internal/agentctl/server/api -count=3
+```
+
+Post-commit and exact-head remote results remain tracked in the external task
+plan. A locally corrected test does not clear the failed remote backend gate.
+
 ## Risks
 
 - A full composer can dominate a half-height tile. The grid-height fallback,
