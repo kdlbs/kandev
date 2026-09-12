@@ -55,4 +55,3 @@ Observability](requirements/budget-observability.md).
 > **unattended**, because the safe answer here is "do not spend". Reusing
 > `IsPeriodicTasklessWake` for provenance would invert this and fail open on
 > exactly the legacy cron rows it is meant to catch.
-

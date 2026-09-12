@@ -58,6 +58,7 @@ function TaskTitle({ task }: { task: TaskRowLink }) {
 const buttonClass = cn(
   "inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs",
   "hover:bg-muted/70 transition-colors cursor-pointer w-fit max-w-full",
+  "min-h-11 min-w-11 text-left md:min-h-0 md:min-w-0 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 );
 const iconClass = "h-3 w-3 shrink-0 text-muted-foreground";
 
@@ -84,7 +85,19 @@ function SingleTaskButton({
           className={buttonClass}
         >
           <IconChecklist className={iconClass} />
-          <span className="truncate text-foreground/80">{title}</span>
+          <span className="min-w-0">
+            <span className="block wrap-anywhere text-foreground/80 md:truncate [@media(pointer:coarse)]:whitespace-normal">
+              {title}
+            </span>
+            {stepTitle && (
+              <span
+                data-testid="task-row-step-title"
+                className="block wrap-anywhere text-muted-foreground md:hidden [@media(pointer:coarse)]:block"
+              >
+                {t("github:stepLabelled", { stepTitle })}
+              </span>
+            )}
+          </span>
         </button>
       </TooltipTrigger>
       <TooltipContent>

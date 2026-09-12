@@ -1,5 +1,9 @@
 {
   "columnLabel": "{{title}} 的代理程式對話",
+  "chooseThread": "選擇對話",
+  "chooseThreadLabel": "選擇對話。目前：{{title}}",
+  "chooseThreadDescription": "跳轉到此檢視中的對話。",
+  "threadPosition": "{{position}}/{{total}}",
   "emptyBody": "對話流把所有正在執行的代理程式並排展示。在某個任務上啟動代理程式，它的對話就會作為一列出現在這裡。",
   "emptyTitle": "目前沒有代理程式在工作",
   "loading": "正在載入對話...",

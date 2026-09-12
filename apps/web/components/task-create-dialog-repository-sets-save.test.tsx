@@ -63,6 +63,52 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+describe("SaveRepositorySetDialog duplicate rows", () => {
+  it.each([1, 2])("reports %i duplicate rows separately from non-workspace rows", (count) => {
+    renderDialog({
+      rows: [
+        ...ROWS,
+        ...Array.from({ length: count }, (_, index) => ({
+          key: `duplicate-${index}`,
+          repositoryId: REPO_WEB,
+          branch: `feature/${index}`,
+        })),
+        { key: "local", localPath: "/src/other", branch: "main" },
+      ],
+    });
+
+    expect(screen.getByTestId("repository-set-save-duplicates").textContent).toBe(
+      `${count} additional ${count === 1 ? "row is" : "rows are"} not included. Only the first row for each repository is saved, including its base choice.`,
+    );
+    expect(screen.getByTestId("repository-set-save-excluded").textContent).toBe(
+      "1 row is not a saved workspace repository and will not be included",
+    );
+    expect(screen.getByText("Saves 2 repositories")).toBeTruthy();
+  });
+
+  it("does not warn about duplicates when all repository rows are unique", () => {
+    renderDialog();
+    expect(screen.queryByTestId("repository-set-save-duplicates")).toBeNull();
+  });
+
+  it("saves the first duplicate's base without changing the draft", async () => {
+    const rows = [...ROWS, { key: "duplicate", repositoryId: REPO_WEB, branch: "feature/x" }];
+    const originalRows = structuredClone(rows);
+    renderDialog({ rows });
+    expect(screen.getByTestId("repository-set-save-duplicates")).toBeTruthy();
+    expect(screen.queryByTestId("repository-set-save-excluded")).toBeNull();
+    fireEvent.change(screen.getByTestId(NAME_INPUT), { target: { value: SET_NAME } });
+    fireEvent.click(screen.getByTestId(SUBMIT));
+
+    await waitFor(() => expect(mockCreateRepositorySet).toHaveBeenCalledTimes(1));
+    expect(mockCreateRepositorySet.mock.calls[0][1].repositories).toEqual([
+      { repositoryId: REPO_WEB, baseBranch: "main" },
+      { repositoryId: REPO_GATEWAY, baseBranch: "develop" },
+    ]);
+    expect(rows).toEqual(originalRows);
+  });
+});
+
 describe("SaveRepositorySetDialog", () => {
   it("creates a set from the form's selected repositories in row order", async () => {
     renderDialog();
@@ -74,8 +120,10 @@ describe("SaveRepositorySetDialog", () => {
     expect(mockCreateRepositorySet).toHaveBeenCalledWith("ws-1", {
       name: SET_NAME,
       description: "",
-      // Branches are deliberately not sent: a set holds repositories only.
-      repositoryIds: [REPO_WEB, REPO_GATEWAY],
+      repositories: [
+        { repositoryId: REPO_WEB, baseBranch: "main" },
+        { repositoryId: REPO_GATEWAY, baseBranch: "develop" },
+      ],
     });
   });
 
@@ -153,7 +201,9 @@ describe("SaveRepositorySetDialog", () => {
     fireEvent.click(screen.getByTestId(SUBMIT));
 
     await waitFor(() => expect(mockCreateRepositorySet).toHaveBeenCalledTimes(1));
-    expect(mockCreateRepositorySet.mock.calls[0][1].repositoryIds).toEqual([REPO_GATEWAY]);
+    expect(mockCreateRepositorySet.mock.calls[0][1].repositories).toEqual([
+      { repositoryId: REPO_GATEWAY, baseBranch: "main" },
+    ]);
     // The user is told which rows could not be included.
     expect(screen.queryByTestId("repository-set-save-excluded")).not.toBeNull();
   });

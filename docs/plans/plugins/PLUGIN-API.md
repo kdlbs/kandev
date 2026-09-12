@@ -821,10 +821,10 @@ interface PluginRegistry {
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
   // presentation }`, where presentation is "desktop" or "mobile". On a phone,
-  // contributions join the horizontally scrollable middle action strip between
-  // the fixed Kandev link and menu button. Documented host ui.Button icon
-  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
-  // desktop contribution sizing is unchanged. It is the app-wide,
+  // listing contributions live inside the topbar menu with 44px touch targets
+  // and 16px SVG icons. Slots own their controls and disclosure state; the host
+  // does not dismiss the menu on arbitrary plugin interactions. Desktop
+  // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
   // ids.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
@@ -899,8 +899,8 @@ interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
   // Contributes an item to the kanban card's Edit submenu (group "edit") or
-  // a flat, top-level card menu item between "Move to"/"Send to workflow"
-  // and "Link" (group "primary"). See "Kanban card contributions" below.
+  // a flat, top-level card menu item after "Move to"/"Send to workflow"
+  // and before "Archive"/"Delete" (group "primary"). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
 
   // Contributes a client-side filter section to the kanban board's display
@@ -1184,8 +1184,8 @@ interface TaskMenuActionRegistration {
   label: string;
   icon?: React.ReactNode;
   // "edit" nests the item in the card's Edit submenu; "primary" renders it
-  // as a flat, top-level item between the "Move to"/"Send to workflow"
-  // submenus and the "Link" submenu.
+  // as a flat, top-level item after the "Move to"/"Send to workflow"
+  // submenus and before the "Archive"/"Delete" items.
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean; // default: always visible
   run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
@@ -1300,10 +1300,11 @@ console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
 Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit`. It appears on cards and on the shared
-desktop/mobile task-row menu. Group `"edit"` remains card-only. Visibility
-filtering, registration order, and `run()`/error handling are identical; the
-two groups are independent lists (an action only ever belongs to one).
+item instead of nesting it under `Edit`. It appears after the movement items
+and before the Archive/Delete items on cards and on the shared desktop/mobile
+task-row menu. Group `"edit"` remains card-only. Visibility filtering,
+registration order, and `run()`/error handling are identical; the two groups
+are independent lists (an action only ever belongs to one).
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status

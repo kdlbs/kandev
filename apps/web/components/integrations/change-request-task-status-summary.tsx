@@ -31,6 +31,9 @@ export type ChangeRequestTaskSummaryStatus =
   | "changes_requested"
   | "pending_review"
   | "awaiting_approval"
+  | "workflow_attention"
+  | "workflow_unavailable"
+  | "checks_not_successful"
   | "passed"
   | "failed"
   | "in_progress"
@@ -57,6 +60,7 @@ export type ChangeRequestTaskSummaryRow = {
   kind: ChangeRequestTaskSummaryRowKind;
   status: ChangeRequestTaskSummaryStatus;
   tone: ChangeRequestTaskSummaryTone;
+  id?: string;
   rawValue?: string;
   detail?: ChangeRequestTaskSummaryRowDetail;
 };
@@ -104,7 +108,10 @@ const STATUS_LABEL_KEYS: Record<Exclude<ChangeRequestTaskSummaryStatus, "raw">, 
   approved: "github:approved",
   changes_requested: "github:changesRequested",
   pending_review: "github:pendingReview",
-  awaiting_approval: "github:pendingReview",
+  awaiting_approval: "github:workflowAwaitingApproval",
+  workflow_attention: "github:workflowNeedsAttention",
+  workflow_unavailable: "github:workflowStatusUnavailable",
+  checks_not_successful: "github:checksNotSuccessful",
   passed: "github:checkBucketPassed",
   failed: "github:checkBucketFailed",
   in_progress: "github:checkBucketInProgress",
@@ -129,6 +136,9 @@ const STATUS_ICONS: Record<ChangeRequestTaskSummaryStatus, TablerIcon> = {
   changes_requested: IconX,
   pending_review: IconClockHour4,
   awaiting_approval: IconClockHour4,
+  workflow_attention: IconAlertTriangle,
+  workflow_unavailable: IconCircleDot,
+  checks_not_successful: IconAlertTriangle,
   passed: IconCheck,
   failed: IconX,
   in_progress: IconClockHour4,
@@ -185,15 +195,16 @@ function SummaryRow({
   presentation: ChangeRequestTaskStatusPresentation;
 }) {
   const { t } = useTranslation();
+  const rowTestId = `${presentation.rowTestIdPrefix}-${row.kind}${row.id ? `-${row.id}` : ""}`;
   return (
-    <div data-testid={`${presentation.rowTestIdPrefix}-${row.kind}`} className="contents">
+    <div data-testid={rowTestId} className="contents">
       <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">
         {t(presentation.rowLabelKeys[row.kind])}
       </span>
       <span className={cn("flex items-center", TONE_CLASSES[row.tone])}>
         <SummaryStatusIcon status={row.status} />
       </span>
-      <div data-testid={`${presentation.rowTestIdPrefix}-${row.kind}-value`} className="min-w-0">
+      <div data-testid={`${rowTestId}-value`} className="min-w-0">
         <span
           className={cn("flex min-w-0 items-center gap-1.5 font-medium", TONE_CLASSES[row.tone])}
         >
@@ -201,7 +212,7 @@ function SummaryRow({
         </span>
         {row.detail && (
           <span
-            data-testid={presentation.rowTestIdPrefix + "-" + row.kind + "-detail"}
+            data-testid={`${rowTestId}-detail`}
             className="mt-0.5 block text-[11px] leading-snug text-muted-foreground"
           >
             {getDetailText(row.detail, t)}
@@ -269,8 +280,12 @@ export function ChangeRequestTaskStatusSummary({
               data-testid={`${presentation.rowTestIdPrefix}-rows`}
               className="mt-2.5 grid grid-cols-[minmax(0,max-content)_auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1.5 pl-6"
             >
-              {summary.rows.map((row) => (
-                <SummaryRow key={row.kind} row={row} presentation={presentation} />
+              {summary.rows.map((row, rowIndex) => (
+                <SummaryRow
+                  key={`${row.kind}-${row.id ?? row.status}-${rowIndex}`}
+                  row={row}
+                  presentation={presentation}
+                />
               ))}
             </div>
           )}

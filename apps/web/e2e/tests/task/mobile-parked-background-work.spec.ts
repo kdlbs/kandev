@@ -95,22 +95,14 @@ async function createParkedTask(
 }
 
 test.describe("mobile: parked on background work", () => {
-  let claudeAcpProfileId: string;
-
-  test.beforeAll(async ({ backend, apiClient }) => {
+  test.beforeAll(async ({ backend, seedData }) => {
+    // Seed before changing providers, matching a worker reused by earlier specs.
+    // Per-test cleanup retains this profile, not the suite's provider profile.
+    void seedData;
     await backend.restart({
       KANDEV_PARKED_PROBE_INTERVAL: PARKED_PROBE_INTERVAL,
       KANDEV_MOCK_PROVIDERS: "claude-acp",
     });
-    const { agents } = await apiClient.listAgents();
-    const claudeAgent = agents.find((agent) => agent.name === "claude-acp");
-    const profileId = claudeAgent?.profiles[0]?.id;
-    if (!profileId) {
-      throw new Error(
-        "E2E seed has no claude-acp mock profile after KANDEV_MOCK_PROVIDERS restart",
-      );
-    }
-    claudeAcpProfileId = profileId;
   });
 
   test.afterAll(async ({ backend }) => {
@@ -124,11 +116,19 @@ test.describe("mobile: parked on background work", () => {
   }) => {
     test.setTimeout(120_000);
 
+    // testPage has finished resetting profiles. Create this test's launch
+    // profile afterward so shared-worker cleanup cannot delete its identity.
+    const { agents } = await apiClient.listAgents();
+    const claudeAgent = agents.find((agent) => agent.name === "claude-acp");
+    if (!claudeAgent) throw new Error("E2E seed has no claude-acp mock provider");
+    const profile = await apiClient.createAgentProfile(claudeAgent.id, "Parked background work", {
+      model: "mock-fast",
+    });
     let parkedSession: SessionPage | undefined;
     const { sessionId } = await createParkedTask(
       apiClient,
       seedData,
-      claudeAcpProfileId,
+      profile.id,
       "Parked Switcher Turn",
       async (parkedTaskId) => {
         await testPage.goto(`/t/${parkedTaskId}`);

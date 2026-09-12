@@ -62,14 +62,15 @@ type sshSessionState struct {
 // the client — at the cost of an extra TCP+handshake per session on the same
 // host. See docs/specs/executors/requirements/ssh-executor.md for the full design.
 type SSHExecutor struct {
-	agentctlResolver *AgentctlResolver
-	secretStore      secrets.SecretStore
-	agentList        RemoteAuthAgentLister
-	logger           *logger.Logger
-	brokerPreflight  func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
-	stopRemote       func(context.Context, *ssh.Client, string, int) error
-	closeClient      func(*ssh.Client) error
-	cleanupScript    func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error
+	agentctlResolver     *AgentctlResolver
+	secretStore          secrets.SecretStore
+	agentList            RemoteAuthAgentLister
+	logger               *logger.Logger
+	brokerPreflight      func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
+	stopRemote           func(context.Context, *ssh.Client, string, int) error
+	verifyRemoteIdentity func(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error)
+	closeClient          func(*ssh.Client) error
+	cleanupScript        func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error
 
 	mu       sync.Mutex
 	sessions map[string]*sshSessionState // keyed by ExecutorInstance.InstanceID
@@ -92,6 +93,7 @@ func NewSSHExecutor(
 	}
 	executor.brokerPreflight = executor.preflightGitHubCredentialBroker
 	executor.stopRemote = stopRemoteAgentctl
+	executor.verifyRemoteIdentity = verifyRemoteAgentctlIdentity
 	executor.closeClient = func(client *ssh.Client) error { return client.Close() }
 	executor.cleanupScript = executor.runCleanupScript
 	return executor
@@ -476,11 +478,11 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 		// process. sshAgentctlLaunchEnv adds the bootstrap credentials
 		// required for the authenticated control handshake without
 		// forwarding profile secrets.
-		env := sshAgentctlLaunchEnv(
-			managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
-			nonce,
-			req.AgentctlStartupConfig,
-		)
+		brokerEnv := managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin))
+		if selectedCheckoutIsPullRequest(req.Metadata) {
+			brokerEnv = nil
+		}
+		env := sshAgentctlLaunchEnv(brokerEnv, nonce, req.AgentctlStartupConfig)
 		port, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 		if err != nil {
 			// Preserve port/pid so retryAgentctlHandshake's "if pid > 0"
@@ -552,6 +554,7 @@ func (r *SSHExecutor) buildInstance(
 		MetadataKeySSHRemoteSessionDir:   sessionDir,
 		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(pid),
+		MetadataKeySSHAgentctlInstanceID: req.InstanceID,
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
@@ -595,6 +598,7 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 		MetadataKeySSHRemoteSessionDir:   state.remoteDir,
 		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(state.pid),
+		MetadataKeySSHAgentctlInstanceID: resumedSSHAgentctlInstanceID(req),
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
@@ -640,9 +644,7 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	delete(r.sessions, instance.InstanceID)
 	r.mu.Unlock()
 	if state == nil {
-		r.logger.Debug("stop: no tracked SSH session state for instance",
-			zap.String("instance_id", instance.InstanceID))
-		return nil
+		return r.stopPersistedRemoteAgentctl(ctx, instance, force)
 	}
 	_ = state.runtimeAPITunnel.Close()
 	if state.forwarder != nil {
@@ -689,6 +691,94 @@ func sshShouldStopRemoteAgentctl(instance *ExecutorInstance, force bool) bool {
 
 func sshRemoteCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), sshAgentctlCleanupTimeout)
+}
+
+// stopPersistedRemoteAgentctl reaps a remote agentctl process whose in-memory
+// session state did not survive a backend restart, dialing fresh from the
+// pid, session directory, and connection details persisted in
+// executors_running.metadata (see persistentMetadataKeys). It is the only
+// path that can stop a session the executor never tracked in this process
+// lifetime — every other stop reuses the SSH client opened at CreateInstance
+// or ResumeRemoteInstance.
+func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance *ExecutorInstance, force bool) error {
+	if !sshShouldStopRemoteAgentctl(instance, force) {
+		return nil
+	}
+	if instance == nil || len(instance.Metadata) == 0 {
+		return fmt.Errorf("ssh: persisted agentctl metadata is missing for instance %q", instanceID(instance))
+	}
+	pid, sessionDir, ok := persistedSSHAgentctlTarget(instance.Metadata)
+	if !ok {
+		return fmt.Errorf("ssh: persisted agentctl metadata is incomplete for instance %q", instance.InstanceID)
+	}
+	taskDir := strings.TrimSpace(getMetadataString(instance.Metadata, MetadataKeySSHRemoteTaskDir))
+	if taskDir == "" {
+		return fmt.Errorf("ssh: no persisted remote task dir for instance %q: agentctl identity is unprovable", instance.InstanceID)
+	}
+	target, err := r.targetFromMetadata(instance.Metadata)
+	if err != nil {
+		return fmt.Errorf("ssh: resolve persisted target for instance %q: %w", instance.InstanceID, err)
+	}
+	cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
+	defer cancel()
+	client, err := dialSSH(cleanupCtx, target)
+	if err != nil {
+		return fmt.Errorf("ssh: dial persisted target for instance %q: %w", instance.InstanceID, err)
+	}
+	defer func() { _ = r.closeSSHClient(client) }()
+
+	verifyIdentity := r.verifyRemoteIdentity
+	if verifyIdentity == nil {
+		verifyIdentity = verifyRemoteAgentctlIdentity
+	}
+	isOurs, err := verifyIdentity(cleanupCtx, client, pid, sessionDir, taskDir)
+	if err != nil {
+		return fmt.Errorf("ssh: verify persisted agentctl identity for instance %q: %w", instance.InstanceID, err)
+	}
+	if !isOurs {
+		// Reached only for a *proven* abandoned row: the pid is gone, or it
+		// is held by something that is not an agentctl under this row's
+		// taskDir. Unproven identity arrives as an error above and never
+		// here, which is what makes reclaiming the directory safe — a
+		// directory is only removed once nothing is known to be using it.
+		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
+			return fmt.Errorf("ssh: remove persisted session dir for unmatched pid on instance %q: %w", instance.InstanceID, err)
+		}
+		return nil
+	}
+
+	stopRemote := r.stopRemote
+	if stopRemote == nil {
+		stopRemote = stopRemoteAgentctl
+	}
+	if err := stopRemote(cleanupCtx, client, sessionDir, pid); err != nil {
+		return fmt.Errorf("ssh: stop persisted remote agentctl for instance %q: %w", instance.InstanceID, err)
+	}
+	return nil
+}
+
+// persistedSSHAgentctlTarget extracts the remote pid and session directory a
+// persisted-metadata stop needs. Either being missing or the pid being
+// non-positive means there is nothing durable to act on — never build a
+// kill/rm-rf command from an empty or zero value.
+func persistedSSHAgentctlTarget(metadata map[string]interface{}) (pid int, sessionDir string, ok bool) {
+	pidStr := strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHRemoteAgentctlPID))
+	sessionDir = strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHRemoteSessionDir))
+	if pidStr == "" || sessionDir == "" {
+		return 0, "", false
+	}
+	parsedPID, err := strconv.Atoi(pidStr)
+	if err != nil || parsedPID <= 0 {
+		return 0, "", false
+	}
+	return parsedPID, sessionDir, true
+}
+
+func instanceID(instance *ExecutorInstance) string {
+	if instance == nil {
+		return "<nil>"
+	}
+	return instance.InstanceID
 }
 
 // RecoverInstances re-opens SSH connections for sessions that were live before
@@ -840,6 +930,10 @@ func (r *SSHExecutor) newResumedAgentctlClient(
 }
 
 func resumedSSHAgentctlInstanceID(req *ExecutorCreateRequest) string {
+	// The remote controller keeps its launch identity across local execution replacements.
+	if instanceID := getMetadataString(req.Metadata, MetadataKeySSHAgentctlInstanceID); instanceID != "" {
+		return instanceID
+	}
 	if req.PreviousExecutionID != "" {
 		return req.PreviousExecutionID
 	}
@@ -930,6 +1024,7 @@ func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
 		MetadataKeySSHRemoteSessionDir,
 		MetadataKeySSHRemoteAgentctlPort,
 		MetadataKeySSHRemoteAgentctlPID,
+		MetadataKeySSHAgentctlInstanceID,
 		MetadataKeySSHLocalForwardPort,
 		MetadataKeySSHRemoteAgentctlURL,
 		MetadataKeySSHRuntimeAPIRemotePort,

@@ -5,6 +5,7 @@ import { repositoryId, workspaceId } from "@/lib/types/ids";
 import {
   applyRepositorySet,
   selectedRepositoryIdsForSet,
+  selectedRepositoryMembersForSet,
 } from "@/components/task-create-dialog-repository-sets";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 
@@ -18,13 +19,21 @@ const REPO_ORDERS = "repo-orders";
 const ROW_0 = "row-0";
 const AVAILABLE = [repository(REPO_WEB), repository(REPO_GATEWAY), repository(REPO_ORDERS)];
 
-function repositorySet(ids: string[], name = "Full-stack"): RepositorySet {
+function repositorySet(
+  ids: string[],
+  name = "Full-stack",
+  bases: Record<string, string> = {},
+): RepositorySet {
   return {
     id: "set-1",
     workspace_id: workspaceId("ws-1"),
     name,
     description: "",
-    repositories: ids.map((id, position) => ({ repository_id: repositoryId(id), position })),
+    repositories: ids.map((id, position) => ({
+      repository_id: repositoryId(id),
+      position,
+      base_branch: bases[id] ?? "",
+    })),
     created_at: "2026-08-17T09:00:00Z",
     updated_at: "2026-08-17T09:00:00Z",
   };
@@ -58,6 +67,30 @@ describe("applyRepositorySet", () => {
     });
 
     expect(result.rows[0].branch).toBe("");
+  });
+
+  it("copies a saved base into new row state without using it as the row checkout", () => {
+    const result = applyRepositorySet({
+      rows: [],
+      set: repositorySet([REPO_WEB], "Full-stack", { [REPO_WEB]: "develop" }),
+      repositories: AVAILABLE,
+    });
+
+    expect(result.rows[0]).toMatchObject({
+      repositoryId: REPO_WEB,
+      branch: "",
+      baseBranch: "develop",
+    });
+  });
+
+  it("keeps an empty saved base on normal task defaulting", () => {
+    const result = applyRepositorySet({
+      rows: [],
+      set: repositorySet([REPO_WEB]),
+      repositories: AVAILABLE,
+    });
+
+    expect(result.rows[0]).not.toHaveProperty("baseBranch");
   });
 
   it("consumes a single blank placeholder row instead of leaving it behind", () => {
@@ -232,5 +265,48 @@ describe("selectedRepositoryIdsForSet", () => {
     ]);
 
     expect(ids).toEqual([REPO_WEB]);
+  });
+});
+
+describe("selectedRepositoryMembersForSet", () => {
+  // Reviewer-requested coverage of the existing first-row-wins contract.
+  it.each([
+    { isLocalExecutor: false, freshBranchEnabled: false, expected: "saved-base" },
+    { isLocalExecutor: true, freshBranchEnabled: false, expected: "saved-base" },
+    { isLocalExecutor: true, freshBranchEnabled: true, expected: "develop" },
+  ])("keeps the first duplicate's effective base: %o", (mode) => {
+    const rows = [
+      { ...row(ROW_0, REPO_WEB, "develop"), baseBranch: "saved-base" },
+      row("row-1", REPO_WEB, "feature/x"),
+      row("row-2", REPO_GATEWAY, "develop"),
+    ];
+    expect(
+      selectedRepositoryMembersForSet(rows, [], mode.isLocalExecutor, mode.freshBranchEnabled),
+    ).toEqual([
+      { repositoryId: REPO_WEB, baseBranch: mode.expected },
+      {
+        repositoryId: REPO_GATEWAY,
+        baseBranch: mode.isLocalExecutor && !mode.freshBranchEnabled ? "" : "develop",
+      },
+    ]);
+  });
+
+  it("captures the selected fork base while fresh-branch mode is enabled", () => {
+    const repository = {
+      ...AVAILABLE[0],
+      default_branch: "main",
+    } as Repository;
+    const rows: TaskRepoRow[] = [
+      {
+        key: ROW_0,
+        repositoryId: REPO_WEB,
+        branch: "develop",
+        baseBranch: "main",
+      },
+    ];
+
+    expect(selectedRepositoryMembersForSet(rows, [repository], true, true)).toEqual([
+      { repositoryId: REPO_WEB, baseBranch: "develop" },
+    ]);
   });
 });

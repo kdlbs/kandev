@@ -14,6 +14,7 @@ const state = {
     ],
   },
   features: { office: true },
+  userSettings: { startupPage: "task_overview" },
   appSidebar: { workspacePickerOpen: false },
   setWorkspacePickerOpen,
 };

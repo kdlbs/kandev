@@ -224,7 +224,7 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
     return entries.map((entry) => entry.key);
   }
 
-  it("renders a 'primary' group action as a flat item between Send to workflow and Link", () => {
+  it("renders a 'primary' group action as a flat item after the move group and before Archive", () => {
     pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
       id: "quick-tag",
       label: "Quick tag",
@@ -248,18 +248,19 @@ describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => 
       },
       onSendToWorkflow: vi.fn(),
       onLinkPullRequest: vi.fn(),
+      onArchive: vi.fn(),
     });
 
     const keys = entryKeys(entries);
     const sendToIndex = keys.indexOf("send-to-workflow");
     const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}-quick-tag`);
-    const linkIndex = keys.indexOf("link");
+    const archiveIndex = keys.indexOf("archive");
 
     expect(sendToIndex).toBeGreaterThanOrEqual(0);
     expect(primaryIndex).toBeGreaterThanOrEqual(0);
-    expect(linkIndex).toBeGreaterThanOrEqual(0);
+    expect(archiveIndex).toBeGreaterThanOrEqual(0);
     expect(sendToIndex).toBeLessThan(primaryIndex);
-    expect(primaryIndex).toBeLessThan(linkIndex);
+    expect(primaryIndex).toBeLessThan(archiveIndex);
 
     const primaryEntry = entries[primaryIndex];
     expect(primaryEntry.kind).toBe("item");

@@ -111,10 +111,11 @@ function applyCanvasRuntime(
 ) {
   if (runtime.runtime_url) {
     setRuntimeUrl(runtime.runtime_url);
-    setState("ready");
+    setState("loading_runtime");
     scheduleRuntimeRenewal(runtime.expires_in_seconds);
   } else {
     clearRuntimeRenewal();
+    setRuntimeUrl(null);
     setState("unavailable");
   }
 }
@@ -258,6 +259,7 @@ function useCanvasHostRequests(canvasId: string, options: CanvasHostRequestOptio
     const requestId = ++requestRef.current;
     renewingRef.current = true;
     clearRuntimeRenewal();
+    setRuntimeUrl(null);
     setState("loading_runtime");
     setError(null);
     requestCanvasHostRuntime({
@@ -317,6 +319,16 @@ function useCanvasHost(canvasId: string) {
     scheduleRuntimeRenewal,
   });
 
+  const markRuntimeReady = useCallback(() => {
+    setState((current) => (current === "loading_runtime" ? "ready" : current));
+  }, []);
+
+  const markRuntimeUnavailable = useCallback(() => {
+    clearRuntimeRenewal();
+    setRuntimeUrl(null);
+    setState("unavailable");
+  }, [clearRuntimeRenewal]);
+
   useEffect(() => {
     renewRuntimeRef.current = renewRuntime;
     return () => {
@@ -345,6 +357,8 @@ function useCanvasHost(canvasId: string) {
     lifecycleRevision,
     load,
     renewRuntime,
+    markRuntimeReady,
+    markRuntimeUnavailable,
     setHostError: setError,
   };
 }
@@ -353,8 +367,16 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
   const { t } = useTranslation();
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
-  const { canvas, runtimeUrl, state, error, load, renewRuntime, setHostError } =
-    useCanvasHost(canvasId);
+  const {
+    canvas,
+    runtimeUrl,
+    state,
+    error,
+    load,
+    markRuntimeReady,
+    markRuntimeUnavailable,
+    setHostError,
+  } = useCanvasHost(canvasId);
   const hostCanvases = useCanvasHostCanvases(canvas);
   const [menuOpen, setMenuOpen] = useState(false);
   const [promotionOpen, setPromotionOpen] = useState(false);
@@ -418,7 +440,8 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
         runtimeUrl={runtimeUrl}
         error={error}
         onOpenActions={() => setMenuOpen(true)}
-        onRuntimeError={() => void renewRuntime()}
+        onRuntimeReady={markRuntimeReady}
+        onRuntimeError={markRuntimeUnavailable}
         onRetry={load}
       />
       <MobileCanvasActions

@@ -101,6 +101,33 @@ func TestMeasurePreservesRootOptionsAndProgressOrder(t *testing.T) {
 	}
 }
 
+func TestMeasureReportsOverlappedBytesPerFile(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	if err := os.WriteFile(filepath.Join(root, "distinct"), make([]byte, 100), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "covered"), make([]byte, 10), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	results := NewLimiter(1).Measure(context.Background(), []Root{{
+		Path: root, OverlapRoots: []string{nested},
+	}}, nil)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("measurement = %#v, want one successful result", results)
+	}
+	if results[0].Bytes != 110 {
+		t.Fatalf("measured bytes = %d, want full 110-byte footprint", results[0].Bytes)
+	}
+	if results[0].OverlappedBytes != 10 {
+		t.Fatalf("overlapped bytes = %d, want nested 10-byte footprint", results[0].OverlappedBytes)
+	}
+}
+
 func TestMeasureRejectsSymlinkAndSupportsMissingRoots(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target")

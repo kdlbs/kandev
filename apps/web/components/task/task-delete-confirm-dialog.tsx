@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { IconLoader } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,12 +15,12 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
-import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import {
-  getCleanupSummary,
-  getBulkCleanupSummary,
-  hasWorktreeExecutor,
-} from "./task-cleanup-summary";
+  useTaskDeletePreflight,
+  type TaskDeletePreflightStatus,
+} from "@/hooks/use-task-delete-preflight";
+import { useTaskInFlight } from "@/hooks/use-task-in-flight";
+import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 import { TaskCleanupConsequences } from "./task-cleanup-consequences";
 import { StillWorkingWarning } from "./task-still-working-warning";
 import {
@@ -31,6 +32,7 @@ import {
   stopDialogPropagation,
 } from "./task-confirm-dialog-shared";
 import { useTranslation } from "react-i18next";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -46,13 +48,11 @@ type TaskDeleteConfirmDialogProps = {
   executorType?: string | null;
   /** Executor types of the tasks being deleted (bulk). */
   executorTypes?: Array<string | null | undefined>;
-  /** Require discard consent when the task's retained worktree state is unknown. */
-  requireDiscardConsent?: boolean;
   onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
   confirmTestId?: string;
-  /** Element to return keyboard focus to on close, confirmed or cancelled
-   * (AC-TASKS-TASK-ACTIONS-MENU-001.12). Omitted callers keep Radix's
-   * default restore-to-previously-focused-element behavior. */
+  /** Overrides default focus restoration when the original trigger may disappear. */
+  onCloseAutoFocus?: (event: Event) => void;
+  /** Returns focus on close; omitted callers keep Radix's default restoration. */
   focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
@@ -173,26 +173,50 @@ function useTaskDeleteDialogState(onOpenChange: (open: boolean) => void) {
   };
 }
 
-function hasPotentialWorktree(
-  isBulkOperation: boolean | undefined,
-  executorType: string | null | undefined,
-  executorTypes: Array<string | null | undefined> | undefined,
-) {
-  if (isBulkOperation) {
-    return (
-      executorTypes == null ||
-      executorTypes.some((type) => type == null || hasWorktreeExecutor(type))
-    );
-  }
-  return executorType == null || hasWorktreeExecutor(executorType);
+function useResetDiscardWorktreeChanges(resetKey: string, reset: (checked: boolean) => void) {
+  useEffect(() => {
+    reset(false);
+  }, [resetKey, reset]);
 }
 
-function shouldRequireDiscardConsent(
-  explicit: boolean,
-  hasWorktree: boolean,
-  subtaskCount: number,
-) {
-  return explicit || hasWorktree || subtaskCount > 0;
+function PreflightStatusBanner({
+  status,
+  onRetry,
+}: {
+  status: TaskDeletePreflightStatus;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  if (status === "loading" || status === "idle") {
+    return (
+      <p
+        role="status"
+        data-testid="delete-preflight-loading"
+        className="text-sm text-muted-foreground"
+      >
+        {t("task:deletePreflightChecking")}
+      </p>
+    );
+  }
+  if (status !== "error") return null;
+  return (
+    <div
+      role="alert"
+      data-testid="delete-preflight-error"
+      className="flex flex-wrap items-center gap-2 text-sm text-destructive"
+    >
+      <span>{t("task:deletePreflightError")}</span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className={TASK_CONFIRM_ACTION_CLASS}
+        onClick={onRetry}
+      >
+        {t("task:retryDeletePreflight")}
+      </Button>
+    </div>
+  );
 }
 
 function TaskDeleteDialogOptions({
@@ -200,6 +224,8 @@ function TaskDeleteDialogOptions({
   isBulkOperation,
   safeCount,
   storeInFlight,
+  preflightStatus,
+  onRetryPreflight,
   requiresDiscardConsent,
   discardWorktreeChanges,
   setDiscardWorktreeChanges,
@@ -212,6 +238,8 @@ function TaskDeleteDialogOptions({
   isBulkOperation?: boolean;
   safeCount: number;
   storeInFlight: boolean;
+  preflightStatus: TaskDeletePreflightStatus;
+  onRetryPreflight: () => void;
   requiresDiscardConsent: boolean;
   discardWorktreeChanges: boolean;
   setDiscardWorktreeChanges: (checked: boolean) => void;
@@ -225,6 +253,7 @@ function TaskDeleteDialogOptions({
       {(isInFlight || storeInFlight) && (
         <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
       )}
+      <PreflightStatusBanner status={preflightStatus} onRetry={onRetryPreflight} />
       <DiscardWorktreeChangesOption
         enabled={requiresDiscardConsent}
         checked={discardWorktreeChanges}
@@ -255,9 +284,9 @@ export function TaskDeleteConfirmDialog({
   isInFlight,
   executorType,
   executorTypes,
-  requireDiscardConsent = false,
   onConfirm,
   confirmTestId,
+  onCloseAutoFocus,
   focusReturnRef,
 }: TaskDeleteConfirmDialogProps) {
   const { t } = useTranslation();
@@ -281,11 +310,15 @@ export function TaskDeleteConfirmDialog({
   } = useTaskDeleteDialogState(onOpenChange);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
   const storeInFlight = useTaskInFlight(taskId, taskIds, open);
-  const requiresDiscardConsent = shouldRequireDiscardConsent(
-    requireDiscardConsent,
-    hasPotentialWorktree(isBulkOperation, executorType, executorTypes),
-    subtaskCount,
-  );
+  const preflight = useTaskDeletePreflight(open, taskId, taskIds, cascade);
+  const requiresDiscardConsent =
+    preflight.status === "resolved" && preflight.requiresDiscardConsent;
+  const preflightReady = preflight.status === "resolved";
+
+  useResetDiscardWorktreeChanges(preflight.requestKey, setDiscardWorktreeChanges);
+
+  const deleteDisabled =
+    isDeleting || !preflightReady || (requiresDiscardConsent && !discardWorktreeChanges);
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
@@ -293,12 +326,7 @@ export function TaskDeleteConfirmDialog({
         size="lg"
         className={TASK_CONFIRM_CLASS}
         onClick={stopDialogPropagation}
-        onCloseAutoFocus={(event) => {
-          const target = focusReturnRef?.current;
-          if (!target || !document.contains(target)) return;
-          event.preventDefault();
-          target.focus();
-        }}
+        onCloseAutoFocus={onCloseAutoFocus ?? createFocusReturnHandler(focusReturnRef)}
       >
         <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
@@ -315,6 +343,8 @@ export function TaskDeleteConfirmDialog({
             isBulkOperation={isBulkOperation}
             safeCount={safeCount}
             storeInFlight={storeInFlight}
+            preflightStatus={preflight.status}
+            onRetryPreflight={preflight.retry}
             requiresDiscardConsent={requiresDiscardConsent}
             discardWorktreeChanges={discardWorktreeChanges}
             setDiscardWorktreeChanges={setDiscardWorktreeChanges}
@@ -329,7 +359,7 @@ export function TaskDeleteConfirmDialog({
             {t("common:cancel")}
           </AlertDialogCancel>
           <TaskDeleteAction
-            disabled={isDeleting || (requiresDiscardConsent && !discardWorktreeChanges)}
+            disabled={deleteDisabled}
             isDeleting={isDeleting}
             confirmTestId={confirmTestId}
             cascade={cascade}

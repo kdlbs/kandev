@@ -265,6 +265,13 @@ type stubExecutorProfileReader struct {
 	profile *taskmodels.ExecutorProfile
 }
 
+func (s *stubExecutorProfileReader) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
+	if s.session == nil {
+		return &taskmodels.Task{ID: id}, nil
+	}
+	return &taskmodels.Task{ID: s.session.TaskID}, nil
+}
+
 func (s *stubExecutorProfileReader) GetTaskSession(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
 	return s.session, nil
 }

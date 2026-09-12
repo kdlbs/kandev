@@ -81,7 +81,12 @@ vi.mock("@kandev/ui/tooltip", async () => {
 });
 
 import { Pill, type PillOption } from "./task-create-dialog-pill";
-import { branchToOption, computeBranchPlaceholder, sortBranches } from "./branch-picker-options";
+import {
+  branchOptionValue,
+  branchToOption,
+  computeBranchPlaceholder,
+  sortBranches,
+} from "./branch-picker-options";
 
 const CREATE_REPOSITORY = "Create new repository";
 
@@ -190,6 +195,12 @@ describe("grouped pill options", () => {
 });
 
 describe("branchToOption keywords", () => {
+  it("uses the qualified value for remote branches", () => {
+    expect(branchOptionValue(remoteBranch("main"))).toBe("origin/main");
+    expect(branchToOption(remoteBranch("main")).value).toBe("origin/main");
+    expect(branchOptionValue(localBranch("main"))).toBe("main");
+  });
+
   it("tags branch options for the grouped selector", () => {
     expect(branchToOption(localBranch("main"))).toMatchObject({
       group: "branches",

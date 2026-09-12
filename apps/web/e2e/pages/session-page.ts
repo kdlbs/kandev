@@ -724,15 +724,29 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Delete",
    * and confirms the delete dialog.
    */
-  async deleteTaskInSidebar(title: string): Promise<void> {
+  async deleteTaskInSidebar(
+    title: string,
+    options: { discardWorktreeChanges?: boolean; waitForCompletion?: boolean } = {},
+  ): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
     const dialog = this.page.getByRole("alertdialog");
-    const discard = dialog.getByTestId("delete-discard-worktree-checkbox");
-    if (await discard.isVisible()) {
-      await discard.click();
-    }
     const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    const discardCheckbox = dialog.getByTestId("delete-discard-worktree-checkbox");
+    if (options.discardWorktreeChanges) {
+      await expect(discardCheckbox).toBeVisible();
+      await discardCheckbox.click();
+      await expect(discardCheckbox).toBeChecked();
+    } else {
+      await expect(confirmButton).toBeEnabled();
+      await expect(discardCheckbox).toHaveCount(0);
+    }
+    await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
+    if (options.waitForCompletion !== false) {
+      await expect(
+        this.page.getByTestId("toast-message").filter({ hasText: "Deleted 1 task." }),
+      ).toBeVisible({ timeout: 15_000 });
+    }
   }
 
   /**
@@ -1317,7 +1331,7 @@ export class SessionPage {
    * than a real bug.
    */
   async togglePlanMode() {
-    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    const btn = this.activeChat().getByTestId("plan-mode-toggle-button");
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await expect(btn).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
     await btn.click();

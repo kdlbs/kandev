@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { expectControlHeight } from "../../helpers/control-sizing";
 
 const SET_ROW = "repository-set-row";
 const EDITOR_NAME = "repository-set-editor-name";
@@ -15,12 +16,22 @@ test.describe("Workspace repository sets settings", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const dir = path.join(backend.tmpDir, "repos", "settings-repository-sets");
+    const remoteDir = path.join(backend.tmpDir, "repos", "settings-repository-sets-origin.git");
     fs.mkdirSync(dir, { recursive: true });
     const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync(`git init --bare -b main "${remoteDir}"`, { env: gitEnv });
     execSync("git init -b main", { cwd: dir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
+    execSync("git branch develop", { cwd: dir, env: gitEnv });
+    for (let index = 0; index < 40; index++) {
+      execSync(`git branch scroll-test-${index}`, { cwd: dir, env: gitEnv });
+    }
+    execSync(`git remote add origin "file://${remoteDir}"`, { cwd: dir, env: gitEnv });
+    execSync("git push origin main", { cwd: dir, env: gitEnv });
+    execSync("git update-ref refs/remotes/origin/main HEAD", { cwd: dir, env: gitEnv });
     const second = await apiClient.createRepository(seedData.workspaceId, dir, "main", {
       name: SECOND_REPO_NAME,
     });
@@ -31,9 +42,78 @@ test.describe("Workspace repository sets settings", () => {
     // Create a set holding both repositories.
     const setName = `Settings set ${Date.now()}`;
     await testPage.getByTestId("repository-set-create").click();
+    const membersHint = testPage.getByText(
+      "Add repositories in task order. Base branches are optional.",
+    );
+    const addRepository = testPage.getByTestId("repository-set-add-repository");
+    const [membersHintBox, addRepositoryBox] = await Promise.all([
+      membersHint.boundingBox(),
+      addRepository.boundingBox(),
+    ]);
+    expect(membersHintBox).not.toBeNull();
+    expect(addRepositoryBox).not.toBeNull();
+    expect(membersHintBox!.width).toBeGreaterThan(addRepositoryBox!.width);
     await testPage.getByTestId(EDITOR_NAME).fill(setName);
-    await testPage.getByTestId(`repository-set-member-${seedData.repositoryId}`).click();
-    await testPage.getByTestId(`repository-set-member-${second.id}`).click();
+    await addRepository.click();
+    const repositoryOption = testPage.getByRole("option", { name: /E2E Repo/ });
+    await expect(repositoryOption).toBeVisible();
+    await expect
+      .poll(() =>
+        repositoryOption.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return [box.x + 8, box.right - 8].every((x) =>
+            element.contains(document.elementFromPoint(x, box.y + box.height / 2)),
+          );
+        }),
+      )
+      .toBe(true);
+    await prCapture.screenshot("desktop-repository-set-add-picker", {
+      caption: "The repository picker remains fully clickable outside the scrolling form.",
+    });
+    await testPage.getByRole("option", { name: /E2E Repo/ }).click();
+    await testPage.getByTestId("repository-set-add-repository").click();
+    await testPage.getByRole("option", { name: SECOND_REPO_NAME }).click();
+    const basePicker = testPage.getByTestId(`repository-set-base-${second.id}`);
+    for (const control of [
+      addRepository,
+      basePicker,
+      testPage.getByTestId("repository-set-reset-bases"),
+      testPage.getByTestId(`repository-set-remove-${second.id}`),
+    ])
+      await expectControlHeight(control, 28);
+    await basePicker.click();
+    const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${second.id}`);
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown.getByPlaceholder("Search branches...")).toBeVisible();
+    await expect(dropdown.getByText("Branches")).toBeVisible();
+    await expect(dropdown.getByRole("option", { name: /^main local/ })).toBeVisible();
+    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+    await expect(dropdown.getByText("origin", { exact: true })).toBeVisible();
+
+    const branchList = dropdown.getByRole("listbox");
+    await branchList.hover();
+    await testPage.mouse.wheel(0, 500);
+    await expect.poll(() => branchList.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await prCapture.screenshot("desktop-repository-set-branch-scroll", {
+      caption: "Mouse-wheel scrolling reaches branches beyond the initial list inside the dialog.",
+    });
+    await testPage.mouse.wheel(0, -500);
+    await expect.poll(() => branchList.evaluate((element) => element.scrollTop)).toBe(0);
+
+    const search = dropdown.getByPlaceholder("Search branches...");
+    await search.fill("origin");
+    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+    await expect(dropdown.getByRole("option", { name: /^main local/ })).toHaveCount(0);
+    await dropdown.getByTestId("branch-refresh-button").click();
+    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
+
+    await search.fill("");
+    const develop = dropdown.getByRole("option", { name: /^develop local/ });
+    await expect(develop).toBeVisible();
+    await develop.click();
+    await prCapture.screenshot("desktop-repository-set-editor", {
+      caption: "The desktop repository set editor assigns a saved base branch per member.",
+    });
     await testPage.getByTestId(EDITOR_SAVE).click();
 
     const rows = testPage.getByTestId(SET_ROW);
@@ -43,9 +123,16 @@ test.describe("Workspace repository sets settings", () => {
     await expect
       .poll(async () => {
         const listed = await apiClient.listRepositorySets(seedData.workspaceId);
-        return listed.repository_sets.find((entry) => entry.name === setName)?.repositories.length;
+        const stored = listed.repository_sets.find((entry) => entry.name === setName);
+        return (
+          stored?.repositories.length === 2 &&
+          stored.repositories.some((member) => member.repository_id === seedData.repositoryId) &&
+          stored.repositories.some((member) => member.repository_id === second.id) &&
+          stored.repositories.find((member) => member.repository_id === second.id)?.base_branch ===
+            "develop"
+        );
       })
-      .toBe(2);
+      .toBe(true);
 
     const createdId = (
       await apiClient.listRepositorySets(seedData.workspaceId)
@@ -53,7 +140,7 @@ test.describe("Workspace repository sets settings", () => {
 
     // Edit: drop one member. A supplied membership replaces the whole list.
     await testPage.getByTestId(`repository-set-edit-${createdId}`).click();
-    await testPage.getByTestId(`repository-set-member-${second.id}`).click();
+    await testPage.getByTestId(`repository-set-remove-${second.id}`).click();
     await testPage.getByTestId(EDITOR_SAVE).click();
 
     await expect(rows.first()).toHaveAttribute("data-member-count", "1");

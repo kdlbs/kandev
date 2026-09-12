@@ -148,3 +148,72 @@ func TestLaunchErrorMatchesStampDoesNotFallBackWhenExplicitStampExists(t *testin
 	require.True(t, sessionError.MatchesStamp("explicit-session"))
 	require.False(t, sessionError.MatchesStamp(legacyStamp))
 }
+
+func TestLastAgentErrorNormalizesBootstrapCorrelationAndCauses(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":      "The agent could not start.",
+			"occurred_at":  "2026-09-11T10:00:00Z",
+			"phase":        "bootstrap",
+			"execution_id": strings.Repeat("e", maxLaunchErrorIDBytes+20),
+			"attempt_id":   strings.Repeat("a", maxLaunchErrorIDBytes+20),
+			"details":      strings.Repeat("d", maxLaunchErrorDetailsBytes),
+			"causes": []map[string]interface{}{
+				{
+					"operation": "resume",
+					"code":      AgentErrorCauseCodePermissionDenied,
+					"detail":    strings.Repeat("r", maxAgentErrorCauseDetailBytes+20),
+				},
+				{
+					"operation": "restore_workspace",
+					"code":      AgentErrorCauseCodeTransportUnavailable,
+					"detail":    "workspace access failed",
+				},
+				{
+					"operation": "resume",
+					"code":      "raw-provider-error",
+					"detail":    "must be ignored",
+				},
+			},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Equal(t, LaunchErrorPhaseBootstrap, lastError.Phase)
+	require.Len(t, lastError.ExecutionID, maxLaunchErrorIDBytes)
+	require.Len(t, lastError.AttemptID, maxLaunchErrorIDBytes)
+	require.Len(t, lastError.Causes, 2)
+	require.Len(t, lastError.Causes[0].Detail, maxAgentErrorCauseDetailBytes)
+	require.Equal(t, AgentErrorCauseCodePermissionDenied, lastError.Causes[0].Code)
+	require.Equal(t, AgentErrorCauseCodeTransportUnavailable, lastError.Causes[1].Code)
+	require.LessOrEqual(t, len(lastError.Details)+sumCauseDetailBytes(lastError.Causes), maxLaunchErrorDetailsBytes)
+}
+
+func TestLoadLastAgentErrorIgnoresMalformedOptionalBootstrapFields(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":      "The agent could not start.",
+			"occurred_at":  "2026-09-11T10:00:00Z",
+			"phase":        map[string]interface{}{"unexpected": true},
+			"execution_id": []string{"unexpected"},
+			"attempt_id":   42,
+			"causes":       "not-a-cause-list",
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Equal(t, "", lastError.Phase)
+	require.Equal(t, "", lastError.ExecutionID)
+	require.Equal(t, "", lastError.AttemptID)
+	require.Empty(t, lastError.Causes)
+}
+
+func sumCauseDetailBytes(causes []AgentErrorCause) int {
+	total := 0
+	for _, cause := range causes {
+		total += len(cause.Detail)
+	}
+	return total
+}

@@ -26,15 +26,18 @@ var ErrOperationInProgress = errors.New("git operation already in progress")
 // ErrInvalidBranchName is returned when a branch name contains invalid characters.
 var ErrInvalidBranchName = errors.New("invalid branch name")
 
+const preflightReasonHistoryUpdateRequired = "history_update_required"
+
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
-	Success        bool     `json:"success"`
-	Operation      string   `json:"operation"`
-	Output         string   `json:"output"`
-	Error          string   `json:"error,omitempty"`
-	ErrorCode      string   `json:"error_code,omitempty"`
-	ConflictFiles  []string `json:"conflict_files,omitempty"`
-	RecoveryBranch string   `json:"recovery_branch,omitempty"`
+	Success         bool     `json:"success"`
+	Operation       string   `json:"operation"`
+	Output          string   `json:"output"`
+	Error           string   `json:"error,omitempty"`
+	ErrorCode       string   `json:"error_code,omitempty"`
+	PreflightReason string   `json:"preflight_reason,omitempty"`
+	ConflictFiles   []string `json:"conflict_files,omitempty"`
+	RecoveryBranch  string   `json:"recovery_branch,omitempty"`
 }
 
 // GitOperator executes git operations in a workspace directory.
@@ -183,97 +186,16 @@ func (g *GitOperator) environmentValue(key string) string {
 // runGitCommand executes a git command in the workDir with defense-in-depth validation.
 // Validates both flags and branch/ref arguments to prevent command injection.
 func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string, error) {
-	// Validate that user-controlled arguments don't introduce command injection risks
-	// Even though exec.CommandContext doesn't use a shell, we must prevent argument
-	// injection where malicious input like "--help" or "--exec=..." could be passed
-	// as what appears to be a file/branch name but is interpreted as a flag by git.
-	skipNextArg := false
-	afterDoubleDash := false // Track if we've seen "--" separator
-	for i, arg := range args {
-		// Skip git subcommand (first argument)
-		if i == 0 {
-			continue
-		}
+	return g.runGitCommandWithEnvironment(ctx, nil, args...)
+}
 
-		// Skip if this argument is a value for a previous flag
-		if skipNextArg {
-			skipNextArg = false
-			continue
-		}
-
-		// After "--", all arguments are file paths - no validation needed
-		if afterDoubleDash {
-			continue
-		}
-
-		if strings.HasPrefix(arg, contributionLeaseFlagPrefix) {
-			if err := validateContributionLeaseFlag(arg); err != nil {
-				return "", err
-			}
-			continue
-		}
-
-		// Validate flags against whitelist
-		if strings.HasPrefix(arg, "-") {
-			if !securityutil.IsKnownSafeGitFlag(arg) {
-				return "", fmt.Errorf("potentially unsafe flag: %s", arg)
-			}
-			// Special handling for "--" separator
-			if arg == "--" {
-				afterDoubleDash = true
-				continue
-			}
-			// Flags that take a value in the next argument
-			if arg == "-m" || arg == "--format" {
-				skipNextArg = true
-			}
-			continue
-		}
-
-		// Skip known safe git literals (HEAD, origin, etc.)
-		if securityutil.IsKnownSafeGitLiteral(arg) {
-			continue
-		}
-
-		// Skip commit SHAs (validated elsewhere via validateCommitSHA)
-		if securityutil.LooksLikeCommitSHA(arg) {
-			continue
-		}
-
-		// Contribution pushes use an explicit, non-force refspec. Validate the
-		// branch portion before allowing the colon-bearing argument through.
-		if strings.HasPrefix(arg, "HEAD:refs/heads/") {
-			if !securityutil.IsValidBranchName(strings.TrimPrefix(arg, "HEAD:refs/heads/")) {
-				return "", ErrInvalidBranchName
-			}
-			continue
-		}
-
-		// Empty-remote publication uses an immutable commit-to-branch refspec.
-		// Validate it before the generic slash-bearing reference check.
-		if source, destination, ok := strings.Cut(arg, ":refs/heads/"); ok {
-			if securityutil.LooksLikeCommitSHA(source) &&
-				securityutil.IsValidBranchName(destination) {
-				continue
-			}
-		}
-
-		// Validate branch references (e.g., "origin/branch", "upstream/main")
-		// This provides defense-in-depth even though branches are validated at call sites
-		if strings.Contains(arg, "/") {
-			if err := securityutil.ValidateBranchReference(arg); err != nil {
-				return "", err
-			}
-			continue
-		}
-
-		// Validate standalone branch names
-		if securityutil.IsValidBranchName(arg) {
-			// Standalone arg that matches branch name pattern - validated and safe
-			continue
-		}
-		// If we reach here, it's a non-branch argument (file path, etc.)
-		// which we don't validate as strictly
+func (g *GitOperator) runGitCommandWithEnvironment(
+	ctx context.Context,
+	environmentOverrides map[string]string,
+	args ...string,
+) (string, error) {
+	if err := validateGitCommandArgs(args); err != nil {
+		return "", err
 	}
 
 	// All args validated: flags in securityutil.IsKnownSafeGitFlag whitelist, branch names via securityutil.IsValidBranchName
@@ -281,7 +203,7 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 	// This defense-in-depth validation prevents injection of arbitrary commands.
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = g.workDir
-	cmd.Env = filterGitEnv(g.environmentValues())
+	cmd.Env = withEnvironmentOverrides(filterGitEnv(g.environmentValues()), environmentOverrides)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -308,6 +230,76 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 	}
 
 	return output, nil
+}
+
+func validateGitCommandArgs(args []string) error {
+	// Validate that user-controlled arguments don't introduce command injection risks.
+	// exec.CommandContext does not use a shell, but git still interprets unsafe flags.
+	skipNextArg := false
+	afterDoubleDash := false
+	for i, arg := range args {
+		if i == 0 || skipNextArg || afterDoubleDash {
+			skipNextArg = false
+			continue
+		}
+		nextArgIsValue, separator, err := validateGitCommandArgument(arg)
+		if err != nil {
+			return err
+		}
+		skipNextArg = nextArgIsValue
+		afterDoubleDash = separator
+	}
+	return nil
+}
+
+func validateGitCommandArgument(arg string) (skipNextArg, separator bool, err error) {
+	if strings.HasPrefix(arg, contributionLeaseFlagPrefix) {
+		return false, false, validateContributionLeaseFlag(arg)
+	}
+	if strings.HasPrefix(arg, "-") {
+		if !securityutil.IsKnownSafeGitFlag(arg) {
+			return false, false, fmt.Errorf("potentially unsafe flag: %s", arg)
+		}
+		return arg == "-m" || arg == "--format", arg == "--", nil
+	}
+	if securityutil.IsKnownSafeGitLiteral(arg) || securityutil.LooksLikeCommitSHA(arg) {
+		return false, false, nil
+	}
+	if strings.HasPrefix(arg, "HEAD:refs/heads/") {
+		if !securityutil.IsValidBranchName(strings.TrimPrefix(arg, "HEAD:refs/heads/")) {
+			return false, false, ErrInvalidBranchName
+		}
+		return false, false, nil
+	}
+	if source, destination, ok := strings.Cut(arg, ":refs/heads/"); ok {
+		if securityutil.LooksLikeCommitSHA(source) && securityutil.IsValidBranchName(destination) {
+			return false, false, nil
+		}
+	}
+	if strings.Contains(arg, "/") {
+		return false, false, securityutil.ValidateBranchReference(arg)
+	}
+	return false, false, nil
+}
+
+func withEnvironmentOverrides(environment []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return environment
+	}
+	result := make([]string, 0, len(environment)+len(overrides))
+	for _, entry := range environment {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, overridden := overrides[key]; overridden {
+				continue
+			}
+		}
+		result = append(result, entry)
+	}
+	for key, value := range overrides {
+		result = append(result, key+"="+value)
+	}
+	return result
 }
 
 // filterGitEnv removes GIT_DIR and GIT_WORK_TREE from the environment.
@@ -569,27 +561,27 @@ func (g *GitOperator) PushPreflight(ctx context.Context) (*GitOperationResult, e
 	defer g.unlock()
 	result := &GitOperationResult{Operation: "push_preflight"}
 	if g.remoteContributionErr != nil {
-		result.Error = g.remoteContributionErr.Error()
+		setPushPreflightError(result, g.remoteContributionErr)
 		return result, nil
 	}
 	if g.contributionDestinationErr != nil {
-		result.Error = g.contributionDestinationErr.Error()
+		setPushPreflightError(result, g.contributionDestinationErr)
 		return result, nil
 	}
 	if g.contributionDestination != nil {
 		if err := g.validateContributionDestinationRemote(ctx); err != nil {
-			result.Error = err.Error()
+			setPushPreflightError(result, err)
 			return result, nil
 		}
 		branch, err := g.getCurrentBranch(ctx)
 		if err != nil {
-			result.Error = err.Error()
+			setPushPreflightError(result, err)
 			return result, nil
 		}
 		output, err := g.runGitCommand(ctx, "push", "--dry-run", g.contributionDestination.ContributionRemoteName(), branch)
 		result.Output = output
 		if err != nil {
-			result.Error = err.Error()
+			setPushPreflightError(result, err)
 			return result, nil
 		}
 		result.Success = true
@@ -601,24 +593,152 @@ func (g *GitOperator) PushPreflight(ctx context.Context) (*GitOperationResult, e
 		return result, nil
 	}
 	if err := g.validateContributionRemote(ctx); err != nil {
-		result.Error = err.Error()
+		setPushPreflightError(result, err)
 		return result, nil
 	}
 	branch, err := g.getCurrentBranch(ctx)
 	if err != nil {
-		result.Error = err.Error()
+		setPushPreflightError(result, err)
+		return result, nil
+	}
+	environment := map[string]string{
+		"GIT_TERMINAL_PROMPT": "0",
+		"LANG":                "C",
+		"LC_ALL":              "C",
+	}
+	remote := g.remoteContribution.ContributionRemoteName()
+	destinationRef := "refs/heads/" + g.remoteContribution.HeadBranch
+	sourceOutput, sourceErr := g.runGitCommandWithEnvironment(
+		ctx,
+		environment,
+		"ls-remote",
+		"--refs",
+		remote,
+		destinationRef,
+	)
+	if sourceErr != nil {
+		setPushPreflightError(result, sourceErr)
+		return result, nil
+	}
+	if strings.TrimSpace(sourceOutput) == "" {
+		result.Error = "contribution source branch is missing"
+		result.ErrorCode = models.AgentErrorCauseCodeSourceBranchMissing
 		return result, nil
 	}
 	refspec := "HEAD:refs/heads/" + g.remoteContribution.HeadBranch
-	output, err := g.runGitCommand(ctx, "push", "--dry-run", g.remoteContribution.ContributionRemoteName(), refspec)
+	output, err := g.runGitCommandWithEnvironment(
+		ctx,
+		environment,
+		"push",
+		"--dry-run",
+		"--porcelain",
+		remote,
+		refspec,
+	)
 	result.Output = output
 	if err != nil {
-		result.Error = err.Error()
+		if classifyPushPreflightHistoryUpdate(output, destinationRef) {
+			result.PreflightReason = preflightReasonHistoryUpdateRequired
+		}
+		setPushPreflightError(result, err)
 		return result, nil
 	}
 	result.Success = true
 	g.logger.Info("contribution push preflight completed", zap.String("branch", branch))
 	return result, nil
+}
+
+func setPushPreflightError(result *GitOperationResult, err error) {
+	if result == nil || err == nil {
+		return
+	}
+	result.Error = err.Error()
+	result.ErrorCode = classifyPushPreflightError(err)
+}
+
+func classifyPushPreflightError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return models.AgentErrorCauseCodeTimeout
+	}
+	normalized := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(normalized, "authentication required"),
+		strings.Contains(normalized, "authentication failed"),
+		strings.Contains(normalized, "could not read username"):
+		return models.AgentErrorCauseCodeAuthenticationRequired
+	case strings.Contains(normalized, "permission denied"),
+		strings.Contains(normalized, "access denied"),
+		strings.Contains(normalized, "protected branch"):
+		return models.AgentErrorCauseCodePermissionDenied
+	case strings.Contains(normalized, "remote repository is invalid"),
+		strings.Contains(normalized, "remote has no configured"),
+		strings.Contains(normalized, "push url does not match"),
+		strings.Contains(normalized, "invalid contribution"):
+		return models.AgentErrorCauseCodeDestinationInvalid
+	case strings.Contains(normalized, "could not resolve host"),
+		strings.Contains(normalized, "unable to access"),
+		strings.Contains(normalized, "connection refused"),
+		strings.Contains(normalized, "network is unreachable"),
+		strings.Contains(normalized, "remote is unavailable"):
+		return models.AgentErrorCauseCodeTransportUnavailable
+	default:
+		return models.AgentErrorCauseCodeUnknown
+	}
+}
+
+func classifyPushPreflightHistoryUpdate(output, destinationRef string) bool {
+	failedStatusLines := 0
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "!" {
+			continue
+		}
+		failedStatusLines++
+		if !pushStatusTargets(fields[1:], destinationRef) || !hasRejectedStatus(fields) {
+			return false
+		}
+		if !hasHistoryUpdateReason(fields) {
+			return false
+		}
+	}
+	return failedStatusLines == 1
+}
+
+func pushStatusTargets(fields []string, destinationRef string) bool {
+	for _, field := range fields {
+		candidate := strings.Trim(field, "\"'")
+		if _, destination, ok := strings.Cut(candidate, ":"); ok {
+			candidate = destination
+		}
+		if candidate == destinationRef {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRejectedStatus(fields []string) bool {
+	for _, field := range fields {
+		if field == "[rejected]" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasHistoryUpdateReason(fields []string) bool {
+	for i, field := range fields {
+		if field == "(non-fast-forward)" {
+			return true
+		}
+		if field == "(fetch" && i+1 < len(fields) && fields[i+1] == "first)" {
+			return true
+		}
+	}
+	return false
 }
 
 // Rebase performs a git rebase onto the specified base branch.

@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
@@ -26,8 +25,6 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
-import type { WorkflowStep } from "@/components/kanban-card";
 import {
   stepHasAutoStart,
   type TaskMoveStep,
@@ -40,14 +37,13 @@ import {
 } from "@/lib/tasks/task-priority";
 import type { TaskPriority } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
-import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
 import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 import { buildPrimaryPluginEntries } from "./plugins/task-menu-actions";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
-import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+export { useKanbanCardMoveTargets } from "@/hooks/use-kanban-card-move-targets";
 
 type ItemEntry = {
   kind: "item";
@@ -76,6 +72,26 @@ type SubmenuEntry = {
 };
 
 export type KanbanCardMenuEntry = ItemEntry | SeparatorEntry | SubmenuEntry;
+
+export type KanbanCardMenuEntryGroup = {
+  key: string;
+  entries: readonly KanbanCardMenuEntry[];
+};
+
+/** Inserts one separator between each nonempty top-level menu group. */
+export function buildGroupedMenuEntries(
+  groups: readonly KanbanCardMenuEntryGroup[],
+): KanbanCardMenuEntry[] {
+  return groups
+    .filter((group) => group.entries.length > 0)
+    .flatMap((group, index) => {
+      const separator: SeparatorEntry = {
+        kind: "separator",
+        key: `${group.key}-separator`,
+      };
+      return index === 0 ? [...group.entries] : [separator, ...group.entries];
+    });
+}
 
 export type KanbanCardMoveTargets = {
   currentWorkflowId: string | null;
@@ -360,46 +376,30 @@ export function buildKanbanCardMenuEntries({
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
-  const isMoveDisabled = Boolean(moveDisabled || isProcessing);
-  const entries: KanbanCardMenuEntry[] = [
-    buildEditMenuEntry({
-      onEdit,
-      disabled: isProcessing,
-      context: resolvePluginMenuContext(pluginMenuContext),
-      forceFlat: forceFlatEdit,
-    }),
-  ];
-
   const priorityEntry = buildPriorityMenuEntry({
     currentPriority,
     disabled: isProcessing,
     onSelectPriority,
   });
-  if (priorityEntry) entries.push(priorityEntry);
 
   const moveToEntry = buildMoveToCurrentWorkflowSubmenu({
     steps: currentSteps,
     currentStepId,
-    disabled: isMoveDisabled,
+    disabled: moveDisabled || isProcessing,
     onMoveToStep,
   });
-  if (moveToEntry) entries.push(moveToEntry);
-
   const sendToEntry = buildSendToWorkflowSubmenu({
     currentWorkflowId,
     workflows: visibleWorkflows,
     stepsByWorkflowId,
-    disabled: isMoveDisabled,
+    disabled: moveDisabled || isProcessing,
     onSendToWorkflow,
   });
-  if (sendToEntry) entries.push(sendToEntry);
 
-  entries.push(
-    ...buildPrimaryPluginEntries({
-      disabled: isProcessing,
-      context: resolvePluginMenuContext(pluginMenuContext),
-    }),
-  );
+  const pluginEntries = buildPrimaryPluginEntries({
+    disabled: isProcessing,
+    context: resolvePluginMenuContext(pluginMenuContext),
+  });
 
   const linkEntry = buildLinkSubmenu({
     disabled: isProcessing,
@@ -411,17 +411,43 @@ export function buildKanbanCardMenuEntries({
     onLinkSentryIssue,
     pluginLinkActions,
   });
-  if (linkEntry) entries.push(linkEntry);
-
-  entries.push(buildArchiveEntry({ isArchiving, isProcessing, onArchive }));
 
   const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
-  if (detachEntry) entries.push(detachEntry);
 
-  entries.push({ kind: "separator", key: "delete-separator" });
-  entries.push(buildDeleteEntry({ isDeleting, isProcessing, onDelete }));
-
-  return entries;
+  return buildGroupedMenuEntries([
+    { key: "priority", entries: priorityEntry ? [priorityEntry] : [] },
+    {
+      key: "edit",
+      entries: [
+        buildEditMenuEntry({
+          onEdit,
+          disabled: isProcessing,
+          context: resolvePluginMenuContext(pluginMenuContext),
+          forceFlat: forceFlatEdit,
+        }),
+      ],
+    },
+    {
+      key: "relationships",
+      entries: [linkEntry, detachEntry].filter(
+        (entry): entry is KanbanCardMenuEntry => entry !== null,
+      ),
+    },
+    {
+      key: "move",
+      entries: [moveToEntry, sendToEntry].filter(
+        (entry): entry is KanbanCardMenuEntry => entry !== null,
+      ),
+    },
+    { key: "plugins", entries: pluginEntries },
+    {
+      key: "remove",
+      entries: [
+        buildArchiveEntry({ isArchiving, isProcessing, onArchive }),
+        buildDeleteEntry({ isDeleting, isProcessing, onDelete }),
+      ],
+    },
+  ]);
 }
 
 export function buildArchiveEntry({
@@ -493,68 +519,6 @@ function buildDetachEntry({
     disabled: isProcessing,
     onSelect: onDetach,
   };
-}
-
-/**
- * The card's hot render path: a caller with column context already passes a
- * `steps` list pre-filtered for this workflow, and its `currentWorkflowId`
- * always resolves from `kanbanMulti.snapshots`. Kept to exactly these two
- * subscriptions (system design: no `kanban.tasks`/`hiddenWorkflowStepIds`
- * reads here) so unrelated writes to either slice never re-render every
- * visible card. Callers without column context (preview panel, detail top
- * bar) use `useTaskActionsMenuMoveTargets` instead, which layers the
- * flat-list and hidden-step fallbacks this hook intentionally omits.
- */
-export function useKanbanCardMoveTargets(
-  taskId: string,
-  steps?: WorkflowStep[],
-): KanbanCardMoveTargets {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const currentWorkflowId = useAppStore((state) => {
-    for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-      if (snapshot.tasks.some((task) => task.id === taskId)) return workflowId;
-    }
-    return null;
-  });
-  const snapshotStepsByWorkflowId = useAppStore(
-    useShallow((state): Record<string, WorkflowSnapshotData["steps"]> => {
-      const result: Record<string, WorkflowSnapshotData["steps"]> = {};
-      for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-        result[workflowId] = snapshot.steps;
-      }
-      return result;
-    }),
-  );
-
-  const workflowItems = useMemo<TaskMoveWorkflow[]>(() => {
-    const current = workflows.find((workflow) => workflow.id === currentWorkflowId);
-    return workflows
-      .filter((workflow) => workflow.workspaceId === current?.workspaceId && !workflow.hidden)
-      .map((workflow) => ({ id: workflow.id, name: workflow.name, hidden: workflow.hidden }));
-  }, [workflows, currentWorkflowId]);
-
-  const stepsByWorkflowId = useMemo<Record<string, TaskMoveStep[]>>(() => {
-    const result: Record<string, TaskMoveStep[]> = {};
-    for (const [workflowId, snapshotSteps] of Object.entries(snapshotStepsByWorkflowId)) {
-      result[workflowId] = sortWorkflowStepsByPosition(snapshotSteps).map((step) => ({
-        id: step.id,
-        title: step.title,
-        color: step.color,
-        events: step.events,
-      }));
-    }
-    if (currentWorkflowId && steps) {
-      result[currentWorkflowId] = steps.map((step) => ({
-        id: step.id,
-        title: step.title,
-        color: step.color,
-        events: step.events,
-      }));
-    }
-    return result;
-  }, [snapshotStepsByWorkflowId, currentWorkflowId, steps]);
-
-  return { currentWorkflowId, workflowItems, stepsByWorkflowId };
 }
 
 function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {

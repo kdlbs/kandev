@@ -184,7 +184,8 @@ The desktop popover has this hierarchy:
    generic icon and explains that task creation determines the agent.
 3. The lifecycle view explains that the start setting selects the target's
    conversation and the end setting applies when leaving that conversation.
-   Profile-only choices retain their existing same-profile behavior.
+   Profile-only choices preserve the current session for same-profile `reuse`;
+   `new` replaces it even when profile IDs match.
 4. **When this step starts** offers:
    - **Reuse an available session.** Continue the most recent available session
      for this target. If none is available, start a new session. For an explicit
@@ -483,6 +484,11 @@ contains internal identifiers but no credentials or prompt content.
 Profile-switch logs include source step ID, destination step ID, start setting,
 end setting, source outcome, and destination outcome. Stop-event suppression
 logs include session ID, execution ID, and intent stamp.
+
+## Implementation plans
+
+- [Explicit session targeting](../../../plans/workflow-session-targeting/plan.md)
+- [Same-profile fresh-session repair](../../../plans/workflow-same-profile-new-session/plan.md)
 
 ## Related decisions
 

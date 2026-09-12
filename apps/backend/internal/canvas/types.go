@@ -16,8 +16,9 @@ import (
 const (
 	// CanvasPluginID identifies the synthetic plugin binding used by local
 	// canvas instances. The package identity remains in the release metadata.
-	CanvasPluginID = "kandev.canvas"
-	MaxTitleLength = 200
+	CanvasPluginID                 = "kandev.canvas"
+	MaxTitleLength                 = 200
+	CreationAuthorityPolicyVersion = 1
 
 	MaxTaskCanvases      = plugininstances.MaxTaskInstances
 	MaxWorkspaceCanvases = plugininstances.MaxWorkspaceInstances
@@ -46,6 +47,11 @@ const (
 	permissionKindEvents   = "events"
 	permissionKindNetwork  = "network"
 	permissionKindState    = "state"
+
+	canvasCapabilityTasks      = "tasks"
+	canvasCapabilityWorkflows  = "workflows"
+	canvasCapabilityMessages   = "messages"
+	canvasCapabilityTaskUpdate = "task.updated"
 )
 
 var (
@@ -61,8 +67,9 @@ var (
 
 	// These aliases preserve the stable plugin admission errors while keeping
 	// the canvas package convenient for service callers and API adapters.
-	ErrTaskCanvasLimit      = plugininstances.ErrTaskCanvasLimit
-	ErrWorkspaceCanvasLimit = plugininstances.ErrWorkspaceCanvasLimit
+	ErrTaskCanvasLimit           = plugininstances.ErrTaskCanvasLimit
+	ErrWorkspaceCanvasLimit      = plugininstances.ErrWorkspaceCanvasLimit
+	ErrCreationAuthorityNotFound = errors.New("canvas creation authority not found")
 )
 
 // CreateCanvasRequest contains trusted scope metadata supplied by the caller.
@@ -74,7 +81,21 @@ type CreateCanvasRequest struct {
 	OriginTaskID       string `json:"origin_task_id,omitempty"`
 	Title              string `json:"title"`
 	CreatedBySessionID string `json:"created_by_session_id,omitempty"`
-	PluginID           string `json:"plugin_id,omitempty"`
+	// OwnerUserID is populated only by the trusted task authoring adapter. It
+	// records the owner who may authorize the first publication.
+	OwnerUserID string `json:"-"`
+	PluginID    string `json:"plugin_id,omitempty"`
+}
+
+// CreationAuthority is the durable, single-use permission to publish the
+// first release of a newly created task canvas.
+type CreationAuthority struct {
+	CanvasID          string
+	OwnerUserID       string
+	CreatingSessionID string
+	TaskID            string
+	PolicyVersion     int
+	ConsumedAt        time.Time
 }
 
 // Canvas is the lifecycle projection consumed by host, API, and event layers.
@@ -135,17 +156,18 @@ type GrantProjection struct {
 // CanvasMetadata is the canvas-owned half of a lifecycle record. The plugin
 // instance table is intentionally not duplicated here.
 type CanvasMetadata struct {
-	ID                 string     `json:"id"`
-	PluginInstanceID   string     `json:"plugin_instance_id"`
-	WorkspaceID        string     `json:"workspace_id"`
-	TaskID             string     `json:"task_id,omitempty"`
-	OriginTaskID       string     `json:"origin_task_id,omitempty"`
-	Title              string     `json:"title"`
-	CreatedBySessionID string     `json:"created_by_session_id,omitempty"`
-	PromotedByUserID   string     `json:"promoted_by_user_id,omitempty"`
-	PromotedAt         *time.Time `json:"promoted_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                  string     `json:"id"`
+	PluginInstanceID    string     `json:"plugin_instance_id"`
+	WorkspaceID         string     `json:"workspace_id"`
+	TaskID              string     `json:"task_id,omitempty"`
+	OriginTaskID        string     `json:"origin_task_id,omitempty"`
+	Title               string     `json:"title"`
+	CreatedBySessionID  string     `json:"created_by_session_id,omitempty"`
+	CreationOwnerUserID string     `json:"-"`
+	PromotedByUserID    string     `json:"promoted_by_user_id,omitempty"`
+	PromotedAt          *time.Time `json:"promoted_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // PluginInstanceStore is the small adapter surface used by the lifecycle
