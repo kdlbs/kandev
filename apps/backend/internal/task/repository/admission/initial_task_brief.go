@@ -11,5 +11,8 @@ type InitialTaskBriefCandidate struct {
 	DescriptionSnapshot    string
 	Content                string
 	PromptReferenceContext string
-	Selected               bool
+	// PromptReferencesPrepared distinguishes an accepted empty expansion from
+	// content that never passed the server-owned prompt preparer.
+	PromptReferencesPrepared bool
+	Selected                 bool
 }

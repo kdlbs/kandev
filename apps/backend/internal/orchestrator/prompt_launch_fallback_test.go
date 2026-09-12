@@ -152,6 +152,59 @@ func TestApplyWorkflowAndPlanMode_PreservesAcceptedContextWithoutWorkflow(t *tes
 	require.Equal(t, 1, strings.Count(got, sysprompt.Wrap(trustedContext)))
 }
 
+// @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.11
+func TestApplyWorkflowAndPlanMode_PreservesEmptyAcceptedPromptSnapshot(t *testing.T) {
+	ctx := context.Background()
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	preparedPrompt, trustedContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, "Follow @rules.", zap.NewNop(),
+	)
+	require.Equal(t, "Follow @rules.", preparedPrompt)
+	require.Empty(t, trustedContext)
+
+	changedContent := "Apply the rules created after admission."
+	_, err := promptService.CreatePrompt(ctx, "rules", changedContent)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name           string
+		workflowStepID string
+		stepGetter     *mockStepGetter
+	}{
+		{name: "without workflow"},
+		{
+			name:           "with workflow",
+			workflowStepID: "step-accepted-empty",
+			stepGetter: func() *mockStepGetter {
+				getter := newMockStepGetter()
+				getter.steps["step-accepted-empty"] = &wfmodels.WorkflowStep{
+					ID: "step-accepted-empty", WorkflowID: "workflow-accepted-empty", Prompt: "Apply the step template:\n\n{{task_prompt}}",
+				}
+				return getter
+			}(),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stepGetter := test.stepGetter
+			if stepGetter == nil {
+				stepGetter = newMockStepGetter()
+			}
+			svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+			svc.promptExpander = promptService
+
+			got, _, gotTrustedContext := svc.applyWorkflowAndPlanModeWithPromptContextOptions(
+				ctx, preparedPrompt, "task-accepted-empty", "session-accepted-empty", test.workflowStepID,
+				false, false, false, false, trustedContext, true, false,
+			)
+
+			require.Empty(t, gotTrustedContext)
+			require.Contains(t, got, "Follow @rules.")
+			require.NotContains(t, got, changedContent)
+		})
+	}
+}
+
 // @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.4, AC-TASKS-SAVED-PROMPT-DELIVERY-001.5, AC-TASKS-SAVED-PROMPT-DELIVERY-001.8
 func TestApplyWorkflowAndPlanMode_WithoutWorkflowGuards(t *testing.T) {
 	ctx := context.Background()
@@ -351,7 +404,7 @@ func TestStartCreatedSession_InitialTaskBrief(t *testing.T) {
 
 			_, err := svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
 				ctx, taskID, sessionID, "profile1", taskBrief+"\n\n"+instruction,
-				false, false, false, nil, nil, "", true, false,
+				false, false, false, nil, nil, "", false, true, false,
 			)
 			require.NoError(t, err)
 			require.NotEmpty(t, launchedPrompt)
@@ -404,6 +457,7 @@ func TestStartCreatedSession_PreservesAcceptedPromptContextWithoutWorkflowStep(t
 	_, err = svc.StartCreatedSessionWithPromptContext(
 		ctx, "task1", "session1", "profile1", preparedPrompt,
 		false, false, false, nil, nil, trustedContext,
+		true,
 	)
 	require.NoError(t, err)
 	require.Len(t, messages.userMessages, 1)
@@ -452,6 +506,7 @@ func TestStartCreatedSession_DropsAcceptedPromptContextWhenDynamicRouteIsPassthr
 	_, err = svc.StartCreatedSessionWithPromptContext(
 		ctx, "task1", "session1", dynamicProfileID, preparedPrompt,
 		false, false, false, nil, nil, trustedContext,
+		true,
 	)
 	require.NoError(t, err)
 	require.Contains(t, dispatchedPrompt, "Follow @principles.")

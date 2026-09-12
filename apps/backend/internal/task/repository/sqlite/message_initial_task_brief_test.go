@@ -199,6 +199,31 @@ func TestInitialTaskBriefAdmissionRollbackAndStaleSnapshot(t *testing.T) {
 	}
 }
 
+func TestInitialTaskBriefAdmissionRejectsOversizedRenderedPrompt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID    = "task-initial-brief-size"
+		sessionID = "session-initial-brief-size"
+		turnID    = "turn-initial-brief-size"
+	)
+	seedForMsgTest(t, repo, taskID, sessionID, turnID)
+	setInitialTaskBriefDescription(t, repo, taskID, "Size constrained task brief")
+	message := initialTaskBriefMessage(taskID, sessionID, turnID, "initial-brief-size-message", "instruction")
+	originalContent := message.Content
+	candidate := initialTaskBriefCandidate("Size constrained task brief", strings.Repeat("x", plancomments.MaxRenderedPromptBytes+1))
+	err := requireInitialTaskBriefMessageWriter(t, repo).CreateMessageWithInitialTaskBrief(ctx, message, candidate)
+	if !errors.Is(err, plancomments.ErrRenderedTooLarge) {
+		t.Fatalf("oversized admission error = %v, want ErrRenderedTooLarge", err)
+	}
+	if candidate.Selected || message.Content != originalContent || message.PromptIndex != 0 {
+		t.Fatalf("oversized admission changed caller state: message=%+v candidate=%+v", message, candidate)
+	}
+	if hasHistory, historyErr := repo.HasUserPromptHistory(ctx, sessionID); historyErr != nil || hasHistory {
+		t.Fatalf("history after oversized admission = %v, err=%v", hasHistory, historyErr)
+	}
+}
+
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.5
 func TestInitialTaskBriefAdmissionSerializesConcurrentFirstSends(t *testing.T) {
 	repo := newRepoForSessionTests(t)

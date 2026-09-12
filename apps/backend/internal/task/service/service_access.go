@@ -296,7 +296,21 @@ func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, s
 // caller and that the session belongs to the supplied task. Mismatches use the
 // task not-found sentinel so callers cannot enumerate another task's sessions.
 func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error {
-	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeWorkspaceRead)
+}
+
+// AuthorizeTaskSessionPromptAccess checks the task/session pair and requires
+// the session.prompt capability used to create or dispatch user messages.
+func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, sessionID string) error {
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeSessionPrompt)
+}
+
+func (s *Service) authorizeTaskSessionScope(
+	ctx context.Context,
+	taskID, sessionID string,
+	scope authz.Scope,
+) error {
+	if err := s.authorizeTaskScope(ctx, taskID, scope); err != nil {
 		return err
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)

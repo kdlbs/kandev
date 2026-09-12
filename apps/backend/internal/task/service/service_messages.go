@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 const (
@@ -526,6 +527,9 @@ func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessage
 	if req == nil || req.AuthorType == createdByAgent {
 		return nil
 	}
+	if req.TaskID != "" {
+		return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+	}
 	return s.AuthorizeSessionScope(ctx, req.TaskSessionID, authz.ScopeSessionPrompt)
 }
 
@@ -651,6 +655,9 @@ func (s *Service) createMessageWithRequestRetry(
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if errors.Is(err, repoerrors.ErrInitialTaskBriefStale) {
+			return nil, err
 		}
 		if attempt < maxRetries-1 {
 			s.logger.Debug("failed to create message, retrying",

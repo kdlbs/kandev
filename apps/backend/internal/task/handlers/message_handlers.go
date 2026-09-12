@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,7 +25,6 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
-	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -74,9 +74,10 @@ type taskCanvasGuidanceResolver interface {
 }
 
 type canvasGuidanceProjection struct {
-	resolved             bool
-	include              bool
-	preserveDirectPrompt bool
+	resolved                 bool
+	include                  bool
+	preserveDirectPrompt     bool
+	promptReferencesPrepared bool
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -227,17 +228,18 @@ func (h *MessageHandlers) prepareDirectPrompt(
 	ctx context.Context,
 	content string,
 	isPassthrough bool,
-) (string, string) {
+) (string, string, bool) {
 	if h.orchestrator == nil || isPassthrough {
-		return content, ""
+		return content, "", false
 	}
 	preparer, ok := h.orchestrator.(orchestrator.DirectPromptPreparer)
 	if !ok {
 		// Keep test and compatibility doubles that do not provide the optional
 		// seam functional. The production wrapper always implements it.
-		return content, ""
+		return content, "", false
 	}
-	return preparer.PrepareDirectPrompt(ctx, content, isPassthrough)
+	prepared, trustedContext := preparer.PrepareDirectPrompt(ctx, content, isPassthrough)
+	return prepared, trustedContext, true
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
@@ -476,6 +478,7 @@ type wsAddMessageRequest struct {
 	canvasGuidanceResolved   bool
 	includeCanvasGuidance    bool
 	initialTaskBriefSelected bool
+	promptReferencesPrepared bool
 }
 
 type addMessageReplayIdentity struct {
@@ -568,6 +571,19 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		); handled {
 			return response, nil
 		}
+	}
+	// Validate the task/session relationship before loading either mutable task
+	// state or its description. Authorizing the two IDs independently would let
+	// a mismatched request compose one task's brief for another task's session.
+	if err := h.service.AuthorizeTaskSessionPromptAccess(admissionCtx, req.TaskID, req.TaskSessionID); err != nil {
+		if service.IsForbidden(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "Cannot send messages to this session", nil)
+		}
+		if errors.Is(err, repoerrors.ErrTaskNotFound) || errors.Is(err, sql.ErrNoRows) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task and session do not match", nil)
+		}
+		h.logger.Error("failed to authorize task and session", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to authorize message", nil)
 	}
 
 	// Check session state — may block the message or flag it as a create-start
@@ -692,9 +708,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
-	preparedContent, trustedPromptContext := h.prepareDirectPrompt(
+	preparedContent, trustedPromptContext, promptReferencesPrepared := h.prepareDirectPrompt(
 		ctx, req.Content, sessionResp.Session.IsPassthrough,
 	)
+	req.promptReferencesPrepared = promptReferencesPrepared
 	storedContent := preparedContent
 	if len(req.PlanCommentRefs) > 0 {
 		storedContent = plancomments.WithPlaceholder(storedContent)
@@ -741,26 +758,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		req.canvasGuidanceResolved = canvasGuidanceResolved
 		req.includeCanvasGuidance = includeCanvasGuidance
 	}
-	var initialTaskBrief *admission.InitialTaskBriefCandidate
-	if eligibleForInitialTaskBrief(task, sessionResp, configMode, startCreatedSession, hasMessageContent) {
-		candidateRawContent := composeInitialTaskBrief(task.Description, req.Content)
-		candidateContent, candidateTrustedPromptContext := h.prepareDirectPrompt(
-			ctx, candidateRawContent, sessionResp.Session.IsPassthrough,
-		)
-		if len(req.PlanCommentRefs) > 0 {
-			candidateContent = plancomments.WithPlaceholder(candidateContent)
-		}
-		candidateContent = orchestrator.AppendEntityReferenceContext(candidateContent, req.EntityReferences)
-		candidateContent = h.injectMessageContext(
-			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner,
-			req.includeCanvasGuidance, candidateContent, candidateTrustedPromptContext,
-		)
-		initialTaskBrief = &admission.InitialTaskBriefCandidate{
-			DescriptionSnapshot:    task.Description,
-			Content:                candidateContent,
-			PromptReferenceContext: candidateTrustedPromptContext,
-		}
-	}
+	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
+		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+	)
 	req.Content = storedContent
 	if planCommentAttachmentClaim == nil {
 		err = h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments)
@@ -794,35 +794,62 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// receipt. Promptable sessions drain it immediately; workflow waits and
 	// process restarts retain the same caller-owned delivery identity.
 	atomicQueuedPlanComments := len(req.PlanCommentRefs) > 0
-	switch {
-	case atomicQueuedPlanComments:
-		coordinator, ok := h.orchestrator.(AtomicQueuedPromptCoordinator)
+	var queuedCoordinator AtomicQueuedPromptCoordinator
+	if atomicQueuedPlanComments {
+		var ok bool
+		queuedCoordinator, ok = h.orchestrator.(AtomicQueuedPromptCoordinator)
 		if !ok {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queued prompt admission is unavailable", nil)
 		}
-		queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
-		for key, value := range createRequest.Metadata {
-			queueMetadata[key] = value
+	}
+	createMessage := func() (*models.Message, error) {
+		if atomicQueuedPlanComments {
+			queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
+			for key, value := range createRequest.Metadata {
+				queueMetadata[key] = value
+			}
+			queueMetadata["user_message_recorded"] = true
+			queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = req.ClientMessageID
+			queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
+			queued := &messagequeue.QueuedMessage{
+				ID: req.ClientMessageID, SessionID: req.TaskSessionID, TaskID: req.TaskID,
+				Content: storedContent, Model: req.Model, PlanMode: req.PlanMode,
+				Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
+				QueuedBy: messagequeue.QueuedByUser,
+			}
+			created, createErr := h.service.CreateQueuedMessageIdempotent(
+				admissionCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
+			)
+			if createErr == nil && (createRequest.InitialTaskBrief == nil ||
+				createRequest.InitialTaskBrief.Selected || (created != nil && created.PromptIndex == 1)) {
+				queuedCoordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
+			}
+			return created, createErr
 		}
-		queueMetadata["user_message_recorded"] = true
-		queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = req.ClientMessageID
-		queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
-		queued := &messagequeue.QueuedMessage{
-			ID: req.ClientMessageID, SessionID: req.TaskSessionID, TaskID: req.TaskID,
-			Content: storedContent, Model: req.Model, PlanMode: req.PlanMode,
-			Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
-			QueuedBy: messagequeue.QueuedByUser,
+		if req.ClientMessageID != "" {
+			return h.service.CreateMessageIdempotent(admissionCtx, req.ClientMessageID, createRequest)
 		}
-		message, err = h.service.CreateQueuedMessageIdempotent(
-			admissionCtx, req.ClientMessageID, createRequest, queued, coordinator.MaxQueuedPromptsPerSession(),
+		return h.service.CreateMessage(admissionCtx, createRequest)
+	}
+	for refreshAttempt := 0; ; refreshAttempt++ {
+		message, err = createMessage()
+		if !errors.Is(err, repoerrors.ErrInitialTaskBriefStale) || initialTaskBrief == nil || refreshAttempt > 0 {
+			break
+		}
+		// The repository owns the final description snapshot. If it changed after
+		// preparation, rebuild only this candidate and retry admission. Turn-start
+		// and title ownership already ran for this accepted request and must not run
+		// again while the candidate catches up with the current task description.
+		freshTask, refreshErr := h.service.GetTask(admissionCtx, req.TaskID)
+		if refreshErr != nil {
+			err = fmt.Errorf("refresh task for initial brief admission: %w", refreshErr)
+			break
+		}
+		task = freshTask
+		initialTaskBrief = h.prepareInitialTaskBriefCandidate(
+			admissionCtx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
 		)
-		if err == nil {
-			coordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
-		}
-	case req.ClientMessageID != "":
-		message, err = h.service.CreateMessageIdempotent(admissionCtx, req.ClientMessageID, createRequest)
-	default:
-		message, err = h.service.CreateMessage(admissionCtx, createRequest)
+		createRequest.InitialTaskBrief = initialTaskBrief
 	}
 	if err != nil {
 		if response := planCommentMessageError(msg, err); response != nil {
@@ -838,11 +865,46 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 	req.Content = message.Content
+	initialTaskBriefQueued := initialTaskBrief != nil && !initialTaskBrief.Selected
+	// An idempotent create can return a row committed by another process, so
+	// the candidate pointer is not necessarily the object that selected the
+	// first slot. Recover that result from the committed row before deciding who
+	// owns created-session launch.
+	if initialTaskBriefQueued && message.PromptIndex == 1 && message.Content == initialTaskBrief.Content {
+		initialTaskBrief.Selected = true
+		initialTaskBriefQueued = false
+	}
 	if initialTaskBrief != nil && initialTaskBrief.Selected {
 		req.initialTaskBriefSelected = true
 		trustedPromptContext = initialTaskBrief.PromptReferenceContext
+		promptReferencesPrepared = initialTaskBrief.PromptReferencesPrepared
+		req.promptReferencesPrepared = promptReferencesPrepared
 	}
-	if turnStartResult.Queued && !atomicQueuedPlanComments {
+	if initialTaskBriefQueued && h.orchestrator != nil && !atomicQueuedPlanComments {
+		queueMetadata := meta.ToMap()
+		if queueMetadata == nil {
+			queueMetadata = make(map[string]interface{})
+		}
+		queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
+		queueMetadata[orchestrator.MetaKeyInitialTaskBriefDispatchPending] = true
+		if err := h.orchestrator.QueueUserPrompt(
+			ctx,
+			req.TaskID,
+			req.TaskSessionID,
+			req.Content,
+			req.Model,
+			req.PlanMode,
+			req.Attachments,
+			queueMetadata,
+			true,
+		); err != nil {
+			h.logger.Warn("failed to queue competing initial task brief prompt",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue prompt", nil)
+		}
+	} else if turnStartResult.Queued && !atomicQueuedPlanComments {
 		if err := h.orchestrator.QueueUserPrompt(
 			ctx,
 			req.TaskID,
@@ -872,7 +934,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// an orchestrator is available. This runs async so the WS request can
 	// respond immediately. Plan mode changes the execution prompt and agent
 	// behavior; it does not make message.add a record-only operation.
-	if h.orchestrator != nil && !turnStartResult.Queued && !atomicQueuedPlanComments {
+	if h.orchestrator != nil && !turnStartResult.Queued && !atomicQueuedPlanComments && !initialTaskBriefQueued {
 		h.dispatchPromptAsync(
 			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
 		)
@@ -1246,9 +1308,10 @@ func (h *MessageHandlers) dispatchPromptAsync(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
 			trustedPromptContext, canvasGuidanceProjection{
-				resolved:             req.canvasGuidanceResolved,
-				include:              req.includeCanvasGuidance,
-				preserveDirectPrompt: req.initialTaskBriefSelected,
+				resolved:                 req.canvasGuidanceResolved,
+				include:                  req.includeCanvasGuidance,
+				preserveDirectPrompt:     req.initialTaskBriefSelected,
+				promptReferencesPrepared: req.promptReferencesPrepared,
 			},
 		)
 	}()
@@ -1337,18 +1400,21 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
 				ctx, taskID, sessionID, agentProfileID,
 				content, true, planMode, false, attachments, references, trustedPromptContext,
+				projection.promptReferencesPrepared,
 				projection.resolved, projection.include,
 			)
 		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidance); ok && len(canvasGuidance) > 0 {
 			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidance(
 				ctx, taskID, sessionID, agentProfileID,
 				content, true, planMode, false, attachments, references, trustedPromptContext,
+				projection.promptReferencesPrepared,
 				projection.resolved, projection.include,
 			)
 		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
 			_, err = starter.StartCreatedSessionWithPromptContext(
 				ctx, taskID, sessionID, agentProfileID,
 				content, true, planMode, false, attachments, references, trustedPromptContext,
+				projection.promptReferencesPrepared,
 			)
 		} else {
 			err = h.orchestrator.StartCreatedSession(

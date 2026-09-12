@@ -90,9 +90,22 @@ Do not call `HasUserPromptHistory` outside a transaction and then write later.
 Do not select by `PromptIndex == 1` alone: automatic fallback reserves ordinal
 zero before its user row exists. Preserve the existing fallback reservation.
 
-Prepare candidate expansions before database writes. Compare the description
-snapshot during admission and reject stale selection. Keep replay identity based
-on the original request. Preserve plan-comment transaction and attachment ownership.
+Compose and deduplicate the raw brief and instruction before one server-owned
+preparer call. Carry the resulting content, trusted reference context, and an
+explicit prepared-state bit as one candidate through admission and dispatch;
+the bit preserves an accepted empty expansion snapshot. Compare the description
+snapshot during admission and refresh only the candidate when it is stale.
+Keep replay identity based on the original request. Preserve plan-comment
+transaction and attachment ownership. Validate the final rendered content at
+the database boundary before insertion.
+
+Authorize the task/session pair before reading mutable task state. Atomic
+admission gives only the selected candidate created-session launch ownership.
+Later contenders are persisted and queued with turn-start already processed and
+an admission-order dispatch marker, so queue fast paths wait for the admitted
+launch. Only the selected queued plan-comment candidate notifies the lifecycle
+starter. This keeps visible content, trusted expansion, and launch ownership
+paired across direct and queued delivery.
 
 The rendered structure stays unchanged. Stored prompt content corrects visibility.
 No new locale keys are expected. Any added product copy must use existing localization rules.
@@ -132,7 +145,7 @@ Content order and durable visibility are required. Borders and spacing are illus
 | `.1`, `.2`, `.4`, `.10` | `TestWSAddMessage_InitialTaskBrief`, `TestWSAddMessage_InitialTaskBriefExpandsCombinedPromptAtAdmission`, `TestWSAddMessage_InitialTaskBriefKeepsAcceptedExpansionWhenDefinitionsChange`, handler persistence and captured dispatch |
 | `.3`, `.5`, `.6` | `TestInitialTaskBriefAdmission`, SQLite transaction, fallback reservation, rollback, and replay |
 | `.5`, `.6` | `TestInitialTaskBriefAdmissionPostgres`, cross-connection transaction parity |
-| `.8`, `.9` | `TestStartCreatedSession_InitialTaskBrief`, handler saved-reference table cases, and queued initial-brief delivery |
+| `.8`, `.9` | `TestStartCreatedSession_InitialTaskBrief`, `TestApplyWorkflowAndPlanMode_PreservesEmptyAcceptedPromptSnapshot`, handler saved-reference table cases, and queued initial-brief delivery |
 | `.2`, `.7` | `use-processed-messages-fallback.test.ts`, synthetic row replacement with combined prompt |
 
 All criterion suffixes refer to `AC-TASKS-INITIAL-TASK-BRIEF-001`.
@@ -169,6 +182,7 @@ the implemented behavior.
 ## Verification results
 
 - Permanent backend admission, handler, service, and orchestrator regressions passed, including combined saved-reference preparation, accepted-context dispatch, and queued delivery.
+- Review-remediation regressions passed for task/session pair authorization, stale-description candidate refresh without repeated turn-start hooks, admission-order launch ownership, deferred queue fast-path delivery, accepted empty expansion snapshots, and rendered prompt size validation.
 - SQLite admission tests passed, including rollback, stale snapshots, deletion, restart, fallback races, zero reservations, and plan-comment queues.
 - PostgreSQL parity test was skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured in this environment.
 - `go vet` passed for all changed backend packages.

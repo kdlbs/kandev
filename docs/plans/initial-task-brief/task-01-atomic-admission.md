@@ -87,6 +87,7 @@ A skipped PostgreSQL test is not parity evidence. Use existing disposable databa
 - Preserved idempotency and covered normal, plan-comment, and queued plan-comment writes.
 - Added SQLite coverage for two competing direct submissions, fallback races, zero-valued fallback reservations, stale descriptions, rollback, deletion, restart, and plan/queue boundaries.
 - Added a cross-connection PostgreSQL parity test. It skips when `KANDEV_TEST_POSTGRES_DSN` is unset.
+- Validated the selected rendered prompt against `plancomments.MaxRenderedPromptBytes` before insertion, with rollback coverage for an oversized candidate.
 - `go test -tags fts5 ./internal/task/repository/sqlite -run '^TestInitialTaskBrief' -count=1` passed.
 - `go test -race -tags fts5 ./internal/task/repository/sqlite -run '^TestInitialTaskBrief' -count=1` passed.
 - `go vet ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/orchestrator ./internal/backendapp` passed.

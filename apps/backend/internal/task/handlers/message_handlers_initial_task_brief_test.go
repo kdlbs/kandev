@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/admission"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -38,6 +41,25 @@ func (r *messageAddSwitchRepo) CreateMessageWithInitialTaskBrief(
 	r.messages = append(r.messages, message)
 	r.idempotentMessage = message
 	return nil
+}
+
+type staleInitialTaskBriefRepo struct {
+	*messageAddSwitchRepo
+	staleDescription string
+	admissionCalls   int
+}
+
+func (r *staleInitialTaskBriefRepo) CreateMessageWithInitialTaskBrief(
+	ctx context.Context,
+	message *models.Message,
+	candidate *admission.InitialTaskBriefCandidate,
+) error {
+	if r.admissionCalls == 0 {
+		r.admissionCalls++
+		r.tasks[message.TaskID].Description = r.staleDescription
+		return repoerrors.ErrInitialTaskBriefStale
+	}
+	return r.messageAddSwitchRepo.CreateMessageWithInitialTaskBrief(ctx, message, candidate)
 }
 
 func (r *messageAddSwitchRepo) CreateMessageWithPlanCommentsWithInitialTaskBrief(
@@ -132,6 +154,7 @@ func (o *firstTurnCaptureOrchestrator) StartCreatedSessionWithPromptContextAndCa
 	_ []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	_ bool,
 	_, _ bool,
 ) (*executor.TaskExecution, error) {
 	o.started <- capturedFirstTurn{
@@ -381,6 +404,171 @@ func TestWSAddMessage_InitialTaskBriefKeepsAcceptedExpansionWhenDefinitionsChang
 		dispatched := <-orch.started
 		require.Equal(t, expectedContext, dispatched.promptReferenceContext)
 	})
+}
+
+func TestWSAddMessage_RejectsMismatchedTaskSessionBeforeReadingTask(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"task-a": {ID: "task-a", State: v1.TaskStateInProgress, UpdatedAt: now},
+			"task-b": {ID: "task-b", State: v1.TaskStateInProgress, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"session-b": {
+				ID: "session-b", TaskID: "task-b", State: models.TaskSessionStateCreated,
+				AgentProfileID: "profile-b", UpdatedAt: now,
+			},
+		},
+		primaryID: "session-b",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &firstTurnCaptureOrchestrator{started: make(chan capturedFirstTurn, 1)}
+	h := NewMessageHandlers(svc, orch, log)
+
+	request, err := ws.NewRequest("mismatched-pair", ws.ActionMessageAdd, map[string]any{
+		"task_id": "task-a", "session_id": "session-b", "content": "send this",
+	})
+	require.NoError(t, err)
+	response, err := h.wsAddMessage(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	require.Contains(t, string(response.Payload), "Task and session do not match")
+	require.Empty(t, repo.messages)
+	require.Zero(t, repo.taskGetCalls)
+	require.Zero(t, orch.onTurnStartCount())
+}
+
+func TestWSAddMessage_ConcurrentInitialBriefStartsOnlyAdmittedCandidate(t *testing.T) {
+	now := time.Now().UTC()
+	const taskID = "concurrent-initial-brief-task"
+	const sessionID = "concurrent-initial-brief-session"
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			taskID: {
+				ID: taskID, Description: "Concurrent task brief", State: v1.TaskStateInProgress,
+				UpdatedAt: now,
+			},
+		},
+		sessions: map[string]*models.TaskSession{
+			sessionID: {
+				ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCreated,
+				AgentProfileID: "profile-concurrent", UpdatedAt: now,
+			},
+		},
+		primaryID: sessionID,
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &firstTurnCaptureOrchestrator{started: make(chan capturedFirstTurn, 2)}
+	h := NewMessageHandlers(svc, orch, log)
+	start := make(chan struct{})
+	responses := make(chan *ws.Message, 2)
+	var wg sync.WaitGroup
+	for index, instruction := range []string{"first contender", "second contender"} {
+		request, requestErr := ws.NewRequest(
+			fmt.Sprintf("concurrent-initial-brief-%d", index), ws.ActionMessageAdd,
+			map[string]any{
+				"task_id": taskID, "session_id": sessionID,
+				"message_id": fmt.Sprintf("concurrent-initial-brief-message-%d", index),
+				"content":    instruction,
+			},
+		)
+		require.NoError(t, requestErr)
+		wg.Add(1)
+		go func(request *ws.Message) {
+			defer wg.Done()
+			<-start
+			response, requestErr := h.wsAddMessage(context.Background(), request)
+			require.NoError(t, requestErr)
+			responses <- response
+		}(request)
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+	for response := range responses {
+		require.Equal(t, ws.MessageTypeResponse, response.Type)
+	}
+
+	require.Eventually(t, func() bool { return len(orch.queueCalls()) == 1 }, time.Second, time.Millisecond)
+	require.Len(t, orch.started, 1)
+	require.Len(t, repo.messages, 2)
+	queuedCalls := orch.queueCalls()
+	require.True(t, queuedCalls[0].userMessageRecorded)
+	require.True(t, queuedCalls[0].metadata[orchestrator.MetaKeyInitialTaskBriefDispatchPending].(bool))
+	require.Contains(t, queuedCalls[0].prompt, "contender")
+	for _, message := range repo.messages {
+		if strings.Contains(message.Content, "Concurrent task brief") {
+			require.Equal(t, 1, message.PromptIndex)
+		} else {
+			require.Equal(t, 2, message.PromptIndex)
+		}
+	}
+}
+
+func TestWSAddMessage_RefreshesStaleBriefWithoutRepeatingTurnStart(t *testing.T) {
+	now := time.Now().UTC()
+	baseRepo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"stale-brief-task": {
+				ID: "stale-brief-task", Description: "Original task brief", State: v1.TaskStateInProgress,
+				UpdatedAt: now,
+			},
+		},
+		sessions: map[string]*models.TaskSession{
+			"stale-brief-session": {
+				ID: "stale-brief-session", TaskID: "stale-brief-task", State: models.TaskSessionStateCreated,
+				AgentProfileID: "profile-stale", UpdatedAt: now,
+			},
+		},
+		primaryID: "stale-brief-session",
+	}
+	repo := &staleInitialTaskBriefRepo{messageAddSwitchRepo: baseRepo, staleDescription: "Fresh task brief"}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &initialTaskBriefPromptOrchestrator{
+		firstTurnCaptureOrchestrator: firstTurnCaptureOrchestrator{started: make(chan capturedFirstTurn, 1)},
+		expansions:                   map[string]string{},
+	}
+	h := NewMessageHandlers(svc, orch, log)
+	request, err := ws.NewRequest("stale-brief-request", ws.ActionMessageAdd, map[string]any{
+		"task_id": "stale-brief-task", "session_id": "stale-brief-session", "content": "follow the brief",
+	})
+	require.NoError(t, err)
+	response, err := h.wsAddMessage(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Len(t, baseRepo.messages, 1)
+	stored := baseRepo.firstMessageContent()
+	require.Contains(t, stored, "Fresh task brief")
+	require.NotContains(t, stored, "Original task brief")
+	require.Contains(t, stored, "follow the brief")
+	require.Equal(t, 1, orch.onTurnStartCount())
+	require.Eventually(t, func() bool { return len(orch.started) == 1 }, time.Second, time.Millisecond)
+	dispatched := <-orch.started
+	require.Equal(t, stored, dispatched.content)
 }
 
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.8

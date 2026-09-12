@@ -86,8 +86,10 @@ Preserve the original request fingerprint across candidate preparation.
 ## Results
 
 - Composed the raw trimmed task description and first direct instruction before saved-prompt expansion, so both inputs share one acceptance-time snapshot.
-- Preserved the selected stored content and its matching trusted prompt context through created-session dispatch and workflow prompt composition.
+- Preserved the selected stored content and its matching trusted prompt context through created-session dispatch and workflow prompt composition, including an explicit accepted-empty expansion state.
 - Kept equality, empty descriptions, attachments, saved references, plan comments, queued promotion, session redirection, and excluded modes on their existing paths.
-- Added handler regressions for distinct saved references, brief-only references, identical brief and instruction deduplication, definitions changed after admission, and queued delivery.
+- Added task/session pair authorization before mutable task reads and a stale-description retry that rebuilds only the candidate without repeating turn-start or title hooks.
+- Added handler regressions for distinct saved references, brief-only references, identical brief and instruction deduplication, definitions changed after admission, queued delivery, mismatched task/session IDs, stale descriptions, and concurrent first sends.
+- Restricted created-session launch to the atomically selected candidate; later contenders use an admission-order queue marker and the queue fast path defers until the selected launch completes.
 - Added handler and orchestrator regressions for empty, placeholder, and replacing workflow step prompts.
-- Focused handler, service, and orchestrator tests passed, including `TestWSAddMessage_InitialTaskBriefExpandsCombinedPromptAtAdmission`, `TestWSAddMessage_InitialTaskBriefKeepsAcceptedExpansionWhenDefinitionsChange`, `TestWSAddMessage_QueuedInitialTaskBriefPersistsAcceptedExpansion`, and `TestStartCreatedSession_InitialTaskBrief`.
+- Focused handler, service, and orchestrator tests passed, including `TestWSAddMessage_InitialTaskBriefExpandsCombinedPromptAtAdmission`, `TestWSAddMessage_InitialTaskBriefKeepsAcceptedExpansionWhenDefinitionsChange`, `TestWSAddMessage_QueuedInitialTaskBriefPersistsAcceptedExpansion`, `TestWSAddMessage_RejectsMismatchedTaskSessionBeforeReadingTask`, `TestWSAddMessage_ConcurrentInitialBriefStartsOnlyAdmittedCandidate`, `TestWSAddMessage_RefreshesStaleBriefWithoutRepeatingTurnStart`, `TestStartCreatedSession_InitialTaskBrief`, and `TestApplyWorkflowAndPlanMode_PreservesEmptyAcceptedPromptSnapshot`.

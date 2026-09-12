@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -284,6 +285,9 @@ func (r *Repository) executeBoundaryTransaction(
 		if err := r.selectInitialTaskBriefCandidate(ctx, tx, message.TaskSessionID, message, candidate); err != nil {
 			return err
 		}
+	}
+	if err := plancomments.ValidateRenderedPrompt(message.Content); err != nil {
+		return err
 	}
 	if err := r.assignUserMessageBoundary(ctx, tx, message, driver, nm); err != nil {
 		return err
