@@ -155,6 +155,9 @@ const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTrig
   ) {
     const { t } = useTranslation();
     const currentDisplayIndex = currentIndex >= 0 ? currentIndex : 0;
+    const progressLabel = progress
+      ? t(workflowStepProgressTranslationKey(progress.status))
+      : undefined;
     return (
       <button
         {...buttonProps}
@@ -167,10 +170,11 @@ const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTrig
         data-testid="workflow-stepper-minimal"
         aria-haspopup="dialog"
         aria-expanded={controls.open}
-        aria-label={t("task:stepOf", {
+        aria-label={t(progressLabel ? "task:stepOfWithStatus" : "task:stepOf", {
           stepNumber: currentDisplayIndex + 1,
           totalSteps: total,
           stepLabel: current.name,
+          status: progressLabel,
         })}
         onMouseEnter={controls.openDisclosure}
         onMouseLeave={controls.scheduleClose}

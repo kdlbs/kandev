@@ -1604,6 +1604,7 @@
   "stepFieldLabel": "śţēƥ",
   "stepNumber": "Śţēƥ {{index}}",
   "stepOf": "Śţēƥ {{stepNumber}} ōƒ {{totalSteps}}: {{stepLabel}}",
+  "stepOfWithStatus": "Śţēƥ {{stepNumber}} ōƒ {{totalSteps}}: {{stepLabel}}, {{status}}",
   "stillWorkingSubjectMany": "Ōńē ōŕ ḿōŕē ōƒ ţĥēśē ţàśķś àŕē śţĩĺĺ ŵōŕķĩńĝ",
   "stillWorkingSubjectOne": "Ţĥĩś ţàśķ ĩś śţĩĺĺ ŵōŕķĩńĝ",
   "stillWorkingWarning": "{{subject}}; àń àĝēńţ ĩś ĝēńēŕàţĩńĝ ōŕ ŕũńńĩńĝ ƀàćķĝŕōũńď ŵōŕķ. Ƥŕōćēēďĩńĝ ńōŵ ďĩśćàŕďś ŵōŕķ ţĥàţ ĩś śţĩĺĺ ĩń ƥŕōĝŕēśś.",

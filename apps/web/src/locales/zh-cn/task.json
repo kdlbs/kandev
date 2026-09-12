@@ -1546,6 +1546,7 @@
   "stepFieldLabel": "步骤",
   "stepNumber": "步骤 {{index}}",
   "stepOf": "步骤 {{stepNumber}} / {{totalSteps}}：{{stepLabel}}",
+  "stepOfWithStatus": "步骤 {{stepNumber}} / {{totalSteps}}：{{stepLabel}}，{{status}}",
   "stillWorkingSubjectMany": "其中一个或多个任务仍在工作",
   "stillWorkingSubjectOne": "此任务仍在工作",
   "stillWorkingWarning": "{{subject}}；智能体正在生成或运行后台工作。现在继续将丢弃仍在进行的工作。",

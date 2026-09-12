@@ -227,6 +227,60 @@ describe("resolveWorkflowProgressEvidence", () => {
   });
 });
 
+describe("workflow progress projection ownership", () => {
+  it("does not select an arbitrary session when primary ownership is ambiguous", () => {
+    const result = resolveWorkflowProgressEvidence({
+      task: { id: TASK_ID },
+      sessionsById: {
+        [SESSION_ID]: {
+          id: SESSION_ID,
+          task_id: TASK_ID,
+          state: "STARTING",
+          is_primary: true,
+        },
+        "session-other-primary": {
+          id: "session-other-primary",
+          task_id: TASK_ID,
+          state: "RUNNING",
+          is_primary: true,
+        },
+      },
+      sessionsForTask: [],
+      agentProfiles: [],
+    });
+
+    expect(result).toEqual({
+      sessionId: null,
+      sessionState: null,
+      cancellationPending: false,
+      agentLabel: null,
+    });
+  });
+
+  it("lets an overview task projection outrank a stale loaded session state", () => {
+    const result = resolveWorkflowProgressEvidence({
+      task: {
+        id: TASK_ID,
+        primarySessionId: SESSION_ID,
+        primarySessionState: "STARTING",
+      },
+      sessionsById: {
+        [SESSION_ID]: {
+          id: SESSION_ID,
+          task_id: TASK_ID,
+          state: "RUNNING",
+          is_primary: true,
+        },
+      },
+      sessionsForTask: [],
+      agentProfiles: [],
+      preferTaskProjection: true,
+    });
+
+    expect(result.sessionState).toBe("STARTING");
+  });
+});
+
 describe("workflow progress cancellation evidence", () => {
   it("carries authoritative cancellation evidence from the primary session", () => {
     const result = resolveWorkflowProgressEvidence({
@@ -263,5 +317,37 @@ describe("workflow progress cancellation evidence", () => {
         cancellationPending: result.cancellationPending,
       }),
     ).toMatchObject({ status: "cancelling", isPending: false });
+  });
+
+  it("lets cancellation evidence override startup before terminal settlement", () => {
+    expect(
+      deriveWorkflowStepProgress({
+        stepId: "work",
+        currentStepId: "work",
+        taskState: "SCHEDULING",
+        primarySessionState: "STARTING",
+        cancellationPending: true,
+      }),
+    ).toMatchObject({ status: "cancelling", isPending: false });
+
+    expect(
+      deriveWorkflowStepProgress({
+        stepId: "work",
+        currentStepId: "work",
+        taskState: "IN_PROGRESS",
+        primarySessionState: "CANCELLED",
+      }),
+    ).toMatchObject({ status: "cancelled", isPending: false });
+  });
+
+  it("ignores a previous terminal session when a task returns to TODO", () => {
+    expect(
+      deriveWorkflowStepProgress({
+        stepId: "work",
+        currentStepId: "work",
+        taskState: "TODO",
+        primarySessionState: "COMPLETED",
+      }),
+    ).toMatchObject({ status: "not_started", isPending: false });
   });
 });

@@ -1547,6 +1547,7 @@
   "stepFieldLabel": "passo",
   "stepNumber": "Passo {{index}}",
   "stepOf": "Passo {{stepNumber}} de {{totalSteps}}: {{stepLabel}}",
+  "stepOfWithStatus": "Passo {{stepNumber}} de {{totalSteps}}: {{stepLabel}}, {{status}}",
   "stillWorkingSubjectMany": "Uma ou mais destas tarefas continuam a trabalhar",
   "stillWorkingSubjectOne": "Esta tarefa continua a trabalhar",
   "stillWorkingWarning": "{{subject}}; há um agente a gerar ou a executar trabalho em segundo plano. Avançar agora descarta trabalho que ainda está em curso.",

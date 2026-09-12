@@ -69,6 +69,7 @@ export type WorkflowProgressEvidenceInput = {
   sessionsById: Record<string, WorkflowProgressSessionProjection>;
   sessionsForTask: WorkflowProgressSessionProjection[];
   agentProfiles: WorkflowProgressAgentProfile[];
+  preferTaskProjection?: boolean;
 };
 
 export type WorkflowProgressEvidence = {
@@ -84,6 +85,7 @@ const TERMINAL_STATUS_BY_STATE: Record<string, WorkflowStepProgressStatus> = {
   CANCELLED: "cancelled",
 };
 const EMPTY_SESSIONS_FOR_TASK: WorkflowProgressSessionProjection[] = [];
+const EMPTY_SESSIONS_BY_ID: Record<string, WorkflowProgressSessionProjection> = {};
 
 function isSessionForTask(
   session: WorkflowProgressSessionProjection | undefined,
@@ -108,12 +110,14 @@ function findPrimarySession(
   sessionsForTask: WorkflowProgressSessionProjection[],
 ): WorkflowProgressSessionProjection | undefined {
   if (!sessionId) {
-    return (
-      sessionsForTask.find((session) => session.task_id === task.id && session.is_primary) ??
-      Object.values(sessionsById).find(
-        (session) => session.task_id === task.id && session.is_primary,
-      )
-    );
+    const candidates = new Map<string, WorkflowProgressSessionProjection>();
+    for (const session of sessionsForTask) {
+      if (session.task_id === task.id && session.is_primary) candidates.set(session.id, session);
+    }
+    for (const session of Object.values(sessionsById)) {
+      if (session.task_id === task.id && session.is_primary) candidates.set(session.id, session);
+    }
+    return candidates.size === 1 ? candidates.values().next().value : undefined;
   }
 
   const loadedSession = sessionsById[sessionId];
@@ -139,7 +143,11 @@ function resolvedSessionState(
   loadedSession: WorkflowProgressSessionProjection | undefined,
   task: WorkflowProgressTaskProjection,
   projectedSession: { state: string } | null | undefined,
+  preferTaskProjection: boolean,
 ): string | null {
+  if (preferTaskProjection) {
+    return task.primarySessionState ?? projectedSession?.state ?? loadedSession?.state ?? null;
+  }
   return loadedSession?.state ?? task.primarySessionState ?? projectedSession?.state ?? null;
 }
 
@@ -161,6 +169,7 @@ export function resolveWorkflowProgressEvidence({
   sessionsById,
   sessionsForTask,
   agentProfiles,
+  preferTaskProjection = false,
 }: WorkflowProgressEvidenceInput): WorkflowProgressEvidence {
   if (!task) {
     return {
@@ -181,7 +190,12 @@ export function resolveWorkflowProgressEvidence({
   );
 
   const sessionId = loadedPrimarySession?.id ?? sessionIdFromProjection;
-  const sessionState = resolvedSessionState(loadedPrimarySession, task, projectedSession);
+  const sessionState = resolvedSessionState(
+    loadedPrimarySession,
+    task,
+    projectedSession,
+    preferTaskProjection,
+  );
   const cancellationPending =
     loadedPrimarySession?.cancellation_pending ?? task.primarySessionCancellationPending ?? false;
   return {
@@ -205,7 +219,11 @@ function progressStatusForEvidence(
   if (terminalTaskStatus) return terminalTaskStatus;
 
   const terminalSessionStatus = progressForTerminalState(primarySessionState);
-  if (terminalSessionStatus) return terminalSessionStatus;
+  // A task that has explicitly returned to its pre-start state can still
+  // retain the terminal session that belonged to its previous step. The task
+  // projection owns that placement, so do not paint the new step as terminal.
+  const taskIsNotStarted = taskState === "CREATED" || taskState === "TODO";
+  if (terminalSessionStatus && !taskIsNotStarted) return terminalSessionStatus;
 
   if (cancellationPending) return "cancelling";
   if (taskState === "SCHEDULING") return "preparing";
@@ -270,22 +288,54 @@ export function useWorkflowStepProgress({
   currentStepId,
   movingToStepId,
   taskProjection,
+  preferTaskProjection = false,
+  useSessionProjection = true,
 }: {
   taskId?: string | null;
   currentStepId?: string | null;
   movingToStepId?: string | null;
   taskProjection?: WorkflowProgressTaskProjection | null;
+  preferTaskProjection?: boolean;
+  useSessionProjection?: boolean;
 }) {
   const taskFromStore = useAppStore(useCallback((state) => findTaskById(state, taskId), [taskId]));
-  const task = taskFromStore ?? taskProjection ?? null;
-  const sessionsById = useAppStore((state) => state.taskSessions.items);
+  const task =
+    (preferTaskProjection
+      ? (taskProjection ?? taskFromStore)
+      : (taskFromStore ?? taskProjection)) ?? null;
+  const projectedSessionIdValue = task ? projectedSessionId(task) : null;
+  const primarySession = useAppStore(
+    useCallback(
+      (state) => {
+        if (!useSessionProjection || !taskId) return null;
+        if (projectedSessionIdValue) {
+          const session = state.taskSessions.items[projectedSessionIdValue];
+          return isSessionForTask(session, taskId) ? session : null;
+        }
+        const sessionsForTask = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
+        const candidates = new Map<string, WorkflowProgressSessionProjection>();
+        for (const session of sessionsForTask) {
+          if (session.task_id === taskId && session.is_primary) candidates.set(session.id, session);
+        }
+        for (const session of Object.values(state.taskSessions.items)) {
+          if (session.task_id === taskId && session.is_primary) candidates.set(session.id, session);
+        }
+        return candidates.size === 1 ? (candidates.values().next().value ?? null) : null;
+      },
+      [projectedSessionIdValue, taskId, useSessionProjection],
+    ),
+  );
+  const sessionsById = useMemo(
+    () => (primarySession ? { [primarySession.id]: primarySession } : EMPTY_SESSIONS_BY_ID),
+    [primarySession],
+  );
   const sessionsForTask = useAppStore(
     useCallback(
       (state) =>
-        taskId
+        useSessionProjection && taskId
           ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS_FOR_TASK)
           : EMPTY_SESSIONS_FOR_TASK,
-      [taskId],
+      [taskId, useSessionProjection],
     ),
   );
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
@@ -297,8 +347,9 @@ export function useWorkflowStepProgress({
         sessionsById,
         sessionsForTask,
         agentProfiles,
+        preferTaskProjection,
       }),
-    [agentProfiles, sessionsById, sessionsForTask, task],
+    [agentProfiles, preferTaskProjection, sessionsById, sessionsForTask, task],
   );
 
   const agentLabelsByProfileId = useMemo(

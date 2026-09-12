@@ -1546,6 +1546,7 @@
   "stepFieldLabel": "步驟",
   "stepNumber": "步驟 {{index}}",
   "stepOf": "步驟 {{stepNumber}} / {{totalSteps}}：{{stepLabel}}",
+  "stepOfWithStatus": "步驟 {{stepNumber}} / {{totalSteps}}：{{stepLabel}}，{{status}}",
   "stillWorkingSubjectMany": "其中一個或多個任務仍在工作",
   "stillWorkingSubjectOne": "此任務仍在工作",
   "stillWorkingWarning": "{{subject}}；代理程式正在產生或執行後台工作。現在繼續將丟棄仍在進行的工作。",

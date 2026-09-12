@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useRef, useState } from "react";
 import { cn } from "@kandev/ui/lib/utils";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import { IconAdjustments, IconArrowRight } from "@tabler/icons-react";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
@@ -34,6 +34,7 @@ import {
   workflowStepProgressTranslationKey,
 } from "./workflow-step-progress-details";
 import { StepCircleIndicator } from "./workflow-step-marker";
+import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 
 type Step = WorkflowStepperStep;
 
@@ -186,6 +187,7 @@ function WorkflowStepItem({
     isAdjacent,
     allowManualMove: step.allow_manual_move,
   });
+  const hover = useHoverPopover({ openDelayMs: 200, closeDelayMs: 100 });
 
   return (
     <div className="flex items-center">
@@ -195,8 +197,8 @@ function WorkflowStepItem({
           testId={`workflow-step-connector-${step.id}`}
         />
       )}
-      <HoverCard openDelay={200} closeDelay={100}>
-        <HoverCardTrigger asChild>
+      <Popover open={hover.open} onOpenChange={hover.onOpenChange}>
+        <PopoverTrigger asChild>
           <button
             type="button"
             data-testid={`workflow-step-${step.name}`}
@@ -205,6 +207,14 @@ function WorkflowStepItem({
               "m-0 flex items-center gap-1.5 rounded-md border-0 bg-transparent p-0 px-2 py-0.5 text-left text-xs whitespace-nowrap transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
             )}
+            onMouseEnter={hover.onTriggerEnter}
+            onMouseMove={hover.onTriggerEnter}
+            onPointerEnter={hover.onTriggerEnter}
+            onPointerMove={hover.onTriggerEnter}
+            onFocus={hover.onTriggerEnter}
+            onMouseLeave={hover.onTriggerLeave}
+            onPointerLeave={hover.onTriggerLeave}
+            onBlur={hover.onTriggerLeave}
           >
             <StepCircleIndicator
               isCurrent={isCurrent}
@@ -216,7 +226,7 @@ function WorkflowStepItem({
               {step.name}
             </span>
           </button>
-        </HoverCardTrigger>
+        </PopoverTrigger>
         <StepHoverContent
           step={step}
           isCurrent={isCurrent}
@@ -225,8 +235,9 @@ function WorkflowStepItem({
           progress={progress}
           agentLabelsByProfileId={agentLabelsByProfileId}
           onMove={onMove}
+          hover={hover}
         />
-      </HoverCard>
+      </Popover>
     </div>
   );
 }
@@ -250,6 +261,7 @@ function StepHoverContent({
   progress,
   agentLabelsByProfileId,
   onMove,
+  hover,
 }: {
   step: Step;
   isCurrent: boolean;
@@ -258,14 +270,24 @@ function StepHoverContent({
   progress?: WorkflowStepProgress;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+  hover: ReturnType<typeof useHoverPopover>;
 }) {
   const { t } = useTranslation();
   return (
-    <HoverCardContent
+    <PopoverContent
       side="bottom"
       align="center"
       data-testid="workflow-step-popover"
       className="p-1.5 flex flex-col gap-1.5 items-center w-auto min-w-28 max-w-[calc(100vw-1rem)]"
+      onMouseEnter={hover.onContentEnter}
+      onMouseMove={hover.onContentEnter}
+      onPointerEnter={hover.onContentEnter}
+      onPointerMove={hover.onContentEnter}
+      onMouseLeave={hover.onContentLeave}
+      onPointerLeave={hover.onContentLeave}
+      onFocusCapture={hover.onContentEnter}
+      onBlurCapture={hover.onContentLeave}
+      onOpenAutoFocus={(event) => event.preventDefault()}
     >
       {canMove && <StepMoveControls step={step} isMoving={isMoving} onMove={onMove} />}
       {isCurrent && (
@@ -280,7 +302,7 @@ function StepHoverContent({
         />
       )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
-    </HoverCardContent>
+    </PopoverContent>
   );
 }
 

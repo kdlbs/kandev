@@ -243,6 +243,36 @@ describe("useWorkflowStepMove deferred progress cleanup", () => {
     });
     expect(result.current.progressingToStepId).toBeNull();
   });
+
+  it("keeps the latest destination while the projection reports an older accepted target", async () => {
+    vi.mocked(moveTask).mockResolvedValue({} as Awaited<ReturnType<typeof moveTask>>);
+    const { result, rerender } = renderHook(
+      ({ currentStepId }: { currentStepId: string }) =>
+        useWorkflowStepMove({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          currentStepId,
+          presentationToken: 0,
+        }),
+      { initialProps: { currentStepId: "step-a" } },
+    );
+
+    await act(async () => {
+      await result.current.handleMove("step-b");
+    });
+
+    await act(async () => {
+      await result.current.handleMove("step-c");
+    });
+
+    // B is evidence for the earlier accepted request, not supersession of the
+    // newer A-to-C request. Keep C visible until its own projection arrives.
+    rerender({ currentStepId: "step-b" });
+    expect(result.current.progressingToStepId).toBe("step-c");
+
+    rerender({ currentStepId: "step-c" });
+    expect(result.current.progressingToStepId).toBeNull();
+  });
 });
 
 describe("useWorkflowStepMove presentation token handling", () => {

@@ -34,6 +34,17 @@ vi.mock("@kandev/ui/hover-card", () => ({
   HoverCardContent: Passthrough,
 }));
 
+vi.mock("@/components/integrations/use-hover-popover", () => ({
+  useHoverPopover: () => ({
+    open: true,
+    onOpenChange: vi.fn(),
+    onTriggerEnter: vi.fn(),
+    onTriggerLeave: vi.fn(),
+    onContentEnter: vi.fn(),
+    onContentLeave: vi.fn(),
+  }),
+}));
+
 // The stepper only threads the shared move-options draft through the hover
 // popover; the fields themselves are covered by the form's own tests.
 vi.mock("./workflow-move-options", () => ({
@@ -142,7 +153,7 @@ const DISCLOSURE_TEST_ID = "workflow-step-disclosure";
 const MOVE_A_TEST_ID = "workflow-step-disclosure-move-a";
 const MOVE_C_TEST_ID = "workflow-step-disclosure-move-c";
 const MOVE_D_TEST_ID = "workflow-step-disclosure-move-d";
-const TRIGGER_LABEL = "Step 2 of 4: Work";
+const TRIGGER_LABEL = /Step 2 of 4: Work/;
 const SPEC_TEST_ID = "workflow-step-Spec";
 const ARIA_CURRENT = "aria-current";
 const WORK_TEST_ID = "workflow-step-Work";

@@ -105,5 +105,9 @@ function useTaskMoveProgress(task: TaskContextMenuItemsProps["task"], actingOnSe
     taskId: actingOnSelection ? null : task.id,
     currentStepId: actingOnSelection ? null : task.workflowStepId,
     taskProjection,
+    // Context menus render the bounded task-row projection. Session caches
+    // belong to the task detail surface and may still describe an older step.
+    preferTaskProjection: true,
+    useSessionProjection: false,
   });
 }

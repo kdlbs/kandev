@@ -186,34 +186,40 @@ function StepChoices({
   agentLabelsByProfileId: Readonly<Record<string, string>>;
 }) {
   const { t } = useTranslation();
-  return steps.map((step) => (
-    <Choice
-      key={step.id}
-      testId={`task-context-step-${step.id}`}
-      disabled={disabled || step.id === currentStepId}
-      onClick={() => onSelect(step.id)}
-    >
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{step.title}</span>
-          {step.id === currentStepId && (
-            <span className="shrink-0 text-xs text-muted-foreground">{t("task:current2")}</span>
-          )}
-          {stepHasAutoStart(step) && (
-            <span className="shrink-0 text-xs text-muted-foreground">{t("task:autoStart")}</span>
-          )}
-        </span>
-        {progressByStepId[step.id] && (
+  return steps.map((step) => {
+    const progress = progressByStepId[step.id];
+    return (
+      <div key={step.id} className="min-w-0">
+        <Choice
+          testId={`task-context-step-${step.id}`}
+          disabled={disabled || step.id === currentStepId}
+          onClick={() => onSelect(step.id)}
+        >
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{step.title}</span>
+              {step.id === currentStepId && (
+                <span className="shrink-0 text-xs text-muted-foreground">{t("task:current2")}</span>
+              )}
+              {stepHasAutoStart(step) && (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {t("task:autoStart")}
+                </span>
+              )}
+            </span>
+          </span>
+        </Choice>
+        {progress && (
           <StepProgressDetails
-            progress={progressByStepId[step.id]}
+            progress={progress}
             agentProfileId={step.agent_profile_id ?? undefined}
             agentLabelsByProfileId={agentLabelsByProfileId}
             testId={`task-context-step-progress-${step.id}`}
           />
         )}
-      </span>
-    </Choice>
-  ));
+      </div>
+    );
+  });
 }
 
 function PriorityChoices({ task, disabled, onPriority }: TaskManagementDrawerProps) {
@@ -412,6 +418,10 @@ export function TaskManagementDrawer(props: TaskManagementDrawerProps) {
       primarySessionId: props.task.primarySessionId,
       primarySessionState: props.task.sessionState,
     },
+    // The drawer receives the bounded task-row projection. Prefer its current
+    // lifecycle over a stale rich session cache, while still using a loaded
+    // primary session for cancellation_pending when that projection exists.
+    preferTaskProjection: true,
   });
   const [page, setPage] = useState<Page>("root");
   const [focusChoiceId, setFocusChoiceId] = useState<string>();

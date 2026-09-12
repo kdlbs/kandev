@@ -1,8 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { moveTask } from "@/lib/api";
 import { WorkflowStepper, type WorkflowStepperStep } from "./workflow-stepper";
 
-const { appStoreState } = vi.hoisted(() => ({
+const { appStoreState, moveTaskMock } = vi.hoisted(() => ({
+  moveTaskMock: vi.fn(),
   appStoreState: {
     tasks: { activeSessionId: null },
     chatInput: { planModeBySessionId: {} },
@@ -24,9 +26,7 @@ const { appStoreState } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/lib/api", () => ({
-  moveTask: vi.fn(),
-}));
+vi.mock("@/lib/api", () => ({ moveTask: moveTaskMock }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appStoreState) => unknown) => selector(appStoreState),
@@ -108,5 +108,35 @@ describe("WorkflowStepper full-layout keyboard disclosure", () => {
         "Preparing agent",
       );
     });
+  });
+
+  it("keeps the full disclosure open while focusing and activating Move here", async () => {
+    moveTaskMock.mockResolvedValue({});
+    render(
+      <WorkflowStepper
+        steps={STEPS}
+        currentStepId="work"
+        taskId="task-1"
+        workflowId="workflow-1"
+      />,
+    );
+
+    const destinationTrigger = screen.getByTestId("workflow-step-Review");
+    destinationTrigger.focus();
+    const moveButton = await screen.findByTestId("workflow-step-move-here");
+
+    moveButton.focus();
+    expect(document.activeElement).toBe(moveButton);
+    fireEvent.keyDown(moveButton, { key: "Enter", code: "Enter" });
+    fireEvent.keyUp(moveButton, { key: "Enter", code: "Enter" });
+    moveButton.click();
+
+    await waitFor(() =>
+      expect(moveTask).toHaveBeenCalledWith("task-1", {
+        workflow_id: "workflow-1",
+        workflow_step_id: "review",
+        position: 0,
+      }),
+    );
   });
 });

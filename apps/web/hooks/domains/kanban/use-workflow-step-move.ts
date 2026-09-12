@@ -89,10 +89,16 @@ function shouldClearProgressMove(
   move: ProgressMove,
   currentStepId: string | null | undefined,
   taskState: string | null | undefined,
+  priorMoveTargets: ReadonlyMap<number, string>,
 ): boolean {
   if (taskState && TERMINAL_TASK_STATES.has(taskState)) return true;
   if (currentStepId === move.targetStepId) return true;
-  return Boolean(move.sourceStepId && currentStepId && currentStepId !== move.sourceStepId);
+  return Boolean(
+    move.sourceStepId &&
+    currentStepId &&
+    currentStepId !== move.sourceStepId &&
+    !Array.from(priorMoveTargets.values()).includes(currentStepId),
+  );
 }
 
 /**
@@ -121,6 +127,7 @@ export function useWorkflowStepMove({
   const moveRequestRef = useRef(0);
   const tokenRef = useRef(presentationToken);
   const progressMoveRef = useRef<ProgressMove | null>(null);
+  const priorMoveTargetsRef = useRef(new Map<number, string>());
 
   // Invalidate synchronously in the render that changes `presentationToken`,
   // not in a passive effect: a `moveTask` rejection can reach its `catch`
@@ -132,15 +139,22 @@ export function useWorkflowStepMove({
     // it replaced, and starts with no disabled control of its own.
     moveRequestRef.current += 1;
     progressMoveRef.current = null;
+    priorMoveTargetsRef.current.clear();
     setMovingToStepId(null);
     setProgressingToStepId(null);
   }
   if (
     progressingToStepId &&
     progressMoveRef.current &&
-    shouldClearProgressMove(progressMoveRef.current, currentStepId, taskState)
+    shouldClearProgressMove(
+      progressMoveRef.current,
+      currentStepId,
+      taskState,
+      priorMoveTargetsRef.current,
+    )
   ) {
     progressMoveRef.current = null;
+    priorMoveTargetsRef.current.clear();
     setMovingToStepId(null);
     setProgressingToStepId(null);
   }
@@ -151,6 +165,12 @@ export function useWorkflowStepMove({
       onMoveStart?.();
       disablePlanMode();
       const requestId = ++moveRequestRef.current;
+      if (progressMoveRef.current) {
+        priorMoveTargetsRef.current.set(
+          progressMoveRef.current.requestId,
+          progressMoveRef.current.targetStepId,
+        );
+      }
       progressMoveRef.current = {
         requestId,
         sourceStepId: currentStepId ?? null,
@@ -170,8 +190,11 @@ export function useWorkflowStepMove({
         console.error("[useWorkflowStepMove] Failed to move task:", err);
         if (requestId === moveRequestRef.current) {
           progressMoveRef.current = null;
+          priorMoveTargetsRef.current.clear();
           setProgressingToStepId(null);
           onMoveError?.(err);
+        } else {
+          priorMoveTargetsRef.current.delete(requestId);
         }
         return false;
       } finally {

@@ -44,6 +44,9 @@ Clear an accepted move target when authoritative task state shows a direct
 supersession or a terminal outcome, while retaining late-response ownership
 guards. Carry existing `cancellation_pending` evidence through lifecycle
 derivation so it overrides obsolete startup progress.
+Use the existing controlled Popover primitive for the full stepper so focus can
+move from a step trigger into its disclosure without losing the lifecycle
+details or move controls.
 Use actual runtime model metadata only when available; otherwise show the known profile name.
 
 ## ASCII UI preview
@@ -104,12 +107,12 @@ These structures are required by AC .2-.4 and .10; example names and text wrappi
 
 ## Tests
 
-| Criteria | Evidence |
-| --- | --- |
-| .1, .5-.9 | New `use-workflow-step-progress.test.ts`: lifecycle table, request-settlement transition through SCHEDULING/STARTING/RUNNING, current primary ownership, unloaded sessions, no-auto-start, failure/cancellation, terminal precedence, reload snapshots |
-| .7, .8 | `use-workflow-step-move.test.ts`: late rejection, overlapping request, task switch, close/reopen identity, direct supersession, terminal cleanup, and late-response ownership |
-| .2-.4, .10, .11 | `workflow-stepper.test.tsx` and `workflow-stepper-keyboard.test.tsx`: marker and painted-size state, current-card details after move, controls preserved, reduced motion, full-layout keyboard focus, cancellation/failure disclosure |
-| .1-.4, .8 | `task-preview-panel-step-indicator.test.tsx`: shared preview progress and stale presentation protection |
+| Criteria        | Evidence                                                                                                                                                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| .1, .5-.9       | New `use-workflow-step-progress.test.ts`: lifecycle table, request-settlement transition through SCHEDULING/STARTING/RUNNING, current primary ownership, unloaded sessions, no-auto-start, failure/cancellation, terminal precedence, reload snapshots |
+| .7, .8          | `use-workflow-step-move.test.ts`: late rejection, overlapping request, task switch, close/reopen identity, direct supersession, terminal cleanup, and late-response ownership                                                                          |
+| .2-.4, .10, .11 | `workflow-stepper.test.tsx` and `workflow-stepper-keyboard.test.tsx`: marker and painted-size state, current-card details after move, controls preserved, reduced motion, full-layout keyboard focus, cancellation/failure disclosure                  |
+| .1-.4, .8       | `task-preview-panel-step-indicator.test.tsx`: shared preview progress and stale presentation protection                                                                                                                                                |
 
 All numbers refer to `AC-TASKS-WORKFLOW-STEP-PROGRESS-001`. Add any new component test files to the work order's command before completion.
 
@@ -137,13 +140,14 @@ Design validation on 2026-09-12:
 - `git diff --check -- docs/specs docs/plans/workflow-step-progress`: passed.
 - `git status --short -- docs/specs docs/plans/workflow-step-progress`: confirmed the new requirement, design, and plan directory.
 
-Implementation is complete and the package remains uncommitted. Final evidence:
+Implementation and review remediation are complete and committed on the feature branch. Final evidence:
 
-- `pnpm exec vitest run hooks/domains/kanban/use-workflow-step-progress.test.ts hooks/domains/kanban/use-workflow-step-move.test.ts components/task/workflow-stepper.test.tsx components/task/workflow-stepper-keyboard.test.tsx components/task-preview-panel-step-indicator.test.tsx`: 5 files, 62 tests passed.
+- `pnpm exec vitest run hooks/domains/kanban/use-workflow-step-progress.test.ts hooks/domains/kanban/use-workflow-step-move.test.ts components/task/workflow-stepper.test.tsx components/task/workflow-stepper-keyboard.test.tsx components/task/task-management-drawer.test.tsx components/task/mobile/session-task-switcher-sheet.test.tsx`: 6 files, 65 tests passed.
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`: passed.
 - `pnpm run build:e2e`: passed.
 - Desktop Chromium E2E for task top-bar, preview navigation, and workflow progress: 8 tests passed.
 - Mobile Chromium E2E for the phone Move to drawer: 1 test passed.
+- Focused review coverage also verifies ambiguous primary-session ownership, bounded task-summary precedence, stale terminal-session suppression after a return to TODO, cancellation before terminal settlement, overlapping accepted destinations, and a real full-layout Popover focus and move activation path.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, `node --test scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`, and `git diff --check`: passed.
 
 ## Risks

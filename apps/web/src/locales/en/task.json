@@ -1604,6 +1604,7 @@
   "stepFieldLabel": "step",
   "stepNumber": "Step {{index}}",
   "stepOf": "Step {{stepNumber}} of {{totalSteps}}: {{stepLabel}}",
+  "stepOfWithStatus": "Step {{stepNumber}} of {{totalSteps}}: {{stepLabel}}, {{status}}",
   "stillWorkingSubjectMany": "One or more of these tasks are still working",
   "stillWorkingSubjectOne": "This task is still working",
   "stillWorkingWarning": "{{subject}}; an agent is generating or running background work. Proceeding now discards work that is still in progress.",

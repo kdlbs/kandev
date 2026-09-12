@@ -175,12 +175,15 @@ request and presentation. The progress resolver carries the existing primary
 session `cancellation_pending` evidence and reports an explicit stopping state
 before terminal cancellation. Non-current spinners keep the 8px painted and
 in-flow bounds; the current marker keeps its existing 14px decoration. The
-full stepper trigger is keyboard-focusable and opens the existing HoverCard.
+full stepper trigger is keyboard-focusable and opens the existing controlled
+Popover without closing as focus enters its move controls.
 
 Focused coverage includes request settlement through SCHEDULING, STARTING,
 and RUNNING; no-auto-start; failure and cancellation; direct supersession;
-terminal cleanup; stale response ownership; marker, label, and connector
-geometry; reduced motion; and the full hover card after the destination becomes
+terminal cleanup; stale response ownership; ambiguous primary-session
+ownership; bounded task-summary precedence; stale terminal-session suppression;
+marker, label, and connector geometry; reduced motion; the disabled phone
+choice status boundary; and the full Popover after the destination becomes
 current. The desktop browser suite holds the move request, verifies the 8px
 SVG bounds and stable layout, then completes the move and checks the current
 destination disclosure. The mobile browser test verifies the existing phone
@@ -188,7 +191,7 @@ Move to drawer and touch dimensions.
 
 Final verification passed:
 
-- Focused Vitest: 5 files, 62 tests.
+- Focused Vitest: 6 files, 65 tests.
 - `pnpm run typecheck`, full `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`.
 - `pnpm run build:e2e`.
 - Desktop Chromium E2E: 8 tests across top-bar, preview, and workflow-progress suites.
