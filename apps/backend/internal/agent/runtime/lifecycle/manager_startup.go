@@ -183,7 +183,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
-	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID, executionAdmissionAgent); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		return err
 	}

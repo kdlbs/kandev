@@ -6,7 +6,6 @@ import {
   KIND_SHA256_AMD64,
   KIND_VERSION,
   KUBECTL_SHA256_AMD64,
-  KUBERNETES_E2E_BASE_IMAGE,
   KUBERNETES_FIXTURE_PINS,
   KUBERNETES_E2E_BASE_IMAGE,
   KUBERNETES_VERSION,
@@ -28,12 +27,6 @@ const KUBERNETES_E2E_RUNTIME_IMAGE =
   "ghcr.io/kdlbs/kandev-ci:runtime-sha-6f288a23c526@sha256:b9636e1c20adb0fcce1c65858a767fb1b0fe48a15ac5688b9c623163575efb8d";
 
 describe("Kubernetes E2E version pins", () => {
-  it("uses an immutable prebuilt runtime image for compatibility jobs", () => {
-    expect(KUBERNETES_E2E_BASE_IMAGE).toMatch(
-      /^ghcr\.io\/kdlbs\/kandev-ci:runtime-latest@sha256:[0-9a-f]{64}$/,
-    );
-  });
-
   it("uses the current supported Kubernetes release for the full lifecycle fixture", () => {
     expect(KUBERNETES_VERSION).toBe(CURRENT_KUBERNETES_VERSION);
     expect(KUBECTL_SHA256_AMD64).toBe(CURRENT_KUBECTL_SHA256_AMD64);

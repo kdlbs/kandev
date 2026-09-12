@@ -805,7 +805,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
-	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
 	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd, rt.StripEnv)
@@ -1081,7 +1081,7 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 	// to a process it doesn't know about yet.
 	startReq := buildInteractiveStartRequest(sessionID, execution, resolved.pt, env, cmd, resolved.rt.StripEnv, true)
 
-	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
 	processInfo, err := interactiveRunner.Start(ctx, startReq)

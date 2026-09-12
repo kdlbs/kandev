@@ -33,6 +33,9 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 	if err := validateWorkspaceAdmission(taskID, info, snapshot); err != nil {
 		return err
 	}
+	if err := m.ensureWorkspaceTaskAdmission(ctx, snapshot.session); err != nil {
+		return err
+	}
 	if err := m.ensureWorkspaceCleanupInactive(ctx, taskID, snapshot); err != nil {
 		return err
 	}
@@ -42,6 +45,9 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 		return fmt.Errorf("reverify workspace admission: %w", err)
 	}
 	if err := validateWorkspaceAdmission(taskID, info, latest); err != nil {
+		return fmt.Errorf("reverify workspace admission: %w", err)
+	}
+	if err := m.ensureWorkspaceTaskAdmission(ctx, latest.session); err != nil {
 		return fmt.Errorf("reverify workspace admission: %w", err)
 	}
 	return nil
