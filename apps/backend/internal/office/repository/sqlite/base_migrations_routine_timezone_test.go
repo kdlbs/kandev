@@ -84,6 +84,63 @@ func TestBackfillRoutineTriggerTimezones_LegacyEmptyTimezoneBecomesUTC(t *testin
 	}
 }
 
+func TestBackfillRoutineTriggerTimezones_ReportsUpdateFailure(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("settings store init: %v", err)
+	}
+
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("first init: %v", err)
+	}
+
+	routine := &models.Routine{
+		WorkspaceID:       "ws-1",
+		Name:              "Legacy Cron Failure",
+		TaskTemplate:      "{}",
+		Status:            "active",
+		ConcurrencyPolicy: "skip_if_active",
+		Variables:         "{}",
+	}
+	if err := repo.CreateRoutine(context.Background(), routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	trigger := &models.RoutineTrigger{
+		RoutineID:      routine.ID,
+		Kind:           "cron",
+		CronExpression: "0 9 * * *",
+		Timezone:       "",
+		Enabled:        true,
+	}
+	if err := repo.CreateRoutineTrigger(context.Background(), trigger); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE office_routine_triggers SET timezone = '' WHERE id = ?`, trigger.ID); err != nil {
+		t.Fatalf("simulate legacy empty timezone: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TRIGGER fail_routine_timezone_backfill
+		BEFORE UPDATE OF timezone ON office_routine_triggers
+		WHEN OLD.id = NEW.id AND OLD.timezone = '' AND NEW.timezone = 'UTC'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected backfill failure');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	if _, err := sqlite.NewWithDB(db, db, nil); err == nil {
+		t.Fatal("migration replay succeeded after timezone backfill failure")
+	}
+}
+
 // TestBackfillRoutineTriggerTimezones_LeavesNonEmptyAndNonCronAlone verifies
 // the backfill only touches cron triggers with an empty timezone, not a
 // deliberately-set timezone or a non-cron (webhook/manual) trigger kind.

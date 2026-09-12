@@ -78,45 +78,85 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 // genuinely matching slot. matchesWallClock cannot recover this on its own
 // because it only validates candidates schedule.Next actually returns.
 //
-// This rescans (after, candidate) at minute granularity, but only when that
-// interval contains such a transition, so no other zone's candidate path
-// pays for the scan.
+// This rescans only the local days around each affected transition at minute
+// granularity, so a sparse schedule cannot turn the shared scheduler tick
+// into a multi-year scan.
 func findEarlierMatchAcrossSubHourTransition(spec *cron.SpecSchedule, loc *time.Location, after, candidate time.Time) (time.Time, bool) {
-	if spec == nil || !intervalHasSubHourTransition(loc, after, candidate) {
+	if spec == nil {
 		return time.Time{}, false
 	}
-	t := after.Truncate(time.Minute)
-	if !t.After(after) {
-		t = t.Add(time.Minute)
-	}
-	for t.Before(candidate) {
-		if !isAmbiguousFallBack(t) && matchesWallClock(spec, t) {
-			return t, true
-		}
-		t = t.Add(time.Minute)
-	}
-	return time.Time{}, false
-}
 
-// intervalHasSubHourTransition reports whether (after, candidate) contains a
-// zone transition whose offset delta is not a whole number of hours, e.g.
-// the 30-minute Australia/Lord_Howe shift.
-func intervalHasSubHourTransition(loc *time.Location, after, candidate time.Time) bool {
-	t := after.In(loc)
-	for {
-		_, end := t.ZoneBounds()
-		if end.IsZero() || !end.Before(candidate) {
-			return false
-		}
-		delta := zoneOffsetAt(end) - zoneOffsetAt(end.Add(-time.Second))
+	var earlier time.Time
+	found := walkZoneTransitions(loc, after, candidate, func(transition time.Time) bool {
+		delta := zoneOffsetAt(transition) - zoneOffsetAt(transition.Add(-time.Second))
 		if delta < 0 {
 			delta = -delta
 		}
-		if delta%3600 != 0 {
+		if delta%3600 == 0 {
+			return false
+		}
+
+		windowStart, windowEnd := transitionDayWindow(loc, transition)
+		t := after.Truncate(time.Minute)
+		if !t.After(after) {
+			t = t.Add(time.Minute)
+		}
+		if t.Before(windowStart) {
+			t = windowStart
+		}
+		if candidate.Before(windowEnd) {
+			windowEnd = candidate
+		}
+		for t.Before(windowEnd) {
+			if !isAmbiguousFallBack(t) && matchesWallClock(spec, t) {
+				earlier = t
+				return true
+			}
+			t = t.Add(time.Minute)
+		}
+		return false
+	})
+	return earlier, found
+}
+
+const maxZoneTransitionHops = 512
+
+// walkZoneTransitions visits each transition strictly between after and
+// candidate. Some TZif files use a POSIX extension whose ZoneBounds result
+// can stop advancing at a leap-year boundary, so a non-progressing result is
+// advanced to the next local year before the next lookup. The hop limit is a
+// final guard against malformed or unexpectedly long timezone data.
+func walkZoneTransitions(loc *time.Location, after, candidate time.Time, visit func(time.Time) bool) bool {
+	if loc == nil || visit == nil || !after.Before(candidate) {
+		return false
+	}
+	t := after.In(loc)
+	for hops := 0; hops < maxZoneTransitionHops; hops++ {
+		_, transition := t.ZoneBounds()
+		if transition.IsZero() || !transition.Before(candidate) {
+			return false
+		}
+		if !transition.After(t) {
+			nextYear := time.Date(t.Year()+1, time.January, 1, 0, 0, 0, 0, loc)
+			if !nextYear.After(t) {
+				return false
+			}
+			t = nextYear
+			continue
+		}
+		if visit(transition) {
 			return true
 		}
-		t = end
+		t = transition
 	}
+	return false
+}
+
+func transitionDayWindow(loc *time.Location, transition time.Time) (time.Time, time.Time) {
+	local := transition.In(loc)
+	start := time.Date(local.Year(), local.Month(), local.Day()-1, 0, 0, 0, 0, loc)
+	end := time.Date(local.Year(), local.Month(), local.Day()+2, 0, 0, 0, 0, loc)
+	return start, end
 }
 
 func zoneOffsetAt(t time.Time) int {
