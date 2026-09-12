@@ -265,6 +265,10 @@ export type SessionBackendMessageMap = {
   >;
   "session.turn.started": BackendMessage<"session.turn.started", TurnEventPayload>;
   "session.turn.completed": BackendMessage<"session.turn.completed", TurnEventPayload>;
+  "session.turn.removed": BackendMessage<
+    "session.turn.removed",
+    { id: string; session_id: string; task_id: string }
+  >;
   "session.available_commands": BackendMessage<
     "session.available_commands",
     AvailableCommandsPayload

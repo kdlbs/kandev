@@ -124,7 +124,8 @@ type Services struct {
 	// Plugins is the extensible plugin system service (registration
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
-	Plugins *plugins.Service
+	Plugins        *plugins.Service
+	PluginsCleanup func() error
 	// Canvas is the gated lifecycle service for agent-authored plugin web
 	// applications. It is nil while features.canvases is disabled.
 	Canvas *canvasservice.Service

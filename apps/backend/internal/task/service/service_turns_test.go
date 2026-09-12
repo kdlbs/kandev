@@ -253,6 +253,10 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	if _, err := repo.GetTurn(ctx, rejected.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("GetTurn(rolled back) error = %v, want sql.ErrNoRows", err)
 	}
+	removedEvents := eventBus.GetPublishedEvents()
+	if len(removedEvents) != 1 || removedEvents[0].Type != events.TurnRemoved {
+		t.Fatalf("rollback events = %#v, want one turn.removed event", removedEvents)
+	}
 
 	accepted, err := svc.ReserveTurn(ctx, sessionID, recovery)
 	if err != nil {

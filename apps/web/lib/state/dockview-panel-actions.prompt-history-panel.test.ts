@@ -77,7 +77,7 @@ describe("scrollTranscriptToMessage", () => {
     const store = makeStore(api);
     const actions = buildExtraPanelActions(store.set, store.get);
 
-    actions.scrollTranscriptToMessage(SESSION_ID, MESSAGE_ID, "Agent");
+    const queued = actions.scrollTranscriptToMessage(SESSION_ID, MESSAGE_ID, "Agent");
 
     expect(api.getPanel(`session:${SESSION_ID}`)).toMatchObject({ api: { component: "chat" } });
     expect(store.state.scrollTarget).toMatchObject({
@@ -85,6 +85,18 @@ describe("scrollTranscriptToMessage", () => {
       messageId: MESSAGE_ID,
       hostPanelId: `session:${SESSION_ID}`,
     });
+    expect(queued).toBe(true);
+  });
+
+  it("reports unavailable when no dockview host can queue navigation", () => {
+    const store = makeStore(makeApi());
+    store.state.api = null;
+    const actions = buildExtraPanelActions(store.set, store.get);
+
+    const queued = actions.scrollTranscriptToMessage(SESSION_ID, MESSAGE_ID, "Agent");
+
+    expect(queued).toBe(false);
+    expect(store.state.scrollTarget).toBeNull();
   });
 
   it("focuses an existing session panel instead of adding a second tab", () => {
@@ -125,7 +137,9 @@ describe("scrollTranscriptToMessage", () => {
     expect((api.getPanel("chat") as unknown as { isActive: boolean }).isActive).toBe(true);
     expect(store.state.scrollTarget?.hostPanelId).toBe("chat");
   });
+});
 
+describe("scrollTranscriptToMessage target lifecycle", () => {
   it("activates the target panel before recording the target", () => {
     const api = makeApi();
     api.addPanel({

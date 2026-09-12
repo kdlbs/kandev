@@ -399,9 +399,16 @@ func seedForMsgTest(t *testing.T, repo *Repository, taskID, sessionID, turnID st
 	}
 	_, err = repo.db.Exec(repo.db.Rebind(`
 		INSERT OR IGNORE INTO task_sessions
-			(id, task_id, started_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`), sessionID, taskID, now, now)
+			(id, task_id, queue_incarnation_id, started_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), sessionID, taskID, "incarnation-"+sessionID, now, now)
+	if err != nil && strings.Contains(err.Error(), "no column named queue_incarnation_id") {
+		_, err = repo.db.Exec(repo.db.Rebind(`
+			INSERT OR IGNORE INTO task_sessions
+				(id, task_id, started_at, updated_at)
+			VALUES (?, ?, ?, ?)
+		`), sessionID, taskID, now, now)
+	}
 	if err != nil {
 		t.Fatalf("seed session %s: %v", sessionID, err)
 	}

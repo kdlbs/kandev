@@ -316,7 +316,9 @@ function findActiveClarification(
   messages: Message[],
   scope?: PendingClarificationScope,
 ): Message | undefined {
-  return findPendingClarification(messages, scope) ?? undefined;
+  const pending = findPendingClarification(messages, scope);
+  const metadata = pending?.metadata as ClarificationRequestMetadata | undefined;
+  return metadata?.agent_disconnected === true ? undefined : (pending ?? undefined);
 }
 
 function isClarificationVisible(

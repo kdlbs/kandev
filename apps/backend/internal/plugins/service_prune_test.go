@@ -248,6 +248,7 @@ func TestServiceInstallSaveFailurePrunesNothingAndRestartsPrevious(t *testing.T)
 	svc.SetPluginsDir(dir)
 	rt := newFakeRuntime()
 	svc.SetRuntime(rt)
+	t.Cleanup(func() { _ = svc.Close() })
 
 	installTestPlugin(t, svc, prunePluginID) // 1.0.0, active + running
 	seedVersionDir(t, dir, prunePluginID, "0.9.0")
@@ -320,6 +321,7 @@ func TestServiceInstallWithoutRuntimePrunesNothing(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewService(store.NewFSStore(dir), NewRegistry(), nil, testLogger(t))
 	svc.SetPluginsDir(dir)
+	t.Cleanup(func() { _ = svc.Close() })
 
 	for _, v := range []string{"1.0.0", "1.1.0", "1.2.0"} {
 		if _, err := svc.Install(context.Background(), testPackage(t, prunePluginID, v, false)); err != nil {
@@ -367,6 +369,7 @@ func TestConcurrentInstallsKeepBothExtractions(t *testing.T) {
 	svc := NewService(barrier, NewRegistry(), nil, testLogger(t))
 	svc.SetPluginsDir(dir)
 	svc.SetRuntime(newFakeRuntime())
+	t.Cleanup(func() { _ = svc.Close() })
 
 	// 1.0.0 must be a real installed record, so the first racing install
 	// treats it as its rollback target and 1.2.0 becomes a prune candidate.

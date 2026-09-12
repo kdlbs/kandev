@@ -168,10 +168,12 @@ const (
 	ActionWorkflowHistoryList  = "workflow.history.list"
 
 	// Subscription actions
-	ActionTaskSubscribe      = "task.subscribe"
-	ActionTaskUnsubscribe    = "task.unsubscribe"
-	ActionSessionSubscribe   = "session.subscribe"
-	ActionSessionUnsubscribe = "session.unsubscribe"
+	ActionTaskSubscribe        = "task.subscribe"
+	ActionTaskUnsubscribe      = "task.unsubscribe"
+	ActionSessionSubscribe     = "session.subscribe"
+	ActionSessionUnsubscribe   = "session.unsubscribe"
+	ActionSessionAck           = "session.ack"
+	ActionSessionPoisonRequeue = "session.event.poison.requeue"
 	// Focus signals are layered on top of subscriptions to indicate which
 	// session the user is actively viewing (task details page or task panel),
 	// vs merely subscribed (sidebar diff badges). Drives backend polling tier.
@@ -246,6 +248,7 @@ const (
 	ActionSessionMessageAdded           = "session.message.added"
 	ActionSessionMessageUpdated         = "session.message.updated"
 	ActionSessionMessageDeleted         = "session.message.deleted"
+	ActionSessionRemoved                = "session.removed"
 	ActionSessionStateChanged           = "session.state_changed"
 	ActionSessionPendingActionChanged   = "session.pending_action_changed"
 	ActionSessionActivityChanged        = "session.activity_changed"
@@ -256,6 +259,7 @@ const (
 	ActionSessionAgentctlError          = "session.agentctl_error"
 	ActionSessionTurnStarted            = "session.turn.started"
 	ActionSessionTurnCompleted          = "session.turn.completed"
+	ActionSessionTurnRemoved            = "session.turn.removed"
 	ActionSessionAvailableCommands      = "session.available_commands"
 	ActionSessionModeChanged            = "session.mode_changed"
 	ActionSessionAgentCapabilities      = "session.agent_capabilities"

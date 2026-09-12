@@ -59,6 +59,17 @@ func DateTimeOf(driver, expr string) string {
 	return fmt.Sprintf("datetime(%s)", expr)
 }
 
+// RFC3339Millis renders an ISO-8601 timestamp with millisecond precision.
+//
+//	SQLite:   strftime('%Y-%m-%dT%H:%M:%fZ', expr)
+//	Postgres: to_char(expr, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+func RFC3339Millis(driver, expr string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf(`to_char(%s, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`, expr)
+	}
+	return fmt.Sprintf(`strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', %s)`, expr)
+}
+
 // NaiveUTCTimestampOf normalizes a naive timestamp expression — one with NO
 // embedded zone information, but KNOWN to always hold UTC wall-clock values
 // (every `TIMESTAMP`-typed column in this codebase, written via

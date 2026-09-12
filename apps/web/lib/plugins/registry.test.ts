@@ -80,6 +80,26 @@ describe("pluginRegistry", () => {
     }
   });
 
+  it("rolls back translations and registrations when a staged atomic commit throws", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    scoped.registerTranslations({ en: { greeting: "Hello" } });
+    scoped.registerNavItem({ id: "nav-rollback", label: "A", path: "/rollback" });
+    expect(i18n.getResourceBundle("en", "plugin-plugin-a")?.greeting).toBe("Hello");
+
+    expect(() =>
+      pluginRegistry.runAtomicMutation(() => {
+        pluginRegistry.unregisterPlugin("plugin-a");
+        scoped.registerNavItem({ id: "nav-committed", label: "A", path: "/committed" });
+        scoped.registerTranslations({ en: { greeting: "Bye" } });
+        throw new Error("staged commit failed");
+      }),
+    ).toThrow("staged commit failed");
+
+    expect(i18n.getResourceBundle("en", "plugin-plugin-a")?.greeting).toBe("Hello");
+    expect(pluginRegistry.getNavItems().map((item) => item.id)).toContain("nav-rollback");
+    expect(pluginRegistry.getNavItems().map((item) => item.id)).not.toContain("nav-committed");
+  });
+
   it("registers and returns a nav item", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
 

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { i18n as I18n } from "i18next";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import {
   isKnownPanelId,
@@ -6,6 +7,7 @@ import {
   parsePluginPanelId,
   pluginPanelId,
   resolvePluginPanelDefinition,
+  resolveTaskPanelTitle,
 } from "./plugin-panels";
 
 afterEach(() => {
@@ -89,5 +91,32 @@ describe("resolvePluginPanelDefinition", () => {
 
   it("returns undefined for a malformed id", () => {
     expect(resolvePluginPanelDefinition("chat")).toBeUndefined();
+  });
+});
+
+describe("resolveTaskPanelTitle", () => {
+  it("uses the plugin namespace and falls back to the canonical English title", () => {
+    function Notes() {
+      return null;
+    }
+    pluginRegistry.forPlugin("plugin-a").registerTaskPanel({
+      id: "notes",
+      title: "Notes",
+      titleKey: "panels.notes",
+      Component: Notes,
+    });
+    const registration = pluginRegistry.getTaskPanel("plugin-a", "notes");
+    if (!registration) throw new Error("panel registration missing");
+    const translate = vi.fn(() => "Notas");
+
+    expect(
+      resolveTaskPanelTitle(registration, {
+        t: translate as unknown as I18n["t"],
+      }),
+    ).toBe("Notas");
+    expect(translate).toHaveBeenCalledWith("panels.notes", {
+      ns: "plugin-plugin-a",
+      defaultValue: "Notes",
+    });
   });
 });

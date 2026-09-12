@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- session hydration and lifecycle hooks share one transcript contract. */
 
 import { useEffect, useRef, type MutableRefObject } from "react";
+import { listTaskSessionMessages } from "@/lib/api/domains/session-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -24,10 +25,15 @@ import { t } from "@/lib/i18n";
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
 // Test seam: exported for direct unit coverage of hydration dedup/guards.
 export { ensureSessionTurnsLoaded } from "./use-session-turns-hydration";
-
 const INITIAL_FETCH_LIMIT = 100;
 const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
 const RUNNING_BACKFILL_INTERVAL_MS = 5000;
+const SETTLED_STATE_REFRESH_DELAY_MS = 1200;
+const TERMINAL_SESSION_STATES: Partial<Record<TaskSessionState, true>> = {
+  WAITING_FOR_INPUT: true,
+  COMPLETED: true,
+  FAILED: true,
+};
 
 // Monotonic guard against stale concurrent fetches. Each fetch claims an
 // increasing sequence number before awaiting; a completion only merges if no
@@ -291,6 +297,22 @@ async function fetchAndStoreMessages(
   // and message content from the return, so `merged` is equivalent.
   return merged;
 }
+async function fetchTerminalMessagesFromHttp(
+  sessionId: string,
+  store: ReturnType<typeof useAppStoreApi>,
+): Promise<Message[]> {
+  const response = await listTaskSessionMessages(sessionId, {
+    limit: INITIAL_FETCH_LIMIT,
+    sort: "desc",
+  });
+  const fetched = [...(response.messages ?? [])].reverse();
+  store.getState().mergeMessages(sessionId, fetched, {
+    historyInitialized: true,
+    hasMore: response.has_more ?? false,
+    oldestCursor: fetched[0]?.id ?? null,
+  });
+  return fetched;
+}
 /**
  * When the initial fetch window contains no user/agent message rows (common
  * when the latest turn produced hundreds of tool calls), the chat would render
@@ -299,6 +321,7 @@ async function fetchAndStoreMessages(
  * the user has no anchor to scroll from. Paginate backward via the same HTTP
  * endpoint `useLazyLoadMessages` uses until we span at least one user/agent
  * message or hit the page budget.
+
  */
 function useTerminalStateFetch(
   taskSessionId: string | null,
@@ -315,19 +338,33 @@ function useTerminalStateFetch(
   const lastFetchStateKeyRef = useRef<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
   useEffect(() => {
-    if (!taskSessionId || connectionStatus !== "connected") return;
-    if (!taskSessionState || hasAgentMessage) return;
-    const terminalStates = new Set<TaskSessionState>(["WAITING_FOR_INPUT", "COMPLETED", "FAILED"]);
-    if (!terminalStates.has(taskSessionState)) return;
+    if (!taskSessionId || connectionStatus !== "connected" || !taskSessionState) return;
+    if (!TERMINAL_SESSION_STATES[taskSessionState]) return;
+    if (taskSessionState !== "WAITING_FOR_INPUT" && hasAgentMessage) return;
     const key = `${taskSessionId}:${taskSessionState}`;
     if (lastFetchStateKeyRef.current === key) return;
     lastFetchStateKeyRef.current = key;
-    void doFetchMessages({
-      taskSessionId,
-      ...refs,
-      fetchAndStoreMessages,
-      onError: (error) => console.error("Failed to fetch messages after state change:", error),
-    });
+    const refresh = () => {
+      // Terminal-state refreshes must bypass SSR hydration. The server may
+      // persist clarification detachment immediately before publishing the
+      // settled state, while the boot snapshot still contains the pending row.
+      void fetchTerminalMessagesFromHttp(taskSessionId, refs.store).catch((error) => {
+        console.error("Failed to fetch messages after state change:", error);
+      });
+    };
+    if (taskSessionState === "WAITING_FOR_INPUT") {
+      const refreshInterval = window.setInterval(refresh, SETTLED_STATE_REFRESH_DELAY_MS);
+      const refreshStopTimeout = window.setTimeout(
+        () => window.clearInterval(refreshInterval),
+        SETTLED_STATE_REFRESH_DELAY_MS * 10,
+      );
+      if (!hasAgentMessage) refresh();
+      return () => {
+        window.clearInterval(refreshInterval);
+        window.clearTimeout(refreshStopTimeout);
+      };
+    }
+    refresh();
   }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
 }
 
@@ -662,7 +699,7 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
       setIsWaitingForInitialMessages(false);
       setIsCachedHistoryRefreshPending(true);
       const refreshGeneration = ++cachedRefreshGenerationRef.current;
-      void fetchAndStoreMessages(taskSessionId, store, () => active, hydrationRef, hydrationKey)
+      void fetchAndStoreMessages(taskSessionId, store, () => active)
         .catch(() => {})
         .finally(() => {
           if (cachedRefreshGenerationRef.current === refreshGeneration) {
@@ -671,7 +708,6 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
         });
       return deactivate;
     }
-    if (lastFetchedSessionIdRef.current === taskSessionId) return deactivate;
     void doFetchMessages({
       taskSessionId,
       ...fetchRefs,

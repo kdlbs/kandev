@@ -16,6 +16,17 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    (`~/.kandev/plugins/<id>/<version>/ui/...`, per manifest `ui.bundle`). There is no
    reverse proxy and no live upstream request: the plugin subprocess does not need to
    be running to serve the UI bundle, since installation already extracted the file.
+   Before importing a bundle, the Host calls authenticated
+   `GET /api/plugins/{id}/conversation/binding`. Success returns
+   `{bindingToken,generation,expiresAt}` with `expiresAt` RFC3339 UTC; every
+   response, including errors, sends `Cache-Control: no-store`. Errors use
+   `{ "error": { "code": "...", "message": "...", "retryable": false|true } }`:
+   `401/unauthenticated/false`, `404/not_found/false`, and
+   `409/generation_superseded/true`. On `401` or `404`, the current load is
+   skipped without disabling persisted state; on `409`, binding is retried with
+   bounded backoff and import waits for success. Expiry rebinds or aborts. The
+   grant remains in a Host-only closure and is never passed to bundle code/public
+   API values.
 2. On SPA boot, the **plugin host** (`apps/web/lib/plugins/host.ts`) iterates
    `bootPayload.plugins`, injects any `styleUrls` as `<link>`, and dynamically
    `import(/* @vite-ignore */ bundleUrl)` each bundle as a native ES module. Before a
@@ -33,21 +44,19 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
      destroy?(): void,
    })
    ```
+   The loader serializes stages per plugin and creates a private Host-only `(pluginId,generation,stageId,stageToken)` registration context before import. The public `window.registerKandevPlugin(id,plugin)` signature is unchanged; the Host routes each call to the currently open stage context for that plugin ID through an internal import-context handshake (closure-held stage token, never a public argument). Only the open stage's first registration is accepted. Registration after context closure (timeout, failure, or settled stage), a duplicate registration within the same stage, and a call presenting a foreign or retired stage token are rejected without mutating active state; the next stage does not import until the prior import settles.
+   Generation lifecycle is `pending -> active -> retired` with one commit linearization point. `pending` owns staged style links keyed by `(pluginId,generation)`, staged registry contributions, staged runtime handles/subscriptions, and the staged binding grant. `active` is the single committed generation serving panels. `retired` is revoked and reclaimed. Failed or timed-out staging removes only pending style links, contributions, handles, and grants. Commit atomically swaps active registry contributions and styles, then retires the old generation: revoke its grant and binding token, call its `destroy?.()`, remove its `(pluginId,generation)` styles and registrations, and close its panels. Prior contributions stay visible until replacement succeeds.
 4. After the module resolves, the host calls `initialize(registry, host)`. A
-   reload/update may unregister the previous generation before starting the next
-   one; the host keeps that transition unresolved until the current generation's
-   initialization finishes. Slow or failed reloads do not by themselves revoke
-   open or saved task panels. On explicit plugin disable/uninstall the host calls
-   `destroy?.()`, removes the plugin's registrations, and closes its panels.
-   Each initialization attempt is transactional for plugin-owned runtime state:
-   failure or timeout aborts plugin-owned work and fences callbacks from the
-   expired generation. The same generation owns host-created subscriptions,
-   modal and task-link handles, toasts, and review surfaces; the loader closes or
-   unsubscribes them before calling `destroy` exactly once. Requests and callbacks
-   from an expired generation cannot mutate the replacement generation. Failure or
-   timeout does **not** unregister `registry` contributions (nav items, routes,
-   etc.) already made before the failure — those persist, and only the plugin's
-   lifecycle status becomes failed, until the plugin's _next_ load revokes them.
+   reload/update stages binding, import, and initialization for the successor;
+   the previous active generation remains usable until the successor commits.
+   Failed or timed-out staging fences only the pending generation and leaves
+   open/saved panels on the previous generation. On explicit disable/uninstall
+   the host calls `destroy?.()`, revokes the active grant, removes registrations,
+   and closes panels. Each initialization attempt is transactional for
+   plugin-owned runtime state; its callbacks, subscriptions, and handles are
+   fenced on failure, while successful replacement revokes the old generation.
+   Failure does not unregister prior registry contributions until replacement
+   succeeds.
 
 ## Global entry point
 
@@ -60,6 +69,11 @@ The independently consumable frontend type contract is the runtime-free
 these types instead of re-declaring this document or importing `apps/web` internals.
 The host has a compile-time assignability test, and the real Bitbucket package is a
 required exact-head compatibility consumer.
+`HostReact` includes `Fragment`, `createElement`, `useState`, `useEffect`,
+`useMemo`, `useCallback`, and `useLayoutEffect` with structural React-compatible
+signatures. `host.ui.PromptMentionText` is a curated host component with
+`{ text: string; interactive?: boolean }` props and owns alias loading plus
+fine/coarse-pointer disclosure.
 
 ## `host: PluginHostApi`
 
@@ -353,7 +367,7 @@ provider-neutral code-host dashboard set: `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
 `IntegrationSaveQueryDialog`, `IntegrationRepositoryFilter`, `IntegrationCursorPagination`,
 `IntegrationStartTaskMenu`, `IntegrationIcon`, `IntegrationChangeRequestStatus`, and
-`TaskRowIndicator`, plus native integration settings surfaces:
+`TaskRowIndicator`, `PromptMentionText`, plus native integration settings
 `IntegrationAuthStatusBanner`, `IntegrationEnabledControl`, `SettingsSection`,
 `SettingsCard`, and `WorkspaceScopedSection`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
@@ -680,6 +694,386 @@ that already filters to this plugin's own events, applies your `scope`/
 `scopeId`/`key` filter, and skips notifications whose `writerId` matches this
 tab's own writes (so an editor never clobbers its own caret/selection from its
 own write).
+
+### `host.conversation` — live paginated session history
+
+This browser-only facade requires the manifest capability
+`capabilities.api_read: ["messages"]` and `min_kandev_version: "0.91.1"` or
+higher. The same floor applies to the Go `Messages().List` reader. It is the
+only supported browser way to read prompt history and does not expose Zustand
+state, first-party `/api/v1` URLs, raw content, arbitrary metadata, or raw
+WebSocket frames. The Host binds every request and event to the current
+plugin generation and task-panel session context.
+
+```ts
+type PluginConversationErrorCode =
+  | "unauthenticated"
+  | "not_found"
+  | "invalid_query"
+  | "upstream_failure";
+
+interface PluginConversationError {
+  code: PluginConversationErrorCode;
+  message: string;
+  retryable: boolean;
+}
+Browser conversation routes map `401` to `unauthenticated` with
+`retryable:false`, `404` to `not_found` with `retryable:false`, `400` to
+`invalid_query` with `retryable:false`, and every authorized upstream `5xx` to
+`upstream_failure` with `retryable:true`. Binding-only
+`409/generation_superseded` is not plugin-visible; continuation-renewal
+`409` is plugin-visible as retryable `upstream_failure`.
+
+type PluginSessionKind = "managed" | "passthrough" | null;
+type PluginConversationAuthor = "user" | "agent";
+type PluginConversationSort = "asc" | "desc";
+
+interface PluginConversationMessage {
+  id: string;
+  taskId: string | null;
+  sessionId: string;
+  turnId?: string;
+  authorType: PluginConversationAuthor;
+  type: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  promptIndex?: number;
+  senderTaskId?: string;
+}
+
+interface PluginConversationTurn {
+  id: string;
+  taskId: string | null;
+  sessionId: string;
+  startedAt: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+interface PluginSessionMessagesQuery {
+  sessionId: string | null;
+  taskId?: string | null;
+  authorTypes?: readonly PluginConversationAuthor[];
+  sort?: PluginConversationSort;
+  pageSize?: number;
+}
+
+interface PluginSessionMessagesState {
+  messages: readonly PluginConversationMessage[];
+  loading: boolean;
+  hydrated: boolean;
+  loadingMore: boolean;
+  error: PluginConversationError | null;
+  hasMore: boolean;
+  removed: boolean;
+  loadMore(): Promise<number>;
+  retry(): void;
+}
+
+interface PluginSessionTurnsState {
+  turns: readonly PluginConversationTurn[];
+  loading: boolean;
+  hydrated: boolean;
+  error: PluginConversationError | null;
+  removed: boolean;
+  retry(): void;
+}
+
+interface PluginConversationApi {
+  useSessionMessages(
+    query: PluginSessionMessagesQuery,
+  ): PluginSessionMessagesState;
+  useSessionTurns(
+    sessionId: string | null,
+    taskId?: string | null,
+  ): PluginSessionTurnsState;
+  useMessageFavorite(sessionId: string | null, messageId: string): boolean;
+}
+```
+
+Within a task-panel render, `host.conversation` resolves the Host-injected
+panel scope; `props.conversation.history` is the equivalent explicit handle.
+Outside a panel scope, nullable session reads return empty state. `taskId` is tri-state: `undefined` (field omitted) inherits the active panel context task via Host-side resolution before sending, so the server never observes `undefined`; explicit `null` means session-scoped with no task filter and encodes as absent `task_id`; an explicit string must equal the panel context task or the query fails `400/invalid_query` without network activity. An explicit string sends as its value; empty `task_id=` is `400`. Event `task_id` and public DTO `taskId` are nullable (`string | null`), with `null` for session-scoped rows. Cache identity, cursor fingerprint, and live-event filtering all key on the tri-state tag, so `undefined`, `null`, and `"t1"` never collapse; wrong-session or wrong-task events are dropped before merge.
+Live event matching is explicit: inherited `undefined` and an explicit task
+string accept only events whose `session_id` and `task_id` equal the resolved
+query context. Explicit `null` accepts every task ID in the selected session,
+including event `task_id: null`. A `session.removed` barrier is accepted for
+the selected session regardless of its event task ID and closes both hooks.
+
+`loadMore()` resolves to the number of newly projected messages. Joined calls
+resolve to the same committed count. Exhausted, closed, and terminal handles
+resolve `0` without network activity; retryable transport or renewal failures
+reject with `PluginConversationError` while leaving committed state unchanged.
+Non-retryable query errors also reject and remain in `error`; `retry()` clears
+the error and starts a fresh snapshot only for a live, retryable handle.
+Turn `retry()` follows the same live-handle rule: it clears a retryable error
+and starts a fresh ready snapshot, while closed, removed, exhausted, and
+non-retryable handles do not issue network requests.
+Each mounted `PluginTaskPanel` is wrapped in a Host-owned scope provider with its own cache, consumer identity, and abort controller. `history` is the authoritative panel handle; global `host.conversation` resolves only the nearest scope. Unmount or any plugin/panel/task/session/generation change aborts in-flight work, releases that consumer, and closes the handle. Closed handles and calls outside a scope return the stable empty state without network activity; two panels never share scope state. Message pages are bounded, newest-first by default, deterministic keyset pages with opaque cursors. `loadMore` is idempotent and preserves cursor, sort, filters, and generation. The Host owns cutoff, sidecars, replay, gaps, deduplication, tombstones, and lifecycle abort; none is public DTO state.
+Lifecycle invalidation also includes a presentation change. `loadMore` is
+idempotent operationally: concurrent calls for the same committed continuation
+join one in-flight request, and calls after `hasMore` is `false` resolve without
+network activity.
+On `session.removed`, the facade retains already projected rows, sets
+`removed` to `true`, sets `hasMore` to `false` for messages, and makes
+subsequent `loadMore` and retry operations no-ops without network activity.
+The `removed` terminal state is observable and stable; subsequent retries and
+pagination calls resolve without network activity.
+Each panel scope owns a monotonic `continuation_revision` over `{cursor,snapshot_token,cutoff,fingerprint,generation}` starting at sentinel `0` on scope creation. Query identity change, explicit `retry`, and close/invalidate increment the revision (close moves to an invalid tombstone that rejects all in-flight completions). Renewal and `loadMore` serialize dispatch per scope and CAS-install only when the current revision still equals the captured one; every response is checked against both the revision and the full tuple. Renewal may change only expiry, token rotation, and cursor re-encoding while preserving cutoff and fingerprint. Failed renewal or failed page leaves the committed page state unchanged; close or retry invalidates pending completions.
+The HTTP facade returns the public page shapes above. The Host transport carries the subscribe ACK's `snapshot_token` in a Host-only request header; it remains valid through the signed cursor/query expiry (maximum 10 minutes) and rotates only on rebind. The server validates its plugin/session/generation binding and committed cutoff, then returns internal row-sequence sidecars. The Host strips those sidecars before this API resolves. Cursors reject tampering or a different session, task, filter, sort, generation, or expiry; reads are not caller-selectable as-of queries.
+The Host renews a continuation before 80% of expiry through its private `POST /api/plugins/{id}/conversation/continuation/renew` operation. It accepts the current cursor and snapshot token, returns replacements with the same cutoff/fingerprint and a new expiry, and never selects a new cutoff. If retention or generation cannot preserve the cutoff, `loadMore` leaves existing state unchanged and reports retryable `upstream_failure`; explicit `retry` starts a fresh snapshot.
+
+Endpoint error matrix: `GET /conversation/binding` `409/generation_superseded/true` is Host-loader-only (bounded retry, never import until success, `Cache-Control: no-store` on success and every error). `POST /conversation/continuation/renew` `409` maps to public retryable `upstream_failure` without changing the loaded cutoff, also `Cache-Control: no-store`. Plugin-visible errors never carry `generation_superseded`.
+Binding tokens expire no later than 10 minutes after issuance; the loader
+rebinds before expiry and never sends an expired token to plugin code.
+The Host establishes ordered readiness before the initial snapshot. The Host-only
+request uses the discriminated `SubscribeRequest` branches below: core requires
+`wire_id`; plugin requires `plugin_id`, `generation`, `binding_token`, and
+`consumer_id`; identities are mutually exclusive. Success returns the matching
+identity, while failure has no success-only fields. Legacy payloads are
+accepted only with all ordered fields absent.
+
+#### Host-only conversation wire contract
+
+The Host-only snapshot header is `X-Kandev-Snapshot-Token`. HTTP page and
+renewal shapes, plus ordered event payloads, are:
+
+```ts
+type CoreSubscribeRequest = {
+  session_id: string;
+  consumer_kind: "core";
+  last_seen_sequence?: number;
+  resume_token?: string;
+  wire_id: string;
+  plugin_id?: never;
+  generation?: never;
+  binding_token?: never;
+  consumer_id?: never;
+};
+type PluginSubscribeRequest = {
+  session_id: string;
+  consumer_kind: "plugin";
+  plugin_id: string;
+  generation: number;
+  binding_token: string;
+  last_seen_sequence?: number;
+  resume_token?: string;
+  consumer_id: string;
+  wire_id?: never;
+};
+type SubscribeRequest = CoreSubscribeRequest | PluginSubscribeRequest;
+type SessionWireFailureCode =
+  | "unauthorized"
+  | "invalid_binding"
+  | "generation_superseded"
+  | "invalid_request"
+  | "session_not_found"
+  | "cursor_expired"
+  | "forward_gap"
+  | "session_removed";
+type SessionWireError = {
+  code: SessionWireFailureCode;
+  message: string;
+  retryable: boolean;
+};
+type SubscribeSuccessPayload = {
+  success: true;
+  session_id: string;
+  result: "fresh" | "replay" | "gap" | "invalid_resume";
+  event_watermark: number;
+  snapshot_cutoff: number;
+  snapshot_token: string;
+  replay_from?: number;
+  replay_to?: number;
+  oldest_sequence?: number;
+  resume_token: string;
+} & (
+  | { wire_id: string; consumer_id?: never }
+  | { consumer_id: string; wire_id?: never }
+);
+type SubscribeFailurePayload = {
+  success: false;
+  session_id?: string;
+  error: SessionWireError;
+};
+type SubscribeAck = {
+  id: string;
+  type: "response";
+  action: "session.subscribe";
+  payload: SubscribeSuccessPayload | SubscribeFailurePayload;
+};
+type CoreSessionAckRequest = {
+  session_id: string;
+  consumer_kind: "core";
+  sequence: number;
+  resume_token?: string;
+  wire_id: string;
+  plugin_id?: never;
+  generation?: never;
+  consumer_id?: never;
+};
+type PluginSessionAckRequest = {
+  session_id: string;
+  consumer_kind: "plugin";
+  plugin_id: string;
+  generation: number;
+  sequence: number;
+  resume_token?: string;
+  consumer_id: string;
+  wire_id?: never;
+};
+type SessionAckRequest = CoreSessionAckRequest | PluginSessionAckRequest;
+type SessionAckSuccessPayload = {
+  success: true;
+  session_id: string;
+  acknowledged_sequence: number;
+  resume_token: string;
+} & (
+  | { wire_id: string; consumer_id?: never }
+  | { consumer_id: string; wire_id?: never }
+);
+type SessionAckFailurePayload = {
+  success: false;
+  session_id?: string;
+  error: SessionWireError;
+};
+type SessionAckResponse = {
+  id: string;
+  type: "response";
+  action: "session.ack";
+  payload: SessionAckSuccessPayload | SessionAckFailurePayload;
+};
+type PluginConversationPage = {
+  messages: readonly PluginConversationMessage[];
+  hasMore: boolean;
+  cursor: string | null;
+};
+type PluginConversationTurnsPage = {
+  turns: readonly PluginConversationTurn[];
+};
+type ContinuationRenewRequest = {
+  cursor: string;
+  snapshot_token: string;
+};
+type ContinuationRenewResponse = {
+  cursor: string;
+  snapshot_token: string;
+  cutoff: number;
+  fingerprint: string;
+  expires_at: string;
+};
+type RawSessionEvent = {
+  type: "session.event";
+  protocol_version: number;
+  event_type: string;
+  session_id: string;
+  task_id: string | null;
+  sequence: number;
+  event_id: string;
+  payload: unknown;
+};
+
+// Validation converts RawSessionEvent to this projected union only after
+// protocol, identity, event-type, and payload checks succeed.
+type SessionEventPayload =
+  | { event_type: "message.added"; message: PluginConversationMessage }
+  | { event_type: "message.updated"; message: PluginConversationMessage }
+  | { event_type: "message.deleted"; message_id: string }
+  | { event_type: "session.turn.started"; turn: PluginConversationTurn }
+  | { event_type: "session.turn.completed"; turn: PluginConversationTurn }
+  | { event_type: "session.removed" };
+type SessionEventBase = {
+  type: "session.event";
+  protocol_version: 1;
+  session_id: string;
+  task_id: string | null;
+  sequence: number;
+  event_id: string;
+};
+type SessionEvent = {
+  [T in SessionEventPayload["event_type"]]: SessionEventBase & {
+    event_type: T;
+    payload: Extract<SessionEventPayload, { event_type: T }>;
+  };
+}[SessionEventPayload["event_type"]];
+```
+
+The Host sends `X-Kandev-Snapshot-Token` on snapshot reads and validates the
+renewal request before exposing only the public page state. `cursor` is
+nullable only on a page with no next page; renewal receives and returns the
+current non-null cursor. The Host maps event payloads to public DTOs and
+strips protocol sidecars before plugin code sees them. Removal is terminal
+whether it precedes or follows poison; the replacement cursor is closed.
+Only `message.added`, `message.updated`, `message.deleted`,
+`session.turn.started`, `session.turn.completed`, and `session.removed` use
+this migrated contract.
+The raw envelope is decoded with `protocol_version: number` and arbitrary
+`event_type`/`payload`; `SessionEvent` is the validated projected union.
+Validation requires `payload.event_type === event_type`; a mismatch is durable
+poison, is not projected, and cannot advance ACK. Strict subscribe ACKs require
+`session_id`, `result`, `event_watermark`, `snapshot_cutoff`, `snapshot_token`,
+and `resume_token`. `fresh` forbids replay and oldest-sequence fields;
+`replay` requires `replay_from` and `replay_to` with
+`replay_from <= replay_to <= snapshot_cutoff`.
+For `replay`, `replay_from` is the first delivered sequence (inclusive) and
+equals `last_seen_sequence + 1`; `replay_to` is the final delivered sequence
+(inclusive) and equals the committed `snapshot_cutoff`.
+`replay` is returned only when `last_seen_sequence` was supplied; otherwise
+the initial result is `fresh`.
+`gap` requires `oldest_sequence` and forbids replay fields; `invalid_resume`
+forbids replay fields and reports the replacement cursor state. The
+`resume_token` is always the current token for the returned consumer state.
+
+Subscribe and ACK failures use the same outer response envelope with
+`success:false`, the requested `session_id` when known, and
+`error:{code,message,retryable}`; no success-only ordered fields are present.
+Codes distinguish `unauthorized`, `invalid_binding`, `generation_superseded`,
+`invalid_request`, `session_not_found`, `cursor_expired`, `forward_gap`, and
+`session_removed`. Binding/generation failures are non-projection failures;
+`generation_superseded` is retryable only for the Host loader, while expired
+or retained-cursor failures produce `gap` reconciliation rather than a
+plugin-visible subscribe exception. ACK rejects forward gaps and malformed
+identity/range/token input without advancing the durable cursor.
+Core wire identity: the Host mints one opaque `wireId` per core consumer mount and carries it in subscribe/ACK state as `wire_id`. Plugin panels receive a separate Host-minted opaque `consumer_id`, carried in subscribe/ACK state and never caller-supplied. Broker state is keyed by `(session,consumer_kind,plugin,generation,wire_id|consumer_id)`; each applicable identity survives reconnect through its persisted entry, while a new mount mints a new identity at its registration watermark. Identities transition `registered -> ready -> streaming -> suspended (reconnect window) -> released` and release on unsubscribe/unmount or after the reconnect plus token-retention window expires. Plugin panels from one plugin/generation never share a cursor.
+Reconnect grace is 10 minutes after disconnect. Resume and snapshot tokens
+expire no later than 10 minutes after issuance; delivery cursors and immutable
+event rows remain for the maximum token expiry plus the reconnect grace.
+Garbage collection runs only after those bounds and preserves terminal
+tombstones until all resumable consumer identities are released.
+If `session.removed` precedes poison, the rebind still produces terminal
+removal and a closed replacement cursor; no later event is admitted. This is
+the same terminal outcome as poison followed by removal.
+If a previously authorized consumer reconnects to `session_removed` or a
+terminal replacement cursor, the facade preserves committed rows, sets
+`removed:true`, sets message `hasMore:false`, and makes `loadMore` and `retry`
+no-ops. A fresh unauthorized or nonexistent lookup remains ordinary
+`404/not_found` and never reveals deletion state.
+Ordered event envelopes carry `protocol_version`; canonical policy registry is `{1:{ignorable:["session.workspace_sources.updated"]}}`. Only a type listed by its matching version may advance ACK without projection. Missing, malformed, or unsupported versions and other unknown types remain durable poison: the cursor stays before the event, diagnostics retain its ID/version, and advancement stops. Rebind atomically snapshots past poison at a new cutoff, commits that cutoff, returns a replacement cursor/token, and does not project the poison. When `session.removed` arrives after a poison cursor, rebind snapshots past both to a terminal cutoff: the outcome is terminal removal, the replacement cursor is terminally closed and admits no post-terminal events, and poison diagnostics remain durable.
+Poison operations are owned by `SessionDeliveryDispatcher`: each record moves
+`pending -> leased -> exhausted -> requeued`, with a 30-second lease, five
+attempts, and exponential backoff capped at 30 seconds. Exhaustion records
+event ID, protocol version, and last error, and emits structured
+`session_event_poison_total` diagnostics. The Host-only
+`session.event.poison.requeue` command requires an authenticated operator with
+`session_events:requeue`; it accepts session, event ID, and expected owner epoch,
+audits actor, prior state, attempt count, and timestamp, increments owner epoch,
+resets attempts, and returns `pending` without changing sequence or payload.
+Repeated requests after requeue return current state without mutation; stale
+expected epochs are rejected without mutation. Startup reclaims expired leases
+but never clears or skips poison.
+Legacy projection coalescing: pending contiguous sequence ranges project at most once per `event_id`/sequence per wire, then ACK the highest contiguous sequence. Example: `seq 10 = message.updated id A` followed by `seq 11 = message.updated id A` coalesces to one projection of the latest image `A@11`, then a single `session.ack` for `11`; a `session.removed` barrier after `11` is a separate terminal projection. Same-`event_id` replays and same-sequence redeliveries are dropped; any event with `sequence <= acknowledged_sequence` is suppressed without a second projection.
+After contiguous delivery the Host-only `session.ack` uses the discriminated
+`SessionAckRequest` branches below: core requires `wire_id`; plugin requires
+`plugin_id`, `generation`, and `consumer_id`; identities are mutually exclusive.
+Success returns the matching identity and failure has no success-only fields.
+The shared client retains the full response envelope, validates outer
+IDs/types/actions before payload parsing, and retries by consumer sequence/token.
+The Host validates binding/generation, strict integer/range rules, applicable
+identity, current or prior token on retry, and contiguous advancement. Snapshot
+tokens and sidecars never reach plugin code. Reload, disable, uninstall, panel
+switch, or unmount revokes generation.
+
+Registry ownership matrix: every `register*` call and Host-owned resource is keyed by `(pluginId,generation,stageId,kind,localId)` and staged invisibly until commit. `kind` is the registration method (`route`, `navItem`, `settingsRoute`, `component`, `wsHandler`, `keybinding`, `integrationSettings`, `repositoryProvider`, `reviewProvider`, `taskAction`, `taskPanel`, `taskMenuAction`, `taskFilter`, `taskListFacet`, `translations`) or Host-owned resource (`styleLink`, `modal`, `conversationScope`, `bindingGrant`). A duplicate `(kind,localId)` within the same stage rejects the second call; a call from a foreign or retired `(pluginId,generation,stageId)` is rejected without side effects; stage abort discards all its staged entries without notifications. Commit atomically publishes the stage's entries and revokes the retired generation's entries in one linearization step, emitting notifications only for the committed delta.
 
 ## `registry: PluginRegistry`
 
@@ -1155,20 +1549,33 @@ interface PluginComposerSlotProps {
   disabledReason?: string;
   composer: PluginComposerCapability;
 }
+type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
+interface PluginTaskPanelConversationCapability {
+  openMessage(messageId: string): PluginOpenMessageResult;
+  /** Host-created API bound to this panel's context and generation. */
+  history: PluginConversationApi;
+}
 
-interface PluginTaskPanelProps {
-  panelId: string; // this registration's panel id, so one Component can back multiple panels
+interface PluginTaskPanelContext {
   taskId: string;
   sessionId: string | null;
+  sessionKind: PluginSessionKind;
   presentation: PluginPresentation;
+}
+
+interface PluginTaskPanelProps extends PluginTaskPanelContext {
+  panelId: string; // this registration's panel id, so one Component can back multiple panels
+  conversation: PluginTaskPanelConversationCapability;
 }
 
 interface TaskPanelRegistration {
   id: string; // plugin-local panel id (unique within the plugin, not globally)
   title: string; // add-panel-menu row label and dockview tab title
+  titleKey?: string;
   icon?: PluginIcon;
   Component: React.ComponentType<PluginTaskPanelProps>; // wrapped in a PluginErrorBoundary
   mobileEnabled?: boolean; // include in the phone's grouped Panels picker. Default: false.
+  visible?(context: PluginTaskPanelContext): boolean;
 }
 
 interface PluginTaskMenuContext {

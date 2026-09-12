@@ -66,6 +66,12 @@ each referenced workspace, task, or repository. It derives a task's workspace
 server-side. `access` defaults to `authenticated`. `admin` requires
 `min_kandev_version: "0.91.1"` or later; validation rejects older/missing
 minimums. Non-admins are rejected before envelope parsing or plugin invocation.
+The same centralized minimum-version policy applies when
+`capabilities.api_read` includes `messages`, for both Go `Messages().List` and
+the browser facade, including development and E2E installs. The policy is
+shared by manifest, archive, install, and boot/load validators; missing,
+malformed, or lower versions reject, while equal or higher versions pass.
+It preserves the `admin` action rule above.
 Verified context is separate from untrusted JSON; calls are bounded/cancellable and
 response headers allowlisted. Public `/webhooks/` callbacks cannot serve browser
 actions. A task action may select one attached persisted repository; other IDs are

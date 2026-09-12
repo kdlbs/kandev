@@ -15,10 +15,10 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | Integrations | [README](integrations/README.md) | complete    | 18 requirements, 21 designs  |
 | Office       | [README](office/README.md)       | complete    | 19 requirements, 38 designs  |
 | Platform     | [README](platform/README.md)     | complete    | 30 requirements, 10 designs  |
-| Plugins      | [README](plugins/README.md)      | complete    | 7 requirements, 9 designs    |
+| Plugins      | [README](plugins/README.md)      | in progress | 12 requirements, 14 designs  |
 | Release      | [README](release/README.md)      | complete    | 5 requirements, 0 designs    |
 | System page  | [README](system-page/README.md)  | complete    | 3 requirements, 5 designs    |
-| Tasks        | [README](tasks/README.md)        | complete    | 69 requirements, 12 designs  |
+| Tasks        | [README](tasks/README.md)        | complete    | 69 requirements, 12 designs   |
 | UI           | [README](ui/README.md)           | in_progress | 127 requirements, 56 designs |
 | Workspaces   | [README](workspaces/README.md)   | complete    | 11 requirements, 3 designs   |
 

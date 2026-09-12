@@ -448,7 +448,11 @@ function usePendingClarificationState(messages: Message[], options: ProcessedMes
   const scope = useMemo(
     () =>
       hasScopeKeys
-        ? { currentTurnId: options.currentTurnId, pendingAction: options.pendingAction }
+        ? {
+            currentTurnId: options.currentTurnId,
+            pendingAction: options.pendingAction,
+            allowDetached: true,
+          }
         : undefined,
     [hasScopeKeys, options.currentTurnId, options.pendingAction],
   );

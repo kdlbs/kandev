@@ -360,6 +360,7 @@ func TestServiceInstallSerializesAgentToolCollisionValidation(t *testing.T) {
 	svc := NewService(barrier, NewRegistry(), nil, testLogger(t))
 	svc.SetPluginsDir(dir)
 	svc.SetRuntime(newFakeRuntime())
+	t.Cleanup(func() { _ = svc.Close() })
 	firstPackage := testAgentToolPackage(t, "plugin-a", "echo")
 	secondPackage := testAgentToolPackage(t, "plugin_a", "echo")
 
@@ -409,6 +410,7 @@ func newTestServiceWithDir(t *testing.T) (*Service, string, *store.FSStore, *fak
 	svc.SetPluginsDir(dir)
 	rt := newFakeRuntime()
 	svc.SetRuntime(rt)
+	t.Cleanup(func() { _ = svc.Close() })
 	return svc, dir, fsStore, rt
 }
 
@@ -1338,6 +1340,7 @@ func TestServiceStartActivePluginsSpawnsOnlyActiveManagedNotAlreadyRunning(t *te
 	svc2.SetPluginsDir(dir)
 	rt2 := newFakeRuntime()
 	svc2.SetRuntime(rt2)
+	t.Cleanup(func() { _ = svc2.Close() })
 
 	svc2.StartActivePlugins(context.Background())
 
@@ -1359,6 +1362,7 @@ func TestServiceStartActivePluginsFailurePersistsDiagnosticAndRefreshesDeliverer
 	rt2 := newFakeRuntime()
 	rt2.setStartErr("kandev-plugin-slack", errors.New("boot handshake failed"))
 	svc2.SetRuntime(rt2)
+	t.Cleanup(func() { _ = svc2.Close() })
 	deliverer := &fakeDeliverer{}
 	svc2.SetDeliverer(deliverer)
 

@@ -29,6 +29,8 @@ type ClarificationInputOverlayProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
+  /** True when the session no longer has a live clarification waiter. */
+  agentDisconnected?: boolean;
   // Called when the user presses Escape. Unlike Skip, this must not answer or
   // reject the bundle — it only dismisses the UI (e.g. collapses the panel).
   // The question stays pending and the agent stays blocked.
@@ -393,6 +395,7 @@ type CarouselBodyProps = {
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   allAnswered: boolean;
   isSubmitting: boolean;
+  agentDisconnected: boolean;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   armedEventRef: RefObject<KeyboardEvent | null>;
   keyboardShortcutsEnabled: boolean;
@@ -495,7 +498,6 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
     },
   };
 }
-
 function ClarificationCarouselBody({
   sortedMessages,
   meta,
@@ -506,6 +508,7 @@ function ClarificationCarouselBody({
   setCustomDrafts,
   allAnswered,
   isSubmitting,
+  agentDisconnected,
   shortcutScopeRef,
   armedEventRef,
   keyboardShortcutsEnabled,
@@ -513,9 +516,11 @@ function ClarificationCarouselBody({
   onDismiss,
 }: CarouselBodyProps) {
   const total = sortedMessages.length;
-  const showAgentDisconnectedAtTop = sortedMessages.some(
-    (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
-  );
+  const showAgentDisconnectedAtTop =
+    agentDisconnected ||
+    sortedMessages.some(
+      (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
+    );
   const isSingleQuestion = total === 1;
 
   if (!meta) return null;
@@ -580,11 +585,13 @@ function ClarificationCarouselBody({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- coordinates the complete clarification overlay lifecycle.
 export function ClarificationInputOverlay({
   messages,
   onResolved,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
+  agentDisconnected = false,
   onDismiss,
   onCollapse,
   collapseContentId,
@@ -686,6 +693,7 @@ export function ClarificationInputOverlay({
         setCustomDrafts={setCustomDrafts}
         allAnswered={allAnswered}
         isSubmitting={isSubmitting}
+        agentDisconnected={agentDisconnected}
         shortcutScopeRef={shortcutScopeRef}
         armedEventRef={armedEventRef}
         keyboardShortcutsEnabled={keyboardShortcutsEnabled}

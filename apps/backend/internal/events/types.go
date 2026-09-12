@@ -70,6 +70,7 @@ const (
 	MessageAdded   = "message.added"
 	MessageUpdated = "message.updated"
 	MessageDeleted = "message.deleted"
+	SessionRemoved = "session.removed"
 )
 
 // Event types for message queue
@@ -136,6 +137,7 @@ const (
 const (
 	TurnStarted   = "turn.started"
 	TurnCompleted = "turn.completed"
+	TurnRemoved   = "turn.removed"
 )
 
 // Event types for repositories

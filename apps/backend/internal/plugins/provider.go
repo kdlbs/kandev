@@ -118,7 +118,14 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 
 	configureWebAppStorage(cfg, svc, instanceStore, instanceState, log)
 	svc.SetSecrets(secrets)
-	svc.SetPluginsDir(dir)
+	if dbPool != nil && dbPool.Writer() != nil {
+		svc.SetConversationJournalDB(dbPool.Writer())
+	}
+	if err := svc.SetPluginsDir(dir); err != nil {
+		warnProvider(log, "Plugins durable conversation state initialization failed; continuing with degraded conversation capabilities", err)
+	} else if _, err := svc.syncAllCommittedSessionEvents(context.Background()); err != nil {
+		warnProvider(log, "Plugins committed conversation journal synchronization failed; continuing with degraded conversation capabilities", err)
+	}
 
 	seedMarketplace(svc, sourceStore, storeErrors, log)
 	if settingsStore != nil {
@@ -131,12 +138,13 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 	if cfg.Features.Canvases {
 		stopArtifactCleanup = svc.StartWebAppArtifactCleanupWorker(context.Background())
 	}
+	stopSessionEventMaintenance := svc.StartSessionEventMaintenanceWorker(context.Background())
 
 	cleanup := func() error {
 		stopArtifactCleanup()
+		stopSessionEventMaintenance()
 		svc.closeWebAppEvents()
-		rt.StopAll()
-		return nil
+		return svc.Close()
 	}
 	return svc, cleanup, storeErrors
 }

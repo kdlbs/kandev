@@ -87,6 +87,9 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provide services with postgres: %v", err)
 	}
+	if services.PluginsCleanup != nil {
+		t.Cleanup(func() { _ = services.PluginsCleanup() })
+	}
 	if services.GitHub == nil {
 		t.Fatal("GitHub service is unavailable after PostgreSQL boot")
 	}

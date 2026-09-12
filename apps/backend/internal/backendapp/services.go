@@ -296,8 +296,11 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
-	pluginsSvc, _, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	pluginsSvc, pluginsCleanup, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
+		if pluginsCleanup != nil {
+			_ = pluginsCleanup()
+		}
 		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
 	}
 	if pluginsSvc != nil {
@@ -414,6 +417,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Share:                    shareHTTP,
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
+		PluginsCleanup:           pluginsCleanup,
 		Canvas:                   canvasSvc,
 		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all

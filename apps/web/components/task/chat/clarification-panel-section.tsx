@@ -15,14 +15,18 @@ type ClarificationPanelSectionProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   /**
+   * True when the session no longer has a live clarification waiter.
+   * Detached requests remain answerable even if their row refresh lags.
+   */
+  agentDisconnected?: boolean;
+  /**
    * Caps the expanded overlay's height as a percentage of the viewport.
-   * Drives both the rendered CSS max-height and the resize hook's drag
-   * clamp — the two MUST agree, or the drag handle silently stops
-   * responding before its own visible ceiling.
+   * Drives both the rendered CSS max-height and the resize hook's drag clamp
+   * - the two MUST agree, or the drag handle silently stops responding before
+   * its own visible ceiling.
    */
   maxHeightVh: number;
 };
-
 function pendingIdFromMessages(messages: readonly Message[] | null | undefined): string | null {
   const first = messages?.[0];
   if (!first) return null;
@@ -56,6 +60,7 @@ export function ClarificationPanelSection({
   messages,
   onResolved,
   shortcutScopeRef,
+  agentDisconnected = false,
   maxHeightVh,
 }: ClarificationPanelSectionProps) {
   const { t } = useTranslation();
@@ -143,6 +148,7 @@ export function ClarificationPanelSection({
             onResolved={onResolved}
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
+            agentDisconnected={agentDisconnected}
             onDismiss={() => setCollapsed(true)}
             onCollapse={() => setCollapsed(true)}
             collapseContentId={contentId}

@@ -119,6 +119,70 @@ describe("pluginRegistry — repository provider result lifecycle", () => {
   });
 });
 
+describe("pluginRegistry — atomic unload and work lifecycle", () => {
+  it("does not abort in-flight provider work when an atomic unload rolls back", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const provider = repositoryProvider({
+      listRepositories: ({ signal }) =>
+        new Promise((resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+          gate.then(() => resolve([]));
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+    const request = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .listRepositories({ workspaceId: WORKSPACE_ID, signal: new AbortController().signal });
+    await Promise.resolve();
+
+    expect(() =>
+      pluginRegistry.runAtomicMutation(() => {
+        pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+        throw new Error("staged commit failed");
+      }),
+    ).toThrow("staged commit failed");
+
+    release();
+    await expect(request).resolves.toEqual([]);
+  });
+
+  it("aborts in-flight provider work once an atomic unload commits", async () => {
+    const aborted = vi.fn();
+    const provider = repositoryProvider({
+      listRepositories: ({ signal }) =>
+        new Promise((_, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted();
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+    const request = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .listRepositories({ workspaceId: WORKSPACE_ID, signal: new AbortController().signal });
+    await Promise.resolve();
+
+    pluginRegistry.runAtomicMutation(() => {
+      pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    });
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect(aborted).toHaveBeenCalledOnce();
+  });
+});
+
 describe("pluginRegistry — repository provider reload lifecycle", () => {
   it("keeps re-enabled provider work tracked after an older request settles", async () => {
     let rejectFirst!: (error: Error) => void;

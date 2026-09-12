@@ -30,6 +30,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     pluginId,
     React,
     jsx: React.createElement,
+    conversation: {} as PluginHostApi["conversation"],
     store: { getState: () => ({}) as never, setState: () => {}, subscribe: () => () => {} },
     context: {
       getActiveWorkspaceId: () => undefined,

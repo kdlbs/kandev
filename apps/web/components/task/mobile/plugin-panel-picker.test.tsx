@@ -1,5 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      tasks: { activeTaskId: "task-1", activeSessionId: "session-1" },
+      taskSessions: {
+        items: {
+          "session-1": { id: "session-1", is_passthrough: false },
+        },
+      },
+    }),
+}));
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { PluginPanelPicker } from "./plugin-panel-picker";
 
@@ -24,7 +36,7 @@ describe("PluginPanelPicker", () => {
       .forPlugin(PLUGIN_B)
       .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes, mobileEnabled: true });
 
-    render(<PluginPanelPicker open onOpenChange={vi.fn()} onSelect={vi.fn()} />);
+    render(<PluginPanelPicker taskId="task-1" open onOpenChange={vi.fn()} onSelect={vi.fn()} />);
 
     const options = screen.getAllByTestId(/^mobile-plugin-panel-option-/);
     expect(options).toHaveLength(2);
@@ -43,11 +55,49 @@ describe("PluginPanelPicker", () => {
     const onOpenChange = vi.fn();
     const onSelect = vi.fn();
 
-    render(<PluginPanelPicker open onOpenChange={onOpenChange} onSelect={onSelect} />);
+    render(
+      <PluginPanelPicker taskId="task-1" open onOpenChange={onOpenChange} onSelect={onSelect} />,
+    );
 
     fireEvent.click(screen.getByTestId("mobile-plugin-panel-option-picker-plugin-b-notes"));
 
     expect(onSelect).toHaveBeenCalledWith("plugin:picker-plugin-b:notes");
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("omits registrations whose visibility predicate rejects the active mobile context", () => {
+    function Notes() {
+      return null;
+    }
+    pluginRegistry.forPlugin(PLUGIN_A).registerTaskPanel({
+      id: "notes",
+      title: "Notes",
+      Component: Notes,
+      mobileEnabled: true,
+      visible: (context) => context.presentation === "desktop",
+    });
+
+    render(<PluginPanelPicker taskId="task-1" open onOpenChange={vi.fn()} onSelect={vi.fn()} />);
+
+    expect(screen.queryByTestId(`mobile-plugin-panel-option-${PLUGIN_A}-notes`)).toBeNull();
+  });
+
+  it("does not invoke plugin visibility without a task context", () => {
+    function Notes() {
+      return null;
+    }
+    const visible = vi.fn(() => true);
+    pluginRegistry.forPlugin(PLUGIN_A).registerTaskPanel({
+      id: "notes",
+      title: "Notes",
+      Component: Notes,
+      mobileEnabled: true,
+      visible,
+    });
+
+    render(<PluginPanelPicker open onOpenChange={vi.fn()} onSelect={vi.fn()} />);
+
+    expect(visible).not.toHaveBeenCalled();
+    expect(screen.queryByTestId(`mobile-plugin-panel-option-${PLUGIN_A}-notes`)).toBeNull();
   });
 });

@@ -21,6 +21,13 @@ func newTestPool(t *testing.T) *db.Pool {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	conn.SetMaxOpenConns(1)
+	if _, err := conn.Exec(`
+		CREATE TABLE conversation_session_streams (
+			session_id TEXT PRIMARY KEY,
+			watermark INTEGER NOT NULL
+		)`); err != nil {
+		t.Fatalf("create conversation journal schema: %v", err)
+	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return db.NewPool(conn, conn)
 }

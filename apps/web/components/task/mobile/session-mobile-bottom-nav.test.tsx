@@ -110,6 +110,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="chat"
+        taskId="task-1"
         onPanelChange={onPanelChange}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -142,6 +143,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="plugin:plugin-a:notes"
+        taskId="task-1"
         onPanelChange={vi.fn()}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -149,6 +151,32 @@ describe("SessionMobileBottomNav plugin panels", () => {
     );
 
     expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
+  });
+
+  it("does not evaluate task-panel visibility without a task", () => {
+    function Notes() {
+      return null;
+    }
+    const visible = vi.fn(() => true);
+    pluginRegistry.forPlugin(PLUGIN_A).registerTaskPanel({
+      id: "notes",
+      title: "Notes",
+      Component: Notes,
+      mobileEnabled: true,
+      visible,
+    });
+
+    render(
+      <SessionMobileBottomNav
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+      />,
+    );
+
+    expect(visible).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Panels" })).toBeNull();
   });
 
   it("keeps the grouped Panels action active for Prompt history", () => {

@@ -10,12 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
-// Registry is an in-memory, mutex-guarded index of installed plugins, keyed
-// by plugin id. It is loaded from the filesystem store at startup (Load)
-// and kept in sync as Service mutates installations, so read paths (List,
-// Get) never hit disk.
-//
-// Get and List return copies of the stored *store.Record so callers cannot
 // mutate registry state by holding onto a returned pointer; all writes go
 // through Add / Remove / SetStatus / SetRuntimeState / SetAutoUpdate /
 // SetRestartCount.
@@ -156,6 +150,7 @@ func (r *Registry) SetRuntimeState(id string, status Status, lastError string, l
 
 func cloneRecord(rec *store.Record) *store.Record {
 	clone := *rec
+	clone.Manifest = rec.Clone()
 	if rec.AutoUpdate != nil {
 		autoUpdate := *rec.AutoUpdate
 		clone.AutoUpdate = &autoUpdate

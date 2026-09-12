@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/plugins"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -119,6 +120,31 @@ func TestBroadcastToSession_DeliversOnceToSubscribedAndFocusedClient(t *testing.
 	}
 }
 
+func TestBroadcastToSession_SuppressesLegacyCopyForOrderedCoreConsumer(t *testing.T) {
+	h := newTestHub(t)
+	c := newTestClient("c1")
+	registerTestClient(h, c)
+	h.SubscribeToSession(c, "sess-1")
+	c.orderedSessionSubscriptions = map[string]map[string]plugins.SessionDeliveryCursorKey{
+		"sess-1": {
+			"core-1": {SessionID: "sess-1", ConsumerKind: "core", WireID: "core-1"},
+		},
+	}
+
+	msg, err := ws.NewNotification(
+		ws.ActionSessionMessageAdded,
+		map[string]any{"session_id": "sess-1"},
+	)
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	h.BroadcastToSession("sess-1", msg)
+
+	if clientReceived(c) {
+		t.Fatal("ordered core consumer received a duplicate legacy notification")
+	}
+}
+
 func TestBroadcastToUserReportsWhetherAFrameWasQueued(t *testing.T) {
 	h := newTestHub(t)
 	msg, err := ws.NewNotification("system.update_available", map[string]any{"occurrence_id": "v1.2.3"})
@@ -197,3 +223,110 @@ func TestSendToIdentityTargetsConnectedClientsWithoutSubscription(t *testing.T) 
 		t.Fatal("a different identity must not receive the notification")
 	}
 }
+
+// TestBroadcastCommittedPoisonFrameDeliversAndCountsAttempt pins the unified
+// poison contract: the mirrored frame IS delivered to live subscribers (their
+// recovery depends on seeing it) and the delivery attempt is counted only when
+// a recipient exists.
+func TestBroadcastCommittedPoisonFrameDeliversAndCountsAttempt(t *testing.T) {
+	h := newTestHub(t)
+	svc := plugins.NewService(nil, plugins.NewRegistry(), nil, testLogger())
+	h.SetPluginConversationService(svc)
+
+	// message.added missing author/content -> projection poison.
+	event, err := svc.SessionEvents().Append(
+		"sess-poison", newStringPointer("task-poison"), "message.added",
+		[]byte(`{"type":"message.added","session_id":"sess-poison","task_id":"task-poison"}`),
+	)
+	if err != nil {
+		t.Fatalf("append poison event: %v", err)
+	}
+	if _, ok := svc.SessionEvents().Poison("sess-poison", event.ID); !ok {
+		t.Fatal("append did not poison the malformed event")
+	}
+
+	c := newTestClient("c-poison")
+	registerTestClient(h, c)
+	c.orderedSessionSubscriptions = map[string]map[string]plugins.SessionDeliveryCursorKey{
+		"sess-poison": {
+			"core-1": {SessionID: "sess-poison", ConsumerKind: "core", WireID: "core-1"},
+		},
+	}
+
+	h.broadcastCommittedOrderedSessionEvent(svc, event)
+
+	if !clientReceived(c) {
+		t.Fatal("live subscriber did not receive the poison frame")
+	}
+	record, ok := svc.SessionEvents().Poison("sess-poison", event.ID)
+	if !ok {
+		t.Fatal("poison record missing after broadcast")
+	}
+	if record.Attempts != 1 {
+		t.Fatalf("poison attempts = %d, want 1 (one delivery with a recipient)", record.Attempts)
+	}
+}
+
+// TestBroadcastCommittedPoisonFrameWithoutRecipientsSkipsAttempt pins that a
+// mirrored poison with nobody subscribed does not burn a delivery attempt.
+func TestBroadcastCommittedPoisonFrameWithoutRecipientsSkipsAttempt(t *testing.T) {
+	h := newTestHub(t)
+	svc := plugins.NewService(nil, plugins.NewRegistry(), nil, testLogger())
+	h.SetPluginConversationService(svc)
+
+	event, err := svc.SessionEvents().Append(
+		"sess-poison-idle", newStringPointer("task-poison"), "message.added",
+		[]byte(`{"type":"message.added","session_id":"sess-poison-idle","task_id":"task-poison"}`),
+	)
+	if err != nil {
+		t.Fatalf("append poison event: %v", err)
+	}
+
+	h.broadcastCommittedOrderedSessionEvent(svc, event)
+
+	record, ok := svc.SessionEvents().Poison("sess-poison-idle", event.ID)
+	if !ok {
+		t.Fatal("poison record missing after broadcast")
+	}
+	if record.Attempts != 0 {
+		t.Fatalf("poison attempts = %d, want 0 with no recipients", record.Attempts)
+	}
+}
+
+func TestBroadcastCommittedPoisonQueueFailureDoesNotCountAttempt(t *testing.T) {
+	h := newTestHub(t)
+	svc := plugins.NewService(nil, plugins.NewRegistry(), nil, testLogger())
+	h.SetPluginConversationService(svc)
+	event, err := svc.SessionEvents().Append(
+		"sess-poison-full", newStringPointer("task-poison"), "message.added",
+		[]byte(`{"type":"message.added","session_id":"sess-poison-full","task_id":"task-poison"}`),
+	)
+	if err != nil {
+		t.Fatalf("append poison event: %v", err)
+	}
+	c := newTestClient("c-poison-full")
+	for range cap(c.send) {
+		c.send <- []byte("occupied")
+	}
+	registerTestClient(h, c)
+	c.orderedSessionSubscriptions = map[string]map[string]plugins.SessionDeliveryCursorKey{
+		"sess-poison-full": {
+			"core-1": {SessionID: "sess-poison-full", ConsumerKind: "core", WireID: "core-1"},
+		},
+	}
+
+	h.broadcastCommittedOrderedSessionEvent(svc, event)
+
+	record, ok := svc.SessionEvents().Poison("sess-poison-full", event.ID)
+	if !ok {
+		t.Fatal("poison record missing after queue failure")
+	}
+	if record.Attempts != 0 || record.State != plugins.SessionPoisonPending {
+		t.Fatalf("poison after queue failure = attempts %d state %q, want pending at zero", record.Attempts, record.State)
+	}
+	if !c.closed {
+		t.Fatal("ordered queue failure must close the client for replay")
+	}
+}
+
+func newStringPointer(value string) *string { return &value }

@@ -4,6 +4,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useQuickChatResync } from "@/hooks/use-quick-chat-resync";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { restoreQuickChatLauncherFocus } from "./quick-chat-focus";
 import { QuickChatModal } from "./quick-chat-modal";
 
@@ -68,6 +69,22 @@ export function QuickChatProvider({ children }: { children: React.ReactNode }) {
   // Quick chats are shared across devices: re-read the server's list whenever
   // the socket connects so tabs opened or closed elsewhere show up here too.
   useQuickChatResync(activeWorkspace);
+  const connectionStatus = useAppStore((s) => s.connection.status);
+
+  // Keep persisted Quick Chat sessions subscribed while their modal is closed.
+  // The sidebar activity indicator must receive the completion event that arms
+  // the unseen marker after the conversation view unmounts.
+  useEffect(() => {
+    if (connectionStatus !== "connected") return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    const unsubscribes = quickChatSessions.map((session) =>
+      client.subscribeSession(session.sessionId),
+    );
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [connectionStatus, quickChatSessions]);
 
   const workspaceId = getWorkspaceId({
     sessions: quickChatSessions,

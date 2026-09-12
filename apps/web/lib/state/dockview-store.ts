@@ -266,7 +266,7 @@ type DockviewStore = {
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
   scrollTarget: TranscriptScrollTarget | null;
-  scrollTranscriptToMessage: (sessionId: string, messageId: string, title: string) => void;
+  scrollTranscriptToMessage: (sessionId: string, messageId: string, title: string) => boolean;
   clearScrollTarget: (token: number) => void;
   clearScrollTargetForOwner: (sessionId: string, hostPanelId: string) => void;
   activeGroupId: string | null;

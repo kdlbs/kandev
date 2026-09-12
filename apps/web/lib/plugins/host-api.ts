@@ -112,6 +112,10 @@ import { Combobox } from "@/components/combobox";
 import { RichTextEditor, RichTextReadOnly } from "@/components/editors/tiptap/rich-text-editor";
 import { PageTopbar } from "@/components/page-topbar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import {
+  PromptMentionText as NativePromptMentionText,
+  usePromptMentionNames,
+} from "@/components/task/chat/messages/prompt-mention-components";
 import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
 import type { ChangeRequestDetailProps } from "@/components/integrations/change-request-detail";
 import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
@@ -148,6 +152,7 @@ import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import { buildPluginContextApi } from "./plugin-context-api";
 import { pluginTranslationNamespace } from "./plugin-translations";
+import { pluginConversationApi } from "./conversation-host";
 import type {
   PluginActionInput,
   PluginActionOptions,
@@ -189,6 +194,21 @@ function PluginChangeRequestDetail(props: ChangeRequestDetailProps) {
     },
     React.createElement(LazyChangeRequestDetail, props),
   );
+}
+
+function PluginPromptMentionText({
+  text,
+  interactive = false,
+}: {
+  text: string;
+  interactive?: boolean;
+}) {
+  const promptNames = usePromptMentionNames();
+  return React.createElement(NativePromptMentionText, {
+    text,
+    promptNames,
+    focusable: interactive,
+  });
 }
 
 /**
@@ -350,6 +370,8 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   //   pixel-identical to the Plan panel. See rich-text-editor.tsx.
   RichTextEditor,
   RichTextReadOnly,
+  // - PromptMentionText: native prompt-reference parsing and chip rendering.
+  PromptMentionText: PluginPromptMentionText,
   IntegrationAuthStatusBanner,
   IntegrationEnabledControl: DraftedIntegrationEnabledControl,
   SettingsSection,
@@ -499,6 +521,7 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
         return getBackendConfig().apiBaseUrl;
       },
     },
+    conversation: pluginConversationApi,
     ui: createPluginUIApi(pluginId),
     useResponsiveBreakpoint,
     // Getter, not a value captured at boot: a plugin built once at page load

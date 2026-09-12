@@ -43,6 +43,8 @@ import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
+import type { RenderItem } from "@/hooks/use-processed-messages";
+
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import type { AppState } from "@/lib/state/store";
@@ -78,6 +80,10 @@ export type PendingMessageScrollTarget = {
   token: number;
   hostPanelId: string;
 };
+/** Reports whether a target has a dedicated DOM row in the transcript. */
+export function isMessageRowRendered(items: readonly RenderItem[], messageId: string): boolean {
+  return items.some((item) => item.type === "message" && item.message.id === messageId);
+}
 
 /** Scrolls a non-Dockview host target after the message row becomes rendered. */
 type PendingMessageScrollOptions = {
@@ -1064,8 +1070,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     messageListRef,
     isInitialMessagesLoading,
     targetRendered: Boolean(
-      dockviewTargetMessageId &&
-      allMessages.some((message) => message.id === dockviewTargetMessageId),
+      dockviewTargetMessageId && isMessageRowRendered(groupedItems, dockviewTargetMessageId),
     ),
     renderedMessageCount: allMessages.length,
   });
@@ -1237,6 +1242,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         <ClarificationPanelSection
           pending={Boolean(pendingClarification)}
           messages={pendingClarificationGroup}
+          agentDisconnected={session?.pending_action === null}
           onResolved={handleClarificationResolved}
           shortcutScopeRef={panelRef}
           maxHeightVh={50}

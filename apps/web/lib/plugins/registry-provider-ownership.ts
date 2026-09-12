@@ -1,3 +1,7 @@
+export interface PluginProviderOwnershipSnapshot {
+  owners: Map<string, string>;
+  declarations: Map<string, Set<string>>;
+}
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const CORE_PROVIDER_IDS = new Set(["github", "gitlab", "azure_devops"]);
 
@@ -8,6 +12,31 @@ export class PluginProviderOwnership {
 
   setDeclarations(pluginId: string, ids: string[]): void {
     this.declarations.set(pluginId, new Set(ids));
+  }
+
+  clearDeclarations(pluginId: string): void {
+    this.declarations.delete(pluginId);
+  }
+
+  getDeclarations(pluginId: string): string[] | undefined {
+    const ids = this.declarations.get(pluginId);
+    return ids ? [...ids] : undefined;
+  }
+
+  snapshot(): PluginProviderOwnershipSnapshot {
+    return {
+      owners: new Map(this.owners),
+      declarations: new Map(
+        [...this.declarations].map(([pluginId, ids]) => [pluginId, new Set(ids)]),
+      ),
+    };
+  }
+
+  restore(snapshot: PluginProviderOwnershipSnapshot): void {
+    this.owners = new Map(snapshot.owners);
+    this.declarations = new Map(
+      [...snapshot.declarations].map(([pluginId, ids]) => [pluginId, new Set(ids)]),
+    );
   }
 
   claim(pluginId: string, providerId: string): void {

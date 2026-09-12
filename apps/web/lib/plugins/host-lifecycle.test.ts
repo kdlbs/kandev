@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { pluginDestinations } from "@/lib/navigation/plugin-destinations";
-import { loadPlugins } from "./host";
+import { loadPlugins, unloadPlugin } from "./host";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
@@ -29,6 +28,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     pluginId,
     React: {} as PluginHostApi["React"],
     jsx: {} as PluginHostApi["jsx"],
+    conversation: {} as PluginHostApi["conversation"],
     store: {
       getState: () => ({}) as never,
       setState: () => {},
@@ -87,6 +87,10 @@ function activePlugin(overrides: Partial<ActivePlugin> = {}): ActivePlugin {
     bundleUrl: "/api/plugins/plugin-a/bundle",
     ...overrides,
   };
+}
+
+function registerFake(id: string, plugin: unknown) {
+  (window as unknown as FakeWindow).registerKandevPlugin(id, plugin);
 }
 
 function fakeImporterFor(
@@ -186,8 +190,8 @@ describe("authoritative plugin lifecycle", () => {
   });
 });
 
-describe("authoritative plugin lifecycle — partial-initialization-failure retention", () => {
-  it("keeps a sidebar-footer registration made before initialize() throws, and marks the plugin failed", async () => {
+describe("authoritative plugin lifecycle staging", () => {
+  it("discards a sidebar-footer registration when initialize() throws", async () => {
     const initialize = vi.fn(async (registry: PluginRegistry) => {
       registry.registerNavItem({
         id: "nav-throw-a",
@@ -210,29 +214,13 @@ describe("authoritative plugin lifecycle — partial-initialization-failure rete
     );
 
     expect(pluginRegistry.getPluginLifecycle(PLUGIN_THROW_ID)?.status).toBe("failed");
-    expect(pluginRegistry.getNavItems()).toContainEqual({
-      id: "nav-throw-a",
-      label: "Throw",
-      path: "/throw-a",
-      section: SIDEBAR_FOOTER_SECTION,
-    });
-    // The footer's manifest is built from getNavRegistrations() through
-    // pluginDestinations() (see plugin-destinations.ts), which has no concept
-    // of plugin lifecycle status — a "failed" plugin's already-registered item
-    // maps to the "insights" section exactly like a "ready" plugin's would,
-    // which is what makes it occupy a footer budget slot (spec.md:816's AC).
-    const destinations = pluginDestinations(pluginRegistry.getNavRegistrations());
-    expect(destinations).toContainEqual(
-      expect.objectContaining({
-        pluginItemId: "nav-throw-a",
-        section: "insights",
-        source: "plugin",
-      }),
+    expect(pluginRegistry.getNavItems()).not.toContainEqual(
+      expect.objectContaining({ id: "nav-throw-a" }),
     );
     errorSpy.mockRestore();
   });
 
-  it("keeps a sidebar-footer registration made before initialize() times out, and marks the plugin failed", async () => {
+  it("discards a sidebar-footer registration when initialize() times out", async () => {
     const initializeStarted = deferred<void>();
     const initializeGate = deferred<void>();
     const initialize = vi.fn(async (registry: PluginRegistry) => {
@@ -264,25 +252,139 @@ describe("authoritative plugin lifecycle — partial-initialization-failure rete
     await load;
 
     expect(pluginRegistry.getPluginLifecycle(PLUGIN_PARTIAL_TIMEOUT_ID)?.status).toBe("failed");
-    expect(pluginRegistry.getNavItems()).toContainEqual({
-      id: "nav-partial-timeout",
-      label: "Partial",
-      path: "/partial-timeout",
-      section: SIDEBAR_FOOTER_SECTION,
-    });
-    // See the throw case above: pluginDestinations() has no lifecycle concept,
-    // so a timed-out plugin's already-registered item still maps to "insights"
-    // and occupies a footer budget slot exactly like a ready plugin's would.
-    const destinations = pluginDestinations(pluginRegistry.getNavRegistrations());
-    expect(destinations).toContainEqual(
-      expect.objectContaining({
-        pluginItemId: "nav-partial-timeout",
-        section: "insights",
-        source: "plugin",
-      }),
+    expect(pluginRegistry.getNavItems()).not.toContainEqual(
+      expect.objectContaining({ id: "nav-partial-timeout" }),
     );
 
     initializeGate.resolve();
     warnSpy.mockRestore();
+  });
+});
+describe("plugin reload staging", () => {
+  const PLUGIN_RELOAD_ID = "plugin-reload-staging";
+
+  afterEach(() => {
+    unloadPlugin(PLUGIN_RELOAD_ID, { evictCache: true });
+  });
+
+  it("keeps the published runtime and contributions when a replacement fails", async () => {
+    const oldDestroy = vi.fn();
+    const importer = async (url: string) => {
+      if (url === "/old-bundle.js") {
+        registerFake(PLUGIN_RELOAD_ID, {
+          initialize: (registry: PluginRegistry) =>
+            registry.registerNavItem({ id: "old-nav", label: "Old", path: "/old" }),
+          destroy: oldDestroy,
+        });
+        return {};
+      }
+      registerFake(PLUGIN_RELOAD_ID, {
+        initialize: () => {
+          throw new Error("replacement failed");
+        },
+      });
+      return {};
+    };
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_RELOAD_ID, bundleUrl: "/old-bundle.js" })],
+      makeHostFactory,
+      importer,
+    );
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_RELOAD_ID, bundleUrl: "/new-bundle.js" })],
+      makeHostFactory,
+      importer,
+    );
+
+    expect(pluginRegistry.getNavItems()).toContainEqual(expect.objectContaining({ id: "old-nav" }));
+    expect(oldDestroy).not.toHaveBeenCalled();
+    expect(pluginRegistry.getPluginLifecycle(PLUGIN_RELOAD_ID)?.status).toBe("ready");
+  });
+});
+
+describe("plugin registration staging", () => {
+  const PLUGIN_STAGE_ID = "plugin-registration-staging";
+
+  afterEach(() => {
+    unloadPlugin(PLUGIN_STAGE_ID, { evictCache: true });
+    pluginRegistry.unregisterPlugin("foreign-registration");
+  });
+
+  it("ignores foreign and late registrations without changing the matching bundle cache", async () => {
+    const importer = vi.fn(async (_url: string) => {
+      const register = (window as unknown as FakeWindow).registerKandevPlugin;
+      register("foreign-registration", {
+        initialize: (registry: PluginRegistry) =>
+          registry.registerNavItem({ id: "foreign-nav", label: "Foreign", path: "/foreign" }),
+      });
+      register(PLUGIN_STAGE_ID, {
+        initialize: (registry: PluginRegistry) =>
+          registry.registerNavItem({ id: "stage-nav", label: "Stage", path: "/stage" }),
+      });
+      (window as unknown as { lateRegister?: typeof register }).lateRegister = register;
+      return {};
+    });
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_STAGE_ID, bundleUrl: "/stage-bundle.js" })],
+      makeHostFactory,
+      importer,
+    );
+    (window as unknown as { lateRegister?: typeof registerFake }).lateRegister?.(PLUGIN_STAGE_ID, {
+      initialize: (registry: PluginRegistry) =>
+        registry.registerNavItem({ id: "late-nav", label: "Late", path: "/late" }),
+    });
+    unloadPlugin(PLUGIN_STAGE_ID);
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_STAGE_ID, bundleUrl: "/stage-bundle.js" })],
+      makeHostFactory,
+      importer,
+    );
+
+    expect(importer).toHaveBeenCalledTimes(1);
+    expect(pluginRegistry.getNavItems()).toContainEqual(
+      expect.objectContaining({ id: "stage-nav" }),
+    );
+    expect(pluginRegistry.getNavItems()).not.toContainEqual(
+      expect.objectContaining({ id: "foreign-nav" }),
+    );
+    expect(pluginRegistry.getNavItems()).not.toContainEqual(
+      expect.objectContaining({ id: "late-nav" }),
+    );
+  });
+
+  it("imports a changed bundle URL instead of reusing the prior registration", async () => {
+    const importer = vi.fn(async (url: string) => {
+      registerFake(PLUGIN_STAGE_ID, {
+        initialize: (registry: PluginRegistry) =>
+          registry.registerNavItem({
+            id: url === "/stage-v1.js" ? "stage-v1-nav" : "stage-v2-nav",
+            label: "Stage",
+            path: "/stage",
+          }),
+      });
+      return {};
+    });
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_STAGE_ID, bundleUrl: "/stage-v1.js" })],
+      makeHostFactory,
+      importer,
+    );
+    unloadPlugin(PLUGIN_STAGE_ID);
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_STAGE_ID, bundleUrl: "/stage-v2.js" })],
+      makeHostFactory,
+      importer,
+    );
+
+    expect(importer).toHaveBeenCalledTimes(2);
+    expect(pluginRegistry.getNavItems()).toContainEqual(
+      expect.objectContaining({ id: "stage-v2-nav" }),
+    );
+    expect(pluginRegistry.getNavItems()).not.toContainEqual(
+      expect.objectContaining({ id: "stage-v1-nav" }),
+    );
   });
 });

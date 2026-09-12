@@ -765,12 +765,14 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		limit = MaxMessagesPageSize
 	}
 	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
-		Limit:      limit,
-		Before:     req.Before,
-		After:      req.After,
-		Sort:       req.Sort,
-		AuthorType: req.AuthorType,
-		Around:     req.Around,
+		Limit:       limit,
+		Before:      req.Before,
+		After:       req.After,
+		Sort:        req.Sort,
+		AuthorType:  req.AuthorType,
+		AuthorTypes: req.AuthorTypes,
+		TaskID:      req.TaskID,
+		Around:      req.Around,
 	})
 }
 

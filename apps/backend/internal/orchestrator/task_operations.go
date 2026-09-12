@@ -1765,11 +1765,7 @@ func (s *Service) prepareSessionForStartWithWorkflowRoute(
 		// session row. Compensate before returning so callers never observe a
 		// partial sibling session when the required parent/group workspace is
 		// unavailable.
-		createdSession, lookupErr := s.repo.GetTaskSession(ctx, sessionID)
-		if lookupErr != nil {
-			s.logger.Warn("failed to load inherited workspace session for compensation",
-				zap.String("session_id", sessionID), zap.Error(lookupErr))
-		} else if deleteErr := s.deleteSessionAndCleanAttachments(ctx, createdSession); deleteErr != nil {
+		if deleteErr := s.deleteSessionAndPublishRemoval(ctx, task.ID, sessionID); deleteErr != nil {
 			s.logger.Warn("failed to compensate inherited workspace session",
 				zap.String("session_id", sessionID), zap.Error(deleteErr))
 		}
@@ -3815,6 +3811,32 @@ func (s *Service) StopSessionSynchronously(ctx context.Context, sessionID string
 	return s.executor.StopSessionSynchronously(ctx, sessionID, reason, force)
 }
 
+// deleteSessionAndPublishRemoval commits a session deletion before publishing
+// the terminal event consumed by ordered conversation subscribers.
+func (s *Service) deleteSessionAndPublishRemoval(ctx context.Context, taskID, sessionID string) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := s.deleteSessionAndCleanAttachments(ctx, session); err != nil {
+		return err
+	}
+	if s.eventBus != nil {
+		if err := s.eventBus.Publish(ctx, events.SessionRemoved, bus.NewEvent(
+			events.SessionRemoved,
+			"orchestrator",
+			map[string]interface{}{metaKeySessionID: sessionID, metaKeyTaskID: taskID},
+		)); err != nil {
+			s.logger.Warn("session deleted but removal event publish failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+	return nil
+
+}
+
 // DeleteSession deletes a session that is not currently running.
 func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
@@ -3923,7 +3945,7 @@ func (s *Service) deleteSessionAndPublishError(ctx context.Context, session *mod
 	lock.Lock()
 	defer lock.Unlock()
 
-	if err := s.deleteSessionAndCleanAttachments(ctx, session); err != nil {
+	if err := s.deleteSessionAndPublishRemoval(ctx, session.TaskID, session.ID); err != nil {
 		return err
 	}
 	s.publishDeletedSessionError(ctx, session.TaskID, session.ID)
@@ -3960,7 +3982,6 @@ func (s *Service) publishDeletedSessionError(ctx context.Context, taskID, sessio
 			zap.Error(err))
 	}
 }
-
 func (s *Service) newestRetainedSessionError(
 	ctx context.Context,
 	taskID string,

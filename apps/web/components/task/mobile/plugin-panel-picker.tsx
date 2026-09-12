@@ -7,6 +7,8 @@ import { pluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import { registrationIsVisible } from "../plugin-task-panel";
+import { resolveTaskPanelTitle } from "@/lib/state/layout-manager/plugin-panels";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 
 type PluginPanelPickerProps = {
@@ -16,6 +18,9 @@ type PluginPanelPickerProps = {
   showPromptHistory?: boolean;
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
+  taskId?: string | null;
+  sessionId?: string | null;
+  sessionKind?: "managed" | "passthrough" | null;
 };
 
 /** One grouped, scrollable phone picker for all mobile-enabled plugin panels. */
@@ -26,12 +31,25 @@ export function PluginPanelPicker({
   showPromptHistory = false,
   taskCanvases = [],
   onOpenCanvas,
+  taskId = null,
+  sessionId = null,
+  sessionKind = null,
 }: PluginPanelPickerProps) {
   const { t } = useTranslation();
   usePluginRegistry();
-  const registrations = pluginRegistry
-    .getTaskPanels()
-    .filter((registration) => registration.mobileEnabled);
+  const registrations = taskId
+    ? pluginRegistry
+        .getTaskPanels()
+        .filter((registration) => registration.mobileEnabled)
+        .filter((registration) =>
+          registrationIsVisible(registration, {
+            taskId,
+            sessionId,
+            sessionKind,
+            presentation: "mobile",
+          }),
+        )
+    : [];
 
   if (!open) return null;
 
@@ -83,7 +101,7 @@ export function PluginPanelPicker({
               }}
             >
               <Icon className="h-5 w-5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 truncate">{registration.title}</span>
+              <span className="min-w-0 truncate">{resolveTaskPanelTitle(registration)}</span>
             </button>
           );
         })}

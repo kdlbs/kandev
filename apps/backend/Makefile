@@ -186,7 +186,7 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
@@ -311,11 +311,16 @@ build-mock-agent-linux:
 FIXTURE_PACKAGE_DIR := cmd/plugin-fixture/fixture-package
 FIXTURE_STAGE_DIR := .build/fixture-stage
 FIXTURE_PACKAGE_OUT := .build/kandev-plugin-e2e-1.0.0.tar.gz
+FIXTURE_IDENTITY_OUT := .build/e2e-plugin-identity.json
 HOST_GOOS := $(shell $(GO) env GOOS)
 HOST_GOARCH := $(shell $(GO) env GOARCH)
 
+.PHONY: e2e-plugin-ui
+e2e-plugin-ui:
+	cd ../web && pnpm run build:e2e-plugin -- --outDir ../../apps/backend/cmd/plugin-fixture/fixture-package/ui
+
 .PHONY: e2e-plugin-package
-e2e-plugin-package:
+e2e-plugin-package: e2e-plugin-ui
 	@echo "Packaging plugin-fixture for e2e ($(HOST_GOOS)-$(HOST_GOARCH))..."
 	@$(RMDIR) $(FIXTURE_STAGE_DIR)
 	@$(call MKDIR,$(FIXTURE_STAGE_DIR)/server)
@@ -323,6 +328,12 @@ e2e-plugin-package:
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
 	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
 	$(GO) run ./cmd/plugin-pack -dir $(FIXTURE_STAGE_DIR) -out $(FIXTURE_PACKAGE_OUT) -platform-only
+	cd ../web && node scripts/write-e2e-plugin-identity.mjs \
+		e2e/fixtures/plugins/prompt-history-plugin/bundle.js \
+		../backend/cmd/plugin-fixture/fixture-package/ui/bundle.js \
+		../backend/cmd/plugin-fixture/fixture-package/manifest.yaml \
+		../backend/$(FIXTURE_PACKAGE_OUT) \
+		../backend/$(FIXTURE_IDENTITY_OUT)
 	@$(RMDIR) $(FIXTURE_STAGE_DIR)
 	@echo "Wrote $(FIXTURE_PACKAGE_OUT)"
 

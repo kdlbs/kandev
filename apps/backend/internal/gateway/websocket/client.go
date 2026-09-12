@@ -3,13 +3,16 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/user/store"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -32,7 +35,14 @@ const (
 	// Control frames (RPC responses and errors) use a separate bounded queue so
 	// high-volume session notifications cannot fill the queue and make a user
 	// action appear to time out.
-	controlSendBufferSize = 256
+	controlSendBufferSize   = 256
+	orderedConsumerPlugin   = "plugin"
+	orderedConsumerCore     = "core"
+	responseErrorKey        = "error"
+	sessionIDPayloadKey     = "session_id"
+	eventTypePayloadKey     = "type"
+	eventSequencePayloadKey = "sequence"
+	taskIDPayloadKey        = "task_id"
 )
 
 // Client represents a single WebSocket connection
@@ -42,20 +52,21 @@ type Client struct {
 	// anonymous connections (auth disabled and no synthetic identity set by
 	// the HTTP middleware — e.g. direct hub tests); synthetic in disabled
 	// mode; a real user when auth is enabled.
-	identity                authn.Identity
-	conn                    *websocket.Conn
-	hub                     *Hub
-	send                    chan []byte
-	controlSend             chan []byte
-	subscriptions           map[string]bool // Task IDs this client is subscribed to
-	sessionSubscriptions    map[string]bool // Session IDs this client is subscribed to
-	sessionFocus            map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
-	userSubscriptions       map[string]bool // User IDs this client is subscribed to
-	runSubscriptions        map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
-	systemMetricsSubscribed bool
-	mu                      sync.RWMutex
-	closed                  bool
-	logger                  *logger.Logger
+	identity                    authn.Identity
+	conn                        *websocket.Conn
+	hub                         *Hub
+	send                        chan []byte
+	controlSend                 chan []byte
+	subscriptions               map[string]bool // Task IDs this client is subscribed to
+	sessionSubscriptions        map[string]bool // Session IDs this client is subscribed to
+	sessionFocus                map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
+	orderedSessionSubscriptions map[string]map[string]plugins.SessionDeliveryCursorKey
+	userSubscriptions           map[string]bool // User IDs this client is subscribed to
+	runSubscriptions            map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
+	systemMetricsSubscribed     bool
+	mu                          sync.RWMutex
+	closed                      bool
+	logger                      *logger.Logger
 
 	// Replaceable session.message.updated traffic is scheduled separately from
 	// semantic notifications so one noisy session cannot fill the shared FIFO.
@@ -81,22 +92,23 @@ type Client struct {
 // NewClient creates a new WebSocket client
 func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
 	return &Client{
-		ID:                      id,
-		identity:                identity,
-		conn:                    conn,
-		hub:                     hub,
-		send:                    make(chan []byte, 256),
-		controlSend:             make(chan []byte, controlSendBufferSize),
-		subscriptions:           make(map[string]bool),
-		sessionSubscriptions:    make(map[string]bool),
-		sessionFocus:            make(map[string]bool),
-		userSubscriptions:       make(map[string]bool),
-		runSubscriptions:        make(map[string]bool),
-		replaceableByKey:        make(map[queuedReplaceableKey]outboundNotification),
-		replaceableBySession:    make(map[string][]sessionNotificationQueueItem),
-		replaceableCurrentByKey: make(map[replaceableNotificationKey]queuedReplaceableKey),
-		notificationWake:        make(chan struct{}, 1),
-		logger:                  log.WithFields(zap.String("client_id", id)),
+		ID:                          id,
+		identity:                    identity,
+		conn:                        conn,
+		hub:                         hub,
+		send:                        make(chan []byte, 256),
+		controlSend:                 make(chan []byte, controlSendBufferSize),
+		subscriptions:               make(map[string]bool),
+		sessionSubscriptions:        make(map[string]bool),
+		sessionFocus:                make(map[string]bool),
+		orderedSessionSubscriptions: make(map[string]map[string]plugins.SessionDeliveryCursorKey),
+		userSubscriptions:           make(map[string]bool),
+		runSubscriptions:            make(map[string]bool),
+		replaceableByKey:            make(map[queuedReplaceableKey]outboundNotification),
+		replaceableBySession:        make(map[string][]sessionNotificationQueueItem),
+		replaceableCurrentByKey:     make(map[replaceableNotificationKey]queuedReplaceableKey),
+		notificationWake:            make(chan struct{}, 1),
+		logger:                      log.WithFields(zap.String("client_id", id)),
 	}
 }
 
@@ -192,6 +204,12 @@ func (c *Client) handleMessage(msg *ws.Message) {
 		return
 	case ws.ActionSessionUnsubscribe:
 		c.handleSessionUnsubscribe(msg)
+		return
+	case ws.ActionSessionAck:
+		c.handleSessionAck(msg)
+		return
+	case ws.ActionSessionPoisonRequeue:
+		c.handleSessionPoisonRequeue(msg)
 		return
 	case ws.ActionSessionFocus:
 		c.handleSessionFocus(msg)
@@ -303,7 +321,16 @@ type UserSubscribeRequest struct {
 }
 
 type SessionSubscribeRequest struct {
-	SessionID string `json:"session_id"`
+	SessionID        string  `json:"session_id"`
+	ConsumerKind     string  `json:"consumer_kind,omitempty"`
+	PluginID         string  `json:"plugin_id,omitempty"`
+	Generation       int64   `json:"generation,omitempty"`
+	BindingToken     string  `json:"binding_token,omitempty"`
+	LastSeenSequence *uint64 `json:"last_seen_sequence,omitempty"`
+	ResumeToken      string  `json:"resume_token,omitempty"`
+	ReplaceCursor    bool    `json:"replace_cursor,omitempty"`
+	ConsumerID       string  `json:"consumer_id,omitempty"`
+	WireID           string  `json:"wire_id,omitempty"`
 }
 
 // ownUserTopic resolves the user-topic this client may subscribe to: its own
@@ -351,6 +378,10 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 		return
 	}
+	if req.ConsumerKind != "" {
+		c.handleOrderedSessionSubscribe(msg, req)
+		return
+	}
 
 	if !c.maySubscribeSession(msg, req.SessionID) {
 		return
@@ -370,6 +401,488 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 	}
 }
 
+func (c *Client) handleOrderedSessionSubscribe(msg *ws.Message, req SessionSubscribeRequest) {
+	service := c.hub.pluginConversationService
+	if service == nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "upstream_failure", "session stream unavailable", true)
+		return
+	}
+	userID := c.ownUserTopic()
+	if req.ConsumerKind == orderedConsumerPlugin {
+		lastSeen := uint64(0)
+		if req.LastSeenSequence != nil {
+			lastSeen = *req.LastSeenSequence
+		}
+		candidate := plugins.SessionDeliveryCursorKey{
+			SessionID: req.SessionID, ConsumerKind: req.ConsumerKind, ConsumerID: req.ConsumerID,
+			WireID: req.WireID, PluginID: req.PluginID, Generation: req.Generation, UserID: userID,
+		}
+		if req.ResumeToken == "" || service.ValidateSessionResume(req.ResumeToken, candidate, lastSeen) != nil {
+			req.ConsumerID = uuid.NewString()
+		}
+	}
+	key := plugins.SessionDeliveryCursorKey{
+		SessionID: req.SessionID, ConsumerKind: req.ConsumerKind,
+		ConsumerID: req.ConsumerID, WireID: req.WireID, PluginID: req.PluginID,
+		Generation: req.Generation, UserID: userID,
+	}
+	if !c.authorizeOrderedSessionConsumer(msg, req, service, userID) {
+		return
+	}
+	if !c.maySubscribeOrderedSession(msg, req, key, service) {
+		return
+	}
+	c.hub.orderedSessionMu.Lock()
+	defer c.hub.orderedSessionMu.Unlock()
+	committedEvents, err := service.SyncCommittedSessionEvents(context.Background(), req.SessionID)
+	if err != nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "upstream_failure", "session stream unavailable", true)
+		return
+	}
+	for _, event := range committedEvents {
+		c.hub.broadcastCommittedOrderedSessionEvent(service, event)
+	}
+	replay := resolveOrderedSessionReplay(service, req, key)
+	if replay.terminal && (replay.resumeValid || service.SessionEvents().HasCursor(key)) {
+		c.sendSessionStreamFailure(msg, req.SessionID, "session_removed", "session was removed", false)
+		return
+	}
+	c.acceptOrderedSessionSubscription(msg, req, key, userID, replay)
+}
+
+type orderedSessionReplay struct {
+	events         []plugins.SessionEvent
+	watermark      uint64
+	cursorSequence uint64
+	result         string
+	resumeValid    bool
+	terminal       bool
+}
+
+//nolint:goconst // Result values are protocol literals.
+func resolveOrderedSessionReplay(
+	service *plugins.Service,
+	req SessionSubscribeRequest,
+	key plugins.SessionDeliveryCursorKey,
+) orderedSessionReplay {
+	lastSeen := uint64(0)
+	lastSeenSupplied := req.LastSeenSequence != nil
+	if lastSeenSupplied {
+		lastSeen = *req.LastSeenSequence
+	}
+	events, watermark, terminal := service.SessionEvents().ReplayState(req.SessionID, lastSeen)
+	// A retained replay that starts past lastSeen+1 - or has no retained rows
+	// at all while the partition watermark is still ahead of the cursor -
+	// means intermediate rows aged out on both sides; replaying it as if
+	// contiguous would hide lost history. Rebind to the watermark instead
+	// (same replacement-cursor machinery as invalid_resume) so the client
+	// reconciles from the authoritative snapshot boundary.
+	retainedGap := lastSeenSupplied &&
+		lastSeen < watermark &&
+		(len(events) == 0 || events[0].Sequence > lastSeen+1)
+	if retainedGap {
+		return orderedSessionReplay{
+			watermark: watermark, cursorSequence: watermark,
+			result: "invalid_resume", terminal: terminal,
+		}
+	}
+	if req.ResumeToken != "" {
+		if err := service.ValidateSessionResume(req.ResumeToken, key, lastSeen); err != nil {
+			return orderedSessionReplay{
+				watermark: watermark, cursorSequence: watermark,
+				result: "invalid_resume", terminal: terminal,
+			}
+		}
+		result := "fresh"
+		if lastSeenSupplied && len(events) > 0 {
+			result = "replay"
+		}
+		return orderedSessionReplay{
+			events: events, watermark: watermark, cursorSequence: lastSeen,
+			result: result, resumeValid: true, terminal: terminal,
+		}
+	}
+	if !lastSeenSupplied {
+		return orderedSessionReplay{
+			watermark: watermark, cursorSequence: watermark,
+			result: "fresh", terminal: terminal,
+		}
+	}
+	result := "fresh"
+	if len(events) > 0 {
+		result = "replay"
+	}
+	return orderedSessionReplay{
+		events: events, watermark: watermark, cursorSequence: lastSeen,
+		result: result, terminal: terminal,
+	}
+}
+
+func (c *Client) acceptOrderedSessionSubscription(
+	msg *ws.Message,
+	req SessionSubscribeRequest,
+	key plugins.SessionDeliveryCursorKey,
+	userID string,
+	replay orderedSessionReplay,
+) bool {
+	service := c.hub.pluginConversationService
+	snapshotToken, resumeToken, expiresAt, err := service.MintSessionStreamGrant(
+		req.PluginID,
+		userID,
+		req.Generation,
+		req.SessionID,
+		req.ConsumerID,
+		req.WireID,
+		replay.watermark,
+	)
+	if err != nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_binding", "cannot mint session stream grant", true)
+		return false
+	}
+	replay, claims, err := prepareOrderedReplayDelivery(service, replay, time.Now().UTC())
+	if err != nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "upstream_failure", "cannot claim session event delivery", true)
+		return false
+	}
+	cursorSequence := replay.cursorSequence
+	if req.ReplaceCursor || replay.result == "invalid_resume" {
+		cursorSequence = replay.watermark
+	}
+	var cursorErr error
+	if req.ReplaceCursor || replay.result == "invalid_resume" {
+		cursorErr = service.SessionEvents().ReplaceCursor(key, cursorSequence)
+	} else {
+		cursorErr = service.SessionEvents().RegisterCursor(key, cursorSequence)
+	}
+	if cursorErr != nil {
+		if releaseErr := releaseOrderedReplayClaims(service, claims); releaseErr != nil && c.logger != nil {
+			c.logger.Error("release ordered replay claims", zap.Error(releaseErr))
+		}
+		c.sendSessionStreamFailure(msg, req.SessionID, "upstream_failure", "cannot register session cursor", true)
+		return false
+	}
+	payload := orderedSessionSubscribePayload(req, replay, snapshotToken, resumeToken, expiresAt)
+	c.storeOrderedSessionSubscription(req, key)
+	response, _ := ws.NewResponse(msg.ID, msg.Action, payload)
+	c.sendMessage(response)
+	for _, event := range replay.events {
+		queued := c.sendOrderedSessionEvent(event)
+		if claim, ok := claims[event.ID]; ok {
+			if err := service.SessionDelivery().Complete(claim, queued, time.Now().UTC()); err != nil && c.logger != nil {
+				c.logger.Error("complete ordered replay poison", zap.String("event_id", event.ID), zap.Error(err))
+			}
+		}
+	}
+	return true
+}
+
+func prepareOrderedReplayDelivery(
+	service *plugins.Service,
+	replay orderedSessionReplay,
+	now time.Time,
+) (orderedSessionReplay, map[string]plugins.SessionDeliveryClaim, error) {
+	claims := make(map[string]plugins.SessionDeliveryClaim)
+	for _, event := range replay.events {
+		claim, err := service.SessionDelivery().Claim(event.SessionID, event.ID, now)
+		if err != nil {
+			releaseErr := releaseOrderedReplayClaims(service, claims)
+			return replay, nil, errors.Join(err, releaseErr)
+		}
+		switch claim.Disposition {
+		case plugins.SessionDeliveryUntracked:
+		case plugins.SessionDeliveryClaimed:
+			claims[event.ID] = claim
+		default:
+			if err := releaseOrderedReplayClaims(service, claims); err != nil {
+				return replay, nil, err
+			}
+			replay.events = nil
+			replay.result = "invalid_resume"
+			replay.cursorSequence = replay.watermark
+			return replay, nil, nil
+		}
+	}
+	return replay, claims, nil
+}
+
+func releaseOrderedReplayClaims(
+	service *plugins.Service,
+	claims map[string]plugins.SessionDeliveryClaim,
+) error {
+	now := time.Now().UTC()
+	var result error
+	for _, claim := range claims {
+		result = errors.Join(result, service.SessionDelivery().Complete(claim, false, now))
+	}
+	return result
+}
+
+func orderedSessionSubscribePayload(
+	req SessionSubscribeRequest,
+	replay orderedSessionReplay,
+	snapshotToken string,
+	resumeToken string,
+	expiresAt time.Time,
+) map[string]any {
+	payload := map[string]any{
+		"success": true, sessionIDPayloadKey: req.SessionID, "result": replay.result,
+		"event_watermark": replay.watermark, "snapshot_cutoff": replay.watermark,
+		"snapshot_token": snapshotToken, "resume_token": resumeToken, "expires_at": expiresAt,
+	}
+	if req.ConsumerKind == orderedConsumerPlugin {
+		payload["consumer_id"] = req.ConsumerID
+	} else {
+		payload["wire_id"] = req.WireID
+	}
+	if replay.result == "replay" && len(replay.events) > 0 {
+		payload["replay_from"] = replay.events[0].Sequence
+		payload["replay_to"] = replay.events[len(replay.events)-1].Sequence
+	}
+	return payload
+}
+
+func (c *Client) storeOrderedSessionSubscription(
+	req SessionSubscribeRequest,
+	key plugins.SessionDeliveryCursorKey,
+) {
+	subscriptionID := req.ConsumerID
+	if subscriptionID == "" {
+		subscriptionID = req.WireID
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	byConsumer := c.orderedSessionSubscriptions[req.SessionID]
+	if byConsumer == nil {
+		byConsumer = make(map[string]plugins.SessionDeliveryCursorKey)
+		c.orderedSessionSubscriptions[req.SessionID] = byConsumer
+	}
+	byConsumer[subscriptionID] = key
+}
+
+func (c *Client) authorizeOrderedSessionConsumer(
+	msg *ws.Message,
+	req SessionSubscribeRequest,
+	service *plugins.Service,
+	userID string,
+) bool {
+	switch req.ConsumerKind {
+	case orderedConsumerPlugin:
+		return c.authorizeOrderedPluginConsumer(msg, req, service, userID)
+	case orderedConsumerCore:
+		if req.WireID != "" && req.ConsumerID == "" && req.PluginID == "" &&
+			req.Generation == 0 && req.BindingToken == "" {
+			return true
+		}
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "invalid core consumer identity", false)
+	default:
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "unsupported consumer kind", false)
+	}
+	return false
+}
+
+func (c *Client) authorizeOrderedPluginConsumer(
+	msg *ws.Message,
+	req SessionSubscribeRequest,
+	service *plugins.Service,
+	userID string,
+) bool {
+	if req.ConsumerID == "" || req.WireID != "" || req.PluginID == "" || req.Generation == 0 {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "invalid plugin consumer identity", false)
+		return false
+	}
+	err := service.AuthorizeConversationConsumer(
+		req.PluginID,
+		userID,
+		req.Generation,
+		req.BindingToken,
+	)
+	if err == nil {
+		return true
+	}
+	code := "invalid_binding"
+	retryable := false
+	if errors.Is(err, plugins.ErrConversationGenerationSuperseded) {
+		code = "generation_superseded"
+		retryable = true
+	}
+	c.sendSessionStreamFailure(msg, req.SessionID, code, "plugin conversation binding rejected", retryable)
+	return false
+}
+
+func (c *Client) sendSessionStreamFailure(
+	msg *ws.Message,
+	sessionID string,
+	code string,
+	message string,
+	retryable bool,
+) {
+	payload := map[string]any{
+		"success":        false,
+		responseErrorKey: map[string]any{"code": code, "message": message, "retryable": retryable},
+	}
+	if sessionID != "" {
+		payload["session_id"] = sessionID
+	}
+	response, _ := ws.NewResponse(msg.ID, msg.Action, payload)
+	c.sendMessage(response)
+}
+
+func (c *Client) sendOrderedSessionEvent(event plugins.SessionEvent) bool {
+	frame, err := sessionEventFrame(event)
+	if err != nil {
+		c.closeSend()
+		return false
+	}
+	if c.sendNotification(frame, "session.event") {
+		return true
+	}
+	// An ordered frame that is not queued cannot be acknowledged safely. End
+	// this connection so the client reconnects and replays from its cursor.
+	c.closeSend()
+	return false
+}
+
+type SessionAckRequest struct {
+	SessionID    string `json:"session_id"`
+	ConsumerKind string `json:"consumer_kind"`
+	PluginID     string `json:"plugin_id,omitempty"`
+	Generation   int64  `json:"generation,omitempty"`
+	Sequence     uint64 `json:"sequence"`
+	ResumeToken  string `json:"resume_token,omitempty"`
+	ConsumerID   string `json:"consumer_id,omitempty"`
+	WireID       string `json:"wire_id,omitempty"`
+}
+
+func (c *Client) handleSessionAck(msg *ws.Message) {
+	var req SessionAckRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendSessionStreamFailure(msg, "", "invalid_request", "invalid acknowledgement", false)
+		return
+	}
+	service := c.hub.pluginConversationService
+	identity, validIdentity := sessionAckSubscriptionID(req)
+	if !validIdentity {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "invalid session consumer identity", false)
+		return
+	}
+	c.mu.RLock()
+	key, ok := c.orderedSessionSubscriptions[req.SessionID][identity]
+	c.mu.RUnlock()
+	if service == nil || !ok || !sessionAckMatchesKey(req, key) {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "unknown session consumer", false)
+		return
+	}
+	if err := service.ValidateSessionResume(req.ResumeToken, key, req.Sequence); err != nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_binding", "invalid resume token", false)
+		return
+	}
+	if err := service.SessionEvents().Acknowledge(key, req.Sequence); err != nil {
+		code := "forward_gap"
+		retryable := true
+		if errors.Is(err, plugins.ErrPoisonEvent) {
+			code = "invalid_request"
+			retryable = false
+		}
+		c.sendSessionStreamFailure(msg, req.SessionID, code, "acknowledgement rejected", retryable)
+		return
+	}
+	_, resumeToken, _, err := service.MintSessionStreamGrant(
+		key.PluginID,
+		key.UserID,
+		key.Generation,
+		key.SessionID,
+		key.ConsumerID,
+		key.WireID,
+		req.Sequence,
+	)
+	if err != nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_binding", "cannot mint resume token", true)
+		return
+	}
+	payload := map[string]any{
+		"success": true, "session_id": req.SessionID,
+		"acknowledged_sequence": req.Sequence, "resume_token": resumeToken,
+	}
+	if key.ConsumerKind == orderedConsumerPlugin {
+		payload["consumer_id"] = key.ConsumerID
+	} else {
+		payload["wire_id"] = key.WireID
+	}
+	response, _ := ws.NewResponse(msg.ID, msg.Action, payload)
+	c.sendMessage(response)
+}
+
+func sessionAckSubscriptionID(req SessionAckRequest) (string, bool) {
+	switch req.ConsumerKind {
+	case orderedConsumerPlugin:
+		return req.ConsumerID, req.ConsumerID != "" && req.WireID == ""
+	case orderedConsumerCore:
+		return req.WireID, req.WireID != "" && req.ConsumerID == ""
+	default:
+		return "", false
+	}
+}
+
+func sessionAckMatchesKey(req SessionAckRequest, key plugins.SessionDeliveryCursorKey) bool {
+	if req.SessionID != key.SessionID || req.ConsumerKind != key.ConsumerKind {
+		return false
+	}
+	switch req.ConsumerKind {
+	case orderedConsumerPlugin:
+		return req.ConsumerID == key.ConsumerID &&
+			req.PluginID == key.PluginID &&
+			req.Generation == key.Generation
+	case orderedConsumerCore:
+		return req.WireID == key.WireID && req.PluginID == "" && req.Generation == 0
+	default:
+		return false
+	}
+}
+
+type sessionPoisonRequeueRequest struct {
+	SessionID          string `json:"session_id"`
+	EventID            string `json:"event_id"`
+	ExpectedOwnerEpoch uint64 `json:"expected_owner_epoch"`
+}
+
+func (c *Client) handleSessionPoisonRequeue(msg *ws.Message) {
+	var req sessionPoisonRequeueRequest
+	if err := msg.ParsePayload(&req); err != nil ||
+		req.SessionID == "" ||
+		req.EventID == "" ||
+		req.ExpectedOwnerEpoch == 0 {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "invalid poison requeue request", false)
+		return
+	}
+	if !canRequeueSessionEvents(c.identity) || c.hub.pluginConversationService == nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "unauthorized", "session_events:requeue required", false)
+		return
+	}
+	err := c.hub.pluginConversationService.SessionDelivery().Requeue(
+		req.SessionID,
+		req.EventID,
+		req.ExpectedOwnerEpoch,
+		c.ownUserTopic(),
+		time.Now().UTC(),
+	)
+	if err != nil {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "poison requeue rejected", false)
+		return
+	}
+	response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"success": true, "session_id": req.SessionID, "event_id": req.EventID,
+		"state": plugins.SessionPoisonPending,
+	})
+	c.sendMessage(response)
+}
+
+func canRequeueSessionEvents(identity authn.Identity) bool {
+	if identity.UserID == "" {
+		return false
+	}
+	return identity.Instance || identity.Synthetic
+}
+
 // maySubscribeSession applies the per-user session scoping check, emitting the
 // forbidden error itself. Returns true when the subscription may proceed.
 func (c *Client) maySubscribeSession(msg *ws.Message, sessionID string) bool {
@@ -382,6 +895,27 @@ func (c *Client) maySubscribeSession(msg *ws.Message, sessionID string) bool {
 		return false
 	}
 	return true
+}
+
+func (c *Client) maySubscribeOrderedSession(
+	msg *ws.Message,
+	req SessionSubscribeRequest,
+	key plugins.SessionDeliveryCursorKey,
+	service *plugins.Service,
+) bool {
+	check := c.hub.authPolicy.Subscriptions.Session
+	if check == nil {
+		return true
+	}
+	if err := check(c.dispatchContext(), req.SessionID); err == nil {
+		return true
+	}
+	_, _, terminal := service.SessionEvents().ReplayState(req.SessionID, 0)
+	if terminal && service.SessionEvents().HasCursor(key) {
+		return true
+	}
+	c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot subscribe to this session", nil)
+	return false
 }
 
 func (c *Client) handleUserUnsubscribe(msg *ws.Message) {
@@ -550,7 +1084,6 @@ func (c *Client) handleSystemMetricsSubscribe(msg *ws.Message) {
 	})
 	c.sendMessage(resp)
 }
-
 func (c *Client) handleSystemMetricsUnsubscribe(msg *ws.Message) {
 	c.hub.UnsubscribeFromSystemMetrics(c)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -566,19 +1099,69 @@ func (c *Client) handleSessionUnsubscribe(msg *ws.Message) {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 		return
 	}
-
 	if req.SessionID == "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 		return
 	}
-
+	if req.ConsumerKind != "" {
+		c.handleOrderedSessionUnsubscribe(msg, req)
+		return
+	}
 	c.hub.UnsubscribeFromSession(c, req.SessionID)
-
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success":    true,
 		"session_id": req.SessionID,
 	})
 	c.sendMessage(resp)
+}
+
+func (c *Client) handleOrderedSessionUnsubscribe(msg *ws.Message, req SessionSubscribeRequest) {
+	key, removed := c.removeOrderedSessionSubscription(req)
+	if !removed {
+		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "ordered subscription not found", false)
+		return
+	}
+	if service := c.hub.pluginConversationService; service != nil {
+		if err := service.SessionEvents().ReleaseCursor(key); err != nil {
+			c.storeOrderedSessionSubscription(req, key)
+			c.sendSessionStreamFailure(msg, req.SessionID, "upstream_failure", "cannot release session cursor", true)
+			return
+		}
+	}
+	payload := map[string]any{"success": true, sessionIDPayloadKey: req.SessionID}
+	if req.ConsumerKind == orderedConsumerPlugin {
+		payload["consumer_id"] = req.ConsumerID
+	} else {
+		payload["wire_id"] = req.WireID
+	}
+	response, _ := ws.NewResponse(msg.ID, msg.Action, payload)
+	c.sendMessage(response)
+}
+
+func (c *Client) removeOrderedSessionSubscription(
+	req SessionSubscribeRequest,
+) (plugins.SessionDeliveryCursorKey, bool) {
+	subscriptionID := req.ConsumerID
+	if req.ConsumerKind == orderedConsumerCore {
+		subscriptionID = req.WireID
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	byConsumer := c.orderedSessionSubscriptions[req.SessionID]
+	key, subscribed := byConsumer[subscriptionID]
+	if !subscribed ||
+		key.ConsumerKind != req.ConsumerKind ||
+		key.ConsumerID != req.ConsumerID ||
+		key.WireID != req.WireID ||
+		key.PluginID != req.PluginID ||
+		key.Generation != req.Generation {
+		return plugins.SessionDeliveryCursorKey{}, false
+	}
+	delete(byConsumer, subscriptionID)
+	if len(byConsumer) == 0 {
+		delete(c.orderedSessionSubscriptions, req.SessionID)
+	}
+	return key, true
 }
 
 // handleSessionFocus handles session.focus — marks the session as actively

@@ -26,7 +26,9 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { reviewPanelId } from "@/lib/state/dockview-review-panel-id";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
-import type { ReviewItemSummary } from "@/lib/plugins/types";
+import { registrationIsVisible } from "./plugin-task-panel";
+import { resolveTaskPanelTitle } from "@/lib/state/layout-manager/plugin-panels";
+import type { PluginSessionKind, ReviewItemSummary } from "@/lib/plugins/types";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { useAppStore } from "@/components/state-provider";
@@ -200,20 +202,41 @@ function PRPanelMenuItems({ prs, onOpenPR }: { prs: TaskPR[]; onOpenPR: (pr: Tas
 }
 
 /** One "+" menu row per plugin-registered task panel (AC1), rendered after Plan. */
-function PluginTaskPanelMenuItems({ groupId }: { groupId: string }) {
+function PluginTaskPanelMenuItems({
+  groupId,
+  state,
+}: {
+  groupId: string;
+  state: AddPanelMenuState;
+}) {
   usePluginRegistry();
   const addPluginPanel = useDockviewStore((s) => s.addPluginPanel);
-  const panels = pluginRegistry.getTaskPanels();
+  const sessionId = useAppStore((store) => store.tasks.activeSessionId);
+  let sessionKind: PluginSessionKind = null;
+  if (sessionId) {
+    sessionKind = state.isPassthrough ? "passthrough" : "managed";
+  }
+  const panels = state.taskId
+    ? pluginRegistry.getTaskPanels().filter((registration) =>
+        registrationIsVisible(registration, {
+          taskId: state.taskId!,
+          sessionId,
+          sessionKind,
+          presentation: "desktop",
+        }),
+      )
+    : [];
 
   return (
     <>
       {panels.map((registration) => {
         const Icon = resolvePluginIcon(registration.icon);
+        const title = resolveTaskPanelTitle(registration);
         return (
           <DropdownMenuItem
             key={`${registration.pluginId}:${registration.id}`}
             onClick={() =>
-              addPluginPanel(registration.pluginId, registration.id, registration.title, {
+              addPluginPanel(registration.pluginId, registration.id, title, {
                 groupId,
               })
             }
@@ -221,7 +244,7 @@ function PluginTaskPanelMenuItems({ groupId }: { groupId: string }) {
             data-testid={`add-panel-plugin-item-${registration.pluginId}-${registration.id}`}
           >
             <Icon className={MENU_ICON_CLASS} />
-            {registration.title}
+            {title}
           </DropdownMenuItem>
         );
       })}
@@ -354,7 +377,7 @@ export function AddPanelMenuItems({
           {t("task:portForwarding")}
         </DropdownMenuCheckboxItem>
       )}
-      <PluginTaskPanelMenuItems groupId={groupId} />
+      <PluginTaskPanelMenuItems groupId={groupId} state={state} />
       <TaskCanvasMenuItems groupId={groupId} taskId={state.taskId} />
       {!state.isPassthrough && (
         <DropdownMenuItem onClick={() => addTodosPanel({ groupId })} className={MENU_ITEM_CLASS}>

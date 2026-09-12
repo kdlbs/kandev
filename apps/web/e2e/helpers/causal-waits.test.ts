@@ -150,6 +150,23 @@ describe("watchWs().waitForEvent", () => {
       payload: { task_id: "t1", status: "cancelled" },
     });
   });
+  it("resolves on an ordered session event using its legacy action alias", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForEvent("session.message.added", {
+      where: (payload) => payload.session_id === "session-1",
+    });
+    socket.emit("framereceived", {
+      type: "session.event",
+      event_type: "message.added",
+      payload: { session_id: "session-1", message_id: "message-1" },
+    });
+    await expect(pending).resolves.toMatchObject({
+      eventType: "message.added",
+      payload: { session_id: "session-1", message_id: "message-1" },
+    });
+  });
 
   it("skips notifications that fail the `where` predicate", async () => {
     const { page, fake } = fakePage();

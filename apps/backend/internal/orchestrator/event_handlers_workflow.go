@@ -3535,7 +3535,7 @@ func (s *Service) prepareWorkflowReplacementSession(
 	launchProfileID, err := s.resolveDynamicLaunchExecution(ctx, newSession, newAgentProfileID, true)
 	if err != nil {
 		resolutionErr := fmt.Errorf("failed to resolve workflow replacement profile: %w", err)
-		if deleteErr := s.deleteSessionAndCleanAttachments(ctx, newSession); deleteErr != nil {
+		if deleteErr := s.deleteSessionAndPublishRemoval(ctx, taskID, sessionID); deleteErr != nil {
 			s.logger.Warn("failed to delete workflow replacement after profile resolution failure",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),

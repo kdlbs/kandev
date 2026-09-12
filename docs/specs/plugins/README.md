@@ -40,6 +40,7 @@ plugin security boundaries.
 - [Plugin System](requirements/plugins.md)
 - [Plugin Repository Task Creation](requirements/repository-provider-task-creation.md)
 - [Voice Plugin Host Prerequisites](requirements/voice-extraction-host.md)
+- [Prompt History Plugin Host Prerequisites](requirements/prompt-history-extraction-host.md)
 - [Voice Mode Leaves Core](requirements/voice-extraction.md)
 
 ### System design
@@ -52,6 +53,7 @@ plugin security boundaries.
 - [Plugin nav items in the sidebar footer icon row System Design Part 3](system-design/plugin-nav-sidebar-footer-03.md)
 - [Plugin nav items in the sidebar footer icon row System Design Part 4](system-design/plugin-nav-sidebar-footer-04.md)
 - [Plugin Shortcut Settings](system-design/plugin-shortcut-settings.md)
+- [Prompt History Plugin Host Prerequisites](system-design/prompt-history-extraction-host.md)
 - [Plugin System System Design Part 1](system-design/plugins-01.md)
 - [Plugin System System Design Part 2](system-design/plugins-02.md)
 - [Plugin System System Design Part 3](system-design/plugins-03.md)

@@ -1505,7 +1505,7 @@ export class ApiClient {
       turnStartedAt?: string;
       turnCompletedAt?: string;
     },
-  ): Promise<void> {
+  ): Promise<{ messageId: string; turnId: string | null }> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
     if (opts.content !== undefined) body.content = opts.content;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
@@ -1515,7 +1515,24 @@ export class ApiClient {
     if (opts.newTurn !== undefined) body.new_turn = opts.newTurn;
     if (opts.turnStartedAt !== undefined) body.turn_started_at = opts.turnStartedAt;
     if (opts.turnCompletedAt !== undefined) body.turn_completed_at = opts.turnCompletedAt;
-    await this.request("POST", "/api/v1/_test/messages", body);
+    const result = await this.request<{ message_id: string; turn_id?: string | null }>(
+      "POST",
+      "/api/v1/_test/messages",
+      body,
+    );
+    return { messageId: result.message_id, turnId: result.turn_id ?? null };
+  }
+
+  async updateSessionMessage(messageId: string, content: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/_test/messages/${messageId}`, { content });
+  }
+
+  async deleteSessionMessage(messageId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/_test/messages/${messageId}`);
+  }
+
+  async completeSessionTurn(turnId: string): Promise<void> {
+    await this.request("POST", `/api/v1/_test/turns/${turnId}/complete`);
   }
 
   async seedToolCallMessages(
@@ -2576,7 +2593,7 @@ export class ApiClient {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/task-sessions/${sessionId}`);
+    await this.request("DELETE", `/api/v1/_test/task-sessions/${sessionId}`);
   }
 
   async getTask(taskId: string): Promise<{

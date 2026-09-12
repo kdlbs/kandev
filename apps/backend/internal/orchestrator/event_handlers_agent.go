@@ -906,8 +906,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	// Explicit agent-requested moves (move_task_kandev) take precedence over pending clarifications.
+	// Agent.ready is the authoritative turn boundary. Detach the request before
+	// publishing WAITING_FOR_INPUT so a client that immediately reloads sees the
+	// deferred-answer metadata in its first snapshot.
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
+		s.detachClarificationWaiters(ctx, data.SessionID)
 		s.logger.Info("deferring on_turn_complete while clarification is pending",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))

@@ -141,6 +141,7 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)
 	errs = append(errs, m.validateActions()...)
+	errs = append(errs, m.validateCapabilityMinimumVersions()...)
 	errs = append(errs, m.validateRepositoryProviders()...)
 	errs = append(errs, m.validateReferenceSources()...)
 	errs = append(errs, m.validateAgentTools()...)

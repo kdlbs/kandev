@@ -3634,12 +3634,22 @@ func (h *Handlers) deleteTaskMessageRollbackSession(
 		if err != nil {
 			return err
 		}
-		if attachmentSvc := h.taskSvc.AttachmentService(); attachmentSvc != nil {
-			attachmentSvc.RemoveBytes(attachments)
+		if h.taskSvc != nil {
+			if attachmentSvc := h.taskSvc.AttachmentService(); attachmentSvc != nil {
+				attachmentSvc.RemoveBytes(attachments)
+			}
 		}
+	} else if err := repo.DeleteTaskSession(ctx, session); err != nil {
+		return err
+	}
+	if h.eventBus == nil {
 		return nil
 	}
-	return repo.DeleteTaskSession(ctx, session)
+	return h.eventBus.Publish(ctx, events.SessionRemoved, bus.NewEvent(
+		events.SessionRemoved,
+		"mcp-handlers",
+		map[string]interface{}{"session_id": session.ID, "task_id": session.TaskID},
+	))
 }
 
 func (r taskMessageReviewRollback) primarySessionID() string {

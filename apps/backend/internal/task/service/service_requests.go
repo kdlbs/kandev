@@ -337,7 +337,11 @@ type ListMessagesRequest struct {
 	After         string
 	Sort          string
 	AuthorType    string
-	Around        string
+	// AuthorTypes narrows by any listed author; when non-empty it takes
+	// precedence over AuthorType. TaskID narrows the page to one task.
+	AuthorTypes []string
+	TaskID      string
+	Around      string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

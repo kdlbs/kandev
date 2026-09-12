@@ -6,6 +6,7 @@
 # cmd/plugin-pack into apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz.
 id: "kandev-plugin-e2e"
 api_version: 2
+min_kandev_version: "0.91.1"
 version: "1.0.0"
 display_name: "Kandev E2E Fixture Plugin"
 description: "SDK-based plugin backend used by backend integration tests and Playwright e2e tests"
@@ -23,6 +24,7 @@ runtime:
     windows-amd64: "server/plugin-windows-amd64.exe"
 
 capabilities:
+  api_read: ["messages"]
   events: ["task.created"]
   api_write: ["tasks"]
   state: true

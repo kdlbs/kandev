@@ -12,7 +12,12 @@ import (
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
-func registerPluginRoutesWithIdentity(t *testing.T, svc *Service, identity authn.Identity) *gin.Engine {
+func registerPluginRoutesWithIdentity(
+	t *testing.T,
+	svc *Service,
+	identity authn.Identity,
+	conversationReaders ...ConversationReader,
+) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -20,7 +25,7 @@ func registerPluginRoutesWithIdentity(t *testing.T, svc *Service, identity authn
 		authn.SetOnGin(ctx, identity)
 		ctx.Next()
 	})
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	RegisterRoutes(router, svc, nil, testLogger(t), conversationReaders...)
 	return router
 }
 

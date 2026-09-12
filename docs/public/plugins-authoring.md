@@ -294,7 +294,17 @@ of truth and must be updated together when the contract changes:
 - Wire contract: apps/backend/proto/kandev/plugin/v1/plugin.proto.
 - Manifest model and semantic validation: apps/backend/internal/plugins/manifest.
 - Package integrity and installation: apps/backend/internal/plugins/pkgtar.
-- Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md), [ADR 0047](../decisions/0047-plugin-host-conversation-reads.md), [ADR 0048](../decisions/0048-plugin-host-utility-agent-invoke.md), and [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
+- Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md),
+  [ADR 0047](../decisions/0047-plugin-host-conversation-reads.md),
+  [ADR 0048](../decisions/0048-plugin-host-utility-agent-invoke.md),
+  [ADR 0050](../decisions/0050-plugin-external-auth-capability.md), and
+  [Browser conversation facade ADR](../decisions/2026-09-06-browser-plugin-conversation-facade.md).
+
+The browser conversation facade ADR is still proposed while this prerequisite
+package is under review. Until that ADR is accepted, normative authority is
+split deliberately: requirements define observable behavior, the system design
+defines Host architecture, and `PLUGIN-API.md` defines the Host-only wire
+contract.
 
 ## Frontend contract
 
@@ -344,6 +354,48 @@ If a bundle registers a component at its exact plugin detail route, Kandev
 keeps that component and renders the host-owned shortcut card alongside it.
 Nested plugin settings routes remain fully plugin-owned.
 
+### Browser conversation facade
+
+Native UI plugins read prompt history through `host.conversation`, not through
+`host.store`, raw WebSocket frames, first-party `/api/v1` URLs, or the Go Host
+reader. The facade requires `capabilities.api_read: ["messages"]`, and every
+manifest declaring that capability requires `min_kandev_version: "0.91.1"` or
+later. The same floor applies to Go `host.Messages().List` plugins. It returns
+sanitized public SDK DTOs. Inside a task panel, prefer the injected
+`conversation.history` handle so the read stays bound to that panel's task,
+session, and plugin generation:
+
+```tsx
+function PromptHistory({ sessionId, conversation }: PluginTaskPanelProps) {
+  const { messages, loading, loadMore } =
+    conversation.history.useSessionMessages({ sessionId });
+  return <PromptList messages={messages} loading={loading} onLoadMore={loadMore} />;
+```
+
+Panel handles are independently scoped and become inert on unmount, identity
+change, disable, or reload. `host.conversation` is the equivalent nearest-scope
+accessor; outside a panel it returns stable empty state. Use the canonical
+[PLUGIN-API contract](../plans/plugins/PLUGIN-API.md) for DTOs, pagination,
+ordered updates, lifecycle, and retryable errors.
+Browser route errors use `unauthenticated`/non-retryable for `401`,
+`not_found`/non-retryable for `404`, `invalid_query`/non-retryable for `400`,
+and `upstream_failure`/retryable for every authorized `5xx`.
+Within a task panel, omitted `taskId` inherits the panel task, explicit
+`null` reads the whole selected session, and an explicit task ID must match the
+panel task. `loadMore()` resolves to the number of newly projected messages;
+joined, exhausted, closed, and removed calls are deterministic, while
+transport failures reject with the typed error and preserve committed state.
+The turns hook follows the same scope and lifecycle rules, favorites remain
+read-only and reactive, and `session.removed` retains visible rows while
+closing future reads.
+
+| Need | Browser facade | Go Host API |
+| --- | --- | --- |
+| Surface | `host.conversation` or `conversation.history` | `host.Messages().List` |
+| Runtime | Native UI bundle | Plugin server process |
+| Data | Sanitized browser DTOs and ordered live updates | Typed paginated reader |
+| Forbidden shortcut | `host.store`, raw WS, `/api/v1` | Private application imports |
+
 ### Frontend hook/API matrix
 
 | Surface                         | Location and input                                                                                                                                                                                                                                                                                     | Manifest requirement                                                   | Cleanup/lifecycle                                                                                                                                                                                               | Small example                                                                                                       |
@@ -359,7 +411,7 @@ Nested plugin settings routes remain fully plugin-owned.
 | registerRepositoryProvider      | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |
 | registerTaskAction              | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
 | registerReviewProvider          | Normalized task reviews, workspace associations, unlink, and shared Review panel                                                                                                                                                                                                                       | ui.bundle and matching `repository_providers[]` id                     | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement                                                                 | registry.registerReviewProvider({ id: "acme", ...reviews })                                                         |
-| registerTaskPanel               | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation }                                                                                                                              | Active ui.bundle                                                       | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance                                        | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel })                                  |
+| registerTaskPanel               | { id, title, titleKey?, icon?, Component, mobileEnabled?, visible?(context) }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, sessionKind, presentation, conversation: { openMessage(messageId), history } }; `titleKey` is a plugin translation key with literal `title` fallback | Active ui.bundle | Panel renders behind its own error boundary with reactive localized titles; a throwing `visible` hides the item; handles are generation-bound and independently scoped, inert after unmount, identity change, disable, reload, or uninstall; `host.conversation` outside a panel returns stable empty state; desktop preserves layout identity on navigation and mobile uses the full-height Chat surface | registry.registerTaskPanel({ id: "notes", title: "Notes", titleKey: "panels.notes", Component: NotesPanel }) |
 | registerTaskMenuAction          | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a flat item on cards and desktop/mobile task-row menus                                                                                                          | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
 | registerTaskFilter              | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | registerTaskListFacet           | { id, label, getValues({ taskId, workspaceId }), subscribe? }; adds page-local Sort and Group choices on `/tasks`                                                                                                                                                                                      | Active ui.bundle                                                       | Values apply only to the loaded page, callbacks are isolated, and registrations are revoked on disable/unload                                                                                                   | registry.registerTaskListFacet({ id: "tags", label: "Tag", getValues: taskTags })                                   |

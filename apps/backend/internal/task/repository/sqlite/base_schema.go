@@ -50,6 +50,7 @@ func (r *Repository) initSchema() error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
+		r.initConversationJournalSchema,
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {

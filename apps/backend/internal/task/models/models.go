@@ -64,7 +64,12 @@ type ListMessagesOptions struct {
 	After      string
 	Sort       string
 	AuthorType string
-	Around     string
+	// AuthorTypes narrows by any of the listed authors (IN); when non-empty
+	// it takes precedence over AuthorType. TaskID, when non-empty, narrows
+	// to rows for that task.
+	AuthorTypes []string
+	TaskID      string
+	Around      string
 }
 
 // SearchMessagesOptions defines options for searching a session's messages.

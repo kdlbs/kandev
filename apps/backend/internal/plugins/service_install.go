@@ -206,7 +206,10 @@ func previousVersion(oldRec *store.Record, hadOldRec bool) string {
 // (cmd/kandev's `Version` default, mirrored by internal/system/updates'
 // devVersion). It sorts meaninglessly against real semver, and a developer
 // running from source must still be able to install a package that declares
-// a min_kandev_version, so it disables the check entirely.
+// a min_kandev_version, so it disables the release-boundary comparison only.
+// Manifest-level capability floors (e.g. api_read:messages >= 0.91.1) are
+// validated independently of the running version and remain enforced on dev
+// and unwired builds.
 const DevKandevVersion = "dev"
 
 // checkMinKandevVersion rejects a package whose manifest declares a
@@ -214,6 +217,8 @@ const DevKandevVersion = "dev"
 // tags may carry a leading `v`; development and git-describe build strings do
 // not provide a trustworthy release boundary, so they deliberately skip this
 // release-only compatibility gate. An invalid manifest minimum is rejected.
+// The capability floor above is enforced earlier, in Manifest validation,
+// regardless of what running version (if any) is wired here.
 func (s *Service) checkMinKandevVersion(minVersion string) error {
 	if minVersion == "" || s.kandevVersion == "" || s.kandevVersion == DevKandevVersion {
 		return nil

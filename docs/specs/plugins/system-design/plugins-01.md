@@ -135,7 +135,7 @@ runtime:
     linux-amd64: server/plugin-linux-amd64
     darwin-arm64: server/plugin-darwin-arm64
     # ... any subset; kandev requires the running host's platform key at install time
-min_kandev_version: "0.91.1"                 # required for admin actions
+- `min_kandev_version: "0.91.1"`                 # required for api_read:messages or admin actions
 
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]

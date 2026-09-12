@@ -267,7 +267,21 @@ func (s *Service) RollbackReservedTurn(
 	ctx context.Context,
 	sessionID, turnID string,
 ) (bool, error) {
-	return s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+	turn, err := s.turns.GetTurn(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	if turn.TaskSessionID != sessionID {
+		return false, nil
+	}
+	removed, err := s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+	if err != nil || !removed {
+		return removed, err
+	}
+	if err := s.publishTurnEvent(events.TurnRemoved, turn, nil); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 // createCompletedTurn persists a synthetic turn that is never observable as

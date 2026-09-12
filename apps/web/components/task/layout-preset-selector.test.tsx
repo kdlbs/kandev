@@ -27,6 +27,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/lib/i18n", () => ({
+  i18n: { language: "en", on: vi.fn() },
   t: (key: string) => key,
 }));
 
