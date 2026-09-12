@@ -251,9 +251,14 @@ from its currently rendered resolution, in the page/board focus adapter.
 Retain dismissal across temporary absence. New explicit URL requests still
 receive normal focus behavior; do not clear unrelated URL parameters or reset
 order during bookkeeping. A failed archive cannot close a newer menu or
-scroll back to its restored column. Only an unconsumed focus mark may influence
-the viewport owner's initial detail fallback; a retired request must not
-temporarily replace a surviving chat while visibility is being recomputed.
+scroll back to its restored column. `useThreadFocusRequest` tracks the visual
+mark separately from the viewport owner's initial detail fallback. Interaction
+retires the mark without unmounting the requested conversation before the
+first visibility callback. Once a consumed request's target leaves the deck,
+its fallback is cleared and readmission cannot replace the surviving chat.
+An unconsumed request can still activate a target that resolves after hydration.
+URL-driven board callers supply an explicit stable request key; the optional
+task-ID default retains legacy dismissal semantics for non-URL callers.
 
 Desktop uses the remaining columns and their existing scroll-offset recovery.
 Phone uses the next snapped conversation, or the existing empty state, after

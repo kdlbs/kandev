@@ -87,9 +87,10 @@ the smallest browser stimulus: assert absence before `pending.continue()`.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run app/threads/threads-page-client.test.tsx app/threads/threads-page-archive.test.tsx lib/threads/thread-view-query.test.ts lib/threads/stable-order.test.ts lib/threads/thread-selection-fallback.test.ts components/threads/threads-board.test.tsx components/threads/thread-column-activation.test.tsx hooks/use-task-menu-actions.test.ts)
+(cd apps/web && pnpm exec vitest run app/threads/threads-page-client.test.tsx app/threads/threads-page-archive.test.tsx lib/threads/thread-view-query.test.ts lib/threads/stable-order.test.ts lib/threads/thread-selection-fallback.test.ts components/threads/threads-board.test.tsx components/threads/thread-column-activation.test.tsx components/threads/use-thread-focus-request.test.ts hooks/use-task-menu-actions.test.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint app/threads/threads-page-client.tsx app/threads/threads-page-client.test.tsx app/threads/threads-page-archive.test.tsx lib/threads/thread-view-query.ts lib/threads/thread-view-query.test.ts components/threads/threads-board.tsx components/threads/threads-board.test.tsx components/threads/use-thread-column-activation.ts components/threads/thread-column-activation.test.tsx e2e/tests/task/threads-task-actions.spec.ts e2e/tests/task/mobile-threads-task-actions.spec.ts e2e/tests/task/threads-task-actions-helpers.ts e2e/tests/task/threads-task-actions-edge-helpers.ts e2e/tests/task/threads-pending-archive-helpers.ts --max-warnings 0)
+(cd apps/web && pnpm exec eslint app/threads/threads-page-client.tsx app/threads/threads-page-client.test.tsx app/threads/threads-page-archive.test.tsx lib/threads/thread-view-query.ts lib/threads/thread-view-query.test.ts components/threads/threads-board.tsx components/threads/threads-board.test.tsx components/threads/use-thread-column-activation.ts components/threads/thread-column-activation.test.tsx components/threads/use-thread-focus-request.ts components/threads/use-thread-focus-request.test.ts e2e/tests/task/threads-task-actions.spec.ts e2e/tests/task/mobile-threads-task-actions.spec.ts e2e/tests/task/threads-task-actions-helpers.ts e2e/tests/task/threads-task-actions-edge-helpers.ts e2e/tests/task/threads-pending-archive-helpers.ts --max-warnings 0)
+(cd apps/web && pnpm exec prettier --check app/threads/threads-page-client.tsx app/threads/threads-page-client.test.tsx app/threads/threads-page-archive.test.tsx lib/threads/thread-view-query.ts lib/threads/thread-view-query.test.ts components/threads/threads-board.tsx components/threads/threads-board.test.tsx components/threads/use-thread-column-activation.ts components/threads/thread-column-activation.test.tsx components/threads/use-thread-focus-request.ts components/threads/use-thread-focus-request.test.ts e2e/tests/task/threads-task-actions.spec.ts e2e/tests/task/mobile-threads-task-actions.spec.ts e2e/tests/task/threads-task-actions-helpers.ts e2e/tests/task/threads-task-actions-edge-helpers.ts e2e/tests/task/threads-pending-archive-helpers.ts)
 (cd apps/web && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --project chromium tests/task/threads-task-actions.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-threads-task-actions.spec.ts tests/task/mobile-threads-swipe.spec.ts -- --retries=0)
@@ -115,6 +116,8 @@ Under `apps/web/`:
 - `app/threads/threads-page-archive.test.tsx` (real-store/coordinator integration).
 - `lib/threads/thread-view-query.ts` and `.test.ts`.
 - `components/threads/threads-board.tsx` and `.test.tsx` (focus request lifetime).
+- `components/threads/use-thread-focus-request.ts` and `.test.ts` (visual
+  dismissal versus initial activation lifetime and late hydration).
 - `components/threads/use-thread-column-activation.ts` and `thread-column-activation.test.tsx`
   (retain surviving visibility and editor mounts across removal/readmission).
 - `e2e/tests/task/threads-task-actions-edge-helpers.ts`.
@@ -186,7 +189,7 @@ membership without clearing surviving visibility or remounting editors.
 
 ### Final checks
 
-All commands in the verification block passed:
+The initial implementation checks passed (extended fixup results appear below):
 
 - Frozen-lockfile dependency installation succeeded.
 - Vitest: 117 passed across eight files, including real-store/coordinator/WS
@@ -234,3 +237,41 @@ warnings and optional macOS-sidecar signing warnings on Linux.
 Public docs updated: `docs/public/sessions-and-review.md` (how-to guide).
 The owning design is current and the work package is complete. At the
 implementation handoff, no commit, push or PR had been requested or performed.
+
+### PR review remediation
+
+Greptile identified a pre-observer activation race. Two board regressions
+reproduced it: pointer and keyboard focus retired the visual mark and unmounted
+the requested non-first conversation (28 existing cases passed). The extracted
+`useThreadFocusRequest` now keeps that activation fallback until its consumed
+target departs, without reviving it on failed-archive readmission. The regressions
+assert the same conversation node stays mounted. Three additional hook controls
+cover late hydration, interaction before hydration, and a genuinely new request.
+
+Claude's compatibility suggestion is addressed by documenting the explicit
+URL-key requirement and legacy optional default. CodeRabbit's aggregate
+suggestions are addressed by removing the stale public-doc deferral and adding
+the exact Prettier command above. No further public-doc change is needed:
+the existing how-to already promises uninterrupted conversation use and focus
+preservation; this repair enforces that contract.
+
+Final local remediation verification on 2026-09-12:
+
+- The updated nine-file Vitest command passed all 122 tests.
+- Typecheck, changed-source ESLint with zero warnings, the explicit 16-file
+  Prettier check, and i18n ratchet passed.
+- Fresh managed Chromium run: all eight archive/action regressions plus one
+  disposable PR capture passed (nine tests, 1.8 minutes).
+- Mobile-chrome reused that fresh build: all ten archive/action/swipe
+  regressions plus one disposable PR capture passed (11 tests, 2.3 minutes).
+  Both runs used one worker, retries disabled, `--host`, `CAPTURE_PR_ASSETS=1`
+  and the previously recorded loopback/cache overrides. Capture specs were
+  removed afterward; screenshot publication uses a separate orphan media ref,
+  never the feature branch.
+- All 19 harness-validator tests, all 196 harness files, all 36 spec-validator
+  tests, the all-spec check, the public-doc validator test and all 46 public
+  pages passed. Scoped guidance remains within its line budget.
+
+Current-head CI, review-thread resolution, the minimum five-minute new-comment
+watch, and current-base integration validation are tracked on the live PR/task
+after the remediation commit. Local checks do not substitute for those gates.

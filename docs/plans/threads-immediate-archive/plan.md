@@ -85,7 +85,7 @@ navigation, new confirmation rules, UI geometry changes, and broad refactors.
 - Keep the board's action provider mounted and feed one consistent candidate
   projection to columns, header counts, phone picker and pagination. Existing
   `useThreadSelectionRecovery` owns successor/predecessor/empty behavior.
-- Make `useRetiringFocusMark` distinguish a URL request's identity from its
+- Make `useThreadFocusRequest` distinguish a URL request's identity from its
   resolved visible target. A temporarily excluded task returning after failure
   must not reactivate an already consumed deep link. Add a narrow optional
   board prop for the request identity if needed; preserve current callers.
@@ -93,7 +93,7 @@ navigation, new confirmation rules, UI geometry changes, and broad refactors.
   optimistically mutate shared task snapshots or introduce API calls in Threads.
 - Update the pending-exclusion note in `components/threads/AGENTS.md` and the
   Threads paragraph in `docs/public/sessions-and-review.md` with implementation.
-  Public docs are deferred because this turn changes design intent only.
+  The required public documentation update is complete.
 
 Source paths above are relative to `apps/web/` unless prefixed with `docs/`.
 
@@ -196,7 +196,7 @@ At the design checkpoint, production and permanent tests were unchanged,
 dependencies were not installed, and product/browser tests were not run.
 Implementation was subsequently authorized by "go for it" on 2026-09-12.
 
-Implementation completed on 2026-09-12 in the primary session, without
+Initial implementation completed on 2026-09-12 in the primary session, without
 delegation or additional platform tasks/sessions. The
 [work order](task-01-remove-pending-archives.md#results) records behavioral
 RED/GREEN evidence, corrected test assumptions, exact environment overrides,
@@ -213,6 +213,15 @@ and inspected screenshots.
 - Public how-to documentation now describes immediate departure and failed
   readmission. Scoped Threads guidance records query exclusion, focus request
   identity and retention of surviving viewport observations.
+
+PR review remediation is recorded in the
+[work order](task-01-remove-pending-archives.md#pr-review-remediation): early
+pointer/keyboard interaction now retires the mark without unmounting the
+requested chat before visibility is ready. Local verification passed 122 tests
+across nine files, the explicit Prettier command, typecheck, lint, i18n and docs
+checks, and all eight desktop/ten phone browser regressions with fresh captures.
+The legacy focus-key contract is documented, the stale public-doc deferral is
+removed, and CI/review completion remains an external post-commit gate.
 
 ## Risks
 

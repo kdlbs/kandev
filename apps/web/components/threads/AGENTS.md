@@ -109,6 +109,11 @@ it only ever answered "where is the column I asked for". Dismissal is keyed to
 the raw workspace/task/session request identity, independently of its currently
 resolved column. Temporary exclusion and failed archive readmission must not
 revive a consumed mark; an actual new deep link still earns a fresh mark.
+`useThreadFocusRequest` keeps the initial activation fallback alive after mark
+dismissal until its target leaves the deck. Early interaction must not unmount
+that chat before the first visibility callback, and failed readmission must
+not restore a consumed fallback. URL-driven callers pass `focusRequestKey`;
+the optional task-ID default deliberately retains legacy dismissal semantics.
 
 `OpenInThreadsButton` is the other half, living in the chat status row. It has
 two gates, and both matter:

@@ -480,6 +480,29 @@ describe("ThreadsBoard — focusing a column from a deep link", () => {
   });
 });
 
+// @covers AC-TASKS-THREADS-ACTIONS-003.4
+describe("ThreadsBoard initial activation", () => {
+  it.each(["pointerDown", "focusIn"] as const)(
+    "keeps the requested conversation mounted when %s retires its mark before visibility is ready",
+    (interaction) => {
+      render(
+        <ThreadsBoard
+          threads={[thread({ taskId: "a" }), thread({ taskId: "b" })]}
+          focusedTaskId="b"
+          focusRequestKey="workspace:b:session-b"
+          onOpenTask={() => {}}
+        />,
+      );
+      const conversation = screen.getByTestId("thread-conversation-session-b");
+
+      fireEvent[interaction](screen.getByTestId(COLUMN_B));
+
+      expect(screen.getByTestId(COLUMN_B).getAttribute(FOCUSED_ATTR)).toBeNull();
+      expect(screen.queryByTestId("thread-conversation-session-b")).toBe(conversation);
+    },
+  );
+});
+
 describe("ThreadsBoard — retiring the deep-link mark", () => {
   // @covers AC-TASKS-THREADS-ACTIONS-003.4, AC-TASKS-THREADS-ACTIONS-003.5
   it("keeps a consumed URL request retired when its excluded column returns", () => {
