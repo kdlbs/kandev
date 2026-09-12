@@ -493,6 +493,10 @@ async function waitForPortForward(proc: ChildProcess, timeoutMs = 30_000): Promi
   });
 }
 
+export function waitForInClusterBackendReady(baseUrl: string, proc?: ChildProcess): Promise<void> {
+  return waitForHealth(`${baseUrl}/ready`, 30_000, proc);
+}
+
 async function stopChild(proc: ChildProcess): Promise<void> {
   if (proc.exitCode !== null) return;
   proc.kill("SIGTERM");
@@ -508,7 +512,7 @@ async function stopChild(proc: ChildProcess): Promise<void> {
   });
 }
 
-function inClusterBackendPod(image: string): string {
+export function inClusterBackendPod(image: string): string {
   return `apiVersion: v1
 kind: Pod
 metadata:
@@ -531,7 +535,7 @@ spec:
           containerPort: 8080
       readinessProbe:
         httpGet:
-          path: /health
+          path: /ready
           port: http
         periodSeconds: 1
         failureThreshold: 60
@@ -849,7 +853,7 @@ export async function provisionKubernetesCluster(
     try {
       const port = await waitForPortForward(proc);
       const baseUrl = `http://127.0.0.1:${port}`;
-      await waitForHealth(`${baseUrl}/health`, 30_000, proc);
+      await waitForInClusterBackendReady(baseUrl, proc);
       const context: InClusterBackend = {
         baseUrl,
         frontendUrl: baseUrl,

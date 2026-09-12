@@ -558,6 +558,52 @@ GOTOOLCHAIN=go1.26.0 GOMAXPROCS=2 go test -race ./internal/agentctl/server/api -
 Post-commit and exact-head remote results remain tracked in the external task
 plan. A locally corrected test does not clear the failed remote backend gate.
 
+## Kubernetes fixture readiness correction (2026-09-12)
+
+The container-backed CI shard failed before in-cluster task seeding: its first
+settings boot request returned HTTP 503 on all three attempts. The fixture's
+pod probe and forwarded HTTP wait still used `/health`, even though platform
+startup deliberately reports liveness before application routes are ready.
+The normal backend fixture already waits on `/ready`.
+
+Both fixture checks now use `/ready`. The E2E regression asserts application
+readiness immediately when the in-cluster fixture returns, before seeding.
+Focused unit tests exercise the rendered pod probe and the actual HTTP polling
+path against a controlled liveness-before-readiness transition. Both failed
+before the endpoint correction; all 21 Kubernetes fixture unit tests passed
+afterward in 10.11 seconds. Typecheck, formatting, and the E2E wait-policy lint
+also passed:
+
+```bash
+cd apps/web
+pnpm exec vitest run e2e/scripts/kubernetes-readiness.test.ts e2e/scripts/kubernetes-fixture-policy.test.ts e2e/scripts/kubernetes-kubeconfig.test.ts e2e/scripts/kubernetes-pins.test.ts e2e/scripts/kubernetes-helpers.test.ts
+pnpm run typecheck
+pnpm exec prettier --check e2e/fixtures/kubernetes-tools.ts e2e/scripts/kubernetes-readiness.test.ts e2e/tests/kubernetes/kubernetes-executor.spec.ts
+pnpm exec eslint --config eslint.e2e-sleeps.config.mjs e2e/fixtures/kubernetes-tools.ts e2e/tests/kubernetes/kubernetes-executor.spec.ts
+```
+
+The existing backend contract tests passed three race-enabled repetitions in
+1.634 seconds:
+
+```bash
+cd apps/backend
+GOTOOLCHAIN=go1.26.0 GOMAXPROCS=2 go test -tags fts5 -race ./internal/backendapp -run '^(TestBootstrapDelayedSuccessKeepsLivenessUntilReadiness|TestHealthHandlerBodyIncludesVersionRegardlessOfReadiness|TestReadyHandlerBodyShapesByReadiness)$' -count=3
+```
+
+Two isolated, single-worker local Kind attempts with retries disabled stopped
+before the test body: image loading exceeded its existing 180-second bound,
+and Docker cleanup reported that it could not receive the container exit
+event. The second attempt reused the fresh build and cached CI image. These
+setup failures do not count as behavioral regression evidence or passing E2E
+verification. Only the two runs' owned leftover clusters and incomplete image
+exports were removed; the shared Docker daemon, main instance, and user demo
+were not restarted. Real-cluster verification remains an exact-head CI gate,
+tracked in the external task plan alongside post-commit and review results.
+
+Production liveness semantics, timeout values, and UI are unchanged. Public
+documentation already describes the correct boundary, so no public-doc change
+is needed.
+
 ## Risks
 
 - A full composer can dominate a half-height tile. The grid-height fallback,
