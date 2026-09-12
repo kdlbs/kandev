@@ -62,6 +62,11 @@ export type SessionRecoveryFailure =
       outcome: "recovery_failed";
       resumeError: string;
       restoreError: string;
+    }
+  | {
+      outcome: "status_unavailable";
+      kind: "timeout" | "request";
+      statusError: string;
     };
 
 export type ResumeStateSetter = {

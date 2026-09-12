@@ -825,6 +825,43 @@ describe("MessageListStatus", () => {
     expect(screen.queryByTestId("conversation-loading-state")).not.toBeNull();
     expect(screen.queryByText("Loading conversation...")).not.toBeNull();
   });
+
+  it("does not show the empty invitation before history is ready", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore={false}
+        showLoadingState
+        messagesLoading
+        isInitialLoading
+        messagesCount={0}
+        sessionId="sess-1"
+        historyStatus="loading"
+        onRetryHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("No messages yet. Start the conversation!")).toBeNull();
+    expect(screen.getByTestId("session-history-loading")).toBeTruthy();
+  });
+
+  it("shows the empty invitation after a successful empty history snapshot", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore={false}
+        showLoadingState={false}
+        messagesLoading={false}
+        isInitialLoading={false}
+        messagesCount={0}
+        sessionId="sess-1"
+        historyStatus="ready"
+        onRetryHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("No messages yet. Start the conversation!")).toBeTruthy();
+  });
 });
 
 describe("UnreadDivider", () => {

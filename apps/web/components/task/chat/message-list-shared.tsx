@@ -20,6 +20,8 @@ import {
 import { isLaunchErrorSurfaceMessage } from "./types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { MessageHistoryStatus } from "@/hooks/domains/session/use-message-fetch-state";
+import { SessionHistoryFeedback } from "./session-entry-feedback";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -33,6 +35,9 @@ export type MessageListProps = {
   messagesLoading: boolean;
   /** Latest-session history is still reconciling while cached rows remain visible. */
   historyRefreshPending?: boolean;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
@@ -470,9 +475,31 @@ export function UnreadDivider() {
   );
 }
 
+function SessionHistoryStatus({
+  sessionId,
+  sessionState,
+  historyStatus,
+  historyError,
+  onRetryHistory,
+}: {
+  sessionId: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus: MessageHistoryStatus;
+  historyError: unknown;
+  onRetryHistory?: () => void;
+}) {
+  if (!sessionId || sessionState === "CREATED" || historyStatus === "ready" || !onRetryHistory) {
+    return null;
+  }
+  return (
+    <SessionHistoryFeedback status={historyStatus} error={historyError} onRetry={onRetryHistory} />
+  );
+}
+
 /** Transcript status footer: the loading-older indicator, an explicit
  * load-older button, the conversation loading spinner, and the empty-state
  * message when there are no messages. */
+// eslint-disable-next-line complexity -- transcript status owns independent loading, pagination, and recovery states.
 export function MessageListStatus({
   isLoadingMore,
   hasMore,
@@ -482,6 +509,11 @@ export function MessageListStatus({
   messagesCount,
   onLoadMore,
   showRecovery = false,
+  sessionId = null,
+  sessionState,
+  historyStatus = "ready",
+  historyError = null,
+  onRetryHistory,
 }: {
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -497,6 +529,11 @@ export function MessageListStatus({
   onLoadMore?: () => void;
   /** Shows the explicit control only after a recoverable pagination failure. */
   showRecovery?: boolean;
+  sessionId?: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
 }) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -521,7 +558,14 @@ export function MessageListStatus({
           </Button>
         </div>
       )}
-      {showLoadingState && (
+      <SessionHistoryStatus
+        sessionId={sessionId}
+        sessionState={sessionState}
+        historyStatus={historyStatus}
+        historyError={historyError}
+        onRetryHistory={onRetryHistory}
+      />
+      {showLoadingState && historyStatus === "ready" && (
         <div
           className="flex items-center justify-center py-8 text-muted-foreground"
           data-testid="conversation-loading-state"
@@ -530,11 +574,14 @@ export function MessageListStatus({
           <span>{t("task:loadingConversation")}</span>
         </div>
       )}
-      {!messagesLoading && !isInitialLoading && messagesCount === 0 && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <span>{t("task:noMessagesYetStartTheConversation")}</span>
-        </div>
-      )}
+      {!messagesLoading &&
+        !isInitialLoading &&
+        messagesCount === 0 &&
+        historyStatus === "ready" && (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <span>{t("task:noMessagesYetStartTheConversation")}</span>
+          </div>
+        )}
     </>
   );
 }
