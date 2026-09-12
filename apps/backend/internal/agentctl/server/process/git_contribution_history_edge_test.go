@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -123,17 +124,8 @@ func TestContributionHistoryReflogObservationUsesTwoHundredEntryBound(t *testing
 
 	localHead := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 	argsFile := filepath.Join(t.TempDir(), "git-args")
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatalf("exec.LookPath(git) returned error: %v", err)
-	}
-	binDir := t.TempDir()
-	wrapper := filepath.Join(binDir, "git")
-	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n  *'reflog show'*) printf '%%s' \"$*\" > %q; exit 1 ;;\nesac\nexec %q \"$@\"\n", argsFile, realGit)
-	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
-		t.Fatalf("write git wrapper: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	installContributionHistoryGitShim(t, contributionHistoryGitShimBound)
+	t.Setenv(contributionHistoryGitShimArgsFileEnv, argsFile)
 
 	result, err := NewGitOperator(repoDir, newTestLogger(t), nil).ExplainContributionHistory(
 		context.Background(), "main", localHead, localHead)
@@ -155,17 +147,8 @@ func TestContributionHistoryReflogOverflowFallsBackToBoundedNeutral(t *testing.T
 	defer cleanup()
 
 	head := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatalf("exec.LookPath(git) returned error: %v", err)
-	}
-	binDir := t.TempDir()
-	wrapper := filepath.Join(binDir, "git")
-	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n  *'reflog show'*) i=0; while [ $i -le 200 ]; do printf '%%s\\037noise\\n' %q; i=$((i + 1)); done; exit 0 ;;\nesac\nexec %q \"$@\"\n", head, realGit)
-	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
-		t.Fatalf("write git wrapper: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	installContributionHistoryGitShim(t, contributionHistoryGitShimOverflow)
+	t.Setenv(contributionHistoryGitShimHeadEnv, head)
 
 	result, err := NewGitOperator(repoDir, newTestLogger(t), nil).ExplainContributionHistory(
 		context.Background(), "main", head, head)
@@ -203,17 +186,7 @@ func TestContributionHistoryRunningCommandStopsAtObservationDeadline(t *testing.
 	defer cleanup()
 
 	head := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatalf("exec.LookPath(git) returned error: %v", err)
-	}
-	binDir := t.TempDir()
-	wrapper := filepath.Join(binDir, "git")
-	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n  *'reflog show'*) exec tail -f /dev/null ;;\nesac\nexec %q \"$@\"\n", realGit)
-	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
-		t.Fatalf("write git wrapper: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	installContributionHistoryGitShim(t, contributionHistoryGitShimTimeout)
 
 	started := time.Now()
 	result, err := NewGitOperator(repoDir, newTestLogger(t), nil).ExplainContributionHistory(
@@ -225,6 +198,39 @@ func TestContributionHistoryRunningCommandStopsAtObservationDeadline(t *testing.
 		t.Fatalf("observation took %s, want it to stop near the 2-second deadline", elapsed)
 	}
 	assertContributionHistoryNeutral(t, result, contributionHistoryReasonUnavailable)
+}
+
+func installContributionHistoryGitShim(t *testing.T, mode string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("exec.LookPath(git) returned error: %v", err)
+	}
+	shimDir := t.TempDir()
+	shimName := "git"
+	if runtime.GOOS == "windows" {
+		shimName += ".exe"
+	}
+	shimPath := filepath.Join(shimDir, shimName)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find test executable: %v", err)
+	}
+	contents, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatalf("read test executable: %v", err)
+	}
+	if err := os.WriteFile(shimPath, contents, 0o755); err != nil {
+		t.Fatalf("write Git shim: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(shimPath, 0o755); err != nil {
+			t.Fatalf("make Git shim executable: %v", err)
+		}
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(contributionHistoryGitShimModeEnv, mode)
+	t.Setenv(contributionHistoryGitShimRealGitEnv, realGit)
 }
 
 func assertContributionHistoryNeutral(t *testing.T, result *ContributionHistoryExplanationResult, reason string) {
