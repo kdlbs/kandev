@@ -3,6 +3,7 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { SessionPage } from "../../pages/session-page";
 import {
+  canvasHref,
   enableCanvasFeature,
   expectCanvasFrameFillsHost,
   removeCanvas,
@@ -349,19 +350,31 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     test.setTimeout(180_000);
 
     const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
-    let contextFailures = 0;
-    await testPage.route("**/_kandev/v1/context", async (route) => {
-      if (contextFailures === 0) {
-        contextFailures += 1;
-        await route.abort();
-        return;
-      }
-      await route.continue();
-    });
+    let runtimeFailures = 0;
     let canvasId: string | undefined;
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
       canvasId = seeded.canvas.id;
+
+      await testPage.goto(canvasHref(seeded.canvas.id));
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+      await testPage.route(
+        `**/api/v1/canvases/${encodeURIComponent(seeded.canvas.id)}/runtime**`,
+        async (route) => {
+          if (runtimeFailures === 0) {
+            runtimeFailures += 1;
+            await route.fulfill({ status: 503, body: "runtime unavailable" });
+            return;
+          }
+          await route.continue();
+        },
+      );
+      await testPage.reload();
+      await expect.poll(() => runtimeFailures).toBe(1);
 
       await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Canvas unavailable", {
         timeout: 20_000,
@@ -378,9 +391,9 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         "ready",
         { timeout: 20_000 },
       );
-      expect(contextFailures).toBe(1);
+      expect(runtimeFailures).toBe(1);
     } finally {
-      await testPage.unroute("**/_kandev/v1/context");
+      await testPage.unroute(`**/api/v1/canvases/${encodeURIComponent(canvasId ?? "")}/runtime**`);
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await releaseFeature();
     }
