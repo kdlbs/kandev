@@ -28,7 +28,7 @@ modified.
 | --- | --- |
 | `REQ-OFFICE-SESSION-TERM-001` | [Where the precondition lives](#where-the-precondition-lives), [Control flow](#control-flow) |
 | `REQ-OFFICE-SESSION-TERM-002` | [The capacity question](#the-capacity-question) |
-| `REQ-OFFICE-SESSION-TERM-003` | [What stays where it is](#what-stays-where-it-is) |
+| `REQ-OFFICE-SESSION-TERM-003` | [Control flow](#control-flow) |
 | `REQ-OFFICE-SESSION-TERM-004` | [Observability](#observability) |
 
 ## Components and responsibilities

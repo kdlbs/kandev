@@ -41,6 +41,16 @@ type seatRow struct {
 	CreatedAt        string `db:"created_at"`
 }
 
+type decisionRow struct {
+	ID            string `db:"id"`
+	TaskID        string `db:"task_id"`
+	StepID        string `db:"step_id"`
+	ParticipantID string `db:"participant_id"`
+	Decision      string `db:"decision"`
+	DecidedAt     string `db:"decided_at"`
+	SupersededAt  string `db:"superseded_at"`
+}
+
 func readSeat(t *testing.T, repo *sqlite.Repository, seatID string) seatRow {
 	t.Helper()
 	var got seatRow
@@ -50,6 +60,20 @@ func readSeat(t *testing.T, repo *sqlite.Repository, seatID string) seatRow {
 		FROM workflow_step_participants WHERE id = ?
 	`, seatID); err != nil {
 		t.Fatalf("read seat %s: %v", seatID, err)
+	}
+	return got
+}
+
+func readDecision(t *testing.T, repo *sqlite.Repository, decisionID string) decisionRow {
+	t.Helper()
+	var got decisionRow
+	if err := repo.ReaderDB().Get(&got, `
+		SELECT id, task_id, step_id, participant_id, decision,
+		       COALESCE(decided_at, '') AS decided_at,
+		       COALESCE(superseded_at, '') AS superseded_at
+		FROM workflow_step_decisions WHERE id = ?
+	`, decisionID); err != nil {
+		t.Fatalf("read decision %s: %v", decisionID, err)
 	}
 	return got
 }
@@ -96,6 +120,15 @@ func TestAddTaskParticipant_ClaimDecisionGuard_RolelessDecisionBlocksReassignmen
 	after := readSeat(t, repo, "guard-seat")
 	if after != before {
 		t.Errorf("decided seat mutated:\n got %+v\nwant %+v", after, before)
+	}
+	decision := readDecision(t, repo, "guard-decision")
+	wantDecision := decisionRow{
+		ID: "guard-decision", TaskID: "guard-task", StepID: "guard-step",
+		ParticipantID: "guard-seat", Decision: "approve",
+		DecidedAt: "2026-01-01 00:00:00",
+	}
+	if decision != wantDecision {
+		t.Errorf("guard decision mutated:\n got %+v\nwant %+v", decision, wantDecision)
 	}
 
 	// AC-OFFICE-SEAT-GUARD-001.2: the registering agent still gets a seat.
@@ -172,6 +205,7 @@ func TestAddTaskParticipant_ClaimDecisionGuard_RepeatRegistrationWritesNothing(t
 		}
 		seedRolelessDecision(t, hookCtx, tx, "rep-decision", "rep-task", "rep-step", seatID)
 	})
+	t.Cleanup(restore)
 	if _, err := repo.AddTaskParticipant(ctx, "rep-task", "agent-registering", "reviewer"); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}

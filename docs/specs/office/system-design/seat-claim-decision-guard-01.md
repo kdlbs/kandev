@@ -86,15 +86,18 @@ neighbouring concurrency test.
 
 **A test-only interleaving hook** is the design. An unexported package-level
 function value in the office repository's sqlite package, called between the
-select and the update, nil in every build that does not set it. An in-package
-test sets it to commit a roleless decision against the chosen seat from a
-second connection, then lets the update run.
+select and the update, is nil in every build that does not set it. The
+test-only `SetClaimWindowHook` setter in `export_test.go` makes the yield point
+available to the external `sqlite_test` package. The SQLite test writes the
+roleless decision through the in-flight transaction. The Postgres-gated test
+uses the workflow repository from the hook, so that decision commits through a
+second pooled connection before the update runs.
 
 Three properties make this acceptable rather than a production concession, and
 they map to `AC-OFFICE-SEAT-GUARD-002.3`:
 
-- The variable is unexported, so only this package's own tests can set it, and
-  it needs no build tag to be unreachable from anywhere else.
+- The variable is unexported, and its setter is compiled only into the test
+  binary, so production code cannot set it and it needs no build tag.
 - Unset, the call site is a nil check on a value that is never written, so the
   production path is byte-for-byte the behavior that ships today.
 - It carries no behavior of its own. It is a yield point, not a policy hook,
@@ -110,14 +113,17 @@ a dependency in either direction - neither card's tests need the other's.
 
 ## Data and contracts
 
-No schema change, no interface change, no new exported symbol. The condition on
-the update, the select's filter and the seat exclusion all stay exactly as they
-are.
+No schema change, no production interface change, and no production export. The
+test binary exposes only the setter needed by the external-package tests. The
+condition on the update, the select's filter and the seat exclusion all stay
+exactly as they are.
 
 ## Control flow
 
 Unchanged in production. Under test, one nil-valued call site between two
-existing statements of an existing transaction.
+existing statements of an existing transaction. The SQLite test uses that
+transaction directly; the Postgres test uses a separate pooled connection to
+prove a real cross-transaction commit.
 
 ## Failure and recovery
 
@@ -149,11 +155,13 @@ Three changes to the suite, and one of them is a deletion of a claim rather
 than of a test:
 
 1. **The new guard test** (`-002.1`, `-002.2`). Drives a registration with the
-   hook set, commits a roleless decision against the chosen seat from a second
-   connection inside the window, and asserts the seat is not reassigned and a
-   new seat is written for the registering agent instead. Removing the `NOT
-   EXISTS` condition must make this test fail; that is the acceptance check for
-   the test itself, and should be performed once by hand when it is written.
+   hook set, writes a roleless decision against the chosen seat inside the
+   window, and asserts the decision and seat are unchanged while a new seat is
+   written for the registering agent. The SQLite test writes through the open
+   transaction; the Postgres-gated variant commits from a second connection.
+   Removing the `NOT EXISTS` condition must make these tests fail; that is the
+   acceptance check for the tests themselves, and should be performed once by
+   hand when they are written.
 2. **The existing concurrency test's documentation** (`-002.4`, `-002.5`). Its
    stated premise - that decision recording and registration lock on
    non-contending namespaces - is false since the shared exclusion landed. It
