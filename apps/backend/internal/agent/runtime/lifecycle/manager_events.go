@@ -855,7 +855,28 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 
 func (m *Manager) handleAgentEventWithAttempt(
 	execution *AgentExecution,
-		event agentctl.AgentEvent,
+	event agentctl.AgentEvent,
+	attemptID string,
+) {
+	m.handleAgentEventAtContextResetBoundary(execution, event, true, attemptID)
+}
+
+// handleAgentEventAfterContextReset replays setup events after the lifecycle
+// manager has committed the replacement session while the exclusive reset
+// lease is still held. The event has already crossed the reset boundary and
+// must not be buffered again.
+func (m *Manager) handleAgentEventAfterContextReset(execution *AgentExecution, event agentctl.AgentEvent) {
+	startupGeneration := execution.startupAttemptSnapshot()
+	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		m.handleAgentEventAtContextResetBoundary(execution, event, false, attemptID)
+	})
+}
+
+//nolint:cyclop,funlen // ACP event types share lifecycle bookkeeping before publication.
+func (m *Manager) handleAgentEventAtContextResetBoundary(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	enforceResetBoundary bool,
 	attemptID string,
 ) {
 	event.AttemptID = attemptID
@@ -868,7 +889,7 @@ func (m *Manager) handleAgentEventWithAttempt(
 			zap.Int64("control_turn_id", event.ControlTurnID))
 		return
 	}
-	if execution.bufferOrDropContextResetEvent(event) {
+	if enforceResetBoundary && execution.bufferOrDropContextResetEvent(event) {
 		m.logger.Debug("ignoring agent event at context reset boundary",
 			zap.String("execution_id", execution.ID),
 			zap.String("event_type", event.Type),

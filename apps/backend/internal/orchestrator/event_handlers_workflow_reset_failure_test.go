@@ -169,6 +169,49 @@ func TestProcessOnEnter_ResetFailureLogsPersistenceFailure(t *testing.T) {
 	}
 }
 
+func TestProcessOnEnter_ResetFailureSettlesStateAfterPersistenceBudgetExpires(t *testing.T) {
+	previousTimeout := workflowResetFailureCleanupTimeout
+	workflowResetFailureCleanupTimeout = 25 * time.Millisecond
+	t.Cleanup(func() { workflowResetFailureCleanupTimeout = previousTimeout })
+
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedSessionRecord, err := repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	seedExecutorRunning(t, repo, seedSessionRecord.ID, seedSessionRecord.TaskID, "exec-reset")
+
+	barrier := &workflowResetFailureBarrierRepo{
+		repoStore: repo,
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	manager := &mockAgentManager{restartProcessErr: errors.New("provider reset failed")}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.repo = barrier
+	svc.eventBus = &mockEventBus{}
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+
+	resetDone := make(chan struct{})
+	go func() {
+		svc.processOnEnter(
+			context.Background(), "t1", seedSessionRecord, workflowResetFailureTestStep(),
+			"review task", 0, nil,
+		)
+		close(resetDone)
+	}()
+	waitForWorkflowResetBarrier(t, barrier.entered)
+
+	select {
+	case <-resetDone:
+	case <-time.After(time.Second):
+		t.Fatal("workflow reset failure did not settle after metadata persistence timed out")
+	}
+
+	stored, err := repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, stored.State)
+}
+
 func TestProcessOnEnter_SuccessfulResetDispatchesAutoStartPrompt(t *testing.T) {
 	svc, repo, manager, session := newActiveResetTestService(t)
 	manager.isAgentRunning = true

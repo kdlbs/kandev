@@ -144,6 +144,10 @@ type AgentExecution struct {
 	// manager has committed the new ACP session. A timed-out attempt discards
 	// those events and fences all later provider use until an explicit restart
 	// succeeds.
+	// contextResetAdmissionMu is the shared operation lease: ordinary provider
+	// operations hold a read lease, while a reset holds the write lease through
+	// session replacement, configuration restoration, and ready publication.
+	contextResetAdmissionMu      sync.RWMutex
 	contextResetMu               sync.Mutex
 	contextResetInFlight         bool
 	contextResetFenced           bool

@@ -1,7 +1,9 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -15,6 +17,49 @@ var ErrContextResetFenced = errors.New("agent context reset requires explicit re
 var errContextResetInProgress = errors.New("agent context reset is in progress")
 
 const maxContextResetEvents = 64
+
+const contextResetLeasePoll = 10 * time.Millisecond
+
+func waitForContextResetLease(ctx context.Context, try func() bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if try() {
+			return nil
+		}
+		timer := time.NewTimer(contextResetLeasePoll)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (e *AgentExecution) acquireContextResetOperation(ctx context.Context) (func(), error) {
+	if err := waitForContextResetLease(ctx, e.contextResetAdmissionMu.TryRLock); err != nil {
+		return nil, err
+	}
+	if err := e.contextResetAdmissionError(); err != nil {
+		e.contextResetAdmissionMu.RUnlock()
+		return nil, err
+	}
+	return e.contextResetAdmissionMu.RUnlock, nil
+}
+
+func (e *AgentExecution) acquireContextResetExclusive(ctx context.Context) (func(), error) {
+	if err := waitForContextResetLease(ctx, e.contextResetAdmissionMu.TryLock); err != nil {
+		return nil, err
+	}
+	return e.contextResetAdmissionMu.Unlock, nil
+}
 
 func (e *AgentExecution) beginContextReset() error {
 	e.contextResetMu.Lock()
@@ -30,14 +75,13 @@ func (e *AgentExecution) beginContextReset() error {
 	return nil
 }
 
-// finishContextReset commits the attempt boundary and returns only setup
+// drainContextResetEvents returns only setup
 // events for the session that the caller just committed. Events from the old
 // session can be queued while session/new is waiting and must never be replayed
 // into the replacement conversation.
-func (e *AgentExecution) finishContextReset(newSessionID string) []agentctl.AgentEvent {
+func (e *AgentExecution) drainContextResetEvents(newSessionID string) []agentctl.AgentEvent {
 	e.contextResetMu.Lock()
 	defer e.contextResetMu.Unlock()
-	e.contextResetInFlight = false
 	buffered := e.contextResetEvents
 	e.contextResetEvents = nil
 	if len(buffered) == 0 {
@@ -50,6 +94,13 @@ func (e *AgentExecution) finishContextReset(newSessionID string) []agentctl.Agen
 		}
 	}
 	return accepted
+}
+
+func (e *AgentExecution) finishContextReset() {
+	e.contextResetMu.Lock()
+	e.contextResetEvents = nil
+	e.contextResetInFlight = false
+	e.contextResetMu.Unlock()
 }
 
 func (e *AgentExecution) failContextReset(fence bool, reason string) {
@@ -127,9 +178,9 @@ func isContextResetSetupEvent(event agentctl.AgentEvent) bool {
 	case streams.EventTypeSessionStatus,
 		streams.EventTypeSessionMode,
 		streams.EventTypeSessionModels,
-		"agent_capabilities",
-		"available_commands",
-		"context_window":
+		streams.EventTypeAgentCapabilities,
+		streams.EventTypeAvailableCommands,
+		streams.EventTypeContextWindow:
 		return true
 	default:
 		return false

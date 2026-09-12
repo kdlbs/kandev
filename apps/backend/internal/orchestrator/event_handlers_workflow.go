@@ -51,10 +51,14 @@ var (
 )
 
 const (
-	workflowResetFailureCode           = "workflow_context_reset_failed"
-	workflowResetFailureMessage        = "Context reset failed. The workflow step prompt did not start."
-	workflowResetFailureCleanupTimeout = 5 * time.Second
+	workflowResetFailureCode    = "workflow_context_reset_failed"
+	workflowResetFailureMessage = "Context reset failed. The workflow step prompt did not start."
 )
+
+// workflowResetFailureCleanupTimeout bounds each failure-settlement stage. It
+// remains a variable so tests can force a persistence timeout without waiting
+// for the production budget.
+var workflowResetFailureCleanupTimeout = 5 * time.Second
 
 func sessionAttachmentTransfererAvailable(transfer SessionAttachmentTransferer) bool {
 	if transfer == nil {
@@ -6286,10 +6290,15 @@ func (s *Service) persistWorkflowResetFailure(
 			zap.String("step_name", stepName),
 			zap.Error(persistErr))
 	}
+	cancelFailure()
+	settlementCtx, cancelSettlement := context.WithTimeout(
+		context.WithoutCancel(ctx), workflowResetFailureCleanupTimeout,
+	)
+	defer cancelSettlement()
 	// Do not pass the pre-reset session snapshot to either operation. The
 	// metadata write above must be visible in the waiting-state projection.
-	s.setSessionWaitingForInput(failureCtx, taskID, sessionID)
-	s.publishSessionWaitingEvent(failureCtx, taskID, sessionID, stepID)
+	s.setSessionWaitingForInput(settlementCtx, taskID, sessionID)
+	s.publishSessionWaitingEvent(settlementCtx, taskID, sessionID, stepID)
 }
 
 // quiesceActiveResetTurn stops an in-flight turn through the internal silent
