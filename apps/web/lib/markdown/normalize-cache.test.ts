@@ -47,6 +47,19 @@ const BARE_WRAPPED_DOCUMENT = [
   "",
   SELF_CONTAINED_TEXT,
 ].join("\n");
+const BARE_WRAPPED_OUTER_OPEN_INDEX = 4;
+const BARE_WRAPPED_FIRST_NESTED_OPEN_INDEX = 7;
+const BARE_WRAPPED_FIRST_NESTED_CLOSE_INDEX = 9;
+const BARE_WRAPPED_SECOND_NESTED_OPEN_INDEX = 11;
+const BARE_WRAPPED_SECOND_NESTED_CLOSE_INDEX = 13;
+const BARE_WRAPPED_FINAL_PROSE_INDEX = 14;
+const BARE_WRAPPED_OUTER_CLOSE_INDEX = 15;
+const BARE_WRAPPED_INDENTED_LINE_INDEXES = [
+  2,
+  BARE_WRAPPED_OUTER_OPEN_INDEX,
+  BARE_WRAPPED_OUTER_CLOSE_INDEX,
+  17,
+];
 const INDEPENDENT_TAGGED_BLOCKS = [
   "```go",
   FIRST_FUNCTION_TEXT,
@@ -204,7 +217,7 @@ describe("normalizeMarkdown bare-wrapper contract", () => {
 
   it("preserves an ambiguous glued outer close while retaining CRLF line endings", () => {
     const inputLines = BARE_WRAPPED_DOCUMENT.replaceAll("\n", "\r\n").split("\n");
-    inputLines.splice(14, 2, "Final prose.```\r");
+    inputLines.splice(BARE_WRAPPED_FINAL_PROSE_INDEX, 2, "Final prose.```\r");
     const input = inputLines.join("\n");
 
     expect(normalizeMarkdown(input)).toBe(input);
@@ -218,7 +231,9 @@ describe("normalizeMarkdown bare-wrapper contract", () => {
 
   it("preserves three-space indentation on an unchanged bare wrapper", () => {
     const input = BARE_WRAPPED_DOCUMENT.split("\n")
-      .map((line, index) => ([2, 4, 15, 17].includes(index) ? `   ${line}` : line))
+      .map((line, index) =>
+        BARE_WRAPPED_INDENTED_LINE_INDEXES.includes(index) ? `   ${line}` : line,
+      )
       .join("\n");
 
     expect(normalizeMarkdown(input)).toBe(input);
@@ -226,17 +241,17 @@ describe("normalizeMarkdown bare-wrapper contract", () => {
 
   it("preserves longer nested fences in an unchanged bare wrapper", () => {
     const input = BARE_WRAPPED_DOCUMENT.split("\n");
-    input[7] = "````go";
-    input[9] = "````";
-    input[11] = "````go";
-    input[13] = "````";
+    input[BARE_WRAPPED_FIRST_NESTED_OPEN_INDEX] = "````go";
+    input[BARE_WRAPPED_FIRST_NESTED_CLOSE_INDEX] = "````";
+    input[BARE_WRAPPED_SECOND_NESTED_OPEN_INDEX] = "````go";
+    input[BARE_WRAPPED_SECOND_NESTED_CLOSE_INDEX] = "````";
 
     expect(normalizeMarkdown(input.join("\n"))).toBe(input.join("\n"));
   });
 
   it("leaves a rule-delimited wrapper with no outer close unchanged", () => {
     const input = BARE_WRAPPED_DOCUMENT.split("\n");
-    input.splice(15, 1);
+    input.splice(BARE_WRAPPED_OUTER_CLOSE_INDEX, 1);
 
     expect(normalizeMarkdown(input.join("\n"))).toBe(input.join("\n"));
   });

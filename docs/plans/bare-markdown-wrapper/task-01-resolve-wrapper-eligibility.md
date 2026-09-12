@@ -82,14 +82,11 @@ Installation is required once in a fresh worktree. Do not override the configure
 Vitest worker budget or its `NODE_ENV=test` setting. Changed-line warnings fail
 acceptance. Preserve the supplied frontend complexity and size limits.
 
-## Files touched
+## Files in this package
 
-- `docs/specs/ui/requirements/comment-markdown.md`
-- `docs/specs/ui/system-design/comment-markdown.md`
+- `docs/plans/bare-markdown-wrapper/analysis.md`
 - `docs/plans/bare-markdown-wrapper/plan.md`
-- This work order.
-
-- `apps/web/lib/markdown/normalize-cache.ts`
+- `docs/plans/bare-markdown-wrapper/task-01-resolve-wrapper-eligibility.md`
 - `apps/web/lib/markdown/normalize-cache.test.ts`
 
 ## Dependencies
@@ -111,6 +108,7 @@ bare blocks plus literal content inside enclosing fences.
 
 - [Requirements](../../specs/ui/requirements/comment-markdown.md)
 - [System design](../../specs/ui/system-design/comment-markdown.md)
+- `apps/web/lib/markdown/normalize-cache.ts`
 - [Counterexamples and source evidence](analysis.md)
 - Existing normalizer helpers and tests, especially wrapper unchanged boundaries.
 - The user's explicit implementation request and the written-analysis fallback.
