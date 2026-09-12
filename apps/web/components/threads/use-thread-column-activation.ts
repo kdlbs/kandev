@@ -121,6 +121,7 @@ export function useThreadColumnActivation(
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
   const [observerReady, setObserverReady] = useState(false);
   const idsKey = orderedIds.join("\u0000");
+  const hasColumns = orderedIds.length > 0;
 
   const updateVisibleIds = useCallback(() => {
     const next = new Set<string>();
@@ -148,10 +149,6 @@ export function useThreadColumnActivation(
 
   useLayoutEffect(() => {
     const board = boardRef.current;
-    const orderedSet = new Set(orderedIds);
-    for (const id of elementsRef.current.keys()) {
-      if (!orderedSet.has(id)) elementsRef.current.delete(id);
-    }
     observerRef.current?.disconnect();
     observerRef.current = null;
     visibilityRef.current.clear();
@@ -186,10 +183,9 @@ export function useThreadColumnActivation(
       observer.disconnect();
       if (observerRef.current === observer) observerRef.current = null;
     };
-    // The keyed dependency keeps ref registration stable while still
-    // rebuilding observation when the shell order or membership changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey, layoutKey, isMobile, updateVisibleIds]);
+    // Callback refs reconcile membership without dropping surviving visibility.
+    // Reflow or board replacement rebuilds observation from measured geometry.
+  }, [hasColumns, layoutKey, isMobile, updateVisibleIds]);
 
   const fallbackTaskId =
     focusedTaskId && orderedIds.includes(focusedTaskId) ? focusedTaskId : (orderedIds[0] ?? null);

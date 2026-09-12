@@ -67,6 +67,11 @@ order without copying selection state. Do not derive pagination from loaded
 chat or visibility-ID membership alone: both adjacent columns can stay
 intersecting across a swipe midpoint. Position changes also refresh the nearest
 visible detail calculation, retaining the one-phone-transcript limit.
+Callback refs reconcile column additions/removals on the existing observer.
+Do not rebuild it on every membership change: clearing surviving visibility
+briefly unmounts readers' chats and loses editor focus. Recreate observation
+for layout/width reflow or an empty/nonempty transition that replaces the board
+element, measuring current geometry before asynchronous callbacks arrive.
 
 `ThreadTaskActionsProvider` owns one task-action surface above removable
 columns. Headers pass explicit task IDs; `useTaskManagementFlow` captures the
@@ -75,6 +80,15 @@ workspace/task identity and resolves current eligibility from shared snapshots.
 `useTaskMenuActions({ stayOnListing: true })` shares destructive lifecycle
 cleanup with the sidebar without task-detail navigation. Do not add task API
 calls or mutation policy to Threads.
+
+The page excludes task IDs from pending `archive` operations in
+`taskRemoval.operationsByToken` before `queryThreadView` applies scope, filters,
+limits or temporary deep-link admission. This unmounts outgoing chats at
+acceptance and keeps counts, the phone picker and pagination consistent. Do not
+mutate shared snapshots optimistically or include removal intent in the query
+fingerprint/stable-order reset key. Successful reconciliation prunes snapshots
+before releasing intent; failure readmits only currently eligible tasks in
+normal arrival order. Pending deletion retains its existing timing.
 
 Only noninteractive desktop task-header regions handle context menus. The
 visible `TaskMenuButton` is also the keyboard/touch entry; phone and coarse
@@ -145,8 +159,14 @@ message updates do not scroll the deck.
 
 The mark retires on the first pointer, wheel, or focus interaction with the deck,
 since it only ever answered "where is the column I asked for". Dismissal is keyed to
-the requested id, so a later deep link earns a fresh mark rather than being
-swallowed by an earlier dismissal.
+the raw workspace/task/session request identity, independently of its currently
+resolved column. Temporary exclusion and failed archive readmission must not
+revive a consumed mark; an actual new deep link still earns a fresh mark.
+`useThreadFocusRequest` keeps the initial activation fallback alive after mark
+dismissal until its target leaves the deck. Early interaction must not unmount
+that chat before the first visibility callback, and failed readmission must
+not restore a consumed fallback. URL-driven callers pass `focusRequestKey`;
+the optional task-ID default deliberately retains legacy dismissal semantics.
 
 `OpenInThreadsButton` is the other half, living in the chat status row. It has
 two gates, and both matter:

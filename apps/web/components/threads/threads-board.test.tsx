@@ -1,83 +1,14 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render as renderReact,
-  screen,
-  waitFor,
-} from "@testing-library/react";
-import type { ReactElement } from "react";
-import { StateProvider } from "@/components/state-provider";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { ActiveThread } from "@/lib/threads/active-threads";
-
-const sessionMocks = vi.hoisted(() => {
-  const startedAt = "2026-08-27T10:00:00Z";
-  const updatedAt = "2026-08-27T12:00:00Z";
-  return {
-    startedAt,
-    updatedAt,
-    sessionLists: new Map<string, Array<Record<string, unknown>>>(),
-    sessionErrors: new Map<string, string | null>(),
-    sessionLoaded: new Map<string, boolean>(),
-    sessionLoaders: new Map<string, ReturnType<typeof vi.fn>>(),
-    useTaskSessions: vi.fn((taskId: string) => {
-      let sessions = sessionMocks.sessionLists.get(taskId);
-      if (!sessions) {
-        sessions = [
-          {
-            id: `session-${taskId}`,
-            task_id: taskId,
-            state: "RUNNING" as const,
-            is_primary: true,
-            started_at: sessionMocks.startedAt,
-            updated_at: sessionMocks.updatedAt,
-          },
-        ];
-        sessionMocks.sessionLists.set(taskId, sessions);
-      }
-      return {
-        sessions,
-        isLoading: false,
-        isLoaded: sessionMocks.sessionLoaded.get(taskId) ?? true,
-        error: sessionMocks.sessionErrors.get(taskId) ?? null,
-        loadSessions: sessionMocks.sessionLoaders.get(taskId) ?? vi.fn(),
-      };
-    }),
-  };
-});
-
-vi.mock("./thread-conversation", () => ({
-  ThreadConversation: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`thread-conversation-${sessionId}`} />
-  ),
-}));
-
-vi.mock("@/hooks/use-task-sessions", () => ({
-  useTaskSessions: sessionMocks.useTaskSessions,
-}));
-
-function render(element: ReactElement) {
-  return renderReact(element, { wrapper: StateProvider });
-}
-
+import { render, sessionMocks } from "./threads-board.test-helpers";
 import { ThreadsBoard } from "./threads-board";
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  sessionMocks.useTaskSessions.mockClear();
-  sessionMocks.sessionLists.clear();
-  sessionMocks.sessionErrors.clear();
-  sessionMocks.sessionLoaded.clear();
-  sessionMocks.sessionLoaders.clear();
-});
 
 const COLUMN_A = "thread-column-a";
 const BOARD_TEST_ID = "threads-board";
 const FOCUSED_ATTR = "data-focused";
 const COLUMN_B = "thread-column-b";
+const CONVERSATION_A = "thread-conversation-session-a";
 const TASK_A = "a";
 const PRIMARY_SESSION_A = "session-a-primary";
 const BUILDER_SESSION_A = "session-a-builder";
@@ -249,7 +180,7 @@ describe("ThreadsBoard — basic layout", () => {
   it("mounts the live conversation inside each column", () => {
     render(<ThreadsBoard threads={[thread({ taskId: "a" })]} onOpenTask={() => {}} />);
 
-    expect(screen.getByTestId("thread-conversation-session-a")).not.toBeNull();
+    expect(screen.getByTestId(CONVERSATION_A)).not.toBeNull();
   });
 
   it("keeps thirty task shells mounted without mounting thirty conversations", () => {
@@ -309,7 +240,7 @@ describe("ThreadsBoard — session list loading", () => {
 
     expect(screen.getByTestId("thread-session-list-error")).not.toBeNull();
     expect(screen.getByRole("button", { name: /retry/i })).not.toBeNull();
-    expect(screen.queryByTestId("thread-conversation-session-a")).toBeNull();
+    expect(screen.queryByTestId(CONVERSATION_A)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await act(async () => {
@@ -319,7 +250,7 @@ describe("ThreadsBoard — session list loading", () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId("thread-session-list-error")).toBeNull();
-      expect(screen.getByTestId("thread-conversation-session-a")).not.toBeNull();
+      expect(screen.getByTestId(CONVERSATION_A)).not.toBeNull();
     });
   });
 });
@@ -588,7 +519,76 @@ describe("ThreadsBoard — focusing a column from a deep link", () => {
   });
 });
 
+// @covers AC-TASKS-THREADS-ACTIONS-003.4
+describe("ThreadsBoard initial activation", () => {
+  it.each(["pointerDown", "focusIn"] as const)(
+    "keeps the requested conversation mounted when %s retires its mark before visibility is ready",
+    (interaction) => {
+      render(
+        <ThreadsBoard
+          threads={[thread({ taskId: "a" }), thread({ taskId: "b" })]}
+          focusedTaskId="b"
+          focusRequestKey="workspace:b:session-b"
+          onOpenTask={() => {}}
+        />,
+      );
+      const conversation = screen.getByTestId("thread-conversation-session-b");
+
+      fireEvent[interaction](screen.getByTestId(COLUMN_B));
+
+      expect(screen.getByTestId(COLUMN_B).getAttribute(FOCUSED_ATTR)).toBeNull();
+      expect(screen.queryByTestId("thread-conversation-session-b")).toBe(conversation);
+    },
+  );
+});
+
 describe("ThreadsBoard — retiring the deep-link mark", () => {
+  // @covers AC-TASKS-THREADS-ACTIONS-003.4, AC-TASKS-THREADS-ACTIONS-003.5
+  it("keeps a consumed URL request retired when its excluded column returns", () => {
+    const props = { focusRequestKey: "workspace:b:session-b", onOpenTask: () => {} };
+    const allThreads = [thread({ taskId: "a" }), thread({ taskId: "b" })];
+    const view = render(<ThreadsBoard {...props} threads={allThreads} focusedTaskId="b" />);
+    fireEvent.pointerDown(screen.getByTestId(COLUMN_A));
+    view.rerender(
+      <ThreadsBoard {...props} threads={[thread({ taskId: "a" })]} focusedTaskId={null} />,
+    );
+    view.rerender(<ThreadsBoard {...props} threads={allThreads} focusedTaskId="b" />);
+
+    expect(screen.getByTestId(COLUMN_B).getAttribute(FOCUSED_ATTR)).toBeNull();
+    expect(screen.queryByTestId(CONVERSATION_A)).not.toBeNull();
+    expect(screen.queryByTestId("thread-conversation-session-b")).toBeNull();
+  });
+
+  it("honors a new URL request after a consumed request loses its resolved column", () => {
+    const props = { onOpenTask: () => {} };
+    const view = render(
+      <ThreadsBoard
+        {...props}
+        threads={[thread({ taskId: "a" }), thread({ taskId: "b" })]}
+        focusedTaskId="b"
+        focusRequestKey="workspace:b:session-b"
+      />,
+    );
+    fireEvent.pointerDown(screen.getByTestId(COLUMN_A));
+    view.rerender(
+      <ThreadsBoard
+        {...props}
+        threads={[thread({ taskId: "a" })]}
+        focusedTaskId={null}
+        focusRequestKey="workspace:b:session-b"
+      />,
+    );
+    view.rerender(
+      <ThreadsBoard
+        {...props}
+        threads={[thread({ taskId: "a" })]}
+        focusedTaskId="a"
+        focusRequestKey="workspace:a:session-a"
+      />,
+    );
+    expect(screen.getByTestId(COLUMN_A).getAttribute(FOCUSED_ATTR)).toBe("true");
+  });
+
   it.each(["pointerDown", "wheel"] as const)("drops the mark on reader %s", (event) => {
     render(
       <ThreadsBoard

@@ -140,6 +140,11 @@ shipped `AnchoredLastPromptBar` grid-track transition pattern.
 
 ## Results
 
+CI remediation keeps the animated editor mounted when its first queued row
+appears or the queue drains. It also clarifies that the footer's 80px reserve
+is a transcript floor inside the tile body, not a header-height assumption.
+See [the final CI remediation record](plan.md#pr-ci-remediation-2026-09-12).
+
 PR #3626 follow-up: deep-link scrolling now honors reduced motion alongside
 composer disclosure. Overflow assertions have descriptive labels, the mobile
 Open task locator identifies a known tile, and Chinese hidden counts refer to

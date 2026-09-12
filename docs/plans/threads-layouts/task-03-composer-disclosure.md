@@ -156,6 +156,12 @@ sequential
 
 ## Results
 
+PR #3626 CI remediation preserves input identity through empty/nonempty queue
+transitions. The collapse action stays outside `QueueAffordance`, leaving its
+single keyed input stable. The regression failed before the placement fix;
+all 111 focused composer unit tests then passed. Final integration evidence is
+recorded in [the plan](plan.md#pr-ci-remediation-2026-09-12).
+
 Done, 2026-09-11. The plugin question is resolved.
 
 The earlier recording/owned-plugin hold could not be reported by its

@@ -322,12 +322,18 @@ or replaced shell. Publish measured shell intersections synchronously when
 rebuilding observation, retaining still-visible chats while dropping offscreen
 ones before asynchronous delivery. Reconcile without briefly activating every
 task, and preserve the one-phone-detail rule throughout responsive transitions.
+Callback refs reconcile membership on the existing observer; only reflow or
+board replacement rebuilds it, so removing a tile preserves surviving readers.
 Keep the short-height explanation in Display, outside the measured board
 allocation, so crossing the Grid threshold is independent of resize history.
 Pointer, focus, and wheel input all record the interacted task for recovery.
 Deep-link scrolling is instant when reduced motion is requested.
 Recovery skips zero-offset scroll assignments so it does not cancel an
 in-flight browser deep-link scroll when the first size measurement arrives.
+Deep-link retirement uses the raw workspace/task/session request identity.
+`useThreadFocusRequest` retains the initial activation fallback after reader
+interaction until the target leaves the deck; failed archive readmission must
+not revive a consumed mark or fallback.
 
 The selected task remains the owner for context menus and removal recovery in
 the lower row. `scrollIntoView` keeps `block: "nearest"`, and board scroll
@@ -464,6 +470,9 @@ Session draft text, rich content, and staged attachments continue to use
 `getChatDraftAttachments`. They remain transient session drafts, distinct from
 backend-owned view preferences. When offscreen detail unmounts, existing draft
 restoration owns recovery; an expanded composer never pins an offscreen stream.
+Queue transitions must preserve the mounted input and focus. Keep the keyed
+input as `QueueAffordance`'s single child, with the collapse action outside that
+wrapper, so adding or draining queued messages cannot remount the editor.
 
 ## Failure and recovery
 

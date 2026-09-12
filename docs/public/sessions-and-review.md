@@ -153,6 +153,11 @@ changes. Canceling a confirmation leaves the task unchanged. See
 [archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
 for confirmation preferences and cleanup consequences.
 
+Once you confirm **Archive**, its conversation disappears immediately while
+cleanup continues. With archive confirmation disabled, choosing **Archive** is
+enough. If the request fails, the task returns when your current filters and
+column limit allow, without taking focus from the thread you are using.
+
 If an action or view filter removes your current thread, Threads selects the
 next remaining thread, otherwise the previous one. If neither survives from
 the previous view, it selects the first thread in the new view. The empty view

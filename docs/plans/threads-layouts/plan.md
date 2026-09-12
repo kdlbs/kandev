@@ -472,6 +472,64 @@ linter tests. Public guidance and the saved-view/deck contracts reflect these
 fixes. Review/CI completion is tracked externally for the pushed head, not
 inferred from local results. Physical-device checks remain unavailable.
 
+## PR CI remediation (2026-09-12)
+
+The merge of main `140ef39c` preserves immediate archive removal, raw focus
+request identity, fallback activation, and Grid reflow. Combined board tests
+retain both behavior sets; shared setup is extracted to satisfy the file-size
+limit without dropping assertions. The 145-test board/view/archive suite and
+32-scenario desktop integration run passed before the composer correction.
+
+The shared composer previously remounted when the first queue row appeared:
+the collapse action changed a keyed input child into an unkeyed child array.
+Moving that action outside `QueueAffordance` preserves input identity, focus,
+submitted-draft clearing, and normal task/Quick Chat/mobile hosts. The new
+identity regression failed before this one-line placement correction; all
+111 composer unit tests passed afterward:
+
+```bash
+cd apps/web
+pnpm exec vitest run components/task/chat/chat-input-area.test.tsx components/task/chat/chat-input-area.test.ts components/task/chat/queued-ghost-list.test.tsx components/task/chat/use-chat-input-state.test.ts components/task/chat/use-chat-input-container.test.ts components/task/chat/composer-disclosure.test.tsx components/task/chat/use-composer-disclosure.test.ts
+```
+
+A fresh managed build passed 15 desktop scenarios covering every failed queue,
+startup/resume, and plan-comment assertion plus all five setup-script cases.
+The 29-scenario mobile run passed all failed phone cases, both mobile flaky
+scenarios, and Threads display/disclosure/navigation/archive flows. Both runs
+used one worker, strict WebSocket accounting, and no retries. Existing
+describe-level retry overrides were temporarily set to zero for these runs,
+then restored without changing their committed policy.
+
+Two test-only timing corrections address additional CI evidence: the mobile
+branch-picker test waits for the previous popover's exit before matching the
+next list, and mention recency clears through editor transactions before
+retyping a dismissed trigger. The latter matches the desktop correction
+landed in #3594. Both passed three repeats under a two-CPU limit (six tests,
+42.9 seconds), with retries disabled:
+
+```bash
+cd apps/web
+taskset -c 0,1 pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-mention-recency.spec.ts tests/settings/mobile-repository-branch-policies.spec.ts -- --repeat-each=3 --retries=0
+```
+
+The setup-streaming failure did not reproduce in three additional two-CPU
+repeats immediately after its preceding CI stream-budget scenario (six tests,
+57.2 seconds). No setup production or test change was made:
+
+```bash
+cd apps/web
+taskset -c 0,1 pnpm e2e:run --no-build --project chromium tests/session/session-stream-budget.spec.ts tests/session/setup-script-progress.spec.ts:32 -- --repeat-each=3 --retries=0
+```
+
+Claude's two clarification suggestions are reflected in comments: the footer
+reserve is an 80px transcript floor below a separate header, and strict JSON
+decoding rejects invalid explicit zero defaults while service validation owns
+unknown layout strings. No validation boundary or product behavior changes.
+Typecheck, scoped zero-warning lint, formatting, i18n ratchet, and specification
+lint passed. Exact-head post-commit checks, additional ordering probes, media,
+later-base synthetic integration, and remote CI/review outcomes are recorded
+in the external task plan; local passes do not establish remote CI success.
+
 ## Risks
 
 - A full composer can dominate a half-height tile. The grid-height fallback,

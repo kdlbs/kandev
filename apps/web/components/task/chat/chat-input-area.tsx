@@ -519,8 +519,8 @@ export function ChatInputArea(props: ChatInputAreaProps) {
           )}
         >
           <ChatInputContainer ref={chatInputRef} key={clarificationKey} {...composerProps} />
-          <ComposerCollapseButton />
         </QueueAffordance>
+        <ComposerCollapseButton />
       </ComposerDisclosureRegion>
     </div>
   );
