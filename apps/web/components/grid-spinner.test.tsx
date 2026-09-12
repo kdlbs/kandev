@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GridSpinner } from "./grid-spinner";
 
 const delays = ["0.2s", "0.3s", "0.4s", "0.1s", "0.2s", "0.3s", "0s", "0.1s", "0.2s"];
+const CUBE_SELECTOR = ".spinner-grid-cube";
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
 afterEach(() => {
   cleanup();
@@ -13,6 +15,11 @@ afterEach(() => {
     Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
   } else {
     Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  }
+  if (originalVisibilityState) {
+    Object.defineProperty(document, "visibilityState", originalVisibilityState);
+  } else {
+    Reflect.deleteProperty(document, "visibilityState");
   }
 });
 
@@ -38,10 +45,51 @@ function installAnimate(implementation?: (...args: unknown[]) => Animation) {
 }
 
 function makeAnimation() {
-  return { cancel: vi.fn() } as unknown as Animation;
+  let playState: AnimationPlayState = "running";
+  return {
+    get playState() {
+      return playState;
+    },
+    cancel: vi.fn(() => {
+      playState = "idle";
+    }),
+    pause: vi.fn(() => {
+      playState = "paused";
+    }),
+    play: vi.fn(() => {
+      playState = "running";
+    }),
+  } as unknown as Animation;
 }
 
 describe("GridSpinner", () => {
+  it("pauses and resumes all owned cube effects with document visibility", () => {
+    installComputedAnimationStyles();
+    const animations = Array.from({ length: 9 }, () => makeAnimation());
+    let animationIndex = 0;
+    installAnimate(() => animations[animationIndex++]);
+
+    const { container } = render(<GridSpinner />);
+    const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    for (const animation of animations) expect(animation.pause).toHaveBeenCalledOnce();
+    expect(cubes.every((cube) => cube.style.animationPlayState === "paused")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    for (const animation of animations) expect(animation.play).toHaveBeenCalledOnce();
+    expect(cubes.every((cube) => cube.style.animationPlayState === "")).toBe(true);
+  });
+
   it("starts nine compositor transform effects with the CSS timing and stagger", () => {
     installComputedAnimationStyles();
     const animate = installAnimate();
@@ -51,7 +99,7 @@ describe("GridSpinner", () => {
     const status = container.querySelector<HTMLElement>('[role="status"]');
     expect(status?.getAttribute("aria-label")).toBe("Loading");
     expect(status?.className).toContain("text-primary");
-    const cubes = Array.from(container.querySelectorAll<HTMLElement>(".spinner-grid-cube"));
+    const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     expect(cubes).toHaveLength(9);
     expect(animate).toHaveBeenCalledTimes(9);
     expect(animate.mock.calls.map((call) => call[0])).toEqual(
@@ -78,11 +126,27 @@ describe("GridSpinner", () => {
 
     const { container } = render(<GridSpinner />);
 
-    const cubes = Array.from(container.querySelectorAll<HTMLElement>(".spinner-grid-cube"));
+    const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     expect(cubes).toHaveLength(9);
     expect(cubes.every((cube) => cube.style.animation === "")).toBe(true);
-  });
 
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "paused")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "")).toBe(true);
+  });
+});
+
+describe("GridSpinner lifecycle", () => {
   it("preserves commas inside CSS easing functions", () => {
     installComputedAnimationStyles("cubic-bezier(0.4, 0, 0.6, 1)");
     const animate = installAnimate();
@@ -120,10 +184,24 @@ describe("GridSpinner", () => {
 
     const { container } = render(<GridSpinner />);
 
-    const cubes = Array.from(container.querySelectorAll<HTMLElement>(".spinner-grid-cube"));
+    const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     expect(animate).toHaveBeenCalledTimes(2);
     expect(firstAnimation.cancel).toHaveBeenCalledOnce();
     expect(cubes.every((cube) => cube.style.animation === "")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "paused")).toBe(true);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cubes.every((cube) => cube.style.animationPlayState === "")).toBe(true);
   });
 
   it("cancels every compositor effect when it unmounts", () => {

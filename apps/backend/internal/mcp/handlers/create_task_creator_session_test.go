@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
@@ -24,11 +26,16 @@ func TestHandleCreateTask_UsesVerifiedCreatorSessionProfileAndRuntime(t *testing
 		Name:        "Creator session workflow",
 	})
 	require.NoError(t, err)
+	step := &workflowmodels.WorkflowStep{ID: "creator-session-step", WorkflowID: workflow.ID, Name: "Start"}
+	svc.SetWorkflowStepGetter(&staticWorkflowStepGetter{steps: map[string]*workflowmodels.WorkflowStep{
+		step.ID: step,
+	}})
 
 	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID: workspaces[0].ID,
-		WorkflowID:  workflow.ID,
-		Title:       "Source task",
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflow.ID,
+		WorkflowStepID: step.ID,
+		Title:          "Source task",
 		Metadata: map[string]interface{}{
 			models.MetaKeyAgentProfileID: "source-task-profile",
 		},
@@ -65,13 +72,15 @@ func TestHandleCreateTask_UsesVerifiedCreatorSessionProfileAndRuntime(t *testing
 	}))
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
-		"source_task_id":    sourceResult.Task.ID,
-		"source_session_id": "creator-session",
-		"workspace_id":      workspaces[0].ID,
-		"workflow_id":       workflow.ID,
-		"title":             "Creator session child",
-		"start_agent":       false,
+	principalResolver := mcpscope.NewResolver(repo, nil, func() bool { return false }, testLogger(t))
+	principalCtx, err := principalResolver.ScopePrincipal(ctx, sourceResult.Task.ID, "creator-session")
+	require.NoError(t, err)
+	resp, err := h.handleCreateTask(principalCtx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflow.ID,
+		"workflow_step_id": step.ID,
+		"title":            "Creator session child",
+		"start_agent":      false,
 	}))
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type, "payload: %s", string(resp.Payload))
@@ -91,6 +100,11 @@ func TestHandleCreateTask_UsesVerifiedCreatorSessionProfileAndRuntime(t *testing
 	require.Equal(t, "acceptEdits", seed.Mode)
 	require.Equal(t, map[string]string{"reasoning_effort": "low"}, seed.ConfigOptions)
 	require.Equal(t, "creator-session-profile", task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID])
+
+	rows := ledgerRowsForTask(t, repo, created.ID)
+	require.Equal(t, string(steptelemetry.ActorAgent), rows[0].actorKind)
+	require.NotNil(t, rows[0].actorID)
+	require.Equal(t, "creator-session", *rows[0].actorID)
 }
 
 func TestHandleCreateTask_RejectsCreatorSessionFromAnotherTaskBeforePersistence(t *testing.T) {
@@ -122,9 +136,14 @@ func TestHandleCreateTask_RejectsCreatorSessionFromAnotherTaskBeforePersistence(
 		AgentProfileID: "foreign-profile",
 		State:          models.TaskSessionStateWaitingForInput,
 	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "source-session",
+		TaskID: sourceResult.Task.ID,
+		State:  models.TaskSessionStateWaitingForInput,
+	}))
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, sourceResult.Task.ID, "source-session"), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"source_task_id":    sourceResult.Task.ID,
 		"source_session_id": "foreign-session",
 		"workspace_id":      workspaces[0].ID,
@@ -133,7 +152,7 @@ func TestHandleCreateTask_RejectsCreatorSessionFromAnotherTaskBeforePersistence(
 		"start_agent":       false,
 	}))
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
 
 	tasks, err := svc.ListTasks(ctx, workflow.ID)
 	require.NoError(t, err)
@@ -145,7 +164,7 @@ func TestHandleCreateTask_SubtaskKeepsParentExecutorWhenCreatorProfileWins(t *te
 	svc, workspace, workflow, source := newCreatorSessionTask(t)
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspace.ID, source.ID, "creator-session"), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"parent_id":         source.ID,
 		"source_task_id":    source.ID,
 		"source_session_id": "creator-session",

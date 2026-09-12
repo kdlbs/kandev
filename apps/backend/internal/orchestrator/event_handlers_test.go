@@ -357,9 +357,9 @@ type mockAgentManager struct {
 	}
 	// Optional current ACP session lookup used by reset-token generation tests.
 	getACPSessionIDForSessionFunc func(string) (string, bool)
-	// Optional override for ListSessionIDsForTask. When unset, the default
+	// Optional override for ListExecutionsForTask. When unset, the default
 	// implementation returns nil (no registry-recovered sessions).
-	listSessionIDsForTaskFunc func(taskID string) []string
+	listExecutionsForTaskFunc func(taskID string) []lifecycle.ExecutionReference
 
 	// CancelAgent tracking. cancelAgentCalls counts every invocation. If
 	// cancelAgentBlock is non-nil, CancelAgent blocks on it before returning;
@@ -796,9 +796,9 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	return "", fmt.Errorf("no execution found")
 }
 
-func (m *mockAgentManager) ListSessionIDsForTask(taskID string) []string {
-	if m.listSessionIDsForTaskFunc != nil {
-		return m.listSessionIDsForTaskFunc(taskID)
+func (m *mockAgentManager) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	if m.listExecutionsForTaskFunc != nil {
+		return m.listExecutionsForTaskFunc(taskID)
 	}
 	return nil
 }

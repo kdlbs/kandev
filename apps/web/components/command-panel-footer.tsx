@@ -3,13 +3,8 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandInput,
-  CommandList,
-} from "@kandev/ui/command";
+import { Command, CommandEmpty, CommandInput, CommandList } from "@kandev/ui/command";
+import { CommandPanelDialog } from "./command-panel-dialog";
 import { Kbd, KbdGroup } from "@kandev/ui/kbd";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import type { Task } from "@/lib/types/http";
@@ -322,7 +317,7 @@ export function CommandPanelView(props: CommandPanelViewProps) {
   };
 
   return (
-    <CommandDialog
+    <CommandPanelDialog
       open={open}
       onOpenChange={handleOpenChange}
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
@@ -351,6 +346,6 @@ export function CommandPanelView(props: CommandPanelViewProps) {
         <CommandPanelResultList {...renderedProps} />
         <CommandPanelFooter mode={renderedProps.mode} />
       </Command>
-    </CommandDialog>
+    </CommandPanelDialog>
   );
 }

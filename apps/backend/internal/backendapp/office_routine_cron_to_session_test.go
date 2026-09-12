@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -445,7 +446,9 @@ func (m *stubAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context,
 func (m *stubAgentManager) GetExecutionIDForSession(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
-func (m *stubAgentManager) ListSessionIDsForTask(_ string) []string { return nil }
+func (m *stubAgentManager) ListExecutionsForTask(_ string) []lifecycle.ExecutionReference {
+	return nil
+}
 func (m *stubAgentManager) GetGitLog(
 	_ context.Context, _, _ string, _ int, _ string,
 ) (*client.GitLogResult, error) {

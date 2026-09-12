@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   IconAlertCircle,
   IconFolder,
@@ -60,8 +60,8 @@ export type CreateLocalRepositorySurfaceProps = {
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   executorSelection: DirectLocalExecutorSelection | null;
-  context?: "task-create" | "workspace";
-  onCreated: (repository: Repository) => void;
+  context?: "task-create" | "task-create-multi" | "workspace";
+  onCreated: (repository: Repository) => boolean | void;
 };
 
 // `context` and `requiresSwitch` stay logic; only the notices they select are
@@ -71,7 +71,7 @@ function executorNotice(
   selection: DirectLocalExecutorSelection | null,
   context: NonNullable<CreateLocalRepositorySurfaceProps["context"]>,
 ): string {
-  if (context === "workspace") {
+  if (!requiresDirectLocalExecutor(context)) {
     return t("common:createsAnEmptyGitRepository");
   }
   if (!selection) {
@@ -178,7 +178,7 @@ function RepositoryFormDetails({
       </div>
       <div
         className={
-          executorSelection || context === "workspace"
+          executorSelection || !requiresDirectLocalExecutor(context)
             ? "flex items-start gap-2 text-xs text-muted-foreground"
             : "flex items-start gap-2 text-xs text-destructive"
         }
@@ -221,6 +221,13 @@ function CreateRepositoryFooter({
   );
 }
 
+function requiresDirectLocalExecutor(context: CreateLocalRepositorySurfaceProps["context"]) {
+  return context === "task-create";
+}
+
+// Keep async submission ownership beside the form so stale completions cannot
+// mutate a newer request's state.
+// eslint-disable-next-line max-lines-per-function -- form coordinates submission and its full layout
 function CreateRepositoryForm({
   open,
   workspaceId,
@@ -235,6 +242,7 @@ function CreateRepositoryForm({
   const [editingParentPath, setEditingParentPath] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const submissionIdRef = useRef(0);
   const { listing, loading, error: listingError, load } = useDirectoryListing(open, "");
   useEffect(() => {
     if (!open) {
@@ -249,13 +257,15 @@ function CreateRepositoryForm({
   const nameError = validateLocalRepositoryName(name);
   const targetPath =
     parentPath && !nameError ? buildLocalRepositoryTargetPath(parentPath, name) : "";
-  const executorReady = Boolean(executorSelection || context === "workspace");
+  const executorReady = Boolean(executorSelection || !requiresDirectLocalExecutor(context));
   const canSubmit = !!workspaceId && executorReady && !!parentPath && !nameError && !submitting;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     event.stopPropagation();
     if (!canSubmit || !workspaceId) return;
+    const submissionId = submissionIdRef.current + 1;
+    submissionIdRef.current = submissionId;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -263,13 +273,14 @@ function CreateRepositoryForm({
         name: name.trim(),
         parentPath,
       });
-      onCreated(repository);
+      const shouldDismiss = onCreated(repository);
+      if (shouldDismiss === false) return;
       setName("");
       onDismiss();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("common:failedToCreateRepository"));
     } finally {
-      setSubmitting(false);
+      if (submissionIdRef.current === submissionId) setSubmitting(false);
     }
   };
 

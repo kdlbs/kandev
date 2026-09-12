@@ -29,6 +29,8 @@ type TaskPRAutoFixOutcomeService interface {
 	ReportTaskPRAutoFixOutcome(ctx context.Context, taskID, sessionID, outcome, summary string) error
 }
 
+const taskPRAutoFixOutcomeUnmatchedMessage = "No matching unresolved GitHub PR auto-fix attempt exists for this turn. Finish ordinary work without retrying this report or enabling auto-fix."
+
 func (h *Handlers) SetTaskPRAutomationService(automation TaskPRAutomationService) {
 	h.taskPRAutomation = automation
 }
@@ -153,8 +155,9 @@ func (h *Handlers) handleReportTaskPRAutoFixOutcome(ctx context.Context, msg *ws
 		ctx, req.TaskID, req.SessionID, req.Outcome, req.Summary,
 	); err != nil {
 		switch {
-		case errors.Is(err, github.ErrTaskCIAutoFixAttemptNotFound),
-			errors.Is(err, github.ErrTaskCIAutoFixOutcomeInvalid):
+		case errors.Is(err, github.ErrTaskCIAutoFixAttemptNotFound):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, taskPRAutoFixOutcomeUnmatchedMessage, nil)
+		case errors.Is(err, github.ErrTaskCIAutoFixOutcomeInvalid):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		default:
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to record PR auto-fix outcome: "+err.Error(), nil)

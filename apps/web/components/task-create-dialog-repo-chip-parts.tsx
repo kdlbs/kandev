@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
 import type { Branch, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
-import { computeBranchPlaceholder } from "@/components/branch-picker-options";
+import { branchOptionValue, computeBranchPlaceholder } from "@/components/branch-picker-options";
 import {
   computeBranchDisabledReason,
   computeBranchPrefix,
@@ -81,10 +81,9 @@ function branchPolicyToOption(
   branches: Branch[],
   policyDisabledReason?: string,
 ): PillOption {
-  const baseBranchAvailable = branches.some((branch) => {
-    if (branch.name === policy.base_branch) return true;
-    return branch.type === "remote" && `${branch.remote}/${branch.name}` === policy.base_branch;
-  });
+  const baseBranchAvailable = branches.some(
+    (branch) => branchOptionValue(branch) === policy.base_branch,
+  );
   const unavailableReason =
     policyDisabledReason ?? (baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable"));
   const summary = t("workspaces:branchPolicySummary", {
@@ -128,6 +127,7 @@ function branchPolicyToOption(
 
 export function useRepoChipBranchPicker({
   row,
+  branchValue = row.branch,
   branchPolicies,
   branches,
   branchOptions,
@@ -139,6 +139,7 @@ export function useRepoChipBranchPicker({
   onPolicySelected,
 }: {
   row: TaskRepoRow;
+  branchValue?: string;
   branchPolicies: RepositoryBranchPolicy[];
   branches: Branch[];
   branchOptions: PillOption[];
@@ -151,7 +152,7 @@ export function useRepoChipBranchPicker({
 }) {
   const { t } = useTranslation();
   const hasRepo = !!(row.repositoryId || row.localPath);
-  const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
+  const visibleBranchValue = preferredDefaultBranchLoading ? "" : branchValue;
   const selectedPolicy = branchPolicies.find((policy) => policy.id === row.branchPolicyId);
   const policyOptions = useMemo(
     () =>
@@ -162,13 +163,13 @@ export function useRepoChipBranchPicker({
     () => [...policyOptions, ...branchOptions],
     [branchOptions, policyOptions],
   );
-  const selectedBranchValue = selectedPolicy ? `policy:${selectedPolicy.id}` : branchValue;
+  const selectedBranchValue = selectedPolicy ? "policy:" + selectedPolicy.id : visibleBranchValue;
   const selectedBranchLabel = selectedPolicy
     ? t("task:branchPolicySelected", {
         name: selectedPolicy.name,
         base: selectedPolicy.base_branch,
       })
-    : branchValue;
+    : visibleBranchValue;
   const handleBranchSelect = (value: string) => {
     if (value.startsWith("policy:")) {
       const policy = branchPolicies.find((candidate) => `policy:${candidate.id}` === value);
@@ -295,4 +296,57 @@ export function RepoChipBranchPill({
       flat
     />
   );
+}
+
+export function RepoChipBaseBranchPill({
+  options,
+  value,
+  defaultBranch,
+  hasRepo,
+  branchesLoading,
+  onSelect,
+  refreshBranches,
+}: {
+  options: PillOption[];
+  value: string;
+  defaultBranch: string;
+  hasRepo: boolean;
+  branchesLoading: boolean;
+  onSelect: (value: string) => void;
+  refreshBranches?: () => void;
+}) {
+  const { t } = useTranslation();
+  const defaultLabel = defaultBranch || t("common:repositoryDefaultBranchOption");
+  const valueLabel = value || t("workspaces:repositorySetsTaskDefault", { branch: defaultLabel });
+  const disabledReason = baseBranchDisabledReason(hasRepo, branchesLoading, t);
+  return (
+    <Pill
+      icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
+      value={valueLabel}
+      selectedValue={value}
+      placeholder={valueLabel}
+      options={options}
+      onSelect={onSelect}
+      disabled={!hasRepo || branchesLoading || options.length === 0}
+      disabledReason={disabledReason}
+      searchPlaceholder={t("task:searchBranches")}
+      emptyMessage={t("task:noBranches")}
+      testId="repo-chip-base-branch"
+      tooltip={t("workspaces:repositorySetsBaseBranchLabel")}
+      onRefresh={refreshBranches}
+      refreshing={branchesLoading}
+      filter={scoreBranch}
+      flat
+    />
+  );
+}
+
+function baseBranchDisabledReason(
+  hasRepo: boolean,
+  branchesLoading: boolean,
+  translate: (key: string) => string,
+): string {
+  if (!hasRepo) return translate("task:selectRepositoryFirst");
+  if (branchesLoading) return translate("task:loadingBranches2");
+  return translate("task:noBranches");
 }

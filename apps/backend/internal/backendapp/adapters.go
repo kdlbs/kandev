@@ -900,8 +900,8 @@ func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, session
 	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
 }
 
-func (a *lifecycleAdapter) ListSessionIDsForTask(taskID string) []string {
-	return a.mgr.ListSessionIDsForTask(taskID)
+func (a *lifecycleAdapter) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	return a.mgr.ListExecutionsForTask(taskID)
 }
 
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {

@@ -31,18 +31,20 @@ its terminal state and error message survive.
 ## In scope
 
 - Add a read-only task-scoped lookup to the execution registry:
-  `ExecutionStore` gains a method returning the session IDs of executions whose
-  `TaskID` matches, and `Manager` exposes it. `AgentExecution.TaskID` already
-  exists; no new index is required.
+  `ExecutionStore` gains a method returning paired session and execution IDs for
+  executions whose `TaskID` matches, and `Manager` exposes it.
+  `AgentExecution.TaskID` already exists; no new index is required.
 - Add that method to `executor.AgentManagerClient`.
 - In `StopByTaskID`, after the existing `ListActiveTaskSessionsByTaskID` call,
   add registry-only sessions by loading each session row with
-  `repo.GetTaskSession`. Skip and log a row that cannot be loaded. Return
+  `repo.GetTaskSession`. Keep and log a paired registry reference when a row
+  cannot be loaded, and schedule teardown by its captured execution ID. Return
   `ErrExecutionNotFound` only when the union is empty.
-- Stop a registry-recovered session without the session-state transition, so its
-  terminal state and error message are preserved. Extract the shared
-  execution-resolution and stop-scheduling part of `stopWithSession` rather than
-  duplicating it.
+- Stop a registry-recovered session with the per-session lock used by resume.
+  Preserve a terminal row, but use the normal cancellation transition when the
+  captured execution still owns a row that became active. Always target the
+  captured execution ID. Extract the shared stop-scheduling part of
+  `stopWithSession` rather than duplicating it.
 - Log recovered sessions distinctly from query-resolved sessions, naming the
   session and execution.
 
@@ -53,14 +55,15 @@ its terminal state and error message survive.
   of `ListActiveTaskSessionsByTaskID` depends on its current meaning.
 - Do not change `stopSession`, `StopExecution`, the `agent.cancel` path, or
   `StopTaskForCoordinator`.
-- Do not change the behavior for a session that is in an active persisted state.
+- Do not change the behavior for a session already returned by the active
+  persisted-state query.
 - Do not add startup or background reconciliation of orphans.
 
 ## Acceptance conditions
 
-1. A task whose only session is `FAILED` with a registered execution is stopped
-   successfully, the execution is stopped once, and the session stays `FAILED`
-   with its original error message.
+1. A task whose only session is `FAILED` with a registered execution schedules
+   its execution stop once, and the session stays `FAILED` with its original
+   error message. Success means scheduling, not confirmed process exit.
 2. A task with an active session behaves exactly as today, including the
    cancellation transition and its events.
 3. A task with neither an active session nor a registered execution still
@@ -85,7 +88,7 @@ New regressions:
   `TestStopByTaskID_NoActiveSessionAndNoRegisteredExecutionReportsNotFound`
   pin the unchanged paths.
 - `apps/backend/internal/agent/runtime/lifecycle/execution_store_test.go`:
-  `TestExecutionStore_ListsSessionIDsForTask` — covers matching, non-matching,
+  `TestExecutionStore_ListsExecutionsForTask` — covers matching, non-matching,
   empty-task, and post-`Remove` cases.
 
 ## Files likely touched
@@ -104,35 +107,34 @@ the fake agent manager, not the stall path, seeds the registered execution.
 
 ## Results
 
-Added `ExecutionStore.ListSessionIDsForTask(taskID) []string`
+Added `ExecutionStore.ListExecutionsForTask(taskID) []ExecutionReference`
 (`execution_store.go`) — a read-only in-memory scan of registered executions
-by `TaskID`, independent of session persisted state — and exposed it as
-`Manager.ListSessionIDsForTask` (`manager_execution.go`). Added it to
-`executor.AgentManagerClient` (`executor.go`) and wired the real path through
-`lifecycleAdapter.ListSessionIDsForTask` (`backendapp/adapters.go`).
+by `TaskID` that keeps each session ID paired with its execution ID — and
+exposed it as `Manager.ListExecutionsForTask` (`manager_execution.go`). Added
+it to `executor.AgentManagerClient` (`executor.go`) and wired the real path
+through `lifecycleAdapter.ListExecutionsForTask` (`backendapp/adapters.go`).
 
 In `executor_interaction.go`:
-- Extracted `resolveExecutionIDForStop` (execution-ID lookup + not-found
-  classification, previously inlined in `stopWithSession`) and
-  `registerAndScheduleStop` (advisory ownership registration + detached
-  teardown scheduling, previously the tail of `stopWithSession`). Both are now
-  shared rather than duplicated, per the work order.
-- Added `stopRegistryRecoveredSession`, which resolves and stops an
-  execution via those two shared helpers but skips the CANCELLED
-  transition — the session's terminal state and error message stay
-  authoritative.
+- Added a shared exact-execution stop helper. It records advisory ownership and
+  schedules detached teardown, with an optional cancellation transition.
+- Added `stopRegistryRecoveredSession`, which keeps the captured execution
+  reference under the per-session resume lock. It preserves terminal state, or
+  uses the cancellation transition if the captured execution still owns a row
+  that became active.
+- Added `stopRegistryRecoveredByID`, which schedules the captured execution
+  even when the session row cannot be loaded.
 - Added `recoverRegistryOnlySessions`, called from `StopByTaskID` after the
   existing `ListActiveTaskSessionsByTaskID` call: it asks the registry for
-  taskID's registered session IDs, skips any already covered by the active
-  query, loads each remaining row via `repo.GetTaskSession` (skip + log on
-  failure), and returns the loaded rows for `stopRegistryRecoveredSession`.
+  taskID's paired execution references, skips any already covered by the active
+  query, loads each remaining row via `repo.GetTaskSession`, and retains the
+  reference when a row load fails.
   `StopByTaskID` now returns `ErrExecutionNotFound` only when both the active
   query and the recovered set are empty; the SQL active-state set in
   `sqlite/session.go` was not touched.
 
 Added regressions:
 - `execution_store_test.go`:
-  `TestExecutionStore_ListsSessionIDsForTask` — matching/non-matching/empty-
+  `TestExecutionStore_ListsExecutionsForTask` — matching/non-matching/empty-
   task/post-`Remove` cases.
 - `executor_interaction_test.go`:
   `TestStopByTaskID_StopsFailedSessionWithRegisteredExecution` (new
@@ -146,19 +148,19 @@ Added regressions:
 RED verification for the primary test: reverted the interface/store/executor
 production and mock plumbing via a scoped `git stash` (unique tag, applied by
 SHA, dropped after) and confirmed the package fails to *compile* without it
-(`unknown field listSessionIDsForTaskFunc in struct literal of type
+(`unknown field listExecutionsForTaskFunc in struct literal of type
 mockAgentManager`) — the registry-recovery capability does not exist on
 `main` at all, so there is no lesser "wrong behavior" RED state to assert
 against; a compile failure is the correct RED here. Re-applied the stash and
 confirmed all three new tests pass.
 
-Adding `ListSessionIDsForTask` to `executor.AgentManagerClient` required
+Adding `ListExecutionsForTask` to `executor.AgentManagerClient` required
 updating every other implementer to keep the codebase compiling: the mock
 `GetExecutionIDForSession` implementations in
 `internal/orchestrator/event_handlers_test.go`,
 `internal/orchestrator/scheduler/scheduler_test.go`, and
 `internal/orchestrator/executor/executor_mocks_test.go` (all gained a real
-`listSessionIDsForTaskFunc`-backed method), plus
+`listExecutionsForTaskFunc`-backed method), plus
 `internal/integration/simulated_agent_manager_test.go`'s
 `SimulatedAgentManagerClient` (gained a real implementation filtering its
 `simulatedInstance` map by `taskID`, matching its other lookups).
@@ -247,3 +249,20 @@ specific already-stuck launch from here — doing so needs the actual running
 backend process for this Kandev instance restarted onto the fixed code, which
 is a deployment action outside this card's scope (a source change, not an
 operational one).
+
+### Contributor fixup: preserve execution identity during recovery
+
+Registry recovery now returns a paired `SessionID` and `ExecutionID` snapshot.
+Both recovery paths keep that pair through the per-session lock used by resume.
+They schedule the captured execution even when the session row is unreadable.
+When a row becomes active, recovery changes it to `CANCELLED` only if the
+captured execution still owns the session. A replacement execution is never
+selected by a later session lookup.
+
+The stop contract reports success when teardown is scheduled. It does not wait
+for detached runtime teardown to finish. A row load error remains visible to
+the caller while the captured execution is still scheduled.
+
+Regression coverage includes replacement execution protection for both loaded
+and unloadable rows, plus a terminal-to-active recovery transition. The
+execution store test verifies that each task snapshot contains both IDs.

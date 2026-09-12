@@ -221,11 +221,11 @@ func TestStopByTaskID_StopsFailedSessionWithRegisteredExecution(t *testing.T) {
 	}
 	stopCalls := make(chan string, 1)
 	manager := &mockAgentManager{
-		listSessionIDsForTaskFunc: func(taskID string) []string {
+		listExecutionsForTaskFunc: func(taskID string) []lifecycle.ExecutionReference {
 			if taskID != "task-1" {
 				return nil
 			}
-			return []string{"session-1"}
+			return []lifecycle.ExecutionReference{{SessionID: "session-1", ExecutionID: "execution-orphan"}}
 		},
 		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
 			return "execution-orphan", nil
@@ -348,11 +348,11 @@ func TestStopByTaskID_RegistryRecoveryLoadFailureIsNotReportedAsNotFound(t *test
 		return nil, loadFailure
 	}
 	manager := &mockAgentManager{
-		listSessionIDsForTaskFunc: func(taskID string) []string {
+		listExecutionsForTaskFunc: func(taskID string) []lifecycle.ExecutionReference {
 			if taskID != "task-1" {
 				return nil
 			}
-			return []string{"session-1"}
+			return []lifecycle.ExecutionReference{{SessionID: "session-1", ExecutionID: "execution-orphan"}}
 		},
 	}
 	exec := newTestExecutor(t, manager, repo)
@@ -399,11 +399,14 @@ func TestStopByTaskID_MixedActiveAndUnloadableOrphanSurfacesLoadError(t *testing
 	}
 	stopCalls := make(chan string, 1)
 	manager := &mockAgentManager{
-		listSessionIDsForTaskFunc: func(taskID string) []string {
+		listExecutionsForTaskFunc: func(taskID string) []lifecycle.ExecutionReference {
 			if taskID != "task-1" {
 				return nil
 			}
-			return []string{"session-active", "session-orphan"}
+			return []lifecycle.ExecutionReference{
+				{SessionID: "session-active", ExecutionID: "execution-active"},
+				{SessionID: "session-orphan", ExecutionID: "execution-orphan"},
+			}
 		},
 		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
 			return "execution-active", nil

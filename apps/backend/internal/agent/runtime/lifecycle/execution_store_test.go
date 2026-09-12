@@ -238,11 +238,11 @@ func TestExecutionStore_ClaimPromptActivityRequiresCurrentIdentity(t *testing.T)
 	}
 }
 
-// TestExecutionStore_ListsSessionIDsForTask covers
+// TestExecutionStore_ListsExecutionsForTask covers
 // @covers AC-TASKS-TASK-STOP-REACHABILITY-001.1: the registry-only lookup a
 // task-scoped stop uses to recover a session whose database row is terminal
 // but whose execution is still registered.
-func TestExecutionStore_ListsSessionIDsForTask(t *testing.T) {
+func TestExecutionStore_ListsExecutionsForTask(t *testing.T) {
 	store := NewExecutionStore()
 	if err := store.Add(&AgentExecution{ID: "exec-1", SessionID: "session-1", TaskID: "task-a"}); err != nil {
 		t.Fatalf("Add exec-1: %v", err)
@@ -254,24 +254,24 @@ func TestExecutionStore_ListsSessionIDsForTask(t *testing.T) {
 		t.Fatalf("Add exec-3: %v", err)
 	}
 
-	got := store.ListSessionIDsForTask("task-a")
-	want := map[string]bool{"session-1": true, "session-2": true}
+	got := store.ListExecutionsForTask("task-a")
+	want := map[string]string{"session-1": "exec-1", "session-2": "exec-2"}
 	if len(got) != len(want) {
-		t.Fatalf("ListSessionIDsForTask(task-a) = %v, want %v", got, want)
+		t.Fatalf("ListExecutionsForTask(task-a) = %v, want %v", got, want)
 	}
-	for _, sessionID := range got {
-		if !want[sessionID] {
-			t.Fatalf("ListSessionIDsForTask(task-a) returned unexpected session %q", sessionID)
+	for _, reference := range got {
+		if executionID, ok := want[reference.SessionID]; !ok || executionID != reference.ExecutionID {
+			t.Fatalf("ListExecutionsForTask(task-a) returned unexpected reference %#v", reference)
 		}
 	}
 
-	if got := store.ListSessionIDsForTask("task-does-not-exist"); len(got) != 0 {
-		t.Fatalf("ListSessionIDsForTask(empty task) = %v, want none", got)
+	if got := store.ListExecutionsForTask("task-does-not-exist"); len(got) != 0 {
+		t.Fatalf("ListExecutionsForTask(empty task) = %v, want none", got)
 	}
 
 	store.Remove("exec-1")
-	got = store.ListSessionIDsForTask("task-a")
-	if len(got) != 1 || got[0] != "session-2" {
-		t.Fatalf("ListSessionIDsForTask(task-a) after Remove(exec-1) = %v, want [session-2]", got)
+	got = store.ListExecutionsForTask("task-a")
+	if len(got) != 1 || got[0] != (ExecutionReference{SessionID: "session-2", ExecutionID: "exec-2"}) {
+		t.Fatalf("ListExecutionsForTask(task-a) after Remove(exec-1) = %v, want [{session-2 exec-2}]", got)
 	}
 }

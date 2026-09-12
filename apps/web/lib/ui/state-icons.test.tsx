@@ -65,7 +65,9 @@ describe("getTaskStateIcon", () => {
       }
     }
   });
+});
 
+describe("getTaskStateIcon", () => {
   it("animates an HTML wrapper while keeping the status SVG static", () => {
     const { container } = render(
       <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,

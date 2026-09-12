@@ -478,11 +478,11 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 		// process. sshAgentctlLaunchEnv adds the bootstrap credentials
 		// required for the authenticated control handshake without
 		// forwarding profile secrets.
-		env := sshAgentctlLaunchEnv(
-			managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
-			nonce,
-			req.AgentctlStartupConfig,
-		)
+		brokerEnv := managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin))
+		if selectedCheckoutIsPullRequest(req.Metadata) {
+			brokerEnv = nil
+		}
+		env := sshAgentctlLaunchEnv(brokerEnv, nonce, req.AgentctlStartupConfig)
 		port, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 		if err != nil {
 			// Preserve port/pid so retryAgentctlHandshake's "if pid > 0"
@@ -554,6 +554,7 @@ func (r *SSHExecutor) buildInstance(
 		MetadataKeySSHRemoteSessionDir:   sessionDir,
 		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(pid),
+		MetadataKeySSHAgentctlInstanceID: req.InstanceID,
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
@@ -597,6 +598,7 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 		MetadataKeySSHRemoteSessionDir:   state.remoteDir,
 		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(state.pid),
+		MetadataKeySSHAgentctlInstanceID: resumedSSHAgentctlInstanceID(req),
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
@@ -928,6 +930,10 @@ func (r *SSHExecutor) newResumedAgentctlClient(
 }
 
 func resumedSSHAgentctlInstanceID(req *ExecutorCreateRequest) string {
+	// The remote controller keeps its launch identity across local execution replacements.
+	if instanceID := getMetadataString(req.Metadata, MetadataKeySSHAgentctlInstanceID); instanceID != "" {
+		return instanceID
+	}
 	if req.PreviousExecutionID != "" {
 		return req.PreviousExecutionID
 	}
@@ -1018,6 +1024,7 @@ func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
 		MetadataKeySSHRemoteSessionDir,
 		MetadataKeySSHRemoteAgentctlPort,
 		MetadataKeySSHRemoteAgentctlPID,
+		MetadataKeySSHAgentctlInstanceID,
 		MetadataKeySSHLocalForwardPort,
 		MetadataKeySSHRemoteAgentctlURL,
 		MetadataKeySSHRuntimeAPIRemotePort,

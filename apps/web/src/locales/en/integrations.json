@@ -193,5 +193,8 @@
   "cursorPaginationSummary_one": "Page {{page}} · {{count}} result",
   "cursorPaginationSummary_other": "Page {{page}} · {{count}} results",
   "allRepositories": "All repositories",
-  "changeRequestCreationFailed": "Change-request creation failed"
+  "changeRequestCreationFailed": "Change-request creation failed",
+  "resultCount_one": "Result <count>{{count}}</count>",
+  "resultCount_other": "Results <count>{{count}}</count>",
+  "loadingResults": "Loading results…"
 }

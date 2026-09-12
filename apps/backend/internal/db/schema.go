@@ -98,6 +98,26 @@ func ColumnExists(conn SchemaQuerier, table, column string) (bool, error) {
 	return columns[column], nil
 }
 
+// ColumnExistsContext is the cancellation-aware form of ColumnExists. It uses
+// a point-existence query instead of loading every column name, which keeps
+// startup schema probes bounded even on a wide catalog.
+func ColumnExistsContext(ctx context.Context, conn ContextSchemaQuerier, table, column string) (bool, error) {
+	query := `SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?
+	)`
+	if !isPostgresSchema(conn) {
+		query = `SELECT EXISTS (
+			SELECT 1 FROM pragma_table_info(?) WHERE name = ?
+		)`
+	}
+	var exists bool
+	if err := conn.QueryRowContext(ctx, conn.Rebind(query), table, column).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 func isPostgresSchema(conn SchemaQuerier) bool {
 	return conn.DriverName() == "pgx"
 }

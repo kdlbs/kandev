@@ -118,7 +118,7 @@ Routine fields:
 - `variables`: declared template variables (type, default, required).
 
 Triggers:
-- **Schedule (cron)**: `cron_expression`, `timezone`, computed `next_run_at`, `last_fired_at`.
+- **Schedule (cron)**: `cron_expression`, `timezone`, computed `next_run_at`, `last_fired_at`. `cron_expression` is the standard 5-field syntax (minute hour day-of-month month day-of-week), computed via `robfig/cron/v3`. Day-of-month and day-of-week are ORed when both are restricted, matching `crontab(5)` (`0 0 13 * 5` fires on the 13th of the month OR any Friday). A wall-clock slot fires at most once across a DST transition: a spring-forward slot that does not exist is skipped, and a fall-back slot that occurs twice fires only on its first occurrence. Every returned fire is validated against the expression's own wall-clock fields (minute/hour/month/day-of-month-or-day-of-week), guarding against the underlying library returning a fire under the wrong hour when a DST shift crosses a match boundary. In `Australia/Lord_Howe` (the only IANA zone with a 30-minute DST shift, +10:30 <-> +11:00), `robfig/cron/v3`'s day-loop DST correction — which nudges by whole hours — can skip a candidate that genuinely exists; a minute-granularity rescan of the gap, gated on the interval containing a non-whole-hour offset transition, recovers it, so no zone loses an existing slot. `timezone` defaults to UTC when empty. An expression that can never fire (an impossible date, or empty) is rejected at trigger-create time.
 - **Webhook**: `public_id` (URL path component), `signing_mode` (`none` | `bearer` | `hmac_sha256`), `secret`. URL: `POST /api/routine-triggers/<public_id>/fire`. Webhook payload is available as variables.
 - **Manual**: fired only via UI or API.
 
@@ -165,7 +165,8 @@ variables:           []
 trigger:
   kind:              schedule
   cron_expression:   "*/5 * * * *"
-  timezone:          (workspace TZ, fall back to UTC)
+  timezone:          UTC (no workspace-level timezone exists; a trigger's timezone
+                     defaults to UTC unless the user sets one explicitly)
   enabled:           true
 ```
 

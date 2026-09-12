@@ -140,6 +140,7 @@ type WorkflowItemProps = {
   isMultiSelectMode?: boolean;
   onToggleMultiSelect?: () => void;
   fillHeight?: boolean;
+  compactHeight?: boolean;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
   onToggleAutoHideEmpty: (workflowId: string) => void;
@@ -359,6 +360,7 @@ type WorkflowItemsProps = {
   ViewComponent: ComponentType<ViewContentProps>;
   hideHeaders: boolean;
   fillHeight: boolean;
+  compactHeight: boolean;
   isMobileKanban: boolean;
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
   onToggleAutoHideEmpty: (workflowId: string) => void;
@@ -378,6 +380,7 @@ function WorkflowItems({
   ViewComponent,
   hideHeaders,
   fillHeight,
+  compactHeight,
   isMobileKanban,
   onToggleStepVisibility,
   onToggleAutoHideEmpty,
@@ -400,6 +403,7 @@ function WorkflowItems({
         ViewComponent={ViewComponent}
         hideHeader={hideHeaders}
         fillHeight={fillHeight && !collapsed}
+        compactHeight={compactHeight}
         isSortable={canSortWorkflows && !isMobileKanban}
         isCollapsed={collapsed}
         toggleCollapse={toggleCollapse}
@@ -580,7 +584,8 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
             hideHeaders={hideHeaders}
             onToggleStepVisibility={onToggleStepVisibility}
             onToggleAutoHideEmpty={onToggleAutoHideEmpty}
-            fillHeight={view.id === "kanban"}
+            fillHeight={view.id === "kanban" && renderedWorkflows.length === 1}
+            compactHeight={view.id === "kanban" && !isMobile && renderedWorkflows.length > 1}
             isMobileKanban={isMobileKanban}
             canSortWorkflows={canSortWorkflows}
             isCollapsed={isCollapsed}

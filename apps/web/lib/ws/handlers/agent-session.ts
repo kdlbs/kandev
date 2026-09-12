@@ -15,6 +15,7 @@ import {
 import type {
   QueueStatusChangedPayload,
   TaskSessionActivityChangedPayload,
+  TaskSessionAgentctlPayload,
 } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
@@ -22,6 +23,10 @@ import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fiel
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+import {
+  sanitizeWorkspaceRestorationDetails,
+  type WorkspaceRestorationAttempt,
+} from "@/lib/state/slices/session-runtime/workspace-restoration";
 import { applyForegroundActivity, applyCancellationPending } from "./session-activity";
 
 const debug = createDebugLogger("session:state");
@@ -541,6 +546,59 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   }
 }
 
+function resolveWorkspaceEventEnvironmentId(
+  state: AppState,
+  sessionId: string,
+  payloadEnvironmentId: string,
+): string | null {
+  const mappedEnvironmentId = state.environmentIdBySessionId?.[sessionId];
+  if (mappedEnvironmentId && payloadEnvironmentId && mappedEnvironmentId !== payloadEnvironmentId) {
+    return null;
+  }
+  return payloadEnvironmentId || mappedEnvironmentId || null;
+}
+
+function workspaceRestorationTarget(
+  store: StoreApi<AppState>,
+  payload: TaskSessionAgentctlPayload,
+): { sessionId: string; attempt: WorkspaceRestorationAttempt } | null {
+  const sessionId = payload.session_id?.trim() ?? "";
+  if (!sessionId) return null;
+  const state = store.getState();
+  const environmentId = resolveWorkspaceEventEnvironmentId(
+    state,
+    sessionId,
+    payload.task_environment_id?.trim() ?? "",
+  );
+  if (!environmentId) return null;
+  const attempt = state.workspaceRestoration?.byEnvironmentId?.[environmentId];
+  if (!attempt || attempt.status !== "pending" || attempt.sessionId !== sessionId) return null;
+  return { sessionId, attempt };
+}
+
+/** Settle a workspace-only restore after the backend proves agentctl health. */
+function settleWorkspaceRestorationFromAgentctl(
+  store: StoreApi<AppState>,
+  payload: TaskSessionAgentctlPayload,
+  status: "ready" | "error",
+): void {
+  const target = workspaceRestorationTarget(store, payload);
+  if (!target) return;
+  const state = store.getState();
+
+  if (status === "ready") {
+    if (state.completeWorkspaceRestoration?.(target.attempt)) {
+      state.bumpWorkspaceFilesRefresh?.(target.sessionId);
+    }
+    return;
+  }
+
+  const detail = sanitizeWorkspaceRestorationDetails(
+    payload.error_message || t("task:failedToRestoreWorkspace"),
+  );
+  state.failWorkspaceRestoration?.(target.attempt, detail);
+}
+
 interface SessionFailureContext {
   taskId: TaskId;
   sessionId: SessionId;
@@ -795,6 +853,7 @@ function handleQueueStatusChangedMessage(
 }
 
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
+// eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) =>
@@ -895,6 +954,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         updatedAt: message.timestamp,
       });
       syncEnvFromAgentctlPayload(store, payload);
+      settleWorkspaceRestorationFromAgentctl(store, payload, "ready");
       handleAgentctlReady(store, payload);
     },
     "session.agentctl_error": (message) => {
@@ -906,6 +966,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         errorMessage: payload.error_message,
         updatedAt: message.timestamp,
       });
+      settleWorkspaceRestorationFromAgentctl(store, payload, "error");
     },
     "session.workspace_sources.updated": (message) =>
       handleWorkspaceSourcesUpdated(store, message.payload, message.timestamp),

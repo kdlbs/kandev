@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -104,6 +105,7 @@ type RepositorySetDTO struct {
 type RepositorySetItemDTO struct {
 	RepositoryID string `json:"repository_id"`
 	Position     int    `json:"position"`
+	BaseBranch   string `json:"base_branch"`
 }
 
 type RepositoryBranchPolicyDTO struct {
@@ -778,6 +780,7 @@ func FromRepositorySet(set *models.RepositorySet) RepositorySetDTO {
 		items = append(items, RepositorySetItemDTO{
 			RepositoryID: item.RepositoryID,
 			Position:     item.Position,
+			BaseBranch:   item.BaseBranch,
 		})
 	}
 	return RepositorySetDTO{
@@ -1216,8 +1219,17 @@ type StepActionDTO struct {
 
 // MoveTaskResponse includes the task and the target workflow step info
 type MoveTaskResponse struct {
-	Task         TaskDTO         `json:"task"`
-	WorkflowStep WorkflowStepDTO `json:"workflow_step"`
+	Task         TaskDTO                    `json:"task"`
+	WorkflowStep WorkflowStepDTO            `json:"workflow_step"`
+	MoveID       string                     `json:"move_id,omitempty"`
+	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	// Disposition reports how an MCP move_task call was resolved: "applied" when
+	// the move committed immediately, or "deferred" when it was recorded to run
+	// at the source session's turn-end. It lets an agent distinguish deferred
+	// acceptance from an immediate move and correlate the retained one-shot
+	// EntryOptions (via MoveID) with the eventual step entry. The HTTP move path
+	// always applies immediately and leaves this empty.
+	Disposition string `json:"disposition,omitempty"`
 }
 
 // Session Workflow Review DTOs

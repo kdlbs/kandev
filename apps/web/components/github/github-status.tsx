@@ -36,6 +36,7 @@ import { GitHubConnectionDialog } from "./github-connection-dialog";
 import { GitHubAccessHelp } from "./github-access-help";
 import { GitHubPermissionsDialog } from "./github-permissions-dialog";
 import { GitHubRateLimitDisplay } from "./github-rate-limit";
+import { GitHubPRDiscoveryHealthWarning } from "./github-pr-discovery-health";
 import { GitHubTaskAccessSummary } from "./github-task-credentials-section";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -106,7 +107,11 @@ function StatusLine({
         {t(sourceLabelKeys[connection.source])}
       </Badge>
       {connection.status !== "active" && <Badge variant="outline">{connection.status}</Badge>}
-      <GitHubRateLimitDisplay info={status.rate_limit} onOpen={onRateLimitOpen} />
+      <GitHubRateLimitDisplay
+        info={status.rate_limit}
+        discoveryHealth={status.pr_discovery_health}
+        onOpen={onRateLimitOpen}
+      />
     </div>
   );
 }
@@ -138,6 +143,7 @@ function AutomationStatusSummary({
   return (
     <div className="min-w-0 space-y-1">
       <StatusLine status={status} onRateLimitOpen={onRateLimitOpen} />
+      <GitHubPRDiscoveryHealthWarning health={status.pr_discovery_health} />
       <AutomationActorExplanation status={status} appAutomation={appAutomation} />
       {appAutomation && <AppRegistrationDetails app={app} />}
       <AutomationError status={status} />

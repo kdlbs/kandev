@@ -23,6 +23,7 @@ deployment, and pull request walkthrough generation.
 - Permissions and credential boundaries for review, preview, walkthrough, and
   publication jobs.
 - Workflow contract tests for these boundaries.
+- Pull request documentation coverage and explicit exceptions.
 
 ## Exclusions
 
@@ -30,20 +31,6 @@ deployment, and pull request walkthrough generation.
 - The preview deployment command and its infrastructure.
 - The walkthrough skill, renderer, and artifact format.
 - Kandev application state or user-interface behavior.
-
-## Specification map
-
-### Requirements
-
-- [Unified contributor PR automation](requirements/unified-contributor-pr-automation.md)
-- [Contributor merge approval revocation](requirements/contributor-merge-approval-revocation.md)
-- [Pull request size labels](requirements/pull-request-size-labels.md)
-
-### System design
-
-- [Unified contributor PR automation](system-design/unified-contributor-pr-automation.md)
-- [Contributor merge approval revocation](system-design/contributor-merge-approval-revocation.md)
-- [Pull request size labels](system-design/pull-request-size-labels.md)
 
 ## Migration
 

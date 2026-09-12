@@ -77,6 +77,49 @@ export function scopeSnapshotsToWorkspace(
   );
 }
 
+function useThreadDeck(
+  snapshots: Record<string, WorkflowSnapshotData>,
+  workspaceId: string | null | undefined,
+  requestedTaskId: string | null,
+) {
+  const removals = useAppStore((state) => state.taskRemoval.operationsByToken);
+  const storedThreadViews = useAppStore((state) => state.threadViews);
+  const threadViews = storedThreadViews ?? {
+    views: [DEFAULT_THREAD_VIEW],
+    activeViewId: DEFAULT_THREAD_VIEW.id,
+    draft: null,
+    syncError: null,
+    orderResetGeneration: 0,
+  };
+  const activeThreadView =
+    threadViews.views.find((view) => view.id === threadViews.activeViewId) ?? DEFAULT_THREAD_VIEW;
+  const query = useMemo(
+    () =>
+      queryThreadView(snapshots, activeThreadView, {
+        workspaceId,
+        requestedTaskId,
+        draft: threadViews.draft,
+        excludedTaskIds: new Set(
+          Object.values(removals)
+            .filter((operation) => operation.action === "archive")
+            .flatMap((operation) => operation.taskIds),
+        ),
+      }),
+    [snapshots, workspaceId, activeThreadView, requestedTaskId, threadViews.draft, removals],
+  );
+  // Ranking decides where a column first appears; after that the slot is the
+  // reader's, so replying to a thread cannot slide it across the deck.
+  const threads = useStableThreadOrder(
+    query.stableCandidates,
+    `${query.fingerprint}:${requestedTaskId ?? ""}:${threadViews.orderResetGeneration}`,
+    {
+      resetThreads: query.admittedCandidates,
+      maxItems: query.effectiveView.maxColumns,
+    },
+  );
+  return { query, threads };
+}
+
 /**
  * The Threads page: every live agent conversation in the workspace, side by
  * side. It reads the workflow snapshots the board already keeps in the store,
@@ -101,14 +144,6 @@ export function ThreadsPageClient() {
   const { setView } = useTaskListingView();
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
-  const storedThreadViews = useAppStore((state) => state.threadViews);
-  const threadViews = storedThreadViews ?? {
-    views: [DEFAULT_THREAD_VIEW],
-    activeViewId: DEFAULT_THREAD_VIEW.id,
-    draft: null,
-    syncError: null,
-    orderResetGeneration: 0,
-  };
 
   // Keep a valid deep-link workspace during the bootstrap transition, but use
   // the resolved active workspace when a stale or invalid link is supplied.
@@ -130,28 +165,9 @@ export function ThreadsPageClient() {
     setView("threads");
   }, [setView]);
 
-  const activeThreadView =
-    threadViews.views.find((view) => view.id === threadViews.activeViewId) ?? DEFAULT_THREAD_VIEW;
   const requestedTaskId = searchParams.get("taskId");
-  const query = useMemo(
-    () =>
-      queryThreadView(scopedSnapshots, activeThreadView, {
-        workspaceId: scopedWorkspaceId,
-        requestedTaskId,
-        draft: threadViews.draft,
-      }),
-    [scopedSnapshots, scopedWorkspaceId, activeThreadView, requestedTaskId, threadViews.draft],
-  );
-  // Ranking decides where a column first appears; after that the slot is the
-  // reader's, so replying to a thread cannot slide it across the deck.
-  const threads = useStableThreadOrder(
-    query.stableCandidates,
-    `${query.fingerprint}:${requestedTaskId ?? ""}:${threadViews.orderResetGeneration}`,
-    {
-      resetThreads: query.admittedCandidates,
-      maxItems: query.effectiveView.maxColumns,
-    },
-  );
+  const requestedSessionId = searchParams.get("sessionId");
+  const { query, threads } = useThreadDeck(scopedSnapshots, scopedWorkspaceId, requestedTaskId);
 
   const handleOpenTask = useCallback((taskId: string) => router.push(linkToTask(taskId)), [router]);
   const handleInvalidRequestedSession = useCallback(
@@ -171,7 +187,7 @@ export function ThreadsPageClient() {
   // requested thread may have settled between the link being offered and
   // followed, and a focus id no column matches would ring nothing.
   const focusedTaskId = resolveFocusedThreadId(threads, searchParams.get("taskId"));
-  const focusedSessionId = focusedTaskId ? searchParams.get("sessionId") : null;
+  const focusedSessionId = focusedTaskId ? requestedSessionId : null;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 w-full flex-col bg-background">
@@ -180,6 +196,7 @@ export function ThreadsPageClient() {
         isLoading={isLoading}
         focusedTaskId={focusedTaskId}
         focusedSessionId={focusedSessionId}
+        focusRequestKey={JSON.stringify([scopedWorkspaceId, requestedTaskId, requestedSessionId])}
         onInvalidRequestedSession={handleInvalidRequestedSession}
         onOpenTask={handleOpenTask}
         renderHeader={(activeMobileTaskId) => (

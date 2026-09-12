@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,10 +33,50 @@ type GitHubAPIError struct {
 	StatusCode int
 	Endpoint   string
 	Body       string
+	RetryAt    *time.Time
 }
 
 func (e *GitHubAPIError) Error() string {
 	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
+}
+
+func (e *GitHubAPIError) ProviderRetryAt() *time.Time {
+	if e == nil || e.RetryAt == nil {
+		return nil
+	}
+	value := *e.RetryAt
+	return &value
+}
+
+// retryAtFromHTTPResponse preserves provider-supplied retry evidence. The
+// later of Retry-After and X-RateLimit-Reset is used so a secondary-limit hint
+// cannot cause discovery to resume before the primary reset.
+func retryAtFromHTTPResponse(resp *http.Response, defaultResource Resource, now time.Time) *time.Time {
+	if resp == nil {
+		return nil
+	}
+	var latest *time.Time
+	if value := strings.TrimSpace(resp.Header.Get("Retry-After")); value != "" {
+		var retryAt time.Time
+		if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+			retryAt = now.Add(time.Duration(seconds) * time.Second)
+		} else if parsed, parseErr := http.ParseTime(value); parseErr == nil {
+			retryAt = parsed.UTC()
+		}
+		if retryAt.After(now) {
+			latest = &retryAt
+		}
+	}
+	if snapshot, ok := parseRateHeaders(resp, defaultResource); ok && snapshot.ResetAt.After(now) &&
+		(latest == nil || snapshot.ResetAt.After(*latest)) {
+		resetAt := snapshot.ResetAt
+		latest = &resetAt
+	}
+	if latest == nil {
+		return nil
+	}
+	copy := *latest
+	return &copy
 }
 
 // WithRateTracker attaches a rate tracker so response headers are recorded.

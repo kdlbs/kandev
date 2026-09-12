@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/office-fixture";
+import { test, expect, moveTaskToTerminalStep } from "../../fixtures/office-fixture";
 
 /**
  * E2E coverage for the office task approval gate (in_review → done is
@@ -92,6 +92,12 @@ test.describe("Office task approval flow", () => {
     const task = await apiClient.createTask(officeSeed.workspaceId, "Approval Clearing Task", {
       workflow_id: officeSeed.workflowId,
     });
+    // The office approval gate first checks workflow-step position: a "done"
+    // write is redirected to in_review unless the task is already on its
+    // workflow's terminal step, regardless of approver state. Park it there
+    // so the gate below actually exercises the approver-decision check this
+    // test is about.
+    await moveTaskToTerminalStep(apiClient, officeSeed.workflowId, task.id);
     const attach = await apiClient.rawRequest("POST", `/api/v1/office/tasks/${task.id}/approvers`, {
       agent_profile_id: approverId,
     });

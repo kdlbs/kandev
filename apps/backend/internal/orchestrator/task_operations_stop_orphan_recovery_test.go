@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	orchestratorexec "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -35,8 +36,8 @@ func drainStopCalls(t *testing.T, ch <-chan string, n int) {
 // caller, while the load failure stays observable (StopByTaskID's wrapped
 // error is still returned to whoever asks for it directly, even though
 // StopTask itself does not propagate it as a hard failure). It also covers
-// the follow-up fix that the orphan's execution is itself targeted for stop
-// by session ID alone, not just skipped because its row could not load.
+// the follow-up fix that the orphan's captured execution is itself targeted
+// for stop, not just skipped because its row could not load.
 func TestStopTask_OrphanRecoveryLoadFailureStillReachesReview(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)
@@ -55,11 +56,14 @@ func TestStopTask_OrphanRecoveryLoadFailureStillReachesReview(t *testing.T) {
 
 	stopCalls := make(chan string, 8)
 	agentManager := &mockAgentManager{
-		listSessionIDsForTaskFunc: func(taskID string) []string {
+		listExecutionsForTaskFunc: func(taskID string) []lifecycle.ExecutionReference {
 			if taskID != "task-1" {
 				return nil
 			}
-			return []string{"session-active", "session-orphan"}
+			return []lifecycle.ExecutionReference{
+				{SessionID: "session-active", ExecutionID: "execution-active"},
+				{SessionID: "session-orphan", ExecutionID: "execution-orphan"},
+			}
 		},
 		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
 			return "execution-active", nil
@@ -78,7 +82,7 @@ func TestStopTask_OrphanRecoveryLoadFailureStillReachesReview(t *testing.T) {
 	}
 
 	// The active session stops normally, and the registry-only orphan is now
-	// also targeted for stop by session ID alone despite its row failing to
+	// also targeted by its captured execution ID despite its row failing to
 	// load.
 	drainStopCalls(t, stopCalls, 2)
 
@@ -105,12 +109,11 @@ func TestStopTask_OrphanRecoveryLoadFailureStillReachesReview(t *testing.T) {
 	drainStopCalls(t, stopCalls, 2)
 }
 
-// TestStopTask_NothingStoppedOrphanLoadFailureStillFails covers the other
-// half of Finding 1's synthesis: when nothing at all stopped (no active
-// session, only an unloadable orphan), StopTask must still return a hard
-// error so a caller with nothing to show for the attempt does not silently
-// reach REVIEW.
-func TestStopTask_NothingStoppedOrphanLoadFailureStillFails(t *testing.T) {
+// TestStopTask_UnloadableOrphanReachesReviewAfterScheduling covers a task
+// with no active rows and one unloadable registry orphan. The exact registry
+// reference is enough to schedule teardown, so StopTask reaches REVIEW while
+// still retaining the load failure for a direct StopByTaskID caller.
+func TestStopTask_UnloadableOrphanReachesReviewAfterScheduling(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)
 
@@ -121,41 +124,49 @@ func TestStopTask_NothingStoppedOrphanLoadFailureStillFails(t *testing.T) {
 			return nil, loadFailure
 		},
 	}
+	stopCalls := make(chan string, 1)
 	agentManager := &mockAgentManager{
-		listSessionIDsForTaskFunc: func(taskID string) []string {
+		listExecutionsForTaskFunc: func(taskID string) []lifecycle.ExecutionReference {
 			if taskID != "task-1" {
 				return nil
 			}
-			return []string{"session-orphan"}
+			return []lifecycle.ExecutionReference{{SessionID: "session-orphan", ExecutionID: "execution-orphan"}}
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stopCalls <- executionID
+			return nil
 		},
 	}
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
 	svc := newCoordinatorStopTestService(hookedRepo, taskRepo, agentManager)
 
-	err := svc.StopTask(ctx, "task-1", "cleanup", true)
-	if err == nil {
-		t.Fatal("StopTask: want an error when nothing could be stopped, got nil")
+	if err := svc.StopTask(ctx, "task-1", "cleanup", true); err != nil {
+		t.Fatalf("StopTask: %v", err)
 	}
-	if !errors.Is(err, loadFailure) {
-		t.Fatalf("StopTask error = %v, want it to wrap the load failure", err)
+	select {
+	case executionID := <-stopCalls:
+		if executionID != "execution-orphan" {
+			t.Fatalf("stopped execution = %q, want execution-orphan", executionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("unloadable orphan execution was not scheduled for stop")
 	}
 
 	taskRepo.mu.Lock()
-	_, wasWritten := taskRepo.updatedStates["task-1"]
+	state := taskRepo.updatedStates["task-1"]
 	taskRepo.mu.Unlock()
-	if wasWritten {
-		t.Fatal("task state was updated to REVIEW despite nothing being stopped")
+	if state != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want REVIEW", state)
 	}
 }
 
 // TestStopByTaskID_StopsOrphanExecutionWhenSessionRowFailsToLoad covers the
 // review finding that a registry-only orphan whose session row cannot be
-// loaded must still have its execution targeted for stop: the executor only
-// ever needs the session ID to resolve and stop the execution, so a load
-// failure on the row must not make the process itself unreachable. Before
-// this fix, StopByTaskID skipped the orphan entirely on a load failure and
-// never called StopAgentWithReason for it.
+// loaded must still have its captured execution targeted for stop. A load
+// failure on the row must not make the process itself unreachable. Before this
+// fix, StopByTaskID skipped the orphan entirely on a load failure and never
+// called StopAgentWithReason for it.
 func TestStopByTaskID_StopsOrphanExecutionWhenSessionRowFailsToLoad(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)
@@ -170,11 +181,11 @@ func TestStopByTaskID_StopsOrphanExecutionWhenSessionRowFailsToLoad(t *testing.T
 
 	stopCalls := make(chan string, 1)
 	agentManager := &mockAgentManager{
-		listSessionIDsForTaskFunc: func(taskID string) []string {
+		listExecutionsForTaskFunc: func(taskID string) []lifecycle.ExecutionReference {
 			if taskID != "task-1" {
 				return nil
 			}
-			return []string{"session-orphan"}
+			return []lifecycle.ExecutionReference{{SessionID: "session-orphan", ExecutionID: "execution-orphan"}}
 		},
 		getExecutionIDForSessionFunc: func(_ context.Context, sessionID string) (string, error) {
 			if sessionID != "session-orphan" {
@@ -205,6 +216,6 @@ func TestStopByTaskID_StopsOrphanExecutionWhenSessionRowFailsToLoad(t *testing.T
 			t.Fatalf("stopped execution = %q, want execution-orphan", executionID)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("the registry-only orphan's execution was never stopped despite its execution ID being resolvable by session ID alone")
+		t.Fatal("the registry-only orphan's captured execution was never stopped")
 	}
 }

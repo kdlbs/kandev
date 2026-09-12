@@ -126,6 +126,14 @@ worker per shard, run desktop/mobile separately, and do not increase timeouts.
 
 ## Work orders
 
+The completed delivery below covers explicit conversation Resume. The later
+[workspace restoration package](../completed-workspace-restoration/plan.md)
+adds `REQ-TASKS-COMPLETION-003` and passive workspace access. References here to
+passive opening not launching an execution mean an **agent** execution; they
+do not prohibit workspace-only infrastructure. Existing completion status and
+recorded test counts remain historical evidence for PR #3564, not verification
+of the later workspace fix.
+
 - [x] [Task 01: Persist completion settings](task-01-persistence.md) (done)
 - [x] [Task 02: Carry portable completion settings](task-02-portable-contracts.md) (done)
 - [x] [Task 03: Apply configured task completion](task-03-runtime-completion.md) (done)

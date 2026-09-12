@@ -45,6 +45,10 @@ docs/plans/<initiative>/task-<NN>-<short-slug>.md
 
 ### 1. Map the change
 
+Run the `/interview-me` assumption check, reusing settled specification choices.
+Resolve material blockers before decomposing the affected work. For large
+uncertain initiatives, use that skill's decision-mapping reference first.
+
 Identify:
 
 - The required outcomes and acceptance criteria.
@@ -53,8 +57,9 @@ Identify:
 - Existing tests and end-to-end patterns.
 - The dependency order for implementation.
 
-Check `docs/decisions/INDEX.md` for relevant decisions. Stop when the
-requirements, system design, ADRs, and code disagree on a material boundary.
+Use `python3 scripts/list-docs.py decisions --text <capability-term> --format paths`
+to locate relevant decisions. Stop when the requirements, system design, ADRs,
+and code disagree on a material boundary.
 
 ### 2. Write `plan.md`
 
@@ -204,8 +209,16 @@ Name prior work orders or write `None`.
 Pending.
 ````
 
-Each work order must fit one focused implementation pass. Split work that has
-unrelated outcomes, independent verification, or a title that contains “and.”
+Each work order must deliver one independently verifiable outcome in one focused
+implementation pass. Prefer a narrow end-to-end slice. Split by layer only for
+a real dependency or verification boundary, not because files occupy different
+directories. Title wording does not determine task boundaries.
+
+For broad migrations that cannot proceed in vertical slices, sequence compatible
+expansion, bounded caller migrations, and final removal of the old contract.
+If a batch cannot pass independently, keep it with its required integration in
+one work order. Add only dependencies that actually block the outcome. Preserve
+the exact acceptance IDs, likely files, and verification commands in each work order.
 
 Use `parallel-safe` only when files are disjoint and the tasks share no schema,
 migration, generated contract, lockfile, or package configuration. A wave does

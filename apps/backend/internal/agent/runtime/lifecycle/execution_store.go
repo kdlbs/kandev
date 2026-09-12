@@ -221,26 +221,37 @@ func (s *ExecutionStore) ActivePromptGeneration(executionID string) uint64 {
 	return gen
 }
 
-// ListSessionIDsForTask returns the session IDs of executions registered
-// in-memory under taskID. Read-only snapshot of the execution registry,
-// independent of any session's persisted database state — it is how a
-// task-scoped stop recovers a session whose row is already terminal (e.g.
-// FAILED) but whose execution is still registered because a prior teardown
-// attempt failed.
-func (s *ExecutionStore) ListSessionIDsForTask(taskID string) []string {
+// ExecutionReference identifies one registered execution without requiring a
+// later lookup through the session index. Both IDs are captured from the same
+// execution-store snapshot so a caller can keep targeting the original
+// execution if a session later acquires a replacement.
+type ExecutionReference struct {
+	SessionID   string
+	ExecutionID string
+}
+
+// ListExecutionsForTask returns the session and execution IDs of executions
+// registered in-memory under taskID. It is a read-only snapshot, independent
+// of any session's persisted database state. Task-scoped stop uses it to
+// recover an execution whose session row is already terminal (for example,
+// FAILED) but whose prior teardown attempt failed.
+func (s *ExecutionStore) ListExecutionsForTask(taskID string) []ExecutionReference {
 	if taskID == "" {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var sessionIDs []string
+	var references []ExecutionReference
 	for _, execution := range s.executions {
-		if execution.TaskID == taskID && execution.SessionID != "" {
-			sessionIDs = append(sessionIDs, execution.SessionID)
+		if execution.TaskID == taskID && execution.SessionID != "" && execution.ID != "" {
+			references = append(references, ExecutionReference{
+				SessionID:   execution.SessionID,
+				ExecutionID: execution.ID,
+			})
 		}
 	}
-	return sessionIDs
+	return references
 }
 
 // GetByTaskEnvironmentID returns any execution associated with a task environment ID.

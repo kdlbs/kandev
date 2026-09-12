@@ -222,6 +222,39 @@ in the table above. It does not require per-shard names.
 Do not require `lint` from `pr-title.yml`, `Validate public docs`, review checks,
 or deployment checks. These checks do not run in every merge group.
 
+### PR documentation coverage rollout
+
+`pr-docs.yml` also listens for `merge_group: checks_requested` and publishes the
+`PR documentation coverage` status on the synthetic merge-group head. It maps
+the queue entry boundaries back to the event base and evaluates every included
+pull request with its own changed files, work-order references, and labels. A
+member's `no-docs-allow` label cannot exempt another member.
+
+All PR and merge-group events use the target branch as one non-cancelling
+concurrency key with `queue: max`. GitHub retains up to 100 pending runs in
+that key, so ordinary event bursts do not replace the one pending run; events
+that arrive after the bound is full can still be canceled. This keeps a queued
+label reevaluation from racing with a merge-group status write while the
+published coverage status remains attached to the evaluated PR or synthetic
+group revision. A label removal reevaluates every active queue-group prefix
+that contains the PR, not only the longest group.
+
+The status is not in the active required-check list above until live merge-group
+evidence is collected. Roll out the requirement in two stages:
+
+1. Observe ordinary, draft, fork, label-add, label-remove, manual-retry, and
+   merge-group runs. Confirm that covered, missing, override, and incomplete
+   responses are attached to the evaluated revision and that all affected queue
+   group prefixes reevaluate after label removal.
+2. Add `PR documentation coverage` as a separate required status through an
+   administrator ruleset change. Preserve the existing six checks and bypass
+   rules, then verify a covered PR, an uncovered PR, an override, and a mixed
+   merge group.
+
+Until stage two is complete, a failing result is visible but does not itself
+block merging. The workflow does not add or remove labels, dequeue PRs, or
+change rulesets.
+
 ### Stable release exception
 
 The Stable release workflow creates a mechanical release PR with `GITHUB_TOKEN`.

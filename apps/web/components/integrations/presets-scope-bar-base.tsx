@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject, type ReactNode } from "react";
 import { IconBookmark, IconChevronDown, IconDeviceFloppy, IconX } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import {
@@ -18,7 +18,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
 import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
 import {
-  useSavedTaskViewDeleteConfirmation,
+  useSavedTaskViewDeleteMenu,
   type SavedTaskViewDeleteTarget,
 } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
@@ -124,15 +124,18 @@ function SavedMenuTrigger({
   testId,
   active,
   label,
+  triggerRef,
 }: {
   testId: string;
   active: boolean;
   label: string | null;
+  triggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const { t } = useTranslation();
   return (
     <DropdownMenuTrigger asChild>
       <button
+        ref={triggerRef}
         type="button"
         data-testid={testId}
         className={cn(PILL_BASE, active ? PILL_ACTIVE : PILL_IDLE)}
@@ -145,6 +148,32 @@ function SavedMenuTrigger({
   );
 }
 
+function useSavedMenuSave(onSaveCurrent: () => void) {
+  const pending = useRef(false);
+  const frame = useRef(0);
+  useEffect(
+    () => () => {
+      pending.current = false;
+      cancelAnimationFrame(frame.current);
+    },
+    [],
+  );
+  return {
+    request: () => {
+      pending.current = true;
+    },
+    onCloseAutoFocus: () => {
+      if (!pending.current) return;
+      pending.current = false;
+      frame.current = requestAnimationFrame(onSaveCurrent);
+    },
+  };
+}
+
+function preserveConfirmationInteraction(event: Event) {
+  if (isActionConfirmationTarget(event.target)) event.preventDefault();
+}
+
 function SavedMenu<K extends string>({
   testId,
   selected,
@@ -155,6 +184,7 @@ function SavedMenu<K extends string>({
   onSaveCurrent,
   onToggleSavedDefault,
   defaultMutationPendingId,
+  savedStatus,
 }: {
   testId: string;
   selected: ScopeSelection<K>;
@@ -165,70 +195,72 @@ function SavedMenu<K extends string>({
   onSaveCurrent: () => void;
   onToggleSavedDefault?: (id: string) => void;
   defaultMutationPendingId: string | null;
+  savedStatus?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const deletion = useSavedTaskViewDeleteConfirmation(saved);
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const deletion = useSavedTaskViewDeleteMenu(saved, isMobile);
+  const save = useSavedMenuSave(onSaveCurrent);
   const menuContentRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const defaultMutationPending = defaultMutationPendingId !== null;
   const activeSaved = selected.source === "saved";
   const activeLabel = activeSaved ? (saved.find((s) => s.id === selected.id)?.label ?? null) : null;
   return (
-    <DropdownMenu
-      open={menuOpen}
-      onOpenChange={(open) => {
-        setMenuOpen(open);
-        if (!open) deletion.close();
-      }}
-    >
-      <SavedMenuTrigger testId={testId} active={activeSaved} label={activeLabel} />
+    <DropdownMenu open={deletion.open} onOpenChange={deletion.onOpenChange}>
+      <SavedMenuTrigger
+        testId={testId}
+        active={activeSaved}
+        label={activeLabel}
+        triggerRef={triggerRef}
+      />
       <DropdownMenuContent
         ref={menuContentRef}
         align="end"
         className="w-56"
-        onFocusOutside={(event) => {
-          if (isActionConfirmationTarget(event.target)) event.preventDefault();
+        onCloseAutoFocus={(event) => {
+          deletion.onCloseAutoFocus(event);
+          save.onCloseAutoFocus();
         }}
-        onInteractOutside={(event) => {
-          if (isActionConfirmationTarget(event.target)) event.preventDefault();
-        }}
+        onFocusOutside={preserveConfirmationInteraction}
+        onInteractOutside={preserveConfirmationInteraction}
       >
-        {saved.length === 0 ? (
-          <DropdownMenuItem disabled>{t("integrations:noSavedQueriesYet")}</DropdownMenuItem>
-        ) : (
-          saved.map((preset) => (
-            <SavedMenuEntry
-              key={preset.id}
-              preset={preset}
-              isFinePointer={isFinePointer}
-              deletion={deletion}
-              defaultMutationPending={defaultMutationPending}
-              defaultMutationPendingForPreset={defaultMutationPendingId === preset.id}
-              onSelect={() => onSelect({ kind: preset.kind, source: "saved", id: preset.id })}
-              onToggleDefault={
-                onToggleSavedDefault ? () => onToggleSavedDefault(preset.id) : undefined
-              }
-              onDeleteSaved={onDeleteSaved}
-            />
-          ))
-        )}
+        {savedStatus}
+        {saved.length === 0
+          ? !savedStatus && (
+              <DropdownMenuItem disabled>{t("integrations:noSavedQueriesYet")}</DropdownMenuItem>
+            )
+          : saved.map((preset) => (
+              <SavedMenuEntry
+                key={preset.id}
+                preset={preset}
+                isFinePointer={!isMobile && isFinePointer}
+                deletion={deletion}
+                defaultMutationPending={defaultMutationPending}
+                defaultMutationPendingForPreset={defaultMutationPendingId === preset.id}
+                onSelect={() => onSelect({ kind: preset.kind, source: "saved", id: preset.id })}
+                onToggleDefault={
+                  onToggleSavedDefault ? () => onToggleSavedDefault(preset.id) : undefined
+                }
+                onDeleteSaved={onDeleteSaved}
+              />
+            ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={!canSaveCurrent}
-          onSelect={onSaveCurrent}
+          onSelect={save.request}
           className={cn("gap-2", canSaveCurrent && "cursor-pointer")}
         >
           <IconDeviceFloppy className="h-3.5 w-3.5 shrink-0" />
           <span>{t("integrations:saveCurrentQuery")}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
-      {isFinePointer && deletion.target ? (
+      {(isMobile || isFinePointer) && deletion.target ? (
         <SavedTaskViewDeleteConfirmation
           target={deletion.target}
           presentation="popover"
           open
-          anchorRef={deletion.anchorRef}
+          anchorRef={isMobile ? triggerRef : deletion.anchorRef}
           focusBoundaryRef={menuContentRef}
           confirmDisabled={defaultMutationPending}
           onOpenChange={(open) => {
@@ -351,6 +383,7 @@ export type IntegrationScopeBarProps<K extends string> = {
   onKindChange?: (kind: K) => void;
   presetsByKind: (kind: K) => ScopePreset[];
   savedPresets: ScopeSavedPreset<K>[];
+  savedStatus?: ReactNode;
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
@@ -366,6 +399,7 @@ export function IntegrationScopeBar<K extends string>({
   onKindChange,
   presetsByKind,
   savedPresets,
+  savedStatus,
   onDeleteSaved,
   canSaveCurrent,
   onSaveCurrent,
@@ -415,6 +449,7 @@ export function IntegrationScopeBar<K extends string>({
           testId={savedMenuTestId}
           selected={selected}
           saved={saved}
+          savedStatus={savedStatus}
           onSelect={onSelect}
           onDeleteSaved={onDeleteSaved}
           canSaveCurrent={canSaveCurrent}

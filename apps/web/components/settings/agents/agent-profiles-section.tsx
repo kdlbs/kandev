@@ -21,6 +21,7 @@ import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useProfileDuplicate } from "@/hooks/domains/settings/use-profile-duplicate";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useRouter } from "@/lib/routing/client-router";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
@@ -78,6 +79,8 @@ function ProfileRowActions({
   onConfirmDelete: () => void;
 }) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const pendingDelete = useRef(false);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -92,7 +95,15 @@ function ProfileRowActions({
           <IconDotsVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (!pendingDelete.current) return;
+          pendingDelete.current = false;
+          event.preventDefault();
+          onConfirmDelete();
+        }}
+      >
         {profile.kind !== "dynamic" && (
           <DropdownMenuItem
             className="cursor-pointer"
@@ -106,7 +117,10 @@ function ProfileRowActions({
         <DropdownMenuItem
           className="cursor-pointer text-destructive focus:text-destructive"
           data-testid={`delete-profile-${profile.id}`}
-          onSelect={onConfirmDelete}
+          onSelect={() => {
+            if (isMobile) pendingDelete.current = true;
+            else onConfirmDelete();
+          }}
         >
           <IconTrash className="h-4 w-4 mr-2" />
           {t("agents:delete")}
@@ -168,6 +182,8 @@ function ProfileRowInlineActions({
 }
 
 type ProfileRowDeleteConfirmationProps = {
+  profileId: string;
+  profileName: string;
   open: boolean;
   isFinePointer: boolean;
   anchorRef: RefObject<HTMLButtonElement | null>;
@@ -179,6 +195,8 @@ type ProfileRowDeleteConfirmationProps = {
 type ProfileRowDeleteConfirmationBaseProps = Omit<ProfileRowDeleteConfirmationProps, "placement">;
 
 function ProfileRowDeleteConfirmation({
+  profileId,
+  profileName,
   open,
   isFinePointer,
   anchorRef,
@@ -187,11 +205,14 @@ function ProfileRowDeleteConfirmation({
   onConfirm,
   placement,
 }: ProfileRowDeleteConfirmationProps) {
-  if (placement === "inline" && (isFinePointer || !open)) return null;
-  if (placement === "popover" && !isFinePointer) return null;
+  const { isMobile } = useResponsiveBreakpoint();
+  if (placement === "inline" && (isMobile || isFinePointer || !open)) return null;
+  if (placement === "popover" && !isMobile && !isFinePointer) return null;
 
   const confirmation = (
     <AgentProfileDeleteConfirmation
+      profileId={profileId}
+      profileName={profileName}
       open={open}
       isFinePointer={isFinePointer}
       anchorRef={anchorRef}
@@ -232,6 +253,7 @@ function ProfileRowCard({
   onConfirmDelete,
   confirmationProps,
 }: ProfileRowCardProps) {
+  const { isMobile } = useResponsiveBreakpoint();
   return (
     <Card
       // Same surface treatment as the workspace section tiles.
@@ -261,7 +283,7 @@ function ProfileRowCard({
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
           {canManage &&
-            !(confirmOpen && !isFinePointer) &&
+            (isMobile || !(confirmOpen && !isFinePointer)) &&
             (isFullDesktop ? (
               <ProfileRowInlineActions
                 profile={profile}
@@ -294,6 +316,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
   const { isFinePointer, isFullDesktop } = useResponsiveBreakpoint();
   const handleDuplicate = useProfileDuplicate();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  useConfirmationBoundary(confirmOpen, profile.id, setConfirmOpen);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
@@ -343,6 +366,8 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
     closeDeleteConfirmation();
   };
   const confirmationProps = {
+    profileId: profile.id,
+    profileName: profile.name,
     open: confirmOpen,
     isFinePointer,
     anchorRef: deleteAnchorRef,
