@@ -6,7 +6,6 @@ import {
   KIND_SHA256_AMD64,
   KIND_VERSION,
   KUBECTL_SHA256_AMD64,
-  KUBERNETES_E2E_BASE_IMAGE,
   KUBERNETES_FIXTURE_PINS,
   KUBERNETES_E2E_BASE_IMAGE,
   KUBERNETES_VERSION,
@@ -30,7 +29,7 @@ const KUBERNETES_E2E_RUNTIME_IMAGE =
 describe("Kubernetes E2E version pins", () => {
   it("uses an immutable prebuilt runtime image for compatibility jobs", () => {
     expect(KUBERNETES_E2E_BASE_IMAGE).toMatch(
-      /^ghcr\.io\/kdlbs\/kandev-ci:runtime-latest@sha256:[0-9a-f]{64}$/,
+      /^ghcr\.io\/kdlbs\/kandev-ci:runtime-sha-[0-9a-f]{12}@sha256:[0-9a-f]{64}$/,
     );
   });
 
