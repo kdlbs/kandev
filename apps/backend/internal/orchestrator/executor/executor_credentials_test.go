@@ -695,6 +695,9 @@ func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.
 	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
 		policy: TaskGitCredentialPolicy{Mode: "executor"},
 	})
+	exec.SetHostGitHubCredentialProbe(func(context.Context, string, string, map[string]string) error {
+		return errors.New("host gh unavailable")
+	})
 	req := &LaunchAgentRequest{WorkspaceID: "workspace-1", Env: map[string]string{
 		githubauth.CredentialBrokerURLEnv:  "http://broker.example/resolve",
 		githubauth.CredentialHelperPathEnv: "/opt/kandev/agentctl",

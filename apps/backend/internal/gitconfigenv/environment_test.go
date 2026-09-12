@@ -77,6 +77,20 @@ func TestIndexedGitConfigMergeRejectsMalformedBlock(t *testing.T) {
 	}
 }
 
+func TestIndexedGitConfigMergeRejectsCombinedEntryLimit(t *testing.T) {
+	baseEntries := make([]Entry, maxEntries)
+	for index := range baseEntries {
+		baseEntries[index] = Entry{Key: "test.key", Value: "value"}
+	}
+
+	_, err := Merge(environmentWithEntries(baseEntries...), environmentWithEntries(
+		Entry{Key: "credential.https://github.com.helper", Value: "!gh auth git-credential"},
+	))
+	if err == nil {
+		t.Fatal("Merge() error = nil, want combined entry limit error")
+	}
+}
+
 func TestIndexedGitConfigMergeIgnoresEntriesBeyondCount(t *testing.T) {
 	// Observed on a host whose shell hook re-initialized the block at count 2
 	// without clearing the higher indexes a nested shell had appended. Git

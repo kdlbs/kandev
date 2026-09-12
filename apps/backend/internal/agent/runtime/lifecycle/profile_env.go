@@ -7,6 +7,7 @@ import (
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 var ErrProfileSecretUnavailable = errors.New("BLOCKED_PROFILE_SECRET")
@@ -60,6 +61,20 @@ func mergeEnvFillMissing(dst, src map[string]string) {
 	if err == nil {
 		gitconfigenv.CopyIndexed(dst, merged)
 	}
+}
+
+// composeExecutionRuntimeEnvironment updates an existing execution snapshot
+// with a per-run overlay. Host GitHub helpers are Kandev-owned generated
+// entries and are removed before composition so a later request can replace
+// or remove them without hiding inherited user configuration.
+func composeExecutionRuntimeEnvironment(base, overlay map[string]string) (map[string]string, error) {
+	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
+	}
+	return gitconfigenv.Merge(filtered, overlay)
 }
 
 // resolveAgentProfileEnvVars resolves profile env entries. SecretID wins over

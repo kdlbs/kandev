@@ -28,6 +28,7 @@ type mockAgentManager struct {
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
+	executorProfileEnvFunc           func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
 	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
@@ -74,6 +75,13 @@ func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID stri
 		return m.setExecutionEnvFunc(ctx, executionID, env)
 	}
 	return nil
+}
+
+func (m *mockAgentManager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
+	if m.executorProfileEnvFunc != nil {
+		return m.executorProfileEnvFunc(ctx, sessionID, taskEnvironmentID)
+	}
+	return nil, nil
 }
 
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {

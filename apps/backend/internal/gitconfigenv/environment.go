@@ -44,6 +44,9 @@ func Merge(base, overlay map[string]string) (map[string]string, error) {
 		}
 	}
 	entries := removeBoundaryOverlap(baseEntries, overlayEntries)
+	if len(entries) > maxEntries {
+		return nil, fmt.Errorf("combined Git config has %d entries; maximum is %d", len(entries), maxEntries)
+	}
 	writeEntries(result, entries)
 	return result, nil
 }

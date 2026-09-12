@@ -164,7 +164,15 @@ option remains available.
 - **Inherit executor Git credentials** is the default for newly created workspaces and does not
   install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).
+  For GitHub HTTPS remotes, Kandev also checks the host account's `gh` login for each attached
+  GitHub host. When `gh auth token` succeeds, Kandev adds a temporary HTTPS helper to the task
+  environment. The helper uses the GitHub CLI configuration visible to the Kandev backend service
+  account. It does not write Git configuration or save tokens. An explicit `GH_TOKEN` or
+  `GITHUB_TOKEN` takes precedence over stored CLI credentials. For GitHub Enterprise hosts,
+  `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` have the same effect. If `gh` is unavailable
+  or not authenticated for a host, the task keeps its other inherited Git and SSH credentials.
   Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
+  A CLI login authenticates that account, but it does not grant repository permissions.
   For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
   host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
   match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS

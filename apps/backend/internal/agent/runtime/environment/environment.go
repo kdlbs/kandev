@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/kandev/kandev/internal/gitconfigenv"
 )
 
 // Definition describes one environment value without including its plaintext
@@ -59,8 +61,11 @@ type RevealFunc func(context.Context, Definition) (string, error)
 // override record, no log, and no counter increment — the environment
 // package holds no logger and stays a pure function of its inputs.
 func Validate(definitions []Definition) error {
-	_, _, err := selectDefinitions(definitions)
-	return err
+	ordinary, indexed := splitIndexedDefinitions(definitions)
+	if _, _, err := selectDefinitions(ordinary); err != nil {
+		return err
+	}
+	return validateIndexedDefinitions(indexed)
 }
 
 // Resolve sorts definitions deterministically over five named columns,
@@ -70,7 +75,12 @@ func Validate(definitions []Definition) error {
 // nil []OverrideRecord — all or nothing, even when tier precedence had
 // already resolved other keys before the failing key was reached.
 func Resolve(ctx context.Context, definitions []Definition, reveal RevealFunc) (map[string]string, []OverrideRecord, error) {
-	selected, records, err := selectDefinitions(definitions)
+	ordinary, indexed := splitIndexedDefinitions(definitions)
+	indexedSelections, err := prepareIndexedDefinitions(indexed)
+	if err != nil {
+		return nil, nil, err
+	}
+	selected, records, err := selectDefinitions(ordinary)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -95,7 +105,179 @@ func Resolve(ctx context.Context, definitions []Definition, reveal RevealFunc) (
 		}
 		resolved[key] = value
 	}
+
+	indexedEnv, err := resolveIndexedDefinitions(ctx, indexedSelections, reveal)
+	if err != nil {
+		return nil, nil, err
+	}
+	for key, value := range indexedEnv {
+		resolved[key] = value
+	}
 	return resolved, records, nil
+}
+
+// splitIndexedDefinitions keeps Git's indexed configuration protocol as one
+// composed value. Treating GIT_CONFIG_COUNT, GIT_CONFIG_KEY_* and
+// GIT_CONFIG_VALUE_* as independent environment keys makes two authoritative
+// sources conflict or lets one source hide the other source's entries.
+func splitIndexedDefinitions(definitions []Definition) (ordinary, indexed []Definition) {
+	ordinary = make([]Definition, 0, len(definitions))
+	indexed = make([]Definition, 0)
+	for _, definition := range definitions {
+		if gitconfigenv.IsIndexedKey(definition.Key) {
+			indexed = append(indexed, definition)
+			continue
+		}
+		ordinary = append(ordinary, definition)
+	}
+	return ordinary, indexed
+}
+
+type indexedDefinitionBlock struct {
+	origin      string
+	workspaceID string
+	definitions []Definition
+}
+
+type indexedDefinitionSelection struct {
+	block    indexedDefinitionBlock
+	selected map[string]Definition
+}
+
+func indexedDefinitionBlocks(definitions []Definition) []indexedDefinitionBlock {
+	if len(definitions) == 0 {
+		return nil
+	}
+	bySource := make(map[string]*indexedDefinitionBlock, len(definitions))
+	for _, definition := range definitions {
+		identity := definition.Origin + "\x00" + definition.WorkspaceID
+		block, ok := bySource[identity]
+		if !ok {
+			block = &indexedDefinitionBlock{
+				origin:      definition.Origin,
+				workspaceID: definition.WorkspaceID,
+			}
+			bySource[identity] = block
+		}
+		block.definitions = append(block.definitions, definition)
+	}
+	blocks := make([]indexedDefinitionBlock, 0, len(bySource))
+	for _, block := range bySource {
+		blocks = append(blocks, *block)
+	}
+	// Weaker sources are composed first. Within one tier the origin and
+	// workspace order is deterministic; the later block is the effective Git
+	// configuration source when repeated Git keys are present.
+	sort.Slice(blocks, func(i, j int) bool {
+		ti, tj := TierForOrigin(blocks[i].origin), TierForOrigin(blocks[j].origin)
+		if ti != tj {
+			return ti > tj
+		}
+		if blocks[i].origin != blocks[j].origin {
+			return blocks[i].origin < blocks[j].origin
+		}
+		return blocks[i].workspaceID < blocks[j].workspaceID
+	})
+	return blocks
+}
+
+func validateIndexedDefinitions(definitions []Definition) error {
+	_, err := prepareIndexedDefinitions(definitions)
+	return err
+}
+
+func prepareIndexedDefinitions(definitions []Definition) ([]indexedDefinitionSelection, error) {
+	blocks := indexedDefinitionBlocks(definitions)
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	selections := make([]indexedDefinitionSelection, 0, len(blocks))
+	composedShape := make(map[string]string)
+	for _, block := range blocks {
+		selected, _, err := selectDefinitions(block.definitions)
+		if err != nil {
+			return nil, err
+		}
+		shape := indexedDefinitionValues(selected, true)
+		if _, err := gitconfigenv.Merge(nil, shape); err != nil {
+			return nil, fmt.Errorf("validate indexed Git configuration from %s: %w", indexedSourceLabel(block), err)
+		}
+		selections = append(selections, indexedDefinitionSelection{block: block, selected: selected})
+		// Secret-backed counts cannot be shape-validated until reveal. The
+		// known portion still needs a combined-limit check before any secret
+		// is revealed by Resolve.
+		mergedShape, err := gitconfigenv.Merge(composedShape, shape)
+		if err != nil {
+			return nil, fmt.Errorf("compose indexed Git configuration: %w", err)
+		}
+		composedShape = mergedShape
+	}
+	return selections, nil
+}
+
+func resolveIndexedDefinitions(ctx context.Context, selections []indexedDefinitionSelection, reveal RevealFunc) (map[string]string, error) {
+	resolved := make(map[string]string)
+	for _, selection := range selections {
+		block := selection.block
+		selected := selection.selected
+		source := make(map[string]string, len(selected))
+		var err error
+		keys := make([]string, 0, len(selected))
+		for key := range selected {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			definition := selected[key]
+			value := definition.Literal
+			if definition.SecretID != "" {
+				if reveal == nil {
+					return nil, &SecretError{Key: definition.Key, Origin: definition.Origin, err: fmt.Errorf("secret resolver unavailable")}
+				}
+				value, err = reveal(ctx, definition)
+				if err != nil {
+					return nil, &SecretError{Key: definition.Key, Origin: definition.Origin, err: err}
+				}
+			}
+			source[key] = value
+		}
+		// Re-parse after revealing secrets. Validate cannot inspect secret
+		// values, so the final boundary must still reject a malformed counted
+		// block or an invalid combined count.
+		if _, err := gitconfigenv.Merge(nil, source); err != nil {
+			return nil, fmt.Errorf("resolve indexed Git configuration from %s: %w", indexedSourceLabel(block), err)
+		}
+		resolved, err = gitconfigenv.Merge(resolved, source)
+		if err != nil {
+			return nil, fmt.Errorf("compose indexed Git configuration: %w", err)
+		}
+	}
+	return resolved, nil
+}
+
+func indexedDefinitionValues(selected map[string]Definition, shapeOnly bool) map[string]string {
+	values := make(map[string]string, len(selected))
+	for key, definition := range selected {
+		value := definition.Literal
+		if shapeOnly && definition.SecretID != "" && key != "GIT_CONFIG_COUNT" {
+			value = "<secret>"
+		}
+		// A secret-backed count cannot be shape-validated without revealing it.
+		// Leave it absent for the non-revealing preflight; Resolve validates the
+		// actual count after the final secret boundary.
+		if shapeOnly && definition.SecretID != "" && key == "GIT_CONFIG_COUNT" {
+			continue
+		}
+		values[key] = value
+	}
+	return values
+}
+
+func indexedSourceLabel(block indexedDefinitionBlock) string {
+	if block.workspaceID == "" {
+		return block.origin
+	}
+	return block.origin + " workspace " + block.workspaceID
 }
 
 // selectDefinitions implements the resolution procedure: a deterministic

@@ -468,6 +468,10 @@ type AgentProfileInfo struct {
 	CLIPassthrough             bool
 	NativeSessionResume        bool // Agent supports ACP session/load for resume
 	SupportsMCP                bool
+	// EnvVars carries profile definitions, including only opaque SecretID
+	// references for secret-backed values. The executor uses credential-store
+	// selection variables before probing the optional host bridge.
+	EnvVars []models.ProfileEnvVar
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -936,6 +940,7 @@ type Executor struct {
 	gitCredentialBrokerURL         string
 	githubCredentialPolicyResolver TaskGitCredentialPolicyResolver
 	agentctlBinaryPath             string
+	hostGitHubCredentialProbe      hostGitHubCredentialProbe
 
 	// Configuration
 	retryLimit int
@@ -1211,13 +1216,14 @@ type ShellPreferenceProvider interface {
 // NewExecutor creates a new executor
 func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logger.Logger, cfg ExecutorConfig) *Executor {
 	return &Executor{
-		agentManager: agentManager,
-		repo:         repo,
-		secretStore:  cfg.SecretStore,
-		shellPrefs:   cfg.ShellPrefs,
-		logger:       log.WithFields(zap.String("component", "executor")),
-		retryLimit:   3,
-		retryDelay:   5 * time.Second,
+		agentManager:              agentManager,
+		repo:                      repo,
+		secretStore:               cfg.SecretStore,
+		shellPrefs:                cfg.ShellPrefs,
+		logger:                    log.WithFields(zap.String("component", "executor")),
+		retryLimit:                3,
+		retryDelay:                5 * time.Second,
+		hostGitHubCredentialProbe: runHostGitHubCredentialProbe,
 	}
 }
 

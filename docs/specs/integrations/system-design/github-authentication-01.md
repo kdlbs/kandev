@@ -275,7 +275,7 @@ The non-secret operational settings row adds `task_git_credentials_mode`, with a
 | Value | Behavior |
 | --- | --- |
 | `managed` | Inject the workspace broker contract for attached GitHub repositories unless an explicit executor-profile token overrides it. Existing missing/invalid values continue to normalize here for upgrade compatibility. |
-| `executor` | Default persisted for newly created workspaces. Inject no Kandev GitHub helper or `gh` shim; use credentials available where the selected executor runs. |
+| `executor` | Default persisted for newly created workspaces. Inject no broker helper or managed `gh` shim. Local/Worktree HTTPS can use the optional host CLI bridge described in part 2. Remote credentials remain executor-owned. |
 
 Missing or invalid persisted values normalize to `managed`. Workspace-settings copy includes this
 policy because it is operational configuration, not authentication material.

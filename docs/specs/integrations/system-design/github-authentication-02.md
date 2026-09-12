@@ -3,6 +3,7 @@ status: draft
 system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001
+  - REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002
 created: 2026-07-19
 owners:
   - Kandev
@@ -18,6 +19,7 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 | Requirement | Design section |
 | --- | --- |
 | `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002` | [Executor host CLI bridge](#executor-host-cli-bridge) |
 
 ## Migrated source detail
 
@@ -251,3 +253,102 @@ registration and never creates a global default.
   snapshot. Desktop supports hover and keyboard focus; coarse-pointer/mobile users open the same
   information in a 44px-target drawer. Unknown inherited/profile actors are explicitly labeled
   runtime-selected.
+
+
+## Executor host CLI bridge
+
+This section implements `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002` and its criteria 002.1 through 002.7.
+The integration system owns the credential policy, even though executor and agentctl code carry the environment.
+The [implementation package](../../../plans/executor-host-gh-bridge/plan.md) records delivery status.
+
+### Eligibility and credential precedence
+
+`Executor.configureGitCredentialBrokerForRepositories` owns the policy branch shared by full launch and resume.
+The executor branch removes managed credentials, then considers an optional host helper.
+Only explicit Local and Worktree executor types qualify. An unknown type does not imply Local.
+The branch never runs for Docker, SSH, Sprites, Kubernetes, or other remote execution.
+
+For each attached GitHub repository, resolve its host through `gitcredentials.ResolveRepositoryIdentity`.
+Use provider identity and persisted remote metadata. Do not discover new hosts from arbitrary checkout remotes.
+The existing public GitHub compatibility fallback remains available.
+An explicit enterprise provider host must pass the existing identity validation.
+Invalid or ambiguous optional bridge identities are skipped without weakening managed admission.
+A local-source repository qualifies only when its recorded metadata establishes a GitHub identity.
+Deduplicate hosts within each preparation operation.
+
+A non-empty explicit `GH_TOKEN` or `GITHUB_TOKEN` in the request bypasses host probing and bridge injection.
+For enterprise hosts, respect the corresponding `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` variables too.
+Later profile merges must preserve the same effective token precedence.
+The helper invokes ordinary `gh`, which selects explicit environment tokens before stored login credentials.
+An invalid explicit token must not trigger a retry with a stored host login.
+Tests must exercise late profile tokens at the child-process boundary, not only inspect the early request map.
+
+Managed mode retains its existing helper reset and fail-closed behavior.
+No host helper can follow the managed reset/helper pair in the effective Git configuration.
+A policy transition rebuilds the environment from its source layers instead of retaining a prior generated bridge.
+The existing credential snapshot remains `executor` / `executor_selected`, with no inferred actor.
+
+### Optional host probe
+
+Add a small, injectable command runner beside executor credential routing.
+Resolve the real host `gh` executable before managed shim activation.
+Invoke `gh auth token --hostname <validated-host>` without a shell through `subproc.RunGH`.
+Discard stdout and stderr. The command result exposes only availability, never token bytes.
+Use a five-second operation deadline and honor earlier caller cancellation.
+Deduplicate probes per host for that operation. Do not cache a result across launches or resumes.
+Command failure or its own timeout skips the optional bridge. Caller cancellation aborts preparation normally.
+A successful token command establishes token availability, not repository access or token validity on GitHub.
+
+The probe resolves the selected profile's `HOME`, `GH_CONFIG_DIR`, and `XDG_CONFIG_HOME` values before it runs.
+The helper receives the same values in the final effective child environment, so a profile override cannot
+silently probe one account and execute Git against another account. A secret-backed directory value is
+resolved through the global secret store for the probe and is never logged or placed in the command.
+Use a safely quoted absolute helper executable when a child shell can replace `PATH`.
+Do not embed a token or unvalidated host text in a shell command.
+
+### Indexed configuration and runtime propagation
+
+For each eligible host, append one URL-scoped helper with the semantics of
+`credential.https://<host>.helper = !gh auth git-credential`.
+The generated shell function contains the unambiguous `kandev-host-gh-bridge` ownership marker.
+Existing user helpers remain earlier in the chain. Do not insert an empty reset for this optional fallback.
+Compose the helper block through `gitconfigenv.Merge`, never a map overlay or a hardcoded count.
+Keep the existing malformed-block error behavior and preserve meaningful duplicate entries.
+Validate the combined count against the existing 256-entry limit before dispatch.
+Cleanup removes only host-scoped helpers carrying the Kandev marker; a user-selected quoted `gh` command,
+an unrelated host helper, and an old generated helper with no available replacement CLI remain safe according
+to ownership. Do not premerge the entire host environment into a request that agentctl will merge with that same host environment again.
+
+The strict source-aware resolver treats `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`, and
+`GIT_CONFIG_VALUE_*` as one indexed block per environment source. It composes agent-profile,
+executor-profile, managed-runtime, and repository blocks in source order while ordinary variables
+retain the existing conflict, secret, and tier rules. The final lifecycle boundary resolves this
+composition after every managed definition has been added.
+
+`configureResumeGitHubCredentials` reuses the shared policy branch.
+The prepared-workspace path through `configureExistingWorkspace` also needs the resolved executor identity and repository set.
+It must apply the refreshed environment before `SetExecutionEnv` and agent start.
+Reuse the repository set already resolved for preparation instead of cloning or reconciling it a second time.
+An environment delivery failure must prevent a claim that the refreshed environment is active.
+
+The agentctl configure boundary has two explicit modes. The existing API mode composes a request-only
+overlay with the instance block, removing only marker-owned bridge entries first. The lifecycle uses
+the complete-environment mode for a composed launch snapshot, which replaces the indexed block without
+appending the snapshot to itself. Both modes update the agent environment, one-shot adapter, workspace
+tracker, task shells, and task-scoped processes from the same canonical slice.
+A reused executor must replace obsolete generated entries when a policy, token, or host eligibility changes,
+including when a later preparation supplies no bridge at all.
+A login-shell test covers executable paths with spaces and a replaced `PATH`.
+No global Git file, repository configuration file, token cache, or workspace connection is modified.
+
+### Compatibility and evidence
+
+This extends the existing executor-inheritance contract in
+[the task Git policy decision](../../../decisions/2026-07-27-task-git-credential-policy.md).
+It does not create a new credential source or change the managed security boundary.
+The existing workspace-creation identity rules remain unchanged.
+
+A real Git subprocess with a fake host CLI supplies deterministic end-to-end credential evidence.
+It covers success, a foreign host, an explicit token, and a failed managed helper.
+No live credential or network request is needed for these regressions.
+An authenticated login can still lack repository permissions, and a later logout can still make an operation fail.

@@ -184,21 +184,85 @@ func (e *Executor) configureGitCredentialBrokerForRepositories(
 	req *LaunchAgentRequest,
 	infos []*repoInfo,
 ) error {
-	if len(infos) == 0 {
-		return nil
-	}
-	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
-	if e.githubCredentialPolicyResolver != nil {
-		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, req.WorkspaceID)
-		if err != nil {
-			return fmt.Errorf("resolve task Git credential policy: %w", err)
-		}
-		policy = resolved
+	return e.configureGitCredentialBrokerForRepositoriesWithProfileEnv(ctx, req, infos, nil)
+}
+
+func (e *Executor) configureGitCredentialBrokerForRepositoriesWithProfileEnv(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+	profileEnvVars []models.ProfileEnvVar,
+) error {
+	return e.configureGitCredentialBrokerForRepositoriesWithProfileEnvAndBridge(
+		ctx, req, infos, profileEnvVars, true,
+	)
+}
+
+func (e *Executor) configureGitCredentialBrokerForRepositoriesWithProfileEnvAndBridge(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+	profileEnvVars []models.ProfileEnvVar,
+	hostBridgeProfileResolved bool,
+) error {
+	if req == nil {
+		return errors.New("launch request is required")
 	}
 	if req.Env == nil {
 		req.Env = make(map[string]string)
 	}
-	if policy.Mode == taskGitCredentialsModeExecutor || req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
+	if err := removeHostGitHubCredentialHelpers(req); err != nil {
+		return err
+	}
+	if len(infos) == 0 {
+		return nil
+	}
+	policy, err := e.resolveTaskGitCredentialPolicy(ctx, req.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if policy.Mode == taskGitCredentialsModeExecutor {
+		return e.configureExecutorGitCredentials(ctx, req, infos, profileEnvVars, hostBridgeProfileResolved)
+	}
+	return e.configureManagedGitCredentials(ctx, req, infos, profileEnvVars)
+}
+
+func (e *Executor) resolveTaskGitCredentialPolicy(ctx context.Context, workspaceID string) (TaskGitCredentialPolicy, error) {
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver == nil {
+		return policy, nil
+	}
+	resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, workspaceID)
+	if err != nil {
+		return policy, fmt.Errorf("resolve task Git credential policy: %w", err)
+	}
+	return resolved, nil
+}
+
+func (e *Executor) configureExecutorGitCredentials(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+	profileEnvVars []models.ProfileEnvVar,
+	hostBridgeProfileResolved bool,
+) error {
+	if err := removeManagedGitHubCredentials(req); err != nil {
+		return err
+	}
+	clearManagedContributionDestinations(req, infos)
+	if !hostBridgeProfileResolved {
+		return nil
+	}
+	return e.configureHostGitHubCredentialBridgeWithProfileEnv(ctx, req, infos, profileEnvVars)
+}
+
+func (e *Executor) configureManagedGitCredentials(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+	profileEnvVars []models.ProfileEnvVar,
+) error {
+	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" || hasExplicitGitHubTokenInAnyProfile(profileEnvVars) {
 		if err := removeManagedGitHubCredentials(req); err != nil {
 			return err
 		}

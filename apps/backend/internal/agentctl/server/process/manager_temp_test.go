@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -168,6 +169,105 @@ func TestManager_ProcessEnvironmentMergesIndexedGitConfig(t *testing.T) {
 	}
 	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "core.hooksPath" {
 		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want request entry appended", got)
+	}
+}
+
+func TestManagerConfigureReplacesOwnedHostHelperAndPreservesIndexedEnvironment(t *testing.T) {
+	oldHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/old/gh' auth git-credential \"$@\"; }; f"
+	newHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/new/gh' auth git-credential \"$@\"; }; f"
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			"GIT_CONFIG_COUNT=3",
+			"GIT_CONFIG_KEY_0=notes.augment.mergeStrategy",
+			"GIT_CONFIG_VALUE_0=union",
+			"GIT_CONFIG_KEY_1=core.hooksPath",
+			"GIT_CONFIG_VALUE_1=/user/hooks",
+			"GIT_CONFIG_KEY_2=credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_2=" + oldHelper,
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	configure := func(env map[string]string) {
+		t.Helper()
+		if err := mgr.Configure("echo", nil, false, env, "", "", nil, false); err != nil {
+			t.Fatalf("Configure() error = %v", err)
+		}
+	}
+	configure(map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": newHelper,
+	})
+
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["GIT_CONFIG_COUNT"] != "3" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" ||
+		env["GIT_CONFIG_KEY_2"] != "credential.https://github.com.helper" || env["GIT_CONFIG_VALUE_2"] != newHelper {
+		t.Fatalf("configured environment = %#v, want inherited entries plus replacement helper", env)
+	}
+	if trackerEnv := environmentMap(mgr.GetWorkspaceTracker().gitCommand(context.Background(), false, "status").Env); trackerEnv["GIT_CONFIG_VALUE_2"] != newHelper {
+		t.Fatalf("tracker helper = %q, want replacement helper", trackerEnv["GIT_CONFIG_VALUE_2"])
+	}
+
+	configure(nil)
+	env = environmentMap(mgr.cfg.AgentEnv)
+	if env["GIT_CONFIG_COUNT"] != "2" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" {
+		t.Fatalf("reconfigured environment = %#v, want inherited entries without generated helper", env)
+	}
+	if _, present := env["GIT_CONFIG_VALUE_2"]; present {
+		t.Fatalf("stale generated helper remained after reconfiguration: %#v", env)
+	}
+}
+
+func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.T) {
+	oldHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/old/gh' auth git-credential \"$@\"; }; f"
+	newHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/new/gh' auth git-credential \"$@\"; }; f"
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			"GIT_CONFIG_COUNT=3",
+			"GIT_CONFIG_KEY_0=notes.augment.mergeStrategy",
+			"GIT_CONFIG_VALUE_0=union",
+			"GIT_CONFIG_KEY_1=core.hooksPath",
+			"GIT_CONFIG_VALUE_1=/user/hooks",
+			"GIT_CONFIG_KEY_2=credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_2=" + oldHelper,
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	complete := map[string]string{
+		"GIT_CONFIG_COUNT":   "3",
+		"GIT_CONFIG_KEY_0":   "notes.augment.mergeStrategy",
+		"GIT_CONFIG_VALUE_0": "union",
+		"GIT_CONFIG_KEY_1":   "core.hooksPath",
+		"GIT_CONFIG_VALUE_1": "/user/hooks",
+		"GIT_CONFIG_KEY_2":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2": newHelper,
+	}
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, complete, "", "", nil, false); err != nil {
+		t.Fatalf("ConfigureWithEnvironment() error = %v", err)
+	}
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["GIT_CONFIG_COUNT"] != "3" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" ||
+		env["GIT_CONFIG_KEY_2"] != "credential.https://github.com.helper" || env["GIT_CONFIG_VALUE_2"] != newHelper {
+		t.Fatalf("complete configured environment = %#v, want one complete replacement block", env)
+	}
+
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, nil, "", "", nil, false); err != nil {
+		t.Fatalf("ConfigureWithEnvironment() removal error = %v", err)
+	}
+	env = environmentMap(mgr.cfg.AgentEnv)
+	if env["GIT_CONFIG_COUNT"] != "2" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" {
+		t.Fatalf("removed configured environment = %#v, want preserved user block", env)
+	}
+	if _, present := env["GIT_CONFIG_VALUE_2"]; present {
+		t.Fatalf("generated helper remained after complete removal: %#v", env)
 	}
 }
 

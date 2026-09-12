@@ -2297,33 +2297,60 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
-	env := execution.RuntimeEnvironment()
+	runtimeSnapshot := execution.RuntimeEnvironment()
 	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
-	if env == nil {
-		env = metadataEnv
+	var env map[string]string
+	var configureEnv map[string]string
+	var replaceConfiguredEnv bool
+	if runtimeSnapshot == nil {
+		env = cloneStringMap(metadataEnv)
+		if env == nil {
+			env = make(map[string]string)
+		}
 		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
 			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
 			return "", fmt.Errorf("resolve agent profile environment: %w", err)
 		}
+		configureEnv = cloneStringMap(env)
 	} else {
 		// SetExecutionEnv carries per-run values such as repository credentials.
-		// Overlay them on the launch snapshot without re-reading profile secrets.
-		for key, value := range metadataEnv {
-			env[key] = value
+		// Compose them with the launch snapshot without re-reading profile
+		// secrets. The agentctl instance already owns the launch snapshot, so a
+		// complete effective snapshot is sent through the replacement boundary.
+		// This prevents an already complete indexed block from being appended to
+		// itself while also removing obsolete generated helpers.
+		var err error
+		env, err = composeExecutionRuntimeEnvironment(runtimeSnapshot, metadataEnv)
+		if err != nil {
+			m.updateExecutionError(execution.ID, "failed to compose agent env: "+err.Error())
+			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
+		configureEnv = cloneStringMap(env)
+		replaceConfiguredEnv = true
 	}
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
 	}
+	if err := spillLargeWakePayloadEnv(configureEnv, execution.WorkspacePath, m.logger.Zap()); err != nil {
+		m.updateExecutionError(execution.ID, "failed to prepare agent configure env: "+err.Error())
+		return "", fmt.Errorf("failed to prepare agent configure env: %w", err)
+	}
+	execution.setRuntimeEnvironment(env)
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
-		return "", fmt.Errorf("failed to configure agent: %w", err)
+	var configureErr error
+	if replaceConfiguredEnv {
+		configureErr = client.ConfigureAgentWithEnvironment(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
+	} else {
+		configureErr = client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
+	}
+	if configureErr != nil {
+		return "", fmt.Errorf("failed to configure agent: %w", configureErr)
 	}
 
 	fullCommand, err := client.Start(ctx)

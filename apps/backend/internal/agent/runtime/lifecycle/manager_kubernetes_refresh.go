@@ -199,7 +199,7 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if execution.AgentCommand == "" {
 		return "", fmt.Errorf("execution %q has no recorded agent command for Kubernetes restart", execution.ID)
 	}
-	if err := client.ConfigureAgent(
+	if err := client.ConfigureAgentWithEnvironment(
 		ctx, execution.AgentCommand, execution.AgentArgs, env, approvalPolicy,
 		execution.ContinueCommand, execution.ContinueArgs,
 	); err != nil {

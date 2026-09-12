@@ -32,6 +32,27 @@ GitHub credentials must not silently cross workspace boundaries. A local workspa
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.11:** When a Local or Worktree task launches or resumes, the system shall inspect each attached Kandev-managed GitHub checkout before the agent starts. This behavior includes a prepared workspace that the task reuses.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.12:** The system shall reconcile each managed checkout to the canonical transport for the current task policy. It shall not rewrite an already-canonical origin or a user-managed local checkout.
 
+
+### REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002: Executor HTTPS access through host GitHub CLI
+
+**Intent:** Local and Worktree tasks can use an available host GitHub CLI credential for HTTPS Git operations.
+This extends executor inheritance without changing workspace automation identity or managed task access.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-002.1:** In executor mode, Local and Worktree tasks shall use an available host CLI credential for each eligible attached GitHub host. HTTPS credential lookup shall work without a separate global credential-helper setup.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-002.2:** The bridge shall preserve every valid inherited Git configuration entry, its value, and its order. This includes multiple entries for hooks and notes, and meaningful repeated helper entries.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-002.3:** Explicit profile or executor tokens shall retain precedence over the host login. Managed task authentication shall never fall back to the host bridge after a broker failure.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-002.4:** The bridge shall apply only to eligible attached GitHub hosts on Local and Worktree executors. Remote executors, unrelated hosts, and other providers shall receive no host credential bridge.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-002.5:** When the host CLI is absent, unauthenticated, or exceeds its lookup deadline, task preparation shall continue without the optional bridge. Existing Git helpers and SSH behavior shall remain available. Caller cancellation shall remain cancellation.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-002.6:** Initial launch, resume, and prepared-workspace agent start shall apply the current eligibility rules before task commands run. Repeated preparation shall not accumulate bridge entries.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-002.7:** The bridge shall change only the task execution environment. It shall not write Git configuration files, persist tokens, change workspace automation identity, or rewrite repository remotes.
+
+#### Exclusions
+
+This requirement does not provide repository permissions, create an SSH key, or validate token permissions through a network request.
+It does not change managed repository materialization, credential snapshots, UI controls, or credential routing for remote executors.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/github-authentication-01.md), [part 2](../system-design/github-authentication-02.md), [part 3](../system-design/github-authentication-03.md).
