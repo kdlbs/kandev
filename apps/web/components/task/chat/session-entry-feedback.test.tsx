@@ -19,6 +19,9 @@ describe("SessionHistoryFeedback", () => {
     render(<SessionHistoryFeedback status="loading" error={null} onRetry={vi.fn()} />);
 
     expect(screen.getByTestId("session-history-loading").getAttribute("role")).toBe("status");
+    expect(
+      screen.getByTestId("session-history-loading").querySelector('[aria-hidden="true"]'),
+    ).toBeTruthy();
     expect(screen.getByText("Loading conversation...")).toBeTruthy();
     expect(screen.queryByText("No messages yet. Start the conversation!")).toBeNull();
   });

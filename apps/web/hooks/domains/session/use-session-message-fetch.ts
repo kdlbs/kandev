@@ -119,6 +119,8 @@ type DoFetchMessagesParams = {
   ) => Promise<Message[]>;
   onError?: (error: unknown) => void;
   isActive?: () => boolean;
+  /** Allows the owning hook generation to fence local loading finalization. */
+  canFinalizeLoading?: () => boolean;
   hydrationRef?: SessionHydrationRef;
   hydrationKey?: string;
 };
@@ -135,6 +137,7 @@ export async function doFetchMessages({
   fetchAndStoreMessages,
   onError,
   isActive,
+  canFinalizeLoading,
   hydrationRef,
   hydrationKey,
 }: DoFetchMessagesParams): Promise<void> {
@@ -170,7 +173,7 @@ export async function doFetchMessages({
     const active = !isInactive(isActive);
     if (endSessionFetch(taskSessionId)) {
       store.getState().setMessagesLoading(taskSessionId, false);
-      if (active) setIsLoading(false);
+      if (!canFinalizeLoading || canFinalizeLoading()) setIsLoading(false);
     }
     if (active) setIsWaitingForInitialMessages(false);
   }

@@ -199,6 +199,26 @@ describe("EnsureSessionErrorBanner", () => {
     fireEvent.click(screen.getByTestId("session-status-retry"));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it("renders page-wide feedback when automatic recovery and workspace restoration fail", () => {
+    render(
+      <SessionRecoveryFeedback
+        error="Recovery could not complete"
+        notice={null}
+        onRetry={() => {}}
+        recoveryFailure={{
+          outcome: "recovery_failed",
+          resumeError: RESUME_FAILURE_DETAIL,
+          restoreError: RESTORE_FAILURE_DETAIL,
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("session-recovery-error")).toBeTruthy();
+    expect(screen.getByText("Session recovery failed")).toBeTruthy();
+    expect(screen.getByText("The session could not be recovered.")).toBeTruthy();
+    expect(screen.queryByTestId("session-recovery-notice")).toBeNull();
+  });
 });
 
 describe("EnsureSessionErrorEmptyState", () => {

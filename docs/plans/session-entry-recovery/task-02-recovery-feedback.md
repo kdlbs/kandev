@@ -163,7 +163,7 @@ does not launch the agent.
 
 Verification:
 
-- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx` — 158 tests passed across 9 files.
+- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx` — 170 tests passed across 9 files.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps/web && pnpm exec eslint --max-warnings 0 components/task/ensure-session-error.tsx components/task/task-page-inner.tsx components/task/preview-session-tabs.tsx components/task/chat e2e/helpers/session-entry-recovery.ts e2e/tests/session/session-entry-recovery.spec.ts e2e/tests/session/mobile-session-entry-recovery.spec.ts` — passed.
 - `cd apps/web && pnpm run i18n:zh-hant` — passed.
@@ -184,3 +184,9 @@ Review remediation (complete):
   being cleared as successful status refreshes.
 - Deferred history race coverage confirms that old session work cannot overwrite feedback for the
   current desktop or phone conversation, including manual retry after re-entry.
+- History loading finalization is generation-fenced on navigation and connection changes, while
+  the original session's request bookkeeping is still released. Settled message requests cannot
+  satisfy a later terminal refresh, so explicit Retry sends a new snapshot request.
+- The loading spinner is hidden from the live status subtree so screen readers receive one
+  progress announcement. The status-retry E2E records the launch count before and after Retry
+  and verifies that status recovery stays mutation-free.

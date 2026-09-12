@@ -102,7 +102,7 @@ successful snapshot and exposes explicit recovery state for the presentation tas
 
 Verification:
 
-- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx` — 158 tests passed across 9 files.
+- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx` — 170 tests passed across 9 files.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps/web && pnpm exec eslint --max-warnings 0 lib/ws/client.ts lib/ws/request-error.ts hooks/domains/session/use-session-messages.ts hooks/domains/session/use-session-message-fetch.ts hooks/domains/session/use-message-fetch-state.ts hooks/domains/session/use-session-subscription-retry.ts hooks/domains/session/use-session-resumption.ts` — passed.
 - `git diff --check` — passed.
@@ -124,5 +124,8 @@ Review remediation (complete):
 - Added regressions for workspace-restore failure classification, timeout-then-error status
   responses, A-to-B and A-to-B-to-A deferred history races, terminal-state fetches, and fresh
   manual history retry.
-- Focused remediation validation: 163 tests passed across 9 files; typecheck and zero-warning
-  ESLint passed.
+- Focused review-remediation validation: 170 tests passed across 9 files. It covers
+  environment-scoped workspace-restore errors and launch retry behavior, permanent status error
+  payloads after a timeout, generation-fenced terminal and manual history fetches, settled
+  request-cache refreshes, and local loading cleanup for stale fetches. Typecheck, zero-warning
+  ESLint, and formatting checks passed.

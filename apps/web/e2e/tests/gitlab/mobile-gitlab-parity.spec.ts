@@ -12,6 +12,8 @@ import { makeGitEnv } from "../../helpers/git-helper";
 import { GitLabPage } from "../../pages/gitlab-page";
 import { GitLabSettingsPage } from "../../pages/gitlab-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 async function expectTouchTarget(locator: ReturnType<GitLabPage["mrRow"]>, label: string) {
@@ -65,6 +67,106 @@ async function seedMultiRepoGitLabTask(
 }
 
 test.describe("Mobile GitLab parity", () => {
+  let previousSavedPresets: unknown;
+  test.afterEach(async ({ apiClient }) => {
+    if (previousSavedPresets === undefined) return;
+    const restored = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      gitlab_saved_presets: previousSavedPresets,
+    });
+    previousSavedPresets = undefined;
+    expect(restored.ok).toBe(true);
+  });
+
+  test("confirms saved-query deletion in the existing filter sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    const phoneViewport = { width: 393, height: 640 };
+    await testPage.setViewportSize(phoneViewport);
+    await seedGitLabReview(apiClient, seedData.workspaceId, 121, "Mobile saved-query review");
+    previousSavedPresets = (await apiClient.getUserSettings()).settings.gitlab_saved_presets ?? [];
+    const saved = {
+      id: "mobile-gitlab-saved",
+      kind: "mr",
+      label: "Release review queue",
+      customQuery: "release",
+      projectFilter: "",
+      milestone: "",
+      preset: "",
+      createdAt: "2026-09-10T00:00:00Z",
+    };
+    const neighbors = Array.from({ length: 8 }, (_, index) => ({
+      ...saved,
+      id: `mobile-gitlab-neighbor-${index}`,
+      label: `Other review queue ${index}`,
+    }));
+    const seeded = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      gitlab_saved_presets: [...neighbors, saved],
+    });
+    expect(seeded.ok).toBe(true);
+    const gitlab = new GitLabPage(testPage);
+    await gitlab.goto();
+    await gitlab.mobileFiltersButton.tap();
+    // @covers AC-UI-MOBILE-CONFIRMATION-001.8
+    await expect(gitlab.mobileSidebar).toHaveAttribute("data-vaul-drawer-direction", "bottom");
+    await waitForFiniteAnimations(gitlab.mobileSidebar);
+    const originalHeight = (await gitlab.mobileSidebar.boundingBox())!.height;
+    const sheetId = await gitlab.mobileSidebar.getAttribute("id");
+    const trigger = gitlab.mobileSidebar.getByTestId("gitlab-saved-delete-mobile-gitlab-saved");
+    await trigger.scrollIntoViewIfNeeded();
+    const scrollArea = gitlab.mobileSidebar.getByTestId("integration-filters-scroll");
+    const scrollTop = await scrollArea.evaluate((element) => element.scrollTop);
+    expect(scrollTop).toBeGreaterThan(0);
+    await testPage.screenshot({ path: testInfo.outputPath("bottom-query-filters.png") });
+    await trigger.tap();
+    const confirmation = gitlab.mobileSidebar.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete Release review queue?");
+    const compactBounds = await expectContentSizedBottomConfirmation(
+      gitlab.mobileSidebar,
+      confirmation,
+    );
+    expect(compactBounds.height).toBeLessThan(originalHeight);
+    await expect(testPage.getByText("Kandev update available", { exact: true })).toBeHidden();
+    await testPage.screenshot({
+      path: testInfo.outputPath("compact-saved-query-confirmation.png"),
+    });
+    await testInfo.attach("confirmation-geometry", {
+      body: JSON.stringify({ originalHeight, compactBounds }),
+      contentType: "application/json",
+    });
+    await expect(gitlab.mobileSidebar).toHaveAttribute("id", sheetId!);
+    await expect(testPage.getByRole("dialog")).toHaveCount(1);
+    await confirmation.getByRole("button", { name: "Back" }).tap();
+    await expect(trigger).toBeFocused();
+    await waitForFiniteAnimations(gitlab.mobileSidebar);
+    expect((await gitlab.mobileSidebar.boundingBox())!.height).toBeCloseTo(originalHeight, 0);
+    expect(await scrollArea.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+    await trigger.tap();
+    await expect(confirmation).toBeVisible();
+    await testPage.setViewportSize({ width: 768, height: 800 });
+    await expect(confirmation).toHaveCount(0);
+    await expect(gitlab.mobileSidebar).toHaveAttribute("data-side", "right");
+    expect((await apiClient.getUserSettings()).settings.gitlab_saved_presets).toEqual([
+      ...neighbors,
+      saved,
+    ]);
+    await testPage.setViewportSize(phoneViewport);
+    await expect(gitlab.mobileSidebar).toHaveAttribute("data-vaul-drawer-direction", "bottom");
+    await expect(confirmation).toHaveCount(0);
+    await trigger.tap();
+    const removed = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/user/settings") &&
+        response.request().method() === "PATCH" &&
+        response.ok(),
+    );
+    await confirmation.getByTestId("saved-task-view-delete-confirm").tap();
+    await removed;
+    await expect(trigger).toHaveCount(0);
+    await expect(gitlab.mobileSidebar).toBeVisible();
+    expect((await apiClient.getUserSettings()).settings.gitlab_saved_presets).toEqual(neighbors);
+  });
   test("opens the exact linked MR selected from a multi-MR topbar", async ({
     testPage,
     apiClient,

@@ -36,7 +36,9 @@ export function SessionHistoryFeedback({
         role="status"
         aria-live="polite"
       >
-        <GridSpinner className="text-primary" />
+        <span aria-hidden="true">
+          <GridSpinner className="text-primary" />
+        </span>
         <span>
           {status === "retrying" ? t("task:sessionHistoryRetrying") : t("task:loadingConversation")}
         </span>

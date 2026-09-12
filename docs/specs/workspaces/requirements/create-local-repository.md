@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-21
-updated: 2026-08-05
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -20,14 +20,21 @@ Users can create tasks from an existing local or remote repository, but a new pr
 
 #### Acceptance criteria
 
-- **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.1:** The local repository selector in **Create New Task** exposes a visible **Create new repository** action while the task has exactly one repository row.
+- **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.1:** Every editable local repository row in **Create New Task** exposes visible **Refresh repositories** and **Create new repository** actions on desktop and mobile. Availability does not depend on the number of task rows, registered or discovered repositories, or search matches. Refresh updates the repository list without changing selected rows; it remains visible but disabled while a refresh is in progress.
 - **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.2:** The creation form asks for a repository name and an absolute parent path. It shows the resulting target path before confirmation. The name is one platform-native path segment, not a path.
 - **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.3:** A manually entered parent path may contain missing trailing directories. Confirmation creates those directories beneath the nearest accessible, trusted ancestor before initializing the repository.
 - **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.4:** The parent-folder browser lists the filesystem of the machine running Kandev and shares the same directory browsing behavior as the **None** source mode's starting-folder picker. It also lets the user create and enter one new child folder in the currently displayed directory.
 - **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.5:** Confirmation creates `<parent>/<name>` only when that target does not already exist, initializes a local Git repository with default branch `main`, and creates one empty initial commit on that branch. The working tree contains no user files.
 - **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.6:** Git initialization remains bound to the exact request-owned directory identity that the backend opened and verified. Replacing its pathname before or during initialization must not cause Git to modify the replacement path.
 - **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.7:** A successfully initialized repository is persisted as a local repository in the active workspace, added to the in-memory workspace repository list, selected in the originating row, and displays `main` as that row's branch. Other task fields and repository rows are unchanged.
-- **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.8:** The task-create flow continues to select a compatible `local` or `local_pc` executor profile for the first task when the selected profile cannot run the newly created local repository, and explains the change. Executor selection is unchanged by the initial baseline commit.
+- **AC-WORKSPACES-CREATE-LOCAL-REPOSITORY-001.8:** For a single repository row, the task-create flow retains its direct-local executor selection and explanation. For multiple rows, creating a repository preserves the selected executor profile and all sibling rows. The absence of a direct-local profile does not block repository creation in a multi-row task; normal task execution compatibility checks still apply.
+
+## Compatibility update
+
+The September 2026 picker change removes the former single-row creation restriction.
+New repositories already contain an initial commit, so they can supply a worktree base.
+The action remains scoped to editable local selectors that support creation.
+Remote-host repository creation and locked repository selectors are outside this change.
 
 ## Migrated source detail
 
@@ -40,7 +47,7 @@ repository on the machine running Kandev, select it, and continue composing the 
 ## What
 
 - The local repository selector in **Create New Task** exposes a visible **Create new repository**
-  action while the task has exactly one repository row.
+  action in every editable local repository row, including populated and filtered lists.
 - The creation form asks for a repository name and an absolute parent path. It shows the resulting
   target path before confirmation. The name is one platform-native path segment, not a path.
 - A manually entered parent path may contain missing trailing directories. Confirmation creates
@@ -58,11 +65,11 @@ repository on the machine running Kandev, select it, and continue composing the 
 - A successfully initialized repository is persisted as a local repository in the active workspace,
   added to the in-memory workspace repository list, selected in the originating row, and displays
   `main` as that row's branch. Other task fields and repository rows are unchanged.
-- The task-create flow continues to select a compatible `local` or `local_pc` executor profile for
+- The single-row task-create flow continues to select a compatible `local` or `local_pc` executor profile for
   the first task when the selected profile cannot run the newly created local repository, and
   explains the change. Executor selection is unchanged by the initial baseline commit.
-- Multi-repository task creation does not expose the action because those tasks require the worktree
-  executor. Users can add the repository to a multi-repository task after it has its first commit.
+- Multi-repository task creation exposes the action in every editable local row and preserves
+  the selected executor. The new repository already has its first commit.
 - Initialization is an explicit local-path trust grant for the exact canonical repository path. It
   does not widen automatic discovery roots or grant access to sibling paths.
 - The form remains open with the entered name and parent folder when initialization fails, surfaces
@@ -153,7 +160,7 @@ to the created canonical target path and the active workspace.
 | `git` is unavailable, initialization fails, or the initial commit fails | The request fails, no repository row is persisted, and Kandev removes only the target directory created by this request when cleanup is safe. A cleanup failure is logged and the error remains visible. |
 | Repository persistence fails after Git initialization or the initial commit | The request fails and performs the same best-effort cleanup of the request-owned target; no repository row is returned. |
 | Frontend state refresh fails after a successful response | The returned repository is still selected directly and merged into the active workspace cache without waiting for a second list request. |
-| No compatible direct local executor profile is available for the existing task-create policy | The form explains the requirement and does not call the initialization endpoint. |
+| No compatible direct local executor profile is available for a single-row task | The form explains the requirement and does not call the initialization endpoint. Multi-row creation does not require a direct-local profile. |
 
 ## Persistence Guarantees
 
@@ -187,14 +194,16 @@ workspace registration.
   `/work/projects/alpha` contains a Git repository with one empty initial commit on `main` and no
   user files, the workspace has a matching local repository record, the branch endpoint returns a
   local `main` option, and the originating task row selects `alpha` / `main`.
-- **GIVEN** a worktree or container executor profile is selected and a direct local profile is
+- **GIVEN** a single-row task has a worktree or container executor profile selected and a direct local profile is
   available, **WHEN** repository initialization succeeds, **THEN** the form selects the compatible
   direct local profile and tells the user why the executor changed.
-- **GIVEN** no direct local executor profile is available, **WHEN** the user opens the creation form,
+- **GIVEN** a single-row task has no direct local executor profile available, **WHEN** the user opens the creation form,
   **THEN** the primary action explains the requirement and no directory or repository is created.
-- **GIVEN** a task with multiple repository rows, **WHEN** the user opens any repository picker,
-  **THEN** **Create new repository** is not offered because the action remains limited to the
-  existing single-row task-create flow.
+- **GIVEN** a task with multiple repository rows, **WHEN** the user opens an editable local picker,
+  **THEN** **Create new repository** remains available. Successful creation selects the new
+  repository in that row without changing sibling rows or the executor profile.
+- **GIVEN** an empty, populated, or search-filtered repository list, **WHEN** the user opens an
+  editable local picker, **THEN** the creation action remains visible outside the search results.
 - **GIVEN** `/work/projects/alpha` already exists, **WHEN** the user tries to create `alpha` under
   `/work/projects`, **THEN** the UI reports the conflict and Kandev does not modify or register the
   existing path.
@@ -228,7 +237,6 @@ workspace registration.
 - Choosing the initial branch name; new repositories always start on `main` with the empty baseline
   commit described above.
 - Worktree, container, or remote execution before the repository has its first commit.
-- Creating a new repository as part of a multi-repository task.
 - Adding the creation action to Quick Chat, repository settings, project repository pickers, or MCP
   tools in this iteration.
 - Automatically deleting a successfully created repository when its originating task is canceled or
@@ -239,6 +247,10 @@ workspace registration.
 ## Implementation Plan
 
 See [Create Local Repository plan](../../../plans/create-local-repository/plan.md).
+
+The picker availability extension uses the
+[repository creation availability plan](../../../plans/repository-creation-availability/plan.md)
+and [system design](../system-design/create-local-repository.md).
 
 The descriptor-bound macOS repair is tracked in the
 [local repository descriptor initialization plan](../../../plans/fix-local-repository-darwin-init/plan.md).

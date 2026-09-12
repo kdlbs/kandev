@@ -3,7 +3,10 @@ import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
 
-const responsive = vi.hoisted(() => ({ isFinePointer: true }));
+const DELETE_INLINE_CONFIRM_ID = "file-delete-inline-confirmation";
+const DELETE_CONFIRM_ID = "file-delete-confirm";
+
+const responsive = vi.hoisted(() => ({ isFinePointer: true, isMobile: false }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
@@ -40,7 +43,44 @@ const BULK_TREE: FileTreeNode = {
 afterEach(() => {
   cleanup();
   responsive.isFinePointer = true;
+  responsive.isMobile = false;
   vi.useRealTimers();
+});
+
+it("hands phone file deletion from the touch menu to a named sheet without replacing its trigger", async () => {
+  responsive.isMobile = true;
+  responsive.isFinePointer = false;
+  const onDeleteFile = vi.fn().mockResolvedValue(true);
+  render(
+    <FileContextMenu
+      node={FILE_NODE}
+      tree={FILE_NODE}
+      setTree={vi.fn()}
+      onDeleteFile={onDeleteFile}
+      onStartRename={vi.fn()}
+    >
+      <div data-testid="phone-file-row">
+        <span>{FILE_NODE.name}</span>
+        <FileTreeNodeTouchActions node={FILE_NODE} showTouchActions />
+      </div>
+    </FileContextMenu>,
+  );
+  const trigger = screen.getByTestId("file-tree-node-actions");
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(screen.getByTestId("file-tree-touch-delete"));
+  const sheet = await screen.findByRole("dialog", { name: "Delete README.md" });
+  expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+  expect(within(sheet).queryByText("README.md", { selector: "p" })).toBeNull();
+  expect(trigger.isConnected).toBe(true);
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(screen.queryByTestId(DELETE_INLINE_CONFIRM_ID)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(onDeleteFile).not.toHaveBeenCalled();
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(screen.getByTestId("file-tree-touch-delete"));
+  fireEvent.click(await screen.findByTestId(DELETE_CONFIRM_ID));
+  await waitFor(() => expect(onDeleteFile).toHaveBeenCalledExactlyOnceWith(FILE_NODE.path));
 });
 
 function openMenu(triggerTestId: string) {
@@ -369,8 +409,8 @@ describe("FileContextMenu bulk deletion", () => {
 
     openMenu("single-delete-row");
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    await waitFor(() => expect(screen.getByTestId("file-delete-confirm")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("file-delete-confirm"));
+    await waitFor(() => expect(screen.getByTestId(DELETE_CONFIRM_ID)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(DELETE_CONFIRM_ID));
 
     await waitFor(() => expect(onDeleteFile).toHaveBeenCalledWith(node.path));
   });
@@ -421,17 +461,13 @@ describe("FileContextMenu touch actions", () => {
     fireEvent.pointerDown(screen.getByTestId("file-tree-node-actions"));
     fireEvent.click(screen.getByTestId("file-tree-touch-delete"));
 
-    await waitFor(() => expect(screen.getByTestId("file-delete-inline-confirmation")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(DELETE_INLINE_CONFIRM_ID)).toBeTruthy());
     expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeNull();
     expect(onDeleteFile).not.toHaveBeenCalled();
-    expect(
-      screen.getByTestId("file-delete-inline-confirmation").querySelectorAll("button"),
-    ).toHaveLength(2);
+    expect(screen.getByTestId(DELETE_INLINE_CONFIRM_ID).querySelectorAll("button")).toHaveLength(2);
 
     fireEvent.click(
-      within(screen.getByTestId("file-delete-inline-confirmation")).getByTestId(
-        "file-delete-confirm",
-      ),
+      within(screen.getByTestId(DELETE_INLINE_CONFIRM_ID)).getByTestId(DELETE_CONFIRM_ID),
     );
     await waitFor(() => expect(onDeleteFile).toHaveBeenCalledWith(FILE_NODE.path));
   });

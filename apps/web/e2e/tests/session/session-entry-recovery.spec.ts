@@ -135,9 +135,11 @@ test.describe("session entry recovery", () => {
     await details.getByTestId("session-status-details-summary").click();
     await expect(details).toContainText("WebSocket request timed out: task.session.status");
 
+    const launchRequestCountBeforeRetry = proxy.requestCount("session.launch");
     await statusNotice.getByTestId("session-status-retry").click();
     await expect(statusNotice).toHaveCount(0);
     expect(proxy.requestCount("task.session.status")).toBeGreaterThanOrEqual(3);
+    expect(proxy.requestCount("session.launch")).toBe(launchRequestCountBeforeRetry);
     expect(proxy.delayedResponseCount("task.session.status")).toBe(2);
   });
 });

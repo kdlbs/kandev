@@ -1,6 +1,6 @@
 # ADR-2026-08-22-system-oriented-specifications: Organize Specifications by System
 
-**Status:** accepted
+**Status:** accepted (amended by ADR-2026-09-07-on-demand-document-catalogs)
 **Date:** 2026-08-22
 **Area:** workflow, infra
 
@@ -34,15 +34,18 @@ for acceptance criteria. System designs and work orders reference these
 identifiers. Tests reference acceptance criteria when the mapping is useful.
 
 Use `docs/specs/guide/` as the canonical authoring guide. Skills apply this
-guide but do not duplicate its complete rules. A repository linter enforces
-the mechanical rules, including file-size limits.
+guide but do not duplicate its complete rules. The catalog command derives
+document lists from paths and frontmatter. A repository linter enforces the
+mechanical rules, including file-size limits.
 
 Do not move all legacy specifications in one mechanical change. A migration
 must separate product intent from technical design. Each migrated system must
 name one new source of truth before legacy content becomes a link or archive.
 
-This decision amends the specification layout in ADR-0001. It does not change
-the file-based and progressively loaded knowledge model.
+This decision amends the specification layout in ADR-0001. ADR-2026-09-07
+amends this decision by replacing tracked specification lists with on-demand
+catalog output. The change does not alter the file-based and progressively
+loaded knowledge model.
 
 No product specification needs an update. This decision changes the repository
 authoring system and not Kandev product behavior.
@@ -50,7 +53,7 @@ authoring system and not Kandev product behavior.
 ## Consequences
 
 Requirements and system designs stay close because they share an owning
-system. Agents can load one system index and select only the necessary files.
+system. Agents can query one system and select only the necessary files.
 
 The term `specification` becomes an umbrella term. New documents do not use a
 generic `spec.md` filename. Authors must identify each document as a product
@@ -79,4 +82,3 @@ sprawl.
 This option followed an external software-factory model. The term did not match
 Kandev terminology and implied a more rigid document than a living system
 design.
-

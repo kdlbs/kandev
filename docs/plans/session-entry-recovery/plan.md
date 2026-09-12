@@ -143,7 +143,7 @@ Implementation complete. Design-package checks and implementation checks passed:
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check -- docs/specs docs/plans/session-entry-recovery docs/plans/session-subscription-recovery`: passed.
-- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx`: 158 tests passed across 9 files.
+- `cd apps/web && pnpm exec vitest run lib/ws/client.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-subscription-retry.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption.archive.test.ts hooks/domains/session/use-session-message-fetch.test.ts components/task/chat/session-entry-feedback.test.tsx components/task/ensure-session-error.test.tsx components/task/chat/message-list-shared.test.tsx`: 170 tests passed across 9 files.
 - `cd apps/web && pnpm run typecheck`: passed.
 - The zero-warning ESLint commands listed in both work-order Results: passed.
 - `cd apps/web && pnpm run i18n:zh-hant`: passed; generated the Traditional Chinese pair.
@@ -160,8 +160,11 @@ Review remediation validation:
   permanent status error does not launch a session.
 - Deferred history generation regressions passed for terminal fetch, session A to B navigation,
   session A to B to A re-entry, unmount-safe finalization, and fresh manual Retry.
-- The focused recovery suite passed 163 tests across 9 files after remediation; typecheck,
-  zero-warning ESLint, and formatting checks passed.
+- The focused recovery suite passed 170 tests across 9 files after review remediation. It
+  includes truthful workspace-restore failures, permanent status error payloads, terminal and
+  manual history refreshes, A-to-B and A-to-B-to-A deferred races, stale loading finalization,
+  and the single live status retry path. Typecheck, zero-warning ESLint, and formatting checks
+  passed.
 
 ## Risks
 

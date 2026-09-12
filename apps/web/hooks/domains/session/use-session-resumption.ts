@@ -42,6 +42,10 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import { t } from "@/lib/i18n";
+import {
+  useWorkspaceRestoration,
+  type WorkspaceRestorationResult,
+} from "./use-workspace-restoration";
 
 export type {
   ResumptionState,
@@ -52,7 +56,11 @@ export type {
   SessionStatus,
   TaskArchiveState,
 } from "./use-session-resumption-operations";
-export { markSessionStarting, resumeWithSilentFallback } from "./use-session-resumption-operations";
+export {
+  decideResumeAction,
+  markSessionStarting,
+  resumeWithSilentFallback,
+} from "./use-session-resumption-operations";
 type CheckAndResumeParams = {
   taskId: string;
   sessionId: string;
@@ -418,6 +426,7 @@ interface UseSessionResumptionReturn {
   worktreeBranch: string | null;
   resumeSession: () => Promise<boolean>;
   retrySessionStatus: () => Promise<void>;
+  workspaceRestoration: WorkspaceRestorationResult;
 }
 
 /**
@@ -731,6 +740,7 @@ export function useSessionResumption(
   const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
   const setResumeSkipped = useAppStore((state) => state.setResumeSkipped);
   const storeApi = useAppStoreApi();
+  const workspaceRestoration = useWorkspaceRestoration(taskId, sessionId);
 
   const setters: ResumeStateSetter = {
     setResumptionState,
@@ -744,6 +754,7 @@ export function useSessionResumption(
     setResumeSkipped,
     getLiveSession: (sid: string) => storeApi.getState().taskSessions.items[sid] ?? null,
     setRecoveryFailure,
+    workspaceRestoration: workspaceRestoration.callbacks ?? undefined,
     onTaskArchiveConflict: options.onTaskArchiveConflict,
   };
 
@@ -780,5 +791,6 @@ export function useSessionResumption(
     worktreeBranch,
     resumeSession,
     retrySessionStatus: retryStatus,
+    workspaceRestoration,
   };
 }

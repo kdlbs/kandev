@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -54,14 +55,15 @@ const dynamicRouteLegacyActiveBackfillLockID int64 = 0x4B44_4452_4142 // "KDDRAB
 // is exactly the orphan the startup sweep exists to catch. Re-running a
 // value-based backfill on every boot would silently swallow it instead.
 func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
-	exists, err := db.ColumnExists(r.db, "dynamic_route_states", dynamicRouteLegacyActiveBackfillColumn)
+	ctx := r.migrationContext()
+	exists, err := db.ColumnExistsContext(ctx, r.db, "dynamic_route_states", dynamicRouteLegacyActiveBackfillColumn)
 	if err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: probe marker column: %w", err)
 	}
 	if exists {
 		return nil
 	}
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: begin tx: %w", err)
 	}
@@ -74,20 +76,20 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 	// Re-probe inside the lock: a concurrent PostgreSQL initializer may have
 	// already run and committed the backfill between the cheap probe above
 	// and this transaction acquiring the advisory lock.
-	exists, err = r.columnExists(tx, "dynamic_route_states", dynamicRouteLegacyActiveBackfillColumn)
+	exists, err = db.ColumnExistsContext(ctx, tx, "dynamic_route_states", dynamicRouteLegacyActiveBackfillColumn)
 	if err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: re-probe marker column: %w", err)
 	}
 	if exists {
 		return nil
 	}
-	eligible, err := legacyActiveBackfillVersionAllowed(tx)
+	eligible, err := legacyActiveBackfillVersionAllowed(ctx, tx)
 	if err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: read stored version: %w", err)
 	}
 
 	if eligible {
-		if _, err := tx.Exec(`
+		if _, err := tx.ExecContext(r.migrationContext(), `
 			UPDATE dynamic_route_states
 			SET state = 'active'
 			WHERE state = 'starting'
@@ -105,7 +107,7 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 		// Scoped to sessions whose dynamic_route_states row is now 'active' and
 		// whose generation still matches. A session whose authoritative route row
 		// or generation differs must keep its projection available for recovery.
-		if _, err := tx.Exec(`
+		if _, err := tx.ExecContext(r.migrationContext(), `
 			UPDATE task_sessions
 			SET route_state = 'active'
 			WHERE state = 'IDLE' AND route_state = 'starting'
@@ -120,8 +122,8 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 			return fmt.Errorf("dynamic route legacy backfill: backfill task_sessions: %w", err)
 		}
 	}
-	if _, err := tx.Exec(`ALTER TABLE dynamic_route_states ADD COLUMN ` +
-		dynamicRouteLegacyActiveBackfillColumn + ` INTEGER NOT NULL DEFAULT 1`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `ALTER TABLE dynamic_route_states ADD COLUMN `+
+		dynamicRouteLegacyActiveBackfillColumn+` INTEGER NOT NULL DEFAULT 1`); err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: add marker column: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -130,8 +132,8 @@ func (r *Repository) backfillLegacyActiveDynamicRoutes() error {
 	return nil
 }
 
-func legacyActiveBackfillVersionAllowed(conn db.SchemaQuerier) (bool, error) {
-	exists, err := db.TableExists(conn, "kandev_meta")
+func legacyActiveBackfillVersionAllowed(ctx context.Context, conn db.ContextSchemaQuerier) (bool, error) {
+	exists, err := db.TableExistsContext(ctx, conn, "kandev_meta")
 	if err != nil {
 		return false, err
 	}
@@ -139,7 +141,7 @@ func legacyActiveBackfillVersionAllowed(conn db.SchemaQuerier) (bool, error) {
 		return false, nil
 	}
 	var storedVersion string
-	err = conn.QueryRow(conn.Rebind(
+	err = conn.QueryRowContext(ctx, conn.Rebind(
 		`SELECT value FROM kandev_meta WHERE key = 'kandev_version'`,
 	)).Scan(&storedVersion)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -174,10 +176,10 @@ func (r *Repository) acquireDynamicRouteLegacyActiveBackfillLock(tx *sqlx.Tx) er
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		return nil
 	}
-	if _, err := tx.Exec(`SET LOCAL lock_timeout = '30s'`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `SET LOCAL lock_timeout = '30s'`); err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: set lock timeout: %w", err)
 	}
-	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, dynamicRouteLegacyActiveBackfillLockID); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `SELECT pg_advisory_xact_lock($1)`, dynamicRouteLegacyActiveBackfillLockID); err != nil {
 		return fmt.Errorf("dynamic route legacy backfill: acquire migration advisory lock: %w", err)
 	}
 	return nil

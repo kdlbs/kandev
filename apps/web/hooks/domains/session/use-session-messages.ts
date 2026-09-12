@@ -160,6 +160,7 @@ type InFlightMessageRequest = {
   readiness: Promise<void>;
   promise: Promise<MessageListResponse>;
   cachedAtRequest: Message[];
+  settled: boolean;
 };
 
 const EMPTY_MESSAGES: Message[] = [];
@@ -205,7 +206,7 @@ function requestSessionMessages(
   cachedAtRequest: Message[],
 ): InFlightMessageRequest {
   const existing = inFlightMessageRequests.get(sessionId);
-  if (existing?.readiness === readiness) return existing;
+  if (existing?.readiness === readiness && !existing.settled) return existing;
 
   const requestParams = {
     session_id: sessionId,
@@ -217,10 +218,11 @@ function requestSessionMessages(
     requestParams,
     SESSION_ENTRY_REQUEST_TIMEOUT_MS,
   );
-  const entry = { readiness, promise, cachedAtRequest: [...cachedAtRequest] };
+  const entry = { readiness, promise, cachedAtRequest: [...cachedAtRequest], settled: false };
   inFlightMessageRequests.set(sessionId, entry);
   void promise.then(
     () => {
+      entry.settled = true;
       window.setTimeout(() => {
         if (inFlightMessageRequests.get(sessionId) === entry) {
           inFlightMessageRequests.delete(sessionId);
@@ -228,6 +230,7 @@ function requestSessionMessages(
       }, 0);
     },
     () => {
+      entry.settled = true;
       window.setTimeout(() => {
         if (inFlightMessageRequests.get(sessionId) === entry) {
           inFlightMessageRequests.delete(sessionId);
@@ -394,6 +397,7 @@ function useTerminalStateFetch(
       ...refs,
       fetchAndStoreMessages,
       isActive,
+      canFinalizeLoading: isActive,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
     return deactivate;
@@ -504,11 +508,14 @@ function useSessionSubscription({
     void subscription.ready
       .then(() => {
         if (!active) return;
+        const isCurrentGeneration = () =>
+          active && sessionFetchGenerationRef.current === generation;
         return doFetchMessages({
           taskSessionId,
           ...fetchRefs,
           fetchAndStoreMessages,
-          isActive: () => active && sessionFetchGenerationRef.current === generation,
+          isActive: isCurrentGeneration,
+          canFinalizeLoading: isCurrentGeneration,
           hydrationRef,
           hydrationKey,
         });
@@ -797,6 +804,7 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
         setIsWaitingForInitialMessages: () => {},
         fetchAndStoreMessages,
         isActive,
+        canFinalizeLoading: isActive,
         hydrationRef,
         hydrationKey,
       })
@@ -814,6 +822,7 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
       ...fetchRefs,
       fetchAndStoreMessages,
       isActive,
+      canFinalizeLoading: isActive,
       hydrationRef,
       hydrationKey,
     });
@@ -858,13 +867,18 @@ function useSessionHistoryRecoveryState({
 }) {
   const activeSessionIdRef = useRef(taskSessionId);
   const historySessionIdRef = useRef(taskSessionId);
+  const previousConnectionStatusRef = useRef(connectionStatus);
   const sessionFetchGenerationRef = useRef(0);
   const { refs: fetchRefs } = fetchState;
 
   useLayoutEffect(() => {
     sessionFetchGenerationRef.current += 1;
     activeSessionIdRef.current = taskSessionId;
-    if (historySessionIdRef.current !== taskSessionId) {
+    const sessionChanged = historySessionIdRef.current !== taskSessionId;
+    const connectionChanged = previousConnectionStatusRef.current !== connectionStatus;
+    previousConnectionStatusRef.current = connectionStatus;
+    if (sessionChanged || connectionChanged) fetchRefs.setIsLoading(false);
+    if (sessionChanged) {
       historySessionIdRef.current = taskSessionId;
       fetchRefs.setHistoryStatus(taskSessionId ? "loading" : "ready");
       fetchRefs.setHistoryError(null);
@@ -889,15 +903,17 @@ function useSessionHistoryRecoveryState({
     fetchState.lastFetchedSessionIdRef.current = null;
     fetchState.cachedRefreshGenerationRef.current += 1;
     hydrationRef.current = null;
+    const isCurrentGeneration = () =>
+      activeSessionIdRef.current === retrySessionId &&
+      sessionFetchGenerationRef.current === generation;
     void doFetchMessages({
       taskSessionId: retrySessionId,
       ...fetchRefs,
       setIsWaitingForInitialMessages:
         messages.length > 0 ? () => {} : fetchRefs.setIsWaitingForInitialMessages,
       fetchAndStoreMessages,
-      isActive: () =>
-        activeSessionIdRef.current === retrySessionId &&
-        sessionFetchGenerationRef.current === generation,
+      isActive: isCurrentGeneration,
+      canFinalizeLoading: isCurrentGeneration,
       hydrationRef,
       hydrationKey,
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type RefObject, type ReactNode } from "react";
 import { IconBookmark, IconChevronDown, IconDeviceFloppy, IconX } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import {
@@ -18,7 +18,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
 import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
 import {
-  useSavedTaskViewDeleteConfirmation,
+  useSavedTaskViewDeleteMenu,
   type SavedTaskViewDeleteTarget,
 } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
@@ -124,15 +124,18 @@ function SavedMenuTrigger({
   testId,
   active,
   label,
+  triggerRef,
 }: {
   testId: string;
   active: boolean;
   label: string | null;
+  triggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const { t } = useTranslation();
   return (
     <DropdownMenuTrigger asChild>
       <button
+        ref={triggerRef}
         type="button"
         data-testid={testId}
         className={cn(PILL_BASE, active ? PILL_ACTIVE : PILL_IDLE)}
@@ -167,6 +170,10 @@ function useSavedMenuSave(onSaveCurrent: () => void) {
   };
 }
 
+function preserveConfirmationInteraction(event: Event) {
+  if (isActionConfirmationTarget(event.target)) event.preventDefault();
+}
+
 function SavedMenu<K extends string>({
   testId,
   selected,
@@ -191,34 +198,32 @@ function SavedMenu<K extends string>({
   savedStatus?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const deletion = useSavedTaskViewDeleteMenu(saved, isMobile);
   const save = useSavedMenuSave(onSaveCurrent);
-  const deletion = useSavedTaskViewDeleteConfirmation(saved);
   const menuContentRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const defaultMutationPending = defaultMutationPendingId !== null;
   const activeSaved = selected.source === "saved";
   const activeLabel = activeSaved ? (saved.find((s) => s.id === selected.id)?.label ?? null) : null;
   return (
-    <DropdownMenu
-      open={menuOpen}
-      onOpenChange={(open) => {
-        setMenuOpen(open);
-        if (!open) deletion.close();
-      }}
-    >
-      <SavedMenuTrigger testId={testId} active={activeSaved} label={activeLabel} />
+    <DropdownMenu open={deletion.open} onOpenChange={deletion.onOpenChange}>
+      <SavedMenuTrigger
+        testId={testId}
+        active={activeSaved}
+        label={activeLabel}
+        triggerRef={triggerRef}
+      />
       <DropdownMenuContent
         ref={menuContentRef}
         align="end"
         className="w-56"
-        onCloseAutoFocus={save.onCloseAutoFocus}
-        onFocusOutside={(event) => {
-          if (isActionConfirmationTarget(event.target)) event.preventDefault();
+        onCloseAutoFocus={(event) => {
+          deletion.onCloseAutoFocus(event);
+          save.onCloseAutoFocus();
         }}
-        onInteractOutside={(event) => {
-          if (isActionConfirmationTarget(event.target)) event.preventDefault();
-        }}
+        onFocusOutside={preserveConfirmationInteraction}
+        onInteractOutside={preserveConfirmationInteraction}
       >
         {savedStatus}
         {saved.length === 0
@@ -229,7 +234,7 @@ function SavedMenu<K extends string>({
               <SavedMenuEntry
                 key={preset.id}
                 preset={preset}
-                isFinePointer={isFinePointer}
+                isFinePointer={!isMobile && isFinePointer}
                 deletion={deletion}
                 defaultMutationPending={defaultMutationPending}
                 defaultMutationPendingForPreset={defaultMutationPendingId === preset.id}
@@ -250,12 +255,12 @@ function SavedMenu<K extends string>({
           <span>{t("integrations:saveCurrentQuery")}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
-      {isFinePointer && deletion.target ? (
+      {(isMobile || isFinePointer) && deletion.target ? (
         <SavedTaskViewDeleteConfirmation
           target={deletion.target}
           presentation="popover"
           open
-          anchorRef={deletion.anchorRef}
+          anchorRef={isMobile ? triggerRef : deletion.anchorRef}
           focusBoundaryRef={menuContentRef}
           confirmDisabled={defaultMutationPending}
           onOpenChange={(open) => {

@@ -10,8 +10,8 @@ import { clearOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walk
 import { cn } from "@kandev/ui/lib/utils";
 import type { TaskWalkthrough } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
-import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { WalkthroughDiscardConfirmation } from "./walkthrough-discard-confirmation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type WalkthroughOverlayProps = {
@@ -29,6 +29,7 @@ type WalkthroughLauncherProps = {
   discardDisabled: boolean;
   hasUnseen: boolean;
   isFinePointer: boolean;
+  isMobile: boolean;
   isOpen: boolean;
   onDiscardClick: () => void;
   onDiscardCancel: () => void;
@@ -45,6 +46,7 @@ function WalkthroughLauncher({
   discardDisabled,
   hasUnseen,
   isFinePointer,
+  isMobile,
   isOpen,
   onDiscardClick,
   onDiscardCancel,
@@ -90,7 +92,7 @@ function WalkthroughLauncher({
           {activeStep + 1}/{stepCount}
         </span>
       </button>
-      {isFinePointer || !confirmDiscardOpen ? (
+      {isMobile || isFinePointer || !confirmDiscardOpen ? (
         <button
           ref={discardAnchorRef}
           type="button"
@@ -178,8 +180,7 @@ function useWalkthroughBackfill(params: {
  */
 export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayProps) {
   const { t } = useTranslation();
-  const discardLabel = t("review:discardWalkthrough");
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const walkthrough = useAppStore((s) => (taskId ? s.walkthroughs.byTaskId[taskId] : null));
   const connectionStatus = useAppStore((s) => s.connection.status);
   const activeStep = useAppStore((s) =>
@@ -251,7 +252,8 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
         discardAnchorRef={discardAnchorRef}
         discardDisabled={discarding}
         hasUnseen={hasUnseen}
-        isFinePointer={isFinePointer}
+        isFinePointer={!isMobile && isFinePointer}
+        isMobile={isMobile}
         isOpen={open}
         onDiscardClick={() => setDiscardTargetTaskId(taskId)}
         onDiscardCancel={() => {
@@ -263,20 +265,15 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
         onToggle={() => (open ? closeTour() : openTour())}
         stepCount={walkthrough.steps.length}
       />
-      {isFinePointer ? (
-        <ActionConfirmPopover
-          open={confirmDiscardOpen}
-          anchorRef={discardAnchorRef}
-          title={t("review:discardWalkthroughTitle")}
-          description={t("review:discardWalkthroughDescription")}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={discardLabel}
-          confirmTestId="walkthrough-discard-confirm"
-          testId="walkthrough-discard-confirmation"
-          onOpenChange={(nextOpen) => setDiscardTargetTaskId(nextOpen ? taskId : null)}
-          onConfirm={() => discardWalkthrough(discardTargetTaskId)}
-        />
-      ) : null}
+      <WalkthroughDiscardConfirmation
+        taskId={taskId}
+        walkthrough={walkthrough}
+        open={confirmDiscardOpen}
+        anchorRef={discardAnchorRef}
+        disabled={discarding}
+        onOpenChange={(nextOpen) => setDiscardTargetTaskId(nextOpen ? taskId : null)}
+        onConfirm={() => discardWalkthrough(discardTargetTaskId)}
+      />
     </>
   );
 }

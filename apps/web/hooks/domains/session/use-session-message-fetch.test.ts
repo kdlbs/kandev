@@ -82,7 +82,7 @@ describe("doFetchMessages", () => {
     expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
   });
 
-  it("releases store bookkeeping without finalizing stale hook gates", async () => {
+  it("releases store and local loading bookkeeping when a stale fetch settles", async () => {
     const result = deferred<Message[]>();
     const setMessagesLoading = vi.fn();
     const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
@@ -93,8 +93,27 @@ describe("doFetchMessages", () => {
     result.resolve([]);
     await fetch;
 
-    expect(params.setIsLoading).toHaveBeenLastCalledWith(true);
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(false);
     expect(params.setIsWaitingForInitialMessages).toHaveBeenLastCalledWith(true);
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
+  it("does not finalize a newer hook generation from a stale fetch", async () => {
+    const result = deferred<Message[]>();
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
+    const isActive = { value: true };
+    const fetch = doFetchMessages({
+      ...params,
+      isActive: () => isActive.value,
+      canFinalizeLoading: () => isActive.value,
+    } as never);
+
+    isActive.value = false;
+    result.resolve([]);
+    await fetch;
+
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(true);
     expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
   });
 
