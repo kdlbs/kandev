@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -174,9 +175,7 @@ func TestContributionHistoryCommitCountBoundary(t *testing.T) {
 
 	base := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 	runGit(t, repoDir, "checkout", "-b", "feature/count-limit")
-	for index := 0; index < contributionHistoryCommitLimit+1; index++ {
-		runGit(t, repoDir, "commit", "--allow-empty", "-m", fmt.Sprintf("count commit %d", index))
-	}
+	createContributionHistoryCommitChain(t, repoDir, "feature/count-limit", base, contributionHistoryCommitLimit+1)
 	head := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 	limited := operator.contributionHistoryCount(context.Background(), base, head)
@@ -188,6 +187,43 @@ func TestContributionHistoryCommitCountBoundary(t *testing.T) {
 	underLimit := operator.contributionHistoryCount(context.Background(), base, underLimitHead)
 	if underLimit.limited || underLimit.count == nil || *underLimit.count != contributionHistoryCommitLimit {
 		t.Fatalf("count below limit = %+v, want exact count %d", underLimit, contributionHistoryCommitLimit)
+	}
+}
+
+func createContributionHistoryCommitChain(t *testing.T, repoDir, branch, base string, count int) {
+	t.Helper()
+	var input strings.Builder
+	for index := 0; index < count; index++ {
+		input.WriteString("commit refs/heads/")
+		input.WriteString(branch)
+		input.WriteByte('\n')
+		input.WriteString("mark :")
+		input.WriteString(strconv.Itoa(index + 1))
+		input.WriteByte('\n')
+		input.WriteString("author Kandev Test <test@example.com> 1700000000 +0000\n")
+		input.WriteString("committer Kandev Test <test@example.com> 1700000000 +0000\n")
+		message := fmt.Sprintf("count commit %d", index)
+		input.WriteString("data ")
+		input.WriteString(strconv.Itoa(len(message)))
+		input.WriteByte('\n')
+		input.WriteString(message)
+		input.WriteByte('\n')
+		if index == 0 {
+			input.WriteString("from ")
+			input.WriteString(base)
+			input.WriteByte('\n')
+		} else {
+			input.WriteString("from :")
+			input.WriteString(strconv.Itoa(index))
+			input.WriteByte('\n')
+		}
+	}
+
+	cmd := exec.Command("git", "-C", repoDir, "fast-import")
+	cmd.Env = filterTestGitEnv(os.Environ())
+	cmd.Stdin = strings.NewReader(input.String())
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git fast-import failed: %v\nOutput: %s", err, output)
 	}
 }
 
