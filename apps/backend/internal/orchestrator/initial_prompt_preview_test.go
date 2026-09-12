@@ -81,6 +81,36 @@ func TestInitialPromptPreviewPersistsOnlyInPreparedSession(t *testing.T) {
 	require.Equal(t, "kept", reloaded.Metadata["unrelated"])
 }
 
+// @covers AC-TASKS-PROMPT-ATTACHMENTS-001.8
+// @covers AC-TASKS-PROMPT-ATTACHMENTS-001.10
+func TestInitialPromptPreviewPersistsThroughPassthroughPrepareUpgrade(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task1", WorkspaceID: "ws1", Title: "Task"}))
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Task"}
+	manager := &mockAgentManager{isPassthrough: true}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, manager)
+
+	preview := models.NewInitialPromptPreview("submitted text", []v1.MessageAttachment{
+		{AttachmentID: "image-1", Type: "image", Name: "screen.png", MimeType: "image/png", SizeBytes: 32},
+	})
+	response, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID: "task1", AgentProfileID: "profile1", Intent: IntentPrepare,
+		InitialPromptPreview: preview,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, response.SessionID)
+	session, err := repo.GetTaskSession(ctx, response.SessionID)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(session.Metadata[models.SessionMetaKeyInitialPromptPreview])
+	require.NoError(t, err)
+	expected, err := json.Marshal(preview)
+	require.NoError(t, err)
+	require.JSONEq(t, string(expected), string(encoded))
+}
+
 type initialPreviewFailureStore struct {
 	sessionExecutorStore
 	sessionID string

@@ -37,6 +37,14 @@ export async function assertPreparationAttachments(options: Options) {
   const { settings } = await apiClient.getUserSettings();
   let taskId: string | undefined;
   let repositoryId: string | undefined;
+  const cleanupErrors: unknown[] = [];
+  const runCleanup = async (cleanup: () => void | Promise<void>) => {
+    try {
+      await cleanup();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  };
   try {
     execFileSync("git", ["clone", "--local", seedData.repositoryPath, repoDir], {
       env: makeGitEnv(backend.tmpDir),
@@ -169,23 +177,28 @@ export async function assertPreparationAttachments(options: Options) {
       ).toBeVisible();
     }
   } finally {
-    fs.writeFileSync(release, "release");
-    if (taskId) {
+    await runCleanup(() => fs.writeFileSync(release, "release"));
+    await runCleanup(async () => {
+      if (!taskId) return;
       const response = await apiClient.rawRequest(
         "DELETE",
         `/api/v1/tasks/${taskId}?discard_worktree_changes=true`,
       );
       expect(response.ok).toBeTruthy();
-    }
-    if (repositoryId) {
+    });
+    await runCleanup(async () => {
+      if (!repositoryId) return;
       const response = await apiClient.rawRequest("DELETE", `/api/v1/repositories/${repositoryId}`);
       expect(response.ok).toBeTruthy();
-    }
-    await apiClient.saveUserSettings({
-      task_create_last_used: settings.task_create_last_used as Parameters<
-        ApiClient["saveUserSettings"]
-      >[0]["task_create_last_used"],
     });
-    fs.rmSync(fixture, { recursive: true, force: true });
+    await runCleanup(() =>
+      apiClient.saveUserSettings({
+        task_create_last_used: settings.task_create_last_used as Parameters<
+          ApiClient["saveUserSettings"]
+        >[0]["task_create_last_used"],
+      }),
+    );
+    await runCleanup(() => fs.rmSync(fixture, { recursive: true, force: true }));
+    if (cleanupErrors.length > 0) throw cleanupErrors[0];
   }
 }

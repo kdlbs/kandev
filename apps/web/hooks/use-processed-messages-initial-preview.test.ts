@@ -130,6 +130,7 @@ describe("initial prompt preview guards", () => {
             "invalid",
             {},
             { ...attachment, data: "private", storage_key: "private/path" },
+            { ...attachment, type: "audio" },
           ],
         },
       }),

@@ -234,10 +234,10 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if s.shouldUpgradePassthroughPrepare(ctx, req) {
-		return s.launchStart(ctx, req)
-	}
 	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
+	if s.shouldUpgradePassthroughPrepare(ctx, req) {
+		return s.launchStart(prepareCtx, req)
+	}
 	sessionID, err := s.PrepareTaskSession(
 		prepareCtx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.WorkflowStepID, req.LaunchWorkspace,

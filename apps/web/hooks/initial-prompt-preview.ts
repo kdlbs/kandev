@@ -2,7 +2,7 @@ export const TASK_DESCRIPTION_SYNTHETIC_ID = "task-description";
 
 type PreviewAttachment = {
   attachment_id: string;
-  type: "image" | "resource" | "audio";
+  type: "image" | "resource";
   mime_type: string;
   name: string;
   size_bytes?: number;
@@ -23,7 +23,7 @@ function readAttachment(value: unknown): PreviewAttachment | null {
     !isRecord(value) ||
     typeof value.attachment_id !== "string" ||
     !value.attachment_id.trim() ||
-    !["image", "resource", "audio"].includes(value.type as string) ||
+    !["image", "resource"].includes(value.type as string) ||
     typeof value.mime_type !== "string" ||
     typeof value.name !== "string"
   ) {
