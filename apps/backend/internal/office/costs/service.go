@@ -43,6 +43,9 @@ type Repository interface {
 	) (models.SpendWindow, error)
 	GetWorkspaceBudgetDefault(ctx context.Context, workspaceID string) (limitSubcents int64, found bool, err error)
 	SetWorkspaceBudgetDefault(ctx context.Context, workspaceID string, limitSubcents int64) error
+	// Claim atomically records that (policyID, periodKey, level) may emit its
+	// budget notification. See docs/specs/office/requirements/costs.md.
+	Claim(ctx context.Context, policyID, periodKey, level string) (bool, error)
 }
 
 // CostService handles cost recording, summaries, and budget evaluation.

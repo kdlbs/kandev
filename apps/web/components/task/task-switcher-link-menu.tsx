@@ -13,7 +13,7 @@ import {
 import { ContextMenuItem, ContextMenuSub, ContextMenuSubTrigger } from "@kandev/ui/context-menu";
 import { TaskContextMenuSubContent as ContextMenuSubContent } from "./task-context-menu-sub-content";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
-import type { PluginIcon } from "@/lib/plugins/types";
+import type { PluginLinkMenuAction } from "./task-session-sidebar-link-actions";
 import { useTaskPluginLinkActions } from "./task-session-sidebar-link-actions";
 import type { TaskSwitcherItem } from "./task-switcher-types";
 
@@ -99,6 +99,40 @@ export function TaskPluginLinkMenu({
   disabled,
   closeMenu,
   linkActions,
+  pluginLinkActions: suppliedPluginLinkActions,
+}: {
+  task?: TaskSwitcherItem;
+  disabled?: boolean;
+  closeMenu: () => void;
+  linkActions: Partial<ReturnType<typeof selectTaskLinkActions>>;
+  pluginLinkActions?: PluginLinkMenuAction[];
+}) {
+  if (suppliedPluginLinkActions) {
+    return (
+      <TaskLinkMenuWithActions
+        disabled={disabled}
+        closeMenu={closeMenu}
+        linkActions={linkActions}
+        pluginLinkActions={suppliedPluginLinkActions}
+      />
+    );
+  }
+  if (!task) return null;
+  return (
+    <TaskLinkMenuWithTask
+      task={task}
+      disabled={disabled}
+      closeMenu={closeMenu}
+      linkActions={linkActions}
+    />
+  );
+}
+
+function TaskLinkMenuWithTask({
+  task,
+  disabled,
+  closeMenu,
+  linkActions,
 }: {
   task: TaskSwitcherItem;
   disabled?: boolean;
@@ -106,6 +140,27 @@ export function TaskPluginLinkMenu({
   linkActions: Partial<ReturnType<typeof selectTaskLinkActions>>;
 }) {
   const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositoryLinks ?? []);
+  return (
+    <TaskLinkMenuWithActions
+      disabled={disabled}
+      closeMenu={closeMenu}
+      linkActions={linkActions}
+      pluginLinkActions={pluginLinkActions}
+    />
+  );
+}
+
+function TaskLinkMenuWithActions({
+  disabled,
+  closeMenu,
+  linkActions,
+  pluginLinkActions,
+}: {
+  disabled?: boolean;
+  closeMenu: () => void;
+  linkActions: Partial<ReturnType<typeof selectTaskLinkActions>>;
+  pluginLinkActions: PluginLinkMenuAction[];
+}) {
   return (
     <TaskLinkMenu
       disabled={disabled}
@@ -138,7 +193,7 @@ function TaskLinkMenu({
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
-  pluginLinkActions?: { id: string; label: string; icon?: PluginIcon; onSelect: () => void }[];
+  pluginLinkActions?: PluginLinkMenuAction[];
 }) {
   const { t } = useTranslation();
   if (

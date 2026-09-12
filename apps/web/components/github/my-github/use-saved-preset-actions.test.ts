@@ -132,7 +132,7 @@ async function expectLatestPresetCatalogAfterDelete() {
   expect(setQueryImmediate).toHaveBeenCalledWith(refreshedIssuePreset.filter);
 }
 
-async function expectStaleSaveOutcomeIgnored() {
+async function expectStaleSaveOutcomeIgnored(returnToFirstWorkspace = false) {
   let finishSave!: () => void;
   const save = vi.fn(
     () =>
@@ -149,14 +149,21 @@ async function expectStaleSaveOutcomeIgnored() {
     setRepoFilter,
   } = renderActions({}, makeStore({ save }));
 
-  let mutation!: Promise<void>;
+  let mutation!: Promise<boolean>;
   act(() => {
     mutation = result.current.onConfirmSave(savedPreset.label, savedPreset.repoFilter);
   });
   rerender({ workspaceId: SECOND_WORKSPACE_ID });
+  if (returnToFirstWorkspace) {
+    rerender({
+      workspaceId: FIRST_WORKSPACE_ID,
+      customQuery: "newer query",
+      selection: { kind: "pr", source: "preset", id: "mentions" },
+    });
+  }
   await act(async () => {
     finishSave();
-    await mutation;
+    expect(await mutation).toBe(false);
   });
 
   expect(markSearchInteracted).not.toHaveBeenCalled();
@@ -275,7 +282,10 @@ beforeEach(() => {
 });
 
 describe("useSavedPresetActions save actions", () => {
-  it("ignores a completed save after changing workspace", expectStaleSaveOutcomeIgnored);
+  it("ignores a completed save after changing workspace", () => expectStaleSaveOutcomeIgnored());
+
+  it("ignores a completed save after navigating A to B to A", () =>
+    expectStaleSaveOutcomeIgnored(true));
 
   it("saves the current query, commits it, selects it, and applies its repository", async () => {
     const save = vi.fn(async () => savedPreset);
@@ -321,7 +331,9 @@ describe("useSavedPresetActions save actions", () => {
       markSearchInteracted,
     } = renderActions({}, makeStore({ save }));
 
-    await act(async () => result.current.onConfirmSave("Unavailable", REPO));
+    await act(async () => {
+      expect(await result.current.onConfirmSave("Unavailable", REPO)).toBe(false);
+    });
 
     expect(markSearchInteracted).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalledWith({
@@ -344,7 +356,9 @@ describe("useSavedPresetActions save actions", () => {
       makeStore({ save }),
     );
 
-    await act(async () => result.current.onConfirmSave("Unavailable", REPO));
+    await act(async () => {
+      expect(await result.current.onConfirmSave("Unavailable", REPO)).toBe(false);
+    });
 
     expect(mockToast).toHaveBeenCalledWith({
       description: "Failed to save saved query",

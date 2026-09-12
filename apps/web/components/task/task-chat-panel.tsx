@@ -1174,6 +1174,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             workspaceId={launchErrorContext.workspaceId}
             statusSummary={launchStatusSummary}
             sessionId={resolvedSessionId}
+            sessionMetadata={session?.metadata}
             repositories={launchErrorContext.repositories}
           />
         )}

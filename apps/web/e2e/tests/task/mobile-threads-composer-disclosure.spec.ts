@@ -54,7 +54,7 @@ test("keeps the touch composer visible and restores drafts through single-chat n
       a.locator(".chat-message-list").getByText("My mobile draft", { exact: true }),
     ).toBeVisible();
     await expect(editor).toBeEmpty();
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoHorizontalOverflow(testPage, "short phone composer after sending");
     await capturePresentation(testPage, testInfo, "phone-visible-composer-short-height");
     await testPage.setViewportSize({ width: 900, height: 1100 });
     await expect(board).toHaveAttribute("data-layout", "grid");
@@ -63,7 +63,7 @@ test("keeps the touch composer visible and restores drafts through single-chat n
     await expect(board.getByTestId("collapse-composer")).toHaveCount(0);
     expect((await captureThreadSettings(apiClient)).thread_views[0].auto_hide_composer).toBe(true);
     await capturePresentation(testPage, testInfo, "tablet-visible-composers");
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoHorizontalOverflow(testPage, "touch tablet visible composers");
   } finally {
     await apiClient.saveUserSettings(original);
   }
@@ -95,7 +95,7 @@ test("keeps required answers reachable above a short mobile viewport", async ({
     await expect(question).toHaveCount(0);
     await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
     await expect(testPage.getByTestId("session-chat")).toHaveCount(1);
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoHorizontalOverflow(testPage, "short phone required answer");
   } finally {
     await apiClient.saveUserSettings(original);
   }
@@ -141,7 +141,7 @@ test("keeps native model, cancellation and attachment controls usable by touch",
     await expect(tile.getByText("touch-notes.txt", { exact: false })).toBeVisible();
     await expect(tile.getByTestId("submit-message-button")).toBeEnabled();
     await expect(tile.getByTestId("collapse-composer")).toHaveCount(0);
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoHorizontalOverflow(testPage, "phone composer controls and attachment");
   } finally {
     await apiClient.saveUserSettings(original);
   }

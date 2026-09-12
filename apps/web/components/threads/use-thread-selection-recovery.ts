@@ -90,8 +90,10 @@ export function useThreadSelectionRecovery(
     const changed = old.ids.join("\u0000") !== idsKey || old.layoutKey !== layoutKey;
     if (changed && old.ids.length > 0 && board && element) {
       if (next === old.taskId) {
-        board.scrollLeft +=
+        const adjustment =
           element.getBoundingClientRect().left - board.getBoundingClientRect().left - old.offset;
+        // Even assigning the current offset cancels an in-flight browser smooth scroll.
+        if (adjustment !== 0) board.scrollLeft += adjustment;
       } else {
         element.scrollIntoView({ inline: "start", block: "nearest", behavior: "instant" });
       }

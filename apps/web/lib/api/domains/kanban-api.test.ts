@@ -3,6 +3,7 @@ import {
   attachTaskWorkspaceSources,
   detachTask,
   deleteTask,
+  getTaskDeletePreflight,
   listTasksByWorkspace,
   moveTask,
   updateTask,
@@ -35,6 +36,30 @@ describe("deleteTask", () => {
       `${API_BASE_URL}/api/v1/tasks/task-1?cascade=true&discard_worktree_changes=true`,
     );
     expect(init?.method).toBe("DELETE");
+  });
+});
+
+describe("getTaskDeletePreflight", () => {
+  it("posts the exact scope and bypasses caches", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ requires_discard_consent: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(
+      getTaskDeletePreflight(["task-1", "task-2"], true, { baseUrl: API_BASE_URL }),
+    ).resolves.toEqual({ requires_discard_consent: true });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/delete-preflight`);
+    expect(init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ task_ids: ["task-1", "task-2"], cascade: true }),
+      cache: "no-store",
+    });
   });
 });
 

@@ -100,20 +100,31 @@ function thread(overrides: Partial<ActiveThread> & { taskId: string }): ActiveTh
   };
 }
 
+function mockBoardResize() {
+  let resize: ResizeObserverCallback = () => {};
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  return (width?: number) =>
+    act(() =>
+      resize(
+        [{ contentRect: { height: 700, width } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      ),
+    );
+}
+
 describe("ThreadsBoard — presentation reflow", () => {
   // @covers AC-UI-THREADS-DECK-004.6
   it("reasserts an unretired deep link after width-only reflow", () => {
-    let resize: ResizeObserverCallback = () => {};
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(callback: ResizeObserverCallback) {
-          resize = callback;
-        }
-        observe() {}
-        disconnect() {}
-      },
-    );
+    const measure = mockBoardResize();
     const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
     render(
       <ThreadsBoard
@@ -122,13 +133,6 @@ describe("ThreadsBoard — presentation reflow", () => {
         onOpenTask={() => {}}
       />,
     );
-    const measure = (width: number) =>
-      act(() =>
-        resize(
-          [{ contentRect: { height: 700, width } } as ResizeObserverEntry],
-          {} as ResizeObserver,
-        ),
-      );
     measure(1100);
     scroll.mockClear();
     measure(800);
@@ -141,24 +145,12 @@ describe("ThreadsBoard — presentation reflow", () => {
   });
   // @covers AC-UI-THREADS-DECK-004.1, AC-UI-THREADS-DECK-004.2
   it("uses two column-major rows without replacing the task shells", () => {
-    let resize: ResizeObserverCallback = () => {};
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(callback: ResizeObserverCallback) {
-          resize = callback;
-        }
-        observe() {}
-        disconnect() {}
-      },
-    );
+    const measure = mockBoardResize();
     const threads = ["a", "b", "c"].map((taskId) => thread({ taskId }));
     const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
     const view = render(<ThreadsBoard threads={threads} focusedTaskId="b" onOpenTask={() => {}} />);
     const shells = [...screen.getByTestId(BOARD_TEST_ID).children];
-    act(() =>
-      resize([{ contentRect: { height: 700 } } as ResizeObserverEntry], {} as ResizeObserver),
-    );
+    measure();
     view.rerender(
       <ThreadsBoard threads={threads} layout="grid" focusedTaskId="b" onOpenTask={() => {}} />,
     );
@@ -166,6 +158,51 @@ describe("ThreadsBoard — presentation reflow", () => {
     expect(board.style.gridTemplateRows).toBe("repeat(2, minmax(0, 1fr))");
     expect([...board.children]).toEqual(shells);
     expect(scroll).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ThreadsBoard — reader recovery", () => {
+  it("anchors the wheel-read tile across a layout reflow", () => {
+    const measure = mockBoardResize();
+    const threads = ["a", "b", "c", "d", "e", "f"].map((taskId) => thread({ taskId }));
+    const view = render(<ThreadsBoard threads={threads} onOpenTask={() => {}} />);
+    const board = screen.getByTestId(BOARD_TEST_ID);
+    vi.spyOn(board, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 600, 700));
+    let grid = false;
+    threads.forEach(({ taskId }, index) => {
+      vi.spyOn(
+        screen.getByTestId(`thread-column-${taskId}`),
+        "getBoundingClientRect",
+      ).mockImplementation(
+        () =>
+          new DOMRect((grid ? Math.floor(index / 2) : index) * 372 - board.scrollLeft, 0, 360, 300),
+      );
+    });
+    measure(600);
+    board.scrollLeft = 1660;
+    fireEvent.wheel(screen.getByTestId("thread-column-f"), { deltaY: 100 });
+    grid = true;
+    view.rerender(<ThreadsBoard threads={threads} layout="grid" onOpenTask={() => {}} />);
+    expect(board.scrollLeft).toBe(544);
+    expect(screen.getByTestId("thread-column-f").getBoundingClientRect().left).toBe(200);
+  });
+
+  it.each([true, false])("honors reduced motion (%s) when revealing a deep link", (reduced) => {
+    const originalMatchMedia = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) =>
+      query === "(prefers-reduced-motion: reduce)"
+        ? { ...originalMatchMedia(query), matches: reduced }
+        : originalMatchMedia(query),
+    );
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    render(
+      <ThreadsBoard threads={[thread({ taskId: "a" })]} focusedTaskId="a" onOpenTask={() => {}} />,
+    );
+    expect(scroll).toHaveBeenCalledWith({
+      inline: "center",
+      block: "nearest",
+      behavior: reduced ? "instant" : "smooth",
+    });
   });
 });
 

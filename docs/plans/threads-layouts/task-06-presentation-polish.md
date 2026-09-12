@@ -140,6 +140,13 @@ shipped `AnchoredLastPromptBar` grid-track transition pattern.
 
 ## Results
 
+PR #3626 follow-up: deep-link scrolling now honors reduced motion alongside
+composer disclosure. Overflow assertions have descriptive labels, the mobile
+Open task locator identifies a known tile, and Chinese hidden counts refer to
+chats. Final commands and results are in the
+[review remediation record](plan.md#pr-review-remediation-2026-09-12).
+The original polish evidence below remains historical.
+
 Completed 2026-09-12. Initial package evidence remains in Tasks 01 through 05.
 
 RED: the controls regression expected no standalone selector and received the

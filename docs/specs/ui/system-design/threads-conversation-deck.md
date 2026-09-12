@@ -318,8 +318,16 @@ visible tasks plus at most one neighboring task ID on each side of the stable
 sequence; do not preload an entire extra grid column. Layout changes must
 refresh geometry even if admitted IDs are identical. Update activation with an
 effective-layout generation and reject callbacks from a disconnected observer
-or replaced shell. Reconcile new geometry without briefly activating every
+or replaced shell. Publish measured shell intersections synchronously when
+rebuilding observation, retaining still-visible chats while dropping offscreen
+ones before asynchronous delivery. Reconcile without briefly activating every
 task, and preserve the one-phone-detail rule throughout responsive transitions.
+Keep the short-height explanation in Display, outside the measured board
+allocation, so crossing the Grid threshold is independent of resize history.
+Pointer, focus, and wheel input all record the interacted task for recovery.
+Deep-link scrolling is instant when reduced motion is requested.
+Recovery skips zero-offset scroll assignments so it does not cancel an
+in-flight browser deep-link scroll when the first size measurement arrives.
 
 The selected task remains the owner for context menus and removal recovery in
 the lower row. `scrollIntoView` keeps `block: "nearest"`, and board scroll

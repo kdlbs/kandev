@@ -33,6 +33,7 @@ surface shared by task and Office consumers.
 ### Requirements
 
 - [Agent Resume and Runtime Recovery](requirements/agent-resume-runtime-recovery.md)
+- [Session recovery failures](requirements/session-recovery-failures.md)
 - [Agent Rich Output](requirements/agent-rich-output.md)
 - [Google Antigravity ACP Agent](requirements/antigravity-acp-agent.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
@@ -71,6 +72,7 @@ surface shared by task and Office consumers.
 ### System design
 
 - [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
+- [Session recovery failures](system-design/session-recovery-failures.md)
 - [Google Antigravity ACP Agent](system-design/antigravity-acp-agent.md)
 - [Injected Skill Naming](system-design/injected-skill-naming.md)
 - [Injected Skill Naming Migration](system-design/injected-skill-naming-migration.md)

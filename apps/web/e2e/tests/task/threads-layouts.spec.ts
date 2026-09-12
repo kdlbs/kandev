@@ -104,6 +104,18 @@ test("lays out stable task tiles in two rows and falls back in a short window", 
   expect(grid[0].height).toBeCloseTo(grid[1].height, 1);
   await capturePresentation(testPage, testInfo, "grid-desktop");
 
+  const contentHeight = await board.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return element.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  });
+  const thresholdHeight = 1100 - contentHeight + 612;
+  await testPage.setViewportSize({ width: 1440, height: thresholdHeight + 4 });
+  await expect(board).toHaveAttribute("data-layout", "grid");
+  await testPage.setViewportSize({ width: 1440, height: thresholdHeight - 4 });
+  await expect(board).toHaveAttribute("data-layout", "columns");
+  await testPage.setViewportSize({ width: 1440, height: thresholdHeight + 4 });
+  await expect(board).toHaveAttribute("data-layout", "grid");
+
   await testPage.setViewportSize({ width: 1440, height: 600 });
   await expect
     .poll(async () => {
@@ -111,7 +123,13 @@ test("lays out stable task tiles in two rows and falls back in a short window", 
       return Math.abs(a.y - b.y) < 1 && b.x > a.x;
     })
     .toBe(true);
-  await expect(testPage.getByText("Grid needs more height. Showing Columns.")).toBeVisible();
+  await testPage.getByTestId("threads-view-settings").click();
+  await expect(
+    testPage
+      .getByTestId("threads-view-settings-popover")
+      .getByText("Grid needs more height. Showing Columns."),
+  ).toBeVisible();
+  await testPage.keyboard.press("Escape");
   expect((await captureThreadSettings(apiClient)).thread_views[0].layout).toBe("grid");
 
   await testPage.setViewportSize({ width: 1440, height: 1100 });

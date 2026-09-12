@@ -38,6 +38,27 @@ function columnIdForElement(elements: ReadonlyMap<string, HTMLElement>, target: 
   return null;
 }
 
+function measureVisibility(
+  board: HTMLElement,
+  elements: ReadonlyMap<string, HTMLElement>,
+  visibility: Map<string, VisibilityEntry>,
+): boolean {
+  const root = board.getBoundingClientRect();
+  if (root.width <= 0 || root.height <= 0) return false;
+  for (const [id, element] of elements) {
+    const rect = element.getBoundingClientRect();
+    visibility.set(id, {
+      element,
+      isIntersecting:
+        rect.right > root.left &&
+        rect.left < root.right &&
+        rect.bottom > root.top &&
+        rect.top < root.bottom,
+    });
+  }
+  return true;
+}
+
 function resolveVisibleIds(
   orderedIds: readonly string[],
   visibleIds: ReadonlySet<string>,
@@ -129,10 +150,7 @@ export function useThreadColumnActivation(
     const board = boardRef.current;
     const orderedSet = new Set(orderedIds);
     for (const id of elementsRef.current.keys()) {
-      if (!orderedSet.has(id)) {
-        elementsRef.current.delete(id);
-        visibilityRef.current.delete(id);
-      }
+      if (!orderedSet.has(id)) elementsRef.current.delete(id);
     }
     observerRef.current?.disconnect();
     observerRef.current = null;
@@ -142,6 +160,8 @@ export function useThreadColumnActivation(
       setObserverReady(false);
       return;
     }
+    setObserverReady(measureVisibility(board, elementsRef.current, visibilityRef.current));
+    updateVisibleIds();
 
     const observer = new IntersectionObserver(
       (entries) => {

@@ -118,6 +118,7 @@
   "hiddenCount_other": "{{count}} hidden",
   "saveAs": "Save as",
   "saveOrDiscardBeforeNewView": "Save or discard the current draft before creating another view",
+  "saveOrDiscardBeforeSwitchingView": "Save or discard your changes in View settings before switching views.",
   "viewLimitReached_one": "View limit reached ({{count}})",
   "viewLimitReached_other": "View limit reached ({{count}})",
   "newViewNumbered": "New view {{suffix}}",

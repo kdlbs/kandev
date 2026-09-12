@@ -74,13 +74,19 @@ keys remain unchanged.
 
 The store reuses the sidebar action semantics:
 
-- view selection persists immediately;
+- view selection persists immediately when there is no active draft;
 - edits create or update a persisted draft;
 - Save replaces the active saved definition and clears the draft;
 - Save as creates and activates another view;
 - Discard restores the active saved definition;
 - create, rename, and delete use optimistic updates with rollback;
 - the 50-view limit is checked in the UI and backend.
+
+While a draft exists, both view pickers disable saved-view selection and show
+a localized explanation directing the user to View settings. The existing
+Save/Discard actions clear the draft before switching. `setThreadActiveView`
+also rejects selection while a draft exists, including same-view selection,
+so a stale UI event cannot clear an unsaved draft.
 
 ## Persistence and synchronization
 

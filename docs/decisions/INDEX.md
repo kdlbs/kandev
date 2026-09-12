@@ -217,7 +217,8 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-24-unified-fork-approval-label | [Use One Maintainer Approval Label for Contributor PR Automation](2026-08-24-unified-fork-approval-label.md) | accepted | infra, workflow, security | 2026-08-24 |
 | 2026-08-25-required-worktree-refresh-fails-closed | [Required Worktree Refresh Fails Closed](2026-08-25-required-worktree-refresh-fails-closed.md) | accepted (amended 2026-08-31; local-worktree boundary superseded) | backend, security, operations | 2026-08-25 |
 | 2026-08-25-server-owned-declarative-canvases | [Server-owned declarative canvases](2026-08-25-server-owned-declarative-canvases.md) | superseded by 2026-08-26-plugin-backed-web-app-canvases | backend, frontend, protocol, security | 2026-08-25 |
-| 2026-08-26-plugin-backed-web-app-canvases | [Use plugin-backed web applications for canvases](2026-08-26-plugin-backed-web-app-canvases.md) | accepted | backend, frontend, protocol, plugins, security | 2026-08-26 |
+| 2026-08-26-plugin-backed-web-app-canvases | [Use plugin-backed web applications for canvases](2026-08-26-plugin-backed-web-app-canvases.md) | accepted (initial grants amended by 2026-09-10-canvas-creation-authority) | backend, frontend, protocol, plugins, security | 2026-08-26 |
+| 2026-09-10-canvas-creation-authority | [Authorize the owner's initial canvas release](2026-09-10-canvas-creation-authority.md) | accepted | backend, protocol, security | 2026-09-10 |
 | 2026-08-26-quick-chat-tab-order | [Store Quick Chat Tab Order as a User Preference](2026-08-26-quick-chat-tab-order.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-26-quick-chat-agent-titles | [Apply Agent-Generated Titles to Quick Chat](2026-08-26-quick-chat-agent-titles.md) | accepted | backend, frontend, protocol | 2026-08-26 |
 | 2026-08-27-bounded-agent-profile-recency | [Store Agent Profile Recency in Bounded Context Rows](2026-08-27-bounded-agent-profile-recency.md) | accepted | backend, frontend, protocol | 2026-08-27 |
@@ -265,3 +266,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-08-domain-owned-settings-catalog | [Discover settings through domain-owned contracts](2026-09-08-domain-owned-settings-catalog.md) | accepted | backend, frontend, protocol | 2026-09-08 |
 | 2026-09-09-task-completion-conversation-availability | [Separate task completion from conversation availability](2026-09-09-task-completion-conversation-availability.md) | accepted | workflow | 2026-09-09 |
 | 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |
+| 2026-09-10-mobile-confirmation-surfaces | [Focus mobile confirmation in one surface](2026-09-10-mobile-confirmation-surfaces.md) | accepted | frontend | 2026-09-10 |
+| 2026-09-11-contribution-resume-preflight | [Separate resume admission from push history readiness](2026-09-11-contribution-resume-preflight.md) | proposed | backend, protocol, security | 2026-09-11 |

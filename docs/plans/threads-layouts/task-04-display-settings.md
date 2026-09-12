@@ -151,6 +151,12 @@ sequential
 
 ## Results
 
+PR #3626 follow-up: the shared saved-view action and desktop/touch lists protect
+unresolved drafts until Save or Discard. Native mobile deletion confirmation
+from the base branch is preserved. Final commands and results are in the
+[review remediation record](plan.md#pr-review-remediation-2026-09-12).
+The original implementation evidence below remains historical.
+
 Done, 2026-09-11.
 
 Display uses the existing saved-view draft and save/recovery actions. The

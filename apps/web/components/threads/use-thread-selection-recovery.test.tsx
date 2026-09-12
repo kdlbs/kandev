@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useThreadSelectionRecovery } from "./use-thread-selection-recovery";
 
 const tasks = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -52,6 +52,16 @@ function Fixture({
 afterEach(cleanup);
 
 describe("reader identity across grid reflow", () => {
+  it("does not cancel an in-flight deep-link scroll with a zero-offset assignment", () => {
+    const view = render(<Fixture layout="columns" ids={["a"]} />);
+    const board = screen.getByTestId("board");
+    const assignScroll = vi.fn();
+    Object.defineProperty(board, "scrollLeft", { get: () => 0, set: assignScroll });
+
+    view.rerender(<Fixture layout="grid" ids={["a"]} />);
+
+    expect(assignScroll).not.toHaveBeenCalled();
+  });
   // @covers AC-UI-THREADS-DECK-004.6
   it("ignores resize-generated scroll and live snapshots before responsive reflow commits", () => {
     const geometry = { width: 600, layout: "columns" as "columns" | "grid" };

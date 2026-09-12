@@ -53,7 +53,8 @@ Threads views, so that I can change focus with one action.
   columns.
 - **AC-UI-THREADS-SAVED-VIEWS-001.4:** A user shall be able to create, rename,
   delete, switch, overwrite, duplicate with `Save as`, and discard changes to
-  Threads views.
+  Threads views. Switching or reselecting a view shall not silently discard
+  an active draft; Save or Discard is required first on desktop and touch.
 - **AC-UI-THREADS-SAVED-VIEWS-001.5:** A user shall be able to save at most 50
   Threads views. The UI shall explain the limit before another create action.
 - **AC-UI-THREADS-SAVED-VIEWS-001.6:** Saved views, the active view, and the

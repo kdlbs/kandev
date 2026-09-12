@@ -37,7 +37,7 @@ test("keeps keyboard layout selection inside translated settings at compact desk
       );
       const controls = await testPage.getByTestId("threads-view-controls").boundingBox();
       expect(controls!.x + controls!.width).toBeLessThanOrEqual(width);
-      await assertNoHorizontalOverflow(testPage);
+      await assertNoHorizontalOverflow(testPage, `${width}px desktop Display settings`);
       await testPage.getByTestId("threads-view-settings").click();
       if (width === 820) {
         await testPage.getByTestId("threads-layout-select").press("ArrowDown");
@@ -145,7 +145,7 @@ test("saves, discards, copies and reloads both presentation choices without chan
       saved.thread_views.find((view) => view.id === saved.thread_active_view_id),
     ).toMatchObject({ layout: "grid", auto_hide_composer: true, max_columns: 2 });
     expect((await apiClient.getUserSettings()).settings.sidebar_views).toEqual(sidebar);
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoHorizontalOverflow(testPage, "desktop saved presentation round trip");
   } finally {
     await apiClient.saveUserSettings(original);
   }

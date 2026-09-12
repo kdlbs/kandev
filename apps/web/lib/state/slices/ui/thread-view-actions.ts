@@ -215,6 +215,7 @@ export function buildThreadViewActions(set: ImmerSet, get: () => UISlice) {
       const before = snapshotThreadViews(get().threadViews);
       let committed = false;
       set((draft) => {
+        if (draft.threadViews.draft) return;
         if (!draft.threadViews.views.some((view) => view.id === viewId)) return;
         draft.threadViews.activeViewId = viewId;
         draft.threadViews.draft = null;

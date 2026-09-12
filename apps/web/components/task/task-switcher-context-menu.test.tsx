@@ -12,6 +12,9 @@ import type { TaskSwitcherItem } from "./task-switcher-types";
 const PLUGIN_ID = "example-task-actions";
 const PLUGIN_ACTION_LABEL = "Inspect task";
 const WORKFLOW_1_ID = "workflow-1";
+const WORKFLOW_ID = WORKFLOW_1_ID;
+const STEP_ID = "step-1";
+const SEPARATOR_SLOT = "context-menu-separator";
 const MOVE_TO_TEST_ID = "task-context-move-to";
 const STEP_2_TEST_ID = "task-context-step-step-2";
 const INSTRUCTIONS_TEST_ID = "workflow-move-instructions";
@@ -30,6 +33,7 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
 
 afterEach(() => {
   cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
 });
 
@@ -44,8 +48,23 @@ function task(overrides: Partial<TaskSwitcherItem> = {}): TaskSwitcherItem {
 }
 
 function ArchiveAwareRow({ archiveConfirmation }: { archiveConfirmation?: ReactNode }) {
-  return <div data-testid="task-row">Task 1{archiveConfirmation}</div>;
+  return (
+    <div data-testid="task-row" data-inline-confirmation={Boolean(archiveConfirmation)}>
+      Task 1{archiveConfirmation}
+    </div>
+  );
 }
+
+it("keeps phone rows intact while archive hands off from the menu to a sheet", async () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  const { onArchiveTask } = renderWithDragHandle();
+  await openContextMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: /archive/i }));
+  await screen.findByRole("dialog", { name: /Archive task/ });
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(screen.getByTestId("task-row").getAttribute("data-inline-confirmation")).toBe("false");
+  expect(onArchiveTask).not.toHaveBeenCalled();
+});
 
 /**
  * Stands in for the dnd-kit drag handle that wraps the row. In the real tree
@@ -95,7 +114,7 @@ function renderPluginMenu(run: (context: PluginTaskMenuContext) => void = vi.fn(
   render(
     <StateProvider initialState={{ workspaces: { items: [], activeId: "workspace-1" } }}>
       <ToastProvider>
-        <TaskItemWithContextMenu task={task({ workflowStepId: "step-1" })}>
+        <TaskItemWithContextMenu task={task({ workflowStepId: STEP_ID })}>
           <div data-testid="plugin-task-row">Task 1</div>
         </TaskItemWithContextMenu>
       </ToastProvider>
@@ -116,7 +135,7 @@ describe("TaskItemWithContextMenu — plugin primary actions", () => {
       workspaceId: "workspace-1",
       taskId: "task-1",
       taskTitle: "Task 1",
-      workflowStepId: "step-1",
+      workflowStepId: STEP_ID,
       presentation: "desktop",
     });
   });
@@ -130,6 +149,144 @@ describe("TaskItemWithContextMenu — plugin primary actions", () => {
     await waitFor(() => {
       expect(screen.queryByRole("menuitem", { name: PLUGIN_ACTION_LABEL })).toBeNull();
     });
+  });
+});
+
+describe("TaskItemWithContextMenu — grouped single-task actions", () => {
+  it("renders actions in group order with one divider between nonempty groups", async () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "inspect-task",
+      label: PLUGIN_ACTION_LABEL,
+      group: "primary",
+      run: vi.fn(),
+    });
+
+    render(
+      <StateProvider initialState={{ workspaces: { items: [], activeId: "workspace-1" } }}>
+        <ToastProvider>
+          <TaskItemWithContextMenu
+            task={task({
+              workflowId: WORKFLOW_ID,
+              workflowStepId: STEP_ID,
+              parentTaskId: "parent-1",
+            })}
+            workflows={[
+              { id: WORKFLOW_ID, name: "Workflow 1" },
+              { id: "workflow-2", name: "Workflow 2" },
+            ]}
+            stepsByWorkflowId={{
+              [WORKFLOW_ID]: [
+                { id: STEP_ID, title: "Step 1" },
+                { id: "step-2", title: "Step 2" },
+              ],
+            }}
+            onTogglePin={vi.fn()}
+            onEditTask={vi.fn()}
+            onRenameTask={vi.fn()}
+            onArchiveTask={vi.fn()}
+            onCreateSubtask={vi.fn()}
+            onDeleteTask={vi.fn()}
+            onDetachTask={vi.fn()}
+            onMoveToStep={vi.fn()}
+            onLinkPullRequest={vi.fn()}
+          >
+            <ArchiveAwareRow />
+          </TaskItemWithContextMenu>
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("task-row"));
+    const menu = await screen.findByRole("menu");
+    const labels = within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent?.replace(/\s+/g, " ").trim());
+
+    expect(labels).toEqual([
+      "Pin",
+      "Color",
+      "Priority",
+      "Edit",
+      "Rename",
+      "Duplicate",
+      "Create Subtask",
+      "Nest under",
+      "Link",
+      "Detach from parent",
+      "Move to",
+      "Send to workflow",
+      PLUGIN_ACTION_LABEL,
+      "Archive",
+      "Delete",
+    ]);
+
+    const directChildren = Array.from(menu.children);
+    const separators = directChildren.filter(
+      (child) => child.getAttribute("data-slot") === SEPARATOR_SLOT,
+    );
+    expect(separators).toHaveLength(5);
+    expect(directChildren[0]?.getAttribute("data-slot")).not.toBe(SEPARATOR_SLOT);
+    expect(directChildren.at(-1)?.getAttribute("data-slot")).not.toBe(SEPARATOR_SLOT);
+    expect(
+      directChildren.some(
+        (child, index) =>
+          child.getAttribute("data-slot") === SEPARATOR_SLOT &&
+          directChildren[index - 1]?.getAttribute("data-slot") === SEPARATOR_SLOT,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("TaskItemWithContextMenu — grouped bulk actions", () => {
+  it("keeps bulk actions in mark, movement, and removal groups", async () => {
+    render(
+      <StateProvider>
+        <ToastProvider>
+          <TaskItemWithContextMenu
+            task={task({ workflowId: WORKFLOW_ID, workflowStepId: STEP_ID })}
+            selectedTaskIds={new Set(["task-1", "task-2"])}
+            workflows={[
+              { id: WORKFLOW_ID, name: "Workflow 1" },
+              { id: "workflow-2", name: "Workflow 2" },
+            ]}
+            stepsByWorkflowId={{
+              [WORKFLOW_ID]: [
+                { id: STEP_ID, title: "Step 1" },
+                { id: "step-2", title: "Step 2" },
+              ],
+            }}
+            onBulkPin={vi.fn()}
+            onBulkArchive={vi.fn()}
+            onBulkDelete={vi.fn()}
+            onBulkMove={vi.fn()}
+          >
+            <ArchiveAwareRow />
+          </TaskItemWithContextMenu>
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("task-row"));
+    const menu = await screen.findByRole("menu");
+    const labels = within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent?.replace(/\s+/g, " ").trim());
+
+    expect(labels).toEqual([
+      "Pin 2 tasks",
+      "Move to",
+      "Send to workflow",
+      "Archive 2 tasks",
+      "Delete 2 tasks",
+    ]);
+
+    const directChildren = Array.from(menu.children);
+    const separators = directChildren.filter(
+      (child) => child.getAttribute("data-slot") === SEPARATOR_SLOT,
+    );
+    expect(separators).toHaveLength(2);
+    expect(directChildren[0]?.getAttribute("data-slot")).not.toBe(SEPARATOR_SLOT);
+    expect(directChildren.at(-1)?.getAttribute("data-slot")).not.toBe(SEPARATOR_SLOT);
   });
 });
 
@@ -172,9 +329,6 @@ function renderWorkflowMoveMenu({
   return { bulkMove };
 }
 
-// Open the "Move to" submenu and hover the target step so its nested content
-// is revealed. On fine pointers that content is the inline options form; on
-// coarse/touch pointers it is the "Move with options" item that opens a Drawer.
 async function openMoveSubmenu() {
   fireEvent.contextMenu(screen.getByTestId("task-row"));
   await screen.findByTestId(MOVE_TO_TEST_ID);
@@ -353,8 +507,6 @@ describe("TaskItemWithContextMenu — single-task move options", () => {
     fireEvent.pointerMove(await screen.findByTestId(STEP_2_TEST_ID), {
       pointerType: "mouse",
     });
-    // Fine pointers reveal the options form inline in the step's submenu, not a
-    // separate "Move with options" item that opens a dialog.
     expect(await screen.findByTestId("workflow-move-skip-step-prompt")).toBeTruthy();
     expect(screen.getByTestId(INSTRUCTIONS_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId("workflow-move-submit")).toBeTruthy();

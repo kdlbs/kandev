@@ -118,6 +118,7 @@
   "hiddenCount_other": "{{count}} ocultadas",
   "saveAs": "Guardar como",
   "saveOrDiscardBeforeNewView": "Guarde ou descarte o rascunho atual antes de criar outra vista",
+  "saveOrDiscardBeforeSwitchingView": "Guarde ou descarte as alterações nas Definições da vista antes de mudar de vista.",
   "viewLimitReached_one": "Limite de vistas atingido ({{count}})",
   "viewLimitReached_other": "Limite de vistas atingido ({{count}})",
   "newViewNumbered": "Nova vista {{suffix}}",

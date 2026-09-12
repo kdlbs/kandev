@@ -118,6 +118,7 @@
   "hiddenCount_other": "{{count}} ĥĩďďēń",
   "saveAs": "Śàvē àś",
   "saveOrDiscardBeforeNewView": "Śàvē ōŕ ďĩśćàŕď ţĥē ćũŕŕēńţ ďŕàƒţ ƀēƒōŕē ćŕēàţĩńĝ àńōţĥēŕ vĩēŵ",
+  "saveOrDiscardBeforeSwitchingView": "Śàvē ōŕ ďĩśćàŕď ŷōũŕ ćĥàńĝēś ĩń Vĩēŵ śēţţĩńĝś ƀēƒōŕē śŵĩţćĥĩńĝ vĩēŵś.",
   "viewLimitReached_one": "Vĩēŵ ĺĩḿĩţ ŕēàćĥēď ({{count}})",
   "viewLimitReached_other": "Vĩēŵ ĺĩḿĩţ ŕēàćĥēď ({{count}})",
   "newViewNumbered": "Ńēŵ vĩēŵ {{suffix}}",

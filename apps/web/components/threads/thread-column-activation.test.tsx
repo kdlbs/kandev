@@ -228,11 +228,41 @@ describe("phone position feedback", () => {
   });
 });
 
-describe("useThreadColumnActivation", () => {
-  beforeEach(() => {
-    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
-    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+function observeDesktopColumns() {
+  responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+}
+
+describe("column activation during reflow", () => {
+  beforeEach(observeDesktopColumns);
+
+  it("publishes current geometry before a replacement observer reports after reflow", () => {
+    const taskIds = [TASK_A, TASK_B, TASK_C, TASK_D];
+    const view = render(<ActivationFixture ids={taskIds} />);
+    const board = screen.getByTestId("activation-board");
+    const [a, b, c, d] = taskIds.map((id) => screen.getByTestId(`column-${id}`));
+    const oldObserver = observers.at(-1)!.instance;
+    oldObserver.emit({ target: a, isIntersecting: true }, { target: b, isIntersecting: true });
+
+    vi.spyOn(board, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 360, 612));
+    vi.spyOn(a, "getBoundingClientRect").mockReturnValue(new DOMRect(-372, 0, 360, 300));
+    vi.spyOn(b, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 360, 300));
+    vi.spyOn(c, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 312, 360, 300));
+    vi.spyOn(d, "getBoundingClientRect").mockReturnValue(new DOMRect(372, 0, 360, 300));
+    view.rerender(<ActivationFixture ids={taskIds} layout="grid:360" />);
+
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B, TASK_C]);
+    expect(ids(PRELOAD_IDS)).toEqual(taskIds);
+    oldObserver.emit({ target: a, isIntersecting: true }, { target: d, isIntersecting: true });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B, TASK_C]);
+
+    observers.at(-1)!.instance.emit({ target: b, isIntersecting: false });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_C]);
   });
+});
+
+describe("useThreadColumnActivation", () => {
+  beforeEach(observeDesktopColumns);
 
   // @covers AC-UI-THREADS-DECK-004.5, AC-UI-THREADS-DECK-004.6
   it("refreshes a same-membership layout and ignores stale observer callbacks", () => {

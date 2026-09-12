@@ -143,6 +143,12 @@ sequential
 
 ## Results
 
+PR #3626 follow-up: observer rebuilds measure current visibility, height
+fallback text no longer changes board allocation, wheel interaction records
+the reader anchor, and deep-link scrolling honors reduced motion. Final
+commands and results are in the [review remediation record](plan.md#pr-review-remediation-2026-09-12).
+The original implementation evidence below remains historical.
+
 Done, 2026-09-11.
 
 - Behavioral RED: layout helper returned Columns for Grid, stale observer

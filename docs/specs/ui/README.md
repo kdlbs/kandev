@@ -19,6 +19,8 @@ runtime, and workspace lifecycle/state ownership.
 
 ### Requirements
 
+- [Mobile task-view access](requirements/mobile-task-view-access.md)
+
 - [Control sizing](requirements/control-sizing.md)
 - [ACP model summary](requirements/acp-model-configuration-summary.md)
 - [ACP Shell Command Output](requirements/acp-shell-command-output.md)
@@ -82,6 +84,7 @@ runtime, and workspace lifecycle/state ownership.
 - [Mobile topbar actions](requirements/mobile-quick-chat-topbar.md)
 - [Mobile Task Chrome](requirements/mobile-task-chrome.md)
 - [Mobile Task Navigation](requirements/mobile-task-navigation.md)
+- [Mobile Action Confirmations](requirements/mobile-action-confirmations.md)
 - [Plan comments](requirements/plan-comment-drafts.md)
 - [Plan Editor Task-Switch Stability](requirements/plan-editor-task-switch-stability.md)
 - [Port-forwarding discovery](requirements/port-forwarding-discovery.md)
@@ -156,6 +159,7 @@ runtime, and workspace lifecycle/state ownership.
 
 ### Design
 
+- [Mobile task-view access](system-design/mobile-task-view-access.md)
 - [Agent launch prompt composer](system-design/agent-launch-prompt-composer.md)
 - [Control sizing](system-design/control-sizing.md)
 - [Adaptive Kanban](system-design/adaptive-kanban.md)
@@ -186,6 +190,7 @@ runtime, and workspace lifecycle/state ownership.
 - [Message Queue Automation Controls (current)](system-design/message-queue-automation-controls.md)
 - [Native HTML File Preview](system-design/native-html-preview.md)
 - [Mobile Task Chrome](system-design/mobile-task-chrome.md)
+- [Mobile Action Confirmations](system-design/mobile-action-confirmations.md)
 - [Mobile workspace topbar](system-design/mobile-quick-chat-topbar.md)
 - [Mobile Menu Backdrops System Design](system-design/mobile-menu-backdrops.md)
 - [Persistent status motion](system-design/persistent-status-motion.md)

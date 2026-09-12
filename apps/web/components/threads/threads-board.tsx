@@ -213,7 +213,6 @@ export function ThreadsBoard({
   onOpenTask,
   renderHeader,
 }: ThreadsBoardProps) {
-  const { t } = useTranslation();
   const { markedTaskId, retire } = useRetiringFocusMark(focusedTaskId);
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const orderedIds = useMemo(() => threads.map((thread) => thread.taskId), [threads]);
@@ -233,11 +232,6 @@ export function ThreadsBoard({
     <ThreadTaskActionsProvider boardRef={boardRef}>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
         {renderHeader?.(mobileTaskId, composition.heightFallback)}
-        {composition.heightFallback && (
-          <p role="status" className="shrink-0 px-3 py-1 text-xs text-muted-foreground">
-            {t("threads:gridHeightFallback")}
-          </p>
-        )}
         {threads.length === 0 ? (
           <div className="min-h-0 flex-1">
             {isLoading ? <ThreadsLoadingState /> : <ThreadsEmptyState />}
@@ -247,7 +241,10 @@ export function ThreadsBoard({
             data-testid="threads-board"
             data-layout={composition.layout}
             ref={boardRef}
-            onWheelCapture={retire}
+            onWheelCapture={(event) => {
+              retire();
+              rememberThread(event);
+            }}
             // Capture phase: a column's own handlers must not be able to swallow the
             // interaction that retires the mark.
             onPointerDownCapture={(event) => {

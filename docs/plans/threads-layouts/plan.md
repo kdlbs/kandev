@@ -21,7 +21,8 @@ conversation at a time with swipe/picker navigation and the normal composer.
 
 The user approved implementation on 2026-09-11. The initial five orders are done.
 The scoped polish requested on 2026-09-12 is also complete in Task 06.
-Changes are verified locally and remain uncommitted.
+The feature is committed and open for review in PR #3626. Review remediation
+retains the existing implementation boundaries and is recorded below.
 Read the previews first, then the work order
 for the implementation boundary being changed.
 
@@ -406,6 +407,70 @@ build. Only its frontend assets changed: no backend restart, reseed, view/draft
 reset, or operation against :9998. Old hashed assets remain available for
 already-open tabs; refresh loads the new interface. No commit or publication
 was requested.
+
+## PR review remediation (2026-09-12)
+
+PR #3626 review fixes preserve the existing feature boundary:
+
+- Saved-view selection cannot discard an unresolved draft. Desktop and touch
+  lists explain that Save or Discard in View settings is required first.
+- Replacement viewport observers measure current geometry before their first
+  delivery, retaining visible chats and retiring offscreen subscriptions.
+- The Grid height explanation stays in Display settings so it cannot consume
+  the allocation being measured. Wheel interaction records the reader anchor.
+- Deep-link scrolling honors reduced motion. Chinese hidden-chat wording and
+  mobile locator/overflow assertions now describe the actual chat unit/target.
+- Base-branch integration preserves native in-drawer deletion confirmation.
+- Recovery skips zero-offset scroll assignments, which otherwise cancel an
+  in-flight phone deep-link scroll during the first size measurement.
+
+Regression evidence: six initial draft/observer unit failures, two board
+unit failures, two touch draft browser failures, and the near-threshold Grid
+browser failure reproduced before their fixes. Final focused unit coverage is
+123 passing tests across these ten files:
+
+```bash
+cd apps/web
+pnpm exec vitest run components/threads/threads-board.test.tsx components/threads/thread-column-activation.test.tsx components/threads/use-thread-selection-recovery.test.tsx components/threads/threads-view-controls.test.tsx components/threads/threads-view-controls-recovery.test.tsx components/threads/threads-view-editor-actions.test.tsx components/threads/threads-view-editor-utils.test.ts lib/state/slices/ui/thread-view-actions.test.ts lib/threads/thread-view-query.test.ts app/threads/threads-page-client.test.tsx
+pnpm run typecheck
+pnpm run i18n:check
+pnpm run i18n:ratchet
+```
+
+Typecheck, localization, and scoped ESLint passed. Browser verification uses
+one worker, strict WebSocket accounting, and retries disabled:
+
+```bash
+cd apps/web
+pnpm e2e:run --project chromium tests/task/threads-display-settings.spec.ts tests/task/threads-layouts.spec.ts tests/task/threads-composer-disclosure.spec.ts tests/task/threads-view.spec.ts -- --retries=0
+pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-threads-display-settings.spec.ts tests/task/mobile-threads-composer-disclosure.spec.ts tests/task/mobile-threads-view.spec.ts tests/task/mobile-threads-swipe.spec.ts tests/task/mobile-threads-task-actions.spec.ts -- --retries=0
+```
+
+The original mobile sequence reproduced an initial deep-link failure twice.
+Three instrumented reproductions confirmed a zero-offset recovery assignment
+interrupting the browser scroll. A focused regression test failed before the
+guard and passed afterward. All three rebuilt browser reproductions passed
+(56.3 seconds), then the original 21-test mobile sequence passed in 3.8 minutes
+with diagnostics removed. The desktop command passed 24 tests before that final
+no-op-scroll correction; the focused recovery tests and complete mobile rerun
+cover the correction. Fresh post-commit desktop/capture and remote CI evidence
+will be recorded in the external task plan, without another code change.
+
+Documentation validation from the repository root passed:
+
+```bash
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+python3 scripts/lint-spec-files.test.py
+python3 scripts/lint-spec-files.py --all
+python3 scripts/lint-harness-files.test.py
+python3 .github/scripts/lint-harness-files.py --all
+```
+
+This validated 46 public pages, 36 specification-linter tests, and 19 harness
+linter tests. Public guidance and the saved-view/deck contracts reflect these
+fixes. Review/CI completion is tracked externally for the pushed head, not
+inferred from local results. Physical-device checks remain unavailable.
 
 ## Risks
 

@@ -14,6 +14,7 @@ import { ThreadsViewTaskPicker } from "./threads-view-task-picker";
 import { EditorBody, type EditorBodyProps } from "./threads-view-editor-sections";
 import { parseThreadMaxColumns } from "./threads-view-editor-utils";
 import { threadViewName } from "@/lib/state/slices/ui/thread-view-builtins";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type EditorProps = {
   activeView: ThreadView;
@@ -57,6 +58,7 @@ export function ThreadsViewEditor({
   deleteFocusBoundaryRef,
 }: EditorProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [nameMode, setNameMode] = useState<"rename" | "saveAs" | null>(null);
   const [name, setName] = useState("");
@@ -118,13 +120,13 @@ export function ThreadsViewEditor({
           deletion.request({ id: activeView.id, label: threadViewName(activeView, t) })
         }
         deleteAnchorRef={deletion.anchorRef}
-        deleteConfirmation={mobile ? deleteConfirmation : undefined}
+        deleteConfirmation={mobile && !isMobile ? deleteConfirmation : undefined}
         onDuplicate={onDuplicate}
         onReapplySort={onReapplySort}
         onSetMaxColumns={maxColumns.onChange}
         onOpenPicker={() => setPickerOpen(true)}
       />
-      {!mobile ? deleteConfirmation : null}
+      {!mobile || isMobile ? deleteConfirmation : null}
     </>
   );
 }

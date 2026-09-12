@@ -109,7 +109,12 @@ function useScrollWhenFocused(isFocused: boolean, layoutKey: string) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!isFocused) return;
-    ref.current?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    ref.current?.scrollIntoView({
+      inline: "center",
+      block: "nearest",
+      behavior: reducedMotion ? "instant" : "smooth",
+    });
   }, [isFocused, layoutKey]);
   return ref;
 }

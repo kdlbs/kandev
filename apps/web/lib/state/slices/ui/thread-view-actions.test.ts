@@ -57,6 +57,28 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof updateUserSettings>>);
 });
 
+describe("Threads view draft protection", () => {
+  it.each(["one", "two"])("preserves the active draft when selecting %s", (viewId) => {
+    const store = makeStore();
+    const draft: ThreadViewDraft = {
+      ...makeView("one"),
+      baseViewId: "one",
+      layout: "grid",
+      autoHideComposer: true,
+      maxColumns: 7,
+      sort: { key: "priority", direction: "desc" },
+      filters: [{ id: "title", dimension: "titleMatch", op: "matches", value: "Release" }],
+    };
+    seed(store, [makeView("one"), makeView("two")], draft);
+
+    store.getState().setThreadActiveView(viewId);
+
+    expect(store.getState().threadViews.activeViewId).toBe("one");
+    expect(store.getState().threadViews.draft).toEqual(draft);
+    expect(updateUserSettings).not.toHaveBeenCalled();
+  });
+});
+
 describe("Threads saved-view actions", () => {
   // @covers AC-UI-THREADS-SAVED-VIEWS-005.2, AC-UI-THREADS-SAVED-VIEWS-005.7
   it("retains presentation through query edits, Save, Duplicate, Save as, and Discard", async () => {
