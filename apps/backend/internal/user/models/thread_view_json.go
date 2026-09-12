@@ -8,6 +8,8 @@ import (
 
 // Omitted presentation fields have compatibility defaults. Explicit nulls
 // and empty layouts are not valid new settings values.
+// Unknown layout strings are validated by the service layer; JSON checks
+// reject explicit values that would otherwise become zero-value defaults.
 func decodeThreadViewJSON(data []byte, target any) error {
 	if err := json.Unmarshal(data, target); err != nil {
 		return err

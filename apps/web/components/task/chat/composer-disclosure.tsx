@@ -67,7 +67,10 @@ export function ComposerDisclosureRegion({
   );
 }
 
-/** Bounds Threads actions and input together, including when auto-hide is off. */
+/**
+ * Bounds Threads actions and input together, including when auto-hide is off.
+ * The 80px transcript floor is inside the tile body, below its separate header.
+ */
 export function ComposerFooterAllocation({ children }: { children: ReactNode }) {
   const disclosure = useComposerDisclosureContext();
   return (
