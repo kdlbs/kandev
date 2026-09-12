@@ -211,7 +211,7 @@ function MobileSidebarFilterSurface({
   title,
 }: SidebarFilterSurfaceProps & { title: string }) {
   return (
-    <MobileConfirmationHost open={open}>
+    <MobileConfirmationHost open={open} surface="drawer">
       {({ contentProps }) => (
         <Drawer
           open={open}

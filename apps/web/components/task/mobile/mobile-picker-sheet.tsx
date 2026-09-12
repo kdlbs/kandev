@@ -62,7 +62,7 @@ export function MobilePickerSheet({
 
   if (confirmationHost)
     return (
-      <MobileConfirmationHost open={open}>
+      <MobileConfirmationHost open={open} surface="drawer">
         {({ contentProps }) => (
           <Drawer open={open} onOpenChange={onOpenChange}>
             <DrawerContent {...contentProps}>

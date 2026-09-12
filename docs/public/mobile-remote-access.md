@@ -13,12 +13,14 @@ Anyone who can reach an unauthenticated Kandev origin has administrator access. 
 
 Archiving from the **Tasks** sheet shows a dedicated confirmation step in that
 same sheet. Review the task name, cleanup effects, and optional subtask selection.
-The **Archive** and **Cancel** buttons sit at the bottom, above the phone's safe
-area. Longer details scroll without moving those buttons off screen.
+The sheet shrinks to fit a short decision, with **Archive** and **Cancel** just
+below the details and above the phone's safe area. Longer details scroll without
+moving those buttons off screen.
 
-Choose **Cancel** or **Back** to return to the same task list, filters, and scroll
-position. Swiping the sheet away or tapping its backdrop cancels the decision and
-closes the sheet. From the board or a page, archive opens a compact bottom sheet.
+Choose **Cancel** or **Back** to restore the list or editor's original height,
+draft values, filters, and scroll position. Swiping the sheet away or tapping its
+backdrop cancels the decision and closes the sheet. From the board or a page,
+archive opens a compact bottom sheet.
 Inside the command panel, confirmation stays in the panel and Cancel keeps your
 search query. The archive-confirmation preference and cleanup behavior are unchanged.
 
@@ -26,6 +28,8 @@ The same pattern applies to other inline confirmations:
 
 - Session deletion and terminal closing stay inside their open picker. Saved
   sidebar, Threads, GitHub, and GitLab views stay inside their filter/editor sheet.
+  These sheets fit the confirmation's content instead of keeping the taller
+  picker or editor height. GitHub and GitLab phone filters also open from the bottom.
 - File deletion, chat context reset, plan revision restore, subtask detachment,
   and walkthrough discard use a compact sheet from the page. Resetting context
   inside Quick Chat stays in that dialog.

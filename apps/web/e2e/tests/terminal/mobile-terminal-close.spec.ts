@@ -8,6 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 import { switchToTerminalPanel, waitForShellReady } from "./mobile-terminal-helpers";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 
 async function seedTaskWithSession(
   testPage: Page,
@@ -101,6 +102,10 @@ test.describe("Mobile terminal close", () => {
     await expect(confirmation).toBeVisible({ timeout: 5_000 });
     await expect(confirmation).toHaveRole("group");
     await expect(confirmation).toHaveAccessibleName("Close terminal?");
+    await expectContentSizedBottomConfirmation(
+      testPage.getByRole("dialog", { name: "Close terminal?", exact: true }),
+      confirmation,
+    );
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await expect(
       testPage.getByRole("dialog", { name: "Close terminal?", exact: true }),

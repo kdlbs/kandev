@@ -25,7 +25,9 @@ The [task archive design](../../tasks/system-design/archive-confirmation.md)
 remains authoritative for preference and navigation;
 [task cleanup hierarchy](confirmation-warning-hierarchy.md) remains
 authoritative for cleanup copy and discard consent. Delivery is tracked in the
-[plan](../../../plans/mobile-action-confirmations/plan.md).
+[plan](../../../plans/mobile-action-confirmations/plan.md). The content-sized
+host correction is tracked in the
+[sheet sizing plan](../../../plans/mobile-confirmation-sheet-sizing/plan.md).
 
 ## Requirement mapping
 
@@ -108,11 +110,37 @@ Use one dialog/focus-trap boundary; do not insert another nested `role=dialog`
 or `Drawer` for hosted content. Keep a semantic labelled group inside it.
 Origin content contributes no active scroll region while hidden.
 
-The Tasks drawer keeps its established height during the step to avoid a large
-resize followed by another resize on Cancel. Confirmation occupies the body
-and has a footer at the bottom. Standalone sheets are content-sized. Existing
-pickers keep their established host geometry; introducing new sheet detents or
-gesture navigation is outside this change.
+Drawer hosts use content-sized confirmation geometry, including the Tasks,
+sidebar-filter, Threads, session, terminal, GitHub, and GitLab surfaces. The
+origin's regular height is restored on Cancel; it does not set a minimum height
+for the decision. Centered form/command dialog hosts retain their existing
+geometry. An explicit host surface kind distinguishes these compositions;
+never infer them by querying ancestor roles or change every `Drawer` globally.
+
+For an active drawer request, the host supplies content properties that override
+the origin's fixed height and the primitive's direction-specific height cap.
+Use intrinsic height, a `calc(100dvh - 1rem)` maximum and the existing bottom
+inset. Keep the header and action footer outside the body's internal scroller.
+The confirmation outlet alone participates in the active layout.
+The drawer root uses `overflow: clip` in both steps. Unlike `overflow: hidden`,
+this prevents focus or scroll-into-view from scrolling the shell itself and
+clipping the header while its bounds still appear correct. Inner origin/body
+scrollers retain normal scrolling. Initial Cancel focus uses `preventScroll`.
+
+Before hiding the origin, capture its rendered dimensions for that request.
+Keep it mounted, invisible and inert in an out-of-flow container with those
+dimensions while the compact step is active. Simply using `visibility:hidden`
+inside the shared grid still reserves the editor's height; removing its layout
+without preserving its dimensions can clamp nested scroll offsets. Release the
+temporary sizing with the request, restore normal flow, then return focus.
+Rotation recomputes visible containment without recreating the request.
+
+Reuse Vaul's bottom entry, swipe and dismissal behavior. Do not close and reopen
+the root merely to replay an entrance animation. Any hosted content transition
+is scoped, bottom-up and reduced-motion-aware; it must not compete with Vaul's
+outer transform, restart when copy changes, or delay action availability. No
+new detents, gesture navigation, global animation rules or dependencies are
+introduced.
 
 ### Request lifetime and focus
 
@@ -188,6 +216,14 @@ optimistic rollback stay in their current hooks. Session warnings remain
 shared with desktop. Full system alerts and explicit discard inputs are not
 replaced by this adapter.
 
+The filter shells in `app/github/github-page-client.tsx` and
+`app/gitlab/gitlab-page-client.tsx` share the presentation-only
+`components/integrations/integration-filters-sheet.tsx`. On phones it uses
+`Drawer`, so the picker and compact confirmation share a bottom surface with
+a fixed header and one scrollable list. Above the phone boundary it retains
+the right-hand `Sheet`. Existing selection, default, save and delete handlers
+stay with each provider; retain their close timing and test IDs.
+
 ## Mobile composition and accessibility
 
 Reuse the inset rounded geometry of `SessionTaskSwitcherSheet` and the fixed
@@ -258,6 +294,14 @@ Portuguese/pseudo copy, dark/light themes, safe-area padding, finite animation
 settlement, one active scroll owner, focus return, and horizontal overflow are
 tested on the active surface. Desktop and phone projects run separately through
 the managed runner with a fresh production build.
+
+Hosted geometry checks must assert the short confirmation's actual bounds and
+copy-to-footer spacing, not merely dialog presence or a height equal to the
+editor. Use the saved Threads view deletion as the compact regression fixture;
+also assert restoration of the original dimensions, draft, scroll and focus.
+Exercise the fixed-height Tasks/filter hosts and the intrinsically sized
+session/terminal pickers. GitHub/GitLab cases must assert bottom direction in
+addition to deletion and selection/default isolation.
 
 Capture and inspect the Tasks confirmation, standalone archive, and one
 non-task sheet using the focused E2E fixtures. Public instructions change with

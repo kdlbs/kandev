@@ -351,7 +351,7 @@ function MobileThreadsViewControls({
         <span className="truncate">{activeViewName}</span>
         <IconChevronDown className="h-3.5 w-3.5 shrink-0" />
       </Button>
-      <MobileConfirmationHost open={open}>
+      <MobileConfirmationHost open={open} surface="drawer">
         {({ contentProps }) => (
           <Drawer
             open={open}

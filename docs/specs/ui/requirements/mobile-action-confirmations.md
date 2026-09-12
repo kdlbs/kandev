@@ -11,8 +11,9 @@ owners:
 ## Overview
 
 Phone confirmations give one decision its own focused surface. A confirmation
-inside an open bottom sheet becomes a step in that sheet; a confirmation from
-a page opens a compact bottom sheet. Lists retain their normal row geometry.
+inside an open bottom sheet becomes a content-sized step in that sheet; a
+confirmation from a page opens a compact bottom sheet. Short decisions do not
+inherit a tall editor's height. Lists retain their normal row geometry.
 
 UI owns this reusable presentation, accessibility, and dismissal contract.
 Tasks, saved views, terminals, integrations, and settings retain their existing
@@ -55,8 +56,9 @@ without changing the action being confirmed.
   shall open a compact inset bottom sheet after any transient initiating menu
   closes. The page's selection and scroll position shall remain unchanged.
 - **AC-UI-MOBILE-CONFIRMATION-001.4:** Cancel and the confirmation's Back control
-  shall return to the origin without changing its filters, selection, draft
-  values, or scroll position, except for changes caused by live domain data.
+  shall return to the origin at its normal size without changing its filters,
+  selection, draft values, or scroll position, except for changes caused by
+  live domain data.
   A surviving initiating control shall receive focus; otherwise a visible
   control in the origin shall receive focus.
 - **AC-UI-MOBILE-CONFIRMATION-001.5:** Dismissing the whole sheet or navigating
@@ -72,6 +74,11 @@ without changing the action being confirmed.
   presentation. An inline decision inside an existing centered form dialog
   shall become a focused step in that dialog, preserving the form on Cancel
   and opening no additional modal surface.
+- **AC-UI-MOBILE-CONFIRMATION-001.8:** Saved-view filter panels that host a phone
+  confirmation, including connected-service saved-query panels, shall use
+  bottom-sheet presentation for their list/editor and confirmation steps.
+  Switching to confirmation shall not introduce a side panel or an additional
+  modal surface.
 
 ### REQ-UI-MOBILE-CONFIRMATION-002: Readable content and reachable actions
 
@@ -93,10 +100,13 @@ and operate both actions without scrolling the page.
   48 pixels. Back and selectable option labels shall have at least 44-pixel
   touch targets. Archive shall use its existing non-destructive treatment;
   deletion shall use semantic destructive treatment.
-- **AC-UI-MOBILE-CONFIRMATION-002.4:** Short standalone confirmations shall fit
-  their content. Longer confirmations shall remain inside the dynamic visual
-  viewport, with one active internal body scroller and visible title/actions.
-  Bottom actions shall clear the device safe area, including in landscape.
+- **AC-UI-MOBILE-CONFIRMATION-002.4:** Short bottom-sheet confirmations, whether
+  hosted or standalone, shall fit their content and remain anchored to the
+  bottom inset. Actions shall follow the consequences and options with normal
+  component spacing, without an empty region reserved for the hidden origin.
+  Longer confirmations shall remain inside the dynamic visual viewport, with
+  one active internal body scroller and visible title/actions. Bottom actions
+  shall clear the device safe area, including in landscape.
 - **AC-UI-MOBILE-CONFIRMATION-002.5:** The active surface shall have an accessible
   name and description. Initial action focus shall be on Cancel. Escape shall
   cancel only the confirmation step; it shall not also dismiss its host. Plain
@@ -159,3 +169,4 @@ stale or duplicate actions during overlay transitions.
 
 - [System design](../system-design/mobile-action-confirmations.md)
 - [Implementation plan](../../../plans/mobile-action-confirmations/plan.md)
+- [Compact sheet correction](../../../plans/mobile-confirmation-sheet-sizing/plan.md)

@@ -3,7 +3,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import i18n from "i18next";
 import { MobileConfirmationContent } from "./mobile-confirmation-content";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 it("isolates confirmation mouse events from row selection owners", () => {
   const onMouseDown = vi.fn();
@@ -48,6 +51,7 @@ it("updates Back with the active locale without reopening", async () => {
 
 it("names the target, focuses Cancel, and requires explicit action activation", () => {
   const onConfirm = vi.fn();
+  const focus = vi.spyOn(HTMLElement.prototype, "focus");
   render(
     <MobileConfirmationContent
       title="Delete file?"
@@ -63,6 +67,7 @@ it("names the target, focuses Cancel, and requires explicit action activation", 
   expect(screen.getByText("notes.txt")).toBeTruthy();
   expect(group.getAttribute("aria-describedby")).toBeTruthy();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   fireEvent.keyDown(group, { key: "Enter" });
   expect(onConfirm).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Delete" }));

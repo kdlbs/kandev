@@ -18,11 +18,12 @@ function Harness({
   onConfirm = vi.fn(),
   disabled = false,
   onCancel = vi.fn(),
+  surface = "dialog" as "drawer" | "dialog",
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   return (
-    <MobileConfirmationHost open={parentOpen}>
+    <MobileConfirmationHost open={parentOpen} surface={surface}>
       {({ contentProps }) => (
         <div role="dialog" {...contentProps}>
           <MobileConfirmationHostBody>
@@ -57,25 +58,28 @@ function Harness({
   );
 }
 
-it("shows one modal step and restores the mounted draft, scroll and initiating focus", async () => {
-  render(<Harness />);
-  const input = screen.getByRole("textbox") as HTMLInputElement;
-  const scroll = screen.getByTestId("scroll-owner");
-  scroll.scrollTop = 48;
-  fireEvent.change(input, { target: { value: "my filter" } });
-  const trigger = screen.getByRole("button", { name: "Remove A" });
-  fireEvent.click(trigger);
-  expect(screen.getAllByRole("dialog")).toHaveLength(1);
-  expect(screen.getByRole("dialog").getAttribute("aria-labelledby")).toBeTruthy();
-  expect(screen.getByRole("group", { name: "Delete item?" }).closest("[inert]")).toBeNull();
-  expect(screen.queryByRole("textbox")).toBeNull();
-  expect(input.isConnected).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Back" }));
-  expect(screen.getByRole("textbox")).toBe(input);
-  expect(input.value).toBe("my filter");
-  expect(scroll.scrollTop).toBe(48);
-  await waitFor(() => expect(document.activeElement).toBe(trigger));
-});
+it.each(["drawer", "dialog"] as const)(
+  "%s restores the mounted draft, scroll and initiating focus",
+  async (surface) => {
+    render(<Harness surface={surface} />);
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    const scroll = screen.getByTestId("scroll-owner");
+    scroll.scrollTop = 48;
+    fireEvent.change(input, { target: { value: "my filter" } });
+    const trigger = screen.getByRole("button", { name: "Remove A" });
+    fireEvent.click(trigger);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("dialog").getAttribute("aria-labelledby")).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Delete item?" }).closest("[inert]")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(input.isConnected).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input.value).toBe("my filter");
+    expect(scroll.scrollTop).toBe(48);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  },
+);
 
 it("Escape cancels only the step without invoking the action", () => {
   const outsideKey = vi.fn();

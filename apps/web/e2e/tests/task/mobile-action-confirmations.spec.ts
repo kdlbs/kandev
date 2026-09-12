@@ -3,6 +3,7 @@ import { SessionPage } from "../../pages/session-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 
 const presentations = [
   {
@@ -104,12 +105,101 @@ for (const presentation of presentations) {
   });
 }
 
+for (const presentation of presentations) {
+  test(`hosted archive fits ${presentation.width}px ${presentation.locale} ${presentation.theme}`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    // Enter through the portrait task drawer, then exercise phone rotation while open.
+    await testPage.setViewportSize({
+      width: Math.min(presentation.width, 393),
+      height: Math.max(presentation.height, 640),
+    });
+    await testPage.emulateMedia({ reducedMotion: "reduce" });
+    await testPage.addInitScript(({ theme }) => {
+      localStorage.setItem("theme", theme);
+    }, presentation);
+    const options = { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId };
+    const navigation = await apiClient.seedTask(
+      seedData.workspaceId,
+      "Geometry navigation",
+      options,
+    );
+    const target = await apiClient.createTask(
+      seedData.workspaceId,
+      `Long confirmation ${"X".repeat(40)}`,
+      options,
+    );
+    await apiClient.createTask(seedData.workspaceId, "Active child task", {
+      ...options,
+      parent_id: target.id,
+    });
+    await testPage.goto(`/t/${navigation.task_id}`);
+    await testPage.evaluate((locale) => {
+      document.cookie = `kandev_locale=${locale}; path=/; SameSite=Lax`;
+    }, presentation.locale);
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", presentation.locale);
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const row = testPage
+      .getByTestId("mobile-task-switcher-list")
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: target.title });
+    await row.locator("button.mobile-task-actions-button").tap();
+    await testPage.getByRole("menuitem", { name: presentation.archive, exact: true }).tap();
+    const confirmation = testPage.getByTestId("mobile-action-confirmation");
+    const drawer = testPage.getByRole("dialog").filter({ has: confirmation });
+    await expect(confirmation).toContainText(target.title);
+    const drawerId = await drawer.getAttribute("id");
+    await testPage.setViewportSize(presentation);
+    await expect(drawer).toHaveAttribute("id", drawerId!);
+    await waitForFiniteAnimations(drawer);
+    const bounds = (await drawer.boundingBox())!;
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.y + bounds.height).toBeCloseTo(presentation.height, 0);
+    await assertNoDocumentHorizontalOverflow(testPage);
+    const body = confirmation.getByTestId("mobile-confirmation-body");
+    await expect(body).toHaveCSS("overflow-y", "auto");
+    await expect(confirmation.getByTestId("archive-cascade-checkbox")).not.toBeChecked();
+    if (presentation.height === 375) {
+      expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+        true,
+      );
+      await body.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      expect(await body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    }
+    for (const button of await confirmation.locator("footer button").all()) {
+      const box = (await button.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(48);
+      expect(box.y + box.height).toBeLessThanOrEqual(presentation.height);
+      expect(
+        await button.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return element.contains(
+            document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+          );
+        }),
+      ).toBe(true);
+    }
+    await testPage.screenshot({ path: testInfo.outputPath("hosted-confirmation.png") });
+    await confirmation.getByRole("button", { name: presentation.cancel, exact: true }).tap();
+    await expect(row).toBeVisible();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.task_id}`));
+    const response = await apiClient.rawRequest("GET", `/api/v1/tasks/${target.id}`);
+    expect((await response.json()).archived_at).toBeFalsy();
+  });
+}
+
 test("archive is a step in the Tasks drawer and Cancel restores the scrolled list", async ({
   testPage,
   apiClient,
   seedData,
   prCapture,
-}) => {
+}, testInfo) => {
   const options = {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -151,17 +241,27 @@ test("archive is a step in the Tasks drawer and Cancel restores the scrolled lis
   await expect(confirmation).toContainText(target.title);
   await expect(list).toBeHidden();
   await expect(testPage.getByTestId("task-archive-inline-confirmation")).toHaveCount(0);
-  await waitForFiniteAnimations(confirmation);
-  expect((await confirmation.boundingBox())!.height).toBeCloseTo(originalHeight, 0);
+  const compactBox = await expectContentSizedBottomConfirmation(
+    confirmation,
+    confirmation.getByTestId("mobile-action-confirmation"),
+  );
+  expect(compactBox.height).toBeLessThan(originalHeight);
+  await testInfo.attach("confirmation-geometry", {
+    body: JSON.stringify({ originalHeight, compactBox }),
+    contentType: "application/json",
+  });
   await assertNoDocumentHorizontalOverflow(testPage);
   const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
   await expect(cancel).toBeFocused();
   await prCapture.screenshot("hosted-archive", {
     caption: "Archive becomes a focused step in the same Tasks sheet.",
   });
+  await testPage.screenshot({ path: testInfo.outputPath("compact-archive.png") });
   await cancel.tap();
   await expect(testPage.getByRole("dialog", { name: "Tasks", exact: true })).toBeVisible();
   await expect(list).toBeVisible();
+  await waitForFiniteAnimations(sheet);
+  expect((await sheet.boundingBox())!.height).toBeCloseTo(originalHeight, 0);
   expect(await list.evaluate((element) => element.scrollTop)).toBe(scrollTop);
   await expect(row).toBeVisible();
   await expect(testPage).toHaveURL(new RegExp(`/t/${active.id}`));

@@ -57,7 +57,7 @@ export function MobileConfirmationContent({
   const bodyId = descriptionId ?? `${id}-description`;
   const cancelRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
-    cancelRef.current?.focus();
+    cancelRef.current?.focus({ preventScroll: true });
   }, []);
 
   return (

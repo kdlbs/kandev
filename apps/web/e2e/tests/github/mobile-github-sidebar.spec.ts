@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileGitHubPage } from "../../pages/mobile-github-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 
 const DEFAULT_REPO = "mobileorg/defaultrepo";
 const DEFAULT_REPO_ISSUE = "Mobile issue in saved default repo";
@@ -271,15 +272,18 @@ test.describe("Mobile /github sidebar", () => {
     const deleteAction = page.mobileSidebar.getByRole("button", {
       name: `Delete ${savedQuery} saved query`,
     });
+    await waitForFiniteAnimations(page.mobileSidebar);
     const deleteBox = await deleteAction.boundingBox();
     expect(deleteBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(deleteBox?.width ?? 0).toBeGreaterThanOrEqual(44);
     const originalDialogId = await page.mobileSidebar.getAttribute("id");
+    await expect(page.mobileSidebar).toHaveAttribute("data-vaul-drawer-direction", "bottom");
     await deleteAction.tap();
     const deleteConfirmation = page.mobileSidebar.getByTestId(
       "saved-task-view-delete-confirmation",
     );
     await expect(deleteConfirmation).toHaveAccessibleName(`Delete ${savedQuery}?`);
+    await expectContentSizedBottomConfirmation(page.mobileSidebar, deleteConfirmation);
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
     await expect(page.mobileSidebar).toHaveAttribute("id", originalDialogId!);
     await expect(deleteConfirmation.getByRole("button", { name: "Back" })).toBeVisible();

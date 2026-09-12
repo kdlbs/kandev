@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -26,6 +27,7 @@ type HostContext = {
   register: (request: Request) => void;
   release: (token: symbol) => void;
   originRef: RefObject<HTMLDivElement | null>;
+  originSize: { width: number; height: number } | null;
   restoreFocus: (preferred: HTMLElement | null) => void;
 };
 
@@ -38,21 +40,25 @@ type HostState = {
     "aria-labelledby"?: string;
     "aria-describedby"?: string;
     onEscapeKeyDown?: (event: KeyboardEvent) => void;
+    style?: CSSProperties;
   };
 };
 
 /** Owns one step, not another modal. The actual Drawer/Dialog receives contentProps. */
 export function MobileConfirmationHost({
   open,
+  surface = "dialog",
   children,
 }: {
   open: boolean;
+  surface?: "drawer" | "dialog";
   children: (state: HostState) => ReactNode;
 }) {
   const current = useRef<Request | null>(null);
   const originRef = useRef<HTMLDivElement>(null);
   const [request, setRequest] = useState<Request | null>(null);
   const [outlet, setOutlet] = useState<HTMLDivElement | null>(null);
+  const [originSize, setOriginSize] = useState<HostContext["originSize"]>(null);
   const restoreFocus = useCallback((preferred: HTMLElement | null) => {
     if (current.current || !originRef.current?.isConnected) return;
     if (preferred && originRef.current.contains(preferred)) {
@@ -71,14 +77,22 @@ export function MobileConfirmationHost({
     if (current.current?.token !== token) return;
     current.current = null;
     setRequest(null);
+    setOriginSize(null);
   }, []);
-  const register = useCallback((next: Request) => {
-    if (current.current?.token === next.token) return;
-    const previous = current.current;
-    current.current = next;
-    previous?.cancel(true);
-    setRequest(next);
-  }, []);
+  const register = useCallback(
+    (next: Request) => {
+      if (current.current?.token === next.token) return;
+      if (surface === "drawer" && originRef.current) {
+        const { width, height } = originRef.current.getBoundingClientRect();
+        setOriginSize({ width, height });
+      }
+      const previous = current.current;
+      current.current = next;
+      previous?.cancel(true);
+      setRequest(next);
+    },
+    [surface],
+  );
   useLayoutEffect(() => {
     if (open || !current.current) return;
     const previous = current.current;
@@ -86,20 +100,29 @@ export function MobileConfirmationHost({
     previous.cancel(true);
   }, [open, request, release]);
   const context = useMemo(
-    () => ({ request, outlet, setOutlet, register, release, originRef, restoreFocus }),
-    [request, outlet, register, release, restoreFocus],
+    () => ({ request, outlet, setOutlet, register, release, originRef, originSize, restoreFocus }),
+    [request, outlet, register, release, originSize, restoreFocus],
   );
-  const contentProps = request
+  // Only the inner list/body scrolls; focus must not scroll Vaul's outer shell.
+  const style: CSSProperties | undefined =
+    surface === "drawer"
+      ? {
+          overflow: "clip",
+          ...(request ? { height: "auto", maxHeight: "calc(100dvh - 1rem)", marginTop: 0 } : {}),
+        }
+      : undefined;
+  const contentProps: HostState["contentProps"] = request
     ? {
         "aria-labelledby": request.titleId,
         "aria-describedby": request.descriptionId,
+        style,
         onEscapeKeyDown: (event: KeyboardEvent) => {
           event.preventDefault();
           event.stopPropagation();
           request.cancel();
         },
       }
-    : {};
+    : { style };
   return (
     <Context.Provider value={context}>
       {children({ active: request !== null, contentProps })}
@@ -107,18 +130,25 @@ export function MobileConfirmationHost({
   );
 }
 
-/** Visibility preserves layout and scroll; the sibling portal is never hidden with its source. */
+/** The hidden origin retains its scroll geometry without sizing an active drawer step. */
 export function MobileConfirmationHostBody({ children }: { children: ReactNode }) {
   const host = useMobileConfirmationHost();
   if (!host) return children;
   const active = host.request !== null;
+  const originStyle: CSSProperties = {};
+  if (active) {
+    originStyle.visibility = "hidden";
+    if (host.originSize) {
+      Object.assign(originStyle, host.originSize, { position: "absolute", top: 0, left: 0 });
+    }
+  }
   return (
-    <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1">
+    <div className="relative grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1">
       <div
         ref={host.originRef}
         aria-hidden={active || undefined}
         inert={active || undefined}
-        style={active ? { visibility: "hidden" } : undefined}
+        style={originStyle}
         className="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col"
       >
         {children}

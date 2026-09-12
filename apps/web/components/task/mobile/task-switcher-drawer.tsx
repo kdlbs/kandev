@@ -15,7 +15,7 @@ export function TaskSwitcherDrawer({
   children: ReactNode;
 }) {
   return (
-    <MobileConfirmationHost open={open}>
+    <MobileConfirmationHost open={open} surface="drawer">
       {({ contentProps }) => (
         <Drawer open={open} onOpenChange={onOpenChange}>
           <DrawerContent

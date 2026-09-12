@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconBrandGitlab, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { PageShell } from "@/components/page-shell";
 import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
 import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
@@ -31,10 +30,7 @@ import {
 import { toGitLabTaskPreset } from "@/components/gitlab/my-gitlab/task-presets";
 import { useAppStore } from "@/components/state-provider";
 import { Trans, useTranslation } from "react-i18next";
-import {
-  MobileConfirmationHost,
-  MobileConfirmationHostBody,
-} from "@/components/confirmation/mobile-confirmation-host";
+import { IntegrationFiltersSheet } from "@/components/integrations/integration-filters-sheet";
 
 type GitLabPageClientProps = {
   workspaceId?: string;
@@ -302,36 +298,22 @@ function GitLabPageOverlays({
   };
   return (
     <>
-      <MobileConfirmationHost key={workspaceId} open={mobileSidebarOpen}>
-        {({ active, contentProps }) => (
-          <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-            <SheetContent
-              side="right"
-              className="w-full sm:max-w-sm overflow-hidden p-0"
-              data-testid="gitlab-mobile-sidebar"
-              showCloseButton={!active}
-              aria-describedby={undefined}
-              {...contentProps}
-            >
-              <MobileConfirmationHostBody>
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <SheetHeader className="px-4 pt-4 pb-2">
-                    <SheetTitle>{t("gitlab:filters")}</SheetTitle>
-                  </SheetHeader>
-                  <PresetsSidebar
-                    selected={state.selection}
-                    onSelect={onMobileSidebarSelect}
-                    savedPresets={state.savedPresets}
-                    onDeleteSaved={state.onDeleteSaved}
-                    canSaveCurrent={state.canSaveCurrent}
-                    onSaveCurrent={onMobileSaveCurrent}
-                  />
-                </div>
-              </MobileConfirmationHostBody>
-            </SheetContent>
-          </Sheet>
-        )}
-      </MobileConfirmationHost>
+      <IntegrationFiltersSheet
+        key={workspaceId}
+        open={mobileSidebarOpen}
+        onOpenChange={setMobileSidebarOpen}
+        title={t("gitlab:filters")}
+        testId="gitlab-mobile-sidebar"
+      >
+        <PresetsSidebar
+          selected={state.selection}
+          onSelect={onMobileSidebarSelect}
+          savedPresets={state.savedPresets}
+          onDeleteSaved={state.onDeleteSaved}
+          canSaveCurrent={state.canSaveCurrent}
+          onSaveCurrent={onMobileSaveCurrent}
+        />
+      </IntegrationFiltersSheet>
       <SavePresetDialog
         open={state.saveDialogOpen}
         onOpenChange={state.setSaveDialogOpen}

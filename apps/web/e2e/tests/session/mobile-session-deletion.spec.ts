@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -70,6 +71,10 @@ test.describe("mobile: session deletion", () => {
 
     const confirmation = testPage.getByTestId("mobile-session-delete-confirmation");
     await expect(confirmation).toBeVisible();
+    await expectContentSizedBottomConfirmation(
+      testPage.getByRole("dialog", { name: "Delete session?" }),
+      confirmation,
+    );
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await expect(testPage.getByRole("dialog", { name: "Delete session?" })).toHaveAttribute(
       "id",
