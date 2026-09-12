@@ -22,10 +22,10 @@ test.describe("Canvas sharing on mobile", () => {
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true);
       canvasId = seeded.canvas.id;
-      const active = await promoteCanvas(
-        apiClient,
-        await approvePendingCanvas(apiClient, seeded.canvas),
-      );
+      const approved = seeded.canvas.pending_release
+        ? await approvePendingCanvas(apiClient, seeded.canvas)
+        : seeded.canvas;
+      const active = await promoteCanvas(apiClient, approved);
 
       await testPage.goto(canvasHref(active.id));
       await expect(testPage.getByTestId("canvas-host-route")).toBeVisible({ timeout: 30_000 });
