@@ -16,7 +16,8 @@ Issue: [#3071](https://github.com/kdlbs/kandev/issues/3071).
 ## Overview
 
 The issue remains useful as a documentation repair. Its original runtime proposals need separate treatment.
-This package explains the historical default change and recovery with current releases.
+This package records the historical default change and keeps the public task-access guidance concise.
+The upgrade-specific recovery runbook is deferred because it is temporary migration guidance.
 It preserves the current policy contract and uses one documentation work order.
 
 ## Investigation evidence
@@ -33,7 +34,7 @@ The issue was opened on 2026-08-26 against v0.91.0+ and contains no attachments 
 | Stale prepared checkout | PR #3077, commit `c2e2b3a43`, reconciles origins before prepared launches. | Fixed in v0.92.0. |
 | Host clone protocol | PR #3078, commit `e4d17b3925`, resolves host-specific protocol dynamically. | Fixed in v0.92.0. |
 | Preflight | `PreflightManagedGitCredentials` validates persisted repository identity and skips executor mode. | It does not prove SSH or HTTPS authentication. |
-| Public recovery guide | `docs/public/integrations.md` explains modes and legacy shared connections. | It omits the historical task-policy flip and its explicit recovery procedure. |
+| Public recovery guide | The **Choose task Git credentials** section explains the current modes and entry points. | Keep durable task-access guidance concise; defer the temporary upgrade runbook. |
 
 ## Confirmed root cause and reproduction
 
@@ -56,9 +57,8 @@ A code test that expects automatic policy conversion would contradict the curren
 ### In scope
 
 - Explain the historical managed default and the current new-workspace default.
-- Describe explicit recovery for users who want executor inheritance.
-- Explain automatic origin convergence in v0.92.0 and later.
-- State the limits for user-managed repositories, remote executors, and preflight checks.
+- Summarize task-access selection and the managed, user-managed, and remote-executor boundaries.
+- Keep the public guidance concise and scan-friendly.
 - Qualify the existing description of managed access as an opt-in policy for historical workspaces.
 
 ### Out of scope
@@ -66,22 +66,20 @@ A code test that expects automatic policy conversion would contradict the curren
 - Automatic conversion of saved or missing policies to executor mode.
 - Conditional policy selection based on App presence or temporary credential health.
 - A new transport-authentication probe, launch warning, settings UI, or schema migration.
+- A temporary upgrade-specific recovery runbook in the public guide.
 - Reimplementation of #3069 or #3070.
 - Editing generated changelog history or closing the entire issue automatically.
 
 ## Technical approach
 
-Update the existing task-access and upgrade sections in `docs/public/integrations.md`.
+Update the existing task-access section in `docs/public/integrations.md` with short bullets.
 Keep workspace API authentication separate from credentials inside task processes.
 Use **Workspace GitHub access**, **Change connection** when an automation connection exists, **Connect GitHub** otherwise, and **Inherit executor Git credentials** as the existing control labels.
-Explain that a later launch or resume applies the saved policy to Kandev-managed Local and Worktree origins.
-Existing agent processes retain their launch environment until a later launch or resume.
+Explain saved policy preservation, task-only executor selection, and the need for a new terminal after a launch or resume.
+Do not add a temporary upgrade-specific recovery section; keep its investigation evidence in this plan.
 
-Describe `git remote get-url origin` as an inspection command inside the affected checkout.
-For linked worktrees, explain that their common repository shares remote settings.
-Prefer the current release and normal preparation over manual edits to managed clone state.
-For user-managed local checkouts, explain that the user owns the remote and matching Git credentials.
-Do not instruct users to publish token output or reset healthy GitHub accounts.
+Keep the origin, service-user, and preflight findings in this plan as evidence for a possible future
+runbook. Do not publish those migration details in the current public guide.
 
 The current specifications intentionally preserve existing policies.
 This package follows that boundary and adds only documentation criterion `AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.13`.
@@ -123,21 +121,22 @@ The completed packages remain unchanged because this repair changes none of thei
 Investigation: the focused Go command passed in both packages.
 Package validation passed: catalog validation (264 decisions, 818 specifications), specification lint, and `git diff --check`.
 Public documentation implementation completed in `docs/public/integrations.md` and
-`docs/public/use-kandev.md`. The integration guide now explains the historical `managed`
-compatibility default, preserved policies, conditional task-access entry points, task-only
-executor recovery, fresh-terminal requirements, service-user and checkout ownership boundaries,
-v0.92.0 origin reconciliation, remote-executor credentials, and the limits of managed preflight.
+`docs/public/use-kandev.md`. The integration guide now uses short bullets for historical saved
+policies, conditional task-access entry points, managed and executor credentials, task-only
+executor selection, fresh terminals, and managed, user-managed, and remote-executor boundaries.
+The temporary upgrade-specific recovery section was removed from the public guide; its
+investigation evidence remains here for a later runbook if needed.
 Documentation validation passed: public-doc tests (62), public-doc validation (46 pages), and
 the three work-order acceptance conditions.
 Build validation passed: `make -C apps/backend build` and
 `pnpm --filter @kandev/web build`.
 Follow-up source review corrected the disconnected-workspace entry point and the fresh-terminal
-recovery instruction; no builds or tests were rerun for that review.
+recovery instruction; the public upgrade/recovery section was later removed as temporary guidance.
 Review follow-up also clarified that historical workspaces may preserve either saved task Git
-policy, scoped the recovery list to managed workspace connections, aligned the plan's control
-labels with the UI, and completed the work-order touched-file inventory. Focused post-fixup
-documentation validation passed: public-doc validation (46 pages), catalog validation (264
-decisions and 818 specifications), specification lint, and `git diff --check`.
+policy, aligned the plan's control labels with the UI, and completed the work-order touched-file
+inventory. Focused post-fixup documentation validation passed: public-doc validation (46 pages),
+catalog validation (264 decisions and 818 specifications), specification lint, and
+`git diff --check`.
 No temporary tests, instances, or database mutations were needed.
 
 ## Risks

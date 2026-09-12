@@ -18,27 +18,30 @@ system_design:
 
 ## Summary
 
-Explain the historical managed default and the current recovery path in the existing integration guide.
-Keep the instructions consistent with preserved policies and automatic managed-checkout reconciliation.
+Keep the public task-access guidance concise and consistent with preserved policies.
+Record the upgrade recovery evidence internally for possible later use.
 
 ## In scope
 
 - Qualify the managed opt-in description for historical workspaces.
-- Add a focused subsection under **Upgrade and recovery** about the task credential policy refactor.
-- Explain the healthy-host-login symptom without claiming that every authentication error has this cause.
-- Link to the existing task-access section and describe explicit policy selection and subsequent launch or resume.
-- Identify v0.92.0 as the first stable release with the prepared-origin and dynamic-protocol fixes.
+- Keep the existing **Choose task Git credentials** section focused on durable user actions.
+- Describe explicit policy selection, task-only executor inheritance, and a fresh terminal after launch or resume.
+- Distinguish managed checkouts, user-managed checkouts, and remote executors in short bullets.
+- Keep the upgrade investigation evidence in this plan instead of adding a temporary public runbook.
 - Include the checklist in Acceptance as a manual documentation review.
 
 ## Out of scope
 
-Production code, test code, UI copy, automatic migration, credential probes, and generated changelog edits.
+Production code, test code, UI copy, automatic migration, credential probes, a temporary public
+upgrade runbook, and generated changelog edits.
 
 ## Acceptance
 
 1. The guide explains historical managed defaults, current executor defaults, and preservation of existing workspace policies.
-2. Recovery describes explicit executor selection, the service-user boundary, origin inspection, and a later launch or resume. It distinguishes managed checkouts, user-managed checkouts, and remote executors.
-3. The guide does not promise automatic policy conversion or comprehensive credential preflight. Its introductory mode description agrees with the upgrade subsection.
+2. Task-access bullets describe explicit executor selection, a fresh terminal after launch or resume,
+   and the managed, user-managed, and remote-executor boundaries.
+3. The guide does not promise automatic policy conversion or comprehensive credential preflight,
+   and it does not add a temporary upgrade-specific recovery runbook.
 
 ## Verification
 
@@ -85,26 +88,25 @@ The procedure must not suggest broad manual rewrites, token disclosure, or autom
 - `apps/backend/internal/github/workspace_defaults.go`: existing-installation guard.
 - `apps/backend/internal/orchestrator/executor/executor_credentials.go`: managed admission scope.
 - `apps/backend/internal/orchestrator/executor/executor_execute.go`: prepared launch ordering.
-- Existing **Choose task Git credentials** and **Upgrade and recovery** sections in the public guide.
+- Existing **Choose task Git credentials** section in the public guide.
 
 ## Results
 
-Implemented the focused upgrade and recovery guidance in
+Implemented concise task-access guidance in
 [`docs/public/integrations.md`](../../public/integrations.md). The guide now explains the
-historical `managed` compatibility default, current executor inheritance, preserved saved
+historical `managed` compatibility policy, current executor inheritance, preserved saved
 policies, conditional **Connect GitHub** and **Change connection** entry points, task-only
-executor recovery, fresh-terminal requirements, Local and Worktree origin reconciliation from
-v0.92.0, user-managed checkout ownership, service-user credentials, remote executor boundaries,
-and the limits of managed preflight. The cross-page summary in
+executor selection, fresh-terminal requirements, and managed, user-managed, and remote-executor
+boundaries. The cross-page summary in
 [`docs/public/use-kandev.md`](../../public/use-kandev.md) no longer describes managed access as the
 default for new workspaces.
+The temporary upgrade-specific recovery section was removed from the public guide; the
+investigation evidence remains in the plan for possible later documentation.
 
 All three acceptance conditions pass by manual review. Public-doc tests (62), public-doc
 validation (46 pages), catalog validation, specification lint, focused Go tests, both backend and
-web builds, and `git diff --check` pass. A follow-up source review corrected the conditional
-connection entry point and the requirement to create a fresh terminal process; no builds or tests
-were rerun for that review. The PR fixup review then clarified preservation of either saved task
-Git policy for historical workspaces, scoped the recovery list to managed connections, aligned the
-plan's control labels with the UI, and completed the touched-file inventory. Post-fixup focused
-documentation validation passed: public-doc validation (46 pages), catalog validation (264
-decisions and 818 specifications), specification lint, and `git diff --check`.
+web builds, and `git diff --check` pass. The final documentation pass removed the temporary
+upgrade-specific recovery section, retained concise task-access guidance, and aligned the plan
+and work-order scope. Post-fixup focused documentation validation passed: public-doc validation
+(46 pages), catalog validation (264 decisions and 818 specifications), specification lint, and
+`git diff --check`.
