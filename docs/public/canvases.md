@@ -26,7 +26,9 @@ coordinator-view goal followed by the `@create-canvas` saved-prompt reference.
 
 Choose the agent, executor, workflow, and other task options, then select
 **Start task**. The task uses no repository by default and prefers a local
-executor. You can edit or remove the goal and reference before you submit.
+executor. The saved-prompt reference appears as an editable chip. Select it to
+preview the current instructions, or remove only that occurrence before you
+submit.
 
 On a phone, open **Settings > Workspace > Canvases** and select **Create
 canvas**. The same full-screen task form and task options are available.

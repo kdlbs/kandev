@@ -102,6 +102,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
       )}
       <DialogPromptSection
         isSessionMode={false}
+        promptReferencesEnabled={isCreateMode}
         isTaskStarted={isTaskStarted}
         initialDescription={props.initialDescription}
         fs={fs}

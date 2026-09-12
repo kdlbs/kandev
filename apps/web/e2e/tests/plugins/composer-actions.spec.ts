@@ -16,6 +16,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
@@ -208,7 +209,7 @@ test.describe("Plugins — composer capability", () => {
 
     await composerAction.getByTestId("e2e-composer-insert").click();
     await expect(composerAction).toHaveAttribute("data-status", "inserted");
-    await expect(description).toHaveValue(`head ${DICTATED} tail`);
+    await expectTaskDescription(description, `head ${DICTATED} tail`);
 
     // The title still comes from the native field: the capability owns the
     // prompt, not the whole form.
@@ -271,7 +272,7 @@ test.describe("Plugins — composer capability", () => {
     await description.fill("head tail");
     await caretBackFromEnd(description, " tail".length);
     await composerAction.getByTestId("e2e-composer-insert").click();
-    await expect(description).toHaveValue(`head ${DICTATED} tail`);
+    await expectTaskDescription(description, `head ${DICTATED} tail`);
 
     await composerAction.getByTestId("e2e-composer-submit").click();
     await expect(composerAction).toHaveAttribute("data-status", "submitted");

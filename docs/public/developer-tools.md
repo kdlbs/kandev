@@ -119,6 +119,12 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
+In the new task form, the same completion inserts an editable `@name` chip.
+Select the chip to preview the saved prompt, or use its remove action to delete
+that occurrence. Task creation submits the visible alias text, so later prompt
+updates apply when the task launches. Unknown names and aliases in code spans or
+link destinations remain ordinary text.
+
 Kandev always seeds an editable built-in prompt named `create-canvas`. When
 canvases are enabled, the workspace canvas setup form references it as
 `@create-canvas`, so the task description stays short while the agent receives

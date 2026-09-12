@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 import type { ExecutePromptRequest } from "@/lib/api/domains/utility-api";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
@@ -54,9 +55,8 @@ test.describe("Enhance prompt button in task creation", () => {
     await configureDefaultUtilityAgent(apiClient);
     await openCreateTaskDialog(testPage, seedData.workspaceId);
 
-    // Fill the description textarea
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.fill("Draft task description.");
+    const description = testPage.getByTestId("task-description-input");
+    await description.fill("Draft task description.");
 
     // The enhance button should be visible and enabled
     const enhanceBtn = testPage.getByTestId("enhance-prompt-button");
@@ -65,7 +65,7 @@ test.describe("Enhance prompt button in task creation", () => {
 
     await enhanceBtn.click();
 
-    await expect(textarea).toHaveValue("Stubbed enhanced task description.");
+    await expectTaskDescription(description, "Stubbed enhanced task description.");
     expect(executeBody).toMatchObject({
       utility_agent_id: "builtin-enhance-prompt",
       session_id: "",
@@ -106,22 +106,22 @@ test.describe("Enhance prompt button in task creation", () => {
     await configureDefaultUtilityAgent(apiClient);
     const dialog = await openCreateTaskDialog(testPage, seedData.workspaceId);
 
-    const textarea = testPage.getByTestId("task-description-input");
+    const description = testPage.getByTestId("task-description-input");
     const enhanceBtn = testPage.getByTestId("enhance-prompt-button");
 
-    await textarea.fill(initialPrompt);
+    await description.fill(initialPrompt);
     await enhanceBtn.click();
 
     await expect
       .poll(() => executeBody?.user_prompt ?? null, { timeout: 5_000 })
       .toBe(initialPrompt);
 
-    await textarea.fill(editedPrompt);
+    await description.fill(editedPrompt);
     releaseResponse?.();
 
     const recovery = testPage.getByTestId("prompt-result-recovery");
     await expect(recovery).toBeVisible();
-    await expect(textarea).toHaveValue(editedPrompt);
+    await expectTaskDescription(description, editedPrompt);
     await expect(dialog).not.toContainText(generatedPrompt);
     await expect(dialog).not.toContainText(syntheticCallId);
 
@@ -129,10 +129,10 @@ test.describe("Enhance prompt button in task creation", () => {
     await expect
       .poll(() => testPage.evaluate(() => navigator.clipboard.readText()), { timeout: 5_000 })
       .toBe(generatedPrompt);
-    await expect(textarea).toHaveValue(editedPrompt);
+    await expectTaskDescription(description, editedPrompt);
 
     await recovery.getByRole("button", { name: "Apply" }).click();
-    await expect(textarea).toHaveValue(generatedPrompt);
+    await expectTaskDescription(description, generatedPrompt);
     await expect(recovery).toHaveCount(0);
   });
 
@@ -168,17 +168,17 @@ test.describe("Enhance prompt button in task creation", () => {
 
     await configureDefaultUtilityAgent(apiClient);
     const dialog = await openCreateTaskDialog(testPage, seedData.workspaceId);
-    const textarea = testPage.getByTestId("task-description-input");
+    const description = testPage.getByTestId("task-description-input");
     const enhanceBtn = testPage.getByTestId("enhance-prompt-button");
 
-    await textarea.fill(prompt);
+    await description.fill(prompt);
     await enhanceBtn.click();
     await requestGate;
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog).not.toBeVisible();
 
     await openCreateTaskDialog(testPage, seedData.workspaceId);
-    await textarea.fill(prompt);
+    await description.fill(prompt);
     releaseResponse?.();
     await testPage.evaluate(
       () =>
@@ -186,7 +186,7 @@ test.describe("Enhance prompt button in task creation", () => {
     );
 
     await expect(enhanceBtn).toBeEnabled();
-    await expect(textarea).toHaveValue(prompt);
+    await expectTaskDescription(description, prompt);
     await expect(testPage.getByTestId("prompt-result-recovery")).toHaveCount(0);
     await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
   });
@@ -213,13 +213,13 @@ test.describe("Enhance prompt button in task creation", () => {
     await configureDefaultUtilityAgent(apiClient);
     await openCreateTaskDialog(testPage, seedData.workspaceId);
 
-    const textarea = testPage.getByTestId("task-description-input");
+    const description = testPage.getByTestId("task-description-input");
     const enhanceBtn = testPage.getByTestId("enhance-prompt-button");
 
-    await textarea.fill(initialPrompt);
+    await description.fill(initialPrompt);
     await enhanceBtn.click();
 
-    await expect(textarea).toHaveValue(initialPrompt);
+    await expectTaskDescription(description, initialPrompt);
     const toast = testPage.getByTestId("toast-message");
     await expect(toast).toBeVisible({ timeout: 5_000 });
     await expect(toast).toContainText("Generation failed");

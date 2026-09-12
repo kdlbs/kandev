@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription, readTaskDescription } from "../../pages/task-description-editor";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
 import {
@@ -132,7 +133,8 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await testPage.getByTestId("settings-create-canvas").tap();
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("task-title-input")).toHaveValue("Create a canvas");
-      await expect(dialog.getByTestId("task-description-input")).toHaveValue(
+      await expectTaskDescription(
+        dialog.getByTestId("task-description-input"),
         "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
       );
 
@@ -156,7 +158,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
       // the option, so this remains deterministic under strict locators.
       await testPage.getByRole("button", { name: "E2E Workflow", exact: true }).last().tap();
 
-      const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
+      const defaultPrompt = await readTaskDescription(dialog.getByTestId("task-description-input"));
       expect(defaultPrompt).toBe(
         "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
       );
@@ -263,7 +265,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
           .locator('[data-testid="toast-message"]')
           .filter({ hasText: "Failed to create task" }),
       ).toBeVisible();
-      await expect(dialog.getByTestId("task-description-input")).toHaveValue(description);
+      await expectTaskDescription(dialog.getByTestId("task-description-input"), description);
 
       const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
       await startAgent.tap();

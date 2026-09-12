@@ -187,6 +187,10 @@ Dependency order: 01, then 02. Both are complete and sequential.
 
 ## Companion plans
 
+The proposed [task-create chip package](../task-create-prompt-chips/plan.md)
+extends reference presentation and autocomplete in the shared create-task editor.
+It does not change this package's historical results or completed status.
+
 This package supersedes the sidebar setup redirect in the completed Task 02 of
 [the UX follow-up](../plugin-backed-canvases-ux-follow-up/plan.md), and the
 long visible preset in completed Task 02 of

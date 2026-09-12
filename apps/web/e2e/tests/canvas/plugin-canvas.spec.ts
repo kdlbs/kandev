@@ -2,6 +2,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription, readTaskDescription } from "../../pages/task-description-editor";
 import {
   canvasHref,
   enableCanvasFeature,
@@ -39,7 +40,8 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         "aria-checked",
         "true",
       );
-      await expect(dialog.getByTestId("task-description-input")).toHaveValue(
+      await expectTaskDescription(
+        dialog.getByTestId("task-description-input"),
         "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
       );
 
@@ -93,7 +95,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         localProfile!.name,
       );
 
-      const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
+      const defaultPrompt = await readTaskDescription(dialog.getByTestId("task-description-input"));
       expect(defaultPrompt).toBe(
         "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
       );

@@ -42,8 +42,8 @@ vi.mock("@/components/plugins/plugin-slot", () => ({
 
 // Inert mention popover — the real hook installs a `keydown` listener that
 // drains React's event queue across re-renders and adds noise to assertions.
-vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
-  useTaskCreatePromptMention: () => ({
+vi.mock("@/hooks/use-task-create-prompt-mention", () => {
+  const useMention = () => ({
     isOpen: false,
     isLoading: false,
     position: null,
@@ -55,8 +55,12 @@ vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
     handleSelect: () => {},
     closeMenu: () => {},
     setSelectedIndex: () => {},
-  }),
-}));
+  });
+  return {
+    useTaskCreatePromptMention: useMention,
+    useTaskCreatePromptMentionForInput: useMention,
+  };
+});
 
 afterEach(() => {
   cleanup();
