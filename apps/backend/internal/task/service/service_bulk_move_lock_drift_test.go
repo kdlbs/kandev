@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // TestService_BulkMoveSelectedTasksRelocksAfterSourceStepDrift proves
@@ -135,5 +136,70 @@ func TestService_BulkMoveSelectedTasksMovesTaskThatDriftedOutOfTargetBeforeLock(
 		t.Fatalf("batch-1 step = %q, want step-target (task drifted out of the "+
 			"target before the lock was acquired; it must still be moved back "+
 			"in, not silently skipped as if it had never left)", moved.WorkflowStepID)
+	}
+}
+
+// TestService_BulkMoveTasksReordersAfterSourceStepDrift proves BulkMoveTasks's
+// sibling of the fix above: a mid-batch source-step drift must correct the
+// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order, not just which
+// tasks move. orderTasksForBulkMove runs once before the lock (on the stale
+// read) and again after (on acquireBulkMoveStepLocks' lock-corrected
+// membership); only the second result may reach the dispatch loop.
+//
+// task-a starts in step-high (ordinal 10) and task-b starts in step-low
+// (ordinal 0), so the stale pre-lock order is [task-b, task-a]. Before the
+// lock is acquired, task-b drifts into step-highest (ordinal 20) — higher
+// than task-a's step. The correct, lock-corrected order is therefore
+// [task-a, task-b]. Dispatch order is observable via each task's resulting
+// `position` in the (initially empty) target step: MoveTask assigns
+// arrival positions in call order, so the first-dispatched task ends up
+// with the lower position.
+func TestService_BulkMoveTasksReordersAfterSourceStepDrift(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-low":     {ID: "step-low", WorkflowID: "wf-source", Name: "Low", Position: 0},
+		"step-high":    {ID: "step-high", WorkflowID: "wf-source", Name: "High", Position: 10},
+		"step-highest": {ID: "step-highest", WorkflowID: "wf-source", Name: "Highest", Position: 20},
+		"step-target":  {ID: "step-target", WorkflowID: "wf-target", Name: "Target", Position: 0},
+	}})
+
+	createMoveTask(t, ctx, repo, "task-a", "wf-source", "step-high", nil)
+	createMoveTask(t, ctx, repo, "task-b", "wf-source", "step-low", nil)
+
+	svc.bulkMoveBeforeLockForTest = func() {
+		if _, err := svc.MoveTask(ctx, "task-b", "wf-source", "step-highest", 0); err != nil {
+			t.Errorf("drift MoveTask: %v", err)
+		}
+	}
+	t.Cleanup(func() { svc.bulkMoveBeforeLockForTest = nil })
+
+	result, err := svc.BulkMoveTasks(ctx, "wf-source", "", "wf-target", "step-target")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+	if result.MovedCount != 2 {
+		t.Fatalf("MovedCount = %d, want 2", result.MovedCount)
+	}
+
+	taskA, err := repo.GetTask(ctx, "task-a")
+	if err != nil {
+		t.Fatalf("GetTask(task-a): %v", err)
+	}
+	taskB, err := repo.GetTask(ctx, "task-b")
+	if err != nil {
+		t.Fatalf("GetTask(task-b): %v", err)
+	}
+	if taskA.WorkflowStepID != "step-target" || taskB.WorkflowStepID != "step-target" {
+		t.Fatalf("both tasks must land in step-target, got task-a=%q task-b=%q",
+			taskA.WorkflowStepID, taskB.WorkflowStepID)
+	}
+	if taskA.Position >= taskB.Position {
+		t.Fatalf("task-a.Position=%d, task-b.Position=%d: want task-a dispatched "+
+			"(and so positioned) before task-b, since after the drift task-a's "+
+			"source step (ordinal 10) ranks below task-b's drifted-to source "+
+			"step (ordinal 20) — the stale pre-lock order would have dispatched "+
+			"task-b first instead", taskA.Position, taskB.Position)
 	}
 }
