@@ -32,7 +32,7 @@ func (r *Repository) migrateTaskSessionMessagesTurnNullable() error {
 				type TEXT NOT NULL DEFAULT 'message',
 				metadata TEXT DEFAULT '{}',
 				created_at TIMESTAMP NOT NULL,
-				updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP,
 				prompt_seq INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
 				FOREIGN KEY (turn_id) REFERENCES task_session_turns(id) ON DELETE CASCADE
