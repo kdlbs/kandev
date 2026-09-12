@@ -71,6 +71,15 @@ type GitContributionRequest struct {
 	Repo               string `json:"repo,omitempty"`
 }
 
+// GitContributionHistoryExplanationRequest describes the selected local and
+// published heads for a read-only history observation.
+type GitContributionHistoryExplanationRequest struct {
+	Branch             string `json:"branch"`
+	ExpectedLocalHead  string `json:"expected_local_head"`
+	ExpectedRemoteHead string `json:"expected_remote_head"`
+	Repo               string `json:"repo,omitempty"`
+}
+
 // GitRebaseRequest for POST /api/v1/git/rebase
 type GitRebaseRequest struct {
 	BaseBranch string `json:"base_branch"`
@@ -259,6 +268,40 @@ func (s *Server) handleGitUseContribution(c *gin.Context) {
 	s.handleGitContribution(c, "use_remote_contribution", func(gitOp *process.GitOperator, expected string) (*process.GitOperationResult, error) {
 		return gitOp.UseRemoteContribution(c.Request.Context(), expected)
 	})
+}
+
+func (s *Server) handleGitContributionHistoryExplanation(c *gin.Context) {
+	var req GitContributionHistoryExplanationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: "contribution_history_explanation", Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	for field, value := range map[string]string{
+		"branch":               req.Branch,
+		"expected_local_head":  req.ExpectedLocalHead,
+		"expected_remote_head": req.ExpectedRemoteHead,
+	} {
+		if value == "" {
+			c.JSON(http.StatusBadRequest, process.GitOperationResult{
+				Success: false, Operation: "contribution_history_explanation", Error: field + " is required",
+			})
+			return
+		}
+	}
+
+	gitOp := s.gitOpForRepo(c, "contribution_history_explanation", req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := gitOp.ExplainContributionHistory(
+		c.Request.Context(), req.Branch, req.ExpectedLocalHead, req.ExpectedRemoteHead)
+	if err != nil {
+		s.handleGitError(c, "contribution_history_explanation", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) handleGitContribution(c *gin.Context, operation string, action func(*process.GitOperator, string) (*process.GitOperationResult, error)) {

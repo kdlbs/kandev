@@ -127,6 +127,7 @@ type TimelineProps = Pick<
   | "repoDisplayName"
   | "perRepoStatus"
   | "prByRepo"
+  | "comparisonRequestToken"
 >;
 
 type WorkingTreeProps = Pick<
@@ -213,12 +214,14 @@ function CommitHistorySections({
   defaultCollapsed,
   mergedCommits,
   separated,
+  comparisonRequestToken,
 }: {
   props: TimelineProps;
   isDiverged: boolean;
   defaultCollapsed: boolean;
   mergedCommits: ReturnType<typeof mergeCommits>;
   separated: ReturnType<typeof separateCommitHistories>;
+  comparisonRequestToken?: number;
 }) {
   const { t } = useTranslation();
   if (isDiverged) {
@@ -230,6 +233,7 @@ function CommitHistorySections({
             label={t("task:localCheckoutCommits")}
             testId="local-checkout-commits-section"
             defaultCollapsed={defaultCollapsed}
+            expandOnRequestToken={comparisonRequestToken}
             pushDisabled={props.pushDisabled}
             onOpenCommitDetail={props.onOpenCommitDetail}
             onRevertCommit={props.onRevertCommit}
@@ -248,6 +252,8 @@ function CommitHistorySections({
             label={t("task:prNumberVersion", { number: props.providerPRNumber ?? "" })}
             testId="current-pr-commits-section"
             defaultCollapsed
+            expandOnRequestToken={comparisonRequestToken}
+            focusOnExpand
             showActions={false}
             onOpenCommitDetail={props.onOpenCommitDetail}
             repoDisplayName={props.repoDisplayName}
@@ -344,6 +350,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
           defaultCollapsed={firstSection !== "commits"}
           mergedCommits={mergedCommits}
           separated={separated}
+          comparisonRequestToken={props.comparisonRequestToken}
         />
       )}
     </div>

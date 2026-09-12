@@ -83,6 +83,12 @@ function ContributionDropdownItems({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  onCompareVersions,
+  replaceLabelKey,
+  useLabelKey,
+  viewLabelKey,
+  replaceDescriptionKey,
+  useDescriptionKey,
   prNumber,
 }: {
   disabled: boolean;
@@ -91,6 +97,12 @@ function ContributionDropdownItems({
   onReplaceContribution: () => void;
   onUseContribution: () => void;
   onViewPRVersion: () => void;
+  onCompareVersions?: () => void;
+  replaceLabelKey?: string;
+  useLabelKey?: string;
+  viewLabelKey?: string;
+  replaceDescriptionKey?: string;
+  useDescriptionKey?: string;
   prNumber?: number;
 }) {
   return (
@@ -103,7 +115,13 @@ function ContributionDropdownItems({
         onReplaceContribution={onReplaceContribution}
         onUseContribution={onUseContribution}
         onViewPRVersion={onViewPRVersion}
+        onCompareVersions={onCompareVersions}
         prNumber={prNumber}
+        replaceLabelKey={replaceLabelKey}
+        useLabelKey={useLabelKey}
+        viewLabelKey={viewLabelKey}
+        replaceDescriptionKey={replaceDescriptionKey}
+        useDescriptionKey={useDescriptionKey}
       />
     </>
   );
@@ -128,6 +146,7 @@ export type VcsDropdownItemsProps = {
   onReplaceContribution: () => void;
   onUseContribution: () => void;
   onViewPRVersion: () => void;
+  onCompareVersions?: () => void;
   prNumber?: number;
   onRebase: () => void;
   onMerge: () => void;
@@ -152,6 +171,7 @@ export function VcsDropdownItems({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  onCompareVersions,
   prNumber,
   onRebase,
   onMerge,
@@ -199,7 +219,13 @@ export function VcsDropdownItems({
           onReplaceContribution={onReplaceContribution}
           onUseContribution={onUseContribution}
           onViewPRVersion={onViewPRVersion}
+          onCompareVersions={onCompareVersions}
           prNumber={prNumber}
+          replaceLabelKey="task:publishTaskVersion"
+          useLabelKey="task:restorePublishedPRVersion"
+          viewLabelKey="task:openPROnGitHub"
+          replaceDescriptionKey="task:remoteContributionPublishDescription"
+          useDescriptionKey="task:remoteContributionRestoreDescription"
         />
       )}
       <DropdownMenuSeparator />

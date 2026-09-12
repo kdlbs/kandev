@@ -165,6 +165,15 @@ export type MockGitHubPersonalConnection = {
   access_expires_at?: string;
 };
 
+export type E2ERemoteContributionBinding = {
+  source_repository: {
+    remote_url: string;
+  };
+  base_branch: string;
+  head_branch: string;
+  head_sha: string;
+};
+
 export type MockGitHubCLIAccount = {
   host: string;
   login: string;
@@ -233,6 +242,37 @@ function buildWorkflowStepCreateBody(
   }
   setIf(body, "events", opts?.events);
   return body;
+}
+
+type CreateRepositoryOpts = {
+  name?: string;
+  provider?: string;
+  provider_host?: string;
+  provider_owner?: string;
+  provider_name?: string;
+  remote_url?: string;
+  pull_before_worktree?: boolean;
+};
+
+function buildRepositoryCreateBody(
+  localPath: string,
+  defaultBranch: string,
+  opts?: CreateRepositoryOpts,
+): Record<string, unknown> {
+  return {
+    name: opts?.name ?? "E2E Repo",
+    source_type: "local",
+    local_path: localPath,
+    default_branch: defaultBranch,
+    ...(opts?.provider ? { provider: opts.provider } : {}),
+    ...(opts?.provider_host ? { provider_host: opts.provider_host } : {}),
+    ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
+    ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
+    ...(opts?.remote_url ? { remote_url: opts.remote_url } : {}),
+    ...(opts?.pull_before_worktree !== undefined
+      ? { pull_before_worktree: opts.pull_before_worktree }
+      : {}),
+  };
 }
 
 type CreateTaskOpts = {
@@ -355,6 +395,8 @@ type OptionalAgentTaskOpts = {
   blocked_by?: string[];
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
+  /** Prepare the task without launching its session so E2E fixtures can bind it first. */
+  start_agent?: boolean;
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -383,6 +425,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (opts.start_when_unblocked !== undefined) {
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
+  if (opts.start_agent !== undefined) fields.start_agent = opts.start_agent;
   return fields;
 }
 
@@ -814,13 +857,15 @@ export class ApiClient {
       blocked_by?: string[];
       /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
       start_when_unblocked?: boolean;
+      /** Prepare the task without launching its session so E2E fixtures can bind it first. */
+      start_agent?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
       workspace_id: workspaceId,
       title,
       description: opts?.description ?? "",
-      start_agent: true,
+      start_agent: opts?.start_agent ?? true,
       agent_profile_id: agentProfileId,
       ...buildOptionalAgentTaskFields(opts),
     });
@@ -874,28 +919,13 @@ export class ApiClient {
     workspaceId: string,
     localPath: string,
     defaultBranch = "main",
-    opts?: {
-      name?: string;
-      provider?: string;
-      provider_host?: string;
-      provider_owner?: string;
-      provider_name?: string;
-      pull_before_worktree?: boolean;
-    },
+    opts?: CreateRepositoryOpts,
   ): Promise<{ id: string }> {
-    return this.request("POST", `/api/v1/workspaces/${workspaceId}/repositories`, {
-      name: opts?.name ?? "E2E Repo",
-      source_type: "local",
-      local_path: localPath,
-      default_branch: defaultBranch,
-      ...(opts?.provider ? { provider: opts.provider } : {}),
-      ...(opts?.provider_host ? { provider_host: opts.provider_host } : {}),
-      ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
-      ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
-      ...(opts?.pull_before_worktree !== undefined
-        ? { pull_before_worktree: opts.pull_before_worktree }
-        : {}),
-    });
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${workspaceId}/repositories`,
+      buildRepositoryCreateBody(localPath, defaultBranch, opts),
+    );
   }
 
   /**
@@ -1706,6 +1736,15 @@ export class ApiClient {
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
     await this.seedMockGitHubRepositoryAccess(prs);
+  }
+
+  async attachE2EGitHubContribution(
+    taskId: string,
+    prUrl: string,
+  ): Promise<{ binding: E2ERemoteContributionBinding; remote_name: string }> {
+    return this.request("POST", `/api/v1/e2e/tasks/${taskId}/remote-contribution`, {
+      pr_url: prUrl,
+    });
   }
 
   async mockGitHubSetMergeOutcome(

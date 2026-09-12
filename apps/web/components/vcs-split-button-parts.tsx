@@ -98,6 +98,7 @@ type SingleRepoVcsButtonProps = {
   onReplaceContribution: () => void;
   onUseContribution: () => void;
   onViewPRVersion: () => void;
+  onCompareContribution: () => void;
   prNumber?: number;
   onRebase: () => void;
   onMerge: () => void;
@@ -128,6 +129,7 @@ function SingleRepoVcsButton({
   onReplaceContribution,
   onUseContribution,
   onViewPRVersion,
+  onCompareContribution,
   prNumber,
   onRebase,
   onMerge,
@@ -195,6 +197,7 @@ function SingleRepoVcsButton({
           onReplaceContribution={onReplaceContribution}
           onUseContribution={onUseContribution}
           onViewPRVersion={onViewPRVersion}
+          onCompareVersions={onCompareContribution}
           prNumber={prNumber}
           onRebase={onRebase}
           onMerge={onMerge}
@@ -214,12 +217,13 @@ export type VcsSplitButtonCallbacks = {
   onReplaceContribution: (repo?: string) => void;
   onUseContribution: (repo?: string) => void;
   onViewContribution: (repo?: string) => void;
+  onCompareContribution: (repo?: string) => void;
 };
 
 export function buildSingleRepoContributionCallbacks(
   callbacks: Pick<
     VcsSplitButtonCallbacks,
-    "onReplaceContribution" | "onUseContribution" | "onViewContribution"
+    "onReplaceContribution" | "onUseContribution" | "onViewContribution" | "onCompareContribution"
   >,
   blockedRepositoryName?: string,
 ) {
@@ -227,6 +231,7 @@ export function buildSingleRepoContributionCallbacks(
     onReplaceContribution: () => callbacks.onReplaceContribution(blockedRepositoryName),
     onUseContribution: () => callbacks.onUseContribution(blockedRepositoryName),
     onViewContribution: () => callbacks.onViewContribution(blockedRepositoryName),
+    onCompareContribution: () => callbacks.onCompareContribution(blockedRepositoryName),
   };
 }
 
@@ -260,6 +265,11 @@ type VcsSplitButtonContentProps = {
   confirmResolution: () => Promise<void>;
   prNumber?: number;
 };
+
+type SingleRepoVcsContentProps = Omit<
+  VcsSplitButtonContentProps,
+  "isMultiRepo" | "repoNames" | "perRepoStatus" | "repoDisplayName"
+>;
 
 function ContributionResolutionDialog({
   resolution,
@@ -341,6 +351,7 @@ function MultiRepoVcsContent({
     onReplaceContribution: (repo) => callbacks.onReplaceContribution(repo),
     onUseContribution: (repo) => callbacks.onUseContribution(repo),
     onViewContribution: (repo) => callbacks.onViewContribution(repo),
+    onCompareContribution: (repo) => callbacks.onCompareContribution(repo),
   };
   return (
     <>
@@ -373,8 +384,7 @@ function MultiRepoVcsContent({
   );
 }
 
-export function VcsSplitButtonContent({
-  isMultiRepo,
+function SingleRepoVcsContent({
   primaryButtonConfig,
   primaryAction,
   isDisabled,
@@ -390,10 +400,7 @@ export function VcsSplitButtonContent({
   showContributionResolution,
   replaceDisabled,
   useDisabled,
-  repoNames,
-  perRepoStatus,
   blockedRepositoryName,
-  repoDisplayName,
   buttonSize,
   className,
   showDivergencePills,
@@ -402,35 +409,7 @@ export function VcsSplitButtonContent({
   resolutionTarget,
   confirmResolution,
   prNumber,
-}: VcsSplitButtonContentProps) {
-  if (isMultiRepo) {
-    return (
-      <MultiRepoVcsContent
-        primaryButtonConfig={primaryButtonConfig}
-        primaryAction={primaryAction}
-        isDisabled={isDisabled}
-        isGitLoading={isGitLoading}
-        baseBranch={baseBranch}
-        repoNames={repoNames}
-        perRepoStatus={perRepoStatus}
-        pushDisabled={pushDisabled}
-        pullDisabled={pullDisabled}
-        pushDisabledReason={pushDisabledReason}
-        pullDisabledReason={pullDisabledReason}
-        showContributionResolution={showContributionResolution}
-        replaceDisabled={replaceDisabled}
-        useDisabled={useDisabled}
-        blockedRepositoryName={blockedRepositoryName}
-        repoDisplayName={repoDisplayName}
-        callbacks={callbacks}
-        resolution={resolution}
-        resolutionTarget={resolutionTarget}
-        confirmResolution={confirmResolution}
-        prNumber={prNumber}
-      />
-    );
-  }
-
+}: SingleRepoVcsContentProps) {
   const singleRepoContributionCallbacks = buildSingleRepoContributionCallbacks(
     callbacks,
     blockedRepositoryName,
@@ -463,6 +442,7 @@ export function VcsSplitButtonContent({
         onReplaceContribution={singleRepoContributionCallbacks.onReplaceContribution}
         onUseContribution={singleRepoContributionCallbacks.onUseContribution}
         onViewPRVersion={singleRepoContributionCallbacks.onViewContribution}
+        onCompareContribution={singleRepoContributionCallbacks.onCompareContribution}
         prNumber={prNumber}
         onRebase={() => callbacks.onRebase()}
         onMerge={() => callbacks.onMerge()}
@@ -474,4 +454,11 @@ export function VcsSplitButtonContent({
       />
     </>
   );
+}
+
+export function VcsSplitButtonContent(props: VcsSplitButtonContentProps) {
+  if (props.isMultiRepo) {
+    return <MultiRepoVcsContent {...props} />;
+  }
+  return <SingleRepoVcsContent {...props} />;
 }

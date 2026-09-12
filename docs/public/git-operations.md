@@ -24,6 +24,22 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 
 The state transitions are separate operations. Inspect the diff before staging, verify checks before pushing, and decide whether cleanup may remove a worktree or other local data.
 
+### When task and PR histories differ
+
+For an associated pull request, Kandev keeps the task checkout and the published PR history
+separate when their commit histories differ. It may identify a completed local rebase when the
+current repository evidence supports that explanation. If the evidence is missing or incomplete,
+Kandev uses neutral wording instead of guessing which history changed.
+
+Choose **Compare versions** first. Kandev opens **Changes** with the task and PR histories visible;
+the comparison does not fetch, rewrite, or publish Git history. Review the selected repository,
+branch, pull request, and both displayed heads before choosing a replacement action.
+
+**Publish task version...** replaces the published PR history after an exact provider-head check and
+confirmation. **Restore published PR version...** replaces the task checkout history, creates a
+recovery branch at the current task head first, and requires a clean working tree. If the provider
+head changes before confirmation, Kandev leaves both versions unchanged and asks for a fresh review.
+
 ## Prerequisites and trust boundary
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials in the executor where the command runs before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).

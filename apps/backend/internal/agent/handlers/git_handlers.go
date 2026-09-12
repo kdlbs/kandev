@@ -153,6 +153,7 @@ func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorktreePush, h.wsPush)
 	d.RegisterFunc(ws.ActionWorktreeReplaceContribution, h.wsReplaceContribution)
 	d.RegisterFunc(ws.ActionWorktreeUseContribution, h.wsUseContribution)
+	d.RegisterFunc(ws.ActionWorktreeContributionHistoryExplanation, h.wsContributionHistoryExplanation)
 	d.RegisterFunc(ws.ActionWorktreeRebase, h.wsRebase)
 	d.RegisterFunc(ws.ActionWorktreeMerge, h.wsMerge)
 	d.RegisterFunc(ws.ActionWorktreeAbort, h.wsAbort)
@@ -192,6 +193,16 @@ type GitContributionRequest struct {
 	SessionID          string `json:"session_id"`
 	ExpectedRemoteHead string `json:"expected_remote_head"`
 	Repo               string `json:"repo,omitempty"`
+}
+
+// GitContributionHistoryExplanationRequest carries the selected branch and
+// both immutable heads for a read-only contribution history observation.
+type GitContributionHistoryExplanationRequest struct {
+	SessionID          string `json:"session_id"`
+	Repo               string `json:"repo,omitempty"`
+	Branch             string `json:"branch"`
+	ExpectedLocalHead  string `json:"expected_local_head"`
+	ExpectedRemoteHead string `json:"expected_remote_head"`
 }
 
 // GitRebaseRequest for worktree.rebase action.
@@ -356,6 +367,37 @@ func (h *GitHandlers) wsUseContribution(ctx context.Context, msg *ws.Message) (*
 	return h.wsContribution(ctx, msg, "use_remote_contribution", func(agentClient *client.Client, expectedHead, repo string) (*client.GitOperationResult, error) {
 		return agentClient.GitUseRemoteContribution(ctx, expectedHead, repo)
 	})
+}
+
+func (h *GitHandlers) wsContributionHistoryExplanation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GitContributionHistoryExplanationRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	for field, value := range map[string]string{
+		"branch":               req.Branch,
+		"expected_local_head":  req.ExpectedLocalHead,
+		"expected_remote_head": req.ExpectedRemoteHead,
+	} {
+		if value == "" {
+			return nil, fmt.Errorf("%s is required", field)
+		}
+	}
+
+	agentClient, releaseClient, err := h.getAgentCtlClient(ctx, req.SessionID)
+	defer releaseClient()
+	if err != nil {
+		return nil, err
+	}
+	result, err := agentClient.GitContributionHistoryExplanation(
+		ctx, req.Branch, req.ExpectedLocalHead, req.ExpectedRemoteHead, req.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("contribution history explanation failed: %w", err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
 func (h *GitHandlers) wsContribution(ctx context.Context, msg *ws.Message, operation string, action func(*client.Client, string, string) (*client.GitOperationResult, error)) (*ws.Message, error) {

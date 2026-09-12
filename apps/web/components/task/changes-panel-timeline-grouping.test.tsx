@@ -322,4 +322,24 @@ describe("section auto-expand (defaultCollapsed prop)", () => {
     expect(toggle.getAttribute(ARIA_EXPANDED)).toBe("true");
     expect(screen.getByTestId(COMMIT_ROW_TID)).toBeTruthy();
   });
+
+  it("keeps a comparison-targeted disclosure in keyboard tab order", () => {
+    render(
+      <>
+        <button type="button" data-testid="before-disclosure">
+          Before
+        </button>
+        <CommitsSection commits={[commit("abc123", "first")]} defaultCollapsed focusOnExpand />
+      </>,
+    );
+
+    const toggle = screen.getByTestId(COMMITS_SECTION_TOGGLE_TID);
+    screen.getByTestId("before-disclosure").focus();
+    expect(toggle.tabIndex).toBe(0);
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_EXPANDED)).toBe("true");
+  });
 });

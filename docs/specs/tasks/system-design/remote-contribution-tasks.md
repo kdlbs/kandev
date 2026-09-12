@@ -15,12 +15,20 @@ owners:
 
 This design record preserves the technical source for the capability mapped to REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001 while the task system completes its migration.
 
+## Branch history explanation amendment
+
+The [branch history explanations](branch-history-explanations.md) design covers
+requirement 003. It defines neutral wording, bounded local-rebase evidence, and
+comparison-first actions. Its current labels and behavior supersede the earlier
+warning and replacement wording below. Other contribution contracts remain unchanged.
+
 ## Requirement mapping
 
 | Requirement | Design source |
 | --- | --- |
 | REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001 | Migrated legacy design detail below |
 | REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-002 | Contribution resume preflight |
+| REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-003 | [Branch history explanations](branch-history-explanations.md) |
 
 ## Contribution resume preflight
 
@@ -142,18 +150,18 @@ Kandev must preserve both versions and ask for user intent before one version re
 - When the provider history no longer contains local HEAD, the Changes panel keeps the task version as
   the primary version. A yellow warning icon in the Changes toolbar opens the available version
   actions; the panel body does not repeat the warning. The current provider history remains collapsed
-  behind a **PR #<number> version** disclosure.
+  behind a **PR #<number> version** disclosure. The warning title is **Task and PR histories differ**.
 - A diverged task keeps local edit, commit, amend, reset, and review actions available. Generic Pull is
-  unavailable because it requires a merge strategy. Push becomes an explicit **Replace PR branch**
+  unavailable because it requires a merge strategy. Push becomes an explicit **Publish task version...**
   action instead of a disabled control.
-- **Replace PR branch** requires a direct user action and an explicit destructive confirmation. The
+- **Publish task version...** requires a direct user action and an explicit destructive confirmation. The
   confirmation identifies the selected repository and the current provider version. Kandev replaces
   the remote branch only when its head still equals the confirmed provider head.
 - The managed replacement action uses an exact force-with-lease condition. If the provider head moves
   after confirmation, Kandev changes neither version and asks the user to review the new state.
-- The user can select **Use PR version** instead. Kandev requires a clean working tree, creates a local
-  recovery branch at the current task HEAD, fetches the confirmed provider head, and resets the task
-  branch to that head. The result shows the recovery branch name.
+- The user can select **Restore published PR version...** instead. Kandev requires a clean working tree,
+  creates a local recovery branch at the current task HEAD, fetches the confirmed provider head, and
+  resets the task branch to that head. The result shows the recovery branch name.
 - Kandev exposes no replacement action through agent MCP tools or automatic Git operations. Generic
   contribution force-push requests remain rejected. Direct terminal commands remain outside this UI
   approval boundary.
@@ -283,11 +291,11 @@ recovery branch name after a successful reset. Neither action appears in the age
 | Task persists but the existing-change association fails                                      | Kandev compensates the newly created task and returns failure; it does not launch an agent.                                              |
 | Checkout SHA no longer matches the source branch during preparation                          | Launch fails without checking out or pushing a different revision; retry resolves fresh provider state.                                  |
 | Provider branch advances after launch and still contains local HEAD                          | Kandev identifies a provider-ahead fast-forward, shows the current provider history, and offers Pull instead of Push.                    |
-| Provider branch is rewritten after launch and no longer contains local HEAD                  | Kandev preserves the task version, shows a compact remote-change status, and offers user-controlled version choices.                     |
+| Provider branch is rewritten after launch and no longer contains local HEAD                  | Kandev preserves the task version, shows a history-difference warning, and offers comparison and user-controlled version choices.       |
 | Provider head changes after the replacement confirmation opens                               | The exact lease fails. Kandev does not change the remote branch and refreshes the shown provider state.                                  |
 | Provider rejects the leased replacement                                                      | The task version remains unchanged. Kandev shows the provider or Git error.                                                              |
-| The user selects **Use PR version** with local file changes                                  | Kandev does not reset the checkout. It asks the user to commit or discard the file changes first.                                        |
-| The user selects **Use PR version** and the fetch does not match the confirmed provider head | Kandev does not create a recovery branch or reset the checkout. It refreshes the provider state.                                         |
+| The user selects **Restore published PR version...** with local file changes                 | Kandev does not reset the checkout. It asks the user to commit or discard the file changes first.                                        |
+| The user selects **Restore published PR version...** and the fetch does not match the confirmed provider head | Kandev does not create a recovery branch or reset the checkout. It refreshes the provider state.                              |
 | Current provider commits cannot be loaded                                                    | Kandev retries once, keeps the checkout history without a warning, and derives remote actions only from sufficient evidence.             |
 | A same-contribution provider refresh is pending or fails after a successful read             | Changes retains the last confirmed commit provenance for display, while current-evidence action gates remain closed until refresh succeeds. |
 | Effective Git credentials cannot dry-run a push to the source branch                         | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error.                       |
@@ -312,7 +320,7 @@ The frontend provider-history resource can retain the latest successful commit l
 same-contribution evidence versions. This display cache is not persisted. It does not retain
 provider-head authority. The resource discards the cache when it evicts the bounded entry.
 
-A recovery branch created by **Use PR version** remains in the task repository across backend
+A recovery branch created by **Restore published PR version...** remains in the task repository across backend
 restarts. Kandev does not persist confirmation dialogs, provider snapshots, or replacement leases.
 
 Repository-qualified comparison targets survive backend and executor restarts. Their deterministic
@@ -367,8 +375,11 @@ GIVEN a running contribution task whose provider branch is force-pushed and no l
 HEAD
 WHEN Kandev loads the current provider commits
 THEN the Changes panel keeps the task version primary, shows one warning icon in its toolbar, and offers
-**Replace PR branch**, **Use PR version**, and **PR #<number> version** from the warning menu
-AND each action explanation appears in an immediate tooltip on pointer hover
+**Compare versions**, **Publish task version...**, **Restore published PR version...**, and
+**Open PR on GitHub** from the warning menu
+AND the warning title is **Task and PR histories differ**
+AND comparison is the first action and opens both histories without changing Git state
+AND desktop action consequences are available through tooltips while phone action consequences appear inline
 AND the panel body does not repeat the warning
 
 ### Ignore a historical pull request after the checkout changes branch
@@ -379,30 +390,30 @@ WHEN Kandev computes the Changes relation and provider history
 THEN it uses only the newer pull request
 AND the historical pull request remains available in Review without producing a Changes warning
 
-### Replace the PR branch with the task version
+### Publish the task version to the PR branch
 
 GIVEN a diverged contribution and a confirmed provider head
-WHEN the user confirms **Replace PR branch**
+WHEN the user confirms **Publish task version...**
 THEN Kandev replaces the remote branch only when the exact provider-head lease still matches
 
 ### Reject a stale replacement lease
 
 GIVEN the replacement confirmation names provider head A
 AND the provider branch advances to head B
-WHEN the user confirms **Replace PR branch**
+WHEN the user confirms **Publish task version...**
 THEN Kandev leaves head B unchanged and shows the refreshed remote-change state
 
-### Use the current PR version with recovery
+### Restore the published PR version with recovery
 
 GIVEN a diverged contribution with a clean working tree
-WHEN the user confirms **Use PR version**
+WHEN the user confirms **Restore published PR version...**
 THEN Kandev creates a local recovery branch at the prior task HEAD and moves the task branch to the
 confirmed provider head
 
 ### Preserve local file changes
 
 GIVEN a diverged contribution with staged, unstaged, or untracked file changes
-WHEN the user selects **Use PR version**
+WHEN the user selects **Restore published PR version...**
 THEN Kandev keeps the checkout unchanged and asks the user to commit or discard those changes
 
 ### Provide the same choice on mobile
@@ -410,7 +421,8 @@ THEN Kandev keeps the checkout unchanged and asks the user to commit or discard 
 GIVEN a diverged contribution on a phone viewport
 WHEN the user opens Changes and its remote-contribution actions
 THEN the user can replace the PR branch, use the PR version, or inspect the PR version without a desktop
-workflow
+workflow through **Publish task version...**, **Restore published PR version...**, and
+**Open PR on GitHub**, with **Compare versions** available first
 
 ### Keep ordinary local-ahead work pushable
 
