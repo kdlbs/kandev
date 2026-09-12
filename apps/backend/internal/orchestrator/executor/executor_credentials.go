@@ -398,6 +398,12 @@ func (e *Executor) preflightManagedGitCredentials(
 			policy = resolved
 		}
 	}
+	// A remote executor profile with gh_cli_env supplies an explicit credential
+	// for this launch. Managed identity preflight cannot require a broker
+	// identity when that executor credential path will be selected.
+	if executorProfileHasGitHubToken(execConfig) {
+		return nil
+	}
 	for _, entry := range repositories {
 		repository := entry.repository
 		providerID := managedGitCredentialProvider(repository, true, nil)

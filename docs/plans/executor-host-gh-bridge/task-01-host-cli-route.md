@@ -126,6 +126,9 @@ Malformed optional repository identities must not become trusted hosts.
   environment that excludes token and unrelated process secrets.
 - `TestLaunchPreparedSessionProbesEffectiveProfileCredentialStore` covers the HOME and
   GH_CONFIG_DIR mismatch cases through the production prepared-session entry point.
+- `TestSwitchSessionForStepUsesReusableSessionExecutorProfileForCredentialAdmission` passes with
+  an explicit remote-profile `gh_cli_env` credential, preserving reusable-session admission while
+  broker preflight remains scoped to launches that need managed identity validation.
 - `(cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor -run 'TestExecutorHostGHBridge|TestConfigureGitHubCredentialBroker|TestConfigureGitCredentialBroker' -count=1)` passed.
 - `(cd apps/backend && go test ./internal/gitconfigenv -count=1)` passed.
 - `go test ./internal/orchestrator/executor -count=1` and `go test ./internal/gitconfigenv -count=1` passed in the final affected-package run.

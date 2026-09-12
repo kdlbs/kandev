@@ -145,6 +145,9 @@ Implementation validation:
 - `make -C apps/backend build` passed for the host and remote runtime binaries.
 - The strict production-shaped test `TestBuildEnvForExecutionHostGHBridge_ComposesStrictProfileBlocks`
   composes agent-profile, executor-profile, and managed Git blocks while preserving each indexed entry.
+- `TestSwitchSessionForStepUsesReusableSessionExecutorProfileForCredentialAdmission`
+  verifies that an explicit remote-profile `gh_cli_env` credential keeps reusable-session admission
+  valid while managed identity preflight remains host-aware for launches that use the broker.
 - `TestConfigureAndStartAgentSendsComposedRuntimeEnvironmentAsOverlay` verifies that lifecycle sends
   one composed snapshot through the normal configure path; process-manager tests cover reconfiguration,
   tracker, one-shot, shell/process propagation, user hooks/notes, complete-block removal, and removal
