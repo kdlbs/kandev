@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kevinburke/ssh_config"
@@ -502,6 +503,33 @@ func dialDirect(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.C
 	return ssh.NewClient(sshConn, chans, reqs), nil
 }
 
+// sshProxyJumpConn owns both legs of a ProxyJump connection. Closing the
+// bastion transport first releases any read blocked in the inner SSH client.
+// The inner channel close then completes without relying on a remote reply.
+type sshProxyJumpConn struct {
+	net.Conn
+	bastion  interface{ Close() error }
+	once     sync.Once
+	closeErr error
+}
+
+func (c *sshProxyJumpConn) Close() error {
+	if c == nil {
+		return nil
+	}
+	c.once.Do(func() {
+		var bastionErr, tunnelErr error
+		if c.bastion != nil {
+			bastionErr = c.bastion.Close()
+		}
+		if c.Conn != nil {
+			tunnelErr = c.Conn.Close()
+		}
+		c.closeErr = errors.Join(bastionErr, tunnelErr)
+	})
+	return c.closeErr
+}
+
 // dialViaJump implements ProxyJump as a single bastion hop. The bastion is
 // resolved from its own ~/.ssh/config Host block, defaulting to the same
 // identity source as the target (passes the user's agent / key through).
@@ -539,17 +567,16 @@ func dialViaJump(ctx context.Context, target *SSHTarget, finalAddr string, final
 		_ = bastionClient.Close()
 		return nil, fmt.Errorf("ssh: bastion tunnel to %s: %w", finalAddr, err)
 	}
-	sshConn, chans, reqs, err := ssh.NewClientConn(tunnel, finalAddr, finalCfg)
+	jumpConn := &sshProxyJumpConn{Conn: tunnel, bastion: bastionClient}
+	sshConn, chans, reqs, err := ssh.NewClientConn(jumpConn, finalAddr, finalCfg)
 	if err != nil {
-		_ = tunnel.Close()
-		_ = bastionClient.Close()
+		_ = jumpConn.Close()
 		return nil, fmt.Errorf("ssh: handshake with %s via %s: %w", finalAddr, target.ProxyJump, err)
 	}
-	// Attach the bastion close to the final client lifetime.
 	final := ssh.NewClient(sshConn, chans, reqs)
 	go func() {
 		_ = final.Wait()
-		_ = bastionClient.Close()
+		_ = jumpConn.Close()
 	}()
 	return final, nil
 }
@@ -713,7 +740,11 @@ func parsePortString(s string) (int, bool) {
 }
 
 // SSH connections are owned per-session (no shared pool): a session's client
-// lives on sshSessionState and is Close()d by StopInstance. The earlier
-// pool/refcount/keepalive plumbing was dead code — the executor never used it
-// in production, and the orphaned keepalive goroutines surfaced under e2e
-// fault-injection. See PR #927 for the removal rationale.
+// lives on sshSessionState and is Close()d by StopInstance. An earlier
+// pool/refcount/keepalive design was removed as dead code in PR #927 — the
+// executor never used it in production, and its background goroutines
+// outlived their connections under e2e fault injection. The per-session
+// transport-liveness watchdog in executor_ssh_keepalive.go restores a
+// keepalive, but owned by the session it watches and stopped by the same
+// disposal paths that close the client, so it cannot repeat that leak: see
+// docs/specs/executors/requirements/ssh-transport-liveness.md.

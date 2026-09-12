@@ -27,6 +27,37 @@ failure and recovery contracts.
 - Task ownership of worktrees belongs to the [task system](../tasks/README.md).
 - Desktop process supervision belongs to the [desktop system](../desktop/README.md).
 
+## Specification map
+
+### Requirements
+
+
+
+- [Executor-Profile Environment Precedence](requirements/executor-profile-env-precedence.md)
+- [Port collision and backend ownership safety](requirements/port-collision-safety.md)
+- [SSH Executor](requirements/ssh-executor.md)
+- [Remote SSH task-directory reclamation](requirements/remote-task-directory-reclamation.md)
+- [Kubernetes worker presets](requirements/kubernetes-worker-presets.md)
+- [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
+- [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
+- [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
+
+### System design
+
+
+
+- [Executor-Profile Environment Precedence System Design Part 1](system-design/executor-profile-env-precedence-01.md)
+- [Executor-Profile Environment Precedence System Design Part 2](system-design/executor-profile-env-precedence-02.md)
+- [Executor-Profile Environment Precedence System Design Part 3](system-design/executor-profile-env-precedence-03.md)
+- [Executor-Profile Environment Precedence System Design Part 4](system-design/executor-profile-env-precedence-04.md)
+- [Executor-Profile Environment Precedence System Design Part 5](system-design/executor-profile-env-precedence-05.md)
+- [SSH Executor](system-design/ssh-executor.md)
+- [Remote SSH task-directory reclamation](system-design/remote-task-directory-reclamation.md)
+- [Kubernetes worker presets](system-design/kubernetes-worker-presets.md)
+- [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
+- [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
+- [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
+
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the

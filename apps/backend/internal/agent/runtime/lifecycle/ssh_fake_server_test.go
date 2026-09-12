@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pkg/sftp"
@@ -66,7 +67,21 @@ type fakeSSHServer struct {
 	// tcpTarget maps a requested direct-tcpip port onto a real local address.
 	// Returning "" rejects the channel.
 	tcpTarget func(port uint32) string
+
+	// silent, when set, makes the server accept a global request or a new
+	// channel open and answer neither — so SendRequest and Client.NewSession
+	// both block, as on a wedged link. Toggled live so a test can run a
+	// session healthy, then flip the server silent mid-test.
+	silent atomic.Bool
 }
+
+// setSilent switches the server's silent mode on or off. While silent, every
+// global request (including keepalive@openssh.com) and every new channel
+// open (including a session for a remote command) goes unanswered, so the
+// requester's SendRequest or Client.NewSession blocks exactly as it would on
+// a transport that has stopped carrying traffic. Existing, already-open
+// channels are unaffected.
+func (s *fakeSSHServer) setSilent(v bool) { s.silent.Store(v) }
 
 // newFakeSSHServer starts a listener on 127.0.0.1 and serves SSH until the
 // test finishes. handler may be nil, in which case every command succeeds with
@@ -200,6 +215,13 @@ func (s *fakeSSHServer) serveConn(conn net.Conn) {
 	go s.serveGlobalRequests(serverConn, reqs)
 
 	for newChan := range chans {
+		if s.silent.Load() {
+			// Stall the channel open: neither Accept nor Reject, so the
+			// client's OpenChannel blocks until the connection itself tears
+			// down. No goroutine needed — the pending request resolves on
+			// its own when the mux beneath it closes.
+			continue
+		}
 		switch newChan.ChannelType() {
 		case "session":
 			s.wg.Add(1)
@@ -213,9 +235,16 @@ func (s *fakeSSHServer) serveConn(conn net.Conn) {
 	}
 }
 
+// serveGlobalRequests answers every global request (replying false to one
+// that wants a reply, mirroring ssh.DiscardRequests) unless the server is
+// silent, in which case it drains the request without replying — so a
+// wantReply sender's SendRequest blocks until the connection tears down.
 func (s *fakeSSHServer) serveGlobalRequests(conn *ssh.ServerConn, requests <-chan *ssh.Request) {
 	defer s.wg.Done()
 	for req := range requests {
+		if s.silent.Load() {
+			continue
+		}
 		switch req.Type {
 		case "tcpip-forward":
 			s.handleTCPIPForward(conn, req)
