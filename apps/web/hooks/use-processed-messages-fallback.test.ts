@@ -141,6 +141,27 @@ describe("useProcessedMessages task description fallback", () => {
   });
 });
 
+describe("combined initial task brief transcript", () => {
+  it("does not synthesize a brief after the combined first prompt is stored", () => {
+    const userMessage = makeMessage(
+      "user-1",
+      "user",
+      `${TASK_DESCRIPTION}\n\nadditional instruction`,
+    );
+    const { result } = renderHook(() =>
+      useProcessedMessages([userMessage], "t1", "s1", TASK_DESCRIPTION, {
+        historyInitialized: true,
+        hasOlderMessages: false,
+      }),
+    );
+
+    expect(result.current.allMessages).toEqual([userMessage]);
+    expect(result.current.allMessages[0]?.content).toBe(
+      `${TASK_DESCRIPTION}\n\nadditional instruction`,
+    );
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });

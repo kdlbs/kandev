@@ -1,6 +1,6 @@
 ---
 created: 2026-09-12
-status: draft
+status: implemented
 requirements:
   - REQ-TASKS-INITIAL-TASK-BRIEF-001
 system_design:
@@ -129,10 +129,10 @@ Content order and durable visibility are required. Borders and spacing are illus
 
 | Criteria | Test and boundary |
 | --- | --- |
-| `.1`, `.2`, `.4`, `.10` | `TestWSAddMessage_InitialTaskBrief`, handler persistence and captured dispatch |
+| `.1`, `.2`, `.4`, `.10` | `TestWSAddMessage_InitialTaskBrief`, `TestWSAddMessage_InitialTaskBriefExpandsCombinedPromptAtAdmission`, `TestWSAddMessage_InitialTaskBriefKeepsAcceptedExpansionWhenDefinitionsChange`, handler persistence and captured dispatch |
 | `.3`, `.5`, `.6` | `TestInitialTaskBriefAdmission`, SQLite transaction, fallback reservation, rollback, and replay |
 | `.5`, `.6` | `TestInitialTaskBriefAdmissionPostgres`, cross-connection transaction parity |
-| `.8`, `.9` | `TestStartCreatedSession_InitialTaskBrief` and handler table cases |
+| `.8`, `.9` | `TestStartCreatedSession_InitialTaskBrief`, handler saved-reference table cases, and queued initial-brief delivery |
 | `.2`, `.7` | `use-processed-messages-fallback.test.ts`, synthetic row replacement with combined prompt |
 
 All criterion suffixes refer to `AC-TASKS-INITIAL-TASK-BRIEF-001`.
@@ -152,9 +152,9 @@ These flows cover `.1`, `.2`, `.3`, and `.7`. Use existing causal WebSocket wait
 
 ## Work orders
 
-- [ ] [Task 01: Atomic initial content selection](task-01-atomic-admission.md)
-- [ ] [Task 02: First-message composition](task-02-first-message-composition.md)
-- [ ] [Task 03: Transcript visibility evidence](task-03-transcript-evidence.md)
+- [x] [Task 01: Atomic initial content selection](task-01-atomic-admission.md) — done
+- [x] [Task 02: First-message composition](task-02-first-message-composition.md) — done
+- [x] [Task 03: Transcript visibility evidence](task-03-transcript-evidence.md) — done
 
 ## Related packages and documentation
 
@@ -163,17 +163,23 @@ routing. Its scope and results remain unchanged. The transcript visibility
 package owns pagination. This package consumes both contracts without rewriting
 their completed work orders or test results.
 
-Public docs are unchanged during design. Task 03 adds a short explanation to
-`docs/public/tasks-and-workflows.md` with the implemented behavior.
+Task 03 added a short explanation to `docs/public/tasks-and-workflows.md` with
+the implemented behavior.
 
 ## Verification results
 
-- Temporary reproduction: expected behavioral failure, recorded above.
-- `python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
-- `python3 scripts/lint-spec-files.py --all`: passed.
-- `git diff --check -- docs/specs docs/plans/initial-task-brief`: passed.
-- Package status and work-order traceability: checked, three pending work orders.
-- Implementation, permanent tests, and browser checks: pending by design.
+- Permanent backend admission, handler, service, and orchestrator regressions passed, including combined saved-reference preparation, accepted-context dispatch, and queued delivery.
+- SQLite admission tests passed, including rollback, stale snapshots, deletion, restart, fallback races, zero reservations, and plan-comment queues.
+- PostgreSQL parity test was skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured in this environment.
+- `go vet` passed for all changed backend packages.
+- `make -C apps/backend lint`, `make -C apps/backend build`, and `go run ./cmd/sqlguard ./internal` passed.
+- Race-enabled initial-admission tests and `go test -race ./internal/persistence/storeconformance -count=1` passed.
+- `pnpm exec vitest run hooks/use-processed-messages-fallback.test.ts` passed.
+- `pnpm run typecheck` passed.
+- `pnpm run i18n:check` passed.
+- Targeted changed-file ESLint passed with zero warnings, and `pnpm run e2e:sleep-ratchet` passed.
+- Managed `chromium` and `mobile-chrome` E2E tests passed, including reload and later-message behavior.
+- Both public-doc validators passed; the specification test suite passed 36 tests, all specification files passed, and `git diff --check` passed.
 
 ## Risks
 

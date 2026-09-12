@@ -1,7 +1,7 @@
 ---
 id: "03-transcript-evidence"
 title: "Transcript visibility evidence"
-status: pending
+status: done
 wave: 3
 depends_on: ["02-first-message-composition"]
 plan: "plan.md"
@@ -106,4 +106,10 @@ Do not weaken existing transcript pagination or fallback eligibility to satisfy 
 
 ## Results
 
-Pending. No implementation or permanent tests were added during planning.
+- Extended the processed-message regression so a persisted combined prompt replaces the synthetic task-description row without duplicating the brief.
+- Added managed desktop and phone Chat flows that submit the first message, reload, verify the stored prompt, send a later message, and check for document overflow.
+- Added the same prepared-session API option to both E2E flows without changing production API behavior.
+- Added public guidance to `docs/public/tasks-and-workflows.md`.
+- `pnpm exec vitest run hooks/use-processed-messages-fallback.test.ts` passed.
+- `pnpm e2e:run --project chromium tests/chat/initial-task-brief.spec.ts` passed.
+- `pnpm e2e:run --project mobile-chrome tests/chat/mobile-initial-task-brief.spec.ts` passed.

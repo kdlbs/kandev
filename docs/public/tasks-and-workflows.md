@@ -322,6 +322,8 @@ A task created with **Create without starting agent** opens in a prepared workbe
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
 
+When you send a message from Chat before selecting **Start agent**, Kandev keeps the task description in the first user prompt and places your instruction after it. The combined prompt is stored and remains after reload. Later messages contain only their own text.
+
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
 the high-risk **Claude background prompt handoff** feature toggle for controlled

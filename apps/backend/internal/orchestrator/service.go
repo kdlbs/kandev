@@ -319,6 +319,21 @@ type DirectPromptStarterWithCanvasGuidance interface {
 	) (*executor.TaskExecution, error)
 }
 
+// DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt starts a prepared
+// direct-message session without reapplying workflow replacement semantics to
+// a prompt that already contains the task brief and user instruction.
+type DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt interface {
+	StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+		ctx context.Context,
+		taskID, sessionID, agentProfileID, prompt string,
+		skipMessageRecord, planMode, autoStart bool,
+		attachments []v1.MessageAttachment,
+		references []v1.EntityReference,
+		promptReferenceContext string,
+		canvasGuidanceResolved, includeCanvasGuidance bool,
+	) (*executor.TaskExecution, error)
+}
+
 // repoStore is the repository interface accepted by NewService.
 // It covers both the orchestrator's own needs (sessionExecutorStore) and
 // the executor package's needs (executor.executorStore).

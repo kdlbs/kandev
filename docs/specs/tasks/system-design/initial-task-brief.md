@@ -1,9 +1,10 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-INITIAL-TASK-BRIEF-001
 created: 2026-09-12
+updated: 2026-09-12
 owners:
   - kandev
 ---

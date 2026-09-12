@@ -127,8 +127,9 @@ func (v *fakeReferenceSubmissionValidator) ValidateForSubmission(
 }
 
 type capturedFirstTurn struct {
-	content    string
-	references []v1.EntityReference
+	content                string
+	references             []v1.EntityReference
+	promptReferenceContext string
 }
 
 type firstTurnCaptureOrchestrator struct {

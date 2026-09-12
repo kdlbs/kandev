@@ -240,6 +240,8 @@ type CreateTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   agent_profile_id?: string;
+  /** Prepare a CREATED session without launching the agent. */
+  prepare_session?: boolean;
   session_target?: WorkflowSessionTarget | null;
   executor_profile_id?: string;
   repository_ids?: string[];
@@ -309,6 +311,7 @@ function buildCreateTaskBody(
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
   setIf(body, "agent_profile_id", options.agent_profile_id);
+  if (options.prepare_session) body.prepare_session = true;
   if (options.session_target !== undefined) body.session_target = options.session_target;
   setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
@@ -536,6 +539,8 @@ export class ApiClient {
       workflow_step_id?: string;
       /** Stored in task.Metadata so auto_start_agent can pick it up on on_enter. */
       agent_profile_id?: string;
+      /** Prepare a CREATED session without launching the agent. */
+      prepare_session?: boolean;
       session_target?: WorkflowSessionTarget | null;
       /** Executor profile used when the task session is prepared. */
       executor_profile_id?: string;

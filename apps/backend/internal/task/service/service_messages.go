@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 )
 
@@ -44,6 +45,36 @@ type queuedPlanCommentMessageWriter interface {
 		context.Context,
 		*models.Message,
 		*messagequeue.QueuedMessage,
+		[]models.TaskPlanCommentRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type initialTaskBriefMessageWriter interface {
+	CreateMessageWithInitialTaskBrief(context.Context, *models.Message, *admission.InitialTaskBriefCandidate) error
+}
+
+type initialTaskBriefPlanCommentMessageWriter interface {
+	CreateMessageWithPlanCommentsWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*admission.InitialTaskBriefCandidate,
+		[]models.TaskPlanCommentRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type initialTaskBriefQueuedPlanCommentMessageWriter interface {
+	CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		*admission.InitialTaskBriefCandidate,
 		[]models.TaskPlanCommentRef,
 		bool,
 		models.TaskSessionState,
@@ -364,10 +395,22 @@ func (s *Service) CreateQueuedMessageIdempotent(
 	if !ok {
 		return nil, errors.New("queued plan comment message admission is unavailable")
 	}
-	snapshot, err := writer.CreateMessageWithPlanCommentsAndQueue(
-		ctx, message, queued, req.PlanCommentRefs, req.RequirePrimarySession,
-		req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
-	)
+	var snapshot *models.TaskPlanCommentSnapshot
+	if req.InitialTaskBrief != nil {
+		initialWriter, initialOK := s.messages.(initialTaskBriefQueuedPlanCommentMessageWriter)
+		if !initialOK {
+			return nil, errors.New("queued initial task brief admission is unavailable")
+		}
+		snapshot, err = initialWriter.CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
+			ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs,
+			req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+		)
+	} else {
+		snapshot, err = writer.CreateMessageWithPlanCommentsAndQueue(
+			ctx, message, queued, req.PlanCommentRefs, req.RequirePrimarySession,
+			req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+		)
+	}
 	if err != nil {
 		existing, found, lookupErr := s.findPlanCommentMessageReplay(ctx, id, req)
 		if lookupErr == nil && found {
@@ -631,7 +674,24 @@ func (s *Service) persistMessage(
 	req *CreateMessageRequest,
 ) (*models.TaskPlanCommentSnapshot, error) {
 	if len(req.PlanCommentRefs) == 0 {
+		if req.InitialTaskBrief != nil {
+			writer, ok := s.messages.(initialTaskBriefMessageWriter)
+			if !ok {
+				return nil, errors.New("initial task brief admission is unavailable")
+			}
+			return nil, writer.CreateMessageWithInitialTaskBrief(ctx, message, req.InitialTaskBrief)
+		}
 		return nil, s.messages.CreateMessage(ctx, message)
+	}
+	if req.InitialTaskBrief != nil {
+		writer, ok := s.messages.(initialTaskBriefPlanCommentMessageWriter)
+		if !ok {
+			return nil, errors.New("plan comment initial task brief admission is unavailable")
+		}
+		return writer.CreateMessageWithPlanCommentsWithInitialTaskBrief(
+			ctx, message, req.InitialTaskBrief, req.PlanCommentRefs, req.RequirePrimarySession,
+			req.ExpectedSessionState, req.AttachmentClaim,
+		)
 	}
 	writer, ok := s.messages.(planCommentMessageWriter)
 	if !ok {

@@ -307,6 +307,66 @@ func TestStartCreatedSession_ExpandsSavedPromptsWithoutWorkflowStep(t *testing.T
 	require.Equal(t, 1, strings.Count(dispatchedPrompt, "### @principles"))
 }
 
+// @covers AC-TASKS-INITIAL-TASK-BRIEF-001.2, AC-TASKS-INITIAL-TASK-BRIEF-001.4
+func TestStartCreatedSession_InitialTaskBrief(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskBrief   = "The task brief must remain visible."
+		instruction = "Start with the user instruction."
+		stepID      = "step-initial-task-brief"
+	)
+
+	for _, test := range []struct {
+		name       string
+		stepPrompt string
+	}{
+		{name: "empty step template"},
+		{name: "placeholder step template", stepPrompt: "Follow the step guidance.\n\n{{task_prompt}}"},
+		{name: "replacing step template", stepPrompt: "Follow the step guidance."},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			taskID := "task-initial-brief-" + strings.ReplaceAll(test.name, " ", "-")
+			sessionID := "session-initial-brief-" + strings.ReplaceAll(test.name, " ", "-")
+			seedTaskAndSessionWithStep(t, repo, taskID, sessionID, stepID)
+			stepGetter := newMockStepGetter()
+			stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+				ID: stepID, WorkflowID: "wf1", Name: "Initial brief step", Prompt: test.stepPrompt,
+			}
+			taskRepo := newMockTaskRepo()
+			taskRepo.tasks[taskID] = &v1.Task{
+				ID: taskID, Title: "Initial brief task", Description: taskBrief, State: v1.TaskStateInProgress,
+			}
+			var launchedPrompt string
+			agentMgr := &mockAgentManager{
+				repoForExecutionLookup: repo,
+				launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+					launchedPrompt = req.TaskDescription
+					return &executor.LaunchAgentResponse{AgentExecutionID: "exec-initial-brief"}, nil
+				},
+			}
+			svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+			messages := &mockMessageCreator{}
+			svc.messageCreator = messages
+
+			_, err := svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+				ctx, taskID, sessionID, "profile1", taskBrief+"\n\n"+instruction,
+				false, false, false, nil, nil, "", true, false,
+			)
+			require.NoError(t, err)
+			require.NotEmpty(t, launchedPrompt)
+			visible := sysprompt.StripSystemContent(launchedPrompt)
+			require.Contains(t, visible, taskBrief)
+			require.Contains(t, visible, instruction)
+			require.Equal(t, 1, strings.Count(visible, taskBrief))
+			require.Equal(t, 1, strings.Count(visible, instruction))
+			if test.stepPrompt != "" {
+				require.Contains(t, visible, "Follow the step guidance.")
+			}
+		})
+	}
+}
+
 // @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.11
 func TestStartCreatedSession_PreservesAcceptedPromptContextWithoutWorkflowStep(t *testing.T) {
 	ctx := context.Background()

@@ -1068,6 +1068,25 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 	)
 }
 
+// StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt
+// forwards a first direct prompt whose task brief was admitted and persisted
+// before launch.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
 type githubTaskIssueStoreAdapter struct {
 	svc *taskservice.Service
 }

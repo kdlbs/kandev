@@ -1,7 +1,7 @@
 ---
 id: "02-first-message-composition"
 title: "First-message composition"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-atomic-admission"]
 plan: "plan.md"
@@ -85,4 +85,9 @@ Preserve the original request fingerprint across candidate preparation.
 
 ## Results
 
-Pending. No implementation or permanent tests were added during planning.
+- Composed the raw trimmed task description and first direct instruction before saved-prompt expansion, so both inputs share one acceptance-time snapshot.
+- Preserved the selected stored content and its matching trusted prompt context through created-session dispatch and workflow prompt composition.
+- Kept equality, empty descriptions, attachments, saved references, plan comments, queued promotion, session redirection, and excluded modes on their existing paths.
+- Added handler regressions for distinct saved references, brief-only references, identical brief and instruction deduplication, definitions changed after admission, and queued delivery.
+- Added handler and orchestrator regressions for empty, placeholder, and replacing workflow step prompts.
+- Focused handler, service, and orchestrator tests passed, including `TestWSAddMessage_InitialTaskBriefExpandsCombinedPromptAtAdmission`, `TestWSAddMessage_InitialTaskBriefKeepsAcceptedExpansionWhenDefinitionsChange`, `TestWSAddMessage_QueuedInitialTaskBriefPersistsAcceptedExpansion`, and `TestStartCreatedSession_InitialTaskBrief`.

@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -73,8 +74,9 @@ type taskCanvasGuidanceResolver interface {
 }
 
 type canvasGuidanceProjection struct {
-	resolved bool
-	include  bool
+	resolved             bool
+	include              bool
+	preserveDirectPrompt bool
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -471,8 +473,9 @@ type wsAddMessageRequest struct {
 	RequirePrimarySession bool                        `json:"require_primary_session,omitempty"`
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
-	canvasGuidanceResolved bool
-	includeCanvasGuidance  bool
+	canvasGuidanceResolved   bool
+	includeCanvasGuidance    bool
+	initialTaskBriefSelected bool
 }
 
 type addMessageReplayIdentity struct {
@@ -689,12 +692,13 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
-	if len(req.PlanCommentRefs) > 0 {
-		req.Content = plancomments.WithPlaceholder(req.Content)
-	}
-	storedContent, trustedPromptContext := h.prepareDirectPrompt(
+	preparedContent, trustedPromptContext := h.prepareDirectPrompt(
 		ctx, req.Content, sessionResp.Session.IsPassthrough,
 	)
+	storedContent := preparedContent
+	if len(req.PlanCommentRefs) > 0 {
+		storedContent = plancomments.WithPlaceholder(storedContent)
+	}
 	// Resolve browser prompt definitions before appending the server-owned
 	// entity block. The prompt sanitizer removes untrusted browser blocks and
 	// must not consume the opening tag of this trusted context.
@@ -737,6 +741,26 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		req.canvasGuidanceResolved = canvasGuidanceResolved
 		req.includeCanvasGuidance = includeCanvasGuidance
 	}
+	var initialTaskBrief *admission.InitialTaskBriefCandidate
+	if eligibleForInitialTaskBrief(task, sessionResp, configMode, startCreatedSession, hasMessageContent) {
+		candidateRawContent := composeInitialTaskBrief(task.Description, req.Content)
+		candidateContent, candidateTrustedPromptContext := h.prepareDirectPrompt(
+			ctx, candidateRawContent, sessionResp.Session.IsPassthrough,
+		)
+		if len(req.PlanCommentRefs) > 0 {
+			candidateContent = plancomments.WithPlaceholder(candidateContent)
+		}
+		candidateContent = orchestrator.AppendEntityReferenceContext(candidateContent, req.EntityReferences)
+		candidateContent = h.injectMessageContext(
+			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner,
+			req.includeCanvasGuidance, candidateContent, candidateTrustedPromptContext,
+		)
+		initialTaskBrief = &admission.InitialTaskBriefCandidate{
+			DescriptionSnapshot:    task.Description,
+			Content:                candidateContent,
+			PromptReferenceContext: candidateTrustedPromptContext,
+		}
+	}
 	req.Content = storedContent
 	if planCommentAttachmentClaim == nil {
 		err = h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments)
@@ -763,6 +787,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		RequirePrimarySession: req.RequirePrimarySession,
 		ExpectedSessionState:  sessionResp.Session.State,
 		AttachmentClaim:       planCommentAttachmentClaim,
+		InitialTaskBrief:      initialTaskBrief,
 	}
 	var message *models.Message
 	// Every comment-bearing message uses the queue row as a durable dispatch
@@ -813,6 +838,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 	req.Content = message.Content
+	if initialTaskBrief != nil && initialTaskBrief.Selected {
+		req.initialTaskBriefSelected = true
+		trustedPromptContext = initialTaskBrief.PromptReferenceContext
+	}
 	if turnStartResult.Queued && !atomicQueuedPlanComments {
 		if err := h.orchestrator.QueueUserPrompt(
 			ctx,
@@ -1217,11 +1246,23 @@ func (h *MessageHandlers) dispatchPromptAsync(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
 			trustedPromptContext, canvasGuidanceProjection{
-				resolved: req.canvasGuidanceResolved,
-				include:  req.includeCanvasGuidance,
+				resolved:             req.canvasGuidanceResolved,
+				include:              req.includeCanvasGuidance,
+				preserveDirectPrompt: req.initialTaskBriefSelected,
 			},
 		)
 	}()
+}
+
+func eligibleForInitialTaskBrief(
+	task *models.Task,
+	sessionResp *dto.GetTaskSessionResponse,
+	configMode, startCreatedSession, hasMessageContent bool,
+) bool {
+	return task != nil && sessionResp != nil &&
+		startCreatedSession && hasMessageContent &&
+		!task.IsEphemeral && !task.IsFromOffice && !configMode &&
+		strings.TrimSpace(task.Description) != ""
 }
 
 // forwardMessageAsSteer delivers a message into a still-generating turn.
@@ -1291,7 +1332,14 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		if len(canvasGuidance) > 0 {
 			projection = canvasGuidance[0]
 		}
-		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidance); ok && len(canvasGuidance) > 0 {
+		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt); ok &&
+			projection.preserveDirectPrompt && len(canvasGuidance) > 0 {
+			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+				ctx, taskID, sessionID, agentProfileID,
+				content, true, planMode, false, attachments, references, trustedPromptContext,
+				projection.resolved, projection.include,
+			)
+		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidance); ok && len(canvasGuidance) > 0 {
 			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidance(
 				ctx, taskID, sessionID, agentProfileID,
 				content, true, planMode, false, attachments, references, trustedPromptContext,
