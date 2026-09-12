@@ -93,3 +93,47 @@ func TestService_BulkMoveSelectedTasksRelocksAfterSourceStepDrift(t *testing.T) 
 		t.Fatalf("batch-1 step = %q, want step-target", moved.WorkflowStepID)
 	}
 }
+
+// TestService_BulkMoveSelectedTasksMovesTaskThatDriftedOutOfTargetBeforeLock
+// proves the dispatch loop's "already at the target step, skip it" check
+// (BulkMoveSelectedTasks's intentional behavior for a batch that includes
+// tasks already where the caller wants them) uses the batch's real,
+// lock-corrected membership rather than the stale pre-lock read.
+//
+// A task already at the target step when validateSelectedMoveBatch reads the
+// batch is a legitimate member of that batch (BulkMoveSelectedTasks's own
+// doc comment: "tasks already in the target step are skipped"). If a
+// concurrent move then carries that same task OUT of the target step before
+// this batch's locks are acquired, acquireBulkMoveStepLocks correctly
+// re-locks its new real step — but the task no longer belongs in the
+// "already there" case: the caller still wants it at the target, and it no
+// longer is. The dispatch loop must dispatch it, not skip it.
+func TestService_BulkMoveSelectedTasksMovesTaskThatDriftedOutOfTargetBeforeLock(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+
+	createMoveTask(t, ctx, repo, "batch-1", "wf-target", "step-target", nil)
+
+	svc.bulkMoveBeforeLockForTest = func() {
+		if _, err := svc.MoveTask(ctx, "batch-1", "wf-source", "step-source", 0); err != nil {
+			t.Errorf("drift MoveTask: %v", err)
+		}
+	}
+	t.Cleanup(func() { svc.bulkMoveBeforeLockForTest = nil })
+
+	if _, err := svc.BulkMoveSelectedTasks(ctx, []string{"batch-1"}, "wf-target", "step-target"); err != nil {
+		t.Fatalf("BulkMoveSelectedTasks: %v", err)
+	}
+
+	moved, err := repo.GetTask(ctx, "batch-1")
+	if err != nil {
+		t.Fatalf("GetTask(batch-1): %v", err)
+	}
+	if moved.WorkflowStepID != "step-target" {
+		t.Fatalf("batch-1 step = %q, want step-target (task drifted out of the "+
+			"target before the lock was acquired; it must still be moved back "+
+			"in, not silently skipped as if it had never left)", moved.WorkflowStepID)
+	}
+}

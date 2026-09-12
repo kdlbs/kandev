@@ -1580,11 +1580,23 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	// target here and letting each per-task MoveTask acquire its own source
 	// step deadlocks against an ordinary single move running the opposite
 	// direction between the same two steps.
-	ctx, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
+	lockedCtx, lockedTasks, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
 	if err != nil {
 		return nil, err
 	}
+	ctx = lockedCtx
 	defer unlock()
+	// The lock acquisition above may have re-read a task's step after a
+	// concurrent drift, so re-derive dispatch order from that corrected
+	// membership rather than the pre-lock orderedTasks — otherwise a task
+	// whose stale record still shows it at targetStepID is silently skipped
+	// below even though it has since left, and any task whose real source
+	// step changed keeps the wrong REQ-TASKS-KANBAN-TASK-REORDERING-001.29
+	// submission position.
+	orderedTasks, err = s.orderTasksForBulkMove(ctx, lockedTasks)
+	if err != nil {
+		return nil, err
+	}
 	if s.bulkMoveAfterLockForTest != nil {
 		s.bulkMoveAfterLockForTest()
 	}
@@ -1650,12 +1662,20 @@ const bulkMoveLockRetryLimit = 8
 // task's step moved, the stale lock set is released and a fresh set is
 // acquired for the corrected steps, repeating until the read matches the
 // locked set or bulkMoveLockRetryLimit is exhausted.
+//
+// The returned task slice is the membership the lock was finally acquired
+// against, not the pre-lock tasks argument. Callers must dispatch and derive
+// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order from this
+// returned slice, never from their own pre-lock read: a task that drifted
+// out of the target step during acquisition is only reflected here, and a
+// caller still using its pre-lock copy would treat that task as if it had
+// never left.
 func (s *Service) acquireBulkMoveStepLocks(
 	ctx context.Context, tasks []*models.Task, targetStepID string,
-) (context.Context, func(), error) {
+) (context.Context, []*models.Task, func(), error) {
 	locker, ok := s.tasks.(stepArrivalBatchLocker)
 	if !ok {
-		return ctx, func() {}, nil
+		return ctx, tasks, func() {}, nil
 	}
 	if s.bulkMoveBeforeLockForTest != nil {
 		s.bulkMoveBeforeLockForTest()
@@ -1670,15 +1690,15 @@ func (s *Service) acquireBulkMoveStepLocks(
 		fresh, err := s.tasks.GetTasksByIDs(lockedCtx, taskIDs)
 		if err != nil {
 			unlock()
-			return ctx, func() {}, fmt.Errorf("failed to verify bulk move lock set: %w", err)
+			return ctx, nil, func() {}, fmt.Errorf("failed to verify bulk move lock set: %w", err)
 		}
 		if bulkMoveTaskStepsMatch(current, fresh) {
-			return lockedCtx, unlock, nil
+			return lockedCtx, fresh, unlock, nil
 		}
 		unlock()
 		current = fresh
 	}
-	return ctx, func() {}, fmt.Errorf("bulk move step lock set did not stabilize after %d attempts", bulkMoveLockRetryLimit)
+	return ctx, nil, func() {}, fmt.Errorf("bulk move step lock set did not stabilize after %d attempts", bulkMoveLockRetryLimit)
 }
 
 // bulkMoveTaskStepsMatch reports whether a and b agree on every task's
@@ -1851,11 +1871,20 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	// Hold every step this batch will touch, for the same reason and in the
 	// same ascending-ordered way as BulkMoveSelectedTasks — see its lock
 	// call for the deadlock this avoids.
-	ctx, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
+	lockedCtx, lockedTasks, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
 	if err != nil {
 		return nil, err
 	}
+	ctx = lockedCtx
 	defer unlock()
+	// See BulkMoveSelectedTasks's identical re-derivation: the lock
+	// acquisition above may have corrected a task's step after a concurrent
+	// drift, so dispatch order must be re-derived from that membership
+	// rather than the pre-lock orderedTasks.
+	orderedTasks, err = s.orderTasksForBulkMove(ctx, lockedTasks)
+	if err != nil {
+		return nil, err
+	}
 	if s.bulkMoveAfterLockForTest != nil {
 		s.bulkMoveAfterLockForTest()
 	}
