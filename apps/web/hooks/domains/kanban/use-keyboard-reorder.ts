@@ -123,6 +123,10 @@ export function useKeyboardReorder(workflowId: string, tasks: Task[]) {
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent, task: Task) => {
+      // Ignore a key event bubbling up from a focused interactive
+      // descendant (e.g. the card's own action buttons) so it does not also
+      // pick up or commit a reorder in addition to that descendant's action.
+      if (event.target !== event.currentTarget) return;
       if (pickedUp && pickedUp.taskId !== task.id) return;
       if (event.key === " " || event.key === "Enter") {
         event.preventDefault();

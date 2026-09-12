@@ -31,6 +31,17 @@ function keyEvent(key: string) {
   return { key, preventDefault: vi.fn() } as unknown as React.KeyboardEvent;
 }
 
+function bubbledKeyEvent(key: string) {
+  // Simulates a key event bubbling up from a focused descendant (e.g. a
+  // card action button), where target !== currentTarget.
+  return {
+    key,
+    preventDefault: vi.fn(),
+    target: {},
+    currentTarget: {},
+  } as unknown as React.KeyboardEvent;
+}
+
 beforeEach(() => {
   reorderBand.mockReset();
   bandPending = false;
@@ -156,6 +167,25 @@ describe("useKeyboardReorder", () => {
     // request for the single-member band.
     act(() => {
       result.current.handleKeyDown(keyEvent("Enter"), soleTask[0]);
+    });
+    expect(result.current.pickedUpTaskId).toBeNull();
+    expect(reorderBand).not.toHaveBeenCalled();
+  });
+});
+
+describe("useKeyboardReorder — bubbled key events", () => {
+  const tasks = [admittedTask("a", 0), admittedTask("b", 1), admittedTask("c", 2)];
+
+  it("ignores Space/Enter bubbling from a focused descendant (e.g. a card action button)", () => {
+    const { result } = renderHook(() => useKeyboardReorder(WORKFLOW_ID, tasks));
+
+    act(() => {
+      result.current.handleKeyDown(bubbledKeyEvent(" "), tasks[0]);
+    });
+    expect(result.current.pickedUpTaskId).toBeNull();
+
+    act(() => {
+      result.current.handleKeyDown(bubbledKeyEvent("Enter"), tasks[0]);
     });
     expect(result.current.pickedUpTaskId).toBeNull();
     expect(reorderBand).not.toHaveBeenCalled();
