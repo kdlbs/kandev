@@ -29,8 +29,8 @@ type inboxWorkspaceAuthorizer interface {
 	AuthorizeWorkspaceScope(ctx context.Context, workspaceID string, scope authz.Scope) error
 }
 
-// inboxTaskLookup resolves the task_title/session_state enrichment fields
-// (F41): both degrade to "" on lookup failure rather than failing the page.
+// inboxTaskLookup resolves the task_title/session_state enrichment fields:
+// both degrade to "" on lookup failure rather than failing the page.
 type inboxTaskLookup interface {
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
@@ -166,7 +166,7 @@ func (h *Handlers) httpListInbox(c *gin.Context) {
 		return
 	}
 
-	// F45: the hidden-count query failing fails the whole read rather than
+	// The hidden-count query failing fails the whole read rather than
 	// defaulting hidden_count/next_snooze_expiry, which would misreport both
 	// the empty state and the snooze timer.
 	summary, err := h.inboxBundles.CountHiddenClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
@@ -269,11 +269,11 @@ func (h *Handlers) buildInboxHiddenResponse(
 	return resp, nil
 }
 
-// buildInboxBundleViews hydrates each bundle's durable messages (F43, F44)
-// and task_title/session_state enrichment (F41). A bundle whose
-// messages cannot be read fails the whole page rather than omitting a row
-// silently; a bundle with zero resolvable messages (should not happen given
-// the bundle query's own filters) is skipped and logged.
+// buildInboxBundleViews hydrates each bundle's durable messages and
+// task_title/session_state enrichment. A bundle whose messages cannot be read
+// fails the whole page rather than omitting a row silently; a bundle with
+// zero resolvable messages (should not happen given the bundle query's own
+// filters) is skipped and logged.
 func (h *Handlers) buildInboxBundleViews(
 	ctx context.Context, bundles []taskmodels.ClarificationBundleSummary,
 ) ([]inboxBundleView, error) {
@@ -305,8 +305,8 @@ func (h *Handlers) buildInboxBundleViews(
 
 // renderInboxMessages projects each message through Message.ToAPI() and
 // rewrites its emitted metadata.question_index to its 0-based rank within
-// this order (F44, design-01's "rewrite" rule): the shared client sort is
-// then a no-op against normalized ranks. A fresh metadata map is
+// this order (design-01's "rewrite" rule): the shared client sort is then a
+// no-op against normalized ranks. A fresh metadata map is
 // built rather than written through the map ToAPI() returns, because that
 // map may be the SAME reference as the source message's own metadata.
 func renderInboxMessages(ordered []*taskmodels.Message) []*v1.Message {
@@ -324,9 +324,9 @@ func renderInboxMessages(ordered []*taskmodels.Message) []*v1.Message {
 	return out
 }
 
-// inboxBundleContext implements F40+F43: the bundle's context is its FIRST
-// message's metadata.context when that is a non-empty string after
-// trimming, else "". This mirrors readSharedContext's
+// inboxBundleContext resolves the bundle's context to its FIRST message's
+// metadata.context when that is a non-empty string after trimming, else "".
+// This mirrors readSharedContext's
 // `context?.trim() ? context : null` exactly (clarification-input-overlay.tsx),
 // so the row and the panel it expands into can never disagree.
 func inboxBundleContext(ordered []*taskmodels.Message) string {
@@ -340,7 +340,7 @@ func inboxBundleContext(ordered []*taskmodels.Message) string {
 	return v
 }
 
-// resolveTaskTitle implements F41: degrades to "" on any lookup failure.
+// resolveTaskTitle degrades to "" on any lookup failure.
 func (h *Handlers) resolveTaskTitle(ctx context.Context, taskID string) string {
 	if taskID == "" {
 		return ""
@@ -352,7 +352,7 @@ func (h *Handlers) resolveTaskTitle(ctx context.Context, taskID string) string {
 	return task.Title
 }
 
-// resolveSessionState implements F41: degrades to "" on any lookup failure.
+// resolveSessionState degrades to "" on any lookup failure.
 func (h *Handlers) resolveSessionState(ctx context.Context, sessionID string) string {
 	if sessionID == "" {
 		return ""
