@@ -11,6 +11,27 @@ import (
 // gitOperationOK is the canonical success body every /api/v1/git/* POST returns.
 const gitOperationOK = `{"success":true,"operation":"pull","output":"Already up to date."}`
 
+func TestGitPushSendsPushOptions(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, gitOperationOK))
+	_, err := newHTTPOnlyClient(srv.URL).GitPush(context.Background(), "svc", PushOptions{
+		Remote: "backup", ExpectedBranch: "feature/work",
+	})
+	if err != nil {
+		t.Fatalf("GitPush() error = %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	for key, want := range map[string]any{
+		"repo": "svc", "remote": "backup", "expected_branch": "feature/work",
+	} {
+		if gotValue := body[key]; gotValue != want {
+			t.Errorf("body[%q] = %#v, want %#v", key, gotValue, want)
+		}
+	}
+}
+
 // TestGitOperations_PostExpectedPathAndPayload pins the endpoint and JSON body
 // of every thin wrapper over gitOperation. A wrapper that posts to the wrong
 // path or drops a field is the whole failure mode for this layer.

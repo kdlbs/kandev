@@ -3,11 +3,15 @@ package process
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	osExec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func TestPushPreflightHistoryClassification(t *testing.T) {
@@ -40,6 +44,83 @@ func TestPushPreflightHistoryClassification(t *testing.T) {
 	}
 	if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution")); got != providerTwo {
 		t.Fatalf("remote HEAD changed during preflight: %q != %q", got, providerTwo)
+	}
+}
+
+func TestPushPreflightRejectsMissingContributionSource(t *testing.T) {
+	repoDir, originDir, _, binding, _, _, _ := setupDivergedContributionRepo(t)
+	runGit(t, originDir, "update-ref", "-d", "refs/heads/"+binding.HeadBranch)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setRemoteContribution(binding)
+	result, err := operator.PushPreflight(context.Background(), PushOptions{})
+	if err != nil {
+		t.Fatalf("PushPreflight returned error: %v", err)
+	}
+	if result.Success {
+		t.Fatalf("PushPreflight = %+v, want missing-source refusal", result)
+	}
+	if result.ErrorCode != taskmodels.AgentErrorCauseCodeSourceBranchMissing {
+		t.Fatalf("ErrorCode = %q, want %q", result.ErrorCode, taskmodels.AgentErrorCauseCodeSourceBranchMissing)
+	}
+	if got := remoteBranchSHA(t, originDir, binding.HeadBranch); got != "" {
+		t.Fatalf("missing contribution source was recreated at %q", got)
+	}
+}
+
+func TestPushPreflightUsesStableGitEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git PATH shim is a POSIX shell script")
+	}
+	repoDir, _, _, binding, _, _, _ := setupDivergedContributionRepo(t)
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setRemoteContribution(binding)
+
+	realGit, err := osExec.LookPath("git")
+	if err != nil {
+		t.Fatalf("LookPath(git) = %v", err)
+	}
+	shimDir := t.TempDir()
+	envPath := filepath.Join(shimDir, "push-env")
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\nls-remote|push) printf 'LANG=%%s\\nLC_ALL=%%s\\nGIT_TERMINAL_PROMPT=%%s\\n' \"$LANG\" \"$LC_ALL\" \"$GIT_TERMINAL_PROMPT\" > \"$KANDEV_TEST_PUSH_ENV\";;\nesac\nexec %s \"$@\"\n", realGit)
+	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("KANDEV_TEST_PUSH_ENV", envPath)
+	t.Setenv("LANG", "pt_PT.UTF-8")
+	t.Setenv("LC_ALL", "pt_PT.UTF-8")
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+
+	_, err = operator.PushPreflight(context.Background(), PushOptions{})
+	if err != nil {
+		t.Fatalf("PushPreflight returned error: %v", err)
+	}
+	env, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read recorded Git environment: %v", err)
+	}
+	want := "LANG=C\nLC_ALL=C\nGIT_TERMINAL_PROMPT=0\n"
+	if got := string(env); got != want {
+		t.Fatalf("preflight Git environment = %q, want %q", got, want)
+	}
+}
+
+func TestPushPreflightPreservesContributionValidationErrorCode(t *testing.T) {
+	repoDir, _, remoteName, binding, _, _, _ := setupDivergedContributionRepo(t)
+	runGit(t, repoDir, "remote", "set-url", remoteName, "https://example.test/wrong-source.git")
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setRemoteContribution(binding)
+	result, err := operator.PushPreflight(context.Background(), PushOptions{})
+	if err != nil {
+		t.Fatalf("PushPreflight returned error: %v", err)
+	}
+	if result.Success {
+		t.Fatalf("PushPreflight = %+v, want validation refusal", result)
+	}
+	if result.ErrorCode != taskmodels.AgentErrorCauseCodeDestinationInvalid {
+		t.Fatalf("ErrorCode = %q, want %q", result.ErrorCode, taskmodels.AgentErrorCauseCodeDestinationInvalid)
 	}
 }
 

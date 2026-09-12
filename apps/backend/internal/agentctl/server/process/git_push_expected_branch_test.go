@@ -186,7 +186,7 @@ func TestGitOperatorPushToNamedRemoteLeavesUpstreamUnset(t *testing.T) {
 	}
 }
 
-func TestGitOperatorPushToNamedRemoteStaysNonForce(t *testing.T) {
+func TestGitOperatorPushDoesNotEscalateRejectedNonForcePush(t *testing.T) {
 	repoDir, _, backupDir, operator := setupPushRemotesRepo(t)
 	// Give backup a history the local branch does not contain.
 	runGit(t, repoDir, "push", "backup", "HEAD:refs/heads/feature/work")
@@ -207,6 +207,29 @@ func TestGitOperatorPushToNamedRemoteStaysNonForce(t *testing.T) {
 	}
 	if got := remoteBranchSHA(t, backupDir, "feature/work"); got != remoteBefore {
 		t.Errorf("backup moved to %q, want %q", got, remoteBefore)
+	}
+}
+
+func TestGitOperatorPushNamedFanoutRemotePublishesToEveryPushURL(t *testing.T) {
+	repoDir, originDir, backupDir, operator := setupPushRemotesRepo(t)
+	runGit(t, repoDir, "remote", "add", "mirror", originDir)
+	runGit(t, repoDir, "remote", "set-url", "--push", "mirror", originDir)
+	runGit(t, repoDir, "remote", "set-url", "--add", "--push", "mirror", backupDir)
+
+	result, err := operator.Push(context.Background(), PushOptions{
+		Remote: "mirror", ExpectedBranch: "feature/work",
+	})
+	if err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Push() result = %+v, want success", result)
+	}
+	want := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	for name, remoteDir := range map[string]string{"origin": originDir, "backup": backupDir} {
+		if got := remoteBranchSHA(t, remoteDir, "feature/work"); got != want {
+			t.Errorf("%s feature/work = %q, want %q", name, got, want)
+		}
 	}
 }
 

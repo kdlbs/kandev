@@ -186,8 +186,9 @@ sits between the refusal set and the push. The step 5 verification gives the
 ordering guarantee the caller actually needs: nothing Kandev issues can move
 `HEAD` between the check and the push. The residual window is bounded by the
 push itself, because an agent shell can still move `HEAD` outside the lock;
-closing that needs an exact-OID lease, which the requirement places out of
-scope. In the rare case where step 5 refuses after step 3 already published a
+closing that needs an exact source-OID refspec or an equivalent lease, which
+the requirement places out of scope. A destination lease alone cannot freeze
+local `HEAD`. In the rare case where step 5 refuses after step 3 already published a
 baseline, the result reports the completed baseline publication and leaves the
 task branch unpublished, which is the existing partial first-publication
 contract rather than a new failure mode. A step 5 refusal after a step 3 that

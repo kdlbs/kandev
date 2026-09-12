@@ -28,6 +28,12 @@ var ErrInvalidBranchName = errors.New("invalid branch name")
 
 const preflightReasonHistoryUpdateRequired = "history_update_required"
 
+var contributionPreflightEnvironment = map[string]string{
+	"GIT_TERMINAL_PROMPT": "0",
+	"LANG":                "C",
+	"LC_ALL":              "C",
+}
+
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
 	Success         bool     `json:"success"`
@@ -552,21 +558,57 @@ func (g *GitOperator) Push(ctx context.Context, opts PushOptions) (*GitOperation
 // which precede every refusal this capability adds.
 func (g *GitOperator) validateContributionState(ctx context.Context, force bool) *pushRefusal {
 	if g.remoteContributionErr != nil {
-		return &pushRefusal{message: g.remoteContributionErr.Error()}
+		return pushRefusalFromError(g.remoteContributionErr)
 	}
 	if g.contributionDestinationErr != nil {
-		return &pushRefusal{message: g.contributionDestinationErr.Error()}
+		return pushRefusalFromError(g.contributionDestinationErr)
 	}
 	if g.contributionDestination != nil {
 		if err := g.validateContributionDestinationRemote(ctx); err != nil {
-			return &pushRefusal{message: err.Error()}
+			return pushRefusalFromError(err)
 		}
 	}
 	if g.contributionRouted() && force {
 		return &pushRefusal{message: "force push is not allowed for a remote contribution"}
 	}
 	if err := g.validateContributionRemote(ctx); err != nil {
-		return &pushRefusal{message: err.Error()}
+		return pushRefusalFromError(err)
+	}
+	return nil
+}
+
+func pushRefusalFromError(err error) *pushRefusal {
+	return &pushRefusal{
+		code:    classifyPushPreflightError(err),
+		message: err.Error(),
+	}
+}
+
+func (g *GitOperator) validateContributionSource(
+	ctx context.Context,
+	environmentOverrides map[string]string,
+) *pushRefusal {
+	if g.remoteContribution == nil {
+		return nil
+	}
+	remote := g.remoteContribution.ContributionRemoteName()
+	destinationRef := "refs/heads/" + g.remoteContribution.HeadBranch
+	output, err := g.runGitCommandWithEnvironment(
+		ctx,
+		environmentOverrides,
+		"ls-remote",
+		"--refs",
+		remote,
+		destinationRef,
+	)
+	if err != nil {
+		return pushRefusalFromError(err)
+	}
+	if strings.TrimSpace(output) == "" {
+		return &pushRefusal{
+			code:    models.AgentErrorCauseCodeSourceBranchMissing,
+			message: "contribution source branch is missing",
+		}
 	}
 	return nil
 }
@@ -604,11 +646,24 @@ func (g *GitOperator) PushPreflight(ctx context.Context, opts PushOptions) (*Git
 		refusal.apply(result)
 		return result, nil
 	}
+	if refusal := g.validateContributionSource(ctx, contributionPreflightEnvironment); refusal != nil {
+		refusal.apply(result)
+		return result, nil
+	}
 
 	// --no-verify: a dry-run push still invokes the local pre-push hook, which
 	// can mutate the worktree or perform arbitrary side effects. Preflight must
 	// not mutate anything, so the hook must not run.
-	output, err := g.runGitCommand(ctx, "push", "--dry-run", "--no-verify", "--porcelain", plan.remote, plan.refspec)
+	output, err := g.runGitCommandWithEnvironment(
+		ctx,
+		contributionPreflightEnvironment,
+		"push",
+		"--dry-run",
+		"--no-verify",
+		"--porcelain",
+		plan.remote,
+		plan.refspec,
+	)
 	result.Output = output
 	if err != nil {
 		if destinationRef, ok := strings.CutPrefix(plan.refspec, "HEAD:"); ok &&
