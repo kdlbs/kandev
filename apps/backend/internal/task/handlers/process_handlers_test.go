@@ -444,6 +444,9 @@ func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.
 func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error) {
+	return nil, nil
+}
 func (m *mockRepository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error) {
 	return nil, nil
 }

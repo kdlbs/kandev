@@ -101,6 +101,123 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 }
 
+// ListLiveWorkspaceSessions backs the orphan-reap ownership check's other-task
+// path resolution. It must report the same effective (environment-overridden)
+// workspace_path as GetTaskSession/ListTaskSessions above, never the stale
+// task_sessions column left behind after the linked environment's root moved -
+// a check built on the stale column would compare candidate cwds against a
+// path that is no longer actually owned by anyone, missing real ownership.
+func TestListLiveWorkspaceSessionsUsesCurrentEnvironmentRootNotStaleSessionColumn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID    = "task-live-workspace-root"
+		sessionID = "session-live-workspace-root"
+		envID     = "env-live-workspace-root"
+	)
+
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live workspace root"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            envID,
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/stale-root/kandev",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                sessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: envID,
+		WorkspacePath:     "/stale-root/kandev",
+		State:             models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	// The environment's root moves (e.g. a promoted multi-repo task), but
+	// nothing ever rewrites the session row's own workspace_path column -
+	// that staleness is the case ListLiveWorkspaceSessions must not surface.
+	env, err := repo.GetTaskEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	env.WorkspacePath = "/current-root"
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+	if len(live) != 1 {
+		t.Fatalf("expected exactly one live session, got %+v", live)
+	}
+	if live[0].WorkspacePath != "/current-root" {
+		t.Fatalf("ListLiveWorkspaceSessions WorkspacePath = %q, want the current environment root %q (not the stale session column)",
+			live[0].WorkspacePath, "/current-root")
+	}
+}
+
+// AC-TASKS-ORPHAN-REAP-003.2: ListLiveWorkspaceSessions is the ownership
+// check's authorization boundary, so the state list it filters on must be
+// exactly the five live states, no more and no fewer - a terminal-state
+// session must never block a reap root, and every live state must.
+func TestListLiveWorkspaceSessionsFiltersToExactlyTheLiveStates(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-live-state-filter"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live state filter"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	liveStates := map[models.TaskSessionState]bool{
+		models.TaskSessionStateCreated:         true,
+		models.TaskSessionStateStarting:        true,
+		models.TaskSessionStateRunning:         true,
+		models.TaskSessionStateIdle:            true,
+		models.TaskSessionStateWaitingForInput: true,
+		models.TaskSessionStateCompleted:       false,
+		models.TaskSessionStateFailed:          false,
+		models.TaskSessionStateCancelled:       false,
+	}
+
+	for state := range liveStates {
+		sessionID := "session-" + strings.ToLower(string(state))
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID:            sessionID,
+			TaskID:        taskID,
+			WorkspacePath: "/live-state-filter/" + strings.ToLower(string(state)),
+			State:         state,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", state, err)
+		}
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+
+	gotStates := make(map[models.TaskSessionState]bool, len(live))
+	for _, sess := range live {
+		gotStates[sess.State] = true
+	}
+	for state, wantLive := range liveStates {
+		if gotStates[state] != wantLive {
+			t.Fatalf("state %s: ListLiveWorkspaceSessions returned it = %v, want %v (full result: %+v)",
+				state, gotStates[state], wantLive, live)
+		}
+	}
+	if len(live) != 5 {
+		t.Fatalf("expected exactly the 5 live-state sessions, got %d: %+v", len(live), live)
+	}
+}
+
 func TestTaskSessionWorkspacePathFallsBackWithoutEnvironment(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

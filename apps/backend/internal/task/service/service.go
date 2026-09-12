@@ -440,18 +440,25 @@ type Service struct {
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
-	sessionRunningChecker           SessionRunningChecker
-	remoteBranchLister              RemoteBranchLister
-	repositorySelectionResolver     RepositorySelectionResolver
-	repoCloneLocation               RepoCloneLocation
-	blockers                        BlockerRepository
-	comments                        CommentRepository
-	taskStateActivity               TaskStateActivityLogger
-	secretStore                     secrets.SecretStore
-	workspaceSecretDeleter          WorkspaceSecretDeleter
-	baseBranchPusher                AgentBaseBranchPusher
-	comparisonTargetPusher          AgentComparisonTargetPusher
-	runtimeOverridesMu              sync.Mutex
+	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
+	// host process detection. Nil selects the real platform implementation
+	// (resource_cleanup_orphan_reap_host_*.go); tests override them
+	// directly since they are unexported and this is a whitebox package.
+	orphanReapHostSnapshotter   orphanReapHostSnapshotter
+	orphanReapVerifier          orphanReapVerifier
+	orphanReapSignaler          orphanReapSignaler
+	sessionRunningChecker       SessionRunningChecker
+	remoteBranchLister          RemoteBranchLister
+	repositorySelectionResolver RepositorySelectionResolver
+	repoCloneLocation           RepoCloneLocation
+	blockers                    BlockerRepository
+	comments                    CommentRepository
+	taskStateActivity           TaskStateActivityLogger
+	secretStore                 secrets.SecretStore
+	workspaceSecretDeleter      WorkspaceSecretDeleter
+	baseBranchPusher            AgentBaseBranchPusher
+	comparisonTargetPusher      AgentComparisonTargetPusher
+	runtimeOverridesMu          sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
