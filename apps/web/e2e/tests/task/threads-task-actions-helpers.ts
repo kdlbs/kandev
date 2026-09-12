@@ -272,8 +272,7 @@ export async function allTaskActionOutcomes(
   await ui.press(page.getByTestId("archive-task-confirm"));
   await expect(ui.column(a.id)).toHaveCount(0);
   await expect(ui.trigger(b.id)).toBeFocused();
-  const archived = await api.rawRequest("GET", `/api/v1/tasks/${a.id}`);
-  expect((await archived.json()).archived_at).toBeTruthy();
+  await expect.poll(async () => (await api.getTask(a.id)).archived_at).toBeTruthy();
   await ui.delete(b.id);
   await expect(page.getByTestId("threads-empty-state")).toBeVisible();
   await expect(page.getByTestId("threads-empty-state")).toBeFocused();

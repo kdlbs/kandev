@@ -16,6 +16,8 @@ type ThreadsBoardProps = {
   isLoading?: boolean;
   /** Column a deep link asked for; scrolled into view and ringed on arrival. */
   focusedTaskId?: string | null;
+  /** URL request identity stays stable while its target is temporarily absent. */
+  focusRequestKey?: string | null;
   /** Session a task-detail link asked the target column to select. */
   focusedSessionId?: string | null;
   /** Removes a target session query after the target column proves it invalid. */
@@ -63,16 +65,16 @@ function ThreadsLoadingState() {
  * The deep-link mark answers "where is the column I asked for", so it retires
  * the moment the reader starts using the deck rather than sitting on a column
  * they have since moved away from. A later deep link earns a fresh mark, which
- * is why dismissal is keyed to the requested id rather than latched forever.
+ * is why dismissal is keyed to the URL request rather than its resolved column.
  *
  * Uses the store-previous-props pattern instead of an effect so the mark never
  * paints for a frame after a new request has already been dismissed.
  */
-function useRetiringFocusMark(focusedTaskId: string | null) {
+function useRetiringFocusMark(focusedTaskId: string | null, focusRequestKey: string | null) {
   const [retired, setRetired] = useState(false);
-  const [requested, setRequested] = useState(focusedTaskId);
-  if (requested !== focusedTaskId) {
-    setRequested(focusedTaskId);
+  const [requested, setRequested] = useState(focusRequestKey);
+  if (requested !== focusRequestKey) {
+    setRequested(focusRequestKey);
     setRetired(false);
   }
   return {
@@ -97,19 +99,20 @@ export function ThreadsBoard({
   threads,
   isLoading = false,
   focusedTaskId = null,
+  focusRequestKey = focusedTaskId,
   focusedSessionId = null,
   onInvalidRequestedSession,
   onOpenTask,
   renderHeader,
 }: ThreadsBoardProps) {
-  const { markedTaskId, retire } = useRetiringFocusMark(focusedTaskId);
+  const { markedTaskId, retire } = useRetiringFocusMark(focusedTaskId, focusRequestKey);
   const { isMobile } = useResponsiveBreakpoint();
   const [pickerOpen, setPickerOpen] = useState(false);
   if (!isMobile && pickerOpen) setPickerOpen(false);
   const returnFocusTaskId = useRef<string | null>(null);
   const orderedIds = useMemo(() => threads.map((thread) => thread.taskId), [threads]);
   const { boardRef, registerColumn, preloadTaskIds, detailTaskIds, mobileTaskId } =
-    useThreadColumnActivation(orderedIds, focusedTaskId);
+    useThreadColumnActivation(orderedIds, markedTaskId);
   const rememberThread = useThreadSelectionRecovery(orderedIds, boardRef, isMobile);
 
   function taskColumn(taskId: string | null) {
