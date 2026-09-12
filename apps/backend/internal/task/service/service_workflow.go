@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -484,13 +486,14 @@ type workflowLimitedMoveRepository interface {
 }
 
 type workflowMoveAdmissionRepository interface {
-	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, limit int) (bool, error)
+	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int) (bool, error)
 }
 
 type workflowMoveAdmissionWithStateRepository interface {
 	UpdateTaskWithWorkflowStepAdmissionAndState(
 		ctx context.Context,
 		task *models.Task,
+		sourceStepID string,
 		targetStepID string,
 		limit int,
 		admittedState *v1.TaskState,
@@ -626,8 +629,16 @@ func (s *Service) MoveTaskWithOptions(
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
-	task.Position = position
+	// A move naming the task's current step is not an arrival
+	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28): it keeps the position it
+	// already holds rather than the caller-supplied literal, which the
+	// updateMovedTaskSameStep write path below leaves untouched. A step
+	// change computes its own arrival position server-side further down
+	// this call chain (updateTaskWithWorkflowStepAdmission), so the
+	// caller-supplied position is ignored either way — position here is
+	// never read again.
 	if stepChanged {
+		task.Position = position
 		if task.Metadata == nil {
 			task.Metadata = make(map[string]interface{})
 		}
@@ -1019,7 +1030,7 @@ func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *mode
 	if supported {
 		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err, oldState)
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
-		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			skipped[candidate.ID] = struct{}{}
@@ -1103,7 +1114,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
-		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote feeder queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			skipped[candidate.ID] = struct{}{}
@@ -1250,34 +1261,13 @@ func (s *Service) nextFeederQueuedCandidate(
 	return nil, nil
 }
 
+// queuedTaskBefore is the WIP promotion comparator
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.1, .36): position, priority rank,
+// queued_at (coalesced to created_at when absent), created_at, id. Delegates
+// to models.StepOrderLess, the single source of truth this comparator's
+// byte-identical orchestrator copy and the reorder repository also use.
 func queuedTaskBefore(left, right *models.Task) bool {
-	if left.Position != right.Position {
-		return left.Position < right.Position
-	}
-	priority := func(value string) int {
-		switch value {
-		case "critical":
-			return 0
-		case "high":
-			return 1
-		case priorityMedium:
-			return 2
-		case priorityLow:
-			return 3
-		default:
-			return 4
-		}
-	}
-	if priority(left.Priority) != priority(right.Priority) {
-		return priority(left.Priority) < priority(right.Priority)
-	}
-	if left.QueuedAt != nil && right.QueuedAt != nil && !left.QueuedAt.Equal(*right.QueuedAt) {
-		return left.QueuedAt.Before(*right.QueuedAt)
-	}
-	if !left.CreatedAt.Equal(right.CreatedAt) {
-		return left.CreatedAt.Before(right.CreatedAt)
-	}
-	return left.ID < right.ID
+	return models.StepOrderLess(left, right)
 }
 
 func skippedTaskIDs(skipped map[string]struct{}) []string {
@@ -1301,7 +1291,7 @@ func (s *Service) updateMovedTask(
 	if targetStep == nil || oldStepID == targetStep.ID {
 		return s.updateMovedTaskSameStep(ctx, task, opts)
 	}
-	return s.updateMovedTaskCrossStep(ctx, task, targetStep, admittedState, opts)
+	return s.updateMovedTaskCrossStep(ctx, task, oldStepID, targetStep, admittedState, opts)
 }
 
 // updateMovedTaskSameStep handles the no-step-change branch of updateMovedTask
@@ -1339,6 +1329,7 @@ func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task
 func (s *Service) updateMovedTaskCrossStep(
 	ctx context.Context,
 	task *models.Task,
+	oldStepID string,
 	targetStep *wfmodels.WorkflowStep,
 	admittedState *v1.TaskState,
 	opts MoveTaskOptions,
@@ -1353,7 +1344,7 @@ func (s *Service) updateMovedTaskCrossStep(
 	}
 	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
 		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(
-			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID,
+			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID,
 		)
 	}
 	if expectedWorkflowID != "" {
@@ -1368,7 +1359,7 @@ func (s *Service) updateMovedTaskCrossStep(
 	// Keep compatibility with narrow test/dry-run repositories that expose
 	// only the original admission method. Production repositories implement the
 	// atomic variant above, so this fallback is never used for real moves.
-	admitted, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	admitted, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit)
 	if err != nil {
 		return false, err
 	}
@@ -1564,23 +1555,251 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	if err != nil {
 		return nil, err
 	}
-	nextPosition, err := s.tasks.CountTasksByWorkflowStep(ctx, targetStepID)
+	// The server now computes each arriving task's position from the target
+	// step's current max (REQ-TASKS-KANBAN-TASK-REORDERING-001.28), so the
+	// literal passed to MoveTask below is ignored and no longer needs
+	// precomputing. What still matters is dispatch order: MoveTask is called
+	// once per task, sequentially, so the final order is simply the call
+	// order (REQ-TASKS-KANBAN-TASK-REORDERING-001.29) — source step ordinal
+	// ascending, then within one source step that step's admitted band in
+	// step order followed by its queued band in step order.
+	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count target workflow step tasks: %w", err)
+		return nil, err
+	}
+
+	// Hold every step this batch will touch — the target plus each task's
+	// own source step, known now that orderedTasks is resolved — as one
+	// ascending-ordered lock set across the whole dispatch loop below, not
+	// just within each individual MoveTask call's own transaction. A
+	// per-call-only lock leaves a window between two of this batch's own
+	// calls where an unrelated arrival (another create, move, WIP promotion,
+	// or automatic transition) into targetStepID can land in the middle of
+	// the batch's sequence, breaking the batch-scoped consecutiveness
+	// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 requires. Locking only the
+	// target here and letting each per-task MoveTask acquire its own source
+	// step deadlocks against an ordinary single move running the opposite
+	// direction between the same two steps.
+	lockedCtx, lockedTasks, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
+	if err != nil {
+		return nil, err
+	}
+	ctx = lockedCtx
+	defer unlock()
+	// The lock acquisition above may have re-read a task's step after a
+	// concurrent drift, so re-derive dispatch order from that corrected
+	// membership rather than the pre-lock orderedTasks — otherwise a task
+	// whose stale record still shows it at targetStepID is silently skipped
+	// below even though it has since left, and any task whose real source
+	// step changed keeps the wrong REQ-TASKS-KANBAN-TASK-REORDERING-001.29
+	// submission position.
+	orderedTasks, err = s.orderTasksForBulkMove(ctx, lockedTasks)
+	if err != nil {
+		return nil, err
+	}
+	if s.bulkMoveAfterLockForTest != nil {
+		s.bulkMoveAfterLockForTest()
 	}
 
 	movedCount := 0
-	for _, task := range tasks {
+	for _, task := range orderedTasks {
 		if task.WorkflowID == targetWorkflowID && task.WorkflowStepID == targetStepID {
 			continue
 		}
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, nextPosition+movedCount); err != nil {
+		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
 		}
 		movedCount++
+		if s.bulkMoveAfterTaskForTest != nil {
+			s.bulkMoveAfterTaskForTest()
+		}
 	}
 
 	return &BulkMoveTasksResult{MovedCount: movedCount}, nil
+}
+
+// stepArrivalBatchLocker is the narrow capability BulkMoveSelectedTasks and
+// BulkMoveTasks need from the task repository to hold a batch's whole step
+// set — target plus every distinct source step — locked across their
+// sequential dispatch loop, following the same runtime-asserted
+// narrow-interface pattern as reorderRepository.
+type stepArrivalBatchLocker interface {
+	LockStepArrivalsForBatch(ctx context.Context, stepIDs ...string) (context.Context, func())
+}
+
+// bulkMoveLockStepIDs returns the target step plus every distinct source
+// step among tasks, for a stepArrivalBatchLocker call. Duplicates and the
+// empty string are harmless: withStepArrivalLocks dedupes and sorts before
+// acquiring.
+func bulkMoveLockStepIDs(tasks []*models.Task, targetStepID string) []string {
+	ids := make([]string, 0, len(tasks)+1)
+	ids = append(ids, targetStepID)
+	for _, task := range tasks {
+		ids = append(ids, task.WorkflowStepID)
+	}
+	return ids
+}
+
+// bulkMoveLockRetryLimit bounds acquireBulkMoveStepLocks' re-read/retry loop.
+// A source step can only drift a bounded number of times before some other
+// caller's own work stalls behind this batch's locks, so a low limit is
+// sufficient to converge on the real, uncontended case while still failing
+// loudly instead of spinning forever if something is pathologically racing
+// this batch on every attempt.
+const bulkMoveLockRetryLimit = 8
+
+// acquireBulkMoveStepLocks locks every step BulkMoveSelectedTasks/
+// BulkMoveTasks will touch — the target step plus each task's current
+// source step — using bulkMoveLockStepIDs' set for a stepArrivalBatchLocker.
+//
+// tasks is read once, before any lock is held, to compute that initial
+// step set. A source step named by that pre-lock read can still change
+// between the read and lock acquisition (another mover wins the race),
+// which would leave this batch holding a stale source step's lock while a
+// concurrent move on the true current source step tries to lock the target
+// step this batch already holds — the AB-BA deadlock this exists to avoid.
+// So once the lock is held, tasks are re-read by ID under it; if any
+// task's step moved, the stale lock set is released and a fresh set is
+// acquired for the corrected steps, repeating until the read matches the
+// locked set or bulkMoveLockRetryLimit is exhausted.
+//
+// The returned task slice is the membership the lock was finally acquired
+// against, not the pre-lock tasks argument. Callers must dispatch and derive
+// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order from this
+// returned slice, never from their own pre-lock read: a task that drifted
+// out of the target step during acquisition is only reflected here, and a
+// caller still using its pre-lock copy would treat that task as if it had
+// never left.
+func (s *Service) acquireBulkMoveStepLocks(
+	ctx context.Context, tasks []*models.Task, targetStepID string,
+) (context.Context, []*models.Task, func(), error) {
+	locker, ok := s.tasks.(stepArrivalBatchLocker)
+	if !ok {
+		return ctx, tasks, func() {}, nil
+	}
+	if s.bulkMoveBeforeLockForTest != nil {
+		s.bulkMoveBeforeLockForTest()
+	}
+	taskIDs := make([]string, len(tasks))
+	for i, task := range tasks {
+		taskIDs[i] = task.ID
+	}
+	current := tasks
+	for attempt := 0; attempt < bulkMoveLockRetryLimit; attempt++ {
+		lockedCtx, unlock := locker.LockStepArrivalsForBatch(ctx, bulkMoveLockStepIDs(current, targetStepID)...)
+		fresh, err := s.tasks.GetTasksByIDs(lockedCtx, taskIDs)
+		if err != nil {
+			unlock()
+			return ctx, nil, func() {}, fmt.Errorf("failed to verify bulk move lock set: %w", err)
+		}
+		if bulkMoveTaskStepsMatch(current, fresh) {
+			return lockedCtx, fresh, unlock, nil
+		}
+		unlock()
+		current = fresh
+	}
+	return ctx, nil, func() {}, fmt.Errorf("bulk move step lock set did not stabilize after %d attempts", bulkMoveLockRetryLimit)
+}
+
+// bulkMoveTaskStepsMatch reports whether a and b agree on every task's
+// current WorkflowStepID, keyed by task ID rather than slice position since
+// GetTasksByIDs does not guarantee the requested order.
+func bulkMoveTaskStepsMatch(a, b []*models.Task) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	stepByID := make(map[string]string, len(a))
+	for _, task := range a {
+		stepByID[task.ID] = task.WorkflowStepID
+	}
+	for _, task := range b {
+		if stepByID[task.ID] != task.WorkflowStepID {
+			return false
+		}
+	}
+	return true
+}
+
+// orderTasksForBulkMove re-derives the
+// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order from each task's
+// current source step, rather than trusting the caller-supplied list order:
+// source step ordinal ascending, ties on source step id ascending
+// (a selection can span workflows, so two source steps can share an
+// ordinal), then within one source step that step's admitted band in step
+// order followed by its queued band in step order.
+func (s *Service) orderTasksForBulkMove(ctx context.Context, tasks []*models.Task) ([]*models.Task, error) {
+	stepOrdinals := make(map[string]int, len(tasks))
+	if s.workflowStepGetter == nil {
+		// No ordinal source: fall back to submission order rather than
+		// aborting the batch — every task groups under its own step with an
+		// equal (zero) ordinal, so bulkMoveSubmissionOrder's per-step
+		// StepOrderLess sort still applies within each source step.
+		return bulkMoveSubmissionOrder(tasks, stepOrdinals), nil
+	}
+	for _, task := range tasks {
+		if _, ok := stepOrdinals[task.WorkflowStepID]; ok {
+			continue
+		}
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if err != nil {
+			// An empty or dangling source step (e.g. deleted concurrently)
+			// must not abort every other task's move: order it last rather
+			// than failing the whole batch.
+			stepOrdinals[task.WorkflowStepID] = math.MaxInt32
+			continue
+		}
+		stepOrdinals[task.WorkflowStepID] = step.Position
+	}
+	return bulkMoveSubmissionOrder(tasks, stepOrdinals), nil
+}
+
+func bulkMoveSubmissionOrder(tasks []*models.Task, stepOrdinals map[string]int) []*models.Task {
+	type sourceGroup struct {
+		stepID  string
+		ordinal int
+		tasks   []*models.Task
+	}
+	groupsByStep := make(map[string]*sourceGroup, len(tasks))
+	var groups []*sourceGroup
+	for _, task := range tasks {
+		group, ok := groupsByStep[task.WorkflowStepID]
+		if !ok {
+			group = &sourceGroup{stepID: task.WorkflowStepID, ordinal: stepOrdinals[task.WorkflowStepID]}
+			groupsByStep[task.WorkflowStepID] = group
+			groups = append(groups, group)
+		}
+		group.tasks = append(group.tasks, task)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].ordinal != groups[j].ordinal {
+			return groups[i].ordinal < groups[j].ordinal
+		}
+		return groups[i].stepID < groups[j].stepID
+	})
+
+	ordered := make([]*models.Task, 0, len(tasks))
+	for _, group := range groups {
+		admitted, queued := bulkMoveBandSplit(group.tasks, group.stepID)
+		sort.SliceStable(admitted, func(i, j int) bool { return models.StepOrderLess(admitted[i], admitted[j]) })
+		sort.SliceStable(queued, func(i, j int) bool { return models.StepOrderLess(queued[i], queued[j]) })
+		ordered = append(ordered, admitted...)
+		ordered = append(ordered, queued...)
+	}
+	return ordered
+}
+
+// bulkMoveBandSplit mirrors the reorder repository's band partition
+// (Terminology: the queued band is !wip_admitted && queued_for_step_id ==
+// stepID; everything else in the step is the admitted band).
+func bulkMoveBandSplit(tasks []*models.Task, stepID string) (admitted, queued []*models.Task) {
+	for _, task := range tasks {
+		if !task.WIPAdmitted && task.QueuedForStepID == stepID {
+			queued = append(queued, task)
+		} else {
+			admitted = append(admitted, task)
+		}
+	}
+	return admitted, queued
 }
 
 func uniqueTaskIDs(taskIDs []string) []string {
@@ -1639,9 +1858,43 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	if len(tasks) == 0 {
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
-	for i, task := range tasks {
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, i); err != nil {
+
+	// Re-derive the REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order
+	// from each task's source step, the same as BulkMoveSelectedTasks: the
+	// server now computes each arriving task's position from the target
+	// step's current max, so dispatch order alone decides the final order.
+	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
+	if err != nil {
+		return nil, err
+	}
+
+	// Hold every step this batch will touch, for the same reason and in the
+	// same ascending-ordered way as BulkMoveSelectedTasks — see its lock
+	// call for the deadlock this avoids.
+	lockedCtx, lockedTasks, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
+	if err != nil {
+		return nil, err
+	}
+	ctx = lockedCtx
+	defer unlock()
+	// See BulkMoveSelectedTasks's identical re-derivation: the lock
+	// acquisition above may have corrected a task's step after a concurrent
+	// drift, so dispatch order must be re-derived from that membership
+	// rather than the pre-lock orderedTasks.
+	orderedTasks, err = s.orderTasksForBulkMove(ctx, lockedTasks)
+	if err != nil {
+		return nil, err
+	}
+	if s.bulkMoveAfterLockForTest != nil {
+		s.bulkMoveAfterLockForTest()
+	}
+
+	for _, task := range orderedTasks {
+		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
+		}
+		if s.bulkMoveAfterTaskForTest != nil {
+			s.bulkMoveAfterTaskForTest()
 		}
 	}
 

@@ -92,6 +92,67 @@ func TestStepAgentProfileID_CreateAndGet(t *testing.T) {
 	}
 }
 
+// TestGetStepAndListStepsByWorkflow_IncludeOrderRevision covers the
+// Build-phase fix for missing order_revision on HTTP hydration: GetStep and
+// ListStepsByWorkflow must surface the step's current order_revision so the
+// frontend can seed its last-known revision before accepting a
+// task.reordered WS event. The reorder endpoint bumps order_revision from
+// the task repository package (a different package, same table), so this
+// test simulates that bump directly against the column rather than
+// depending on that package.
+func TestGetStepAndListStepsByWorkflow_IncludeOrderRevision(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	step := &models.WorkflowStep{
+		WorkflowID: "wf-test",
+		Name:       "Test Step",
+		Position:   0,
+		Color:      "#000000",
+	}
+	if err := repo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("failed to create step: %v", err)
+	}
+
+	fresh, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("GetStep: %v", err)
+	}
+	if fresh.OrderRevision != 0 {
+		t.Fatalf("OrderRevision = %d, want 0 for a freshly created step", fresh.OrderRevision)
+	}
+
+	if _, err := repo.db.Exec(`UPDATE workflow_steps SET order_revision = 3 WHERE id = ?`, step.ID); err != nil {
+		t.Fatalf("bump order_revision: %v", err)
+	}
+
+	bumped, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("GetStep after bump: %v", err)
+	}
+	if bumped.OrderRevision != 3 {
+		t.Fatalf("OrderRevision = %d, want 3", bumped.OrderRevision)
+	}
+
+	// "wf-test" also carries the default-template steps seedDefaultWorkflowSteps
+	// creates for any workflow with none, so find this test's step by ID
+	// rather than assuming it is the only row.
+	listed, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	var found *models.WorkflowStep
+	for _, s := range listed {
+		if s.ID == step.ID {
+			found = s
+			break
+		}
+	}
+	if found == nil || found.OrderRevision != 3 {
+		t.Fatalf("ListStepsByWorkflow step %s = %+v, want OrderRevision 3", step.ID, found)
+	}
+}
+
 func TestDeleteStep_ClearsQueuedTaskDestinationAndDeferredLaunch(t *testing.T) {
 	repo, db := setupTestRepoWithDB(t)
 	ctx := context.Background()

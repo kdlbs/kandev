@@ -4,8 +4,9 @@ import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task, type KanbanPresentation } from "../kanban-card";
-import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { compareStepOrder } from "@/lib/kanban/task-order";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
+import type { KeyboardReorderDraft } from "./virtualized-column-task-list";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
@@ -30,6 +31,9 @@ type SwipeableColumnsProps = {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  activeTaskId?: string | null;
+  keyboardDraft?: KeyboardReorderDraft | null;
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
 };
 
 /** Two-way sync between Embla's carousel position and the external activeIndex. */
@@ -89,6 +93,9 @@ export function SwipeableColumns({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
+  keyboardDraft,
+  onCardKeyDown,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -108,7 +115,7 @@ export function SwipeableColumns({
       return tasks
         .filter((task) => task.workflowStepId === stepId)
         .map((task) => (task.position == null ? { ...task, position: 0 } : task))
-        .sort(compareTasksByCreatedDesc);
+        .sort(compareStepOrder);
     },
     [tasks],
   );
@@ -142,6 +149,9 @@ export function SwipeableColumns({
               onSelectRange={onSelectRange}
               isMultiSelectMode={isMultiSelectMode}
               externalLinkAvailability={externalLinkAvailability}
+              activeTaskId={activeTaskId}
+              keyboardDraft={keyboardDraft}
+              onCardKeyDown={onCardKeyDown}
               hideHeader
             />
           </div>

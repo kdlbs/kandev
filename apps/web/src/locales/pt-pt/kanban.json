@@ -76,6 +76,7 @@
   "queuedCount_other": "{{count}} em fila",
   "queuedForStep": "Em fila para {{step}}",
   "queuedSection": "Em fila",
+  "reorderPositionAnnouncement": "{{title}}, posição {{position}} de {{total}}",
   "repository": "Repositório",
   "searchPlaceholder": "Pesquisar...",
   "searchSection": "Pesquisar",

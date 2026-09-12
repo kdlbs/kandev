@@ -565,6 +565,28 @@ func TestHTTPGetWorkflowSnapshotReturnsWorkflowStepsAndTasks(t *testing.T) {
 	require.Empty(t, snapshot.Tasks)
 }
 
+// TestHTTPGetWorkflowSnapshotIncludesStepOrderRevision covers the Build-phase
+// fix for missing order_revision on HTTP hydration: the frontend seeds
+// kanbanMulti.orderRevisionByStepId from this endpoint's response before
+// accepting any task.reordered WS event, so a step's current revision must
+// round-trip through the snapshot response.
+func TestHTTPGetWorkflowSnapshotIncludesStepOrderRevision(t *testing.T) {
+	repo := workflowFixture()
+	steps := &stubStepLister{steps: []*workflowmodels.WorkflowStep{
+		{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", OrderRevision: 5},
+	}}
+	h := newWorkflowHandlers(t, repo, steps)
+	c, rec := newWorkflowRequest(t, http.MethodGet, "/api/v1/workflows/wf-1/snapshot", "")
+	c.Params = gin.Params{{Key: "id", Value: "wf-1"}}
+
+	h.httpGetWorkflowSnapshot(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	snapshot := decodeWorkflowSnapshot(t, rec.Body.Bytes())
+	require.Len(t, snapshot.Steps, 1)
+	require.Equal(t, int64(5), snapshot.Steps[0].OrderRevision)
+}
+
 func TestHTTPGetWorkflowSnapshotReturnsNotFoundForUnknownWorkflow(t *testing.T) {
 	repo := workflowFixture()
 	h := newWorkflowHandlers(t, repo, &stubStepLister{})

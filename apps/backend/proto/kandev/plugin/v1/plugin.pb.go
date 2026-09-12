@@ -6762,8 +6762,11 @@ func (x *UpdateTaskResponse) GetTask() *Task {
 
 // MoveTask transitions a task to a workflow step. workflow_id is optional:
 // omitted inherits the task's current workflow, present-empty is rejected.
-// position is not optional: an omitted position and a position of zero are
-// the same request, both placing the task at the top of the target step.
+// position stays on the wire for compatibility but is ignored: the server
+// computes an arriving task's position from the target step's current
+// highest position, so it always sorts last there rather than displacing
+// work a user has already ordered. Naming the task's current step is not an
+// arrival and leaves its existing position untouched.
 type MoveTaskRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	TaskId         string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`

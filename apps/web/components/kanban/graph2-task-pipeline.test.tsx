@@ -95,6 +95,9 @@ function renderPipelineWithWorkflowSnapshot(
             },
           },
           isLoading: false,
+          orderRevisionByStepId: {},
+          pendingReorderBandKeys: {},
+          withheldReorderByBandKey: {},
         },
       }}
     >
@@ -155,6 +158,49 @@ describe("Graph2TaskPipeline — no resolvable current step (AC-UI-PIPELINE-ROW-
     renderPipeline(makeTask(""), []);
     expect(screen.queryByTestId("graph2-step-node-unassigned")).toBeNull();
     expect(screen.queryByTestId("graph2-connector")).toBeNull();
+  });
+});
+
+describe("Graph2TaskPipeline — no reorder surface (AC.38)", () => {
+  it("ignores the AC.12 keyboard-reorder commands: a row lays out one task, so none apply", () => {
+    const onMoveTask = vi.fn();
+    renderPipeline(makeTask("step-2"), STEPS, { onMoveTask });
+
+    const card = screen.getByTestId("pipeline-task-task-1");
+    fireEvent.keyDown(card, { key: " " });
+    fireEvent.keyDown(card, { key: "ArrowDown" });
+    fireEvent.keyDown(card, { key: "ArrowUp" });
+    fireEvent.keyDown(card, { key: "Enter" });
+    fireEvent.keyDown(card, { key: "Escape" });
+
+    expect(onMoveTask).not.toHaveBeenCalled();
+    // AC.12 requires an assistive-technology announcement on pickup/move; its
+    // absence here confirms no reorder gesture was recognized.
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("Graph2TaskPipeline — actions cluster stays reachable off-screen (defect 2)", () => {
+  it("keeps the actions menu trigger outside the horizontally-scrollable step run region", () => {
+    renderPipeline(makeTask("step-2"), STEPS);
+
+    const region = screen.getByTestId("pipeline-row-overflow-region");
+    const trigger = screen.getByTestId("pipeline-row-menu-trigger-task-1");
+    expect(region.contains(trigger)).toBe(false);
+  });
+
+  it("does not render the actions menu trigger in multi-select mode", () => {
+    renderPipeline(makeTask("step-2"), STEPS, { isMultiSelectMode: true });
+
+    expect(screen.queryByTestId("pipeline-row-menu-trigger-task-1")).toBeNull();
+  });
+
+  it("keeps the action trigger touch-sized on coarse pointers", () => {
+    renderPipeline(makeTask("step-2"), STEPS);
+
+    const trigger = screen.getByTestId("pipeline-row-menu-trigger-task-1");
+    expect(trigger.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(trigger.className).toContain("[@media(pointer:coarse)]:w-11");
   });
 });
 

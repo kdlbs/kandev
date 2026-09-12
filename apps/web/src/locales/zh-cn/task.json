@@ -1822,6 +1822,8 @@
   "taskMoveErrorDifferentWorkspace": "任务和目标工作流必须使用同一工作区。",
   "taskMoveErrorWorkflowStep": "目标步骤不属于目标工作流。",
   "taskMoveErrorWipLimit": "目标工作流步骤已达到 WIP 限制。",
+  "failedToReorderTasks": "重新排序任务失败",
+  "taskReorderErrorGeneric": "无法保存新顺序,请重试。",
   "movedTasksStepDescription_one": "任务现已位于所选步骤中。",
   "movedTasksStepDescription_other": "任务现已位于所选步骤中。",
   "movedTasksToStep_one": "已将任务移动到步骤",

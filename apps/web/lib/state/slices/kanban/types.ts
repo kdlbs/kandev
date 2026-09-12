@@ -1,5 +1,7 @@
 import type {
   ForegroundActivity,
+  ReorderBand,
+  ReorderedTaskPosition,
   TaskPendingAction,
   TaskOrigin,
   TaskPriority,
@@ -61,6 +63,15 @@ export type KanbanState = {
      * decisions). Backend never branches on this field.
      */
     stage_type?: "work" | "review" | "approval" | "custom";
+    /**
+     * Last order-revision this step's task order was written at
+     * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37), as of when this step
+     * record was fetched. Seeded into `kanbanMulti.orderRevisionByStepId` on
+     * hydration so a `task.reordered` WS event received right after page
+     * load is compared against the hydrated value instead of the "no
+     * revision recorded yet" fallback.
+     */
+    order_revision?: number;
   }>;
   tasks: Array<{
     id: string;
@@ -189,6 +200,33 @@ export type WorkflowSnapshotData = {
 export type KanbanMultiState = {
   snapshots: Record<string, WorkflowSnapshotData>;
   isLoading: boolean;
+  /**
+   * Last-applied `order_revision` per workflow step
+   * (REQ-TASKS-KANBAN-TASK-REORDERING-001.16/.19/.25/.27). An unsolicited
+   * `task.reordered` WS event only applies when its revision is strictly
+   * greater than this; a response to the board's own reorder request applies
+   * unconditionally and then advances it.
+   */
+  orderRevisionByStepId: Record<string, number>;
+  /**
+   * Bands with a reorder request currently in flight, keyed
+   * `${stepId}:${band}` (REQ-TASKS-KANBAN-TASK-REORDERING-001.27). While a
+   * band's key is present, the board suspends further reorder input on that
+   * band and holds its optimistic order rather than applying an incoming
+   * published order to it.
+   */
+  pendingReorderBandKeys: Record<string, true>;
+  /**
+   * The most recent published order withheld from a band because it arrived
+   * while that band's own reorder request was in flight, keyed
+   * `${stepId}:${band}`. Reconciled against the request's own resolution by
+   * revision (the higher of the two wins, the response breaking a tie) when
+   * that request settles, then cleared either way.
+   */
+  withheldReorderByBandKey: Record<
+    string,
+    { revision: number; tasks: ReorderedTaskPosition[] } | undefined
+  >;
 };
 
 export type SidebarArchivedTasksState = {
@@ -283,6 +321,13 @@ export type KanbanSliceActions = {
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
+  setStepOrderRevision: (stepId: string, revision: number) => void;
+  setBandReorderPending: (stepId: string, band: ReorderBand, pending: boolean) => void;
+  setWithheldReorder: (
+    stepId: string,
+    band: ReorderBand,
+    payload: { revision: number; tasks: ReorderedTaskPosition[] } | null,
+  ) => void;
   setSidebarArchivedTasks: (
     workspaceId: string,
     tasks: KanbanState["tasks"],

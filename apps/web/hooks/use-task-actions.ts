@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 type MovePayload = {
   workflow_id: string;
   workflow_step_id: string;
-  position: number;
+  position?: number;
   entry_options?: WorkflowMoveEntryOptions;
 };
 

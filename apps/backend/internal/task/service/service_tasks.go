@@ -2005,9 +2005,15 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
 		})
 	}
-	if err := s.tasks.UpdateTask(updateCtx, task); err != nil {
-		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
-		return nil, err
+	var updateErr error
+	if req.Position != nil {
+		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
+	} else {
+		updateErr = s.tasks.UpdateTask(updateCtx, task)
+	}
+	if updateErr != nil {
+		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
+		return nil, updateErr
 	}
 	// UpdateTask may have applied a conditional title/metadata patch because
 	// this snapshot was stale. Publish and return the row that actually won so

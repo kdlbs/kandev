@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -309,18 +310,11 @@ func TestWorkflowStore_ApplyTransitionPullsNextFeederTaskOnVacate(t *testing.T) 
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step-limited")
-	if err := repo.CreateTask(ctx, &models.Task{
-		ID:             "task-low",
-		WorkspaceID:    "ws1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: "step-feeder",
-		Title:          "Low",
-		State:          "TODO",
-		Priority:       "low",
-		Position:       0,
-	}); err != nil {
-		t.Fatalf("CreateTask low: %v", err)
-	}
+	// Creation now assigns each task the next arrival position in its step
+	// regardless of any caller-supplied Position, and step order ranks
+	// position ahead of priority. So the critical task must arrive first to
+	// be the one pulled here; a same-position tiebreak on priority is
+	// covered directly in models.TestStepOrderLess.
 	if err := repo.CreateTask(ctx, &models.Task{
 		ID:             "task-critical",
 		WorkspaceID:    "ws1",
@@ -329,9 +323,19 @@ func TestWorkflowStore_ApplyTransitionPullsNextFeederTaskOnVacate(t *testing.T) 
 		Title:          "Critical",
 		State:          "TODO",
 		Priority:       "critical",
-		Position:       0,
 	}); err != nil {
 		t.Fatalf("CreateTask critical: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-low",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step-feeder",
+		Title:          "Low",
+		State:          "TODO",
+		Priority:       "low",
+	}); err != nil {
+		t.Fatalf("CreateTask low: %v", err)
 	}
 
 	stepGetter := newMockStepGetter()
@@ -563,4 +567,26 @@ func TestWorkflowStore_OperationIdempotency(t *testing.T) {
 			t.Error("expected empty operation ID to never be stored")
 		}
 	})
+}
+
+// TestQueuedTaskBeforeAlignsQueuedAtWithCreatedAtFallback covers
+// AC-TASKS-KANBAN-TASK-REORDERING-001.36: this comparator is byte-identical
+// to service_workflow.go's queuedTaskBefore and must apply the same
+// COALESCE(queued_at, created_at) fallback rather than skipping the key
+// whenever either side's queued_at is nil.
+func TestQueuedTaskBeforeAlignsQueuedAtWithCreatedAtFallback(t *testing.T) {
+	earlier := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	later := earlier.Add(time.Hour)
+
+	left := &models.Task{ID: "a", Position: 1, Priority: "medium", QueuedAt: nil, CreatedAt: earlier}
+	right := &models.Task{ID: "b", Position: 1, Priority: "medium", QueuedAt: &earlier, CreatedAt: later}
+	if !queuedTaskBefore(left, right) {
+		t.Fatalf("queuedTaskBefore(nil queued_at falling back to earlier created_at) = false, want true")
+	}
+
+	leftLate := &models.Task{ID: "a", Position: 1, Priority: "medium", QueuedAt: &later, CreatedAt: earlier}
+	rightNil := &models.Task{ID: "b", Position: 1, Priority: "medium", QueuedAt: nil, CreatedAt: earlier}
+	if queuedTaskBefore(leftLate, rightNil) {
+		t.Fatalf("queuedTaskBefore(later effective queued_at) = true, want false")
+	}
 }

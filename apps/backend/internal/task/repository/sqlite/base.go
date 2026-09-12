@@ -26,6 +26,14 @@ type Repository struct {
 	queuePurgePrepare       func(context.Context, string)
 	queuePurgeNotify        func(context.Context, string)
 	queueSessionPurgeNotify func(context.Context, string, string)
+	// stepArrivalLocks holds one *sync.Mutex per workflow step, serializing
+	// this process's own arrival-position writes (assignArrivalPosition)
+	// against each other for the same step. lockWorkflowStepForWrite alone
+	// only serializes within a single transaction; a caller assigning
+	// positions to several tasks across several sequential transactions (a
+	// bulk move) needs this held across the whole sequence — see
+	// LockStepArrivalsForBatch.
+	stepArrivalLocks sync.Map
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
@@ -93,6 +101,38 @@ type Repository struct {
 	// than only the injected failpoint errors). Nil in production and in
 	// every test but the one that sets it.
 	usageEventPreRollupHook func()
+	// reorderPreWriteHook is a test-only synchronization seam, called (if
+	// set) inside ReorderStepTasks after stepID's current membership has
+	// been read and resolved against the caller's ordered id list, but
+	// before the renumbering write loop begins. Like usageEventPreRollupHook
+	// above, it does not alter control flow; it exists so a Postgres test
+	// can pause a real production reorder transaction at this exact
+	// boundary - after it has locked stepID and observed a task's
+	// still-current membership, but before it writes - to construct a real
+	// interleaving against a concurrent writer that changes that task's step
+	// membership in between. Nil in production and in every test but the
+	// one that sets it.
+	reorderPreWriteHook func()
+	// taskStepLockBeforeAcquireHook is a test-only synchronization seam,
+	// called (if set) inside lockTaskStepForWrite's retry loop after it has
+	// read a task's candidate step but before it locks that step - the exact
+	// gap a concurrent move of the same task can land in. It exists so a
+	// Postgres test can pause there and commit a real concurrent move,
+	// proving the confirm-and-retry loop settles on the task's post-move
+	// step rather than the stale one it read. Nil in production and in
+	// every test but the one that sets it.
+	taskStepLockBeforeAcquireHook func(candidateStepID string)
+	// taskRowReconfirmHook is a test-only synchronization seam, called (if
+	// set) inside lockTaskRowIfStepless right before it re-locks a task's
+	// own row to confirm the task still has no step - the exact gap a
+	// concurrent reattachment of that task can land in, between
+	// lockTaskStepForWrite releasing a stale step's lock (or finding none on
+	// its first read) and re-verifying there is truly nothing left to
+	// protect. It exists so a Postgres test can pause there and commit a
+	// real concurrent reattachment, proving the retry locks the task's new
+	// step instead of returning as if there were none. Nil in production
+	// and in every test but the one that sets it.
+	taskRowReconfirmHook func()
 	// stepEntryDispatcher fires a step's session-independent on_enter
 	// sequence after a registered step-transition writer commits. Nil-safe
 	// (see dispatchStepEntry in step_entry_dispatch.go): unset in every

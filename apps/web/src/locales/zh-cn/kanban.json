@@ -76,6 +76,7 @@
   "queuedCount_other": "{{count}} 个排队任务",
   "queuedForStep": "已排队等待 {{step}}",
   "queuedSection": "排队中",
+  "reorderPositionAnnouncement": "{{title}},第 {{position}} 位,共 {{total}} 位",
   "repository": "仓库",
   "searchPlaceholder": "搜索…",
   "searchSection": "搜索",

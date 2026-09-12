@@ -11,7 +11,10 @@ import type { Repository } from "@/lib/types/http";
 import { countAdmittedTasks, formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
 import { partitionWipTasks } from "@/lib/kanban/wip-queue";
 import { useTranslation } from "react-i18next";
-import { VirtualizedColumnTaskList } from "./kanban/virtualized-column-task-list";
+import {
+  VirtualizedColumnTaskList,
+  type KeyboardReorderDraft,
+} from "./kanban/virtualized-column-task-list";
 
 export interface WorkflowStep {
   id: string;
@@ -46,6 +49,11 @@ interface KanbanColumnProps {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  /** The task currently being dragged anywhere on the board, if any (AC.7's insertion indicator). */
+  activeTaskId?: string | null;
+  /** The card currently picked up via the keyboard, if any (AC.12). */
+  keyboardDraft?: KeyboardReorderDraft | null;
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
 }
 
 function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
@@ -109,7 +117,8 @@ function columnCallbacksEqual(previous: KanbanColumnProps, next: KanbanColumnPro
     previous.onArchiveTask === next.onArchiveTask &&
     previous.onMoveTask === next.onMoveTask &&
     previous.onToggleSelect === next.onToggleSelect &&
-    previous.onSelectRange === next.onSelectRange
+    previous.onSelectRange === next.onSelectRange &&
+    previous.onCardKeyDown === next.onCardKeyDown
   );
 }
 
@@ -132,7 +141,12 @@ function kanbanColumnPropsEqual(previous: KanbanColumnProps, next: KanbanColumnP
     taskItemsEqual(previous.tasks, next.tasks) &&
     columnCallbacksEqual(previous, next) &&
     columnDisplayPropsEqual(previous, next) &&
-    externalLinkAvailabilityEqual(previous.externalLinkAvailability, next.externalLinkAvailability)
+    externalLinkAvailabilityEqual(
+      previous.externalLinkAvailability,
+      next.externalLinkAvailability,
+    ) &&
+    previous.activeTaskId === next.activeTaskId &&
+    previous.keyboardDraft === next.keyboardDraft
   );
 }
 
@@ -156,6 +170,9 @@ export const KanbanColumn = memo(function KanbanColumn({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
+  keyboardDraft,
+  onCardKeyDown,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: step.id,
@@ -201,6 +218,9 @@ export const KanbanColumn = memo(function KanbanColumn({
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}
         selectedIds={selectedIds}
+        activeTaskId={activeTaskId}
+        keyboardDraft={keyboardDraft}
+        onCardKeyDown={onCardKeyDown}
         onPreviewTask={onPreviewTask}
         onOpenTask={onOpenTask}
         onEditTask={onEditTask}

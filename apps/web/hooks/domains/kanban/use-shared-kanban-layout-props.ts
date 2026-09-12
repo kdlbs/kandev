@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { KanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
+import type { KeyboardReorderDraft } from "@/components/kanban/virtualized-column-task-list";
 
 export type SharedKanbanLayoutProps = {
   steps: WorkflowStep[];
@@ -23,6 +24,9 @@ export type SharedKanbanLayoutProps = {
   externalLinkAvailability: KanbanExternalLinkAvailability;
   temporaryStepIds: Set<string>;
   isDragging: boolean;
+  activeTaskId: string | null;
+  keyboardDraft: KeyboardReorderDraft | null;
+  onCardKeyDown: (event: React.KeyboardEvent, task: Task) => void;
 };
 
 type SharedLayoutDragState = {
@@ -34,7 +38,7 @@ type SharedLayoutDragState = {
 
 type SharedLayoutHookOptions = Omit<
   SharedKanbanLayoutProps,
-  "steps" | "tasks" | "moveTaskToStep" | "temporaryStepIds" | "isDragging"
+  "steps" | "tasks" | "moveTaskToStep" | "temporaryStepIds" | "isDragging" | "activeTaskId"
 > & {
   drag: SharedLayoutDragState;
   displayTasks: Task[];
@@ -65,6 +69,9 @@ export function useSharedKanbanLayoutProps(
       externalLinkAvailability,
       temporaryStepIds: drag.temporaryStepIds,
       isDragging: !!drag.activeTask,
+      activeTaskId: drag.activeTask?.id ?? null,
+      keyboardDraft: options.keyboardDraft,
+      onCardKeyDown: options.onCardKeyDown,
     }),
     [
       drag.renderedSteps,
@@ -86,6 +93,8 @@ export function useSharedKanbanLayoutProps(
       options.onSelectRange,
       options.isMultiSelectMode,
       externalLinkAvailability,
+      options.keyboardDraft,
+      options.onCardKeyDown,
     ],
   );
 }

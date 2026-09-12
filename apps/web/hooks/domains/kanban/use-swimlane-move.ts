@@ -51,7 +51,6 @@ export function useSwimlaneMove(
         await moveTaskById(task.id, {
           workflow_id: workflowId,
           workflow_step_id: targetStepId,
-          position: nextPosition,
         });
         // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
         // via the task.moved event → orchestrator processOnEnter()

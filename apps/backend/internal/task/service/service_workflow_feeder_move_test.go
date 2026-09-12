@@ -209,10 +209,11 @@ func (r *failAfterMoveRefreshTaskRepository) GetTask(ctx context.Context, id str
 func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmission(
 	ctx context.Context,
 	task *models.Task,
+	sourceStepID string,
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, err := r.Repository.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit)
+	admitted, err := r.Repository.UpdateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit)
 	if err == nil {
 		r.failRefresh.Store(true)
 	}
@@ -222,6 +223,7 @@ func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmission
 func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	ctx context.Context,
 	task *models.Task,
+	sourceStepID string,
 	targetStepID string,
 	limit int,
 	admittedState *v1.TaskState,
@@ -229,7 +231,7 @@ func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmission
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, err := r.Repository.UpdateTaskWithWorkflowStepAdmissionAndState(
-		ctx, task, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
 	)
 	if err == nil {
 		r.failRefresh.Store(true)

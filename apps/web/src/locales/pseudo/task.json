@@ -1879,6 +1879,8 @@
   "taskMoveErrorDifferentWorkspace": "Ţĥē ţàśķ àńď ţàŕĝēţ ŵōŕķƒĺōŵ ḿũśţ ũśē ţĥē śàḿē ŵōŕķśƥàćē.",
   "taskMoveErrorWorkflowStep": "Ţĥē ţàŕĝēţ śţēƥ ďōēś ńōţ ƀēĺōńĝ ţō ţĥē ţàŕĝēţ ŵōŕķƒĺōŵ.",
   "taskMoveErrorWipLimit": "Ţĥē ţàŕĝēţ ŵōŕķƒĺōŵ śţēƥ ĩś àţ ĩţś ŴĨƤ ĺĩḿĩţ.",
+  "failedToReorderTasks": "Ƒàĩĺēď ţō ŕēōŕďēŕ ţàśķś",
+  "taskReorderErrorGeneric": "Ţĥē ńēŵ ōŕďēŕ ćōũĺď ńōţ ƀē śàvēď. Ţŕŷ àĝàĩń.",
   "movedTasksStepDescription_one": "Ţĥē ţàśķ ĩś ńōŵ ĩń ţĥē śēĺēćţēď śţēƥ.",
   "movedTasksStepDescription_other": "Ţĥē ţàśķś àŕē ńōŵ ĩń ţĥē śēĺēćţēď śţēƥ.",
   "movedTasksToStep_one": "Ḿōvēď ţàśķ ţō śţēƥ",
