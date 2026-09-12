@@ -19,6 +19,14 @@ const (
 	orphanReapSigkill
 )
 
+// orphanReapLastSignalSigtermSent and orphanReapLastSignalSigkillSent record
+// which signal a pending candidate most recently received, for a survivor's
+// "already sent" skip reason.
+const (
+	orphanReapLastSignalSigtermSent = "sigterm already sent"
+	orphanReapLastSignalSigkillSent = "sigkill already sent"
+)
+
 // orphanReapVerifyTimeout bounds the single-process re-verification read.
 // It is deliberately independent of orphanReapSnapshotTimeout: this read
 // sits outside that combined bound.
@@ -140,7 +148,7 @@ func (s *Service) sendOrphanReapSigterms(
 			s.recordOrphanReapSignalError(snapshot, taskID, cand, "sigterm", err)
 			continue
 		}
-		pending = append(pending, orphanReapPendingCandidate{orphanReapCandidate: cand, lastSignal: "sigterm already sent"})
+		pending = append(pending, orphanReapPendingCandidate{orphanReapCandidate: cand, lastSignal: orphanReapLastSignalSigtermSent})
 	}
 	return pending
 }
@@ -182,7 +190,7 @@ func (s *Service) sendOrphanReapSigkills(
 			s.recordOrphanReapSignalError(snapshot, taskID, cand.orphanReapCandidate, "sigkill", err)
 			continue
 		}
-		cand.lastSignal = "sigkill already sent"
+		cand.lastSignal = orphanReapLastSignalSigkillSent
 		killPending = append(killPending, cand)
 	}
 	return killPending
