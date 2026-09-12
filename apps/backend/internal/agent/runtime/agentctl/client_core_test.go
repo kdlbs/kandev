@@ -289,6 +289,27 @@ func TestConfigureAgent_SendsCommandEnvAndApprovalPolicy(t *testing.T) {
 	}
 }
 
+func TestConfigureAgentWithEnvironmentRequestsIndexedReplacement(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{"success":true}`))
+
+	err := newHTTPOnlyClient(srv.URL).ConfigureAgentWithEnvironment(
+		context.Background(), "claude-code acp", nil,
+		map[string]string{"GIT_CONFIG_COUNT": "1"}, "never", "", nil)
+	if err != nil {
+		t.Fatalf("ConfigureAgentWithEnvironment: %v", err)
+	}
+
+	var sent struct {
+		ReplaceEnv bool `json:"replace_env"`
+	}
+	if err := json.Unmarshal(got.Body, &sent); err != nil {
+		t.Fatalf("decode sent body: %v", err)
+	}
+	if !sent.ReplaceEnv {
+		t.Fatal("replace_env = false, want true")
+	}
+}
+
 func TestConfigureAgent_FailureModes(t *testing.T) {
 	tests := []struct {
 		name    string

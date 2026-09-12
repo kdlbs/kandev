@@ -324,6 +324,63 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 	}
 }
 
+func TestCollectAgentEnvHostGHBridge(t *testing.T) {
+	clearParentIndexedGitConfig(t)
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create fake gh directory: %v", err)
+	}
+	const ghScript = `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_0", "union")
+	t.Setenv("GIT_CONFIG_KEY_1", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_1", "/Users/cfl12/.locstat/git/hooks")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GH_TOKEN":            "late-profile-token",
+		"HOME":                filepath.Join(t.TempDir(), "home"),
+		"PATH":                "/usr/bin:/bin",
+		"GIT_CONFIG_COUNT":    "1",
+		"GIT_CONFIG_KEY_0":    "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":  "!'" + ghPath + "' auth git-credential",
+		"GIT_CONFIG_NOSYSTEM": "1",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "3" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 3", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "notes.augment.mergeStrategy" || envSliceValue(env, "GIT_CONFIG_VALUE_0") != "union" {
+		t.Fatalf("inherited Git config entry 0 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_0"))
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "core.hooksPath" || envSliceValue(env, "GIT_CONFIG_VALUE_1") != "/Users/cfl12/.locstat/git/hooks" {
+		t.Fatalf("inherited Git config entry 1 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_1"))
+	}
+
+	command := exec.Command("git", "credential", "fill")
+	command.Env = env
+	command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets\n\n")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git credential fill failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "password=late-profile-token") {
+		t.Fatalf("credential output = %q, want late profile token", output)
+	}
+}
+
 func TestCollectAgentEnvIgnoresParentIndexedGitConfigBeyondCount(t *testing.T) {
 	// Hosts inherit indexed entries from a parent that later lowered
 	// GIT_CONFIG_COUNT. Git ignores the leftovers, so instance creation must

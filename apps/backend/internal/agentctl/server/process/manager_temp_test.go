@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -168,6 +169,169 @@ func TestManager_ProcessEnvironmentMergesIndexedGitConfig(t *testing.T) {
 	}
 	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "core.hooksPath" {
 		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want request entry appended", got)
+	}
+}
+
+func TestManagerConfigureReplacesOwnedHostHelperAndPreservesIndexedEnvironment(t *testing.T) {
+	oldHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/old/gh' auth git-credential \"$@\"; }; f"
+	newHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/new/gh' auth git-credential \"$@\"; }; f"
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			"GIT_CONFIG_COUNT=3",
+			"GIT_CONFIG_KEY_0=notes.augment.mergeStrategy",
+			"GIT_CONFIG_VALUE_0=union",
+			"GIT_CONFIG_KEY_1=core.hooksPath",
+			"GIT_CONFIG_VALUE_1=/user/hooks",
+			"GIT_CONFIG_KEY_2=credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_2=" + oldHelper,
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	configure := func(env map[string]string) {
+		t.Helper()
+		if err := mgr.Configure("echo", nil, false, env, "", "", nil, false); err != nil {
+			t.Fatalf("Configure() error = %v", err)
+		}
+	}
+	configure(map[string]string{
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": newHelper,
+	})
+
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["GIT_CONFIG_COUNT"] != "3" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" ||
+		env["GIT_CONFIG_KEY_2"] != "credential.https://github.com.helper" || env["GIT_CONFIG_VALUE_2"] != newHelper {
+		t.Fatalf("configured environment = %#v, want inherited entries plus replacement helper", env)
+	}
+	if trackerEnv := environmentMap(mgr.GetWorkspaceTracker().gitCommand(context.Background(), false, "status").Env); trackerEnv["GIT_CONFIG_VALUE_2"] != newHelper {
+		t.Fatalf("tracker helper = %q, want replacement helper", trackerEnv["GIT_CONFIG_VALUE_2"])
+	}
+
+	configure(nil)
+	env = environmentMap(mgr.cfg.AgentEnv)
+	if env["GIT_CONFIG_COUNT"] != "2" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" {
+		t.Fatalf("reconfigured environment = %#v, want inherited entries without generated helper", env)
+	}
+	if _, present := env["GIT_CONFIG_VALUE_2"]; present {
+		t.Fatalf("stale generated helper remained after reconfiguration: %#v", env)
+	}
+}
+
+func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.T) {
+	oldHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/old/gh' auth git-credential \"$@\"; }; f"
+	newHelper := "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/new/gh' auth git-credential \"$@\"; }; f"
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			"GIT_CONFIG_COUNT=3",
+			"GIT_CONFIG_KEY_0=notes.augment.mergeStrategy",
+			"GIT_CONFIG_VALUE_0=union",
+			"GIT_CONFIG_KEY_1=core.hooksPath",
+			"GIT_CONFIG_VALUE_1=/user/hooks",
+			"GIT_CONFIG_KEY_2=credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_2=" + oldHelper,
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	complete := map[string]string{
+		"GIT_CONFIG_COUNT":   "3",
+		"GIT_CONFIG_KEY_0":   "notes.augment.mergeStrategy",
+		"GIT_CONFIG_VALUE_0": "union",
+		"GIT_CONFIG_KEY_1":   "core.hooksPath",
+		"GIT_CONFIG_VALUE_1": "/user/hooks",
+		"GIT_CONFIG_KEY_2":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2": newHelper,
+	}
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, complete, "", "", nil, false); err != nil {
+		t.Fatalf("ConfigureWithEnvironment() error = %v", err)
+	}
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["GIT_CONFIG_COUNT"] != "3" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" ||
+		env["GIT_CONFIG_KEY_2"] != "credential.https://github.com.helper" || env["GIT_CONFIG_VALUE_2"] != newHelper {
+		t.Fatalf("complete configured environment = %#v, want one complete replacement block", env)
+	}
+
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, nil, "", "", nil, false); err != nil {
+		t.Fatalf("ConfigureWithEnvironment() removal error = %v", err)
+	}
+	env = environmentMap(mgr.cfg.AgentEnv)
+	if len(env["GIT_CONFIG_COUNT"]) != 0 {
+		t.Fatalf("removed configured environment = %#v, want complete indexed block removed", env)
+	}
+	for key := range env {
+		if strings.HasPrefix(key, "GIT_CONFIG_KEY_") || strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+			t.Fatalf("indexed entry remained after complete removal: %#v", env)
+		}
+	}
+}
+
+func TestManagerConfigureLeavesConfigurationUnchangedWhenEnvironmentIsInvalid(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:        t.TempDir(),
+		AgentCommand:   "old-command",
+		AgentArgs:      []string{"old-command", "--old"},
+		ApprovalPolicy: "old-policy",
+		AgentEnv: []string{
+			"KEEP_ME=yes",
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=core.hooksPath",
+			"GIT_CONFIG_VALUE_0=/user/hooks",
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	err := mgr.ConfigureWithEnvironment(
+		"new-command", []string{"new-command"}, true,
+		map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "missing-value"},
+		"new-policy", "", nil, false,
+	)
+	if err == nil {
+		t.Fatal("ConfigureWithEnvironment() succeeded with malformed indexed Git block")
+	}
+	if mgr.cfg.AgentCommand != "old-command" || strings.Join(mgr.cfg.AgentArgs, " ") != "old-command --old" ||
+		mgr.cfg.ApprovalPolicy != "old-policy" {
+		t.Fatalf("configuration mutated after failed composition: command=%q args=%#v policy=%q", mgr.cfg.AgentCommand, mgr.cfg.AgentArgs, mgr.cfg.ApprovalPolicy)
+	}
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["KEEP_ME"] != "yes" || env["GIT_CONFIG_COUNT"] != "1" || env["GIT_CONFIG_VALUE_0"] != "/user/hooks" {
+		t.Fatalf("environment mutated after failed composition: %#v", env)
+	}
+}
+
+func TestManagerConfigureRemovesObsoleteManagedCredentialEnvironment(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			"KEEP_ME=yes",
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL=https://broker.example/resolve",
+			"KANDEV_GITHUB_CREDENTIAL_LEASE=stale-lease",
+			"KANDEV_GITHUB_CLI_SHIM_DIR=/stale/shim",
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	if err := mgr.Configure("echo", nil, false, nil, "", "", nil, false); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["KEEP_ME"] != "yes" {
+		t.Fatalf("ordinary environment was removed: %#v", env)
+	}
+	for _, key := range []string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL",
+		"KANDEV_GITHUB_CREDENTIAL_LEASE",
+		"KANDEV_GITHUB_CLI_SHIM_DIR",
+	} {
+		if _, ok := env[key]; ok {
+			t.Fatalf("obsolete managed credential %s remained: %#v", key, env)
+		}
 	}
 }
 

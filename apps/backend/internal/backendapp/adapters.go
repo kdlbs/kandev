@@ -584,6 +584,12 @@ func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID
 	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)
 }
 
+// ExecutorProfileEnvForSession resolves the current executor profile
+// environment for a prepared workspace before its agent process starts.
+func (a *lifecycleAdapter) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
+	return a.mgr.ExecutorProfileEnvForSession(ctx, sessionID, taskEnvironmentID)
+}
+
 // SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
 func (a *lifecycleAdapter) SetMcpMode(ctx context.Context, executionID string, mode string) error {
 	return a.mgr.SetMcpMode(ctx, executionID, mode)
@@ -932,6 +938,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
 		CLIPassthrough:             info.CLIPassthrough,
+		EnvVars:                    append([]models.ProfileEnvVar(nil), info.EnvVars...),
 		SupportsMCP:                info.SupportsMCP,
 	}, nil
 }

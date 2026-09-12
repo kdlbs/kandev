@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -58,6 +59,55 @@ func TestManagerTrackerGitEnvironmentUsesInstanceEnvironment(t *testing.T) {
 	}
 	if env["GIT_SSH_COMMAND"] == "ambient-ssh" {
 		t.Fatal("ambient SSH command unexpectedly reached tracker")
+	}
+}
+
+func TestManagerHostGHBridgeGitEnvironment(t *testing.T) {
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create fake gh directory: %v", err)
+	}
+	const ghScript = `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	instanceEnv := []string{
+		"GH_TOKEN=late-profile-token",
+		"HOME=" + filepath.Join(t.TempDir(), "home"),
+		"PATH=/usr/bin:/bin",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_COUNT=3",
+		"GIT_CONFIG_KEY_0=notes.augment.mergeStrategy",
+		"GIT_CONFIG_VALUE_0=union",
+		"GIT_CONFIG_KEY_1=core.hooksPath",
+		"GIT_CONFIG_VALUE_1=/Users/cfl12/.locstat/git/hooks",
+		"GIT_CONFIG_KEY_2=credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2=!" + "'" + ghPath + "' auth git-credential",
+	}
+	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir(), AgentEnv: instanceEnv}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	cmd := mgr.GetWorkspaceTracker().gitCommand(context.Background(), false, "credential", "fill")
+	env := environmentMap(cmd.Env)
+	if env["GIT_CONFIG_COUNT"] != "3" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		env["GIT_CONFIG_VALUE_0"] != "union" || env["GIT_CONFIG_KEY_1"] != "core.hooksPath" ||
+		env["GIT_CONFIG_VALUE_1"] != "/Users/cfl12/.locstat/git/hooks" {
+		t.Fatalf("tracker Git environment changed inherited entries: %#v", env)
+	}
+	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets\n\n")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tracker git credential fill failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "password=late-profile-token") {
+		t.Fatalf("credential output = %q, want late profile token", output)
 	}
 }
 

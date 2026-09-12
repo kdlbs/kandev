@@ -2297,32 +2297,46 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
-	env := execution.RuntimeEnvironment()
+	runtimeSnapshot := execution.RuntimeEnvironment()
 	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
-	if env == nil {
-		env = metadataEnv
+	var env map[string]string
+	if runtimeSnapshot == nil {
+		env = cloneStringMap(metadataEnv)
+		if env == nil {
+			env = make(map[string]string)
+		}
 		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
 			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
 			return "", fmt.Errorf("resolve agent profile environment: %w", err)
 		}
 	} else {
 		// SetExecutionEnv carries per-run values such as repository credentials.
-		// Overlay them on the launch snapshot without re-reading profile secrets.
-		for key, value := range metadataEnv {
-			env[key] = value
+		// Compose them with the launch snapshot without re-reading profile
+		// secrets. Host bridge entries are filtered here, while the normal
+		// agentctl Configure boundary composes the request with the instance's
+		// canonical environment and preserves inherited user entries.
+		var err error
+		env, err = composeExecutionRuntimeEnvironment(runtimeSnapshot, metadataEnv)
+		if err != nil {
+			m.updateExecutionError(execution.ID, "failed to compose agent env: "+err.Error())
+			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
 	}
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
 	}
+	configureEnv := cloneStringMap(env)
+	execution.setRuntimeEnvironment(env)
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
+	// Starting with stale agent configuration could expose an old credential
+	// set, so the subprocess must not start when configuration delivery fails.
+	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

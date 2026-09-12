@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -1347,6 +1348,12 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if strings.TrimSpace(agentProfileID) == "" {
+		agentProfileID = strings.TrimSpace(session.ExecutionProfileID)
+		if agentProfileID == "" {
+			agentProfileID = strings.TrimSpace(session.AgentProfileID)
+		}
+	}
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
@@ -1479,6 +1486,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			mergeEnv(req, opts.RouteOverride.Env)
 		}
 	}
+	profileEnvVars, profileResolved := e.resolveHostGitHubBridgeProfileEnv(ctx, agentProfileID, execCfg.ProfileEnvVars)
+	if err := e.configureGitCredentialBrokerForRepositoriesWithProfileEnvAndBridge(
+		ctx, req, allRepos, profileEnvVars, profileResolved,
+	); err != nil {
+		return nil, err
+	}
+	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
+		return nil, err
+	}
 
 	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
 	if opts.McpMode != "" {
@@ -1558,7 +1574,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
 	}
 	if hasRunning {
-		result, existingErr := e.startAgentOnExistingWorkspace(launchCtx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
+		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(launchCtx, task, session, prompt, startAgent, opts.McpMode, req, opts.TurnID)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
 			if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 				return nil, errors.Join(existingErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
@@ -1991,13 +2007,6 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err != nil {
 		return nil, execConfig, err
 	}
-	if err := e.configureGitCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
-		return nil, execConfig, err
-	}
-	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
-		return nil, execConfig, err
-	}
-
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
 	// per repo. The legacy single-repo top-level fields above stay populated
@@ -2253,6 +2262,25 @@ func dockerLocalCloneSource(repositoryPath string) string {
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
+	request := &LaunchAgentRequest{
+		TaskID:      task.ID,
+		WorkspaceID: task.WorkspaceID,
+		SessionID:   session.ID,
+		Env:         cloneStringMap(env),
+	}
+	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, turnIDs...)
+}
+
+func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	prompt string,
+	startAgent bool,
+	mcpMode string,
+	request *LaunchAgentRequest,
+	turnIDs ...string,
+) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
@@ -2290,7 +2318,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		}
 	}
 	e.bindPromptTurnID(ctx, session.ID, executionID, turnIDs)
-	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, env); err != nil {
+	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, request); err != nil {
 		return nil, err
 	}
 
@@ -2342,17 +2370,34 @@ func (e *Executor) configureExistingWorkspace(
 	task *v1.Task,
 	session *models.TaskSession,
 	executionID, mcpMode string,
-	env map[string]string,
+	request *LaunchAgentRequest,
 ) error {
-	credentialReq := &LaunchAgentRequest{WorkspaceID: task.WorkspaceID, Env: cloneStringMap(env)}
+	if request == nil {
+		return errors.New("existing workspace launch request is required")
+	}
+	credentialReq := &LaunchAgentRequest{
+		TaskID:            task.ID,
+		WorkspaceID:       task.WorkspaceID,
+		SessionID:         session.ID,
+		TaskEnvironmentID: request.TaskEnvironmentID,
+		ExecutorType:      request.ExecutorType,
+		Env:               cloneStringMap(request.Env),
+	}
 	e.injectGitLabWorkspaceCredentials(ctx, credentialReq)
-	if len(credentialReq.Env) > 0 {
-		if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
-			e.logger.Warn("failed to set execution env for existing workspace",
-				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", executionID),
-				zap.Error(err))
+	if provider, ok := e.agentManager.(executorProfileEnvironmentProvider); ok {
+		profileEnv, err := provider.ExecutorProfileEnvForSession(ctx, session.ID, credentialReq.TaskEnvironmentID)
+		if err != nil {
+			return fmt.Errorf("resolve executor profile environment for existing workspace: %w", err)
 		}
+		credentialReq.Env, err = mergeExistingWorkspaceProfileEnv(profileEnv, credentialReq.Env)
+		if err != nil {
+			return fmt.Errorf("compose executor profile environment for existing workspace: %w", err)
+		}
+	}
+	// A failed delivery leaves the running workspace on its previous credential
+	// snapshot, so do not continue to agent start and report refreshed state.
+	if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
+		return fmt.Errorf("set execution env for existing workspace: %w", err)
 	}
 
 	// If config MCP mode is needed, reconfigure the MCP server before starting the agent.
@@ -2373,6 +2418,21 @@ func (e *Executor) configureExistingWorkspace(
 		return fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
 	}
 	return nil
+}
+
+type executorProfileEnvironmentProvider interface {
+	ExecutorProfileEnvForSession(context.Context, string, string) (map[string]string, error)
+}
+
+func mergeExistingWorkspaceProfileEnv(profileEnv, requestEnv map[string]string) (map[string]string, error) {
+	if len(profileEnv) == 0 {
+		return cloneStringMap(requestEnv), nil
+	}
+	merged, err := gitconfigenv.Merge(profileEnv, requestEnv)
+	if err != nil {
+		return nil, err
+	}
+	return merged, nil
 }
 
 func (e *Executor) bindPromptTurnID(ctx context.Context, sessionID, executionID string, turnIDs []string) {

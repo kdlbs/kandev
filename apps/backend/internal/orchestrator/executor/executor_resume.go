@@ -1258,8 +1258,11 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
 		return nil, "", execConfig, existingEnv, existingRunning, err
 	}
-	if err := e.configureResumeGitHubCredentials(
-		ctx, req, session, allRepos, beforeCredentialLease,
+	profileEnvVars, profileResolved := e.resolveHostGitHubBridgeProfileEnv(
+		ctx, req.AgentProfileID, execConfig.ProfileEnvVars,
+	)
+	if err := e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
+		ctx, req, session, allRepos, beforeCredentialLease, profileEnvVars, profileResolved,
 	); err != nil {
 		return nil, "", execConfig, existingEnv, existingRunning, err
 	}
@@ -1466,12 +1469,28 @@ func (e *Executor) configureResumeGitHubCredentials(
 	repositories []*repoInfo,
 	beforeCredentialLease func() error,
 ) error {
+	return e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
+		ctx, req, session, repositories, beforeCredentialLease, nil, true,
+	)
+}
+
+func (e *Executor) configureResumeGitHubCredentialsWithProfileEnvAndBridge(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	session *models.TaskSession,
+	repositories []*repoInfo,
+	beforeCredentialLease func() error,
+	profileEnvVars []models.ProfileEnvVar,
+	hostBridgeProfileResolved bool,
+) error {
 	if beforeCredentialLease != nil {
 		if err := beforeCredentialLease(); err != nil {
 			return err
 		}
 	}
-	if err := e.configureGitCredentialBrokerForRepositories(ctx, req, repositories); err != nil {
+	if err := e.configureGitCredentialBrokerForRepositoriesWithProfileEnvAndBridge(
+		ctx, req, repositories, profileEnvVars, hostBridgeProfileResolved,
+	); err != nil {
 		return err
 	}
 	return e.applyGitCredentialSnapshot(ctx, req, session)
