@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"go.uber.org/zap"
-
-	"github.com/kandev/kandev/internal/task/models"
 )
 
 // deferredLaunchClaim is a direct start's hold on a task's pending launch
@@ -31,9 +29,9 @@ import (
 //
 // So a direct start reserves the intent first and holds it across the launch,
 // which is exactly the protocol the gate already follows (claimDeferredLaunch
-// before LaunchSession, restoreDeferredLaunch on failure). One atomic
-// RemoveTaskMetadataKey elects a single starter, whichever path gets there
-// first, and the loser finds nothing to launch.
+// before LaunchSession, restoreDeferredLaunch on failure). One locked
+// read-and-remove elects a single starter, whichever path gets there first, and
+// the loser finds nothing to launch.
 //
 // # Why "started by any means" and not "has any non-cancelled session"
 //
@@ -50,13 +48,17 @@ import (
 type deferredLaunchClaim struct {
 	svc    *Service
 	taskID string
-	// intent is the record as it was read at claim time, kept so a failed
-	// launch can put it back. It is read before the atomic remove rather than
-	// returned by it, matching restoreDeferredLaunch: a prompt edit landing in
-	// that gap would be restored at its previous value, which costs one stale
-	// brief on a launch that already failed.
-	intent interface{}
-	held   bool
+	// wip holds exactly the keys this claim removed, returned by the same
+	// locked operation that removed them, so a failed launch puts back what it
+	// took and nothing else.
+	//
+	// The deferred_launch record is shared: other writers store their own keys
+	// on it, and one of them can land between this claim and its release. So
+	// the claim takes only its own keys and the release merges them back rather
+	// than restoring a whole-record snapshot, which would erase whatever
+	// arrived in the meantime.
+	wip  map[string]interface{}
+	held bool
 }
 
 // claimDeferredLaunchForStart reserves a task's pending launch intent for a
@@ -65,15 +67,7 @@ type deferredLaunchClaim struct {
 // launch and this one is simply a second session the user asked for.
 func (s *Service) claimDeferredLaunchForStart(ctx context.Context, taskID string) *deferredLaunchClaim {
 	claim := &deferredLaunchClaim{svc: s, taskID: taskID}
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.Metadata == nil {
-		return claim
-	}
-	intent, ok := task.Metadata[models.MetaKeyDeferredLaunch]
-	if !ok {
-		return claim
-	}
-	claimed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch)
+	wip, claimed, err := s.repo.TakeTaskDeferredLaunchWIPKeys(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to claim deferred launch intent on start",
 			zap.String("task_id", taskID), zap.Error(err))
@@ -82,7 +76,7 @@ func (s *Service) claimDeferredLaunchForStart(ctx context.Context, taskID string
 	if !claimed {
 		return claim
 	}
-	claim.intent = intent
+	claim.wip = wip
 	claim.held = true
 	return claim
 }
@@ -115,7 +109,7 @@ func (c *deferredLaunchClaim) releaseIfHeld(ctx context.Context) {
 		return
 	}
 	c.held = false
-	if err := c.svc.repo.SetTaskMetadataKey(ctx, c.taskID, models.MetaKeyDeferredLaunch, c.intent); err != nil {
+	if err := c.svc.repo.RestoreTaskDeferredLaunchWIPKeys(ctx, c.taskID, c.wip); err != nil {
 		c.svc.logger.Warn("failed to restore deferred launch intent after a failed start",
 			zap.String("task_id", c.taskID), zap.Error(err))
 	}

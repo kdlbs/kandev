@@ -447,6 +447,11 @@ type sessionExecutorStore interface {
 	// check and the write cannot be separated by a concurrent archive).
 	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
+	// TakeTaskDeferredLaunchWIPKeys / RestoreTaskDeferredLaunchWIPKeys claim and
+	// release the launch-intent half of the shared deferred_launch record
+	// without touching the keys another writer owns.
+	TakeTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string) (map[string]interface{}, bool, error)
+	RestoreTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string, wip map[string]interface{}) error
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)

@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -155,4 +158,129 @@ func decodeDeferredLaunch(metadataJSON string) (map[string]interface{}, Deferred
 		return nil, prior, nil
 	}
 	return record, prior, nil
+}
+
+// TakeTaskDeferredLaunchWIPKeys removes the launch-intent keys a direct start
+// claims, and only those, returning what it took so a failed start can put them
+// back.
+//
+// The deferred_launch record carries independent meanings that share one key, so
+// claiming the whole key would delete a meaning this caller does not own. The
+// partition is by prefix rather than by an enumerated list, so neither writer has
+// to track the other's keys: everything named by IsCeilingRecordKey stays, and
+// everything else is the claim's.
+//
+// When removing the claimed keys empties the object the whole key is deleted,
+// which is the entire behaviour for a record that carries no ceiling keys.
+// A record holding only ceiling keys is not this caller's to claim, so the take
+// is inert and reports nothing claimed.
+func (r *Repository) TakeTaskDeferredLaunchWIPKeys(
+	ctx context.Context, taskID string,
+) (wip map[string]interface{}, claimed bool, err error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	metadata, err := r.lockMetadataRow(ctx, tx, "tasks", "task", taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	record, prior, err := decodeDeferredLaunch(metadata)
+	if err != nil {
+		return nil, false, err
+	}
+	if !prior.present {
+		return nil, false, tx.Commit()
+	}
+	if record == nil {
+		return nil, false, fmt.Errorf("%s on task %s is not a JSON object", models.MetaKeyDeferredLaunch, taskID)
+	}
+
+	claimedKeys := make(map[string]interface{})
+	retained := make(map[string]interface{})
+	for key, value := range record {
+		if models.IsCeilingRecordKey(key) {
+			retained[key] = value
+			continue
+		}
+		claimedKeys[key] = value
+	}
+	if len(claimedKeys) == 0 {
+		return nil, false, tx.Commit()
+	}
+
+	if len(retained) == 0 {
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, taskID, models.MetaKeyDeferredLaunch); err != nil {
+			return nil, false, err
+		}
+		return claimedKeys, true, tx.Commit()
+	}
+	if err := r.writeDeferredLaunchLocked(ctx, tx, taskID, retained); err != nil {
+		return nil, false, err
+	}
+	return claimedKeys, true, tx.Commit()
+}
+
+// RestoreTaskDeferredLaunchWIPKeys puts previously claimed keys back, merging
+// into whatever the record holds now rather than replacing it.
+//
+// Restoring the pre-claim snapshot wholesale would overwrite anything written to
+// the record while the launch was in flight. Merging is what lets the two
+// meanings coexist: this caller puts back exactly the keys it took and leaves
+// every other key at its current value.
+func (r *Repository) RestoreTaskDeferredLaunchWIPKeys(
+	ctx context.Context, taskID string, wip map[string]interface{},
+) error {
+	if len(wip) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	metadata, err := r.lockMetadataRow(ctx, tx, "tasks", "task", taskID)
+	if err != nil {
+		return err
+	}
+	record, _, err := decodeDeferredLaunch(metadata)
+	if err != nil {
+		return err
+	}
+	merged := make(map[string]interface{}, len(record)+len(wip))
+	maps.Copy(merged, record)
+	maps.Copy(merged, wip)
+
+	if err := r.writeDeferredLaunchLocked(ctx, tx, taskID, merged); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// writeDeferredLaunchLocked performs the single-key update inside a transaction
+// that already holds the row.
+func (r *Repository) writeDeferredLaunchLocked(
+	ctx context.Context, tx *sqlx.Tx, taskID string, record map[string]interface{},
+) error {
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("failed to serialize deferred launch record: %w", err)
+	}
+	result, err := tx.ExecContext(ctx,
+		r.db.Rebind(metadataKeyUpdateQuery("tasks", r.db.DriverName())),
+		metadataKeyUpdateArgs(r.db.DriverName(), models.MetaKeyDeferredLaunch, string(payload), r.nowUTC(), taskID)...)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	return nil
 }
