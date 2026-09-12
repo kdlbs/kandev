@@ -34,9 +34,9 @@ func (r *Repository) initTaskUsageEventsSchema() error {
 	if dialect.IsPostgres(r.db.DriverName()) {
 		idCol = "id BIGSERIAL PRIMARY KEY"
 	}
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_usage_events (
-		` + idCol + `,
+		`+idCol+`,
 		usage_event_id TEXT NOT NULL,
 		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 		session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,

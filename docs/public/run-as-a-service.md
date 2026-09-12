@@ -58,7 +58,7 @@ The installer writes the managed unit or plist and starts the process. It does *
 curl --fail http://127.0.0.1:43127/ready
 ```
 
-`/ready` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. It is not a deep health check of the database, message bus, executors, or remote providers.
+`/ready` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. While it returns 503, its `startup` object reports the current phase and elapsed time for database opening, backup, migrations, service initialization, or session recovery. It is not a deep health check of the database, message bus, executors, or remote providers.
 
 ### System service
 

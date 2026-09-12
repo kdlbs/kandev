@@ -65,11 +65,11 @@ resolved by explicit decision — see [Decisions](#decisions).
 
 - **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.1:** `GET /health` SHALL include the running Kandev version in its JSON response body.
 - **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.2:** The field SHALL be named **`version`**, matching `GET /api/v1/system/info`.
-- **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.3:** The field SHALL be present in **both** the ready (200) and not-ready (503) responses, so an operator can identify the build of a backend that is stuck starting.
+- **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.3:** The field SHALL be present in both `/health` and bootstrap `/ready` responses, so an operator can identify the build of a backend that is stuck starting.
 - **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.4:** The field value SHALL be the same string `GET /api/v1/system/info` reports as `version` for the same running process.
 - **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.5:** The field SHALL be served to unauthenticated callers, exactly as the rest of the `/health` payload already is. This is a deliberate, accepted disclosure — see [Security](#security-and-permissions).
 - **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.6:** Every existing field (`status`, `service`, `mode`) SHALL retain its current name, value, and semantics. This is a purely additive change.
-- **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.7:** The existing HTTP status semantics (200 when ready, 503 while starting) SHALL be unchanged.
+- **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.7:** `/health` SHALL return 200 once bound, including during initialization. `/ready` SHALL return 503 until application initialization finishes.
 - **AC-PLATFORM-HEALTH-ENDPOINT-VERSION-001.8:** The desktop health-token response header SHALL continue to be set on the 200 path only, unchanged.
 
 ## System design

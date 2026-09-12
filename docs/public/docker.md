@@ -263,7 +263,7 @@ Remote Docker profiles are not a workaround: that executor runtime is currently 
 
 ## Health and observability
 
-`GET /health` returns 200 as soon as the listener is accepting connections, even mid-startup; `GET /ready` returns 503 during startup and 200 after routes are registered:
+`GET /health` returns 200 as soon as the listener is accepting connections, even mid-startup. `GET /ready` returns 503 during startup and includes the current startup phase and elapsed time; it returns 200 after routes are registered:
 
 ```bash
 curl --fail http://localhost:38429/ready

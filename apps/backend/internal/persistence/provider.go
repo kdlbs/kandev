@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 // Provide creates the database connection pool used by repositories.
@@ -23,6 +25,15 @@ import (
 // compared against the stored kandev_version to decide whether to take a
 // pre-migration backup.  Pass "" in tests that do not care about snapshots.
 func Provide(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
+	return ProvideContext(context.Background(), cfg, log, version)
+}
+
+// ProvideContext opens persistence for a cancellable backend initialization.
+func ProvideContext(ctx context.Context, cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	startup.SetPhase(ctx, startup.OpeningDatabase)
 	driver := cfg.Database.Driver
 	if driver == "" {
 		driver = "sqlite"
@@ -30,7 +41,7 @@ func Provide(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, 
 
 	switch driver {
 	case "sqlite":
-		return provideSQLite(cfg, log, version)
+		return provideSQLite(ctx, cfg, log, version)
 	case "postgres":
 		return providePostgres(cfg, log)
 	default:
@@ -38,7 +49,7 @@ func Provide(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, 
 	}
 }
 
-func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
+func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
 	selection, err := selectSQLiteDatabase(cfg, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("select sqlite database: %w", err)
@@ -87,13 +98,15 @@ func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.
 	}
 
 	if shouldBackup(storedVersion, version, userTables) {
+		startup.SetPhase(ctx, startup.BackingUpDatabase)
+		started := time.Now()
 		backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
 		if err := os.MkdirAll(backupDir, 0o755); err != nil {
 			_ = pool.Close()
 			return nil, nil, fmt.Errorf("create backup dir: %w", err)
 		}
 		path := snapshotPath(backupDir, storedVersion)
-		size, err := snapshotSQLite(writer, path)
+		size, err := snapshotSQLiteContext(ctx, writer, path)
 		if err != nil {
 			_ = pool.Close()
 			return nil, nil, fmt.Errorf("pre-migration backup failed: %w", err)
@@ -104,6 +117,7 @@ func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.
 				zap.String("to_version", version),
 				zap.String("path", path),
 				zap.Int64("size_bytes", size),
+				zap.Duration("duration", time.Since(started)),
 			)
 		}
 		_ = pruneBackups(backupDir, 2)

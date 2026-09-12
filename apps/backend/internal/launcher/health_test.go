@@ -617,3 +617,18 @@ func TestWaitForHealthFailsFastWhenBackendExited(t *testing.T) {
 		t.Fatalf("onFailure called %d times, want 1", failures)
 	}
 }
+
+func TestReadinessExitIncludesLastStartupPhase(t *testing.T) {
+	var child toggledChild
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"starting","startup":{"phase":"backing_up_database","elapsed_ms":1234,"phase_elapsed_ms":1000}}`))
+		child.code.Store(3)
+		child.exited.Store(true)
+	}))
+	defer srv.Close()
+	err := waitForReady(context.Background(), srv.URL, &child)
+	if err == nil || !strings.Contains(err.Error(), "Backing up database") {
+		t.Fatalf("missing startup phase in error: %v", err)
+	}
+}

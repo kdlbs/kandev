@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,7 +37,11 @@ func SnapshotSQLite(writer *sqlx.DB, path string) (int64, error) {
 // which produces a clean, defragmented snapshot including all WAL frames.
 // Returns the size of the created file in bytes.
 func snapshotSQLite(writer *sqlx.DB, path string) (int64, error) {
-	if _, err := writer.Exec(`VACUUM INTO ?`, path); err != nil {
+	return snapshotSQLiteContext(context.Background(), writer, path)
+}
+
+func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (int64, error) {
+	if _, err := writer.ExecContext(ctx, `VACUUM INTO ?`, path); err != nil {
 		return 0, fmt.Errorf("vacuum into %s: %w", path, err)
 	}
 	info, err := os.Stat(path)

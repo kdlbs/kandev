@@ -35,6 +35,8 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### Requirements
 
+- [Startup lifecycle](requirements/startup-lifecycle.md)
+
 - [Agent-accessible Kandev settings](requirements/agent-settings-parity.md)
 
 
@@ -79,6 +81,8 @@ retains ownership of its values, validation, authority, and persistence.
 - [Workspace Git Status](requirements/workspace-git-status.md)
 
 ### System design
+
+- [Startup lifecycle](system-design/startup-lifecycle.md)
 
 - [Agent-accessible Kandev settings](system-design/agent-settings-parity.md)
 - [Core settings domain adoption](system-design/agent-settings-domains.md)

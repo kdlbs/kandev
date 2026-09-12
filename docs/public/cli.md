@@ -132,6 +132,11 @@ On a normal start, the launcher:
 7. waits for `/ready` (the backend has finished startup recovery and can serve real requests); this wait is unbounded by design, since recovery can legitimately take much longer than 45 seconds; and
 8. opens the reachable access URL in the default browser.
 
+While `/ready` returns 503, it reports the current startup phase and elapsed
+time. The launcher prints phase changes and periodic status, so a long backup,
+migration, or recovery can be distinguished from an unreachable backend. These
+values describe elapsed work and do not estimate completion.
+
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
 Use headless mode for SSH sessions, containers, or an external reverse proxy:
