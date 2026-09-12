@@ -32,40 +32,9 @@ instead of opening the PR.
 
 ### Documentation coverage
 
-The `PR documentation coverage` status check uses a deterministic structural
-policy. It does not classify the PR title or use AI to decide whether a change
-needs documentation.
-
-These changes pass without a delivery package:
-
-- files under `docs/` or Markdown files;
-- Go test files ending in `_test.go`, JavaScript or TypeScript test files with
-  `.test.` or `.spec.` names, and files under `apps/web/e2e/`;
-- one web translation catalog at `apps/web/src/locales/<locale>/<namespace>.json`;
-- files whose basename is `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`,
-  `go.sum`, or `Cargo.lock`.
-
-For other changes, add or modify a work order at
-`docs/plans/<initiative>/task-<NN>-<slug>.md`. The work order must link to its
-sibling `plan.md`, requirement IDs, acceptance criteria, and system-design
-documents. Those referenced contracts can already exist on the base branch.
-Do not make cosmetic edits only to force an unchanged contract into the diff.
-
-For example, a `fix:` PR that changes `apps/backend/internal/runtime/runtime.go`
-still needs a linked work order. A PR that changes only `apps/web/e2e/tasks/foo.ts`
-or `docs/operations.md` does not need one. A rename is checked at both its old
-and new path.
-
-If a maintainer decides that a small exception does not need a delivery package,
-the maintainer can apply the exact `no-docs-allow` label. The label persists
-across pushes and affects only this status. Removing it reevaluates the current
-PR without requiring a new commit. The workflow never applies or removes the
-label.
-
-The check validates links and identifiers, not semantic completeness or the
-order of planning and coding. Read the workflow summary for triggering paths,
-accepted references, missing artifacts, and corrective steps. Maintainers can
-use the workflow's manual retry with a PR number when an event needs a retry.
+When implementing a feature or fix, update the relevant requirements, system
+design, plan, and work-order files. CI runs a linter to check PR documentation
+coverage.
 
 ## How to Contribute
 
