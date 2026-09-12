@@ -116,6 +116,7 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	if hadOldRec {
 		rec.AutoUpdate = oldRec.AutoUpdate
 	}
+	rec.LegacyUtilityAgentFallback = legacyUtilityAgentFallback(oldRec, hadOldRec, rec.ConfigSchema)
 	if err := s.store.Save(rec); err != nil {
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
@@ -141,6 +142,17 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+// legacyUtilityAgentFallback retains an existing selector only across the
+// manifest transition that removed its declaration. A direct-profile plugin
+// may otherwise contain arbitrary undeclared settings, which must not choose
+// an agent at execution time.
+func legacyUtilityAgentFallback(oldRec *store.Record, hadOldRec bool, newSchema map[string]any) bool {
+	if !hadOldRec || oldRec == nil || !hasAgentProfileConfig(newSchema) || hasUtilityAgentConfig(newSchema) {
+		return false
+	}
+	return oldRec.LegacyUtilityAgentFallback || hasUtilityAgentConfig(oldRec.ConfigSchema)
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version

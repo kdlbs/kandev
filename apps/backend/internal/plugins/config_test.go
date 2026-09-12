@@ -143,6 +143,78 @@ func TestMergeMaskedSecretsDropsMaskWithNoStoredValue(t *testing.T) {
 	}
 }
 
+func TestUpdateConfigPreservesLegacyUtilityAgentForDirectProfileSchema(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	merged := mergeMaskedSecrets(map[string]any{agentProfileConfigKey: "profile-1"}, map[string]any{
+		utilityAgentConfigKey: "utility-agent-1",
+	}, schema)
+	if _, submitted := merged[utilityAgentConfigKey]; submitted {
+		t.Fatal("precondition: legacy selector should be absent from the replacement payload")
+	}
+
+	if agentID, ok := merged[utilityAgentConfigKey].(string); ok && agentID != "" {
+		t.Fatalf("legacy selector unexpectedly present before preservation: %q", agentID)
+	}
+	merged = preserveLegacyUtilityAgentConfig(merged, map[string]any{
+		utilityAgentConfigKey: "utility-agent-1",
+	}, schema, true)
+	if merged[utilityAgentConfigKey] != "utility-agent-1" {
+		t.Fatalf("legacy selector = %v, want utility-agent-1", merged[utilityAgentConfigKey])
+	}
+}
+
+func TestPreserveLegacyUtilityAgentConfigRequiresUpgradeMarker(t *testing.T) {
+	schema := map[string]any{"properties": map[string]any{
+		agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+	}}
+	merged := preserveLegacyUtilityAgentConfig(map[string]any{}, map[string]any{
+		utilityAgentConfigKey: "utility-agent-1",
+	}, schema, false)
+	if _, found := merged[utilityAgentConfigKey]; found {
+		t.Fatalf("preserveLegacyUtilityAgentConfig() retained undeclared selector: %v", merged)
+	}
+}
+
+func TestPreserveLegacyUtilityAgentConfigKeepsOnlyPreTransitionSelector(t *testing.T) {
+	schema := map[string]any{"properties": map[string]any{
+		agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+	}}
+	tests := []struct {
+		name     string
+		existing map[string]any
+		config   map[string]any
+		want     string
+		present  bool
+	}{
+		{
+			name:     "replaces submitted selector with pre-transition selector",
+			existing: map[string]any{utilityAgentConfigKey: "utility-agent-before-upgrade"},
+			config:   map[string]any{utilityAgentConfigKey: "utility-agent-injected"},
+			want:     "utility-agent-before-upgrade",
+			present:  true,
+		},
+		{
+			name:     "drops newly submitted selector without pre-transition selector",
+			existing: map[string]any{},
+			config:   map[string]any{utilityAgentConfigKey: "utility-agent-injected"},
+			present:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := preserveLegacyUtilityAgentConfig(tt.config, tt.existing, schema, true)
+			selector, present := got[utilityAgentConfigKey]
+			if present != tt.present || (present && selector != tt.want) {
+				t.Fatalf("legacy selector = (%v, present=%t), want (%q, present=%t)", selector, present, tt.want, tt.present)
+			}
+		})
+	}
+}
+
 func TestValidateConfigSchema(t *testing.T) {
 	schema := testConfigSchema()
 	cases := []struct {

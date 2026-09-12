@@ -49,6 +49,10 @@ type pluginHost struct {
 	// GetConfig to know which fields are secret (and therefore stored as
 	// vault references to resolve back to cleartext).
 	configSchema map[string]any
+	// legacyUtilityAgentFallback is persisted only for a verified manifest
+	// upgrade from the legacy selector. It prevents arbitrary undeclared config
+	// fields from selecting a utility agent.
+	legacyUtilityAgentFallback bool
 
 	state   *state.Store
 	secrets SecretVault
@@ -103,7 +107,7 @@ type pluginHost struct {
 	// lifetime. Reading live (under Service.mu) lets the later SetUtilityAgent
 	// wiring take effect without a plugin restart. nil on a bare test host.
 	// See host_utility.go.
-	utilityDeps func() (utilityAgentSource, utilityRunner)
+	utilityDeps func() (utilityAgentSource, agentProfileSource, utilityRunner)
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)

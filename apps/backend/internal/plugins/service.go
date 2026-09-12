@@ -137,8 +137,9 @@ type Service struct {
 	taskWriter taskWriter
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
-	utilityAgents utilityAgentSource
-	utilityRunner utilityRunner
+	utilityAgents   utilityAgentSource
+	utilityProfiles agentProfileSource
+	utilityRunner   utilityRunner
 
 	// Host data API write dependencies wired late via SetWriteDeps (ADR
 	// 0043): the task-message delivery path and the orchestrator task-starter,
@@ -584,10 +585,11 @@ func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
 // point StartActivePlugins has already spawned boot-active plugins), so hosts
 // read these live via utilityAgentDeps rather than snapshotting them — the
 // write here is mutex-guarded against those concurrent reads.
-func (s *Service) SetUtilityAgent(agents utilityAgentSource, runner utilityRunner) {
+func (s *Service) SetUtilityAgent(agents utilityAgentSource, profiles agentProfileSource, runner utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.utilityAgents = agents
+	s.utilityProfiles = profiles
 	s.utilityRunner = runner
 }
 
@@ -595,10 +597,10 @@ func (s *Service) SetUtilityAgent(agents utilityAgentSource, runner utilityRunne
 // live (not snapshotted at hostForPlugin time) so a plugin spawned before
 // SetUtilityAgent still resolves them once it is called. Guarded by s.mu against
 // the SetUtilityAgent write.
-func (s *Service) utilityAgentDeps() (utilityAgentSource, utilityRunner) {
+func (s *Service) utilityAgentDeps() (utilityAgentSource, agentProfileSource, utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.utilityAgents, s.utilityRunner
+	return s.utilityAgents, s.utilityProfiles, s.utilityRunner
 }
 
 // SetAuthLoginBridge wires the SSO login bridge auth-capable plugins use to
@@ -722,26 +724,27 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
-		pluginID:            pluginID,
-		capabilities:        rec.Capabilities,
-		repositoryProviders: rec.RepositoryProviders,
-		configSchema:        rec.ConfigSchema,
-		state:               s.state,
-		secrets:             s.secrets,
-		bus:                 s.eventBus,
-		configs:             s.store,
-		taskData:            s.taskData,
-		workflows:           s.workflows,
-		workflowSteps:       s.workflowSteps,
-		agentProfiles:       s.agentProfiles,
-		sessionCodeStats:    s.sessionCodeStats,
-		messageData:         s.messageData,
-		interactionData:     s.interactionData,
-		taskPRsDep:          s.taskPRSourceDep,
-		taskWriter:          s.taskWriter,
-		utilityDeps:         s.utilityAgentDeps,
-		writeDeps:           s.writeDependencies,
-		interactionDeps:     s.interactionResponderDep,
+		pluginID:                   pluginID,
+		capabilities:               rec.Capabilities,
+		repositoryProviders:        rec.RepositoryProviders,
+		configSchema:               rec.ConfigSchema,
+		legacyUtilityAgentFallback: rec.LegacyUtilityAgentFallback,
+		state:                      s.state,
+		secrets:                    s.secrets,
+		bus:                        s.eventBus,
+		configs:                    s.store,
+		taskData:                   s.taskData,
+		workflows:                  s.workflows,
+		workflowSteps:              s.workflowSteps,
+		agentProfiles:              s.agentProfiles,
+		sessionCodeStats:           s.sessionCodeStats,
+		messageData:                s.messageData,
+		interactionData:            s.interactionData,
+		taskPRsDep:                 s.taskPRSourceDep,
+		taskWriter:                 s.taskWriter,
+		utilityDeps:                s.utilityAgentDeps,
+		writeDeps:                  s.writeDependencies,
+		interactionDeps:            s.interactionResponderDep,
 	}
 }
 

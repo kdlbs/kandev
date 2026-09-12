@@ -422,6 +422,46 @@ describe("hydrateState — user settings revisions", () => {
   });
 });
 
+describe("hydrateState — agent profile revisions", () => {
+  it("keeps a newer websocket profile snapshot over route bootstrap", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.agentProfiles = {
+        version: 1,
+        items: [
+          {
+            id: "live-profile",
+            label: "Live profile",
+            agent_id: "agent-1",
+            agent_name: "Agent",
+            cli_passthrough: false,
+            inference_capable: true,
+          },
+        ],
+      };
+      draft.settingsAgents.items = [
+        {
+          id: "agent-1",
+          name: "Agent",
+          profiles: [],
+        } as never,
+      ];
+      hydrateState(draft, {
+        settingsAgents: { items: [] },
+        agentProfiles: {
+          version: 0,
+          items: [],
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.agentProfiles).toMatchObject({
+      version: 1,
+      items: [{ id: "live-profile" }],
+    });
+    expect(result.settingsAgents.items).toHaveLength(1);
+  });
+});
+
 describe("hydrateState — sidebar views from user settings", () => {
   it("hydrates active view and draft from backend user settings", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {

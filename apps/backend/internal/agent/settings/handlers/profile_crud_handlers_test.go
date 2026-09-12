@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -94,6 +95,37 @@ func TestCreateProfileEndpoint(t *testing.T) {
 		}
 		if broadcast := decodeProfileBroadcast(t, hub, ws.ActionAgentProfileCreated); broadcast.ID != got.ID {
 			t.Errorf("broadcast profile id = %q, want %q", broadcast.ID, got.ID)
+		}
+	})
+
+	t.Run("broadcast includes the owning agent's inference capability", func(t *testing.T) {
+		repo := newFakeSettingsRepo()
+		seedAgent(repo, "agent-1", "profile-agent", false)
+		hub := &duplicateHub{}
+		router, _, reg := newSettingsHarness(t, repo, hub)
+		inferenceAgent := agents.NewMockAgentWithID("profile-agent", "profile-agent", "Profile Agent")
+		inferenceAgent.SetEnabled(true)
+		if err := reg.Register(inferenceAgent); err != nil {
+			t.Fatalf("register inference agent: %v", err)
+		}
+
+		response := doSettingsRequest(router, http.MethodPost, "/api/v1/agents/agent-1/profiles",
+			`{"name":"Fast","model":"model-x"}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+		}
+		payloads := hub.payloads(ws.ActionAgentProfileCreated)
+		if len(payloads) != 1 {
+			t.Fatalf("recorded %d profile-created broadcasts, want 1", len(payloads))
+		}
+		var envelope struct {
+			InferenceCapable bool `json:"inference_capable"`
+		}
+		if err := json.Unmarshal(payloads[0], &envelope); err != nil {
+			t.Fatalf("decode profile-created payload: %v", err)
+		}
+		if !envelope.InferenceCapable {
+			t.Fatal("profile-created capability = false, want true for mock-agent")
 		}
 	})
 

@@ -48,11 +48,16 @@ type Record struct {
 	// and false forces it off — either override wins over the global default.
 	// Persisted so the choice survives restart and, unlike Status, is carried
 	// over verbatim when a plugin is upgraded in place (see Service.Install).
-	AutoUpdate   *bool      `yaml:"auto_update,omitempty" json:"auto_update,omitempty"`
-	InstalledAt  time.Time  `yaml:"installed_at" json:"installed_at"`
-	RestartCount int        `yaml:"restart_count" json:"restart_count"`
-	LastError    string     `yaml:"last_error,omitempty" json:"last_error,omitempty"`
-	LastErrorAt  *time.Time `yaml:"last_error_at,omitempty" json:"last_error_at,omitempty"`
+	AutoUpdate *bool `yaml:"auto_update,omitempty" json:"auto_update,omitempty"`
+	// LegacyUtilityAgentFallback is set only while upgrading a plugin from a
+	// declared utility-agent selector to a direct agent-profile selector. It
+	// authorizes the host to honor the retained legacy value after the new
+	// manifest no longer declares that field.
+	LegacyUtilityAgentFallback bool       `yaml:"legacy_utility_agent_fallback,omitempty" json:"legacy_utility_agent_fallback,omitempty"`
+	InstalledAt                time.Time  `yaml:"installed_at" json:"installed_at"`
+	RestartCount               int        `yaml:"restart_count" json:"restart_count"`
+	LastError                  string     `yaml:"last_error,omitempty" json:"last_error,omitempty"`
+	LastErrorAt                *time.Time `yaml:"last_error_at,omitempty" json:"last_error_at,omitempty"`
 }
 
 // Store is the persistence interface for plugin installations and their

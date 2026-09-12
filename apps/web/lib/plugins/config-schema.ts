@@ -18,7 +18,8 @@ export type PluginConfigFieldType =
   | "number"
   | "integer"
   | "enum"
-  | "utility_agent";
+  | "utility_agent"
+  | "agent_profile";
 
 export interface PluginConfigField {
   name: string;
@@ -46,6 +47,7 @@ function asObject(value: unknown): SchemaObject | null {
 
 function fieldType(prop: SchemaObject): PluginConfigFieldType {
   if (prop.format === "utility-agent") return "utility_agent";
+  if (prop.format === "agent-profile") return "agent_profile";
   const enumValues = prop.enum;
   if (Array.isArray(enumValues) && enumValues.length > 0) return "enum";
   const type = prop.type;

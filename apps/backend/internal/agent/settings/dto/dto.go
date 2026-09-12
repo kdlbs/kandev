@@ -143,8 +143,11 @@ type AgentDTO struct {
 	// flag agents that need login or reinstallation without fetching the
 	// full model config separately. "" for agents that aren't probed
 	// (mock, tui-only).
-	CapabilityStatus string    `json:"capability_status,omitempty"`
-	CapabilityError  string    `json:"capability_error,omitempty"`
+	CapabilityStatus string `json:"capability_status,omitempty"`
+	CapabilityError  string `json:"capability_error,omitempty"`
+	// InferenceCapable identifies agents accepted by the sessionless host
+	// utility runner. Profile pickers use it to prevent invalid selections.
+	InferenceCapable bool      `json:"inference_capable"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }

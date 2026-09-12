@@ -373,6 +373,11 @@ func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
 
 	t.Run("Succeeds", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
+		d.host.configSchema = map[string]any{
+			"properties": map[string]any{
+				utilityAgentConfigKey: map[string]any{"type": "string", "format": "utility-agent"},
+			},
+		}
 		d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", AgentProfileID: "profile-42", ProfileBindingState: "explicit", Enabled: true}
 		d.utilRun.text = "summary text"
 		host := dialPluginHostOverWire(t, d.host)

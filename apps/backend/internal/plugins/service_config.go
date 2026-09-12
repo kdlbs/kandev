@@ -36,6 +36,11 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 		return err
 	}
 	merged := mergeMaskedSecrets(config, existing, rec.ConfigSchema)
+	// A direct-profile plugin upgraded from the legacy utility-agent selector
+	// carries a persisted provenance marker. Keep only the selector that
+	// existed before the manifest transition: the replacement schema no longer
+	// declares this key, so a later payload must not introduce or replace it.
+	merged = preserveLegacyUtilityAgentConfig(merged, existing, rec.ConfigSchema, rec.LegacyUtilityAgentFallback)
 	if err := validateConfigSchema(rec.ID, merged, rec.ConfigSchema); err != nil {
 		return err
 	}
@@ -62,6 +67,20 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	// and orphan the now-unreferenced vault entries.
 	s.cleanupRemovedConfigSecrets(context.WithoutCancel(ctx), rec.ID, removedSecrets, existing)
 	return s.restartForConfigChange(rec)
+}
+
+func preserveLegacyUtilityAgentConfig(config, existing, schema map[string]any, allowLegacyFallback bool) map[string]any {
+	if !allowLegacyFallback || !hasAgentProfileConfig(schema) {
+		return config
+	}
+	// The legacy field is intentionally absent from the replacement schema.
+	// Ignore any submitted value and restore only the value retained from the
+	// pre-transition configuration.
+	delete(config, utilityAgentConfigKey)
+	if agentID, ok := existing[utilityAgentConfigKey].(string); ok && agentID != "" {
+		config[utilityAgentConfigKey] = agentID
+	}
+	return config
 }
 
 // errSecretVaultRequired is returned by storeConfigSecrets when a plugin

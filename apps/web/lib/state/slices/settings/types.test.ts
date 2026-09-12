@@ -24,6 +24,7 @@ describe("toAgentProfileOption", () => {
     name: "claude-acp",
     capability_status: undefined,
     capability_error: undefined,
+    inference_capable: true,
   };
 
   it("maps enabled from the profile and defaults to true when absent", () => {
@@ -34,6 +35,7 @@ describe("toAgentProfileOption", () => {
       enabled: false,
     });
     expect(enabled.enabled).toBe(false);
+    expect(enabled.inference_capable).toBe(true);
 
     const legacy = toAgentProfileOption(agent, {
       id: agentProfileId("p2"),
