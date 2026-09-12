@@ -23,6 +23,11 @@ E2E_FAMILIES = [
 ]
 FRONTEND_FAMILIES = [
     {"name": "frontend", "tier": "standard"},
+    {
+        "name": "frontend_tests",
+        "tier": "standard",
+        "instances": [{"shard": 1, "total": 2}, {"shard": 2, "total": 2}],
+    },
     {"name": "frontend_gate", "tier": "light"},
 ]
 BACKEND_MATRIX_FAMILY = [
@@ -62,6 +67,12 @@ class RunnerPlanTest(unittest.TestCase):
 
         self.assertEqual(plan.plan["frontend_runner"], "ubuntu-latest")
         self.assertEqual(plan.plan["frontend_gate_runner"], "ubuntu-latest")
+        self.assertTrue(
+            all(
+                item["runner"] == "ubuntu-latest"
+                for item in plan.plan["frontend_tests_matrix"]["include"]
+            )
+        )
 
     def test_matrix_percentage_uses_floor_and_is_stable(self) -> None:
         first = runner_plan.build_plan(
@@ -217,6 +228,12 @@ class RunnerPlanTest(unittest.TestCase):
 
         self.assertEqual(plan.plan["frontend_runner"], "standard-runner")
         self.assertEqual(plan.plan["frontend_gate_runner"], "light-runner")
+        self.assertTrue(
+            all(
+                item["runner"] == "standard-runner"
+                for item in plan.plan["frontend_tests_matrix"]["include"]
+            )
+        )
 
 
 if __name__ == "__main__":

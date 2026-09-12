@@ -107,7 +107,7 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
             self.assertIn("runs-on: ubuntu-latest" if job == "postgres-boot" else "runs-on: windows-latest", protected)
             self.assertNotIn("runner_plan", protected)
 
-    def test_frontend_uses_planner_for_test_and_gate(self) -> None:
+    def test_frontend_uses_planner_for_unsharded_tests_and_gate(self) -> None:
         workflow = self.assert_planner(
             "frontend-tests.yml",
             "frontend",
@@ -121,6 +121,9 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
             "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}",
             job_block(workflow, "frontend", "frontend-gate"),
         )
+        frontend = job_block(workflow, "frontend", "frontend-gate")
+        self.assertNotIn("matrix:", frontend)
+        self.assertNotIn("frontend_tests", workflow)
         self.assertIn(
             "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}",
             job_block(workflow, "frontend-gate", None),
