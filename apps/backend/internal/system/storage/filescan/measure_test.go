@@ -169,6 +169,116 @@ func TestMeasureRejectsSymlinkAndSupportsMissingRoots(t *testing.T) {
 	}
 }
 
+func TestMeasureWithOptionsUsesRootSkipAndValidationHooks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "included"), []byte("included"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "excluded"), []byte("excluded"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "included"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	validated := false
+	results := NewLimiter(1).MeasureWithOptions(context.Background(), []Root{{
+		Path: root,
+		ShouldSkip: func(path string, _ os.DirEntry) (bool, error) {
+			return filepath.Base(path) == "excluded", nil
+		},
+		Validate: func() error {
+			validated = true
+			return nil
+		},
+	}}, MeasureOptions{TolerateEntryErrors: true, CountSkipped: true}, nil)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("measurement = %#v, want one successful result", results)
+	}
+	if results[0].Bytes != int64(len("included")) || !validated {
+		t.Fatalf("measurement = %#v, validated = %v", results[0], validated)
+	}
+	if !results[0].Partial || results[0].SkippedCount != 2 {
+		t.Fatalf("measurement = %#v, want two skipped entries and a partial result", results[0])
+	}
+}
+
+func TestMeasureWithOptionsCountsOnlyActuallySkippedEntries(t *testing.T) {
+	empty := t.TempDir()
+	results := NewLimiter(1).MeasureWithOptions(
+		context.Background(),
+		[]Root{{Path: empty}},
+		MeasureOptions{TolerateEntryErrors: true, CountSkipped: true},
+		nil,
+	)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("empty root measurement = %#v, want one successful result", results)
+	}
+	if results[0].Bytes != 0 || results[0].Partial || results[0].SkippedCount != 0 {
+		t.Fatalf("empty root measurement = %#v, want complete zero-byte result", results[0])
+	}
+
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	if err := os.Mkdir(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "data"), []byte("nested data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	results = NewLimiter(1).MeasureWithOptions(
+		context.Background(),
+		[]Root{{Path: root}},
+		MeasureOptions{TolerateEntryErrors: true, CountSkipped: true},
+		nil,
+	)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("nested root measurement = %#v, want one successful result", results)
+	}
+	if results[0].Bytes != int64(len("nested data")) || results[0].Partial || results[0].SkippedCount != 0 {
+		t.Fatalf("nested root measurement = %#v, want complete nested-file result", results[0])
+	}
+}
+
+func TestMeasureWithOptionsPreservesBytesFromInterruptedTolerantPartition(t *testing.T) {
+	root := t.TempDir()
+	partition := filepath.Join(root, "partition")
+	if err := os.Mkdir(partition, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(partition, "a-known"), []byte("known bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(partition, "b-cancel"), []byte("unread bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := NewLimiter(1).MeasureWithOptions(
+		ctx,
+		[]Root{{
+			Path: root,
+			ShouldSkip: func(path string, _ os.DirEntry) (bool, error) {
+				if filepath.Base(path) == "b-cancel" {
+					cancel()
+				}
+				return false, nil
+			},
+		}},
+		MeasureOptions{TolerateEntryErrors: true, CountSkipped: true},
+		nil,
+	)
+	if len(results) != 1 {
+		t.Fatalf("result count = %d, want one result", len(results))
+	}
+	if !errors.Is(results[0].Err, context.Canceled) {
+		t.Fatalf("interrupted measurement error = %v, want context.Canceled", results[0].Err)
+	}
+	if results[0].Bytes != int64(len("known bytes")) || !results[0].Partial {
+		t.Fatalf("interrupted measurement = %#v, want preserved sampled bytes and partial status", results[0])
+	}
+}
+
 func TestProgressTrackerNotifiesInSnapshotOrder(t *testing.T) {
 	var (
 		events                []Progress

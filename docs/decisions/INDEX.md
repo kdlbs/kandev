@@ -54,6 +54,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
 | 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-22) | backend, frontend, infra | 2026-07-14 |
 | 2026-09-10-storage-overlap-attribution | [Attribute storage by measured files](2026-09-10-storage-overlap-attribution.md) | accepted | backend, frontend | 2026-09-10 |
+| 2026-09-11-temporary-storage-visibility-policy | [Separate temporary visibility from cleanup ownership](2026-09-11-temporary-storage-visibility-policy.md) | accepted | backend, frontend, security | 2026-09-11 |
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted (amended 2026-08-09) | frontend                    | 2026-07-14 |
 | 0047 | [Plugins read conversation content via a capability-gated Host RPC](0047-plugin-host-conversation-reads.md)                          | accepted   | backend, protocol           | 2026-07-21 |
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |

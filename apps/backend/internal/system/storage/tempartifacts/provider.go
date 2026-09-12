@@ -25,6 +25,10 @@ type QuarantineStore interface {
 	TransitionQuarantineEntry(context.Context, string, storage.QuarantineState, string) (storage.QuarantineEntry, error)
 }
 
+type SettingsReader interface {
+	GetSettings(context.Context) (storage.StorageMaintenanceSettings, error)
+}
+
 type ProviderConfig struct {
 	Registry   *Registry
 	Store      QuarantineStore
@@ -35,6 +39,7 @@ type ProviderConfig struct {
 	NewID      func() string
 	Scanner    *filescan.Limiter
 	OnProgress func(filescan.Progress)
+	Settings   SettingsReader
 }
 
 type Provider struct {
@@ -47,6 +52,7 @@ type Provider struct {
 	newID      func() string
 	scanner    *filescan.Limiter
 	onProgress func(filescan.Progress)
+	settings   SettingsReader
 }
 
 type Analysis struct {
@@ -64,14 +70,22 @@ type Analysis struct {
 }
 
 type CleanupResult struct {
-	Skipped        bool     `json:"skipped"`
-	Reason         string   `json:"reason,omitempty"`
-	Considered     int      `json:"considered"`
-	Quarantined    int      `json:"quarantined"`
-	ReclaimedBytes int64    `json:"reclaimed_bytes"`
-	Failed         int      `json:"failed"`
-	FailedBytes    int64    `json:"failed_bytes"`
-	Warnings       []string `json:"warnings,omitempty"`
+	Skipped          bool     `json:"skipped"`
+	Reason           string   `json:"reason,omitempty"`
+	Considered       int      `json:"considered"`
+	Quarantined      int      `json:"quarantined"`
+	ReclaimedBytes   int64    `json:"reclaimed_bytes"`
+	QuarantinedBytes int64    `json:"quarantined_bytes"`
+	Failed           int      `json:"failed"`
+	FailedBytes      int64    `json:"failed_bytes"`
+	Warnings         []string `json:"warnings,omitempty"`
+}
+
+func retentionFromSettings(settings storage.StorageMaintenanceSettings, fallback time.Duration) time.Duration {
+	if settings.QuarantineRetentionHours <= 0 {
+		return fallback
+	}
+	return time.Duration(settings.QuarantineRetentionHours) * time.Hour
 }
 
 func NewProvider(config ProviderConfig) *Provider {
@@ -95,7 +109,7 @@ func NewProvider(config ProviderConfig) *Provider {
 		registry: config.Registry, store: config.Store, homeDir: filepath.Clean(config.HomeDir),
 		trashDir:  filepath.Clean(trashDir),
 		retention: retention, now: now, newID: newID,
-		scanner: config.Scanner, onProgress: config.OnProgress,
+		scanner: config.Scanner, onProgress: config.OnProgress, settings: config.Settings,
 	}
 }
 
@@ -300,8 +314,19 @@ func (p *Provider) AnalyzeWithProgress(
 	return copy.Analyze(ctx)
 }
 
-func (p *Provider) Cleanup(context.Context) (map[string]any, error) {
-	return toMap(CleanupResult{Skipped: true, Reason: "manual_only"}), nil
+func (p *Provider) Cleanup(ctx context.Context) (map[string]any, error) {
+	if p.settings == nil {
+		return toMap(CleanupResult{Skipped: true, Reason: "manual_only"}), nil
+	}
+	settings, err := p.settings.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !settings.TemporaryArtifacts.Enabled {
+		return toMap(CleanupResult{Skipped: true, Reason: "disabled"}), nil
+	}
+	result, err := p.cleanupExplicitWithRetention(ctx, retentionFromSettings(settings, p.retention))
+	return toMap(result), err
 }
 
 func (p *Provider) CleanupExplicit(ctx context.Context) (map[string]any, error) {
@@ -310,8 +335,23 @@ func (p *Provider) CleanupExplicit(ctx context.Context) (map[string]any, error) 
 }
 
 func (p *Provider) cleanupExplicit(ctx context.Context) (CleanupResult, error) {
+	retention := p.retention
+	if p.settings != nil {
+		settings, err := p.settings.GetSettings(ctx)
+		if err != nil {
+			return CleanupResult{}, err
+		}
+		retention = retentionFromSettings(settings, retention)
+	}
+	return p.cleanupExplicitWithRetention(ctx, retention)
+}
+
+func (p *Provider) cleanupExplicitWithRetention(ctx context.Context, retention time.Duration) (CleanupResult, error) {
 	if p.registry == nil || p.store == nil {
 		return CleanupResult{}, errors.New("temporary artifact provider is unavailable")
+	}
+	if err := p.registry.Reconcile(ctx); err != nil {
+		return CleanupResult{}, err
 	}
 	if err := p.Reconcile(ctx); err != nil {
 		return CleanupResult{}, err
@@ -345,7 +385,7 @@ func (p *Provider) cleanupExplicit(ctx context.Context) (CleanupResult, error) {
 			failures = append(failures, inspectErr)
 			continue
 		}
-		if err := p.quarantine(ctx, artifact, size); err != nil {
+		if err := p.quarantine(ctx, artifact, size, retention, cutoff); err != nil {
 			result.Failed++
 			result.FailedBytes += size
 			result.Warnings = append(result.Warnings, err.Error())
@@ -354,6 +394,7 @@ func (p *Provider) cleanupExplicit(ctx context.Context) (CleanupResult, error) {
 		}
 		result.Quarantined++
 		result.ReclaimedBytes += size
+		result.QuarantinedBytes += size
 	}
 	return result, errors.Join(failures...)
 }
@@ -384,7 +425,14 @@ func (p *Provider) quarantine(
 	ctx context.Context,
 	artifact storage.TemporaryArtifact,
 	size int64,
+	retention time.Duration,
+	cutoff time.Time,
 ) error {
+	current, err := p.revalidate(ctx, artifact, cutoff)
+	if err != nil {
+		return err
+	}
+	artifact = current
 	id := p.newID()
 	if id == "" {
 		return errors.New("temporary artifact quarantine id must not be empty")
@@ -406,16 +454,17 @@ func (p *Provider) quarantine(
 		ID: id, ResourceType: storage.ResourceTypeTemporaryArtifact,
 		OriginalPath: artifact.Path, QuarantinePath: quarantinePath, SizeBytes: size,
 		State: storage.QuarantineStateQuarantined, QuarantinedAt: now,
-		DeleteAfter: now.Add(p.retention), Metadata: metadata,
+		DeleteAfter: now.Add(retention), Metadata: metadata,
 	}
 	if err := p.store.CreateQuarantineEntry(ctx, entry); err != nil {
 		return fmt.Errorf("persist temporary artifact quarantine intent: %w", err)
 	}
-	if err := p.registry.Validate(artifact); err != nil {
+	current, err = p.revalidate(ctx, artifact, cutoff)
+	if err != nil {
 		_, _ = p.store.TransitionQuarantineEntry(ctx, entry.ID, storage.QuarantineStateFailed, err.Error())
 		return err
 	}
-	if err := os.Rename(artifact.Path, quarantinePath); err != nil {
+	if err := os.Rename(current.Path, quarantinePath); err != nil {
 		_, _ = p.store.TransitionQuarantineEntry(ctx, entry.ID, storage.QuarantineStateFailed, err.Error())
 		_ = p.registry.MarkFailed(ctx, artifact.ID, err.Error())
 		return fmt.Errorf("quarantine temporary artifact: %w", err)
@@ -425,6 +474,51 @@ func (p *Provider) quarantine(
 		return fmt.Errorf("persist temporary artifact quarantine: %w", err)
 	}
 	return nil
+}
+
+func (p *Provider) revalidate(
+	ctx context.Context,
+	expected storage.TemporaryArtifact,
+	cutoff time.Time,
+) (storage.TemporaryArtifact, error) {
+	current, err := p.registry.Get(ctx, expected.ID)
+	if err != nil {
+		return storage.TemporaryArtifact{}, fmt.Errorf("reload temporary artifact %s: %w", expected.ID, err)
+	}
+	if current.ID != expected.ID ||
+		current.Kind != expected.Kind ||
+		current.Path != expected.Path ||
+		current.MarkerToken != expected.MarkerToken ||
+		current.OwnerPID != expected.OwnerPID ||
+		!current.CreatedAt.Equal(expected.CreatedAt) ||
+		!sameTime(current.LastHeartbeatAt, expected.LastHeartbeatAt) ||
+		!sameTime(current.ClosedAt, expected.ClosedAt) {
+		return storage.TemporaryArtifact{}, fmt.Errorf(
+			"temporary artifact %s changed since candidate selection", expected.ID,
+		)
+	}
+	if current.State != storage.TemporaryArtifactStateClosed &&
+		current.State != storage.TemporaryArtifactStateAbandoned {
+		return storage.TemporaryArtifact{}, fmt.Errorf(
+			"skip temporary artifact %s: lifecycle state is %s", current.Path, current.State,
+		)
+	}
+	if artifactAge(current).After(cutoff) {
+		return storage.TemporaryArtifact{}, fmt.Errorf(
+			"skip temporary artifact %s: lifecycle age is below the cleanup threshold", current.Path,
+		)
+	}
+	if err := p.registry.Validate(current); err != nil {
+		return storage.TemporaryArtifact{}, fmt.Errorf("validate temporary artifact %s: %w", current.Path, err)
+	}
+	return current, nil
+}
+
+func sameTime(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Equal(*right)
 }
 
 func (p *Provider) Restore(ctx context.Context, id string) (storage.QuarantineEntry, error) {

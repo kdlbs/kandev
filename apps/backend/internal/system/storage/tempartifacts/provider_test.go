@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -121,6 +122,243 @@ func TestProviderProtectsRecentlyClosedArtifact(t *testing.T) {
 	}
 	if analysis.ProtectedCount != 1 || analysis.ProtectedBytes == 0 || analysis.StaleCount != 0 {
 		t.Fatalf("analysis = %#v, want recently closed artifact protected", analysis)
+	}
+}
+
+func TestProviderScheduledCleanupFollowsSavedTemporaryArtifactPolicy(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	artifacts := newFakeArtifactStore()
+	registry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: 1234,
+		Now: func() time.Time { return now }, NewID: func() string { return "artifact-1" },
+		NewToken: func() string { return "token-1" },
+	})
+	lease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lease.Path(), "bundle.zip"), []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	artifact := artifacts.artifacts[lease.Path()]
+	old := now.Add(-25 * time.Hour)
+	artifact.CreatedAt, artifact.ClosedAt = old, &old
+	artifacts.artifacts[lease.Path()] = artifact
+
+	quarantine := newFakeQuarantineStore()
+	settings := storage.DefaultSettings()
+	settings.TemporaryArtifacts.Enabled = true
+	settings.QuarantineRetentionHours = 48
+	provider := NewProvider(ProviderConfig{
+		Registry: registry, Store: quarantine, HomeDir: home,
+		Settings: testSettingsReader{settings: settings},
+		Now:      func() time.Time { return now }, NewID: func() string { return "quarantine-1" },
+	})
+
+	result, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("scheduled Cleanup: %v", err)
+	}
+	if result["skipped"] != false || result["quarantined"] != float64(1) {
+		t.Fatalf("scheduled cleanup = %#v, want one quarantined artifact", result)
+	}
+	quarantinedBytes, ok := result["quarantined_bytes"].(float64)
+	if !ok || quarantinedBytes <= 0 || quarantinedBytes != result["reclaimed_bytes"] {
+		t.Fatalf("scheduled cleanup bytes = %#v, want moved bytes in both result fields", result)
+	}
+	entry := quarantine.entries["quarantine-1"]
+	if !entry.DeleteAfter.Equal(now.Add(48 * time.Hour)) {
+		t.Fatalf("delete deadline = %s, want saved 48-hour retention", entry.DeleteAfter)
+	}
+}
+
+func TestProviderScheduledCleanupReconcilesOwnerDeathWithoutRestart(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	artifacts := newFakeArtifactStore()
+	owner := exec.Command("sh", "-c", "sleep 30")
+	if err := owner.Start(); err != nil {
+		t.Fatalf("start owner process: %v", err)
+	}
+	t.Cleanup(func() {
+		if owner.ProcessState == nil {
+			_ = owner.Process.Kill()
+			_ = owner.Wait()
+		}
+	})
+
+	oldRegistry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: int64(owner.Process.Pid), RunID: "owner-run",
+		Now: func() time.Time { return now }, NewID: func() string { return "artifact-1" },
+		NewToken: func() string { return "token-1" },
+	})
+	lease, err := oldRegistry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lease.Path(), "bundle"), []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifact := artifacts.artifacts[lease.Path()]
+	old := now.Add(-25 * time.Hour)
+	artifact.CreatedAt, artifact.LastHeartbeatAt = old, &old
+	artifacts.artifacts[lease.Path()] = artifact
+
+	settings := storage.DefaultSettings()
+	settings.TemporaryArtifacts.Enabled = true
+	quarantine := newFakeQuarantineStore()
+	currentRegistry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: int64(os.Getpid()), RunID: "current-run",
+		Now: func() time.Time { return now }, NewID: func() string { return "current-artifact" },
+		NewToken: func() string { return "current-token" },
+	})
+	provider := NewProvider(ProviderConfig{
+		Registry: currentRegistry, Store: quarantine, HomeDir: home,
+		Settings: testSettingsReader{settings: settings}, Now: func() time.Time { return now },
+		NewID: func() string { return "quarantine-1" },
+	})
+
+	first, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("cleanup while owner is alive: %v", err)
+	}
+	if first["quarantined"] != float64(0) {
+		t.Fatalf("cleanup while owner is alive = %#v, want protected active artifact", first)
+	}
+
+	if err := owner.Process.Kill(); err != nil {
+		t.Fatalf("kill owner process: %v", err)
+	}
+	_ = owner.Wait()
+
+	second, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("cleanup after owner death: %v", err)
+	}
+	if second["quarantined"] != float64(1) {
+		t.Fatalf("cleanup after owner death = %#v, want one quarantined artifact", second)
+	}
+	third, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("repeated cleanup after owner death: %v", err)
+	}
+	if third["quarantined"] != float64(0) {
+		t.Fatalf("repeated cleanup = %#v, want no duplicate quarantine", third)
+	}
+	if artifacts.artifacts[lease.Path()].State != storage.TemporaryArtifactStateQuarantined {
+		t.Fatalf("artifact state = %q, want quarantined", artifacts.artifacts[lease.Path()].State)
+	}
+}
+
+func TestProviderExplicitCleanupBypassesDisabledTemporaryArtifactPolicy(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	artifacts := newFakeArtifactStore()
+	registry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: 1234,
+		Now: func() time.Time { return now }, NewID: func() string { return "artifact-1" },
+		NewToken: func() string { return "token-1" },
+	})
+	lease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindHostUtility, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lease.Path(), "cache"), []byte("cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	artifact := artifacts.artifacts[lease.Path()]
+	old := now.Add(-25 * time.Hour)
+	artifact.CreatedAt, artifact.ClosedAt = old, &old
+	artifacts.artifacts[lease.Path()] = artifact
+
+	settings := storage.DefaultSettings()
+	settings.TemporaryArtifacts.Enabled = false
+	quarantine := newFakeQuarantineStore()
+	provider := NewProvider(ProviderConfig{
+		Registry: registry, Store: quarantine, HomeDir: home,
+		Settings: testSettingsReader{settings: settings},
+		Now:      func() time.Time { return now }, NewID: func() string { return "quarantine-1" },
+	})
+
+	scheduled, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("scheduled Cleanup: %v", err)
+	}
+	if scheduled["skipped"] != true || scheduled["reason"] != "disabled" {
+		t.Fatalf("scheduled cleanup = %#v, want disabled skip", scheduled)
+	}
+
+	explicit, err := provider.CleanupExplicit(context.Background())
+	if err != nil {
+		t.Fatalf("explicit Cleanup: %v", err)
+	}
+	if explicit["quarantined"] != float64(1) {
+		t.Fatalf("explicit cleanup = %#v, want one quarantined artifact", explicit)
+	}
+	if _, err := os.Stat(lease.Path()); !os.IsNotExist(err) {
+		t.Fatalf("original artifact still exists: %v", err)
+	}
+}
+
+func TestProviderRevalidatesLifecycleBeforeQuarantineRename(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	artifacts := newFakeArtifactStore()
+	registry := NewRegistry(Config{
+		Store: artifacts, TempRoot: root, OwnerPID: 1234,
+		Now: func() time.Time { return now }, NewID: func() string { return "artifact-1" },
+		NewToken: func() string { return "token-1" },
+	})
+	lease, err := registry.Create(context.Background(), storage.TemporaryArtifactKindImproveBundle, nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lease.Path(), "bundle"), []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	artifact := artifacts.artifacts[lease.Path()]
+	old := now.Add(-25 * time.Hour)
+	artifact.CreatedAt, artifact.ClosedAt = old, &old
+	artifacts.artifacts[lease.Path()] = artifact
+
+	quarantine := newFakeQuarantineStore()
+	quarantine.onCreate = func() {
+		current := artifacts.artifacts[lease.Path()]
+		recent := now.Add(-time.Hour)
+		current.ClosedAt = &recent
+		artifacts.artifacts[lease.Path()] = current
+	}
+	provider := NewProvider(ProviderConfig{
+		Registry: registry, Store: quarantine, HomeDir: home,
+		Now: func() time.Time { return now }, NewID: func() string { return "quarantine-1" },
+	})
+
+	result, err := provider.cleanupExplicit(context.Background())
+	if err == nil {
+		t.Fatal("cleanup succeeded after lifecycle timestamp changed")
+	}
+	if result.Failed != 1 || len(result.Warnings) != 1 {
+		t.Fatalf("cleanup result = %#v, want one revalidation failure", result)
+	}
+	if _, err := os.Stat(lease.Path()); err != nil {
+		t.Fatalf("original artifact was changed: %v", err)
+	}
+	if quarantine.entries["quarantine-1"].State != storage.QuarantineStateFailed {
+		t.Fatalf("quarantine entry = %#v, want failed intent", quarantine.entries["quarantine-1"])
 	}
 }
 
@@ -335,7 +573,8 @@ func TestProviderCanRequarantineRestoredArtifact(t *testing.T) {
 }
 
 type fakeQuarantineStore struct {
-	entries map[string]storage.QuarantineEntry
+	entries  map[string]storage.QuarantineEntry
+	onCreate func()
 }
 
 func newFakeQuarantineStore() *fakeQuarantineStore {
@@ -344,6 +583,9 @@ func newFakeQuarantineStore() *fakeQuarantineStore {
 
 func (s *fakeQuarantineStore) CreateQuarantineEntry(_ context.Context, entry *storage.QuarantineEntry) error {
 	s.entries[entry.ID] = *entry
+	if s.onCreate != nil {
+		s.onCreate()
+	}
 	return nil
 }
 
@@ -403,4 +645,12 @@ func validFakeQuarantineTransition(current, next storage.QuarantineState) bool {
 	default:
 		return false
 	}
+}
+
+type testSettingsReader struct {
+	settings storage.StorageMaintenanceSettings
+}
+
+func (s testSettingsReader) GetSettings(context.Context) (storage.StorageMaintenanceSettings, error) {
+	return s.settings, nil
 }

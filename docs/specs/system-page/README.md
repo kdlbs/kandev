@@ -39,6 +39,7 @@ feedback.
 
 ### System design
 
+- [Temporary storage visibility and cleanup](system-design/storage-temporary-folders.md)
 - [Database Storage Analysis System Design](system-design/storage-database-footprint.md)
 
 

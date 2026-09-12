@@ -324,11 +324,13 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
 
       await runOwnedBackendFixture(tmpDir, async (registerProcess) => {
         const homeDir = path.join(tmpDir, ".kandev");
+        const systemTemporaryRoot = path.join(tmpDir, "system-temporary");
         const dbPath = path.join(tmpDir, "kandev.db");
         const worktreeBase = path.join(tmpDir, "worktrees");
         const repoCloneBase = path.join(tmpDir, "managed-repos");
 
         fs.mkdirSync(homeDir, { recursive: true });
+        fs.mkdirSync(systemTemporaryRoot, { recursive: true });
         fs.mkdirSync(worktreeBase, { recursive: true });
         fs.mkdirSync(repoCloneBase, { recursive: true });
 
@@ -400,6 +402,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           KANDEV_SERVER_PORT: String(backendPort),
           KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
           KANDEV_DATABASE_PATH: dbPath,
+          KANDEV_E2E_SYSTEM_TEMP_ROOT: systemTemporaryRoot,
           // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
           // apply the `e2e:` profile from profiles.yaml at startup —
           // which sets the mock agent and third-party provider flags,

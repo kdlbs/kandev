@@ -278,16 +278,25 @@ Do not enable those rules on a daemon shared with unrelated workloads.
 
 ![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
-The Storage page also reports **Kandev temporary artifacts** created by services that need a
-short-lived directory under the host temporary root. Each current artifact is registered in the
-Kandev database and carries an owner-only marker in its exact directory. Active artifacts and
-artifacts created within the last 24 hours are protected. **Clean stale artifacts** is a manual-only
-action: it moves eligible, registered artifacts into Kandev quarantine on the same filesystem so
-they can be restored during the configured retention period. It does not permanently delete them.
+The Storage page also reports **System temporary folders** as a read-only footprint. It measures the
+service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
+Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
+informational and can overlap counted categories, so it is excluded from **Total counted**. It has
+no cleanup action and does not claim ownership of any path.
+
+The page separately reports **Kandev temporary artifacts** created by services that need a short-lived
+directory under the host temporary root. Each current artifact is registered in the Kandev database
+and carries an owner-only marker in its exact directory. Active artifacts and artifacts created
+within the last 24 hours are protected. The **Clean stale Kandev temporary artifacts** policy is off
+by default. When enabled, scheduled maintenance and a full **Run now** may move eligible, registered
+artifacts into Kandev quarantine on the same filesystem. An explicit **Clean stale artifacts** action
+is available even when the policy is off. Quarantine entries can be restored during the configured
+retention period; this action does not permanently delete them or immediately free disk space.
 The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
-caches, preview/CI/dev-harness directories, or temporary data belonging to another Kandev
-installation. A missing registry or failed measurement is shown as unavailable rather than as
-zero usage. The inherited `TMPDIR`, `TMP`, and `TEMP` behavior below is unchanged.
+caches, preview/CI/dev-harness directories, temporary data belonging to another Kandev
+installation, or legacy `/tmp/kandev-agent/*` directories. A missing registry or failed measurement
+is shown as unavailable rather than as zero usage. The inherited `TMPDIR`, `TMP`, and `TEMP`
+behavior below is unchanged.
 
 Host-local agents inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` values unchanged. If the
 service leaves them unset, agent tools use their normal operating-system defaults; if an operator

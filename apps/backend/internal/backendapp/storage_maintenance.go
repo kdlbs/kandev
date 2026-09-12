@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
+	"github.com/kandev/kandev/internal/system/storage/tempstore"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
@@ -167,8 +168,9 @@ func prepareStorageDependencies(
 	tempProvider := tempartifacts.NewProvider(tempartifacts.ProviderConfig{
 		Registry: tempArtifacts, Store: store, HomeDir: cfg.ResolvedHomeDir(),
 		TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
-		Scanner:  scanner,
+		Scanner:  scanner, Settings: settings,
 	})
+	systemTemporary := tempstore.New(systemTemporaryConfig(scanner))
 	if err := tempProvider.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact quarantine", err)
 	}
@@ -197,6 +199,7 @@ func prepareStorageDependencies(
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
 		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider, database: database,
+		systemTemporary: systemTemporary,
 	}
 	cachedOverview := newStorageOverviewCache(overview, eventBus, log, logError)
 	quarantine := &workspaceQuarantineController{
@@ -210,6 +213,17 @@ func prepareStorageDependencies(
 		quarantine:     quarantine,
 		providers:      storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider),
 	}, nil
+}
+
+func systemTemporaryConfig(scanner *filescan.Limiter) tempstore.Config {
+	config := tempstore.Config{Scanner: scanner}
+	if root := os.Getenv("KANDEV_E2E_SYSTEM_TEMP_ROOT"); root != "" {
+		// The browser fixture supplies a disposable root so E2E analysis never
+		// reads the host's shared temporary directory.
+		config.EffectiveRoot = root
+		config.UnixRoot = root
+	}
+	return config
 }
 
 func newStorageOverviewCache(
@@ -317,6 +331,7 @@ type storageOverview struct {
 	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
 	tempArtifacts    *tempartifacts.Provider
+	systemTemporary  *tempstore.Provider
 	dockerClient     *lazyStorageDocker
 	dockerHost       string
 	homeDir          string
@@ -360,6 +375,8 @@ func (o *storageOverview) summary(
 		databaseErr       error
 		backupSummary     databasestore.Measurement
 		backupErr         error
+		systemTempSummary tempstore.Analysis
+		systemTempErr     error
 	)
 	var measurements sync.WaitGroup
 	measurements.Add(6)
@@ -424,6 +441,24 @@ func (o *storageOverview) summary(
 		reporter.start(storagepkg.StorageSourceTemporaryArtifacts)
 		reporter.complete(storagepkg.StorageSourceTemporaryArtifacts, tempSummary, nil)
 	}
+	if o.systemTemporary != nil {
+		measurements.Add(1)
+		go func() {
+			defer measurements.Done()
+			reporter.start(storagepkg.StorageSourceSystemTemporary)
+			systemTempSummary, systemTempErr = o.analyzeSystemTemporary(ctx, reporter)
+			reporter.complete(
+				storagepkg.StorageSourceSystemTemporary,
+				summaryValue(systemTempSummary, systemTempErr), systemTempErr,
+			)
+		}()
+	} else {
+		reporter.start(storagepkg.StorageSourceSystemTemporary)
+		reporter.complete(storagepkg.StorageSourceSystemTemporary, tempstore.Analysis{
+			Status: tempstore.StatusNotApplicable, IncludedInTotal: false,
+			Reason: "system temporary provider unavailable",
+		}, nil)
+	}
 	measurements.Wait()
 	if err := ctx.Err(); err != nil {
 		return storagepkg.Summary{}, err
@@ -432,6 +467,7 @@ func (o *storageOverview) summary(
 		workspaceSummary, workspaceErr, goCacheSummary, goCacheErr,
 		quarantineSummary, quarantineErr, tempSummary, tempErr, dockerSummary,
 		databaseSummary, databaseErr, backupSummary, backupErr,
+		systemTempSummary, systemTempErr,
 	), nil
 }
 
@@ -449,12 +485,15 @@ func summaryFromMeasurements(
 	databaseErr error,
 	backupSummary databasestore.Measurement,
 	backupErr error,
+	systemTempSummary tempstore.Analysis,
+	systemTempErr error,
 ) storagepkg.Summary {
 	return storagepkg.Summary{
 		Workspaces:         summaryValue(workspaceSummary, workspaceErr),
 		GoCache:            summaryValue(goCacheSummary, goCacheErr),
 		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
 		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
+		SystemTemporary:    summaryValue(systemTempSummary, systemTempErr),
 		Docker:             dockerSummaryMap(dockerSummary),
 		Database:           databaseMeasurementValue(databaseSummary, databaseErr),
 		DatabaseBackups:    databaseMeasurementValue(backupSummary, backupErr),
@@ -528,10 +567,15 @@ type temporaryArtifactsProgressAnalyzer interface {
 	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (tempartifacts.Analysis, error)
 }
 
+type systemTemporaryProgressAnalyzer interface {
+	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (tempstore.Analysis, error)
+}
+
 var (
 	_ workspaceProgressAnalyzer          = (*workspaces.Provider)(nil)
 	_ goCacheProgressAnalyzer            = (*gocache.Provider)(nil)
 	_ temporaryArtifactsProgressAnalyzer = (*tempartifacts.Provider)(nil)
+	_ systemTemporaryProgressAnalyzer    = (*tempstore.Provider)(nil)
 )
 
 func (o *storageOverview) analyzeWorkspaces(
@@ -564,6 +608,15 @@ func (o *storageOverview) analyzeTemporaryArtifacts(
 ) (tempartifacts.Analysis, error) {
 	return o.tempArtifacts.AnalyzeWithProgress(
 		ctx, reporter.filesystem(storagepkg.StorageSourceTemporaryArtifacts),
+	)
+}
+
+func (o *storageOverview) analyzeSystemTemporary(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+) (tempstore.Analysis, error) {
+	return o.systemTemporary.AnalyzeWithProgress(
+		ctx, reporter.filesystem(storagepkg.StorageSourceSystemTemporary),
 	)
 }
 

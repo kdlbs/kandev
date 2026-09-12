@@ -22,6 +22,9 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 
 ## Migrated source detail
 
+The [temporary storage visibility and cleanup design](storage-temporary-folders.md) supersedes the
+temporary-storage passages below where its implemented policy differs.
+
 ## Scenarios
 
 - **GIVEN** scheduled maintenance has never been configured, **WHEN** Kandev starts as a systemd
@@ -133,9 +136,11 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 - **GIVEN** a stale registered artifact and no current activity blocker, **WHEN** the user confirms
   **Clean stale artifacts**, **THEN** the request uses `resources: ["temporary_artifacts"]`, the root
   moves by same-filesystem rename into quarantine, and the result appears in Quarantine.
-- **GIVEN** the user selects unscoped **Run now** or scheduled maintenance, **WHEN** a stale
-  registered temporary artifact exists, **THEN** the artifact remains in place because this provider
-  is explicit-only.
+- **GIVEN** the temporary-artifact policy is disabled, **WHEN** the user selects unscoped **Run now**
+  or scheduled maintenance, **THEN** a stale registered temporary artifact remains in place.
+- **GIVEN** the temporary-artifact policy is enabled, **WHEN** unscoped **Run now** or scheduled
+  maintenance runs, **THEN** an eligible stale registered artifact uses the same validated
+  quarantine path as explicit cleanup.
 - **GIVEN** a registered artifact has a missing/mismatched marker, a symlinked root, a path escape,
   or a cross-device quarantine destination, **WHEN** analysis or cleanup runs, **THEN** Kandev
   reports the safety warning and leaves the original path unchanged.
@@ -187,7 +192,7 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 - A Kandev-owned general-purpose sweeper for the operating system's shared temporary directory.
 - Cleaning unregistered `kandev-*` roots from another installation or from standalone preview, CI,
   E2E, or `dev-isolated` harnesses.
-- A persisted temporary-artifact threshold or scheduled cleanup toggle in the first release.
+- A persisted temporary-artifact age threshold or a general shared temporary cleanup policy.
 - Guaranteed compatibility with tools that require a fixed, globally unique name in shared temp;
   those tools need a scoped path override when a real collision is observed.
 

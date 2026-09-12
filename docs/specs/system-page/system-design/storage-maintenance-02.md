@@ -198,11 +198,12 @@ registered temporary-artifact provider is available. API responses never expose 
 values.
 
 The existing `POST /storage/run` resource selection accepts `temporary_artifacts` in addition to the
-existing provider names. It is an explicit-only selection: an empty `resources` list and scheduled
-maintenance invoke the provider's no-op path and never move temporary roots. The temporary-artifact
-summary contains `total_bytes`, `active_bytes`, `protected_bytes`, `stale_bytes`, `total_count`,
-`active_count`, `protected_count`, `stale_count`, `skipped_count`, `available`, and an optional
-`warnings` array.
+existing provider names. An explicit selection always invokes cleanup independently of the saved
+option. An empty `resources` list and scheduled maintenance invoke the provider's no-op path when
+the option is disabled; when it is enabled, they use the same eligibility and quarantine path. The
+temporary-artifact summary contains `total_bytes`, `active_bytes`, `protected_bytes`, `stale_bytes`,
+`total_count`, `active_count`, `protected_count`, `stale_count`, `skipped_count`, `available`, and an
+optional `warnings` array.
 
 `GET /storage/settings` is the lightweight policy-read contract. It reads persisted settings and
 capabilities without requesting an overview snapshot or invoking filesystem, Go-cache, quarantine,
@@ -306,8 +307,8 @@ quarantined -> restored
 ```text
 active    -> closed                 producer releases the lease normally
           -> abandoned              restart/reconciliation finds no live lease
-closed    -> quarantined             explicit temporary_artifacts cleanup
-abandoned -> quarantined             explicit cleanup after the stale interval
+closed    -> quarantined             enabled scheduled/full or explicit cleanup
+abandoned -> quarantined             enabled scheduled/full or explicit cleanup after the stale interval
 quarantined -> restored|deleted|failed
 failed      -> quarantined|deleted
 ```

@@ -82,7 +82,7 @@
   "permissionEvents": "事件",
   "permissionExternalOrigins": "外部來源",
   "permissionExternalOrigin": "外部 HTTPS 來源",
-  "permissionSharedState": "讀寫共用畫布狀態",
+  "permissionSharedState": "讀寫共享畫布狀態",
   "permissionReadTasks": "讀取任務資料",
   "permissionReadWorkflows": "讀取工作流程資料",
   "permissionWriteTasks": "寫入任務資料",

@@ -18,6 +18,10 @@ stream coarse progress to the Storage page.
 The order protects the cache contract. The scanner lands first, the backend state contract follows,
 and the web work consumes that contract.
 
+The [temporary storage visibility and cleanup package](../storage-temporary-folders/plan.md)
+extends this completed source and progress contract with an informational system temporary-folder
+source.
+
 ## Scope
 
 ### In scope

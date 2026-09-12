@@ -1,18 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { Switch } from "@kandev/ui/switch";
+import { IconTrash } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsWithDockerAcknowledgement } from "@/hooks/domains/system/use-storage-maintenance";
 import type { StorageCapabilities, StorageMaintenanceSettings } from "@/lib/types/system";
-import { DedicatedDockerDialog, ExternalGoCacheDialog } from "./storage-confirmation-dialogs";
 import { StorageAdoptionField } from "./storage-adoption-field";
 import { NumberField, PolicySection, SettingRow } from "./storage-policy-fields";
 import { bytesToGigabytes, gigabytesToBytes } from "./storage-units";
 import { StorageWorkspaceDependencySettings } from "./storage-workspace-dependency-settings";
+import { StorageActionButton } from "./storage-action-button";
 
-type Props = {
+export type StoragePolicyCardProps = {
   settings: StorageMaintenanceSettings;
   savedSettings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;
@@ -25,10 +24,11 @@ type Props = {
   onChange: (settings: StorageMaintenanceSettings) => void;
   onAdopt: (path: string) => Promise<void>;
   onCleanDependencies?: () => void;
+  onCleanTemporaryArtifacts?: () => void;
 };
 
-type PolicySectionProps = Pick<
-  Props,
+export type PolicySectionProps = Pick<
+  StoragePolicyCardProps,
   "settings" | "savedSettings" | "capabilities" | "onChange" | "pending" | "pendingReason"
 >;
 
@@ -40,7 +40,12 @@ function settingIsDirty<T>(
   return !Object.is(select(settings), select(savedSettings));
 }
 
-function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+export function ScheduleSection({
+  settings,
+  savedSettings,
+  pending,
+  onChange,
+}: PolicySectionProps) {
   const { t } = useTranslation();
   const enabledDirty = settingIsDirty(settings, savedSettings, (value) => value.enabled);
   const intervalDirty = settingIsDirty(
@@ -99,14 +104,14 @@ function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicyS
   );
 }
 
-function WorkspaceSection({
+export function WorkspaceSection({
   settings,
   savedSettings,
   pending,
   pendingReason,
   onChange,
   onCleanDependencies,
-}: PolicySectionProps & Pick<Props, "onCleanDependencies">) {
+}: PolicySectionProps & Pick<StoragePolicyCardProps, "onCleanDependencies">) {
   const { t } = useTranslation();
   const workspacesDirty = settingIsDirty(
     settings,
@@ -186,7 +191,7 @@ function WorkspaceSection({
   );
 }
 
-function GoCacheSection({
+export function GoCacheSection({
   settings,
   savedSettings,
   capabilities,
@@ -385,7 +390,7 @@ function DockerImageSettings({
   );
 }
 
-function DockerSection({
+export function DockerSection({
   settings,
   savedSettings,
   capabilities,
@@ -455,7 +460,12 @@ function DockerSection({
   );
 }
 
-function QuarantineSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+export function QuarantineSection({
+  settings,
+  savedSettings,
+  pending,
+  onChange,
+}: PolicySectionProps) {
   const { t } = useTranslation();
   const retentionDirty = settingIsDirty(
     settings,
@@ -488,104 +498,60 @@ function QuarantineSection({ settings, savedSettings, pending, onChange }: Polic
   );
 }
 
-export function StoragePolicyCard({
+export function TemporaryArtifactsSection({
   settings,
   savedSettings,
-  capabilities,
   pending,
   pendingReason,
   onChange,
-  onAdopt,
-  onCleanDependencies,
-}: Props) {
+  onCleanTemporaryArtifacts,
+}: PolicySectionProps & Pick<StoragePolicyCardProps, "onCleanTemporaryArtifacts">) {
   const { t } = useTranslation();
-  const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
-  const [adoptionDialogOpen, setAdoptionDialogOpen] = useState(false);
-  const savedAdoptionPath = savedSettings.go_cache.adopted_path;
-  const [adoptionPath, setAdoptionPath] = useState(savedAdoptionPath);
-  const previousSavedAdoptionPath = useRef(savedAdoptionPath);
-
-  useEffect(() => {
-    const previousPath = previousSavedAdoptionPath.current;
-    setAdoptionPath((currentPath) =>
-      currentPath === previousPath ? savedAdoptionPath : currentPath,
-    );
-    previousSavedAdoptionPath.current = savedAdoptionPath;
-  }, [savedAdoptionPath]);
-
+  const enabled = settings.temporary_artifacts?.enabled ?? false;
+  const savedEnabled = savedSettings.temporary_artifacts?.enabled ?? false;
+  const cleanupDisabledReason = pending
+    ? (pendingReason ?? t("system:storageActionPending"))
+    : pendingReason;
   return (
-    <section className="min-w-0 space-y-4" data-testid="storage-policy-card">
-      <div>
-        <h2 className={SETTINGS_TYPOGRAPHY.sectionTitle}>{t("system:storagePolicyTitle")}</h2>
-        <p className={SETTINGS_TYPOGRAPHY.sectionDescription}>
-          {t("system:storagePolicyDescription")}
-        </p>
-      </div>
-      <div className="space-y-3">
-        <ScheduleSection
-          settings={settings}
-          savedSettings={savedSettings}
-          capabilities={capabilities}
-          pending={pending}
-          pendingReason={pendingReason}
-          onChange={onChange}
-        />
-        <WorkspaceSection
-          settings={settings}
-          savedSettings={savedSettings}
-          capabilities={capabilities}
-          pending={pending}
-          pendingReason={pendingReason}
-          onChange={onChange}
-          onCleanDependencies={onCleanDependencies}
-        />
-        <GoCacheSection
-          settings={settings}
-          savedSettings={savedSettings}
-          capabilities={capabilities}
-          pending={pending}
-          pendingReason={pendingReason}
-          onChange={onChange}
-          adoptionPath={adoptionPath}
-          setAdoptionPath={setAdoptionPath}
-          onOpenAdoption={() => setAdoptionDialogOpen(true)}
-        />
-        <DockerSection
-          settings={settings}
-          savedSettings={savedSettings}
-          capabilities={capabilities}
-          pending={pending}
-          pendingReason={pendingReason}
-          onChange={onChange}
-          onOpenDedicated={() => setDockerDialogOpen(true)}
-        />
-        <QuarantineSection
-          settings={settings}
-          savedSettings={savedSettings}
-          capabilities={capabilities}
-          pending={pending}
-          pendingReason={pendingReason}
-          onChange={onChange}
-        />
-      </div>
-      <DedicatedDockerDialog
-        open={dockerDialogOpen}
-        onOpenChange={setDockerDialogOpen}
-        onConfirm={() => {
-          const next = settingsWithDockerAcknowledgement(settings, true);
-          onChange(next);
-          setDockerDialogOpen(false);
-        }}
+    <PolicySection
+      sectionId="temporary-artifacts"
+      title={t("system:storageTemporaryArtifactsPolicyTitle")}
+      description={t("system:storageTemporaryArtifactsPolicyDescription")}
+      isDirty={enabled !== savedEnabled}
+    >
+      <SettingRow
+        title={t("system:storageCleanStaleTemporaryArtifacts")}
+        description={t("system:storageTemporaryArtifactsPolicySummary")}
+        help={t("system:storageTemporaryArtifactsPolicyHelp")}
+        control={
+          <Switch
+            checked={enabled}
+            disabled={pending}
+            onCheckedChange={(nextEnabled) =>
+              onChange({ ...settings, temporary_artifacts: { enabled: nextEnabled } })
+            }
+            aria-label={t("system:storageCleanStaleTemporaryArtifacts")}
+            data-testid="storage-temporary-artifacts-enabled"
+            data-settings-dirty={enabled !== savedEnabled}
+          />
+        }
       />
-      <ExternalGoCacheDialog
-        path={adoptionPath}
-        open={adoptionDialogOpen}
-        onOpenChange={setAdoptionDialogOpen}
-        onConfirm={() => {
-          void onAdopt(adoptionPath.trim());
-          setAdoptionDialogOpen(false);
-        }}
-      />
-    </section>
+      <div className="space-y-1 pt-3 text-xs text-muted-foreground">
+        <p>{t("system:storageTemporaryArtifactsPolicyAge")}</p>
+        <p>{t("system:storageTemporaryArtifactsPolicyQuarantine")}</p>
+        <p>{t("system:storageTemporaryArtifactsPolicyShared")}</p>
+      </div>
+      {onCleanTemporaryArtifacts && (
+        <StorageActionButton
+          variant="outline"
+          className="mt-3 w-full sm:w-auto"
+          disabledReason={cleanupDisabledReason}
+          onClick={onCleanTemporaryArtifacts}
+          data-testid="storage-policy-temporary-artifacts-clean"
+        >
+          <IconTrash className="size-4" /> {t("system:storageCleanStaleTemporaryArtifactsAction")}
+        </StorageActionButton>
+      )}
+    </PolicySection>
   );
 }
