@@ -498,7 +498,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
-		Env:                         selectedCheckoutAgentEnv(req.Env, req.Metadata),
+		Env:                        selectedCheckoutAgentEnv(req.Env, req.Metadata),
 	}
 }
 
