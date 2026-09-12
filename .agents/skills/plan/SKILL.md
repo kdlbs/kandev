@@ -53,8 +53,9 @@ Identify:
 - Existing tests and end-to-end patterns.
 - The dependency order for implementation.
 
-Check `docs/decisions/INDEX.md` for relevant decisions. Stop when the
-requirements, system design, ADRs, and code disagree on a material boundary.
+Use `python3 scripts/list-docs.py decisions --text <capability-term> --format paths`
+to locate relevant decisions. Stop when the requirements, system design, ADRs,
+and code disagree on a material boundary.
 
 ### 2. Write `plan.md`
 

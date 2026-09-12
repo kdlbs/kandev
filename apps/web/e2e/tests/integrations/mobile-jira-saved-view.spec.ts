@@ -12,10 +12,7 @@ test.describe("Mobile Jira saved views", () => {
     await apiClient.waitForIntegrationAuthHealthy("jira");
   });
 
-  test("keeps custom-view confirmation inline, touch-sized, and contained", async ({
-    testPage,
-    apiClient,
-  }) => {
+  test("hands custom-view deletion off to a touch-sized sheet", async ({ testPage, apiClient }) => {
     const seedResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       jira_saved_views: [
         {
@@ -34,7 +31,8 @@ test.describe("Mobile Jira saved views", () => {
     expect(seedResponse.ok).toBe(true);
     await testPage.goto("/jira");
 
-    await testPage.getByRole("button", { name: "Assigned to me" }).tap();
+    const pickerTrigger = testPage.getByRole("button", { name: "Assigned to me" });
+    await pickerTrigger.tap();
     const deleteAction = testPage.getByRole("button", {
       name: "Delete Long mobile sprint bugs that need review",
     });
@@ -48,14 +46,16 @@ test.describe("Mobile Jira saved views", () => {
       "Delete Long mobile sprint bugs that need review?",
     );
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+    await expect(testPage.locator('[data-slot="popover-content"]')).toHaveCount(0);
     for (const action of await confirmation.getByRole("button").all()) {
       const box = await action.boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     }
     await assertNoDocumentHorizontalOverflow(testPage, "mobile Jira saved-view confirmation");
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
-    await expect(deleteAction).toBeFocused();
+    await expect(pickerTrigger).toBeFocused();
 
+    await pickerTrigger.tap();
     await deleteAction.tap();
     const deleteResponse = testPage.waitForResponse(
       (response) =>
@@ -68,6 +68,7 @@ test.describe("Mobile Jira saved views", () => {
       .getByRole("button", { name: "Delete Long mobile sprint bugs that need review" })
       .tap();
     await deleteResponse;
+    await pickerTrigger.tap();
     await expect(deleteAction).toHaveCount(0);
   });
 });

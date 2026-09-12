@@ -67,7 +67,7 @@ test.describe("Mobile subtask detachment", () => {
     await expect(testPage.getByRole("menuitem", { name: "Detach from parent" })).toHaveCount(0);
   });
 
-  test("keeps kanban detachment inline on a phone", async ({ testPage, apiClient, seedData }) => {
+  test("confirms kanban detachment in a phone sheet", async ({ testPage, apiClient, seedData }) => {
     const placement = {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -91,11 +91,11 @@ test.describe("Mobile subtask detachment", () => {
     let menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
     await menu.getByRole("menuitem", { name: "Detach from parent" }).click();
 
-    let inlineConfirmation = testPage.getByTestId("detach-task-inline-confirmation");
+    let inlineConfirmation = testPage.getByTestId("mobile-action-confirmation");
     await expect(inlineConfirmation).toBeVisible();
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
-    await expect(inlineConfirmation.getByTestId("detach-task-confirm")).toHaveClass(/h-11/);
-    await expect(inlineConfirmation.getByTestId("detach-task-confirm")).toHaveClass(/min-w-11/);
+    await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
+    await expect(inlineConfirmation.getByTestId("detach-task-confirm")).toHaveClass(/min-h-12/);
     await expect
       .poll(() => testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true);
@@ -107,7 +107,7 @@ test.describe("Mobile subtask detachment", () => {
     await card.getByRole("button", { name: "More options" }).click();
     menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
     await menu.getByRole("menuitem", { name: "Detach from parent" }).click();
-    inlineConfirmation = testPage.getByTestId("detach-task-inline-confirmation");
+    inlineConfirmation = testPage.getByTestId("mobile-action-confirmation");
     await inlineConfirmation.getByTestId("detach-task-confirm").click();
 
     await expect.poll(async () => (await apiClient.getTask(child.id)).parent_id ?? "").toBe("");

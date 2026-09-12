@@ -208,12 +208,15 @@ test("mobile board opens a focused column editor without horizontal overflow", a
   await deleteSavedView.tap();
   const deleteConfirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
   await expect(deleteConfirmation).toHaveAccessibleName("Delete Mobile security queue?");
-  await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(0);
+  await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+  await expect(testPage.getByRole("menu")).toHaveCount(0);
   for (const action of await deleteConfirmation.getByRole("button").all()) {
     const box = await action.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   }
   await deleteConfirmation.getByRole("button", { name: "Cancel" }).tap();
+  await expect(savedViewsMenu).toBeFocused();
+  await savedViewsMenu.tap();
   await expect(deleteSavedView).toBeVisible();
 
   await deleteSavedView.tap();
@@ -228,6 +231,8 @@ test("mobile board opens a focused column editor without horizontal overflow", a
     .getByRole("button", { name: "Delete Mobile security queue" })
     .tap();
   await deleteSavedViewResponse;
+  await expect(deleteSavedView).toHaveCount(0);
+  await savedViewsMenu.tap();
   await expect(deleteSavedView).toHaveCount(0);
   await testPage.keyboard.press("Escape");
   await expect(testPage.getByRole("menu")).toBeHidden();

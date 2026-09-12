@@ -13,6 +13,7 @@ import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { useTranslation } from "react-i18next";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type HeaderMode = "view" | "rename" | "saveAs";
 
@@ -33,6 +34,7 @@ type HeaderProps = {
 };
 
 export function ViewHeaderRow(props: HeaderProps) {
+  const { isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
   const [mode, setMode] = useState<HeaderMode>("view");
   const [nameDraft, setNameDraft] = useState("");
@@ -81,41 +83,44 @@ export function ViewHeaderRow(props: HeaderProps) {
     setEditingViewId(null);
   }, [activeViewId, editingViewId, mode]);
 
-  if (props.deleteConfirmation) {
+  if (props.deleteConfirmation && !isMobile) {
     return <div className="min-w-0 p-1">{props.deleteConfirmation}</div>;
   }
 
   return (
-    <div className="flex items-center justify-between gap-2">
-      <div className="flex flex-1 items-center gap-2 text-xs">
-        <span className="text-muted-foreground">
-          {mode === "saveAs" ? t("task:saveAs") : t("task:view")}
-        </span>
-        {isEditing ? (
-          <NameInput
-            mode={mode}
-            value={nameDraft}
-            onChange={setNameDraft}
-            onSubmit={submit}
-            onCancel={exit}
-          />
-        ) : (
-          <NameDisplay activeView={props.activeView} hasDraft={props.hasDraft} />
-        )}
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-1 items-center gap-2 text-xs">
+          <span className="text-muted-foreground">
+            {mode === "saveAs" ? t("task:saveAs") : t("task:view")}
+          </span>
+          {isEditing ? (
+            <NameInput
+              mode={mode}
+              value={nameDraft}
+              onChange={setNameDraft}
+              onSubmit={submit}
+              onCancel={exit}
+            />
+          ) : (
+            <NameDisplay activeView={props.activeView} hasDraft={props.hasDraft} />
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {isEditing ? (
+            <EditingActions
+              mode={mode}
+              canSubmit={!!nameDraft.trim()}
+              onSubmit={submit}
+              onCancel={exit}
+            />
+          ) : (
+            <ViewActions {...props} onRename={enterRename} onSaveAs={enterSaveAs} />
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-1">
-        {isEditing ? (
-          <EditingActions
-            mode={mode}
-            canSubmit={!!nameDraft.trim()}
-            onSubmit={submit}
-            onCancel={exit}
-          />
-        ) : (
-          <ViewActions {...props} onRename={enterRename} onSaveAs={enterSaveAs} />
-        )}
-      </div>
-    </div>
+      {isMobile ? props.deleteConfirmation : null}
+    </>
   );
 }
 

@@ -19,9 +19,9 @@ docs/specs/
 Read the [specification guide](guide/README.md) before you create or change a
 specification. Use the files in [templates](templates) for new documents.
 
-The [specification catalog](INDEX.md) is the entry point for the completed
-system-oriented layout. Each system README names its authoritative requirements
-and system designs.
+The [specification catalog entry page](INDEX.md) explains how to query current
+documents. Run the catalog command instead of maintaining a tracked document
+list. Each system README defines its durable boundary and related systems.
 
 Plans and work orders are in [`docs/plans`](../plans). Architecture decisions
 are in [`docs/decisions`](../decisions). Public user documentation is in

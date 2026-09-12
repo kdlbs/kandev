@@ -24,7 +24,7 @@ func subagentContextActivationKeyInsertSQL(key, value string) string {
 // empty string as this key's legitimate sentinel value, not "absent".
 func (r *Repository) subagentContextActivationKeyPresent(key string) (bool, error) {
 	var value string
-	err := r.db.QueryRow(r.db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), key).Scan(&value)
+	err := r.db.QueryRowContext(r.migrationContext(), r.db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), key).Scan(&value)
 	if err == nil {
 		return true, nil
 	}

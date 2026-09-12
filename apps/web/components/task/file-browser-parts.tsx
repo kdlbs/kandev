@@ -21,12 +21,13 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
+import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import type { FileBrowserRow } from "./file-browser-hooks";
 import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
 import { InlineFileInput } from "./inline-file-input";
-import { renderSessionOrLoadState } from "./file-browser-load-state";
 import {
   FileContextMenu,
   useFileDeleteAction,
@@ -134,11 +135,13 @@ export function FileTreeNodeTouchActions({
 }) {
   const { t } = useTranslation();
   const deleteAction = useFileDeleteAction();
+  const { isMobile } = useResponsiveBreakpoint();
+  const deletePendingRef = React.useRef(false);
   if (!showTouchActions || (!onAddToChatContext && !deleteAction)) return null;
 
   const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
 
-  if (deleteAction?.confirming && !deleteAction.isBulk) {
+  if (deleteAction?.confirming && !deleteAction.isBulk && !isMobile) {
     return (
       <InlineConfirmActions
         density="touch"
@@ -159,6 +162,7 @@ export function FileTreeNodeTouchActions({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
+          ref={deleteAction?.triggerRef}
           type="button"
           data-testid="file-tree-node-actions"
           data-path={node.path}
@@ -176,6 +180,12 @@ export function FileTreeNodeTouchActions({
         align="end"
         data-testid="file-tree-touch-menu"
         onClick={stopRowInteraction}
+        onCloseAutoFocus={(event) => {
+          if (!deletePendingRef.current) return;
+          event.preventDefault();
+          deletePendingRef.current = false;
+          deleteAction?.onDelete();
+        }}
       >
         {onAddToChatContext && (
           <DropdownMenuItem
@@ -191,7 +201,10 @@ export function FileTreeNodeTouchActions({
             data-testid="file-tree-touch-delete"
             variant="destructive"
             className="min-h-11 cursor-pointer"
-            onSelect={deleteAction.onDelete}
+            onSelect={() => {
+              if (isMobile && !deleteAction.isBulk) deletePendingRef.current = true;
+              else deleteAction.onDelete();
+            }}
           >
             <IconTrash className="h-3.5 w-3.5" />
             {deleteAction.isBulk
@@ -399,7 +412,7 @@ export function SearchResultsList({
 
 export { FileBrowserToolbar } from "./file-browser-toolbar";
 
-type FileBrowserContentAreaProps = {
+export type FileBrowserContentAreaProps = {
   isSearchActive: boolean;
   searchResults: string[] | null;
   isSessionFailed: boolean;
@@ -425,6 +438,9 @@ type FileBrowserContentAreaProps = {
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   onRetry: () => void;
+  workspaceRestoration?: WorkspaceRestorationAttempt | null;
+  onRestoreWorkspace?: () => void;
+  restoreWorkspaceDisabled?: boolean;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
@@ -493,7 +509,7 @@ function scheduleVirtualRowReveal(reveal: () => void): () => void {
   };
 }
 
-function FileTreeView(props: FileBrowserContentAreaProps) {
+export function FileTreeView(props: FileBrowserContentAreaProps) {
   if (!props.tree) return null;
   return <VirtualizedFileTreeView {...props} />;
 }
@@ -588,31 +604,4 @@ function VirtualizedFileTreeView(props: FileBrowserContentAreaProps) {
       })}
     </div>
   );
-}
-
-export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
-  const { t } = useTranslation();
-  if (props.isSearchActive && props.searchResults !== null) {
-    return (
-      <SearchResultsList
-        searchResults={props.searchResults}
-        fileStatuses={props.fileStatuses}
-        onOpenFile={props.onOpenFile}
-        showTouchActions={props.showTouchActions}
-        onAddToChatContext={props.onAddToChatContext}
-      />
-    );
-  }
-  const loadStateResult = renderSessionOrLoadState({
-    isSessionFailed: props.isSessionFailed,
-    sessionError: props.sessionError,
-    loadState: props.loadState,
-    isLoadingTree: props.isLoadingTree,
-    tree: props.tree,
-    loadError: props.loadError,
-    onRetry: props.onRetry,
-  });
-  if (loadStateResult) return loadStateResult;
-  if (props.tree) return <FileTreeView {...props} />;
-  return <div className="p-4 text-sm text-muted-foreground">{t("task:noFilesFound")}</div>;
 }

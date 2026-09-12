@@ -129,7 +129,10 @@ function ContextWindowRing({ usagePercent }: { usagePercent: number }) {
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={strokeDashoffset}
-        className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
+        className={cn(
+          getCircleColor(usagePercent),
+          "transition-[stroke-dashoffset] duration-300 ease-out",
+        )}
       />
     </svg>
   );

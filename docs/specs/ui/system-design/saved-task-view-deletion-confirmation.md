@@ -1,6 +1,7 @@
 ---
 status: current
 system: ui
+updated: 2026-09-10
 requirements:
   - REQ-UI-SAVED-TASK-VIEW-DELETION-001
 ---
@@ -26,6 +27,14 @@ second saved-view source of truth.
 | `REQ-UI-SAVED-TASK-VIEW-DELETION-001` | [Shared confirmation shell](#shared-confirmation-shell), [Surface adapters](#surface-adapters), [Control flow](#control-flow), and [Responsive and accessibility behavior](#responsive-and-accessibility-behavior) |
 
 ## Surface inventory
+
+The planned [mobile action confirmation design](mobile-action-confirmations.md)
+owns phone presentation, including phones with a fine pointer. On phones,
+`SavedTaskViewDeleteConfirmation` renders through the shared mobile adapter;
+drawer/dialog owners supply a host, and transient menus transfer to a stable
+owner before closing. The `popover`/`inline` API and row replacement mechanics
+below remain the non-phone implementation contract. Phone saved rows retain
+their geometry, and hidden host content preserves scroll and editor state.
 
 | Owning surface | Existing delete entry | Existing mutation boundary |
 | --- | --- | --- |
@@ -101,16 +110,15 @@ or user-authored label already rendered by that surface.
   GitHub, GitLab, and Azure DevOps. The shared dropdown stays mounted around a
   fine-pointer confirmation; its coarse-pointer row becomes the inline surface.
 - GitHub and GitLab `PresetsSidebar` components keep their mobile-sheet
-  candidate local and replace only that saved-query row. Their delete actions
+  candidate local and display a confirmation step in that sheet. Their delete actions
   remain separate from row selection and GitHub's default marker.
 - Jira `ViewsDropdown` coordinates custom saved-view rows. Built-in rows never
   create a candidate. Its parent popover uses the same confirmation-boundary
   handling as the shared scope-bar menu.
 
-The task sidebar, Threads, integration scope bar, and Jira adapters read pointer
-mode from `useResponsiveBreakpoint`. GitHub and GitLab mobile sidebars always
-use the coarse-pointer inline presentation because their Kandev-owned mount is
-the phone filter sheet.
+The task sidebar, Threads, integration scope bar, and Jira adapters select the
+phone surface before reading pointer mode from `useResponsiveBreakpoint`.
+GitHub and GitLab mobile filter sheets provide an explicit confirmation host.
 
 ## Data and contracts
 
@@ -134,8 +142,8 @@ mounted.
 1. The owning surface evaluates its existing eligibility and pending rules.
 2. Activating an available delete trigger records the target and anchor. It
    prevents row selection or default-toggle events and performs no mutation.
-3. A fine pointer opens the anchored confirmation. A coarse pointer replaces
-   the relevant row or action region inside its existing parent surface.
+3. A phone opens the shared mobile step. Outside phone widths, a fine pointer
+   opens the anchored confirmation and a coarse pointer retains inline content.
 4. Cancel, Escape, parent dismissal, target disappearance, view switching, or
    unmount clears the candidate without invoking the delete callback.
 5. Explicit Delete first closes the confirmation, then invokes the owning
@@ -155,12 +163,13 @@ viewport-contained non-modal popover anchored to the trigger. Its parent
 dropdown or popover stays mounted while focus moves between the two surfaces,
 and Cancel restores focus to the connected trigger.
 
-Coarse-pointer triggers and both confirmation actions use a minimum 44-pixel
+Tablet coarse-pointer triggers and both confirmation actions use a minimum 44-pixel
 hit area and are visible without hover. Inline content wraps long translated
 copy and names without widening its parent. It remains inside the current
 drawer, sheet, dropdown bottom sheet, or editor, so no second modal navigation
 layer is introduced. The existing parent remains the sole vertical scroll
-owner and keeps its current safe-area padding.
+owner and keeps its current safe-area padding. Phone hosts instead reveal only
+the focused confirmation step, as specified in the linked mobile design.
 
 The confirmation is exposed as a named group or dialog. Cancel receives initial
 focus. Escape is a cancellation path, the destructive action is not an implicit

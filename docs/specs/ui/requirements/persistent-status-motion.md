@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-23
-updated: 2026-08-28
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -106,9 +106,56 @@ keep pulsing, so that active work remains obvious without high steady CPU use.
   unavailable, each migrated surface shall retain its current animated CSS
   fallback and reduced-motion behavior.
 
+## Proposed follow-up requirements
+
+The following additions are draft for the
+[rendering CPU follow-up](../../../plans/frontend-rendering-cpu/plan.md).
+Requirements 001 through 003 remain the accepted contract. Their visible-motion
+criteria apply while the target is visible; the proposed lifecycle below
+governs hidden targets.
+
+### REQ-UI-PERSISTENT-STATUS-MOTION-004: Hidden motion lifecycle
+
+**Intent:** Avoid spending rendering resources on status motion the user cannot see.
+
+#### Acceptance criteria
+
+- **AC-UI-PERSISTENT-STATUS-MOTION-004.1:** When the document is hidden, its
+  host-owned persistent rotation, grid, and pulse animations shall pause.
+- **AC-UI-PERSISTENT-STATUS-MOTION-004.2:** When a status target is outside its
+  scroll viewport or in an inactive hidden panel, its motion shall pause.
+- **AC-UI-PERSISTENT-STATUS-MOTION-004.3:** When the target becomes visible,
+  motion shall resume only if its current status still requires motion. A status
+  that settled while hidden shall appear settled without replaying old motion.
+- **AC-UI-PERSISTENT-STATUS-MOTION-004.4:** Pausing motion shall preserve task
+  updates, transcript content, draft input, focus, scroll position, accessible
+  status, and existing reduced-motion behavior on desktop and mobile.
+- **AC-UI-PERSISTENT-STATUS-MOTION-004.5:** When visibility observation is
+  unavailable, visible status feedback shall remain usable through the existing
+  fallback. Repeated visibility changes shall not accumulate live animations.
+
+### REQ-UI-PERSISTENT-STATUS-MOTION-005: Bounded context-ring motion
+
+**Intent:** Animate changes in context usage without animating unrelated styles.
+
+#### Acceptance criteria
+
+- **AC-UI-PERSISTENT-STATUS-MOTION-005.1:** When context usage changes, the ring
+  shall reach the new value with its existing 300 ms easing and geometry.
+- **AC-UI-PERSISTENT-STATUS-MOTION-005.2:** The ring shall animate only its
+  usage arc. Color and inherited scrollbar styles shall not start transitions.
+- **AC-UI-PERSISTENT-STATUS-MOTION-005.3:** Desktop and phone shall retain the
+  same usage value, threshold colors, accessible disclosure, and touch behavior.
+
+## Implementation plans
+
+- [Idle CPU (completed)](../../../plans/frontend-idle-cpu/plan.md)
+- [Animation CPU (completed)](../../../plans/frontend-animation-cpu/plan.md)
+- [Rendering CPU follow-up (draft)](../../../plans/frontend-rendering-cpu/plan.md)
+
 ## Out of scope
 
-- Removing status motion.
+- Removing visible status motion.
 - Changing task, session, or run state rules.
 - Changing reduced-motion behavior.
 - Migrating one-shot entrance, selection, search, or confirmation cues.

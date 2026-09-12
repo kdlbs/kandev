@@ -899,12 +899,24 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
 		info.ValidatedTaskEnvironmentID = taskEnv.ID
 		info.ValidatedExecutorType = taskEnv.ExecutorType
+		info.ValidatedTaskEnvironmentGeneration = taskEnv.OwnershipGeneration
 		if info.ExecutorType == "" {
 			info.ExecutorType = taskEnv.ExecutorType
 		}
 		info.TaskDirName = taskEnv.TaskDirName
+		if taskEnv.TaskID != "" && taskEnv.TaskID != taskID {
+			owner, ownerErr := s.tasks.GetTask(ctx, taskEnv.TaskID)
+			if ownerErr != nil {
+				return nil, fmt.Errorf("get workspace owner task: %w", ownerErr)
+			}
+			info.WorkspaceOwnerArchived = owner != nil && owner.ArchivedAt != nil
+		}
 	}
-	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, session.Worktrees, info); err != nil {
+	workspaceInventory := session.Worktrees
+	if taskEnv != nil {
+		workspaceInventory = taskEnv.Repos
+	}
+	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, workspaceInventory, info); err != nil {
 		return nil, err
 	}
 
@@ -1004,6 +1016,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 		return fmt.Errorf("get workspace task: %w", err)
 	} else if task != nil {
 		info.WorkspaceID = task.WorkspaceID
+		info.TaskArchived = task.ArchivedAt != nil
 	}
 	worktreesByIdentity := make(map[workspaceWorktreeKey]*models.TaskEnvironmentRepo, len(sessionWorktrees))
 	for _, worktree := range sessionWorktrees {

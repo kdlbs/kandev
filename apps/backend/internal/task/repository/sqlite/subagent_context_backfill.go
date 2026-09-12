@@ -2,6 +2,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -89,16 +90,17 @@ func (r *Repository) migrateSubagentContextBackfill() {
 //     trigger, or from a pre-amendment partial pair — is preserved verbatim
 //     (AC-24 point 5, AC-24d revision 4).
 func (r *Repository) migrateSubagentContextBackfillUnsafe() error {
+	ctx := r.migrationContext()
 	postgres := dialect.IsPostgres(r.db.DriverName())
 	predicate, selectCols := subagentContextBackfillPredicateAndColumns(postgres)
 
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin subagent context backfill transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	backfillThrough, err := subagentContextBackfillHighWaterMark(tx, postgres, predicate)
+	backfillThrough, err := subagentContextBackfillHighWaterMark(ctx, tx, postgres, predicate)
 	if err != nil {
 		return err
 	}
@@ -148,15 +150,15 @@ func (r *Repository) migrateSubagentContextBackfillUnsafe() error {
 		WHERE m.rn = 1
 		ON CONFLICT (task_session_id, agent_execution_id, tool_call_id) DO NOTHING
 	`
-	if _, err := tx.Exec(insertSQL); err != nil {
+	if _, err := tx.ExecContext(ctx, insertSQL); err != nil {
 		return fmt.Errorf("subagent context backfill insert: %w", err)
 	}
 
 	captureSince := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := tx.Exec(subagentContextActivationKeyInsertSQL(subagentContextCaptureSinceKey, captureSince)); err != nil {
+	if _, err := tx.ExecContext(ctx, subagentContextActivationKeyInsertSQL(subagentContextCaptureSinceKey, captureSince)); err != nil {
 		return fmt.Errorf("write subagent_context_capture_since: %w", err)
 	}
-	if _, err := tx.Exec(subagentContextActivationKeyInsertSQL(subagentContextBackfillThroughKey, backfillThrough)); err != nil {
+	if _, err := tx.ExecContext(ctx, subagentContextActivationKeyInsertSQL(subagentContextBackfillThroughKey, backfillThrough)); err != nil {
 		return fmt.Errorf("write subagent_context_backfill_through: %w", err)
 	}
 
@@ -176,11 +178,11 @@ func (r *Repository) migrateSubagentContextBackfillUnsafe() error {
 // see the declared column type; wrapping it in MAX() loses that, so the scan
 // target must be a string on that dialect (see parseLegacyTimestamp's own
 // comment for the same fact). PostgreSQL's driver has no such gap.
-func subagentContextBackfillHighWaterMark(tx *sqlx.Tx, postgres bool, predicate string) (string, error) {
+func subagentContextBackfillHighWaterMark(ctx context.Context, tx *sqlx.Tx, postgres bool, predicate string) (string, error) {
 	query := `SELECT MAX(m.created_at) FROM task_session_messages m WHERE ` + predicate
 	if postgres {
 		var maxCreatedAt sql.NullTime
-		if err := tx.QueryRow(query).Scan(&maxCreatedAt); err != nil {
+		if err := tx.QueryRowContext(ctx, query).Scan(&maxCreatedAt); err != nil {
 			return "", fmt.Errorf("compute subagent context backfill high-water mark: %w", err)
 		}
 		if !maxCreatedAt.Valid {
@@ -189,7 +191,7 @@ func subagentContextBackfillHighWaterMark(tx *sqlx.Tx, postgres bool, predicate 
 		return maxCreatedAt.Time.UTC().Format(time.RFC3339Nano), nil
 	}
 	var maxCreatedAt sql.NullString
-	if err := tx.QueryRow(query).Scan(&maxCreatedAt); err != nil {
+	if err := tx.QueryRowContext(ctx, query).Scan(&maxCreatedAt); err != nil {
 		return "", fmt.Errorf("compute subagent context backfill high-water mark: %w", err)
 	}
 	if !maxCreatedAt.Valid || maxCreatedAt.String == "" {
