@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/office/wakeup"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -387,7 +388,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 	runCtx officeruntime.RunContext,
 	instructionsDir, agentsMD string,
 ) string {
-	pc := si.buildPromptContext(ctx, run.Reason, run.Payload)
+	pc := si.buildPromptContext(ctx, run.Reason, run.Payload, run.ContextSnapshot)
 	pc.RunID = runCtx.RunID
 	pc.AgentID = runCtx.AgentID
 	pc.SessionID = runCtx.SessionID
@@ -912,13 +913,18 @@ func (si *SchedulerIntegration) resolveExecutorForRun(
 	return si.svc.ResolveExecutor(ctx, "", agent.ID, projectID, "")
 }
 
-// buildPromptContext assembles a PromptContext from run data.
+// buildPromptContext assembles a PromptContext from run data. contextSnapshot
+// is run.ContextSnapshot — decoded as a wakeup.RoutinePayload only when
+// reason is one of the three routine-dispatch reasons, so every other run's
+// prompt stays byte-identical to before this parameter existed
+// (AC-OFFICE-ROUTINE-CATCHUP-002.5).
 func (si *SchedulerIntegration) buildPromptContext(
-	ctx context.Context, reason, payload string,
+	ctx context.Context, reason, payload, contextSnapshot string,
 ) *PromptContext {
 	parsed := ParseRunPayload(payload)
 	pc := &PromptContext{Reason: reason}
 	pc.OneTimeInstructions = parsed[RunPayloadOneTimeInstructionsKey]
+	applyRoutineCatchUpContext(pc, reason, contextSnapshot)
 
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)
@@ -963,6 +969,35 @@ func (si *SchedulerIntegration) buildPromptContext(
 	}
 
 	return pc
+}
+
+// applyRoutineCatchUpContext decodes contextSnapshot as a
+// wakeup.RoutinePayload and copies its catch-up fields onto pc, but only
+// when reason is one of the three routine-dispatch reasons. Gating on all
+// three, not just RunReasonRoutineDispatchCron, matters:
+// PromoteRunAndCoalesceWakeupIfQueued can rewrite an in-flight run's reason
+// to RunReasonRoutineDispatchEvent after a cron claim already measured and
+// stored the gap, so a Cron-only gate would silently drop it
+// (AC-OFFICE-ROUTINE-CATCHUP-002.5). A manual or webhook fire never writes
+// these fields, so gating the other two reasons this way is safe: there is
+// nothing to decode for them. Any run with a different reason is left
+// byte-identical to before this function existed.
+func applyRoutineCatchUpContext(pc *PromptContext, reason, contextSnapshot string) {
+	switch reason {
+	case shared.RunReasonRoutineDispatchCron, shared.RunReasonRoutineDispatchEvent, shared.RunReasonRoutineDispatch:
+	default:
+		return
+	}
+	var routinePayload wakeup.RoutinePayload
+	if err := wakeup.UnmarshalPayload(contextSnapshot, &routinePayload); err != nil {
+		return
+	}
+	if routinePayload.MissedTicks <= 0 || routinePayload.MissedSince == "" {
+		return
+	}
+	pc.MissedTicks = routinePayload.MissedTicks
+	pc.MissedSince = routinePayload.MissedSince
+	pc.MissedTruncated = routinePayload.MissedTruncated
 }
 
 // enrichHandoffContext populates pc.HandoffContext from the office

@@ -585,19 +585,29 @@ type RoutineTrigger struct {
 }
 
 // RoutineRun represents a single run of a routine.
+//
+// CatchUpMissedTicks/CatchUpFirstMissedAt/CatchUpTruncated are the gap
+// summary measured for the claim that created this run — written once
+// at creation and never modified afterward (AC-OFFICE-ROUTINE-CATCHUP-002.10).
+// CatchUpMissedTicks is nil when no gap summary was recorded; per
+// AC-002.3, absence is never represented as a stored zero, so a nil
+// check (not a zero check) is the presence test.
 type RoutineRun struct {
-	ID                  string           `json:"id" db:"id"`
-	RoutineID           string           `json:"routine_id" db:"routine_id"`
-	TriggerID           string           `json:"trigger_id" db:"trigger_id"`
-	Source              string           `json:"source" db:"source"`
-	Status              RoutineRunStatus `json:"status" db:"status"`
-	TriggerPayload      string           `json:"trigger_payload" db:"trigger_payload"`
-	LinkedTaskID        string           `json:"linked_task_id" db:"linked_task_id"`
-	CoalescedIntoRunID  string           `json:"coalesced_into_run_id" db:"coalesced_into_run_id"`
-	DispatchFingerprint string           `json:"dispatch_fingerprint" db:"dispatch_fingerprint"`
-	StartedAt           *time.Time       `json:"started_at" db:"started_at"`
-	CompletedAt         *time.Time       `json:"completed_at" db:"completed_at"`
-	CreatedAt           time.Time        `json:"created_at" db:"created_at"`
+	ID                   string           `json:"id" db:"id"`
+	RoutineID            string           `json:"routine_id" db:"routine_id"`
+	TriggerID            string           `json:"trigger_id" db:"trigger_id"`
+	Source               string           `json:"source" db:"source"`
+	Status               RoutineRunStatus `json:"status" db:"status"`
+	TriggerPayload       string           `json:"trigger_payload" db:"trigger_payload"`
+	LinkedTaskID         string           `json:"linked_task_id" db:"linked_task_id"`
+	CoalescedIntoRunID   string           `json:"coalesced_into_run_id" db:"coalesced_into_run_id"`
+	DispatchFingerprint  string           `json:"dispatch_fingerprint" db:"dispatch_fingerprint"`
+	CatchUpMissedTicks   *int             `json:"catch_up_missed_ticks,omitempty" db:"catch_up_missed_ticks"`
+	CatchUpFirstMissedAt *time.Time       `json:"catch_up_first_missed_at,omitempty" db:"catch_up_first_missed_at"`
+	CatchUpTruncated     bool             `json:"catch_up_truncated" db:"catch_up_truncated"`
+	StartedAt            *time.Time       `json:"started_at" db:"started_at"`
+	CompletedAt          *time.Time       `json:"completed_at" db:"completed_at"`
+	CreatedAt            time.Time        `json:"created_at" db:"created_at"`
 }
 
 // ApprovalType constants for approval request types.

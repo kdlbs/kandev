@@ -84,12 +84,25 @@ func (p RoutineConcurrencyPolicy) Valid() bool {
 }
 
 // RoutineCatchUpPolicy controls what happens when a scheduled routine
-// missed fires (e.g. backend was down).
+// missed fires (e.g. backend was down). Whatever the policy, a claim
+// dispatches at most one routine run — the policy only decides whether
+// the gap crossed is reported to the woken agent. See
+// docs/specs/office/requirements/routine-catch-up.md.
 type RoutineCatchUpPolicy string
 
 // Routine catch-up policy values. The DB default is
-// `enqueue_missed_with_cap`; the alternative skips missed fires entirely.
+// `summarize_missed`; the alternative skips gap reporting entirely.
 const (
+	// CatchUpPolicySummarizeMissed is the canonical summarizing policy:
+	// the gap crossed by a claim is recorded and delivered to the woken
+	// agent. Named for what happens (one wake, gap summarized), not for
+	// the discarded enqueue-N-runs design the old name implied.
+	CatchUpPolicySummarizeMissed RoutineCatchUpPolicy = "summarize_missed"
+	// CatchUpPolicyEnqueueMissedWithCap is the deprecated alias for
+	// CatchUpPolicySummarizeMissed. Retained forever — never delete —
+	// so NormaliseCatchUpPolicy has a name to compare persisted rows
+	// and API requests against; installs that already stored it must
+	// keep reading and writing successfully.
 	CatchUpPolicyEnqueueMissedWithCap RoutineCatchUpPolicy = "enqueue_missed_with_cap"
 	CatchUpPolicySkipMissed           RoutineCatchUpPolicy = "skip_missed"
 )
@@ -97,10 +110,13 @@ const (
 // String implements fmt.Stringer.
 func (p RoutineCatchUpPolicy) String() string { return string(p) }
 
-// Valid reports whether p is one of the declared RoutineCatchUpPolicy values.
+// Valid reports whether p is one of the declared RoutineCatchUpPolicy
+// values, including the deprecated alias — a client sending the old
+// value on create/update gets 200, not 400; NormaliseCatchUpPolicy
+// normalizes the persisted value to the canonical one.
 func (p RoutineCatchUpPolicy) Valid() bool {
 	switch p {
-	case CatchUpPolicyEnqueueMissedWithCap, CatchUpPolicySkipMissed:
+	case CatchUpPolicySummarizeMissed, CatchUpPolicyEnqueueMissedWithCap, CatchUpPolicySkipMissed:
 		return true
 	}
 	return false

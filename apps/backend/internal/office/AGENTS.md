@@ -4,7 +4,7 @@
 
 ## Spec authority
 
-`docs/specs/office/` (15 files) is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A sixteenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office-agent-tier-routing/spec.md), lives in a sibling directory, not under `docs/specs/office/`.
+`docs/specs/office/` (16 files) is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A seventeenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office-agent-tier-routing/spec.md), lives in a sibling directory, not under `docs/specs/office/`.
 
 | Spec | Status | Covers |
 |---|---|---|
@@ -12,6 +12,7 @@
 | `agents.md` | draft | Persistent Office agent identity vs. execution profiles |
 | `tasks.md` | draft | Office task model: assignee, reviewers/approvers, blockers, subtasks, per-agent working memory |
 | `scheduler.md` | draft | Autonomous wakeup pipeline: assignments/comments/approvals, routines, idle skip, retry/backoff |
+| `routine-catch-up.md` | shipped | Resuming after downtime produces exactly one run per due trigger, never one per missed tick; `catch_up_max` bounds only how many ticks are counted/reported, never how many runs fire; policy `enqueue_missed_with_cap` renamed to `summarize_missed` (deprecated alias accepted forever) |
 | `runtime.md` | draft | Error-handling contract for the agent runtime; **2026-08-17 amendment**: provider classification/recovery is superseded by `../platform/provider-error-recovery.md` and `../agents/dynamic-agent-routing.md` — read the amendment banner before the body |
 | `routing.md` | **archived** | Provider routing; superseded by `../agents/dynamic-agent-routing.md` — do not treat as current |
 | `costs.md` | in-progress | Cost tracking and budget management |

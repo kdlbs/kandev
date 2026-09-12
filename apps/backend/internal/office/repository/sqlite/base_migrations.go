@@ -62,6 +62,7 @@ func (r *Repository) runMigrations() error {
 	r.migrateParentWakeReceiptColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateRoutineCatchUp()
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}

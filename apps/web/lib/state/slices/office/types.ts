@@ -202,6 +202,12 @@ export type RoutineRun = {
   linkedTaskId?: string;
   coalescedIntoRunId?: string;
   dispatchFingerprint?: string;
+  // Gap summary measured for the claim that created this run (absent when no
+  // gap was recorded — never a stored zero). See
+  // docs/specs/office/requirements/routine-catch-up.md AC-002.
+  catchUpMissedTicks?: number;
+  catchUpFirstMissedAt?: string;
+  catchUpTruncated?: boolean;
   startedAt?: string;
   completedAt?: string;
   createdAt: string;

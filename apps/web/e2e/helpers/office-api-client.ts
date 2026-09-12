@@ -555,13 +555,18 @@ export class OfficeApiClient {
 
   async createRoutine(
     wsId: string,
-    data: { name: string; description?: string },
+    data: { name: string; description?: string; catch_up_policy?: string },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ routine: Record<string, unknown> }>(
       "POST",
       `/workspaces/${wsId}/routines`,
       data,
     );
+    return res.routine ?? (res as unknown as Record<string, unknown>);
+  }
+
+  async getRoutine(id: string): Promise<Record<string, unknown>> {
+    const res = await this.request<{ routine: Record<string, unknown> }>("GET", `/routines/${id}`);
     return res.routine ?? (res as unknown as Record<string, unknown>);
   }
 

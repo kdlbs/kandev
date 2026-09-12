@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // Wakeup request status constants — kept in sync with the spec's
@@ -227,14 +229,7 @@ func (r *Repository) PromoteRunAndCoalesceWakeupIfQueued(
 	`), runID); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE runs
-		SET context_snapshot = json_patch(
-			COALESCE(NULLIF(context_snapshot, ''), '{}'),
-			(SELECT payload FROM agent_wakeup_requests WHERE id = ?)
-		)
-		WHERE id = ?
-	`), requestID, runID); err != nil {
+	if err := mergeWakeupPayloadIntoRunSnapshotWith(ctx, tx, requestID, runID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -254,18 +249,46 @@ func (r *Repository) bumpRunCoalescedCount(ctx context.Context, runID string) er
 }
 
 // mergeWakeupPayloadIntoRunSnapshot merges the wakeup request's payload
-// into the target run's context_snapshot via SQLite's json_patch (top-
-// level merge: keys from the request payload overwrite same-named keys
-// already on the snapshot). When the snapshot is empty / NULL it
-// initialises to "{}" first so the patch lands on a valid object.
+// into the target run's context_snapshot. Delegates to
+// mergeWakeupPayloadIntoRunSnapshotWith on r.db — the non-transactional
+// merge site; PromoteRunAndCoalesceWakeupIfQueued calls the same helper on
+// its own tx instead of duplicating the SQL, so there is exactly one
+// json_patch call site for both merge entry points.
 func (r *Repository) mergeWakeupPayloadIntoRunSnapshot(
 	ctx context.Context, requestID, runID string,
 ) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return mergeWakeupPayloadIntoRunSnapshotWith(ctx, r.db, requestID, runID)
+}
+
+// mergeWakeupPayloadIntoRunSnapshotWith merges the wakeup request's
+// payload into the target run's context_snapshot via SQLite's json_patch
+// (top-level merge: keys from the request payload overwrite same-named
+// keys already on the snapshot). When the snapshot is empty / NULL it
+// initialises to "{}" first so the patch lands on a valid object.
+//
+// The three routine catch-up gap-summary keys are stripped from the
+// incoming payload before the patch via json_remove: a coalesced or
+// promoted wakeup request never adds, changes, or removes the gap
+// statement an existing run's agent already carries
+// (AC-OFFICE-ROUTINE-CATCHUP-002.10) — each run's gap belongs only to the
+// claim that created it. json_remove of an absent key is a no-op in
+// SQLite, so this is byte-for-byte safe for every non-routine wakeup
+// source, none of which writes these keys.
+//
+// exec is r.db for the non-transactional caller or a *sqlx.Tx for the
+// transactional one — sqlx.ExtContext (which both satisfy) already
+// includes Rebind via its embedded binder interface.
+func mergeWakeupPayloadIntoRunSnapshotWith(
+	ctx context.Context, exec sqlx.ExtContext, requestID, runID string,
+) error {
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE runs
 		SET context_snapshot = json_patch(
 			COALESCE(NULLIF(context_snapshot, ''), '{}'),
-			(SELECT payload FROM agent_wakeup_requests WHERE id = ?)
+			json_remove(
+				(SELECT payload FROM agent_wakeup_requests WHERE id = ?),
+				'$.missed_ticks', '$.missed_since', '$.missed_truncated'
+			)
 		)
 		WHERE id = ?
 	`), requestID, runID)

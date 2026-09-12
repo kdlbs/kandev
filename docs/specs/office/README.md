@@ -57,6 +57,7 @@ dashboard projections, and Office testing contracts.
 - [Office Participant Seat Provenance](requirements/participant-seat-provenance.md)
 - [Office Provider Routing](requirements/routing.md)
 - [Office Review Participant Seats](requirements/review-participant-seats.md)
+- [Office Routine Catch-Up](requirements/routine-catch-up.md)
 - [Office Agent Runtime — Error Handling Contract](requirements/runtime.md)
 - [Office Scheduler](requirements/scheduler.md)
 - [Office Stall Visibility](requirements/stall-visibility.md)
@@ -114,6 +115,8 @@ dashboard projections, and Office testing contracts.
 - [Office Provider Routing System Design Part 1](system-design/routing-01.md)
 - [Office Provider Routing System Design Part 2](system-design/routing-02.md)
 - [Office Agent Runtime — Error Handling Contract System Design Part 1](system-design/runtime-01.md)
+- [Office Routine Catch-Up System Design part 1](system-design/routine-catch-up-01.md),
+  [part 2](system-design/routine-catch-up-02.md)
 - [Office Agent Runtime — Error Handling Contract System Design Part 2](system-design/runtime-02.md)
 - [Office Scheduler System Design Part 1](system-design/scheduler-01.md)
 - [Office Stall Visibility System Design](system-design/stall-visibility.md)

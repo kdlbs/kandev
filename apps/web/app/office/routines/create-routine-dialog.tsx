@@ -51,7 +51,7 @@ const INITIAL_ROUTINE_STATE: RoutineFormState = {
   taskDesc: "",
   assignee: "",
   concurrency: "coalesce_if_active",
-  catchUpPolicy: "enqueue_missed_with_cap",
+  catchUpPolicy: "summarize_missed",
   catchUpMax: 25,
   triggerKind: "cron",
   cronExpr: "",
@@ -286,8 +286,8 @@ function PolicyFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="enqueue_missed_with_cap" className="cursor-pointer">
-              {t("office:enqueueMissedWithCap")}
+            <SelectItem value="summarize_missed" className="cursor-pointer">
+              {t("office:summarizeMissed")}
             </SelectItem>
             <SelectItem value="skip_missed" className="cursor-pointer">
               {t("office:skipMissed")}
@@ -298,7 +298,7 @@ function PolicyFields({
           {t("office:whatHappensToTicksMissedWhile")}
         </p>
       </div>
-      {state.catchUpPolicy === "enqueue_missed_with_cap" && (
+      {state.catchUpPolicy === "summarize_missed" && (
         <div className="col-span-2">
           <Label htmlFor="routine-catchup-max">{t("office:catchUpMax")}</Label>
           <Input
@@ -310,7 +310,7 @@ function PolicyFields({
             className="mt-1.5"
           />
           <p className="text-xs text-muted-foreground mt-1.5">
-            {t("office:beyondThisCountMissedTicksAre")}
+            {t("office:beyondThisCountMissedTicksAreNotCounted")}
           </p>
         </div>
       )}
