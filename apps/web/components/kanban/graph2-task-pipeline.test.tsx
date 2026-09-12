@@ -578,14 +578,17 @@ describe("Graph2TaskPipeline — right-click on an interactive control does not 
     expect(queryContextMenuContent()).toBeNull();
   });
 
-  it("does not open the row context menu when right-clicking the current-step pill", () => {
-    // The pill's own onClick opens the task via onOpenTask, so it is an
-    // interactive control in its own right, not a proxy for the row's click.
+  it("still opens the row context menu when right-clicking the current-step pill", async () => {
+    // onOpenTask is not yet threaded through PipelineStepNodes, so the pill's
+    // onClick is inert today; a right-click here must fall through to the
+    // row's own context menu, matching e2e's "opens the shared task menu on
+    // right-click" coverage (which right-clicks the row's bounding-box
+    // center, landing on this pill for a single-step task).
     renderPipelineWithWorkflowSnapshot(makeTask("step-2"), STEPS);
 
     fireEvent.contextMenu(screen.getByRole("button", { name: IN_PROGRESS_TITLE }));
 
-    expect(queryContextMenuContent()).toBeNull();
+    await waitFor(() => expect(queryContextMenuContent()).not.toBeNull());
   });
 
   it("does not open the row context menu when right-clicking the title's own hover-card trigger", () => {

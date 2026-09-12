@@ -211,11 +211,13 @@ export function Graph2StepNode({
         />
       )}
 
+      {/* onOpenTask is not yet threaded through PipelineStepNodes, so this
+          onClick is inert today; an unhandled right-click still bubbles to
+          the row's own context menu, same as the title. */}
       <button
         type="button"
         title={step.title}
         onClick={() => onOpenTask?.(task)}
-        onContextMenu={(e) => e.stopPropagation()}
         className={cn(
           NODE_CLASS,
           "cursor-pointer transition-colors bg-background hover:bg-accent/30",
