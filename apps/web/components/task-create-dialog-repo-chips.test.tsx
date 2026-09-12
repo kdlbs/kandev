@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- repository creation regressions share this focused row fixture. */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
