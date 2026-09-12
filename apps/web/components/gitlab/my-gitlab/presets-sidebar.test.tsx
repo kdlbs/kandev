@@ -16,39 +16,52 @@ const SAVED: SavedPreset = {
 };
 
 describe("GitLab PresetsSidebar", () => {
-  afterEach(cleanup);
-
-  it("uses visible touch controls and deletes without selecting only after confirmation", async () => {
-    const onDeleteSaved = vi.fn();
-    const onSelect = vi.fn();
-    render(
-      <PresetsSidebar
-        selected={{ kind: "mr", source: "saved", id: SAVED.id }}
-        onSelect={onSelect}
-        savedPresets={[SAVED]}
-        onDeleteSaved={onDeleteSaved}
-        canSaveCurrent={false}
-        onSaveCurrent={vi.fn()}
-        mrPresets={[]}
-        issuePresets={[]}
-      />,
-    );
-
-    const deleteButton = screen.getByRole("button", { name: "Delete Ready MRs saved query" });
-    expect(deleteButton.className).toContain("h-12");
-    expect(deleteButton.className).not.toContain("opacity-0");
-    fireEvent.click(deleteButton);
-
-    expect(onDeleteSaved).not.toHaveBeenCalled();
-    expect(onSelect).not.toHaveBeenCalled();
-    const confirmation = screen.getByRole("group", { name: "Delete Ready MRs?" });
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Delete Ready MRs saved query" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete Ready MRs" }));
-
-    await waitFor(() => expect(onDeleteSaved).toHaveBeenCalledWith(SAVED.id));
-    expect(onDeleteSaved).toHaveBeenCalledOnce();
-    expect(onSelect).not.toHaveBeenCalled();
+  afterEach(() => {
+    cleanup();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   });
+
+  it.each([false, true])(
+    "uses visible controls and confirms without selecting (phone: %s)",
+    async (phone) => {
+      if (phone) Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+      const onDeleteSaved = vi.fn();
+      const onSelect = vi.fn();
+      render(
+        <PresetsSidebar
+          selected={{ kind: "mr", source: "saved", id: SAVED.id }}
+          onSelect={onSelect}
+          savedPresets={[SAVED]}
+          onDeleteSaved={onDeleteSaved}
+          canSaveCurrent={false}
+          onSaveCurrent={vi.fn()}
+          mrPresets={[]}
+          issuePresets={[]}
+        />,
+      );
+
+      const deleteButton = screen.getByRole("button", { name: "Delete Ready MRs saved query" });
+      expect(deleteButton.className).toContain("h-12");
+      expect(deleteButton.className).not.toContain("opacity-0");
+      fireEvent.click(deleteButton);
+      if (phone) {
+        expect(deleteButton.isConnected).toBe(true);
+        expect(
+          screen.getByRole("dialog", { name: "Delete Ready MRs?" }).getAttribute("data-slot"),
+        ).toBe("drawer-content");
+      }
+
+      expect(onDeleteSaved).not.toHaveBeenCalled();
+      expect(onSelect).not.toHaveBeenCalled();
+      const confirmation = screen.getByRole("group", { name: "Delete Ready MRs?" });
+      fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete Ready MRs saved query" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete Ready MRs" }));
+
+      await waitFor(() => expect(onDeleteSaved).toHaveBeenCalledWith(SAVED.id));
+      expect(onDeleteSaved).toHaveBeenCalledOnce();
+      expect(onSelect).not.toHaveBeenCalled();
+    },
+  );
 });

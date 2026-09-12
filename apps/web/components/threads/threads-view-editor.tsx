@@ -14,6 +14,7 @@ import { ThreadsViewTaskPicker } from "./threads-view-task-picker";
 import { EditorBody, type EditorBodyProps } from "./threads-view-editor-sections";
 import { parseThreadMaxColumns } from "./threads-view-editor-utils";
 import { threadViewName } from "@/lib/state/slices/ui/thread-view-builtins";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type EditorProps = {
   activeView: ThreadView;
@@ -55,6 +56,7 @@ export function ThreadsViewEditor({
   deleteFocusBoundaryRef,
 }: EditorProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [nameMode, setNameMode] = useState<"rename" | "saveAs" | null>(null);
   const [name, setName] = useState("");
@@ -68,7 +70,6 @@ export function ThreadsViewEditor({
     current.taskScope.mode === "selected" && current.taskScope.taskIds.length === 0;
   const hasDraft = !!draft && draft.baseViewId === activeView.id;
   const repositoryNames = useMemo(() => mapRepositoryNames(repositories), [repositories]);
-  const invalidDraft = invalidSelectedScope || maxColumnsInvalid;
   const deleteConfirmation = deletion.target ? (
     <ThreadViewDeleteConfirmation
       deletion={deletion}
@@ -108,7 +109,7 @@ export function ThreadsViewEditor({
         maxColumnsInput={maxColumnsInput}
         maxColumnsInvalid={maxColumnsInvalid}
         invalidSelectedScope={invalidSelectedScope}
-        invalidDraft={invalidDraft}
+        invalidDraft={invalidSelectedScope || maxColumnsInvalid}
         hasDraft={hasDraft}
         viewCount={viewCount}
         canDelete={canDelete}
@@ -123,7 +124,7 @@ export function ThreadsViewEditor({
           deletion.request({ id: activeView.id, label: threadViewName(activeView, t) })
         }
         deleteAnchorRef={deletion.anchorRef}
-        deleteConfirmation={mobile ? deleteConfirmation : undefined}
+        deleteConfirmation={mobile && !isMobile ? deleteConfirmation : undefined}
         onDuplicate={onDuplicate}
         onReapplySort={onReapplySort}
         onSetMaxColumns={(value, badInput = false) => {
@@ -134,7 +135,7 @@ export function ThreadsViewEditor({
         }}
         onOpenPicker={() => setPickerOpen(true)}
       />
-      {!mobile ? deleteConfirmation : null}
+      {!mobile || isMobile ? deleteConfirmation : null}
     </>
   );
 }

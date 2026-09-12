@@ -2,6 +2,7 @@
 
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import type { FileTreeNode } from "@/lib/types/backend";
+import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { t } from "@/lib/i18n";
 
@@ -13,6 +14,9 @@ type RenderSessionOrLoadStateInput = {
   tree: FileTreeNode | null;
   loadError: string | null;
   onRetry: () => void;
+  workspaceRestoration?: WorkspaceRestorationAttempt | null;
+  onRestoreWorkspace?: () => void;
+  restoreWorkspaceDisabled?: boolean;
 };
 
 export function renderSessionOrLoadState({
@@ -23,7 +27,19 @@ export function renderSessionOrLoadState({
   tree,
   loadError,
   onRetry,
+  workspaceRestoration,
+  onRestoreWorkspace,
+  restoreWorkspaceDisabled,
 }: RenderSessionOrLoadStateInput) {
+  if (workspaceRestoration && workspaceRestoration.status !== "ready") {
+    return (
+      <WorkspaceUnavailable
+        restoration={workspaceRestoration}
+        onRetry={onRestoreWorkspace}
+        retryDisabled={restoreWorkspaceDisabled}
+      />
+    );
+  }
   if (isSessionFailed) {
     return <WorkspaceUnavailable error={sessionError} />;
   }

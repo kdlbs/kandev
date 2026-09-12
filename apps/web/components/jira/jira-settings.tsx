@@ -521,6 +521,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           <TestResultAlert result={s.testResult} />
           <Separator />
           <JiraActionBar
+            workspaceId={workspaceId}
             testing={s.testing}
             loading={s.loading}
             hasConfig={!!s.config}

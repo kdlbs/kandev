@@ -65,6 +65,21 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
+	if err := r.backfillRoutineTriggerTimezones(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// backfillRoutineTriggerTimezones sets an explicit "UTC" on cron triggers
+// created before the column default changed from empty to 'UTC', so the
+// empty string no longer means anything at read time.
+func (r *Repository) backfillRoutineTriggerTimezones() error {
+	if _, err := r.db.Exec(
+		`UPDATE office_routine_triggers SET timezone = 'UTC' WHERE kind = 'cron' AND timezone = ''`,
+	); err != nil {
+		return fmt.Errorf("office_routine_triggers.timezone backfill: %w", err)
+	}
 	return nil
 }
 

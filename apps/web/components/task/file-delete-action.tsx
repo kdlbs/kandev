@@ -12,6 +12,7 @@ export type FileDeleteAction = {
   label: string;
   cancelLabel: string;
   description: React.ReactNode;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
   onDelete: () => void;
   onCancel: () => void;
   onConfirm: () => void;

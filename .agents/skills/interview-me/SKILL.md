@@ -1,92 +1,111 @@
 ---
 name: interview-me
-description: Clarify what the user wants before requirements, system design, plans, or code. Use when an ask is underspecified, when the user asks for an interview or stress test, or when important product or architecture assumptions are missing.
+description: Clarify a standalone idea or check assumptions before feature or fix planning. Use focused questions, stress-test intent, and map unresolved decisions for large uncertain initiatives.
 ---
 
 # Interview Me
 
-Use this before `/spec-driven-development`, `/spec`, or `/plan` when the requested outcome is not clear enough to implement without guessing.
+Run the assumption check before requirements, system designs, or implementation
+plans. Reuse settled answers throughout the design package. An assumption check
+does not require an interview when the material choices are already clear.
 
-## When To Use
+For a standalone interview or stress test, clarify intent without automatically
+creating a design package. Skip this workflow for mechanical edits and pure
+information requests.
 
-Use when the ask is missing one or more of:
-- Who the user/operator is
-- Why this matters now
-- What success looks like
-- The binding constraint or tradeoff
-- Explicit out-of-scope boundaries
+## 1. Check assumptions
 
-Skip for mechanical edits, obvious bug fixes, pure information requests, or when the user explicitly asks for speed over clarification.
+Read the request, relevant specifications, source, and tests. Separate:
 
-## Process
+- **Confirmed:** the user explicitly requested or previously settled it.
+- **Verified:** source, tests, or documentation establish a fact. Keep its source
+  reference and distinguish current behavior from intended behavior.
+- **Unresolved:** a choice or missing fact can change behavior, scope, ownership,
+  permissions, persistence, compatibility, or acceptance criteria.
 
-### 1. State A Hypothesis
+State the intended outcome and material unresolved assumptions briefly. Do not
+invent confidence percentages. Investigate facts that available tools can
+resolve before asking the user. Evidence of current behavior is not user
+agreement to preserve it.
 
-Write one sentence plus a confidence number.
+Ask about consequential choices that evidence cannot settle. Choose routine,
+reversible implementation details within the agreed scope. A request for speed
+reduces questions; it does not make an unanswered material choice confirmed.
 
-```text
-HYPOTHESIS: You want workspace switching to preserve task context because agents lose momentum when users navigate between workspaces.
-CONFIDENCE: 45% - missing: who feels the pain, what "preserve" means, and what counts as done.
-```
+For a clear regression, use the active acceptance criterion without asking the
+user to define the behavior again.
 
-### 2. Ask Focused Questions
+## 2. Ask questions in dependency order
 
-Format every question with a guess.
+Identify which decisions depend on other answers. Ask only questions whose
+prerequisites are settled. Use the active harness's user-question tool and obey
+its limits and waiting rules. Ask one to four independent questions per round,
+within those limits. Without a question tool, ask one question at a time in chat
+during a normal interactive session.
 
-```text
-Q: Is this primarily for human users switching between workspaces, or for office agents operating across workspaces?
-GUESS: Human users, because the pain sounds navigation-related rather than automation-related.
-```
+If this is an autopilot root or another non-interactive session with no question
+tool, record each unresolved material choice as an assumption. Continue only
+when the caller permits autonomous planning for that choice and use the most
+conservative reversible option. Otherwise return the assumption as a blocker to
+the caller. Never present an assumption as confirmed, and preserve the normal
+chat fallback for interactive sessions.
 
-If the active harness provides a native user-question UI that supports multiple
-questions in one turn, ask 2-4 focused questions together. Keep each question
-short, include your guess in the prompt or options, and make the options
-concrete enough that the user can answer quickly.
+Give each question concrete options, a recommended answer, and a short reason.
+Align the question with the recommendation so agreement has one clear meaning.
+Do not ask the user to locate code or supply facts you can investigate.
 
-If no multi-question tool is available, ask one question at a time in chat. Do not send a long questionnaire.
+For example, first settle what "preserve task context" includes. Ask about
+retention duration only after the user chooses persistent context.
 
-If a native single-question interaction resolves one material ambiguity, record
-that decision and continue when the remaining outcome, success conditions, and
-scope are already explicit. Require the full restatement confirmation below
-only when broad intent is still missing.
+Wait for answers before resolving dependent choices. After each round, update
+the remaining questions. If an answer changes an earlier assumption, revisit
+the affected choices and artifacts. Do not repeat settled questions without new
+evidence or changed scope.
 
-### 3. Probe Convention-Sounding Answers
+If the initiative has too many dependent unknowns to specify reliable work
+orders, use [decision mapping](references/decision-mapping.md). Ordinary features
+and clear fixes do not need a map.
 
-If the user says "modern", "scalable", "best practice", "dashboard", "robust", or "clean architecture" without concrete outcomes, ask:
+## 3. Stress-test the answers
 
-```text
-If you did not have to justify this as best practice, what would you actually want?
-```
+Use concrete scenarios to expose material gaps in success, failure, recovery,
+and scope. Select scenarios relevant to the request; do not invent adjacent
+features or an exhaustive questionnaire.
 
-### 4. Restate Intent
+Challenge vague terms such as "robust" with an observable outcome. Compare domain
+terms with the owning specifications and any existing glossary. If a term or
+claimed behavior conflicts with those sources, name the conflict and resolve it.
 
-When confidence is high, restate in this shape:
+Distinguish uncertainty that needs evidence from a choice that needs the user.
+If a design question needs an experiment, define the question and observable
+result first. Keep prototypes temporary and separate from production changes.
+Record what the experiment proves and what remains undecided.
 
-```text
-Here's what I think you want:
-- Outcome:
-- User:
-- Why now:
-- Success:
-- Constraint:
-- Out of scope:
+## 4. Capture decisions and continue
 
-Yes / no / refine?
-```
+After each answer, preserve the choice and its reason in the current task notes.
+Use the Kandev task plan when available, preserving user edits. Do not create a
+separate intent document unless requested.
 
-Do not proceed to `/spec`, `/plan`, or implementation until the user explicitly confirms or corrects the restate.
+During authorized specification or planning work, put settled behavior in the
+owning requirement and technical contracts in its system design. Use `/record`
+for significant decisions that meet its ADR criteria. Preserve meaningful
+alternatives and rationale there. Update an existing glossary when terminology
+changes; do not introduce a parallel glossary by default.
 
-## Output
+Keep unresolved choices visibly unresolved. A recommendation, silence, or timeout
+is not confirmation. If the user explicitly delegates a choice, record the
+selected option as an agent decision made under that delegation.
 
-The deliverable is a confirmed statement of intent. If the user wants it
-persisted, save it only after confirmation. Use `/spec` to update the owning
-system requirement. Do not create a standalone intent document unless the user
-explicitly requests one.
+When intent is clear and no material choice blocks the next design phase,
+finish the interview. This includes success criteria, constraints, and scope.
+Explicit answers and prior
+instructions count as confirmation; do not require a second approval of their
+restatement. If broad intent remains ambiguous, ask about the specific remaining
+gap before continuing.
 
-## Red Flags
-
-- Long open-ended questionnaires with no guesses
-- A question with no guess attached
-- Accepting "whatever you think" as confirmation
-- Starting a spec or plan before the user confirms the restate
-- No explicit out-of-scope line
+Summarize the settled intent and exclusions. If another skill called this check,
+return to its current phase without restarting specification or planning.
+For a direct planning request, continue through `/spec` and `/plan` to the
+existing design-package handoff. For a standalone interview, return the clarified
+intent. Neither path authorizes implementation or delegation.

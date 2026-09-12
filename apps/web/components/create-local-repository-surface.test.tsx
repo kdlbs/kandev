@@ -184,6 +184,59 @@ describe("CreateLocalRepositorySurface", () => {
   });
 });
 
+describe("CreateLocalRepositorySurface async creation", () => {
+  it("delivers a delayed response to the current row handler", async () => {
+    let complete!: (repository: Repository) => void;
+    mocks.initialize.mockReturnValue(
+      new Promise<Repository>((resolve) => {
+        complete = resolve;
+      }),
+    );
+    const previousHandler = vi.fn();
+    const currentHandler = vi.fn();
+    const props = {
+      open: true,
+      onOpenChange: vi.fn(),
+      workspaceId: "ws-1",
+      executorSelection: directLocalSelection,
+      onCreated: previousHandler,
+    };
+    const { rerender } = render(<CreateLocalRepositorySurface {...props} />);
+    fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {
+      target: { value: REPOSITORY_NAME },
+    });
+    fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
+    await waitFor(() => expect(mocks.initialize).toHaveBeenCalledOnce());
+    rerender(<CreateLocalRepositorySurface {...props} onCreated={currentHandler} />);
+    complete(createdRepository);
+    await waitFor(() => expect(previousHandler).toHaveBeenCalledWith(createdRepository));
+    expect(currentHandler).not.toHaveBeenCalled();
+  });
+
+  it("creates for a multi-row task without a direct-local profile", async () => {
+    mocks.initialize.mockResolvedValue(createdRepository);
+    const props = renderSurface({ context: "task-create-multi", executorSelection: null });
+    fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {
+      target: { value: REPOSITORY_NAME },
+    });
+    fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith(createdRepository));
+  });
+
+  it("keeps the surface open when the completion is no longer current", async () => {
+    mocks.initialize.mockResolvedValue(createdRepository);
+    const onOpenChange = vi.fn();
+    const onCreated = vi.fn(() => false);
+    renderSurface({ onOpenChange, onCreated });
+    fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {
+      target: { value: REPOSITORY_NAME },
+    });
+    fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(createdRepository));
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("CreateLocalRepositorySurface submission", () => {
   it("does not submit the parent task form", async () => {
     mocks.initialize.mockResolvedValue(createdRepository);

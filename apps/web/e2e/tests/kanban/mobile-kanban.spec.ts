@@ -1,6 +1,64 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { missingGitHealth } from "./health-fixtures";
+import {
+  withHeightWorkflows,
+  expectCompactColumn,
+  expectNoDocumentOverflow,
+} from "./swimlane-height-helpers";
+
+test("multiple workflows keep a full-height focused phone board across the tablet boundary", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  // @covers AC-UI-ADAPTIVE-KANBAN-002.6
+  await withHeightWorkflows(apiClient, seedData, async (second) => {
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    const phoneSize = testPage.viewportSize()!;
+    for (const width of [phoneSize.width, 767]) {
+      await testPage.setViewportSize({ width, height: phoneSize.height });
+      await expect(mobile.mobileKanbanLayout()).toHaveCount(1);
+      await expect(mobile.mobileKanbanLayout()).toHaveCSS("display", "flex");
+      await expect(mobile.mobileKanbanLayout()).toHaveCSS("overflow-y", "hidden");
+      await expect
+        .poll(async () => (await mobile.mobileKanbanLayout().boundingBox())!.height)
+        .toBeGreaterThan(400);
+      const boardBox = (await mobile.swimlaneContainer.boundingBox())!;
+      const layoutBox = (await mobile.mobileKanbanLayout().boundingBox())!;
+      expect(layoutBox.y + layoutBox.height).toBeLessThanOrEqual(boardBox.y + boardBox.height);
+      await expectNoDocumentOverflow(testPage);
+    }
+    await testPage.setViewportSize(phoneSize);
+    await mobile.boardNavigator.tap();
+    await mobile.workflowItem(second.workflowId).tap();
+    const drawer = testPage.getByTestId("mobile-board-navigator-drawer");
+    await expect(drawer).toBeVisible();
+    await drawer.getByTestId(`column-tab-${second.stepIndex}`).tap();
+    await expect(drawer).not.toBeVisible();
+    await expect(mobile.taskCard(second.taskId)).toBeInViewport();
+    await testInfo.attach("focused-phone", {
+      body: await testPage.screenshot({ path: testInfo.outputPath("focused-phone.png") }),
+      contentType: "image/png",
+    });
+    await mobile.taskCard(second.taskId).tap();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.taskId}`));
+    await apiClient.saveUserSettings({ workflow_filter_id: "" });
+    await testPage.setViewportSize({ width: 768, height: phoneSize.height });
+    await testPage.goto("/");
+    await expect(testPage.getByTestId("mobile-kanban-layout")).toHaveCount(0);
+    await expect(testPage.getByTestId("tablet-kanban-layout")).toHaveCount(2);
+    await expectCompactColumn(testPage.getByTestId(`kanban-column-${second.stepId}`));
+    await expectNoDocumentOverflow(testPage);
+    await testPage.setViewportSize(phoneSize);
+    await expect(mobile.mobileKanbanLayout()).toHaveCount(1);
+    await expect
+      .poll(async () => (await mobile.mobileKanbanLayout().boundingBox())!.height)
+      .toBeGreaterThan(400);
+    expect((await apiClient.getUserSettings()).settings.kanban_view_mode ?? "").toBe("");
+  });
+});
 
 test.describe("Mobile kanban view", () => {
   test.afterEach(async ({ apiClient }) => {

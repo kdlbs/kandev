@@ -2,6 +2,9 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
+import { sanitizeWorkspaceRestorationDetails } from "@/lib/state/slices/session-runtime/workspace-restoration";
+import { createAppStore } from "@/lib/state/store";
 
 const mockRequest = vi.fn();
 const mockSetTaskSession = vi.fn();
@@ -43,12 +46,15 @@ const RESUME_TRANSPORT_ERROR = "Resume transport failed";
 const WORKSPACE_RESTORE_ERROR = "Workspace restore failed";
 
 import {
+  decideResumeAction,
   resumeWithSilentFallback,
   useSessionResumption,
   type ResumeStateSetter,
   type ResumptionState,
   type SessionRecoveryFailure,
 } from "./use-session-resumption";
+import { resumeViaLaunch } from "./use-session-resumption-operations";
+import { buildGuardedSetters } from "./use-session-resumption-request-guard";
 
 type SetterCalls = {
   resumptionStates: ResumptionState[];
@@ -332,7 +338,7 @@ describe("resumeWithSilentFallback", () => {
     });
   });
 
-  it("seeds agentctl ready when restore_workspace fallback succeeds", async () => {
+  it("does not optimistically seed agentctl ready after restore_workspace succeeds", async () => {
     mockRequest
       .mockResolvedValueOnce({ success: false, task_id: TASK_ID, state: FAILED_STATE })
       .mockResolvedValueOnce({
@@ -347,8 +353,85 @@ describe("resumeWithSilentFallback", () => {
 
     await resumeWithSilentFallback(TASK_ID, SESSION_ID, null, setters);
 
-    expect(setAgentctlReady).toHaveBeenCalledTimes(1);
-    expect(setAgentctlReady).toHaveBeenCalledWith(SESSION_ID);
+    expect(setAgentctlReady).not.toHaveBeenCalled();
+  });
+
+  it("keeps workspace-only restore failures out of global recovery feedback", async () => {
+    mockRequest.mockResolvedValueOnce({
+      success: false,
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      state: FAILED_STATE,
+      error: WORKSPACE_RESTORE_ERROR,
+    });
+    const { setters, calls } = createSetters();
+    const attempt = {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      environmentId: "environment-1",
+      revision: 1,
+      status: "pending" as const,
+    };
+    const fail = vi.fn(() => true);
+    const complete = vi.fn(() => true);
+    setters.workspaceRestoration = {
+      begin: () => attempt,
+      complete,
+      fail,
+      clear: vi.fn(() => true),
+    };
+
+    const restored = await resumeViaLaunch(buildRestoreWorkspaceRequest, {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      session: null,
+      setters,
+      canContinue: () => true,
+    });
+
+    expect(restored).toBe(false);
+    expect(fail).toHaveBeenCalledWith(attempt, expect.any(Error));
+    expect(complete).not.toHaveBeenCalled();
+    expect(calls.errors.at(-1)).toBeNull();
+    expect(calls.recoveryFailures.at(-1)).toBeNull();
+  });
+
+  it("clears a stale workspace attempt when restore rejects after navigation", async () => {
+    let rejectRestore: ((error: Error) => void) | undefined;
+    mockRequest.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectRestore = reject;
+      }),
+    );
+    const { setters } = createSetters();
+    const attempt = {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      environmentId: "environment-1",
+      revision: 1,
+      status: "pending" as const,
+    };
+    const clear = vi.fn(() => true);
+    setters.workspaceRestoration = {
+      begin: () => attempt,
+      complete: vi.fn(() => true),
+      fail: vi.fn(() => true),
+      clear,
+    };
+    let current = true;
+    const restorePromise = resumeViaLaunch(buildRestoreWorkspaceRequest, {
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      session: null,
+      setters,
+      canContinue: () => current,
+    });
+
+    current = false;
+    rejectRestore?.(new Error("late restore failure"));
+
+    expect(await restorePromise).toBe(false);
+    expect(clear).toHaveBeenCalledWith(attempt);
   });
 
   it("does not seed agentctl ready when resume succeeds (new execution will emit its own events)", async () => {
@@ -710,6 +793,23 @@ describe("useSessionResumption monotonic terminal hydration", () => {
 });
 
 describe("useSessionResumption completed-session admission", () => {
+  it("selects workspace restoration for a completed session without selecting agent resume", () => {
+    const action = decideResumeAction(
+      {
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "COMPLETED",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        needs_workspace_restore: true,
+      },
+      false,
+    );
+
+    expect(action).toBe("restore");
+  });
+
   it.each([false, true])(
     "does not auto-resume a completed session when preventAutoStart is %s",
     async (preventAutoStart) => {
@@ -783,6 +883,7 @@ describe("useSessionResumption resume-skipped clearing on running status", () =>
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- navigation and response races share one harness.
 describe("useSessionResumption stale-callback guard after navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -833,4 +934,72 @@ describe("useSessionResumption stale-callback guard after navigation", () => {
     expect(mockSetResumeSkipped).not.toHaveBeenCalled();
     expect(mockSetTaskSession).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["success", { success: true, state: "WAITING_FOR_INPUT" }],
+    ["rejection", new Error("obsolete restore rejected")],
+  ] as const)(
+    "cleans up an obsolete automatic restore when navigation A to B to A receives a %s response",
+    async (_outcome, response) => {
+      const workspaceStore = createAppStore();
+      const { setters } = createSetters();
+      setters.workspaceRestoration = {
+        begin: (taskId, sessionId) =>
+          workspaceStore.getState().beginWorkspaceRestoration(taskId, sessionId, "env-a"),
+        complete: (attempt) => workspaceStore.getState().completeWorkspaceRestoration(attempt),
+        fail: (attempt, details) =>
+          workspaceStore
+            .getState()
+            .failWorkspaceRestoration(attempt, sanitizeWorkspaceRestorationDetails(details)),
+        clear: (attempt) => workspaceStore.getState().clearWorkspaceRestoration(attempt),
+      };
+      const activeRequestRef = {
+        current: { key: "task-a/session-a", generation: 1 },
+      };
+      const capturedRequest = activeRequestRef.current;
+      const guardedSetters = buildGuardedSetters(activeRequestRef, capturedRequest, setters);
+      const launchResponse = Promise.withResolvers<unknown>();
+      mockRequest.mockReturnValueOnce(launchResponse.promise);
+
+      const restore = resumeViaLaunch(buildRestoreWorkspaceRequest, {
+        taskId: "task-a",
+        sessionId: "session-a",
+        session: null,
+        setters: guardedSetters,
+        canContinue: () =>
+          activeRequestRef.current.key === capturedRequest.key &&
+          activeRequestRef.current.generation === capturedRequest.generation,
+      });
+
+      await waitFor(() => {
+        expect(
+          workspaceStore.getState().workspaceRestoration.byEnvironmentId["env-a"],
+        ).toMatchObject({
+          taskId: "task-a",
+          sessionId: "session-a",
+          status: "pending",
+        });
+      });
+
+      // Navigate to B before A's workspace request settles.
+      activeRequestRef.current = { key: "task-b/session-b", generation: 2 };
+      if (response instanceof Error) launchResponse.reject(response);
+      else launchResponse.resolve(response);
+      await expect(restore).resolves.toBe(false);
+
+      // Returning to A must not find the obsolete pending attempt.
+      activeRequestRef.current = { key: "task-a/session-a", generation: 3 };
+      expect(
+        workspaceStore.getState().workspaceRestoration.byEnvironmentId["env-a"],
+      ).toBeUndefined();
+      const retry = workspaceStore
+        .getState()
+        .beginWorkspaceRestoration("task-a", "session-a", "env-a");
+      expect(retry).toMatchObject({
+        taskId: "task-a",
+        sessionId: "session-a",
+        status: "pending",
+      });
+    },
+  );
 });

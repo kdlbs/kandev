@@ -5,6 +5,8 @@ requirements:
   - REQ-UI-PERSISTENT-STATUS-MOTION-001
   - REQ-UI-PERSISTENT-STATUS-MOTION-002
   - REQ-UI-PERSISTENT-STATUS-MOTION-003
+  - REQ-UI-PERSISTENT-STATUS-MOTION-004
+  - REQ-UI-PERSISTENT-STATUS-MOTION-005
 ---
 
 # Persistent Status Motion System Design
@@ -24,11 +26,11 @@ One-shot attention and transition effects remain outside this design.
 
 ## Requirement mapping
 
-| Requirement                           | Design section                                                                                                                                |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REQ-UI-PERSISTENT-STATUS-MOTION-001` | [Motion primitive](#motion-primitive), [Status surfaces](#status-surfaces), [Desktop and mobile composition](#desktop-and-mobile-composition) |
+| Requirement                           | Design section                                                                                                                                                                                        |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-UI-PERSISTENT-STATUS-MOTION-001` | [Motion primitive](#motion-primitive), [Status surfaces](#status-surfaces), [Desktop and mobile composition](#desktop-and-mobile-composition)                                                         |
 | `REQ-UI-PERSISTENT-STATUS-MOTION-002` | [Grid activity motion](#grid-activity-motion), [Animation lifecycle and fallback](#animation-lifecycle-and-fallback), [Verification and performance evidence](#verification-and-performance-evidence) |
-| `REQ-UI-PERSISTENT-STATUS-MOTION-003` | [Opacity pulse motion](#opacity-pulse-motion), [Desktop and mobile composition](#desktop-and-mobile-composition), [Verification and performance evidence](#verification-and-performance-evidence) |
+| `REQ-UI-PERSISTENT-STATUS-MOTION-003` | [Opacity pulse motion](#opacity-pulse-motion), [Desktop and mobile composition](#desktop-and-mobile-composition), [Verification and performance evidence](#verification-and-performance-evidence)     |
 
 ## Motion primitive
 
@@ -200,3 +202,85 @@ and restores CSS for all nine cells so one grid never mixes timing engines.
 
 The wrapper preserves existing test IDs and semantic attributes. Tests and
 assistive technology do not need to depend on the nested SVG element.
+
+## Proposed rendering CPU follow-up
+
+This section is draft. Earlier sections describe the accepted implementation.
+The [follow-up plan](../../../plans/frontend-rendering-cpu/plan.md) owns delivery
+and the outstanding attribution investigation.
+
+### Mapping
+
+| Requirement                         | Proposed boundary             |
+| ----------------------------------- | ----------------------------- |
+| REQ-UI-PERSISTENT-STATUS-MOTION-004 | Visibility lifecycle below    |
+| REQ-UI-PERSISTENT-STATUS-MOTION-005 | Context-ring transition below |
+
+### Visibility lifecycle
+
+Keep animation ownership in `CompositorSpin`, `CompositorPulse`, and
+`GridSpinner`. Introduce a small shared lifecycle helper in
+`apps/packages/ui/src/` for their owned animation handles. It must not scan or
+pause arbitrary document animations in production. Diagnostic controls may do
+so only inside the isolated performance fixture.
+
+Combine document visibility with target intersection and, where geometry alone
+does not reflect a hidden panel, the existing owner visibility signal. The
+desktop panel layer already uses `usePanelActive` in
+`apps/web/components/task/dockview-panel-content.tsx`. Do not equate an unfocused
+but visible split pane with a hidden pane. Inspect owner semantics before wiring.
+
+Use visibility and intersection events, not polling or a frame loop. Observe
+the stable outer wrapper, not an animated zero-scale grid cell. A grid shares
+one observation across its nine effects. Reuse a document subscription across
+targets if the audit shows many instances; do not notify unrelated app state.
+This helper belongs to the UI package and must not import the web store.
+
+When ineligible, pause owned Web Animations handles; resume existing handles
+when eligible. Apply equivalent scoped `animation-play-state` handling to CSS
+fallbacks. Restore prior inline declarations on cleanup. A new effect created
+while hidden starts paused, including after a class or reduced-motion change.
+Cancel old handles before replacement. Disconnect observers and listeners on
+unmount. If observation is unavailable, assume intersection and retain document
+visibility gating. Preserve each primitive's existing reduced-motion policy.
+
+Domain updates and subscriptions continue while presentation motion pauses.
+Do not unmount editors, transcripts, terminals, or panels to pause an indicator.
+Do not introduce settings, persistence, backend changes, or plugin controls.
+
+### Context-ring transition
+
+`ContextWindowRing` in `token-usage-display.tsx` uses `transition-all`. Restrict
+that circle to `stroke-dashoffset`, retaining 300 ms and the current easing.
+Apply threshold color changes immediately. Do not change global scrollbar CSS
+or the separate expanded usage bar. This bounds the confirmed transition cost;
+it does not make SVG stroke animation compositor-backed.
+
+### Attribution and acceptance
+
+Extend `e2e/tests/chat/animation-performance-trace.spec.ts`. Its current capture
+disables script execution and unrelated CSS motion. That proves a narrow
+compositor control, not normal whole-page behavior. Retain that control, and add
+a normal-script baseline plus CSS-and-Web-Animations pause and restoration arms.
+Include target IDs, selectors, keyframes, play states, visibility, and trace
+invalidation events. Match backend node IDs where available; do not rely only
+on a class-name substring in serialized trace arguments.
+
+Compare equal settled windows on the same build, browser, display cadence,
+viewport, data, and plugin state. Use three runs per arm. Report medians and
+ranges, main-thread CPU when available, layer/style counts and durations, and
+target invalidations. Never add nested event durations as independent CPU time.
+Exclude profiler startup. Record controlled extension-free runs separately from
+the user's Vivaldi recording and do not claim cross-machine percentage savings.
+
+Before a root-cause repair, identify an owned target whose pause removes the
+recurring work and whose restoration brings it back. If that does not happen,
+continue attribution to style invalidators rather than assuming animation is
+the cause. A plugin cause belongs to its dedicated repository. Broad transcript
+virtualization requires a separate design after a DOM-size control proves value.
+
+Desktop and phone retain their current task layouts. The mobile exemplar is
+`task-layout.tsx` and `mobile-persistent-animation-motion.spec.ts`. Extend the
+existing desktop/mobile motion tests for hidden-to-visible and settled-while-
+hidden states. Preserve the existing scroll owner, safe areas, touch controls,
+and no-horizontal-overflow assertions. No new user-facing copy is needed.

@@ -107,6 +107,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	defer func() {
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
+	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
 	if err != nil {
 		return err
@@ -179,6 +182,11 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
+	execution.remoteInstanceLifecycleMu.Lock()
+	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID, executionAdmissionAgent); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
+	}
 	var bootCommand string
 	if reuseExisting {
 		// Agent subprocess is already running inside the remote executor.
@@ -198,6 +206,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		var err error
 		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
 		if err != nil {
+			execution.remoteInstanceLifecycleMu.Unlock()
 			return err
 		}
 
@@ -206,6 +215,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("task_id", execution.TaskID),
 			zap.String("command", bootCommand))
 	}
+	execution.remoteInstanceLifecycleMu.Unlock()
 
 	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
 }

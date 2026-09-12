@@ -12,6 +12,20 @@ import {
   filteredArchiveOutcome,
   lateArchiveOutcome,
 } from "./threads-task-actions-edge-helpers";
+import { pendingArchiveRecovery, pendingLastArchive } from "./threads-pending-archive-helpers";
+
+for (const [name, outcome] of [
+  ["pending archive recovers without taking focus", pendingArchiveRecovery],
+  ["pending last archive stays empty through settlement", pendingLastArchive],
+] as const) {
+  test(name, async ({ testPage, apiClient, seedData }, testInfo) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 360, height: 780 });
+    await withTaskActionSettings(apiClient, () =>
+      outcome(testPage, apiClient, seedData, true, testInfo),
+    );
+  });
+}
 
 for (const [name, outcome] of [
   ["failures and retry", failedActionOutcomes],

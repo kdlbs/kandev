@@ -107,7 +107,7 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     renderChips({ allowDuplicateRepositories: false });
     fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[1]);
 
-    expect(screen.queryByText("Create new repository")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create new repository" })).toBeNull();
   });
 
   it("routes repository creation to the only row", () => {
@@ -130,11 +130,30 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     expect(onRefreshRepositories).toHaveBeenCalledOnce();
   });
 
-  it("does not expose repository creation for multi-repository tasks", () => {
-    renderChips({ onCreateRepository: vi.fn() });
+  it("offers creation and refresh from a second repository row", () => {
+    const onCreateRepository = vi.fn();
+    const onRefreshRepositories = vi.fn();
+    renderChips({ onCreateRepository, onRefreshRepositories });
     fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[1]);
+    fireEvent.click(screen.getByTestId("repo-refresh-button"));
+    expect(onRefreshRepositories).toHaveBeenCalledOnce();
+    fireEvent.change(screen.getByPlaceholderText("Search repositories..."), {
+      target: { value: "no-matching-repository" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create new repository" }));
+    expect(onCreateRepository).toHaveBeenCalledWith("r1");
+  });
 
-    expect(screen.queryByText("Create new repository")).toBeNull();
+  it.each([0, 1])("keeps both actions in empty lists on row %i while refreshing", (rowIndex) => {
+    renderChips({
+      repositories: [],
+      onCreateRepository: vi.fn(),
+      onRefreshRepositories: vi.fn(),
+      repositoriesRefreshing: true,
+    });
+    fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[rowIndex]);
+    expect(screen.getByTestId("repo-refresh-button").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Create new repository" })).toBeTruthy();
   });
 });
 

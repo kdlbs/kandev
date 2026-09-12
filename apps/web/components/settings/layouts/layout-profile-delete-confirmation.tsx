@@ -8,6 +8,8 @@ import { useTranslation } from "react-i18next";
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import type { SavedLayout } from "@/lib/types/http";
 
@@ -29,6 +31,7 @@ export function LayoutProfileDeleteConfirmation({
   onConfirm,
 }: LayoutProfileDeleteConfirmationProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const title = t("settings:deleteLayoutProfileNamed", { name: profile.name });
   const description = profile.is_default
     ? t("settings:theBuiltInDefaultLayoutWill")
@@ -38,41 +41,53 @@ export function LayoutProfileDeleteConfirmation({
     queueMicrotask(() => anchorRef.current?.focus());
   };
 
-  if (!isFinePointer) {
-    if (!open)
-      return <DeleteProfileButton anchorRef={anchorRef} onClick={() => onOpenChange(true)} />;
-    return (
-      <InlineConfirmActions
-        density="touch"
-        testId="layout-profile-delete-inline-confirmation"
-        ariaLabel={title}
-        description={description}
-        cancelLabel={t("settings:cancel")}
-        confirmLabel={t("settings:delete")}
-        confirmAriaLabel={title}
-        confirmTestId="layout-profile-delete-confirm"
-        onCancel={cancelInlineDelete}
-        onClose={() => onOpenChange(false)}
-        onConfirm={onConfirm}
-      />
-    );
-  }
-
+  const fallback = !isFinePointer ? (
+    <InlineConfirmActions
+      density="touch"
+      testId="layout-profile-delete-inline-confirmation"
+      ariaLabel={title}
+      description={description}
+      cancelLabel={t("settings:cancel")}
+      confirmLabel={t("settings:delete")}
+      confirmAriaLabel={title}
+      confirmTestId="layout-profile-delete-confirm"
+      onCancel={cancelInlineDelete}
+      onClose={() => onOpenChange(false)}
+      onConfirm={onConfirm}
+    />
+  ) : (
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      title={title}
+      description={description}
+      cancelLabel={t("settings:cancel")}
+      confirmLabel={t("settings:delete")}
+      confirmAriaLabel={title}
+      confirmTestId="layout-profile-delete-confirm"
+      testId="layout-profile-delete-confirm-popover"
+      onOpenChange={onOpenChange}
+      onConfirm={onConfirm}
+    />
+  );
   return (
     <>
-      <DeleteProfileButton anchorRef={anchorRef} onClick={() => onOpenChange(true)} />
-      <ActionConfirmPopover
+      {(isMobile || isFinePointer || !open) && (
+        <DeleteProfileButton anchorRef={anchorRef} onClick={() => onOpenChange(true)} />
+      )}
+      <MobileActionConfirmation
         open={open}
-        anchorRef={anchorRef}
+        targetKey={profile.id}
         title={title}
         description={description}
         cancelLabel={t("settings:cancel")}
         confirmLabel={t("settings:delete")}
         confirmAriaLabel={title}
         confirmTestId="layout-profile-delete-confirm"
-        testId="layout-profile-delete-confirm-popover"
+        focusReturnRef={anchorRef}
         onOpenChange={onOpenChange}
         onConfirm={onConfirm}
+        fallback={fallback}
       />
     </>
   );

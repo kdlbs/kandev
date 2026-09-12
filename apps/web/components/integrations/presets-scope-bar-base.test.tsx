@@ -8,13 +8,21 @@ import {
 } from "./presets-scope-bar-base";
 
 let lastMenuItemSelectEvent: Event | null = null;
+let closeMenuFocus: (() => void) | undefined;
 
 vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
-    <div role="menu">{children}</div>
-  ),
+  DropdownMenuContent: ({
+    children,
+    onCloseAutoFocus,
+  }: {
+    children: React.ReactNode;
+    onCloseAutoFocus?: () => void;
+  }) => {
+    closeMenuFocus = onCloseAutoFocus;
+    return <div role="menu">{children}</div>;
+  },
   DropdownMenuItem: ({
     children,
     disabled,
@@ -75,6 +83,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 afterEach(() => {
   cleanup();
   lastMenuItemSelectEvent = null;
+  closeMenuFocus = undefined;
 });
 
 type Kind = "pr" | "issue";
@@ -210,6 +219,35 @@ describe("IntegrationScopeBar saved defaults", () => {
 });
 
 describe("IntegrationScopeBar saved-query actions", () => {
+  it("opens Save only after the menu has restored focus", async () => {
+    const onSaveCurrent = vi.fn();
+    renderBar({ canSaveCurrent: true, onSaveCurrent });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save current query" }));
+    expect(onSaveCurrent).not.toHaveBeenCalled();
+    closeMenuFocus?.();
+    screen.getByTestId("saved-menu").focus();
+    await waitFor(() => expect(onSaveCurrent).toHaveBeenCalledOnce());
+    expect(document.activeElement).toBe(screen.getByTestId("saved-menu"));
+  });
+
+  it("cancels a deferred Save when the scope bar unmounts", async () => {
+    const onSaveCurrent = vi.fn();
+    const { unmount } = renderBar({ canSaveCurrent: true, onSaveCurrent });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save current query" }));
+    closeMenuFocus?.();
+    unmount();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(onSaveCurrent).not.toHaveBeenCalled();
+  });
+
+  it.each(["status", "alert"])("retains cached saved queries alongside a %s", (role) => {
+    const { onSelect } = renderBar({ savedStatus: <div role={role}>Saved-query recovery</div> });
+    expect(screen.getByRole(role).textContent).toBe("Saved-query recovery");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Current default" }));
+    expect(onSelect).toHaveBeenCalledWith({ kind: "pr", source: "saved", id: "saved-a" });
+    expect(screen.queryByText("No saved queries yet.")).toBeNull();
+  });
+
   it("renders no default actions when an integration omits the optional contract", () => {
     renderBar({ onToggleSavedDefault: undefined });
 

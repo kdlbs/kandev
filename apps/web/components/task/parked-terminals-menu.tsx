@@ -116,6 +116,8 @@ function ParkedTerminalRow({
         className="w-full px-1"
       >
         <TerminalCloseInlineConfirmation
+          terminalId={terminal.id}
+          terminalLabel={terminal.label}
           onCancel={onCancelDestroy}
           onClose={onCloseDestroy}
           onConfirm={onConfirmDestroy}

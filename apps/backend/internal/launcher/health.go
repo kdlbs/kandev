@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 const (
@@ -362,16 +364,32 @@ func safeProbeError(err error) string {
 // exists to fix.
 func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 	readyURL := baseURL + "/ready"
+	var last startup.Snapshot
+	var reported time.Time
+	exitError := func(code int) error {
+		if label := last.Phase.Label(); label != "" {
+			return fmt.Errorf("backend exited (code %d) during %s (elapsed %.1fs); check backend logs for the initialization error", code, label, float64(last.ElapsedMS)/1000)
+		}
+		return fmt.Errorf("backend exited (code %d) before it reported ready; check backend logs for the initialization error", code)
+	}
 	for ctx.Err() == nil {
 		if exited, code := proc.Exited(); exited {
-			return fmt.Errorf("backend exited (code %d) before it reported ready", code)
+			return exitError(code)
 		}
-		if probeReady(ctx, readyURL) {
+		isReady, snapshot := probeReadyStatus(ctx, readyURL)
+		if snapshot.Phase.Label() != "" {
+			if snapshot.Phase != last.Phase || time.Since(reported) >= 15*time.Second {
+				fmt.Fprintf(os.Stderr, "[kandev] %s (elapsed %.1fs; phase %.1fs)\n", snapshot.Phase.Label(), float64(snapshot.ElapsedMS)/1000, float64(snapshot.PhaseElapsedMS)/1000)
+				reported = time.Now()
+			}
+			last = snapshot
+		}
+		if isReady {
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("backend readiness wait canceled at %s: %w", readyURL, err)
 			}
 			if exited, code := proc.Exited(); exited {
-				return fmt.Errorf("backend exited (code %d) before it reported ready", code)
+				return exitError(code)
 			}
 			return nil
 		}
@@ -388,17 +406,31 @@ func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 // sets X-Kandev-Desktop-Health-Token (that header is /health-only, see
 // docs/specs/health-endpoint-version/spec.md AC-21).
 func probeReady(ctx context.Context, readyURL string) bool {
+	ready, _ := probeReadyStatus(ctx, readyURL)
+	return ready
+}
+
+func probeReadyStatus(ctx context.Context, readyURL string) (bool, startup.Snapshot) {
+	var body struct {
+		Startup startup.Snapshot `json:"startup"`
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, readyURL, nil)
 	if err != nil {
-		return false
+		return false, body.Startup
 	}
 	resp, err := healthProbeClient.Do(req)
 	if err != nil {
-		return false
+		return false, body.Startup
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&body); err != nil || body.Startup.Phase.Label() == "" || body.Startup.ElapsedMS < 0 || body.Startup.PhaseElapsedMS < 0 {
+			body.Startup = startup.Snapshot{}
+		}
+	} else {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8192))
+	}
+	return resp.StatusCode >= 200 && resp.StatusCode < 300, body.Startup
 }
 
 func healthPort(baseURL string) string {

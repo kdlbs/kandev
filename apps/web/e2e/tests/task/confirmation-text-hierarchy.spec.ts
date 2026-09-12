@@ -10,6 +10,35 @@ import { SessionPage } from "../../pages/session-page";
 
 const LONG_TASK_TITLE = `Desktop cleanup confirmation ${"X".repeat(31)}`;
 
+test.describe("Touch tablet archive boundary", () => {
+  test.use({ hasTouch: true, viewport: { width: 768, height: 1024 } });
+
+  test("retains the tablet inline confirmation at 768px", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const title = "Tablet archive stays inline";
+    const task = await apiClient.seedTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.goto(`/t/${task.task_id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    const row = testPage.getByTestId("sidebar-task-item").filter({ hasText: title });
+    await row.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Archive", exact: true }).click();
+    const inline = row.getByTestId("task-archive-inline-confirmation");
+    await expect(inline).toBeVisible();
+    await expect(testPage.getByTestId("mobile-action-confirmation")).toHaveCount(0);
+    await inline.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(inline).toHaveCount(0);
+    await expect(row).toBeVisible();
+  });
+});
+
 async function assertDesktopDeleteDialog(dialog: Locator): Promise<void> {
   await waitForFiniteAnimations(dialog);
 

@@ -1,6 +1,6 @@
 # 0001: File-based knowledge system
 
-**Status:** accepted (specification layout amended by ADR-2026-08-22-system-oriented-specifications)
+**Status:** accepted (specification layout amended by ADR-2026-08-22-system-oriented-specifications and ADR-2026-09-07-on-demand-document-catalogs)
 **Date:** 2026-03-28 (amended 2026-08-22)
 **Area:** infra
 
@@ -13,7 +13,7 @@ Agents working on Kandev had no way to record architectural decisions or store i
 Use a three-tier, file-based knowledge system:
 
 - **Tier 1 (always loaded):** `CLAUDE.md` stays slim and points to Tier 2 indexes.
-- **Tier 2 (index files):** `docs/decisions/INDEX.md` and `docs/specs/INDEX.md` — one-line-per-entry tables that agents read to find relevant items.
+- **Tier 2 (catalog entry pages):** `docs/decisions/INDEX.md` and `docs/specs/INDEX.md` explain how to query source files with `scripts/list-docs.py`.
 - **Tier 3 (individual files):** Individual ADRs and specification documents,
   loaded only when needed.
 
@@ -42,7 +42,7 @@ future work must follow.
 
 ## Consequences
 
-- Agents can discover past decisions by reading a small index file, then drill into specific ADRs.
+- Agents can discover past decisions with stable filters, then drill into specific ADRs.
 - No file grows unbounded — each decision is its own file.
 - Knowledge is committed to git and survives across sessions, branches, and agent providers.
 - The `/spec` skill integrates with the decision log (reads in design, writes when a durable decision is needed).

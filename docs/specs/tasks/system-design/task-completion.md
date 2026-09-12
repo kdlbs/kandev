@@ -4,6 +4,8 @@ system: tasks
 requirements:
   - REQ-TASKS-COMPLETION-001
   - REQ-TASKS-COMPLETION-002
+  - REQ-TASKS-COMPLETION-003
+updated: 2026-09-10
 ---
 
 # Task Completion System Design
@@ -19,6 +21,7 @@ their current owners and authorization checks.
 | --- | --- |
 | `REQ-TASKS-COMPLETION-001` | Step contract, Migration, Entry and notification |
 | `REQ-TASKS-COMPLETION-002` | Explicit resume, Follow-up ownership, Cleanup and races, User interface |
+| `REQ-TASKS-COMPLETION-003` | Workspace admission, Workspace runtime continuity, Workspace failure feedback |
 
 ## Step contract
 
@@ -237,6 +240,147 @@ An inline setting fits this short choice. Both viewports share draft and save
 logic. Preserve keyboard focus, one settings scroll region, no horizontal page
 overflow, and access to Save changes above safe-area insets.
 
+## Workspace admission
+
+Task completion, conversation availability, and workspace access have separate
+admission rules. `launchRestoreWorkspace` is a workspace operation. It does not
+receive `AllowCompletedSessionResume`, transition the session to STARTING, or
+call agent configuration/start. Explicit Resume retains the preceding design.
+
+The lifecycle manager's `createExecution` builds workspace infrastructure only.
+Replace its calls to `ensureLaunchSessionStillActive` with a workspace-specific
+admission check. Keep the active-session check on agent launch and promotion.
+Do not remove COMPLETED from global terminal-state helpers or introduce a
+client-controlled bypass flag.
+
+Workspace admission resolves the session's canonical `TaskEnvironment` and
+checks the current task, session binding, environment identity, owner generation,
+archive state, and cleanup admission. COMPLETED, FAILED, or CANCELLED alone is
+not proof that the task has relinquished its workspace. Missing records,
+database errors, invalid ownership, or an admitted cleanup fail closed.
+Reuse the existing task cleanup barrier and generation-aware repository helpers;
+do not replace them with a process-local mutex or a path-exists check.
+
+Keep authorization before cache reuse as well as before creation. Retain
+`session.exec` and environment access checks for execution-capable surfaces;
+viewing conversation history does not grant shell or workspace access.
+The environment's actual owner controls destructive cleanup. A borrowing
+session cannot authorize changes to another owner's resources.
+
+Use the same admission rule for `EnsureWorkspaceExecutionForSession`,
+`GetOrEnsureExecution`, and `GetOrEnsureExecutionForEnvironment`. The session
+route remains a lookup handle; it must resolve to the same canonical environment.
+An existing environment execution can be reused without replacing its session
+binding, running agent, or workflow owner.
+
+For workspace creation, capture admission identity before external operations,
+revalidate after runtime creation, persist registration through the existing
+cleanup-aware writer, then revalidate before readiness publication. If cleanup,
+deletion, ownership transfer, or a newer execution invalidates the claim, roll
+back only the runtime created by that attempt. Never tear down a winning sibling
+or resumed execution. A completed session present at admission differs from a
+concurrent stop or cancellation of the attempt; preserve the existing lifecycle
+and cancellation guards rather than inferring cancellation from state alone.
+
+Repository validation uses canonical inventory. Every repository required by
+the environment's existing validation contract must pass; one healthy repository
+does not excuse another missing or unsafe required repository. Keep the current
+handling of historical deleted repository rows. Restoration attaches retained
+workspaces and starts access infrastructure; it does not invoke branch replacement
+or silently rematerialize an absent checkout. Audit
+`reconcileExecutionWorkspace` and `reconcileWorkspaceWorktrees` accordingly.
+Explicit unarchive or branch recovery keeps its separate authority.
+
+## Workspace runtime continuity
+
+Retain the common session-keyed singleflight and duplicate-registration rollback
+used by session and environment entry points. Coordinate restoration with the
+existing explicit-resume lifecycle guard. If Resume wins, workspace consumers
+use its execution; if restoration wins, Resume may use the established promotion
+or replacement path. Only Resume can start the agent. Do not add another lock
+order or an environment-only singleflight bucket that races session requests.
+
+`publishCreatedExecution` emits agentctl Starting before Ready/Error. Preserve
+that ordering and workspace stream attachment. These events update workspace
+readiness, not task completion, session state, turns, or queue dispatch.
+Failure before registration must still reach the initiating request's workspace
+error state; waiting for an agentctl error event cannot cover that failure.
+
+Workspace registration can replace a stopped `executors_running` row. Preserve
+recoverable provider identity and metadata before doing so. Do not store a
+workspace runtime's empty provider fields over the completed conversation's
+resume data. Prove restore, restart, then explicit Resume uses the same provider
+conversation. Existing session metadata and persistence helpers remain the
+source; no schema migration or new durable execution-purpose field is planned.
+
+Startup may release terminal-session runtime resources under existing cleanup
+policy. The next authorized workspace access must be able to restore them
+without reviving the agent. Old stop, reclaim, and readiness callbacks must not
+alter a newer execution. Retain idle resource reclamation; the fix does not keep
+every completed task's runtime permanently alive.
+
+## Workspace failure feedback
+
+Carry the known operation (`restore_workspace`) through the frontend request
+boundary. Do not infer it by parsing the English error message. Workspace
+attempt state is shared by consumers of the same environment and includes
+task/environment identity, an attempt revision, pending/ready/error status, a
+safe cause, bounded diagnostic detail, and retry eligibility. Reuse environment
+state and request guards; do not persist this transient feedback as an agent
+launch failure or create independent retry loops in each panel.
+
+Keep this state in the existing `session-runtime` slice beside environment-keyed
+Git and shell state. Add pure attempt-state helpers and actions, with defaults,
+environment mapping, and purge behavior covered by tests. The domain hook owns
+request coordination. Do not treat a session ID as proof of environment identity
+when its canonical mapping is unavailable, or let purging a historical session
+clear a newer attempt owned by another session in the shared environment.
+
+`useSessionResumption` and `use-session-resumption-operations` publish restore
+results to that workspace state. `task-page-inner.tsx` excludes workspace-only
+failures from `EnsureSessionErrorBanner` and `SessionRecoveryFeedback` above the
+layout. Genuine session ensure/start/resume failures retain their existing
+presentation and precedence. Do not hide errors globally for completed tasks.
+
+Extend `WorkspaceUnavailable` for a restoration cause and Retry, rather than
+using its setup-failure wording for all cases. Render the shared feedback at
+workspace content boundaries, including Files, Changes, and workspace terminals.
+On a failed initial load, replace the preparation indicator. If cached content
+exists, keep it visible with an inline stale/unavailable notice; do not present
+stale data as a successful live refresh. The chat's completed banner, Resume,
+and New Agent remain independent. Failure in agent Resume remains chat-owned.
+
+Use a neutral icon, compact title, one short cause, and inline Retry/Details.
+Suggested localized copy is "Workspace unavailable" and "Couldn't reconnect
+to this task's workspace." Details are collapsed by default and must already
+be sanitized and bounded before rendering. A disclosure is not permission to
+expose credentials, raw command output, or private paths. Classify workspace
+restoration failures correctly in backend logs instead of labelling every
+terminal-state rejection as shutdown. Use existing structured diagnostics with
+task/session/environment identity and outcome; no new metrics are required.
+
+Retry repeats only workspace restoration and clears matching feedback only
+after success. Pending disables duplicate actions. Permission/archive/deleted
+or invalid-inventory failures do not retry on a timer. Preserve existing explicit
+recovery options where applicable. Task switches and newer attempts invalidate
+late results. Readiness reconciliation after reconnect must not overwrite a
+newer error with an old ready event.
+
+### Workspace mobile composition
+
+The curated exemplar is `task-layout.tsx` and its dedicated
+`mobile/session-mobile-layout.tsx`: phone navigation selects one workspace
+panel. The Files panel opens `mobile-file-viewer-panel.tsx` for file content.
+Place the error inline in that selected panel. This is a persistent content
+failure with a short action, so it needs neither a global banner nor a new drawer.
+
+Desktop keeps compact actions within its workspace pane. Phone/coarse-pointer
+Retry and Details have at least 44 px hit areas; apply those dimensions only
+to the appropriate responsive variants. Details wrap in the panel's single
+vertical scroll region. Preserve the mobile layout's dynamic viewport and
+safe-area navigation, keyboard focus, file-viewer back action, and saved desktop
+layout. Shared state and retry behavior remain identical across viewports.
+
 ## Verification and observability
 
 Use barrier-based Go tests for resume/stop, reclaim/resume, stale receipt/new
@@ -254,9 +398,25 @@ Assert a second agent response, unchanged session count and history, and no
 task reopen or duplicate completion. Include a retired non-primary session and
 active clarification regression. Run against freshly built production assets.
 
+For workspace restoration, use a real retained checkout and a completed session
+with no live execution. Prove passive Files/Git/terminal access, unchanged
+conversation state, and later explicit Resume on desktop and phone. Test all
+three terminal states, shared environments, cache reuse, missing mixed repository
+inventory, permissions, cleanup races, and provider identity preservation at the
+appropriate unit/integration boundary. Inject one bounded restore failure for
+the UI recovery test; do not mock successful workspace restoration in the happy
+path. Exact regression names and commands belong to the linked fix package.
+
 ## Related decisions
 
 - [Separate task completion from conversation availability](../../../decisions/2026-09-09-task-completion-conversation-availability.md)
 - [Replayable migrations](../../../decisions/0027-replayable-schema-migrations.md)
 - [Profile-switch session policy](../../../decisions/2026-08-31-workflow-profile-session-switch-policy.md)
 - [Current-turn clarification ownership](../../../decisions/2026-08-14-current-turn-clarification-ownership.md)
+- [Task-owned worktree lifetime](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
+- [Environment ownership generations](../../../decisions/2026-09-04-generation-fenced-task-environment-ownership.md)
+
+## Implementation plans
+
+- [Task completion and follow-ups](../../../plans/task-completion/plan.md)
+- [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)
