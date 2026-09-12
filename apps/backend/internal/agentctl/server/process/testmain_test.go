@@ -26,6 +26,15 @@ import (
 const kandevTestFixtureEnv = "KANDEV_TEST_FIXTURE"
 const gitFetchRaceRealGitEnv = "KANDEV_GIT_FETCH_RACE_REAL_GIT"
 const gitFetchRaceWorktreeEnv = "KANDEV_GIT_FETCH_RACE_WORKTREE"
+const contributionHistoryGitShimModeEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_MODE"
+const contributionHistoryGitShimArgsFileEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_ARGS_FILE"
+const contributionHistoryGitShimHeadEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_HEAD"
+const contributionHistoryGitShimRealGitEnv = "KANDEV_TEST_CONTRIBUTION_HISTORY_GIT_SHIM_REAL_GIT"
+const (
+	contributionHistoryGitShimBound    = "reflog-bound"
+	contributionHistoryGitShimOverflow = "reflog-overflow"
+	contributionHistoryGitShimTimeout  = "reflog-timeout"
+)
 const legacyGitLabHostEnv = "GITLAB_HOST"
 
 // TestMain branches into fixture-binary mode when the activation env var
@@ -35,6 +44,10 @@ const legacyGitLabHostEnv = "GITLAB_HOST"
 func TestMain(m *testing.M) {
 	if spec := os.Getenv(kandevTestFixtureEnv); spec != "" {
 		runFixture(spec)
+		return
+	}
+	if mode := os.Getenv(contributionHistoryGitShimModeEnv); mode != "" {
+		runContributionHistoryGitShim(mode)
 		return
 	}
 	// Tests build GitOperator with a nil environment (NewGitOperator(dir, log,
@@ -246,6 +259,56 @@ func runGitFetchRaceFixture() {
 	}
 	fmt.Fprintf(os.Stderr, "fixture: git-fetch-race: run Git: %v\n", err)
 	os.Exit(1)
+}
+
+func runContributionHistoryGitShim(mode string) {
+	args := os.Args[1:]
+	if len(args) >= 2 && args[0] == "reflog" && args[1] == "show" {
+		switch mode {
+		case contributionHistoryGitShimBound:
+			argsFile := os.Getenv(contributionHistoryGitShimArgsFileEnv)
+			if argsFile == "" {
+				fmt.Fprintln(os.Stderr, "contribution history shim: missing args file")
+				os.Exit(2)
+			}
+			if err := os.WriteFile(argsFile, []byte(strings.Join(args, "\x1f")), 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "contribution history shim: write args: %v\n", err)
+				os.Exit(2)
+			}
+			os.Exit(1)
+		case contributionHistoryGitShimOverflow:
+			head := os.Getenv(contributionHistoryGitShimHeadEnv)
+			if head == "" {
+				fmt.Fprintln(os.Stderr, "contribution history shim: missing head")
+				os.Exit(2)
+			}
+			for i := 0; i <= 200; i++ {
+				_, _ = fmt.Fprintf(os.Stdout, "%s\x1fnoise\n", head)
+			}
+			os.Exit(0)
+		case contributionHistoryGitShimTimeout:
+			time.Sleep(time.Hour)
+			os.Exit(0)
+		}
+	}
+
+	realGit := os.Getenv(contributionHistoryGitShimRealGitEnv)
+	if realGit == "" {
+		fmt.Fprintln(os.Stderr, "contribution history shim: missing real Git path")
+		os.Exit(2)
+	}
+	cmd := exec.Command(realGit, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err == nil {
+		os.Exit(0)
+	} else if exitErr, ok := err.(*exec.ExitError); ok {
+		os.Exit(exitErr.ExitCode())
+	} else {
+		fmt.Fprintf(os.Stderr, "contribution history shim: run Git: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // fixtureExec returns the (Command argv, Env) pair tests pass to runners that
