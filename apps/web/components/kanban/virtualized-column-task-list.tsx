@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
@@ -53,75 +53,6 @@ type VirtualizedColumnTaskListProps = {
   isMultiSelectMode?: boolean;
 };
 
-type VirtualizedKanbanCardProps = Omit<
-  VirtualizedColumnTaskListProps,
-  "orderedTasks" | "queuedStartIndex" | "queuedCount" | "deletingTaskId" | "archivingTaskId"
-> & {
-  task: Task;
-  columnTaskIds: string[];
-  isDeleting: boolean;
-  isArchiving: boolean;
-};
-
-const VirtualizedKanbanCard = memo(function VirtualizedKanbanCard({
-  task,
-  columnTaskIds,
-  step,
-  steps,
-  presentation,
-  workspaceId,
-  repositories,
-  externalLinkAvailability,
-  showMaximizeButton,
-  isDeleting,
-  isArchiving,
-  selectedIds,
-  onPreviewTask,
-  onOpenTask,
-  onEditTask,
-  onDeleteTask,
-  onArchiveTask,
-  onMoveTask,
-  onToggleSelect,
-  onSelectRange,
-  isMultiSelectMode,
-}: VirtualizedKanbanCardProps) {
-  const displayTask = useMemo(() => queuedTaskWithTitle(task, steps, step), [step, steps, task]);
-  const repositoryChips = useMemo(
-    () => resolveTaskRepositoryChips(task, repositories),
-    [repositories, task],
-  );
-  const handleRangeSelect = useCallback(
-    (taskId: string) => onSelectRange?.(taskId, columnTaskIds),
-    [columnTaskIds, onSelectRange],
-  );
-
-  return (
-    <KanbanCard
-      task={displayTask}
-      workspaceId={workspaceId}
-      presentation={presentation}
-      externalLinkAvailability={externalLinkAvailability}
-      repositoryChips={repositoryChips}
-      onClick={onPreviewTask}
-      onOpenFullPage={onOpenTask}
-      onEdit={onEditTask}
-      onDelete={onDeleteTask}
-      onArchive={onArchiveTask}
-      onMove={onMoveTask}
-      steps={steps}
-      showMaximizeButton={showMaximizeButton}
-      isDeleting={isDeleting}
-      isArchiving={isArchiving}
-      isSelected={selectedIds?.has(task.id)}
-      selectedIds={selectedIds}
-      onToggleSelect={onToggleSelect}
-      onRangeSelect={onSelectRange ? handleRangeSelect : undefined}
-      isMultiSelectMode={isMultiSelectMode}
-    />
-  );
-});
-
 function useStableTaskIds(tasks: Task[]): string[] {
   const previousRef = useRef<string[]>([]);
   const next = tasks.map((task) => task.id);
@@ -130,20 +61,6 @@ function useStableTaskIds(tasks: Task[]): string[] {
     previous.length === next.length && previous.every((taskId, index) => taskId === next[index]);
   if (!isUnchanged) previousRef.current = next;
   return isUnchanged ? previous : next;
-}
-
-function useStableExternalLinkAvailability(
-  availability: KanbanExternalLinkAvailability,
-): KanbanExternalLinkAvailability {
-  const previousRef = useRef(availability);
-  const previous = previousRef.current;
-  const isUnchanged =
-    previous.gitlab === availability.gitlab &&
-    previous.jira === availability.jira &&
-    previous.linear === availability.linear &&
-    previous.sentry === availability.sentry;
-  if (!isUnchanged) previousRef.current = availability;
-  return isUnchanged ? previous : availability;
 }
 
 /**
@@ -395,8 +312,6 @@ export function VirtualizedColumnTaskList({
 }: VirtualizedColumnTaskListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnTaskIds = useStableTaskIds(orderedTasks);
-  const stableExternalLinkAvailability =
-    useStableExternalLinkAvailability(externalLinkAvailability);
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: orderedTasks.length,
     getScrollElement: () => scrollRef.current,
