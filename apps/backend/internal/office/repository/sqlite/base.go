@@ -31,6 +31,12 @@ func newParticipantUUID() string { return uuid.New().String() }
 // The alias is the table alias of the tasks row (e.g. "t" or "tasks");
 // the resulting SQL fragment evaluates to "" when neither a runner row
 // nor a step primary exists.
+//
+// The third fallback orders by workflow_step_participants.created_at, a
+// persisted, dialect-portable column, with id as a named tiebreak — the
+// same ordering ResolveCurrentRunner uses for its identical tier, so both
+// resolvers agree and both database engines return the same runner for the
+// same data.
 func RunnerProjection(alias string) string {
 	if alias == "" {
 		alias = "tasks"
@@ -413,6 +419,13 @@ func (r *Repository) createRunTables() error {
 		-- re-deriving it against a context_snapshot a coalesced wakeup
 		-- may have since patched.
 		continuation_scope TEXT NOT NULL DEFAULT '',
+		-- Completion-wave identity (parent-wake-wave-identity): both
+		-- columns are set together, only for task_children_completed
+		-- runs, from one derivation per queued run. wake_wave_key is
+		-- the digest idx_run_wake_wave indexes; wake_wave_string is the
+		-- plain string the backstop's candidate query compares.
+		wake_wave_key TEXT NOT NULL DEFAULT '',
+		wake_wave_string TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP

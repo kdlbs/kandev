@@ -60,6 +60,7 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	r.migrateParentWakeReceiptColumns()
+	r.migrateWakeWaveColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
 	if err := r.migrate.Err(); err != nil {
@@ -208,6 +209,26 @@ func (r *Repository) migrateParentWakeReceiptColumns() {
 		`ALTER TABLE parent_child_wake_receipts
 		 ADD COLUMN child_generation TEXT NOT NULL DEFAULT ''`,
 	)
+}
+
+// migrateWakeWaveColumns adds the completion-wave identity columns for
+// databases created before parent-wake-wave-identity. No backfill: existing
+// rows keep the empty defaults, stay outside the partial unique index, and
+// are judged by the parent-scoped compatibility clause ListStuckParents
+// still applies to a parent with no keyed run at all.
+//
+// Apply's errors are swallowed by design (see db.MigrateLogger.Apply) and
+// surface instead through r.migrate.Err(), which runMigrations checks once
+// after every migration step — explicitly discarded here rather than left
+// unchecked, matching that contract for errcheck.
+func (r *Repository) migrateWakeWaveColumns() {
+	_ = r.migrate.Apply("runs.wake_wave_key",
+		`ALTER TABLE runs ADD COLUMN wake_wave_key TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("runs.wake_wave_string",
+		`ALTER TABLE runs ADD COLUMN wake_wave_string TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_run_wake_wave",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_run_wake_wave
+			ON runs(wake_wave_key, agent_profile_id) WHERE wake_wave_key <> ''`)
 }
 
 // migrateProviderRouting creates the office_workspace_routing,

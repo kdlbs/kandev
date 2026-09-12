@@ -548,3 +548,83 @@ func execPostgres(
 		t.Fatalf("exec %q: %v", query, err)
 	}
 }
+
+// TestPostgresListStuckParents_ThirdTierOrdersByCreatedAtNotID is the
+// PostgreSQL twin of TestListStuckParents_ThirdTierOrdersByCreatedAtNotID:
+// RunnerProjection's third fallback tier — the only line base.go
+// behaviourally changed — must pick the same agent on both engines by
+// ordering on workflow_step_participants.created_at, not a physical or
+// textual row identifier. created_at and id are set in opposite order so
+// a pick driven by id (the prior Postgres ordering) returns the wrong
+// agent.
+func TestPostgresListStuckParents_ThirdTierOrdersByCreatedAtNotID(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	ctx := context.Background()
+
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	if _, err := workflowrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init workflow repo: %v", err)
+	}
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+
+	now := time.Now().UTC()
+	const parentID = "pg-tier3-parent"
+	const recentAgentID, oldAgentID = "pg-tier3-agent-recent", "pg-tier3-agent-old"
+	childID := parentID + "-child-0"
+
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, project_id, workflow_step_id, created_at, updated_at)
+		VALUES (?, 'ws-1', 'Parent', 'office-project', 'step-parent', ?, ?)
+	`), parentID, now, now); err != nil {
+		t.Fatalf("seed parent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, parent_id, state, created_at, updated_at)
+		VALUES (?, 'ws-1', 'Child', ?, 'COMPLETED', ?, ?)
+	`), childID, parentID, now, now); err != nil {
+		t.Fatalf("seed child: %v", err)
+	}
+	for _, agentID := range []string{recentAgentID, oldAgentID} {
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+		`), agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent %s: %v", agentID, err)
+		}
+		if _, err := db.ExecContext(ctx, db.Rebind(`
+			INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'ws-1', '', 'idle', ?, ?)
+		`), agentID, agentID, agentID, agentID, now, now); err != nil {
+			t.Fatalf("seed agent profile %s: %v", agentID, err)
+		}
+	}
+	// Neither participant is at the parent's current step ('step-parent'),
+	// so tier 1 falls through for both; tier 3 must pick by created_at, and
+	// id is set in the opposite order to prove it isn't the deciding column.
+	if _, err := db.ExecContext(ctx, db.Rebind(`
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, created_at)
+		VALUES
+			('aa-pg-tier3-1', 'other-step-1', ?, 'runner', ?, ?),
+			('zz-pg-tier3-2', 'other-step-2', ?, 'runner', ?, ?)
+	`), parentID, recentAgentID, now, parentID, oldAgentID, now.Add(-24*time.Hour)); err != nil {
+		t.Fatalf("seed tier-3 runners: %v", err)
+	}
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != parentID {
+		t.Fatalf("candidates = %#v, want exactly [%s]", candidates, parentID)
+	}
+	if candidates[0].AssigneeAgentProfileID != recentAgentID {
+		t.Fatalf("assignee = %q, want %q (latest created_at, not largest id)", candidates[0].AssigneeAgentProfileID, recentAgentID)
+	}
+}

@@ -10,6 +10,8 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/waveidentity"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // Canonical lowercase status values used inside the pipeline. Backend
@@ -411,13 +413,197 @@ func (ss *SchedulerService) cascadeChildrenCompleted(
 			return
 		}
 	}
-	queue(parentAssignee, RunContext{
+
+	waveKey, waveString, ok := ss.resolveWaveIdentity(ctx, task.ParentID)
+	if !ok {
+		return
+	}
+
+	stepID, actionPayload := ss.resolveWaveActionPayload(ctx, task.ParentID, parentAssignee)
+	rc := RunContext{
 		Reason:         RunReasonTaskChildrenCompleted,
 		TaskID:         task.ParentID,
 		WorkspaceID:    task.WorkspaceID,
 		ChildTaskID:    task.ID,
+		WorkflowStepID: stepID,
 		IdempotencyKey: childrenCompletedIdempotencyKey(task.ParentID, parentAssignee, children),
-	})
+		WaveKey:        waveKey,
+		WaveString:     waveString,
+		ExtraPayload:   actionPayload,
+	}
+	queue(parentAssignee, rc)
+}
+
+// resolveWaveIdentity performs the terminality-confirming last read: a
+// wave identity is derived from, and only from, a wave-member read that
+// itself observed every member terminal. It does not trust the earlier
+// ListChildStates loop above, which counts every child (not just wave
+// members) and is a separate, unsynchronized read. A read error, any
+// non-terminal wave member, or an empty wave-member set (a parent with no
+// wave members has no wave) all report ok=false: the caller queues
+// nothing and the backstop delivers the wake later.
+func (ss *SchedulerService) resolveWaveIdentity(
+	ctx context.Context, parentID string,
+) (waveKey, waveString string, ok bool) {
+	members, err := ss.repo.ListWaveMembers(ctx, parentID)
+	if err != nil {
+		ss.logger.Debug("list wave members failed",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return "", "", false
+	}
+	if len(members) == 0 {
+		return "", "", false
+	}
+	ids := make([]string, 0, len(members))
+	for _, m := range members {
+		if m.State != "COMPLETED" && m.State != "CANCELLED" {
+			return "", "", false
+		}
+		ids = append(ids, m.TaskID)
+	}
+	return waveidentity.WaveKey(parentID, ids), waveidentity.WaveString(parentID, ids), true
+}
+
+// resolveWaveActionPayload resolves the parent's current workflow step id
+// and, from that step's on_children_completed trigger, the
+// workflow-authored payload the engine would attach to a run targeting the
+// same recipient cascade wakes — so a cascade wake that never touches the
+// engine still carries it. The step id is returned even when no matching
+// action payload is found, since the staleness-guard equivalence between
+// producers needs it regardless of whether the step also authors a
+// payload. Any failure to resolve the step itself — no getter wired, no
+// step bound, lookup error — returns ("", nil) and logs the omission at
+// debug: the wake itself is unconditional, an optional field is not worth
+// skipping it for.
+//
+// Cascade always wakes the parent's assignee, so a queue_run action only
+// collides with it when its resolved Target is the implicit-default or
+// explicit "primary" (QueueRunCallback.resolveTarget's own default case),
+// and a queue_run_for_each_participant action only collides with it when
+// its fanned-out seats include the parent's assignee — resolved via the
+// same seat-resolution the engine itself would use
+// (engine.ResolveFanOutSeats). A step authoring more than one queue_run(
+// _for_each_participant) action on this trigger — one to
+// "workspace.ceo_agent", say, one implicit-primary — must not have its
+// non-colliding action's payload attached here: parity is only required
+// between producers waking the *same* target, and the first non-empty
+// payload regardless of target would silently carry the wrong recipient's
+// content.
+//
+// Each action must also be reasoned task_children_completed, mirroring
+// QueueRunCallback.Execute's and QueueRunForEachParticipantCallback.
+// Execute's own reasonTaskChildrenCompleted gates: an action left at its
+// default reason resolves to the trigger name in the engine, never
+// task_children_completed, so it is excluded here too. A step authoring a
+// second on_children_completed action for an unrelated reason must not
+// have its payload attached to this wave.
+func (ss *SchedulerService) resolveWaveActionPayload(
+	ctx context.Context, parentID, parentAssignee string,
+) (stepID string, payload map[string]any) {
+	stepID, err := ss.repo.GetTaskWorkflowStepID(ctx, parentID)
+	if err != nil || stepID == "" {
+		ss.logger.Debug("wave payload parity: no workflow step bound",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return "", nil
+	}
+	if ss.workflowStepGetter == nil {
+		return stepID, nil
+	}
+	step, err := ss.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil || step == nil {
+		ss.logger.Debug("wave payload parity: step lookup failed",
+			zap.String("parent_id", parentID), zap.String("step_id", stepID), zap.Error(err))
+		return stepID, nil
+	}
+	spec := engine.CompileStep(step)
+	for _, action := range spec.Events[engine.TriggerOnChildrenCompleted] {
+		switch action.Kind {
+		case engine.ActionQueueRun:
+			if p, ok := matchQueueRunActionPayload(action); ok {
+				return stepID, p
+			}
+		case engine.ActionQueueRunForEachParticipant:
+			if p, ok := ss.matchFanOutActionPayload(ctx, action, stepID, parentID, parentAssignee); ok {
+				return stepID, p
+			}
+		}
+	}
+	return stepID, nil
+}
+
+// matchQueueRunActionPayload reports the action's payload when it is a
+// task_children_completed-reasoned queue_run targeting the implicit-default
+// or explicit "primary" — the target cascade's fixed-recipient wake collides
+// with. See resolveWaveActionPayload for why non-colliding targets and
+// other reasons are excluded. A collision is decided by reason and target
+// alone, never by whether the action happens to author a payload: the
+// engine dispatches this same action first (author order) regardless of
+// its payload's length, so stopping here — even with a nil/empty payload —
+// is what keeps cascade's selection aligned with which action actually
+// wins the engine-routed producers' wave-unique insertion. Skipping past
+// an empty-payload match to a later, non-empty one would let cascade
+// attach content the engine path would never have selected.
+func matchQueueRunActionPayload(action engine.Action) (map[string]any, bool) {
+	if action.QueueRun == nil {
+		return nil, false
+	}
+	if action.QueueRun.Reason != RunReasonTaskChildrenCompleted {
+		return nil, false
+	}
+	target := strings.TrimSpace(action.QueueRun.Target)
+	if target == "" || target == engine.TargetPrimary {
+		return action.QueueRun.Payload, true
+	}
+	return nil, false
+}
+
+// matchFanOutActionPayload reports the action's payload when it is a
+// task_children_completed-reasoned queue_run_for_each_participant action
+// whose fanned-out seats (resolved via engine.ResolveFanOutSeats, the exact
+// seat resolution QueueRunForEachParticipantCallback.Execute uses) include
+// the parent's assignee — the recipient cascade's fixed-recipient wake
+// collides with. Any resolution failure (no participant store wired, no
+// workflow id, seat lookup error) reports no match rather than blocking the
+// wake: see resolveWaveActionPayload's doc comment on the wake being
+// unconditional. As with matchQueueRunActionPayload, a collision never
+// depends on the action's payload being non-empty — only on reason, role,
+// and resolved seat membership — so cascade stops at the same action the
+// engine would dispatch first, regardless of what that action authors.
+func (ss *SchedulerService) matchFanOutActionPayload(
+	ctx context.Context, action engine.Action, stepID, parentID, parentAssignee string,
+) (map[string]any, bool) {
+	cfg := action.QueueRunForEachParticipant
+	if cfg == nil || cfg.Role == "" {
+		return nil, false
+	}
+	reason := cfg.Reason
+	if reason == "" {
+		reason = string(engine.TriggerOnChildrenCompleted)
+	}
+	if reason != RunReasonTaskChildrenCompleted {
+		return nil, false
+	}
+	if ss.participantStore == nil {
+		return nil, false
+	}
+	workflowID, err := ss.repo.GetTaskWorkflowID(ctx, parentID)
+	if err != nil {
+		ss.logger.Debug("wave payload parity: workflow id lookup failed",
+			zap.String("parent_id", parentID), zap.Error(err))
+		return nil, false
+	}
+	seats, err := engine.ResolveFanOutSeats(ctx, ss.participantStore, stepID, parentID, workflowID, cfg.Role)
+	if err != nil {
+		ss.logger.Debug("wave payload parity: fan-out seat resolution failed",
+			zap.String("parent_id", parentID), zap.String("role", cfg.Role), zap.Error(err))
+		return nil, false
+	}
+	for _, seat := range seats {
+		if seat.AgentProfileID == parentAssignee {
+			return cfg.Payload, true
+		}
+	}
+	return nil, false
 }
 
 // childrenCompletedIdempotencyKey digests the parent's child ID set

@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/office/waveidentity"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -235,7 +237,7 @@ func (s *Service) evaluateChildrenCompleted(
 		// commit the transition lifecycle before accepting this operation.
 		DeferOperationMark: true,
 		PreloadedState:     &state,
-		Payload:            childCompletionPayload(rows),
+		Payload:            childCompletionPayload(parent.ID, rows),
 	})
 	if err != nil {
 		s.logger.Warn("on_children_completed: workflow engine error",
@@ -284,7 +286,14 @@ func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID str
 	return wfmodels.IsTerminalStep(step, nextStep)
 }
 
-func childCompletionPayload(rows []models.ChildCompletionRow) engine.OnChildrenCompletedPayload {
+// childCompletionPayload builds the engine payload for an
+// on_children_completed dispatch. rows arrive ordered by created_at (see
+// ListChildCompletionRows) with terminality already confirmed by the
+// caller's single read (readyChildCompletionRows) — that same read is
+// what the wave identity is derived from, so this function only re-sorts
+// a copy of rows ascending by id before deriving it; it performs no read
+// of its own.
+func childCompletionPayload(parentID string, rows []models.ChildCompletionRow) engine.OnChildrenCompletedPayload {
 	summaries := make([]engine.ChildSummary, 0, len(rows))
 	for _, row := range rows {
 		summaries = append(summaries, engine.ChildSummary{
@@ -293,7 +302,24 @@ func childCompletionPayload(rows []models.ChildCompletionRow) engine.OnChildrenC
 			Summary: row.Title,
 		})
 	}
-	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}
+	waveKey, waveString := childCompletionWaveIdentity(parentID, rows)
+	return engine.OnChildrenCompletedPayload{
+		ChildSummaries: summaries,
+		WaveKey:        waveKey,
+		WaveString:     waveString,
+	}
+}
+
+// childCompletionWaveIdentity derives the completion-wave identity from
+// rows sorted ascending by id — a copy, so it doesn't disturb rows'
+// created_at ordering, which childCompletionOperationID still depends on.
+func childCompletionWaveIdentity(parentID string, rows []models.ChildCompletionRow) (waveKey, waveString string) {
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	sort.Strings(ids)
+	return waveidentity.WaveKey(parentID, ids), waveidentity.WaveString(parentID, ids)
 }
 
 func childCompletionStatus(row models.ChildCompletionRow) string {

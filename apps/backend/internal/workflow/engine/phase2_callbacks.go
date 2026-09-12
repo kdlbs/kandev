@@ -46,6 +46,15 @@ const (
 	TargetWorkspaceCEO  = "workspace.ceo_agent"
 	TaskIDThis          = "this"
 	defaultQueueReasonR = "queue_run"
+
+	// reasonTaskChildrenCompleted is the reason string the wave-identity
+	// columns (runs.wake_wave_key/wake_wave_string) are scoped to: only a
+	// request resolving to this reason may carry them, so a differently
+	// reasoned action on the same on_children_completed trigger never enters
+	// idx_run_wake_wave's uniqueness domain. Duplicated from
+	// office/service.RunReasonTaskChildrenCompleted rather than imported —
+	// engine must not depend on office.
+	reasonTaskChildrenCompleted = "task_children_completed"
 )
 
 // PrimaryAgentResolver resolves the task's "primary" agent profile id. The
@@ -90,14 +99,21 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	if err != nil {
 		return ActionResult{}, err
 	}
+	reason := queueRunReason(in)
+	var waveKey, waveString string
+	if reason == reasonTaskChildrenCompleted {
+		waveKey, waveString = waveIdentityPayload(in.Payload)
+	}
 	for _, agentID := range agentIDs {
 		req := QueueRunRequest{
 			AgentProfileID: agentID,
 			TaskID:         taskID,
 			WorkflowStepID: workflowStepID,
-			Reason:         queueRunReason(in),
+			Reason:         reason,
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
 			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
+			WaveKey:        waveKey,
+			WaveString:     waveString,
 		}
 		if _, err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
@@ -241,6 +257,17 @@ func (c QueueRunCallback) resolveParticipantRoleStepScoped(ctx context.Context, 
 		return nil, fmt.Errorf("queue_run: no participants with role %q on step %s", role, stepID)
 	}
 	return ids, nil
+}
+
+// ResolveFanOutSeats exposes roleSeatsForFanOut to callers outside the
+// engine that must predict a queue_run_for_each_participant action's
+// resolved seats without going through HandleTrigger — office/scheduler's
+// cascade producer needs this to attach the same payload the engine-routed
+// fan-out would for the same (wave, agent) pair (AC-002.10/.16).
+func ResolveFanOutSeats(
+	ctx context.Context, store ParticipantStore, stepID, taskID, workflowID, role string,
+) ([]ParticipantInfo, error) {
+	return roleSeatsForFanOut(ctx, store, stepID, taskID, workflowID, role)
 }
 
 // roleSeatsForFanOut gathers the same participant population the quorum
@@ -442,6 +469,22 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 	return out
 }
 
+// waveIdentityPayload extracts the completion-wave identity from a
+// TriggerOnChildrenCompleted dispatch, or ("", "") for any other trigger
+// (OnChildrenCompletedPayload's WaveKey/WaveString default to empty when
+// the dispatching producer could not derive one).
+func waveIdentityPayload(payload any) (waveKey, waveString string) {
+	switch p := payload.(type) {
+	case OnChildrenCompletedPayload:
+		return p.WaveKey, p.WaveString
+	case *OnChildrenCompletedPayload:
+		if p != nil {
+			return p.WaveKey, p.WaveString
+		}
+	}
+	return "", ""
+}
+
 func commentPayload(payload any) (OnCommentPayload, bool) {
 	switch p := payload.(type) {
 	case OnCommentPayload:
@@ -509,6 +552,10 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
 	}
 	reason := queueRunForEachParticipantReason(in)
+	var waveKey, waveString string
+	if reason == reasonTaskChildrenCompleted {
+		waveKey, waveString = waveIdentityPayload(in.Payload)
+	}
 	// Collect-and-continue (AC-C1): one participant's QueueRun failure must
 	// not abort the fan-out to their siblings — a reviewer whose queue is
 	// briefly unavailable should not silently block every other reviewer's
@@ -520,10 +567,19 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 	// participant list with roleSeatsForFanOut, which already filters by
 	// role and canonicalizes the slate, so #2907's inline `p.Role != cfg.Role`
 	// guard is redundant here and is dropped rather than duplicated.
+	//
+	// waveKey/waveString (parent-wake-wave-identity): this is the second
+	// on_children_completed action callback alongside QueueRunCallback, and
+	// both attach the trigger's wave identity to every request they queue
+	// when the resolved reason is task_children_completed — idx_run_wake_wave,
+	// not this loop, is what collapses two participant roles resolving to the
+	// same agent profile into one run.
 	var errs []error
 	for _, p := range seats {
 		req := QueueRunRequest{
 			AgentProfileID: p.AgentProfileID,
+			WaveKey:        waveKey,
+			WaveString:     waveString,
 			TaskID:         taskID,
 			WorkflowStepID: in.Step.ID,
 			Reason:         reason,

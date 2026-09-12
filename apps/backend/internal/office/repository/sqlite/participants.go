@@ -56,6 +56,28 @@ func (r *Repository) GetTaskWorkflowStepID(ctx context.Context, taskID string) (
 	return r.stepIDForTask(ctx, taskID)
 }
 
+// GetTaskWorkflowID returns the task's current workflow_id. Returns "" with
+// no error when the task has no workflow bound. Exposed so the cascade
+// producer can workflow-scope its fan-out seat resolution the same way the
+// engine's own ParticipantAdapter does for a same-task queue_run_for_each_
+// participant action (parent-wake-wave-identity payload parity).
+func (r *Repository) GetTaskWorkflowID(ctx context.Context, taskID string) (string, error) {
+	var workflowID sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT workflow_id FROM tasks WHERE id = ?`,
+	), taskID).Scan(&workflowID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !workflowID.Valid {
+		return "", nil
+	}
+	return workflowID.String, nil
+}
+
 // GetWorkflowStepStageType returns the persisted stage type for a workflow
 // step. It returns an empty string when the step does not exist so callers
 // can apply compatibility fallbacks for older run payloads.
