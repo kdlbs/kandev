@@ -213,7 +213,7 @@ func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (b
 func (r *Repository) GetTaskAssignee(ctx context.Context, taskID string) (string, error) {
 	var assignee string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
-		`SELECT `+RunnerProjection("tasks")+` FROM tasks WHERE id = ?`), taskID).Scan(&assignee)
+		`SELECT `+RunnerProjection(r.ro.DriverName(), "tasks")+` FROM tasks WHERE id = ?`), taskID).Scan(&assignee)
 	if err != nil {
 		return "", err
 	}
@@ -230,7 +230,7 @@ func (r *Repository) GetTaskAssignee(ctx context.Context, taskID string) (string
 func (r *Repository) GetTaskAssigneeTx(ctx context.Context, tx *sqlx.Tx, taskID string) (string, error) {
 	var assignee string
 	err := tx.QueryRowxContext(ctx, tx.Rebind(
-		`SELECT `+RunnerProjection("tasks")+` FROM tasks WHERE id = ?`), taskID).Scan(&assignee)
+		`SELECT `+RunnerProjection(tx.DriverName(), "tasks")+` FROM tasks WHERE id = ?`), taskID).Scan(&assignee)
 	if err != nil {
 		return "", err
 	}
@@ -346,7 +346,7 @@ func (r *Repository) GetChildSummaries(ctx context.Context, parentID string) ([]
 			COALESCE(t.identifier, '') AS identifier,
 			COALESCE(t.title, '') AS title,
 			COALESCE(t.state, '') AS state,
-			`+RunnerProjection("t")+` AS assignee_agent_profile_id,
+			`+RunnerProjection(r.ro.DriverName(), "t")+` AS assignee_agent_profile_id,
 			COALESCE((
 				SELECT SUBSTR(c.body, 1, ?) FROM task_comments c
 				WHERE c.task_id = t.id ORDER BY c.created_at DESC LIMIT 1

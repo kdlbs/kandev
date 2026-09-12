@@ -31,9 +31,20 @@ func newParticipantUUID() string { return uuid.New().String() }
 // The alias is the table alias of the tasks row (e.g. "t" or "tasks");
 // the resulting SQL fragment evaluates to "" when neither a runner row
 // nor a step primary exists.
-func RunnerProjection(alias string) string {
+//
+// The third fallback's ordering is dialect-branched: SQLite orders by
+// wsp.rowid, which Postgres does not have. Postgres has no column here that
+// preserves insertion order (workflow_step_participants carries no
+// created_at, and ctid is unstable across VACUUM/UPDATE), so it orders by
+// wsp.id instead — a last-resort tiebreak among rows that already fell
+// through both earlier, more specific fallbacks.
+func RunnerProjection(driver, alias string) string {
 	if alias == "" {
 		alias = "tasks"
+	}
+	fallbackOrder := "wsp.rowid DESC"
+	if dialect.IsPostgres(driver) {
+		fallbackOrder = "wsp.id DESC"
 	}
 	return `COALESCE(
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
@@ -45,7 +56,7 @@ func RunnerProjection(alias string) string {
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
 		 WHERE wsp.task_id = ` + alias + `.id
 		   AND wsp.role = 'runner'
-		 ORDER BY wsp.rowid DESC LIMIT 1), ''),
+		 ORDER BY ` + fallbackOrder + ` LIMIT 1), ''),
 		''
 	)`
 }

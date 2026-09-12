@@ -124,16 +124,9 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		WITH stuck AS (
 			SELECT
 				p.id AS parent_task_id,
-				`+RunnerProjection("p")+` AS assignee_agent_profile_id,
+				`+RunnerProjection(driver, "p")+` AS assignee_agent_profile_id,
 				p.workflow_step_id AS workflow_step_id,
-				COALESCE((
-					SELECT GROUP_CONCAT(c.id || ':' || c.state, ',')
-					FROM (
-						SELECT id, state FROM tasks
-						WHERE parent_id = p.id AND archived_at IS NULL
-						ORDER BY id
-					) c
-				), '') AS child_set_key,
+				COALESCE(`+dialect.OrderedPairConcat(driver, "parent_id = p.id AND archived_at IS NULL")+`, '') AS child_set_key,
 				p.id || '|' || COALESCE(`+dialect.OrderedIDConcat(driver, waveMemberPredicate)+`, '') AS wave_string,
 				(
 					SELECT MAX(c.updated_at) FROM tasks c
@@ -169,7 +162,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		WHERE s.assignee_agent_profile_id != ''
 		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
 		  AND (
-		      r.child_set_key IS NOT s.child_set_key
+		      r.child_set_key IS DISTINCT FROM s.child_set_key
 		      OR (
 		          NOT EXISTS (
 		              SELECT 1 FROM runs delivered
@@ -180,7 +173,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		  )
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
-		      WHERE json_extract(w.payload, '$.task_id') = s.parent_task_id
+		      WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
 		        AND w.reason = ?
 		        AND (
 		            w.status IN ('queued', 'claimed')
@@ -276,8 +269,9 @@ type childSetKeyRow struct {
 }
 
 // GetChildSetKey returns the deterministic key for the parent's current
-// active child set. It reads child ids and states separately from the
-// aggregate query so the same logic works on SQLite and PostgreSQL.
+// active child set, formatted by formatChildSetKey — the same "id:state"
+// comma-joined form ListStuckParents computes in SQL via
+// dialect.OrderedPairConcat, so the two must stay byte-identical.
 func (r *Repository) GetChildSetKey(ctx context.Context, parentTaskID string) (string, error) {
 	var rows []childSetKeyRow
 	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
