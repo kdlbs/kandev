@@ -32,6 +32,20 @@ type Repository interface {
 	UpdateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error
 	DeleteBudgetPolicy(ctx context.Context, id string) error
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
+	SpendWindowForWorkspace(
+		ctx context.Context, workspaceID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	SpendWindowForAgent(
+		ctx context.Context, agentInstanceID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	SpendWindowForProject(
+		ctx context.Context, projectID string, start time.Time, hasStart bool, before time.Time,
+	) (models.SpendWindow, error)
+	GetWorkspaceBudgetDefault(ctx context.Context, workspaceID string) (limitSubcents int64, found bool, err error)
+	SetWorkspaceBudgetDefault(ctx context.Context, workspaceID string, limitSubcents int64) error
+	// Claim atomically records that (policyID, periodKey, level) may emit its
+	// budget notification. See docs/specs/office/requirements/costs.md.
+	Claim(ctx context.Context, policyID, periodKey, level string) (bool, error)
 }
 
 // CostService handles cost recording, summaries, and budget evaluation.

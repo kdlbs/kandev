@@ -14,6 +14,11 @@ import {
   type ChangeRequestTaskSummaryStatus,
   type ChangeRequestTaskSummaryTone,
 } from "@/components/integrations/change-request-task-status-summary";
+import {
+  getCurrentWorkflowAttention,
+  isWorkflowApprovalRequired,
+  workflowAttentionWorkflowNames,
+} from "./pr-workflow-attention";
 
 export type PRTaskSummaryRowKind = ChangeRequestTaskSummaryRowKind;
 export type PRTaskSummaryTone = ChangeRequestTaskSummaryTone;
@@ -46,14 +51,57 @@ function deriveReviewRow(reviewState: string): PRTaskSummaryRow | null {
   return rawRow("review", reviewState);
 }
 
-function deriveCIRow(checksState: string): PRTaskSummaryRow | null {
-  if (!checksState) return null;
-  if (checksState === "success") return { kind: "ci", status: "passed", tone: "success" };
-  if (checksState === "failure") return { kind: "ci", status: "failed", tone: "danger" };
-  if (checksState === "pending") {
-    return { kind: "ci", status: "in_progress", tone: "warning" };
+function workflowAttentionRow(pr: TaskPR): PRTaskSummaryRow | null {
+  const attention = getCurrentWorkflowAttention(pr);
+  if (!attention) return null;
+  if (attention.state === "unknown") {
+    return {
+      kind: "ci",
+      id: "workflow-attention",
+      status: "workflow_unavailable",
+      tone: "muted",
+    };
   }
-  return rawRow("ci", checksState);
+  if (attention.state !== "approval_required" && attention.state !== "action_required") {
+    return null;
+  }
+  const names = workflowAttentionWorkflowNames(attention);
+  return {
+    kind: "ci",
+    id: "workflow-attention",
+    status: isWorkflowApprovalRequired(attention) ? "awaiting_approval" : "workflow_attention",
+    tone: "warning",
+    ...(names
+      ? {
+          detail: {
+            key: "github:workflowAttentionWorkflows",
+            values: { names },
+          },
+        }
+      : {}),
+  };
+}
+
+function deriveCIRows(pr: TaskPR): PRTaskSummaryRow[] {
+  const attentionRow = workflowAttentionRow(pr);
+  const attentionExplainsUnstable =
+    attentionRow?.status === "awaiting_approval" || attentionRow?.status === "workflow_attention";
+  const rows: PRTaskSummaryRow[] = [];
+  if (pr.checks_state === "success") rows.push({ kind: "ci", status: "passed", tone: "success" });
+  else if (pr.checks_state === "failure") {
+    rows.push({ kind: "ci", status: "failed", tone: "danger" });
+  } else if (pr.checks_state === "pending") {
+    rows.push({ kind: "ci", status: "in_progress", tone: "warning" });
+  } else if (
+    pr.checks_state === "unstable" ||
+    (pr.mergeable_state === "unstable" && !attentionExplainsUnstable)
+  ) {
+    if (!attentionExplainsUnstable) {
+      rows.push({ kind: "ci", status: "checks_not_successful", tone: "warning" });
+    }
+  } else if (pr.checks_state) rows.push(rawRow("ci", pr.checks_state));
+  if (attentionRow) rows.push(attentionRow);
+  return rows;
 }
 
 function deriveMergeRow(pr: TaskPR, readyToMerge: boolean): PRTaskSummaryRow | null {
@@ -86,6 +134,7 @@ function deriveMergeRow(pr: TaskPR, readyToMerge: boolean): PRTaskSummaryRow | n
   if (pr.mergeable_state === "clean") {
     return { kind: "merge", status: "mergeable", tone: "muted" };
   }
+  if (pr.mergeable_state === "unstable") return null;
   return rawRow("merge", pr.mergeable_state);
 }
 
@@ -96,7 +145,7 @@ export function derivePRTaskStatusSummary(
   const rows = [
     deriveStateRow(pr.state),
     deriveReviewRow(pr.review_state),
-    deriveCIRow(pr.checks_state),
+    ...deriveCIRows(pr),
     deriveMergeRow(pr, readyToMerge),
   ].filter((row): row is PRTaskSummaryRow => row !== null);
 

@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-24
-updated: 2026-09-05
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -76,6 +76,16 @@ pointer inline confirmation behavior.
   and compact desktop/tablet viewport containment. Coarse-pointer inline
   confirmation may continue to expand its row and shall retain its existing
   44px action geometry and zero-overflow behavior.
+- **AC-TASKS-CONFIRMATION-SURFACE-002.4:** When a fine-pointer archive action
+  needs descendant classification before choosing its confirmation surface, no
+  provisional confirmation popover or archive action shall appear while that
+  classification is pending. After classification, exactly one final surface
+  shall appear: the anchored popover for zero descendants, or the full dialog
+  for one or more descendants. An unavailable classification shall fail safe to
+  the full dialog without first showing the popover. While no surface is
+  visible, Escape or a new pointer interaction shall dismiss the pending
+  request; keyboard dismissal shall restore trigger focus, and a late
+  classification result shall not mount a confirmation after dismissal.
 
 ### REQ-UI-TASK-CLEANUP-CONFIRMATION-001: Scannable task cleanup confirmation
 
@@ -113,9 +123,9 @@ repository resources, so that I can understand the consequence before acting.
   system's semantic destructive action treatment without a competing primary
   treatment. Archive shall retain its non-destructive action treatment.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.7:** Cancel, dismiss, focus, Escape,
-  Enter default-action behavior, loading state, cascade selection, in-flight
-  warning visibility, and single/bulk archive and delete callbacks shall remain
-  unchanged.
+  Enter default-action behavior, archive/delete mutation loading state, cascade
+  selection, in-flight warning visibility, and single/bulk archive and delete
+  callbacks shall remain unchanged.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.8:** When archive is initiated from a
   phone Kanban card, the card shall use the contained full task-cleanup alert
   dialog even when the task has no descendants. The dialog shall be centered
@@ -130,10 +140,11 @@ repository resources, so that I can understand the consequence before acting.
   archive-confirmation preference shall continue to bypass the surface.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.11:** When the task's executor
   projection is absent but task-owned worktree state may remain after the last
-  session ends, the delete confirmation shall fail closed by showing the same
-  explicit discard selection.
+  session ends, the delete confirmation shall inspect the retained worktrees
+  through the task cleanup contract. Missing executor metadata alone shall not
+  require discard consent.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.12:** When delete can remove one or more
-  task worktrees, the confirmation shall state that tracked and untracked local
+  dirty task worktrees, the confirmation shall state that tracked and untracked local
   changes will be permanently discarded. The destructive action shall require
   an explicit selection for this outcome.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.13:** When the backend rejects deletion
@@ -143,6 +154,10 @@ repository resources, so that I can understand the consequence before acting.
 - **AC-UI-TASK-CLEANUP-CONFIRMATION-001.14:** At phone widths, the discard
   selection shall remain inside the existing centered dialog and its scrolling
   body. Its label shall provide a touch target of at least 44 CSS px.
+
+Consent inspection, clean-workspace suppression, and failure recovery follow
+[task runtime cleanup](../../tasks/requirements/runtime-cleanup.md),
+`AC-TASKS-RUNTIME-CLEANUP-001.14` through `.17`.
 
 ## Out of scope
 
@@ -154,6 +169,8 @@ repository resources, so that I can understand the consequence before acting.
   dimensions.
 - Replacing the centered task alerts with a drawer, sheet, or new navigation
   flow.
+- Changing the descendant-count API or introducing background prefetching for
+  archive confirmation.
 - Masking sidebar row layout changes with fixed/minimum heights or negative
   offsets.
 - Adding animation or redesigning any confirmation surface beyond the shared

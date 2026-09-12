@@ -485,6 +485,7 @@ test.describe("Mobile sidebar task actions", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const taskTitle = "Mobile task with diff stats";
     const task = await apiClient.createTaskWithAgent(
@@ -547,6 +548,9 @@ test.describe("Mobile sidebar task actions", () => {
           .map((animation) => animation.finished.catch(() => undefined)),
       ),
     );
+    await prCapture.screenshot("mobile-task-row-menu-grouping", {
+      caption: "Phone task-row actions grouped inside the scrolling menu",
+    });
     const [menuBox, itemBox] = await Promise.all([menu.boundingBox(), archiveItem.boundingBox()]);
     const viewport = testPage.viewportSize();
     if (!menuBox || !itemBox || !viewport) throw new Error("mobile action sheet has no layout box");
@@ -564,6 +568,37 @@ test.describe("Mobile sidebar task actions", () => {
       scrollHeight: element.scrollHeight,
     }));
     expect(menuOverflow.scrollHeight).toBeGreaterThan(menuOverflow.clientHeight);
+    const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
+      (text) => text.replace(/\s+/g, " ").trim(),
+    );
+    const menuIndex = (label: string) => menuLabels.indexOf(label);
+    for (const label of [
+      "Pin",
+      "Color",
+      "Priority",
+      "Edit",
+      "Rename",
+      "Duplicate",
+      "Create Subtask",
+      "Nest under",
+      "Link",
+      "Move to",
+      "Archive",
+      "Delete",
+    ]) {
+      expect(menuIndex(label), `${label} should be in the task action menu`).toBeGreaterThanOrEqual(
+        0,
+      );
+    }
+    expect(menuIndex("Pin")).toBeLessThan(menuIndex("Color"));
+    expect(menuIndex("Color")).toBeLessThan(menuIndex("Priority"));
+    expect(menuIndex("Priority")).toBeLessThan(menuIndex("Edit"));
+    expect(menuIndex("Edit")).toBeLessThan(menuIndex("Create Subtask"));
+    expect(menuIndex("Create Subtask")).toBeLessThan(menuIndex("Link"));
+    expect(menuIndex("Link")).toBeLessThan(menuIndex("Move to"));
+    expect(menuIndex("Move to")).toBeLessThan(menuIndex("Archive"));
+    expect(menuIndex("Archive")).toBeLessThan(menuIndex("Delete"));
+    await expect(menu.locator(":scope > [data-slot='context-menu-separator']")).toHaveCount(4);
     for (const actionName of [
       "Pin",
       "Edit",

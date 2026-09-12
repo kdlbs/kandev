@@ -78,6 +78,11 @@ type Worktree struct {
 	// closed if the recorded path or branch advanced before teardown.
 	CleanupHeadOID string `json:"-"`
 
+	// CleanupHeadOIDUnavailable indicates that the current durable cleanup
+	// snapshot intentionally omitted this worktree's commit identity. It is
+	// internal provenance, so it is rebuilt when a snapshot is loaded.
+	CleanupHeadOIDUnavailable bool `json:"-"`
+
 	// BaseBranch is the branch this worktree was created from.
 	BaseBranch string `json:"base_branch"`
 
@@ -180,6 +185,15 @@ type CreateRequest struct {
 	// BaseBranch is the branch to base the worktree on (required).
 	// Typically "main" or "master".
 	BaseBranch string
+
+	// RecoveryClaim carries the durable environment authority through the
+	// recovery publication CAS. It is internal state and is never serialized
+	// into a user-facing request.
+	RecoveryClaim *models.TaskEnvironmentRecoveryClaim
+
+	// RecoveryOperationID lets all repository slots in one admission share the
+	// same restart-safe recovery record identity.
+	RecoveryOperationID string
 
 	// FallbackBaseBranch is an optional branch to retry with when BaseBranch
 	// does not exist in the repository. Typically populated with the

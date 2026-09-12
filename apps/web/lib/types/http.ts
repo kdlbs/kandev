@@ -129,11 +129,13 @@ export type StepDefinition = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
   route_state?: string;
   route_reason?: string;
   downstream_acp_session_id?: string;
+  complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -156,6 +158,8 @@ export type WorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
+  complete_task_on_enter?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
@@ -228,6 +232,7 @@ export type TaskPendingActionRevision = {
 
 export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
 export type WorkflowProfileSessionEndPolicy = "complete" | "park";
+export type WorkflowSessionTarget = { kind: "initial" } | { kind: "step"; step_id: string };
 
 export function normalizeWorkflowProfileSessionStartPolicy(
   value: unknown,
@@ -238,7 +243,7 @@ export function normalizeWorkflowProfileSessionStartPolicy(
 export function normalizeWorkflowProfileSessionEndPolicy(
   value: unknown,
 ): WorkflowProfileSessionEndPolicy {
-  return typeof value === "string" && value.trim() === "park" ? "park" : "complete";
+  return typeof value === "string" && value.trim() === "complete" ? "complete" : "park";
 }
 
 /**
@@ -343,8 +348,8 @@ export type RepositorySecretBinding = {
  * A named, reusable group of workspace repositories. Applying one fills the
  * task-creation repository picker in a single action.
  *
- * A set deliberately carries no branch: branch choice belongs to the task, and
- * the picker's existing per-row defaulting fills it after a set is applied.
+ * A set stores an optional base branch for each member. Applying a set copies
+ * that value into the task draft; it never creates a live link to the set.
  */
 export type RepositorySet = {
   id: string;
@@ -360,6 +365,8 @@ export type RepositorySet = {
 export type RepositorySetItem = {
   repository_id: RepositoryId;
   position: number;
+  /** Empty or absent means that the task form should use its normal default. */
+  base_branch?: string;
 };
 
 export type RepositoryScript = {
@@ -436,12 +443,26 @@ export type Task = ActiveSubagentCountFields & {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start (see internal/task/models WorkspaceOrphaned). */
+  workspace_orphaned?: boolean;
   /**
    * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
    * then "background"; null/absent means none is known. The count is the
    * corresponding sum of live subagents.
    */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /** Process-local transition generation for parked_on_background_work; used to reject stale snapshots. */
+  parked_revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -513,9 +534,13 @@ export type WorkflowStepDTO = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
   pull_from_step_id?: string | null;
+  complete_task_on_enter: boolean;
+  auto_advance_requires_signal: boolean;
+  cancel_triggers_turn_complete: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -524,6 +549,12 @@ export type WorkflowStepDTO = {
 export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
+  move_id?: string;
+  entry_options?: {
+    reset_context?: boolean;
+    instructions?: string;
+    skip_step_prompt?: boolean;
+  };
 };
 
 /** A worktree associated with a task session (one per repo on multi-repo tasks). */
@@ -543,6 +574,10 @@ export type TaskSessionWorktree = {
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
+  /** Immutable queue ownership identity; changes when a textual session ID is recreated. */
+  queue_incarnation_id?: string;
+  /** Frontend-only owner for an in-flight optimistic resume projection. */
+  resume_projection_id?: string;
   /** Optional user-supplied label shown on the session tab. */
   name?: string;
   agent_profile_id?: AgentProfileId;
@@ -583,6 +618,22 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when the session is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input and any live foreground_activity.
+   */
+  parked_on_background_work?: boolean;
+  /**
+   * Process-local transition generation for parked_on_background_work; used
+   * to reject stale snapshots. Deliberately named `revision`, not
+   * `parked_revision` — an accepted naming inconsistency with the task-level
+   * carrier (spec round-5 F20).
+   */
+  revision?: number;
+  /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+  parked_epoch?: number;
   /**
    * True when a send right now would be delivered into the still-generating turn
    * (mid-turn steering) rather than blocked/queued. Live, derived from the
@@ -876,6 +927,7 @@ export type MessageType =
 
 export type MessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  client_queue_id?: string;
 };
 
 export type Message = {
@@ -953,6 +1005,8 @@ export type StepPortable = {
   agent_profile?: AgentProfilePortable;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
+  complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;
   wip_limit?: number;

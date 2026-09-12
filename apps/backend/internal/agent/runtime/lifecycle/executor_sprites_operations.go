@@ -38,7 +38,7 @@ func spriteProjectSkillDir(metadata map[string]interface{}) string {
 		return ""
 	}
 	if strings.TrimSpace(manifest.ProjectSkillDir) == "" {
-		return ".agents/skills"
+		return skill.DefaultProjectSkillDir
 	}
 	return manifest.ProjectSkillDir
 }
@@ -130,7 +130,7 @@ func (r *SpritesExecutor) uploadSkillFiles(
 
 	projectSkillDir := manifest.ProjectSkillDir
 	if projectSkillDir == "" {
-		projectSkillDir = ".agents/skills"
+		projectSkillDir = skill.DefaultProjectSkillDir
 	}
 
 	// Wipe any kandev-* skills from a previous session and append the
@@ -339,7 +339,7 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (stri
 	if script == "" {
 		return "", nil
 	}
-	script += KandevBranchCheckoutPostlude()
+	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
 		if err != nil {
@@ -495,7 +495,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
-		Env:                        cloneStringMap(req.Env),
+		Env:                        selectedCheckoutAgentEnv(req.Env, req.Metadata),
 	}
 }
 

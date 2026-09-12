@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
-updated: 2026-09-02
+updated: 2026-09-11
 owners:
   - Kandev
 ---
@@ -43,6 +43,27 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.5:** Desktop, narrow desktop, and mobile task views use the existing inline alert and chat recovery patterns. Recovery actions remain reachable by keyboard and touch without horizontal overflow.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.6:** A Retry recovery control is disabled while its recovery request is in flight on every recovery surface. A repeated attempt cannot create overlapping `session.recover` requests.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7:** When task navigation changes the active task while an automatic session-status or recovery request is in flight, the task view ignores the result owned by the prior task-session identity. An error from the prior identity does not appear on the newly selected task. Each navigation cycle invalidates prior attempts even when the task-session pair later repeats.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.8:** When automatic recovery fails, the default view shall show a short localized summary and applicable recovery actions. An expandable details control shall retain each failure cause with its operation label. Technical identifiers and nested transport errors shall not appear in the collapsed summary.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.9:** On desktop and mobile, users shall be able to expand recovery details, read both failure causes, and retry using keyboard or touch. Details shall wrap without horizontal page overflow. Retry shall remain disabled during the request.
+
+Additional workspace admission and single-card behavior are defined in
+[Session recovery failures](session-recovery-failures.md).
+
+### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004: Recovery across task archive transitions
+
+**Intent:** Keep archived history readable and resume eligible work after the user unarchives its task.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.1:** Opening or reconnecting to an archived task shall not start an agent or restore a live workspace. History and the existing Unarchive action shall remain available without a recovery failure banner.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2:** Session status for an archived task shall report that automatic resume and workspace restoration are not needed. Direct resume or restore requests shall reject the archived state without creating a runtime or changing the stored conversation identity.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3:** When a task becomes archived during a recovery attempt, the task view shall discard obsolete recovery feedback and shall not begin a fallback restore. A later unarchive shall not make an earlier attempt current again.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.4:** After successful unarchive in an open task view, recovery eligibility shall be checked again without a page reload. An archive-cancelled session shall follow normal resume policy, including the preference that prevents automatic agent starts on open. Failed unarchive shall leave recovery disabled.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5:** When the task retains recoverable workspace ownership and branch data, recovery after unarchive shall use the existing task session and workspace recovery path. It shall preserve any valid provider conversation identity. Explicitly stopped and completed sessions shall retain their existing automatic-start policy.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6:** If recovery after unarchive cannot resolve the workspace, the view shall preserve history and show the failure with applicable actions. It shall not claim that missing files were restored or silently replace a lost branch or provider conversation.
+
+Archive resource ownership remains defined by the task runtime cleanup contract.
+These criteria define session recovery eligibility and its visible outcomes.
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003: Explicit continuation after branch loss
 
@@ -83,44 +104,6 @@ Managed npm runtimes can retain a truncated or otherwise corrupt extracted
 `_npx` execution tree even when npm's content-addressable package cache is
 healthy. Re-running the current update command can reuse that tree and fail
 without repairing it.
-
-## Expected behavior
-
-- A process startup, ACP initialize, or transport failure does not discard the
-  stored resume token. Resume retries the same provider-native session.
-- The stored token is cleared only when the user explicitly chooses
-  **Start fresh**, or is replaced after the agent successfully creates a new
-  provider-native session.
-- An authorized resume moves the task session to `STARTING` under the existing
-  per-session resume lock before request assembly reaches scoped GitHub
-  credential issuance. This makes the session eligible for a lease without
-  weakening the credential broker's terminal-session rejection.
-- A successful resume persists the non-secret Git credential routing snapshot
-  while the session is still guarded `STARTING`, so the task detail view does
-  not retain an earlier workspace/executor credential policy.
-- If request assembly, credential issuance, or launch fails after that early
-  transition, Kandev restores the prior recoverable session state unless
-  another terminal transition won the race.
-- A completed turn remains represented by the task's review state while its
-  persisted response and session lifecycle state settle. After a backend
-  restart and automatic resume, the prior transcript remains visible and the
-  task returns to the Turn Finished review bucket once the session is again
-  `WAITING_FOR_INPUT`; it does not settle in Backlog or Running.
-- The explicit managed-runtime update path may invalidate only the
-  deterministic `_npx` execution directory for the selected built-in package
-  after an initial update failure, then retry once and run the normal ACP
-  capability probe.
-- A failed resume stays visible with the backend cause and a recovery action.
-- An automatic read-only restore states that resume failed and that the
-  restored workspace is read-only.
-- A task selected during navigation does not show a session-status or recovery
-  error produced for the task that was previously active.
-- A confirmed missing branch offers explicit continuation on a new branch from
-  the task base branch. The same conversation continues, but lost code does
-  not return.
-- A resumed session that performs workspace preparation leaves the preparing
-  state when preparation finishes. An idle resumed session does not display
-  background activity that is not running.
 
 ## Persistence and security constraints
 

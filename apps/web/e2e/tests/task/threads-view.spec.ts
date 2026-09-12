@@ -252,6 +252,52 @@ test.describe("Threads view", () => {
     await expect(board.locator("[data-thread-column-id]")).toHaveCount(3);
   });
 
+  test("confirms deletion of a saved Threads view before closing settings", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const baseView = {
+      task_scope: { mode: "all", task_ids: [] },
+      filters: [],
+      sort: { key: "attention", direction: "asc" },
+      max_columns: null,
+    };
+    const seedResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      thread_views: [
+        { ...baseView, id: "view-all-threads", name: "All threads" },
+        { ...baseView, id: "view-release", name: "Release threads" },
+      ],
+      thread_active_view_id: "view-release",
+      thread_view_draft: null,
+    });
+    expect(seedResponse.ok).toBe(true);
+    await testPage.goto("/threads");
+
+    await expect(testPage.getByTestId("threads-view-picker")).toContainText("Release threads");
+    await testPage.getByTestId("threads-view-settings").click();
+    const settings = testPage.getByTestId("threads-view-settings-popover");
+    await expect(settings).toBeVisible();
+    await settings.getByTestId("threads-view-delete").click();
+    const confirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete Release threads?");
+    await expect(settings).toBeVisible();
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(settings).toBeVisible();
+    await expect(testPage.getByTestId("threads-view-picker")).toContainText("Release threads");
+
+    await settings.getByTestId("threads-view-delete").click();
+    const deletedViewResponse = testPage.waitForResponse(
+      (response) =>
+        response.ok() &&
+        response.request().method() === "PATCH" &&
+        response.url().includes("/api/v1/user/settings"),
+    );
+    await confirmation.getByRole("button", { name: "Delete Release threads" }).click();
+    await deletedViewResponse;
+    await expect(settings).toBeHidden();
+    await expect(testPage.getByTestId("threads-view-picker")).toContainText("All threads");
+  });
+
   test("explains sorts and shows live task details in the task picker", async ({
     testPage,
     apiClient,
@@ -322,6 +368,20 @@ test.describe("Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(240_000);
+    const baseView = {
+      id: "view-all-threads",
+      name: "All threads",
+      task_scope: { mode: "all", task_ids: [] },
+      filters: [],
+      sort: { key: "attention", direction: "asc" },
+      max_columns: null,
+    };
+    const seedResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      thread_views: [baseView],
+      thread_active_view_id: baseView.id,
+      thread_view_draft: null,
+    });
+    expect(seedResponse.ok).toBe(true);
     const first = await startAgentTask(testPage, apiClient, seedData, "threads-focus-a");
     const second = await startAgentTask(testPage, apiClient, seedData, "threads-focus-b", {
       title: SECOND_TITLE,
@@ -332,7 +392,11 @@ test.describe("Threads view", () => {
       first: testPage.getByTestId(`thread-column-${first.id}`),
       second: testPage.getByTestId(`thread-column-${second.id}`),
     };
-    for (const column of Object.values(columns)) await expect(column).toBeVisible();
+    // The board shell can render before the workflow snapshot carrying the
+    // second completed session reaches the client after navigation.
+    for (const column of Object.values(columns)) {
+      await expect(column).toBeVisible({ timeout: 30_000 });
+    }
 
     // The composer's own border tracks agent state, not the caret, so the
     // column has to carry the focus mark or a deck of composers gives the

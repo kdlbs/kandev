@@ -923,6 +923,9 @@ type LaunchRequest struct {
 	TaskDescription    string              // Task description to send via ACP prompt
 	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                map[string]string   // Additional env vars
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// durable profile selection.
+	AdditionalSkillSlugs []string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist.
 	ApprovedSecretEnvKeys []string
@@ -1141,6 +1144,10 @@ type WorkspaceInfo struct {
 	TaskID            string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
+	// used to guard host worktree recovery across inherited environments.
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
 	// ValidatedTaskEnvironmentID and ValidatedExecutorType identify the
 	// environment and executor ownership used during workspace admission. They
 	// are populated from the durable task environment, not from a session path.

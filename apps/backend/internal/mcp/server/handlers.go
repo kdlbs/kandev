@@ -15,13 +15,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// askQuestionKeepAliveInterval is how often ask_user_question streams a progress
-// notification to the agent while waiting for the user's answer. The agent's MCP
-// client (auggie runs on Node, whose fetch/undici applies a 300s idle timeout to
-// the in-flight tool-call request) aborts the call with "fetch failed" if no bytes
-// arrive for that long. Emitting a progress notification well inside that window
-// keeps the streamed POST/SSE response alive so the call survives until the user
-// responds. Declared as a var so tests can shorten it.
+// askQuestionKeepAliveInterval controls progress notifications during the
+// blocking ask_user_question call. Managed defaults keep it below client idle
+// deadlines. Tests can shorten it for fast transport tests.
 var askQuestionKeepAliveInterval = 20 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
@@ -30,6 +26,7 @@ const (
 	promptArg            = "prompt"
 	questionsArg         = "questions"
 	optionsArg           = "options"
+	instructionsArg      = "instructions"
 	idArg                = "id"
 	titleArg             = "title"
 	labelArg             = "label"
@@ -47,7 +44,28 @@ const (
 	reqKey               = "required"
 	typeKey              = "type"
 	stringType           = "string"
+	agentProfileIDArg    = "agent_profile_id"
 )
+
+func moveTaskEntryOptionsToolOption() mcp.ToolOption {
+	return mcp.WithObject("entry_options",
+		mcp.Description("One-shot overrides applied only when the task enters the target step; they never change durable step configuration and require an actual workflow step change."),
+		mcp.Properties(map[string]any{
+			"reset_context": map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Reset the target session's agent context before the step's on_enter actions run.",
+			},
+			instructionsArg: map[string]any{
+				typeKey:        stringType,
+				descriptionArg: "One-time instructions appended to the target step's prompt (never replacing it) for this entry only.",
+			},
+			"skip_step_prompt": map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Suppress the destination step's configured prompt (and its task-description fallback) for this one entry. With instructions the agent auto-starts a turn carrying only those instructions; without instructions no turn starts and the task lands idle.",
+			},
+		}),
+	)
+}
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -184,7 +202,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"title":               title,
 			"description":         req.GetString("prompt", ""),
 			autopilotArg:          req.GetBool(autopilotArg, false),
-			"agent_profile_id":    req.GetString("agent_profile_id", ""),
+			agentProfileIDArg:     req.GetString(agentProfileIDArg, ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
@@ -327,6 +345,31 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		outcome := strings.TrimSpace(req.GetString("outcome", ""))
+		summary := strings.TrimSpace(req.GetString("summary", ""))
+		if outcome != "action_taken" && outcome != "non_actionable" && outcome != "blocked" {
+			return mcp.NewToolResultError("outcome must be action_taken, non_actionable, or blocked"), nil
+		}
+		if summary == "" {
+			return mcp.NewToolResultError("summary is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			"outcome":    outcome,
+			"summary":    summary,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPReportPRAutoFixOutcome, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -507,7 +550,7 @@ func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
 			"sender_task_id":    s.taskID,
 			"sender_session_id": s.sessionID,
 		}
-		copyOptionalStringArg(payload, req, "agent_profile_id")
+		copyOptionalStringArg(payload, req, agentProfileIDArg)
 		copyOptionalStringArg(payload, req, "name")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSpawnSession, payload, &result); err != nil {

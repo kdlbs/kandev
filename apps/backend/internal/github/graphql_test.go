@@ -170,7 +170,7 @@ func TestBuildBatchedPRQuery_GroupsByRepo(t *testing.T) {
 // batched branch query return the same fields.
 func TestPRFieldsBlock_RequestsOutcomeFields(t *testing.T) {
 	block := prFieldsBlock()
-	for _, want := range []string{"changedFiles", "mergedBy { login }", "autoMergeRequest", "CLOSED_EVENT"} {
+	for _, want := range []string{"changedFiles", "mergedBy { login }", "autoMergeRequest", "headRepository {", "headRepositoryOwner { login }", "CLOSED_EVENT"} {
 		if !strings.Contains(block, want) {
 			t.Errorf("prFieldsBlock() missing %q: %s", want, block)
 		}

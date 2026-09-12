@@ -40,6 +40,39 @@ taking a fixed slice, so two threads fill the deck and a busy deck scrolls
 horizontally instead of shrinking into slivers. The phone keeps one full-width
 snapping column, which is a deliberately different layout.
 
+The phone title button opens one board-owned `MobileThreadPicker` using
+admitted task summaries. Selection scrolls an existing shell; viewport
+activation still owns transcript mounting. The picker restores focus without
+scrolling back to the previous column. Phone headers prioritize task title,
+status, and agent selection; workflow and step context remain in the picker.
+Titles wrap to two lines. Inline topbar pagination shows position/count for
+multiple threads and decorative dots only for decks of up to seven threads.
+`ThreadsBoard.renderHeader` receives `mobileTaskId`, derived from board scroll
+geometry by `useMobileThreadPosition`; the page derives its ordinal from stable
+order without copying selection state. Do not derive pagination from loaded
+chat or visibility-ID membership alone: both adjacent columns can stay
+intersecting across a swipe midpoint. Position changes also refresh the nearest
+visible detail calculation, retaining the one-phone-transcript limit.
+
+`ThreadTaskActionsProvider` owns one task-action surface above removable
+columns. Headers pass explicit task IDs; `useTaskManagementFlow` captures the
+workspace/task identity and resolves current eligibility from shared snapshots.
+`TaskManagementSurface` composes existing task menus, linking and confirmations;
+`useTaskMenuActions({ stayOnListing: true })` shares destructive lifecycle
+cleanup with the sidebar without task-detail navigation. Do not add task API
+calls or mutation policy to Threads.
+
+Only noninteractive desktop task-header regions handle context menus. The
+visible `TaskMenuButton` is also the keyboard/touch entry; phone and coarse
+pointers use one `TaskManagementDrawer` with nested pages. Keep chat, editor,
+session and native swipe events outside this boundary.
+
+`useThreadSelectionRecovery` preserves the surviving reader's column offset
+and uses `resolveRemainingThreadId` for successor/predecessor/first-new/empty recovery
+when membership changes. This does not replace stable ordering, the parent's
+scroll-derived pagination, or transcript activation. Action focus restoration
+resolves a currently visible trigger and never scrolls to a removed opener.
+
 The page reads `?workspace=` into the route it hands `useKanbanRouteBootstrap`.
 Without it a cross-workspace link loads whichever workspace the cookie last
 named. Scope changes from the shared header go through `listingHistoryHref`,

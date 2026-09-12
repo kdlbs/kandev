@@ -7,6 +7,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -103,6 +105,7 @@ type RepositorySetDTO struct {
 type RepositorySetItemDTO struct {
 	RepositoryID string `json:"repository_id"`
 	Position     int    `json:"position"`
+	BaseBranch   string `json:"base_branch"`
 }
 
 type RepositoryBranchPolicyDTO struct {
@@ -235,6 +238,11 @@ type TaskDTO struct {
 	// auto_start_failed metadata key at DTO conversion time (see
 	// FromTaskWithSessionInfo).
 	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
+	// WorkspaceOrphaned reports that this task's materialized workspace was
+	// removed when its parent was archived, while workspace.mode is still
+	// inherit_parent. Derived from metadata.workspace at DTO conversion time
+	// via models.WorkspaceOrphaned (see FromTaskWithSessionInfo).
+	WorkspaceOrphaned bool `json:"workspace_orphaned,omitempty"`
 
 	// Dependency projection. Derived on every read from task_blockers plus each
 	// related task's own state — never persisted, because a stale copy would be
@@ -286,6 +294,18 @@ type TaskDTO struct {
 	// ordinarily omitted partial projection so clients clear their cache and
 	// expose the coarse compatibility fallback.
 	StatusSummaryInvalidated bool `json:"status_summary_invalidated,omitempty"`
+	// ParkedOnBackgroundWork is the task-level OR across the task's sessions'
+	// parked_on_background_work projections (spec:
+	// docs/specs/disambiguate-waiting/spec.md). Always serialized so a
+	// settled projection clears stale client state. Stamped by
+	// EnrichTaskParkedProjection.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// ParkedRevision is the task's own monotonic transition counter for
+	// ParkedOnBackgroundWork — never derived from member sessions' revisions.
+	ParkedRevision uint64 `json:"parked_revision"`
+	// ParkedEpoch identifies the backend process that produced ParkedRevision
+	// (see "Revision epoch"); a lower-or-equal epoch update is stale.
+	ParkedEpoch uint64 `json:"parked_epoch"`
 }
 
 type TaskRepositoryDTO struct {
@@ -317,8 +337,9 @@ type TaskWorkspaceFolderDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
+	ID                 string `json:"id"`
+	TaskID             string `json:"task_id"`
+	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name              string `json:"name"`
@@ -393,13 +414,26 @@ type TaskSessionDTO struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+	// ParkedOnBackgroundWork mirrors the orchestrator's runtime parked
+	// projection (spec: docs/specs/disambiguate-waiting/spec.md). Always
+	// serialized so a settled projection clears stale client state.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// Revision identifies the process-local parked-projection transition
+	// generation that produced ParkedOnBackgroundWork. Named "revision"
+	// rather than "parked_revision" for the session carrier — an accepted
+	// naming inconsistency with the task-level ParkedRevision field (see F20).
+	Revision uint64 `json:"revision"`
+	// ParkedEpoch identifies the backend process that produced Revision (see
+	// "Revision epoch"); a lower-or-equal epoch update is stale.
+	ParkedEpoch uint64 `json:"parked_epoch"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID     string `json:"id"`
-	TaskID string `json:"task_id"`
+	ID                 string `json:"id"`
+	TaskID             string `json:"task_id"`
+	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name              string `json:"name"`
@@ -454,6 +488,13 @@ type TaskSessionSummaryDTO struct {
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
 	// resolve it.
 	CommandCount int `json:"command_count"`
+	// ParkedOnBackgroundWork mirrors TaskSessionDTO.ParkedOnBackgroundWork for
+	// list endpoints.
+	ParkedOnBackgroundWork bool `json:"parked_on_background_work"`
+	// Revision mirrors TaskSessionDTO.Revision.
+	Revision uint64 `json:"revision"`
+	// ParkedEpoch mirrors TaskSessionDTO.ParkedEpoch.
+	ParkedEpoch uint64 `json:"parked_epoch"`
 }
 
 // ListTaskSessionSummariesResponse is the list response using summary DTOs.
@@ -739,6 +780,7 @@ func FromRepositorySet(set *models.RepositorySet) RepositorySetDTO {
 		items = append(items, RepositorySetItemDTO{
 			RepositoryID: item.RepositoryID,
 			Position:     item.Position,
+			BaseBranch:   item.BaseBranch,
 		})
 	}
 	return RepositorySetDTO{
@@ -947,6 +989,7 @@ func FromTaskWithSessionInfo(
 		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		WorkspaceOrphaned:           models.WorkspaceOrphaned(task.Metadata),
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
@@ -964,30 +1007,31 @@ func FromTaskWithSessionInfo(
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:                session.ID,
-		TaskID:            session.TaskID,
-		Name:              session.Name,
-		AgentExecutionID:  session.AgentExecutionID,
-		ContainerID:       session.ContainerID,
-		AgentProfileID:    session.AgentProfileID,
-		ExecutorID:        session.ExecutorID,
-		ExecutorProfileID: session.ExecutorProfileID,
-		EnvironmentID:     session.EnvironmentID,
-		RepositoryID:      session.RepositoryID,
-		BaseBranch:        session.BaseBranch,
-		BaseCommitSHA:     session.BaseCommitSHA,
-		WorkspacePath:     session.WorkspacePath,
-		State:             session.State,
-		ErrorMessage:      session.ErrorMessage,
-		Metadata:          session.Metadata,
-		StartedAt:         session.StartedAt,
-		CompletedAt:       session.CompletedAt,
-		UpdatedAt:         session.UpdatedAt,
-		IsPrimary:         session.IsPrimary,
-		IsPassthrough:     session.IsPassthrough,
-		ReviewStatus:      session.ReviewStatus,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		LastReadMessageID: session.LastReadMessageID,
+		ID:                 session.ID,
+		TaskID:             session.TaskID,
+		QueueIncarnationID: session.QueueIncarnationID,
+		Name:               session.Name,
+		AgentExecutionID:   session.AgentExecutionID,
+		ContainerID:        session.ContainerID,
+		AgentProfileID:     session.AgentProfileID,
+		ExecutorID:         session.ExecutorID,
+		ExecutorProfileID:  session.ExecutorProfileID,
+		EnvironmentID:      session.EnvironmentID,
+		RepositoryID:       session.RepositoryID,
+		BaseBranch:         session.BaseBranch,
+		BaseCommitSHA:      session.BaseCommitSHA,
+		WorkspacePath:      session.WorkspacePath,
+		State:              session.State,
+		ErrorMessage:       session.ErrorMessage,
+		Metadata:           session.Metadata,
+		StartedAt:          session.StartedAt,
+		CompletedAt:        session.CompletedAt,
+		UpdatedAt:          session.UpdatedAt,
+		IsPrimary:          session.IsPrimary,
+		IsPassthrough:      session.IsPassthrough,
+		ReviewStatus:       session.ReviewStatus,
+		TaskEnvironmentID:  session.TaskEnvironmentID,
+		LastReadMessageID:  session.LastReadMessageID,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1002,6 +1046,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
 		ID:                   session.ID,
 		TaskID:               session.TaskID,
+		QueueIncarnationID:   session.QueueIncarnationID,
 		Name:                 session.Name,
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
@@ -1138,6 +1183,7 @@ type WorkflowStepDTO struct {
 	AgentProfileID            string                                   `json:"agent_profile_id,omitempty"`
 	ProfileSessionStartPolicy models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
 	ProfileSessionEndPolicy   models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	SessionTarget             *wfmodels.WorkflowSessionTarget          `json:"session_target,omitempty"`
 	WIPLimit                  int                                      `json:"wip_limit"`
 	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
@@ -1145,6 +1191,7 @@ type WorkflowStepDTO struct {
 	StageType                  string    `json:"stage_type,omitempty"`
 	AutoAdvanceRequiresSignal  bool      `json:"auto_advance_requires_signal"`
 	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
+	CompleteTaskOnEnter        bool      `json:"complete_task_on_enter"`
 	CreatedAt                  time.Time `json:"created_at"`
 	UpdatedAt                  time.Time `json:"updated_at"`
 }
@@ -1172,8 +1219,17 @@ type StepActionDTO struct {
 
 // MoveTaskResponse includes the task and the target workflow step info
 type MoveTaskResponse struct {
-	Task         TaskDTO         `json:"task"`
-	WorkflowStep WorkflowStepDTO `json:"workflow_step"`
+	Task         TaskDTO                    `json:"task"`
+	WorkflowStep WorkflowStepDTO            `json:"workflow_step"`
+	MoveID       string                     `json:"move_id,omitempty"`
+	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	// Disposition reports how an MCP move_task call was resolved: "applied" when
+	// the move committed immediately, or "deferred" when it was recorded to run
+	// at the source session's turn-end. It lets an agent distinguish deferred
+	// acceptance from an immediate move and correlate the retained one-shot
+	// EntryOptions (via MoveID) with the eventual step entry. The HTTP move path
+	// always applies immediately and leaves this empty.
+	Disposition string `json:"disposition,omitempty"`
 }
 
 // Session Workflow Review DTOs
@@ -1199,6 +1255,7 @@ type TaskPlanDTO struct {
 	CreatedBy                      string     `json:"created_by"`
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
+	CommentsRevision               int64      `json:"comments_revision"`
 	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
 	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
 	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
@@ -1217,10 +1274,53 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 		CreatedBy:                      plan.CreatedBy,
 		CreatedAt:                      plan.CreatedAt,
 		UpdatedAt:                      plan.UpdatedAt,
+		CommentsRevision:               plan.CommentsRevision,
 		ImplementationStartedAt:        plan.ImplementationStartedAt,
 		ImplementationStartedSessionID: plan.ImplementationStartedSessionID,
 		ImplementationStartedBy:        plan.ImplementationStartedBy,
 	}
+}
+
+// TaskPlanCommentDTO is pending feedback attached to a task's current plan.
+type TaskPlanCommentDTO struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	PlanID       string    `json:"plan_id"`
+	Body         string    `json:"body"`
+	SelectedText string    `json:"selected_text"`
+	AnchorFrom   int       `json:"anchor_from"`
+	AnchorTo     int       `json:"anchor_to"`
+	Version      int64     `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// TaskPlanCommentSnapshotDTO is a complete, versioned replacement snapshot.
+type TaskPlanCommentSnapshotDTO struct {
+	TaskID   string                `json:"task_id"`
+	PlanID   string                `json:"plan_id"`
+	Revision int64                 `json:"revision"`
+	Comments []*TaskPlanCommentDTO `json:"comments"`
+}
+
+// TaskPlanCommentSnapshotFromModel converts the authoritative repository snapshot.
+func TaskPlanCommentSnapshotFromModel(snapshot *models.TaskPlanCommentSnapshot) *TaskPlanCommentSnapshotDTO {
+	if snapshot == nil {
+		return nil
+	}
+	out := &TaskPlanCommentSnapshotDTO{
+		TaskID: snapshot.TaskID, PlanID: snapshot.PlanID, Revision: snapshot.Revision,
+		Comments: make([]*TaskPlanCommentDTO, 0, len(snapshot.Comments)),
+	}
+	for _, comment := range snapshot.Comments {
+		out.Comments = append(out.Comments, &TaskPlanCommentDTO{
+			ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
+			Body: comment.Body, SelectedText: comment.SelectedText,
+			AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, Version: comment.Version,
+			CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,
+		})
+	}
+	return out
 }
 
 // TaskPlanRevisionDTO represents a plan revision for API responses.

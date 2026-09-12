@@ -149,6 +149,11 @@ func TestQueueRunCtx_WaveCarryingRequest_NotCoalescedIntoNonWaveRow(t *testing.T
 // the coalescing-skip change above: two distinct requests with no wave key
 // (distinct idempotency keys, so the idempotency check doesn't intercept
 // either) must still coalesce into a single queued run exactly as before.
+// Both requests target the same task: CoalesceRun now also scopes by
+// payload.task_id (see runs/repository/sqlite's task-id-scoping fix), so a
+// cross-task pair would correctly stay uncoalesced regardless of the
+// wave-key gate this test isolates — using the same task keeps that
+// unrelated guard out of the result.
 func TestQueueRunCtx_NonWaveRequest_StillCoalesces(t *testing.T) {
 	repo := newReactivityTestRepo(t)
 	ss := newChildrenCompletedTestScheduler(t, repo)
@@ -156,7 +161,7 @@ func TestQueueRunCtx_NonWaveRequest_StillCoalesces(t *testing.T) {
 	ctx := context.Background()
 
 	first := RunContext{Reason: RunReasonTaskBlockersResolved, TaskID: "task-1", IdempotencyKey: "k1"}
-	second := RunContext{Reason: RunReasonTaskBlockersResolved, TaskID: "task-2", IdempotencyKey: "k2"}
+	second := RunContext{Reason: RunReasonTaskBlockersResolved, TaskID: "task-1", IdempotencyKey: "k2"}
 	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}

@@ -1,17 +1,20 @@
 "use client";
 
-import { useMemo } from "react";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import type { RunError } from "@/app/office/tasks/[id]/types";
-import { hasMatchingSessionLaunchError } from "../chat-entries";
+import { isTaskLaunchErrorVisibleForSession } from "@/components/task/chat/types";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
 import { isTypedTaskLaunchError, TaskLaunchErrorEntry } from "./task-launch-error-entry";
+import { useTaskLaunchErrorContext } from "@/components/task/task-launch-error-context";
 
 type TaskChatLaunchErrorProps = {
   taskId: string;
   workspaceId: string;
   statusSummary?: TaskStatusSummary | null;
-  runErrors: RunError[];
+  /** When supplied, only render the error that belongs to this session. */
+  sessionId?: string | null;
+  sessionMetadata?: Record<string, unknown> | null;
   repositories?: TaskRepository[];
 };
 
@@ -19,17 +22,28 @@ export function TaskChatLaunchError({
   taskId,
   workspaceId,
   statusSummary,
-  runErrors,
+  sessionId,
+  sessionMetadata,
   repositories,
 }: TaskChatLaunchErrorProps) {
-  const error = useMemo(() => {
-    const candidate = statusSummary?.active_error;
-    if (!isTypedTaskLaunchError(candidate)) return null;
-    if (hasMatchingSessionLaunchError(candidate.session_id, candidate.stamp, runErrors)) {
-      return null;
-    }
-    return candidate;
-  }, [runErrors, statusSummary]);
+  const launchErrorContext = useTaskLaunchErrorContext();
+  const candidate = statusSummary?.active_error;
+  const bootstrapError = selectSessionRecoveryError(candidate, sessionId, sessionMetadata);
+  if (bootstrapError && sessionId) {
+    return (
+      <SessionBootstrapRecoveryCard
+        taskId={taskId}
+        sessionId={sessionId}
+        workspaceId={workspaceId}
+        error={bootstrapError}
+        automaticRecovery={launchErrorContext?.automaticRecovery}
+      />
+    );
+  }
+  const error =
+    isTypedTaskLaunchError(candidate) && isTaskLaunchErrorVisibleForSession(candidate, sessionId)
+      ? candidate
+      : null;
 
   if (!error) return null;
   return (

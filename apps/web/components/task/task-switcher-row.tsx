@@ -41,6 +41,8 @@ export type TaskRowProps = {
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
   pinnedTaskIds?: string[];
@@ -77,6 +79,8 @@ function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
     onLinkLinearIssue: archiveAware(props.onLinkLinearIssue, isArchived),
     onLinkSentryIssue: archiveAware(props.onLinkSentryIssue, isArchived),
     onMoveToStep: archiveAware(props.onMoveToStep, isArchived),
+    onRequestMoveOptions: archiveAware(props.onRequestMoveOptions, isArchived),
+    onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     onTogglePin: archiveAware(props.onTogglePin, isArchived),
     isPinned: isArchived ? false : props.isPinned,
     pinnedTaskIds: props.pinnedTaskIds,
@@ -160,6 +164,7 @@ function TaskRowItem({
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
       interrupted={task.interrupted}
+      parkedOnBackgroundWork={task.parkedOnBackgroundWork}
       isArchived={task.isArchived}
       isSelected={isSelected}
       diffStats={task.diffStats}

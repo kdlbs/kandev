@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-09-05
-updated: 2026-09-05
+updated: 2026-09-10
 owners:
   - cfl
 ---
@@ -25,6 +25,7 @@ or push behavior, or branch redundancy rules.
 | Requirement | Design source |
 | --- | --- |
 | REQ-TASKS-RUNTIME-CLEANUP-001.10-.12 | Admission, cleanup snapshot, audited removal, and failure classification below |
+| REQ-TASKS-RUNTIME-CLEANUP-001.14-.17 | Read-only confirmation inspection below |
 
 ## Existing system context
 
@@ -118,6 +119,50 @@ unless they provide explicit consent.
 
 ## Persistence
 
+### Read-only confirmation inspection
+
+Proposed endpoint: `POST /api/v1/tasks/delete-preflight`, with body
+`{"task_ids":["..."],"cascade":false}`. This endpoint performs inspection only.
+It must not prepare cleanup jobs, stop agents, change ownership, or mutate tasks.
+Return `{"requires_discard_consent":false}` only after complete inspection;
+return `true` when at least one owned worktree is dirty. Use `Cache-Control:
+no-store`. Invalid or empty task selections fail validation. Authorization or
+inspection failures use the existing HTTP error envelope, never a clean result.
+
+The task service owns the operation. Authorize all roots and descendants using
+the same task-write scope as deletion before inspecting any paths. Reuse the
+descendant resolution used by `HandoffService` for cascade deletion, including
+archived descendants, then deduplicate the target set. Reuse `WorktreeProvider`
+inventory and `WorktreeDirtyInspector.InspectDirtyWorktrees` from delete admission.
+Keep caller-supplied paths out of the API. Missing inspection dependencies must
+return an error; existing optional dependency fallbacks are not evidence of a
+clean checkout. Confirmed absent paths retain the inspector's existing behavior.
+
+The shared delete dialog requests this result when opened and whenever task IDs
+or cascade selection change. A task-local hook owns loading, resolved, and error
+states, ignores stale responses, and resets consent when its request key changes.
+Executor type, descendant count alone, and cached session Git summaries do not
+establish whether consent is needed. The explicit `requireDiscardConsent` prop
+must no longer override a fresh clean result; remove its heuristic callers.
+
+Loading and error states hide the checkbox and disable Delete. Errors offer
+localized retry feedback. Clean results hide the checkbox and send
+`discardWorktreeChanges:false`. Dirty results show the existing unchecked option
+and enable Delete only after selection. Closing resets all consent. The existing
+typed mutation conflict remains the race guard; reopening performs fresh
+inspection before retry. No preflight response authorizes cleanup or bypasses
+the mutation-time audits.
+
+The existing centered phone alert remains the exemplar. Its body owns scrolling
+and its footer keeps stacked touch actions; desktop keeps compact row actions.
+Archive's full dialog, popover, inline confirmation, and preference bypass remain
+unchanged. Its cascade checkbox concerns descendants, not dirty files.
+
+This exposes an existing inspection boundary. It adds no ownership model,
+persistence, or alternate cleanup policy, so no new ADR is required.
+
+## Cleanup snapshot persistence
+
 The cleanup snapshot JSON gains an additive discard-consent field. No database
 schema change is required. A missing field is `false`.
 
@@ -162,8 +207,9 @@ error. It does not emit repeated retry attempts.
 
 ## Related records
 
+- [Conditional discard confirmation plan](../../../plans/conditional-discard-confirmation/plan.md)
+
 - [Task Runtime Cleanup](runtime-cleanup.md)
 - [Fail-closed GC semantics](../../../decisions/0009-fail-closed-gc-semantics.md)
 - [Task-owned worktree lifetime](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
 - [Confirmation Warning Hierarchy](../../ui/system-design/confirmation-warning-hierarchy.md)
-

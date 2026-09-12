@@ -156,6 +156,13 @@ func TestCIAutomationReadyToMerge(t *testing.T) {
 		{name: "pending review", mutate: func(pr *github.TaskPR) { pr.PendingReviewCount = 1 }, want: false},
 		{name: "not enough approvals", mutate: func(pr *github.TaskPR) { pr.ReviewCount = 0 }, want: false},
 		{name: "unresolved threads", mutate: func(pr *github.TaskPR) { pr.UnresolvedReviewThreads = 1 }, want: false},
+		{name: "workflow attention", mutate: func(pr *github.TaskPR) {
+			pr.WorkflowAttention = &github.WorkflowAttention{
+				State:   github.WorkflowAttentionApprovalRequired,
+				HeadSHA: "head-sha",
+			}
+			pr.HeadSHA = "head-sha"
+		}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,6 +228,48 @@ func TestCIAutomationPromptOmitsSnapshotWithoutPlaceholder(t *testing.T) {
 	}
 	if visible := sysprompt.StripSystemContent(prompt); strings.TrimSpace(visible) != "" {
 		t.Fatalf("expected no visible PR snapshot without placeholder, got:\n%s", visible)
+	}
+}
+
+func TestCIAutomationProviderGenerationIncludesHeadAndCheckExecution(t *testing.T) {
+	started := time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(4 * time.Minute)
+	pr := &github.TaskPR{HeadSHA: "head-a", ReviewState: "approved", MergeableState: "clean"}
+	feedback := &github.PRFeedback{Checks: []github.CheckRun{{
+		Name: "unit", Status: "completed", Conclusion: "failure", StartedAt: &started, CompletedAt: &completed,
+	}}}
+
+	initial := ciAutomationProviderGeneration(pr, feedback)
+	if initial == "" {
+		t.Fatal("provider generation is empty")
+	}
+
+	rerun := completed
+	rerun = rerun.Add(time.Minute)
+	feedback.Checks[0].CompletedAt = &rerun
+	if got := ciAutomationProviderGeneration(pr, feedback); got == initial {
+		t.Fatal("check execution timestamp did not change provider generation")
+	}
+
+	feedback.Checks[0].CompletedAt = &completed
+	pr.HeadSHA = "head-b"
+	if got := ciAutomationProviderGeneration(pr, feedback); got == initial {
+		t.Fatal("pull-request head did not change provider generation")
+	}
+}
+
+func TestCIAutomationOutcomeProtocolVisibility(t *testing.T) {
+	structured := ciAutomationAppendOutcomeProtocol("repair the PR", false)
+	if !strings.Contains(structured, "report_pr_auto_fix_outcome_kandev") {
+		t.Fatal("structured prompt omitted the outcome tool instructions")
+	}
+	if visible := sysprompt.StripSystemContent(structured); strings.Contains(visible, "report_pr_auto_fix_outcome_kandev") {
+		t.Fatalf("structured outcome instructions leaked into visible chat: %s", visible)
+	}
+
+	passthrough := ciAutomationAppendOutcomeProtocol("repair the PR", true)
+	if !strings.Contains(passthrough, "report_pr_auto_fix_outcome_kandev") {
+		t.Fatal("passthrough prompt omitted the outcome tool instructions")
 	}
 }
 
@@ -300,6 +349,44 @@ func TestCIAutomationFeedbackDeltaIncludesChangedCheckOutput(t *testing.T) {
 	delta := ciAutomationBuildDelta(feedback, previous)
 	if len(delta.FailedChecks) != 1 || delta.FailedChecks[0].Output != "new" {
 		t.Fatalf("expected changed check output in delta, got %+v", delta.FailedChecks)
+	}
+}
+
+func TestCIAutomationFeedbackDeltaIncludesRerunExecutionTimestamps(t *testing.T) {
+	started := time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(4 * time.Minute)
+	rerunCompleted := completed.Add(time.Minute)
+	previous := ciAutomationCheckpoint{
+		FailedChecks: []ciAutomationCheckSnapshot{{
+			Name: "unit", Conclusion: "failure", HTMLURL: "https://ci/unit",
+			StartedAt: &started, CompletedAt: &completed,
+		}},
+	}
+	feedback := &github.PRFeedback{Checks: []github.CheckRun{{
+		Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit",
+		StartedAt: &started, CompletedAt: &rerunCompleted,
+	}}}
+
+	delta := ciAutomationBuildDelta(feedback, previous)
+	if len(delta.FailedChecks) != 1 || delta.FailedChecks[0].CompletedAt == nil ||
+		!delta.FailedChecks[0].CompletedAt.Equal(rerunCompleted) {
+		t.Fatalf("expected rerun execution timestamp in delta, got %+v", delta.FailedChecks)
+	}
+}
+
+func TestCIAutomationProviderGenerationSortsSameTimestampChecksDeterministically(t *testing.T) {
+	started := time.Date(2026, 9, 6, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(4 * time.Minute)
+	checks := []github.CheckRun{
+		{Name: "unit", Status: "completed", Conclusion: "failure", StartedAt: &started, CompletedAt: &completed},
+		{Name: "unit", Status: "in_progress", StartedAt: &started, CompletedAt: &completed},
+	}
+	first := ciAutomationProviderGeneration(nil, &github.PRFeedback{Checks: checks})
+	secondChecks := append([]github.CheckRun(nil), checks...)
+	secondChecks[0], secondChecks[1] = secondChecks[1], secondChecks[0]
+	second := ciAutomationProviderGeneration(nil, &github.PRFeedback{Checks: secondChecks})
+	if first != second {
+		t.Fatalf("same-timestamp check generation depended on provider order: %q != %q", first, second)
 	}
 }
 
@@ -2185,13 +2272,17 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFix(t *testing.T) 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	now := time.Now().UTC()
 	pr := &github.TaskPR{
-		TaskID:       "task-1",
-		RepositoryID: "repo-1",
-		Owner:        "acme",
-		Repo:         "widget",
-		PRNumber:     42,
-		State:        "open",
-		LastSyncedAt: &now,
+		TaskID:                      "task-1",
+		RepositoryID:                "repo-1",
+		Owner:                       "acme",
+		Repo:                        "widget",
+		PRNumber:                    42,
+		State:                       "open",
+		HeadSHA:                     "head-a",
+		MergeQueueLastRemovalID:     "removal-cap",
+		MergeQueueLastRemovalReason: "CHECKS_FAILED",
+		MergeQueueLastRemovedAt:     &now,
+		LastSyncedAt:                &now,
 	}
 	_, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "session-1", "task-1", "@ci-auto-fix\n\nold feedback", "", messagequeue.QueuedByWorkflow, false, nil, ciAutomationMessageMetadataForPR(pr, "old"), ciAutomationCoalesceKey(pr), true)
 	if err != nil {
@@ -2215,13 +2306,15 @@ func TestHandleTaskPRCIAutomationAtRoundCapReplacesPendingAutoFix(t *testing.T) 
 			},
 		},
 		ciPRState: &github.TaskCIPRAutomationState{
-			TaskID:                "task-1",
-			RepositoryID:          "repo-1",
-			PRNumber:              42,
-			LastFixSignature:      previousSignature,
-			LastFixCheckpointJSON: previousJSON,
-			LastFixEnqueuedAt:     &now,
-			AutoFixRoundCount:     ciAutomationMaxFixRounds,
+			TaskID:                  "task-1",
+			RepositoryID:            "repo-1",
+			PRNumber:                42,
+			LastFixSignature:        previousSignature,
+			LastFixCheckpointJSON:   previousJSON,
+			LastFixEnqueuedAt:       &now,
+			AutoFixRoundCount:       ciAutomationMaxFixRounds,
+			LastQueueAttemptHeadSHA: "head-a",
+			LastMergeSignature:      "merge-cap",
 		},
 	}
 	svc.SetGitHubService(ghSvc)
@@ -2490,7 +2583,7 @@ func TestDispatchCIAutomationPromptForPRQueuesWhenRunningUserMessageCannotBeReco
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.messageQueue = messagequeue.NewServiceMemory(testLogger())
+	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	messageCreator := &mockMessageCreator{userMessageErr: errors.New("message db unavailable")}
 	svc.messageCreator = messageCreator
 	session, err := repo.GetTaskSession(ctx, "session-1")

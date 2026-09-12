@@ -48,19 +48,17 @@ function OAuthPasteDialog({
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             type="button"
-            size="sm"
             onClick={onComplete}
             disabled={completing || !pasteUrl}
-            className="h-11 w-full cursor-pointer sm:w-auto"
+            className="w-full cursor-pointer sm:w-auto"
           >
             {completing ? t("jira:connecting") : t("jira:oauthComplete")}
           </Button>
           <Button
             type="button"
-            size="sm"
             variant="outline"
             onClick={onCancel}
-            className="h-11 w-full cursor-pointer sm:w-auto"
+            className="w-full cursor-pointer sm:w-auto"
           >
             {t("jira:oauthCancel")}
           </Button>
@@ -98,7 +96,7 @@ export function OAuthFields({
         type="button"
         onClick={oauth.handleConnect}
         disabled={oauth.connecting || loading || !form.siteUrl}
-        className="h-11 w-full cursor-pointer sm:w-auto"
+        className="w-full cursor-pointer sm:w-auto"
         data-testid="jira-oauth-connect"
       >
         {oauth.connecting ? t("jira:connecting") : t("jira:connectWithAtlassian")}

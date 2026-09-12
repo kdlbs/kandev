@@ -27,7 +27,10 @@ type fileReader interface {
 	ReadFile(ctx context.Context, path string) ([]byte, error)
 }
 
-const credentialFileMode os.FileMode = 0o600
+const (
+	credentialFileMode os.FileMode = 0o600
+	fileReadOperation              = "read"
+)
 
 // UploadCredentialFiles reads local credential files and uploads them to the remote environment.
 func UploadCredentialFiles(

@@ -23,6 +23,10 @@ function resolveAutoStartFailed(task: WorkflowSnapshot["tasks"][number]): boolea
   return task.auto_start_failed ?? false;
 }
 
+function resolveWorkspaceOrphaned(task: WorkflowSnapshot["tasks"][number]): boolean {
+  return task.workspace_orphaned ?? false;
+}
+
 function primaryExecutorFields(task: Task) {
   return {
     primaryExecutorId: task.primary_executor_id ?? undefined,
@@ -109,6 +113,10 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
         autoStartFailed: resolveAutoStartFailed(task),
+        parkedOnBackgroundWork: task.parked_on_background_work,
+        parkedRevision: task.parked_revision,
+        parkedEpoch: task.parked_epoch,
+        workspaceOrphaned: resolveWorkspaceOrphaned(task),
         activeSubagentCount: task.active_subagent_count ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
@@ -136,6 +144,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         position: step.position,
         events: step.events,
         allow_manual_move: step.allow_manual_move,
+        auto_advance_requires_signal: step.auto_advance_requires_signal,
         prompt: step.prompt,
         is_start_step: step.is_start_step,
         show_in_command_panel: step.show_in_command_panel,

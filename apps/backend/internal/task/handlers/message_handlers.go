@@ -14,13 +14,18 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -53,11 +58,31 @@ type taskTitleSessionClaimer interface {
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+// AtomicQueuedPromptCoordinator exposes admission limits and committed prompt delivery.
+type AtomicQueuedPromptCoordinator interface {
+	MaxQueuedPromptsPerSession() int
+	NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string)
+}
+
+type recordedMessageSteerer interface {
+	SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
+}
+
+type taskCanvasGuidanceResolver interface {
+	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
+type canvasGuidanceProjection struct {
+	resolved bool
+	include  bool
+}
+
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
 	service             *service.Service
 	orchestrator        OrchestratorService
 	cancellationPending dto.CancellationPendingProvider
+	parkedProjection    dto.ParkedProvider
 	logger              *logger.Logger
 	referenceValidator  entityrefs.SubmissionValidator
 	messageIDMu         sync.Mutex
@@ -91,6 +116,9 @@ func NewMessageHandlers(
 	}
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		handlers.cancellationPending = cancellation
+	}
+	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
+		handlers.parkedProjection = parked
 	}
 	return handlers
 }
@@ -149,6 +177,7 @@ func (h *MessageHandlers) injectMessageContext(
 	configMode bool,
 	startCreatedSession bool,
 	titleOwner bool,
+	includeCanvasGuidance bool,
 	content string,
 	trustedPromptContext string,
 ) string {
@@ -174,10 +203,22 @@ func (h *MessageHandlers) injectMessageContext(
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
+		IncludeCanvasGuidance:          includeCanvasGuidance,
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
 	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
+}
+
+func (h *MessageHandlers) resolveCanvasGuidance(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	resolver, ok := h.orchestrator.(taskCanvasGuidanceResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(
@@ -268,8 +309,9 @@ type listMessagesParams struct {
 }
 
 const (
-	messageSortAsc  = "asc"
-	messageSortDesc = "desc"
+	messageSortAsc        = "asc"
+	messageSortDesc       = "desc"
+	messageFieldSessionID = "session_id"
 )
 
 // parseListMessageParams validates message-list query parameters and selects pagination mode.
@@ -413,18 +455,49 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
-	TaskID            string                 `json:"task_id"`
-	TaskSessionID     string                 `json:"session_id"`
-	MessageID         string                 `json:"message_id,omitempty"`
-	ClientMessageID   string                 `json:"client_message_id,omitempty"`
-	Content           string                 `json:"content"`
-	AuthorID          string                 `json:"author_id,omitempty"`
-	Model             string                 `json:"model,omitempty"`
-	PlanMode          bool                   `json:"plan_mode,omitempty"`
-	HasReviewComments bool                   `json:"has_review_comments,omitempty"`
-	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
-	ContextFiles      []v1.ContextFileMeta   `json:"context_files,omitempty"`
-	EntityReferences  []v1.EntityReference   `json:"entity_references,omitempty"`
+	TaskID                string                      `json:"task_id"`
+	TaskSessionID         string                      `json:"session_id"`
+	MessageID             string                      `json:"message_id,omitempty"`
+	ClientMessageID       string                      `json:"client_message_id,omitempty"`
+	Content               string                      `json:"content"`
+	AuthorID              string                      `json:"author_id,omitempty"`
+	Model                 string                      `json:"model,omitempty"`
+	PlanMode              bool                        `json:"plan_mode,omitempty"`
+	HasReviewComments     bool                        `json:"has_review_comments,omitempty"`
+	Attachments           []v1.MessageAttachment      `json:"attachments,omitempty"`
+	ContextFiles          []v1.ContextFileMeta        `json:"context_files,omitempty"`
+	EntityReferences      []v1.EntityReference        `json:"entity_references,omitempty"`
+	PlanCommentRefs       []models.TaskPlanCommentRef `json:"plan_comment_refs,omitempty"`
+	RequirePrimarySession bool                        `json:"require_primary_session,omitempty"`
+	// These fields are server-owned and are carried only from message admission
+	// to the created-session dispatch. They are intentionally not JSON fields.
+	canvasGuidanceResolved bool
+	includeCanvasGuidance  bool
+}
+
+type addMessageReplayIdentity struct {
+	TaskID                string                      `json:"task_id"`
+	TaskSessionID         string                      `json:"session_id"`
+	Content               string                      `json:"content"`
+	AuthorID              string                      `json:"author_id"`
+	Model                 string                      `json:"model"`
+	PlanMode              bool                        `json:"plan_mode"`
+	HasReviewComments     bool                        `json:"has_review_comments"`
+	Attachments           []v1.MessageAttachment      `json:"attachments"`
+	ContextFiles          []v1.ContextFileMeta        `json:"context_files"`
+	EntityReferences      []v1.EntityReference        `json:"entity_references"`
+	PlanCommentRefs       []models.TaskPlanCommentRef `json:"plan_comment_refs"`
+	RequirePrimarySession bool                        `json:"require_primary_session"`
+}
+
+func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
+	return plancomments.Fingerprint(addMessageReplayIdentity{
+		TaskID: req.TaskID, TaskSessionID: req.TaskSessionID, Content: req.Content,
+		AuthorID: req.AuthorID, Model: req.Model, PlanMode: req.PlanMode,
+		HasReviewComments: req.HasReviewComments, Attachments: req.Attachments,
+		ContextFiles: req.ContextFiles, EntityReferences: req.EntityReferences,
+		PlanCommentRefs: req.PlanCommentRefs, RequirePrimarySession: req.RequirePrimarySession,
+	})
 }
 
 // wsAddMessage handles an incoming add-message WebSocket action, persisting the user message and dispatching the turn and orchestrator flow.
@@ -443,33 +516,54 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if errMsg := validateAddMessageRequest(req); errMsg != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
+	requestFingerprint, err := addMessageRequestFingerprint(req)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to identify message request", nil)
+	}
 	unlockMessageID := h.lockMessageID(req.ClientMessageID)
 	defer unlockMessageID()
 
 	// A response can be lost after the message is committed. Resolve a replay
 	// before checking the live session state or running turn-start hooks so a
 	// retry is a read, not a second prompt.
-	if req.ClientMessageID != "" {
-		existing, err := h.service.GetMessageWithPromptIndex(ctx, req.ClientMessageID)
-		switch {
-		case err == nil && existing != nil:
-			// The turn-start hook may switch the task's primary session before
-			// the message is persisted. A retried request still belongs to the
-			// same authorized task even when its original session_id is no
-			// longer the persisted message's session.
-			if (existing.TaskID != "" && existing.TaskID != req.TaskID) ||
-				existing.AuthorType != models.MessageAuthorUser {
-				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
-			}
-			apiMsg := existing.ToAPI()
-			response, responseErr := ws.NewResponse(msg.ID, msg.Action, apiMsg)
-			if responseErr != nil {
-				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
-			}
+	if response, handled := h.addMessageReplayResponse(ctx, msg, req, requestFingerprint); handled {
+		return response, nil
+	}
+	admissionCtx := ctx
+	if len(req.PlanCommentRefs) > 0 {
+		var releaseAdmission func()
+		admissionCtx, releaseAdmission, err = h.service.AcquirePlanCommentAndMessageAdmission(
+			ctx, req.TaskID, req.ClientMessageID,
+		)
+		if err != nil {
+			h.logger.Error("failed to acquire plan comment message admission", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to validate plan comments", nil)
+		}
+		defer releaseAdmission()
+		// A competing process can commit the same caller ID while this request
+		// waits for the task lease. Recheck before mutable task/turn hooks.
+		if response, handled := h.addMessageReplayResponse(
+			admissionCtx, msg, req, requestFingerprint,
+		); handled {
 			return response, nil
-		case err != nil && !errors.Is(err, sql.ErrNoRows):
-			h.logger.Error("failed to check idempotent message", zap.String("message_id", req.ClientMessageID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check message", nil)
+		}
+	}
+	if len(req.PlanCommentRefs) == 0 && req.ClientMessageID != "" {
+		var releaseMessageAdmission func()
+		admissionCtx, releaseMessageAdmission, err = h.service.AcquireMessageAdmission(
+			admissionCtx, req.ClientMessageID,
+		)
+		if err != nil {
+			h.logger.Error("failed to acquire message admission", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to validate message", nil)
+		}
+		defer releaseMessageAdmission()
+		// The request may have waited behind the process that committed this ID.
+		// Recheck before task state or workflow hooks can observe a replay.
+		if response, handled := h.addMessageReplayResponse(
+			admissionCtx, msg, req, requestFingerprint,
+		); handled {
+			return response, nil
 		}
 	}
 
@@ -494,6 +588,26 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		req.EntityReferences = references
 	}
+	if len(req.PlanCommentRefs) > 0 {
+		if err := h.service.ValidatePlanCommentMessage(
+			admissionCtx, req.TaskID, req.TaskSessionID, req.Content, req.PlanCommentRefs,
+			req.RequirePrimarySession, sessionResp.Session.State,
+		); err != nil {
+			if response := planCommentMessageError(msg, err); response != nil {
+				return response, nil
+			}
+			h.logger.Error("failed to validate plan comment message", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to validate plan comments", nil)
+		}
+	}
+	var planCommentAttachmentClaim *messagequeue.QueueAttachmentClaim
+	if len(req.PlanCommentRefs) > 0 && len(req.Attachments) > 0 {
+		claim, err := h.service.PrepareMessageAttachmentClaim(ctx, req.TaskID, req.Attachments)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		planCommentAttachmentClaim = &claim
+	}
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
 	task, err := h.ensureTaskInProgress(ctx, req.TaskID)
@@ -512,6 +626,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// first turn. dispatchPromptAsync no longer calls ProcessOnTurnStart;
 	// it forwards the (now correctly-wrapped) prompt to the agent.
 	if h.orchestrator != nil {
+		submittedSessionID := req.TaskSessionID
 		var turnStartErr error
 		turnStartResult, turnStartErr = h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID)
 		if turnStartErr != nil {
@@ -528,6 +643,12 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resolve prompt session", nil)
+		}
+		if req.RequirePrimarySession && sessionResp.Session.ID != submittedSessionID {
+			return planCommentMessageError(msg, &plancommenttx.PrimarySessionChangedError{
+				SessionID: sessionResp.Session.ID,
+				State:     sessionResp.Session.State,
+			}), nil
 		}
 		req.TaskSessionID = sessionResp.Session.ID
 	}
@@ -568,6 +689,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
+	if len(req.PlanCommentRefs) > 0 {
+		req.Content = plancomments.WithPlaceholder(req.Content)
+	}
 	storedContent, trustedPromptContext := h.prepareDirectPrompt(
 		ctx, req.Content, sessionResp.Session.IsPassthrough,
 	)
@@ -577,7 +701,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	storedContent = orchestrator.AppendEntityReferenceContext(storedContent, req.EntityReferences)
 	configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 	titleOwner := false
-	hasMessageContent := req.Content != "" || len(req.Attachments) > 0
+	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 || len(req.PlanCommentRefs) > 0
 	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
 		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
 	)
@@ -589,35 +713,107 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		// "type in chat to start the agent" path. Wrap with the Kandev MCP
 		// system block before persisting so the DB row matches what the agent
 		// receives (and "Show formatted" reveals it).
+		includeCanvasGuidance := false
+		canvasGuidanceResolved := false
+		if task != nil && !task.IsFromOffice && !sessionResp.Session.IsPassthrough && !configMode {
+			canvasGuidanceResolved = true
+			var resolveErr error
+			includeCanvasGuidance, resolveErr = h.resolveCanvasGuidance(ctx, req.TaskID, req.TaskSessionID)
+			if resolveErr != nil {
+				if errors.Is(resolveErr, orchestrator.ErrTaskSessionPairMismatch) {
+					return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task and session do not match", nil)
+				}
+				h.logger.Warn("failed to resolve canvas prompt capability; omitting optional guidance",
+					zap.String("task_id", req.TaskID),
+					zap.String("session_id", req.TaskSessionID),
+					zap.Error(resolveErr))
+				includeCanvasGuidance = false
+			}
+		}
 		storedContent = h.injectMessageContext(
-			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, storedContent,
+			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, includeCanvasGuidance, storedContent,
 			trustedPromptContext,
 		)
+		req.canvasGuidanceResolved = canvasGuidanceResolved
+		req.includeCanvasGuidance = includeCanvasGuidance
 	}
 	req.Content = storedContent
-	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	if planCommentAttachmentClaim == nil {
+		err = h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 	}
 
+	messageMetadata := meta.ToMap()
+	if req.ClientMessageID != "" {
+		if messageMetadata == nil {
+			messageMetadata = make(map[string]interface{})
+		}
+		messageMetadata[plancomments.MetadataClientMessageFingerprint] = requestFingerprint
+	}
 	createRequest := &service.CreateMessageRequest{
-		TaskSessionID: req.TaskSessionID,
-		TaskID:        req.TaskID,
-		Content:       storedContent,
-		AuthorType:    "user",
-		AuthorID:      req.AuthorID,
-		Metadata:      meta.ToMap(),
+		TaskSessionID:         req.TaskSessionID,
+		TaskID:                req.TaskID,
+		Content:               storedContent,
+		AuthorType:            string(models.MessageAuthorUser),
+		AuthorID:              req.AuthorID,
+		Metadata:              messageMetadata,
+		PlanCommentRefs:       req.PlanCommentRefs,
+		RequirePrimarySession: req.RequirePrimarySession,
+		ExpectedSessionState:  sessionResp.Session.State,
+		AttachmentClaim:       planCommentAttachmentClaim,
 	}
 	var message *models.Message
-	if req.ClientMessageID != "" {
-		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
-	} else {
-		message, err = h.service.CreateMessage(ctx, createRequest)
+	// Every comment-bearing message uses the queue row as a durable dispatch
+	// receipt. Promptable sessions drain it immediately; workflow waits and
+	// process restarts retain the same caller-owned delivery identity.
+	atomicQueuedPlanComments := len(req.PlanCommentRefs) > 0
+	switch {
+	case atomicQueuedPlanComments:
+		coordinator, ok := h.orchestrator.(AtomicQueuedPromptCoordinator)
+		if !ok {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queued prompt admission is unavailable", nil)
+		}
+		queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
+		for key, value := range createRequest.Metadata {
+			queueMetadata[key] = value
+		}
+		queueMetadata["user_message_recorded"] = true
+		queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = req.ClientMessageID
+		queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
+		queued := &messagequeue.QueuedMessage{
+			ID: req.ClientMessageID, SessionID: req.TaskSessionID, TaskID: req.TaskID,
+			Content: storedContent, Model: req.Model, PlanMode: req.PlanMode,
+			Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
+			QueuedBy: messagequeue.QueuedByUser,
+		}
+		message, err = h.service.CreateQueuedMessageIdempotent(
+			admissionCtx, req.ClientMessageID, createRequest, queued, coordinator.MaxQueuedPromptsPerSession(),
+		)
+		if err == nil {
+			coordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
+		}
+	case req.ClientMessageID != "":
+		message, err = h.service.CreateMessageIdempotent(admissionCtx, req.ClientMessageID, createRequest)
+	default:
+		message, err = h.service.CreateMessage(admissionCtx, createRequest)
 	}
 	if err != nil {
+		if response := planCommentMessageError(msg, err); response != nil {
+			return response, nil
+		}
+		if errors.Is(err, messagequeue.ErrQueueFull) {
+			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode, "Queue is full", nil)
+		}
+		if errors.Is(err, messagequeue.ErrQueueIDConflict) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
+		}
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
-	if turnStartResult.Queued {
+	req.Content = message.Content
+	if turnStartResult.Queued && !atomicQueuedPlanComments {
 		if err := h.orchestrator.QueueUserPrompt(
 			ctx,
 			req.TaskID,
@@ -647,13 +843,91 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// an orchestrator is available. This runs async so the WS request can
 	// respond immediately. Plan mode changes the execution prompt and agent
 	// behavior; it does not make message.add a record-only operation.
-	if h.orchestrator != nil && !turnStartResult.Queued {
+	if h.orchestrator != nil && !turnStartResult.Queued && !atomicQueuedPlanComments {
 		h.dispatchPromptAsync(
 			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
 		)
 	}
 
 	return response, nil
+}
+
+func (h *MessageHandlers) addMessageReplayResponse(
+	ctx context.Context,
+	msg *ws.Message,
+	req wsAddMessageRequest,
+	requestFingerprint string,
+) (*ws.Message, bool) {
+	if req.ClientMessageID == "" {
+		return nil, false
+	}
+	existing, err := h.service.GetMessageWithPromptIndex(ctx, req.ClientMessageID)
+	switch {
+	case err == nil && existing != nil:
+		if addMessageReplayConflicts(existing, req, requestFingerprint) {
+			response, _ := ws.NewError(
+				msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil,
+			)
+			return response, true
+		}
+		if authErr := h.service.AuthorizeSessionScope(
+			ctx, existing.TaskSessionID, authz.ScopeSessionPrompt,
+		); authErr != nil {
+			if service.IsForbidden(authErr) {
+				response, _ := ws.NewError(
+					msg.ID, msg.Action, ws.ErrorCodeForbidden, "Cannot send messages to this session", nil,
+				)
+				return response, true
+			}
+			response, _ := ws.NewError(
+				msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to authorize message", nil,
+			)
+			return response, true
+		}
+		// A replay may be the first process that survives long enough to kick
+		// the atomically persisted delivery receipt. Notification is idempotent:
+		// an acknowledged receipt makes this a no-op.
+		if len(req.PlanCommentRefs) > 0 {
+			if coordinator, ok := h.orchestrator.(AtomicQueuedPromptCoordinator); ok {
+				coordinator.NotifyQueuedUserPrompt(ctx, existing.TaskID, existing.TaskSessionID)
+			}
+		}
+		response, responseErr := ws.NewResponse(msg.ID, msg.Action, existing.ToAPI())
+		if responseErr != nil {
+			response, _ = ws.NewError(
+				msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil,
+			)
+		}
+		return response, true
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		h.logger.Error(
+			"failed to check idempotent message",
+			zap.String("message_id", req.ClientMessageID), zap.Error(err),
+		)
+		response, _ := ws.NewError(
+			msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check message", nil,
+		)
+		return response, true
+	default:
+		return nil, false
+	}
+}
+
+func addMessageReplayConflicts(
+	existing *models.Message,
+	req wsAddMessageRequest,
+	requestFingerprint string,
+) bool {
+	// A turn-start hook can switch the primary before persistence, so an exact
+	// retry remains bound to the authorized task rather than the old session ID.
+	if (existing.TaskID != "" && existing.TaskID != req.TaskID) ||
+		existing.AuthorType != models.MessageAuthorUser {
+		return true
+	}
+	storedFingerprint, _ := existing.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
+	return (storedFingerprint != "" && storedFingerprint != requestFingerprint) ||
+		(storedFingerprint == "" && len(req.PlanCommentRefs) > 0) ||
+		!plancomments.MetadataRefsMatch(existing.Metadata, req.PlanCommentRefs)
 }
 
 // lockMessageID serializes acceptance for one caller-owned message ID. The
@@ -708,6 +982,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	if reloaded.State != models.TaskSessionStateCompleted {
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
@@ -725,6 +1000,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	}
 	sessionDTO := dto.FromTaskSession(primary)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 }
 
@@ -745,7 +1021,7 @@ func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session
 	}
 }
 
-const maxMessageContentBytes = 1 << 20
+const maxMessageContentBytes = plancomments.MaxRenderedPromptBytes
 
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.
 func validateAddMessageRequest(req wsAddMessageRequest) string {
@@ -759,16 +1035,97 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 		return "task_id is required"
 	}
 	// Content can be empty if there are attachments (image-only messages)
-	if req.Content == "" && len(req.Attachments) == 0 {
+	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 {
 		return "content or attachments are required"
+	}
+	seenPlanComments := make(map[string]struct{}, len(req.PlanCommentRefs))
+	for _, ref := range req.PlanCommentRefs {
+		if ref.ID == "" || ref.Version <= 0 {
+			return "plan_comment_refs are invalid"
+		}
+		if _, duplicate := seenPlanComments[ref.ID]; duplicate {
+			return "plan_comment_refs contain duplicates"
+		}
+		seenPlanComments[ref.ID] = struct{}{}
 	}
 	if len(req.ClientMessageID) > 128 {
 		return "client_message_id is too long"
+	}
+	if len(req.PlanCommentRefs) > 0 && req.ClientMessageID == "" {
+		return "client_message_id is required with plan comments"
+	}
+	if len(req.PlanCommentRefs) > 0 && plancomments.ContainsReservedPlaceholder(req.Content) {
+		return "content contains a reserved plan comment marker"
 	}
 	if err := validateAttachments(req.Attachments); err != nil {
 		return err.Error()
 	}
 	return ""
+}
+
+func queuedMessageAttachments(attachments []v1.MessageAttachment) []messagequeue.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	queued := make([]messagequeue.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		queued = append(queued, messagequeue.MessageAttachment{
+			Type: attachment.Type, AttachmentID: attachment.AttachmentID, Data: attachment.Data,
+			MimeType: attachment.MimeType, Name: attachment.Name, SizeBytes: attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+		})
+	}
+	return queued
+}
+
+func planCommentMessageError(msg *ws.Message, err error) *ws.Message {
+	if errors.Is(err, plancomments.ErrRenderedTooLarge) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
+		return response
+	}
+	var commentsChanged *plancommenttx.CommentsChangedError
+	if errors.As(err, &commentsChanged) {
+		details := map[string]interface{}{}
+		if commentsChanged.Snapshot != nil {
+			details["snapshot"] = dto.TaskPlanCommentSnapshotFromModel(commentsChanged.Snapshot)
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePlanCommentsChanged, "Task plan comments changed", details)
+		return response
+	}
+	var primaryChanged *plancommenttx.PrimarySessionChangedError
+	if errors.As(err, &primaryChanged) {
+		details := map[string]interface{}{
+			"primary_session_id":    nil,
+			"primary_session_state": nil,
+		}
+		if primaryChanged.SessionID != "" {
+			details["primary_session_id"] = primaryChanged.SessionID
+			details["primary_session_state"] = primaryChanged.State
+		}
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodePrimarySessionChanged, "Primary session changed", details)
+		return response
+	}
+	if errors.Is(err, repoerrors.ErrTaskSessionMismatch) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session does not belong to task", nil)
+		return response
+	}
+	var unavailable *plancommenttx.SessionUnavailableError
+	if errors.As(err, &unavailable) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"Session is no longer available for input", map[string]interface{}{
+				messageFieldSessionID: unavailable.SessionID, "session_state": unavailable.State,
+			})
+		return response
+	}
+	if errors.Is(err, service.ErrMessageIDConflict) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
+		return response
+	}
+	if errors.Is(err, messagequeue.ErrTaskInactive) {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task is no longer active", nil)
+		return response
+	}
+	return nil
 }
 
 // checkSessionStateForMessage loads the session and returns an error WS message if the
@@ -782,6 +1139,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	}
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
 	// A steer-eligible generating RUNNING session must pass this first guard:
 	// otherwise the busy error is returned here, before the steer branch in
@@ -858,7 +1216,10 @@ func (h *MessageHandlers) dispatchPromptAsync(
 		h.forwardMessageAsPrompt(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
-			trustedPromptContext,
+			trustedPromptContext, canvasGuidanceProjection{
+				resolved: req.canvasGuidanceResolved,
+				include:  req.includeCanvasGuidance,
+			},
 		)
 	}()
 }
@@ -885,7 +1246,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 ) {
-	_, err := h.orchestrator.SteerTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	var err error
+	if steerer, ok := h.orchestrator.(recordedMessageSteerer); ok {
+		_, err = steerer.SteerRecordedMessage(ctx, taskID, sessionID, content, model, planMode, attachments)
+	} else {
+		_, err = h.orchestrator.SteerTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	}
 	if err == nil {
 		return
 	}
@@ -916,11 +1282,22 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	references []v1.EntityReference,
 	startCreated bool,
 	trustedPromptContext string,
+	canvasGuidance ...canvasGuidanceProjection,
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
 		var err error
-		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
+		projection := canvasGuidanceProjection{}
+		if len(canvasGuidance) > 0 {
+			projection = canvasGuidance[0]
+		}
+		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidance); ok && len(canvasGuidance) > 0 {
+			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidance(
+				ctx, taskID, sessionID, agentProfileID,
+				content, true, planMode, false, attachments, references, trustedPromptContext,
+				projection.resolved, projection.include,
+			)
+		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
 			_, err = starter.StartCreatedSessionWithPromptContext(
 				ctx, taskID, sessionID, agentProfileID,
 				content, true, planMode, false, attachments, references, trustedPromptContext,
@@ -965,9 +1342,63 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		// Don't create a prompt error message if the agent itself reported the error.
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
-		if !isAgentReportedError(err) {
+		if !isAgentReportedError(err) &&
+			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) {
 			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
 		}
+	}
+}
+
+// queuePromptIfRuntimeUnavailable handles the window where a workflow step
+// move has promoted a new primary session but its runtime has not finished
+// launching: PromptTask fails with orchestrator.ErrSessionRuntimeUnavailable
+// before anything reached the agent, so the message is safe to queue for
+// delivery once the runtime comes up instead of being reported as failed.
+// Returns true when the message was queued, so the caller must not also
+// report promptErr as an error.
+func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptErr error,
+) bool {
+	if !errors.Is(promptErr, orchestrator.ErrSessionRuntimeUnavailable) {
+		return false
+	}
+	session, err := h.service.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || isTerminalSessionState(session.State) {
+		return false
+	}
+	// wsAddMessage already ran ProcessOnTurnStart synchronously for this prompt
+	// before the runtime-unavailable failure was even known; tag the queued
+	// entry so the drain path (executeQueuedMessageWithReservation) does not
+	// fire on_turn_start a second time on the replacement session.
+	queueMetadata := map[string]interface{}{orchestrator.MetaKeyTurnStartAlreadyProcessed: true}
+	if queueErr := h.orchestrator.QueueUserPrompt(
+		ctx, taskID, sessionID, content, model, planMode, attachments, queueMetadata, true,
+	); queueErr != nil {
+		h.logger.Warn("failed to queue prompt after runtime-unavailable prompt failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(queueErr))
+		return false
+	}
+	h.logger.Warn("queued prompt for delivery once session runtime finishes launching",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.Error(promptErr))
+	return true
+}
+
+// isTerminalSessionState reports whether a session in this state can no
+// longer accept a queued prompt for later delivery.
+func isTerminalSessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -88,7 +88,9 @@ func (r *sqliteRepository) initSchema() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
-	r.runMigrations()
+	if err := r.runMigrations(); err != nil {
+		return err
+	}
 
 	return r.ensureDefaultUser()
 }
@@ -96,8 +98,8 @@ func (r *sqliteRepository) initSchema() error {
 // runMigrations evolves existing databases. CREATE TABLE IF NOT EXISTS is a
 // no-op on a table that already exists, so every added column must also appear
 // here as an idempotent ADD COLUMN (see apps/backend/CLAUDE.md, ADR 0027).
-func (r *sqliteRepository) runMigrations() {
-	m := db.NewMigrateLogger(r.db, nil)
+func (r *sqliteRepository) runMigrations() error {
+	m := db.NewRequiredMigrateLogger(r.db, nil)
 	m.Apply("users.display_name", "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
 	// Default 'admin': the pre-auth singleton default-user becomes the admin
 	// when authentication is enabled. Explicit CreateUser calls always set role.
@@ -116,6 +118,10 @@ func (r *sqliteRepository) runMigrations() {
 	m.Apply("users.is_operator", "ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0")
 	// Safe pre-auth: the table only ever held the single default-user row.
 	m.Apply("users.email_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+	if err := m.Err(); err != nil {
+		return fmt.Errorf("required user migration: %w", err)
+	}
+	return nil
 }
 
 // ensureDefaultUser inserts the pre-auth default user row when it does not
@@ -215,7 +221,7 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) er
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO users (id, email, display_name, role, status, org_id, is_operator, settings, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
-	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, user.IsOperator,
+	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, dialect.BoolToInt(user.IsOperator),
 		user.CreatedAt, user.UpdatedAt)
 	return err
 }

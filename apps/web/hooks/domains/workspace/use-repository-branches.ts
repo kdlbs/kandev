@@ -51,6 +51,8 @@ async function listBranchesUntilSettled(source: BranchSource): Promise<Branch[]>
  */
 export type UseBranchesResult = {
   branches: Branch[];
+  /** True after a non-refresh request has completed, including an empty list. */
+  isLoaded: boolean;
   isLoading: boolean;
   /**
    * Refreshes the branch list. For id-based sources the backend runs
@@ -116,6 +118,7 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
 
   return {
     branches,
+    isLoaded,
     isLoading,
     refresh: source ? refresh : undefined,
   };

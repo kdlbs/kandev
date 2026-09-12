@@ -193,5 +193,8 @@
   "cursorPaginationSummary_one": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţ",
   "cursorPaginationSummary_other": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţś",
   "allRepositories": "Àĺĺ ŕēƥōśĩţōŕĩēś",
-  "changeRequestCreationFailed": "Ćĥàńĝē-ŕēqũēśţ ćŕēàţĩōń ƒàĩĺēď"
+  "changeRequestCreationFailed": "Ćĥàńĝē-ŕēqũēśţ ćŕēàţĩōń ƒàĩĺēď",
+  "resultCount_one": "Ŕēśũĺţ <count>{{count}}</count>",
+  "resultCount_other": "Ŕēśũĺţś <count>{{count}}</count>",
+  "loadingResults": "Ĺōàďĩńĝ ŕēśũĺţś…"
 }

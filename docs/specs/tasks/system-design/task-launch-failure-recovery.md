@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
 created: 2026-08-24
-updated: 2026-09-03
+updated: 2026-09-11
 owners:
   - cfl12
 ---
@@ -45,8 +45,20 @@ actions, exact task-repository identity when applicable, and an idempotency
 stamp.
 
 The supported categories are `base_branch_missing`, `pr_already_closed`,
-`default_branch_unresolved`, and `generic_launch_failure`. The supported
-actions are `retry_default`, `pick_base_branch`, and `mark_review_done`.
+`default_branch_unresolved`, `workspace_checkout_failed`, and
+`generic_launch_failure`. The supported actions are `retry_launch`,
+`retry_default`, `pick_base_branch`, and `mark_review_done`.
+
+The failure category controls the available actions. A repository identity
+alone does not make a base-branch action valid.
+
+| Category | Valid actions |
+| --- | --- |
+| `base_branch_missing` | `retry_default`, `pick_base_branch` |
+| `default_branch_unresolved` | `pick_base_branch` |
+| `workspace_checkout_failed` | `retry_launch` |
+| `pr_already_closed` | `mark_review_done` when the workflow permits it |
+| `generic_launch_failure` | `retry_launch` |
 
 The `TaskStatusSummary.active_error` projection selects the newest active
 record, limits strings and actions, removes duplicate actions without changing
@@ -64,6 +76,8 @@ the current error stamp; stale stamps fail without mutation.
   relaunches.
 - `pick_base_branch` validates and persists one selected branch before
   relaunch.
+- `retry_launch` keeps the task-repository settings unchanged and repeats the
+  failed launch. It still requires the current error stamp.
 - `mark_review_done` is allowed only for a valid terminal workflow step and
   when every relevant PR is terminal; it uses the normal task-move service.
 
@@ -73,6 +87,52 @@ category, bounded details, and valid actions. A successful recovery clears the
 source error only after its write and relaunch or move succeed.
 
 ## Initial prompt admission
+
+### Asynchronous startup amendment
+
+Implemented by `Executor.handleAgentProcessStartFailure` and
+`Service.handleAgentStartFailed` must preserve the launch phase through the
+existing terminal path. After provider-specific auth/runtime handling and
+current-execution guards, persist one typed `last_agent_error` using the
+existing launch classification and stamp model. Do not first publish a raw
+`startErr.Error()` failure and then race to replace it with a safe record.
+
+Keep provider-specific recovery routes authoritative. Generic bootstrap errors
+use `generic_launch_failure` with safe structured operation/reason details.
+Known contribution access, transport, and destination reasons must remain
+distinguishable in the safe projection. Unknown errors use a neutral summary;
+do not guess their cause from an English substring in the frontend.
+
+Add bounded optional operation/attempt correlation fields to the existing
+error projection and recovery error envelope where required. The current
+execution guard and compare-and-set persistence must reject a successor
+execution race. Initial failure, session state, transcript marker, HTTP/boot
+projection, and live status summary carry the same stamp. A failed resume and
+its fallback restore retain separate sanitized causes for that attempt.
+Old records without the new fields remain readable with safe generic copy.
+
+The optional fields are `phase` (`bootstrap`), `execution_id`, `attempt_id`,
+and `causes`. An attempt ID identifies one resume and its optional fallback;
+each explicit retry gets a new ID. The server returns the attempt ID and error
+stamp in request errors and synthetic messages. IDs are bounded to 256 bytes.
+`causes` has at most two entries with `operation` (`resume` or
+`restore_workspace`), an allowlisted `code`, and a sanitized `detail` limited
+to 1024 UTF-8 bytes. Cause details and legacy details together stay within the
+existing 4096-byte details budget. Malformed optional fields are ignored.
+
+Safe contribution reason codes are `authentication_required`,
+`permission_denied`, `destination_invalid`, `source_branch_missing`,
+`transport_unavailable`, `timeout`, and `unknown`. Assign specific codes only
+from typed evidence at the operation boundary. The preflight's history-only
+reason is an admission result, not a durable agent error. Raw Git output and
+nested transport strings are not persisted as user-facing details.
+
+The [agent recovery design](../../agents/system-design/session-recovery-failures.md)
+owns the single recovery card and request-state composition. This extends the
+existing launch-card ownership to asynchronous bootstrap failures; it does not
+turn post-start provider errors into launch errors.
+
+### Existing prompt contract
 
 The lifecycle manager owns initial prompt submission after an agent process
 starts. Materialization and ACP submission errors occur inside that asynchronous
@@ -106,6 +166,32 @@ but `retry_default` and `pick_base_branch` must write the resolved base to
 the exact `task_repositories` row and that write must succeed before relaunch.
 No new table is required.
 
+## Pull-request checkout isolation
+
+A pull-request head uses a Kandev-owned ref that includes the pull-request
+number, specifically `refs/kandev/pull/<N>/head`. The fetch can force-update
+this internal ref because users do not own it. Ordinary remote refresh and
+pruning do not manage this namespace. The fetch never writes directly to a
+user-named local branch.
+
+The worktree manager verifies the fetched ref before it selects a start point.
+If the named local branch has unrelated history, the manager preserves that
+branch. It creates a unique task branch from the verified pull-request ref.
+
+This rule also applies when two pull requests reuse the same source-branch
+name. A local branch from the first pull request cannot block the second pull
+request. A fallback branch uses a task-owned deterministic suffix and a
+bounded retry sequence, so an existing fallback branch cannot make launch fail
+because of one random-name collision.
+
+The manager sets `origin/<source-branch>` as upstream only when that ref points
+to the verified pull-request start point. A remote branch with different
+history is never attached as the worktree upstream.
+
+If Kandev cannot fetch or verify the pull-request ref, preparation fails with a
+typed `workspace_checkout_failed` error. The error retains the existing
+credential and path redaction rules.
+
 ## Failure and security
 
 PR lookup failures launch normally. Remote-default timeout, authentication,
@@ -117,12 +203,49 @@ Initial-prompt errors use a safe generic durable message and the same
 stale-event checks as other agent failures. Raw attachment paths and provider
 details remain in backend diagnostics and do not reach the durable projection.
 
+## Launch-error presentation ownership
+
+The active `TaskStatusSummary.active_error` record owns the primary launch
+error for its matching session and stamp. A task-wide record remains visible
+while a prior session is selected, but it owns session surfaces only when no
+session is selected. A session-owned record owns surfaces only for its exact
+session and stamp. The task Chat surface renders one persistent card from this
+record.
+
+The matching launch error suppresses these secondary presentations:
+
+- The previous-agent-error notice.
+- The standalone failed preparation row.
+- The empty-turn warning.
+- The generic failed-agent status row.
+- The stopped-session recovery banner.
+- A launch-error toast while the user views the affected task.
+
+Only synthetic rows generated by the active launch failure are suppressed;
+stale stamped or historical launch-only rows remain visible. An unrelated
+historical error keeps its normal transcript presentation. A runtime error that
+occurs after agent startup keeps the existing session
+recovery surface.
+
+The card shows a category title, a short cause, a no-change statement, and only
+valid recovery actions. One disclosure shows bounded technical details. The
+disclosure does not show raw Git output, credentials, or local file paths.
+
+A failed recovery updates the same card. It does not add another banner or
+toast. A successful recovery removes the card after launch succeeds.
+
 ## Responsive presentation
 
-The task Chat surface renders one persistent error card from the shared
-projection. Desktop actions are inline; mobile actions wrap and branch
-selection uses the existing mobile picker. Both surfaces use the same action
-authorization and remain free of horizontal overflow.
+The task Chat surface is the entry point on desktop and phone. The card remains
+inline because the error and its actions belong to the current task.
+
+Desktop actions use one compact row. Phone actions use a vertical layout with
+44-pixel touch targets. The existing mobile picker remains the branch-selection
+surface for `base_branch_missing` and `default_branch_unresolved`.
+
+The transcript owns vertical scrolling. Expanded technical details wrap inside
+the card and do not create a second scroll region. Both layouts prevent
+document-level horizontal overflow.
 
 `useEnsureTaskSession` keeps one request latch after an error. Store updates and
 loader identity changes do not start another request. The Retry control starts

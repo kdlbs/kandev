@@ -59,6 +59,18 @@ type blockingTaskLaunchRecoveryWorktree struct {
 	err     error
 }
 
+func TestValidateTaskLaunchRecoveryRequestAllowsRetryLaunchWithoutRepository(t *testing.T) {
+	svc := &Service{}
+	err := svc.validateTaskLaunchRecoveryRequest(&TaskLaunchRecoveryRequest{
+		TaskID:     "task-1",
+		Action:     models.RecoveryActionRetryLaunch,
+		ErrorStamp: "error-1",
+	})
+	if err != nil {
+		t.Fatalf("retry_launch validation error = %v", err)
+	}
+}
+
 func (f blockingTaskLaunchRecoveryWorktree) ResolveRemoteDefaultBranch(context.Context, string) (string, error) {
 	f.started <- struct{}{}
 	<-f.release
@@ -69,6 +81,13 @@ func seedTaskLaunchRecoveryFixture(t *testing.T, repo *sqliterepo.Repository, ta
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
+	category := models.LaunchErrorCategoryGenericLaunchFailure
+	switch action {
+	case models.RecoveryActionRetryDefault, models.RecoveryActionPickBaseBranch:
+		category = models.LaunchErrorCategoryBaseBranchMissing
+	case models.RecoveryActionMarkReviewDone:
+		category = models.LaunchErrorCategoryPRAlreadyClosed
+	}
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-recovery", Name: "Recovery", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -81,7 +100,7 @@ func seedTaskLaunchRecoveryFixture(t *testing.T, repo *sqliterepo.Repository, ta
 			models.MetaKeyLastLaunchError: models.TaskLaunchError{
 				Message:          "launch failed",
 				OccurredAt:       now,
-				Code:             models.LaunchErrorCategoryGenericLaunchFailure,
+				Code:             category,
 				RecoveryActions:  []string{action},
 				TaskRepositoryID: taskRepositoryID,
 				StampValue:       "recovery-stamp",
@@ -106,7 +125,7 @@ func recoveryFixtureService(t *testing.T, repo *sqliterepo.Repository, fake *tas
 	t.Helper()
 	steps := newMockStepGetter()
 	steps.steps["review-recovery"] = &wfmodels.WorkflowStep{ID: "review-recovery", WorkflowID: "wf-recovery", Position: 0, Name: "Review"}
-	steps.steps["done-recovery"] = &wfmodels.WorkflowStep{ID: "done-recovery", WorkflowID: "wf-recovery", Position: 1, Name: "Done"}
+	steps.steps["done-recovery"] = &wfmodels.WorkflowStep{ID: "done-recovery", WorkflowID: "wf-recovery", Position: 1, Name: "Done", CompleteTaskOnEnter: true}
 	svc := createTestService(repo, steps, newMockTaskRepo())
 	svc.taskLaunchRecoveryRepo = repo
 	svc.taskLaunchRecoveryTasks = fake

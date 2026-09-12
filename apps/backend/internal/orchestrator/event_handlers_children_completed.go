@@ -149,7 +149,6 @@ func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string)
 			zap.Error(err))
 		return nil, false
 	}
-	s.annotateTerminalChildSteps(ctx, rows)
 	if len(rows) == 0 || !allChildrenTerminal(rows) {
 		return nil, false
 	}
@@ -262,29 +261,11 @@ func (s *Service) markChildCompletionApplied(ctx context.Context, parentID, oper
 
 func allChildrenTerminal(rows []models.ChildCompletionRow) bool {
 	for _, row := range rows {
-		if !models.IsTerminalTaskState(row.State) && !row.TerminalWorkflowStep {
+		if !models.IsTerminalTaskState(row.State) {
 			return false
 		}
 	}
 	return true
-}
-
-func (s *Service) annotateTerminalChildSteps(ctx context.Context, rows []models.ChildCompletionRow) {
-	if s.workflowStepGetter == nil {
-		return
-	}
-	cache := make(map[string]bool)
-	for i := range rows {
-		if models.IsTerminalTaskState(rows[i].State) || rows[i].WorkflowStepID == "" {
-			continue
-		}
-		terminal, ok := cache[rows[i].WorkflowStepID]
-		if !ok {
-			terminal = s.workflowStepIsTerminal(ctx, rows[i].WorkflowStepID)
-			cache[rows[i].WorkflowStepID] = terminal
-		}
-		rows[i].TerminalWorkflowStep = terminal
-	}
 }
 
 func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID string) bool {
@@ -342,9 +323,6 @@ func childCompletionWaveIdentity(parentID string, rows []models.ChildCompletionR
 }
 
 func childCompletionStatus(row models.ChildCompletionRow) string {
-	if row.TerminalWorkflowStep && !models.IsTerminalTaskState(row.State) {
-		return string(v1.TaskStateCompleted)
-	}
 	return string(row.State)
 }
 
@@ -358,12 +336,6 @@ func childCompletionOperationID(parentID string, rows []models.ChildCompletionRo
 		b.WriteString(string(row.State))
 		b.WriteString(":")
 		b.WriteString(row.WorkflowStepID)
-		b.WriteString(":")
-		if row.TerminalWorkflowStep {
-			b.WriteString("terminal")
-		} else {
-			b.WriteString("active")
-		}
 		b.WriteString(":")
 		b.WriteString(row.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	}

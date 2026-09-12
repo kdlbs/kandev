@@ -1,8 +1,11 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { useEffect } from "react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { defaultState } from "@/lib/state/default-state";
 import { TaskTopBar } from "./task-top-bar";
+import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 
 afterEach(() => cleanup());
 
@@ -165,7 +168,7 @@ describe("TaskTopBar repository crumb", () => {
 
   it("names the task's repository so an open task says which project it belongs to", () => {
     renderTopBar(
-      <TaskTopBar taskId="task-1" taskTitle="Fix the sidebar" repositoryLabel="kdlbs/kandev" />,
+      <TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} repositoryLabel="kdlbs/kandev" />,
     );
 
     const crumb = repositoryCrumb("kdlbs/kandev");
@@ -177,7 +180,7 @@ describe("TaskTopBar repository crumb", () => {
   });
 
   it("renders no repository crumb for a task with no repository", () => {
-    renderTopBar(<TaskTopBar taskId="task-1" taskTitle="Fix the sidebar" />);
+    renderTopBar(<TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} />);
 
     // Any static crumb, not just a slug-shaped one: a repository with no
     // provider falls back to a bare name like "scratchpad", which a
@@ -202,3 +205,155 @@ function renderTopBar(ui: React.ReactNode) {
     </StateProvider>,
   );
 }
+
+const TASK_TITLE = "Fix the sidebar";
+const TRIGGER_TEST_ID = "task-topbar-actions-menu";
+
+const NORMAL_BOARD_ROW: TaskActionsMenuBoardRow = {
+  id: "task-1",
+  title: TASK_TITLE,
+  workflowStepId: "step-1",
+};
+
+function getTrigger() {
+  return screen.getByTestId(TRIGGER_TEST_ID);
+}
+
+function openMenu() {
+  const trigger = getTrigger();
+  fireEvent.pointerDown(trigger, { button: 0, pointerId: 1 });
+  fireEvent.click(trigger);
+  return trigger;
+}
+
+function expectMenuOpen(open: boolean) {
+  expect(getTrigger().getAttribute("aria-expanded")).toBe(String(open));
+}
+
+describe("TaskTopBar actions menu trigger", () => {
+  it("renders no trigger when the top bar has no subject task", () => {
+    renderTopBar(<TaskTopBar taskId={null} actionsMenuBoardRow={null} />);
+
+    expect(screen.queryByTestId(TRIGGER_TEST_ID)).toBeNull();
+  });
+
+  it("renders the trigger last in the right control group, with the More options accessible name", () => {
+    renderTopBar(
+      <TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} actionsMenuBoardRow={NORMAL_BOARD_ROW} />,
+    );
+
+    const trigger = getTrigger();
+    expect(trigger.getAttribute("aria-label")).toBe("More options");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expectMenuOpen(false);
+
+    // Positioned after every other control already rendered in the group
+    // (AC-TASKS-TASK-ACTIONS-MENU-001.2): every earlier control precedes it
+    // in document order.
+    const controls = screen.getAllByRole("button");
+    expect(controls.at(-1)).toBe(trigger);
+  });
+
+  it("opens a menu presenting Edit, Archive, and Delete for a normal (non-archived, resolvable) subject", () => {
+    renderTopBar(
+      <TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} actionsMenuBoardRow={NORMAL_BOARD_ROW} />,
+    );
+
+    openMenu();
+
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Archive" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("renders the trigger and identifier-only tier (Archive/Delete only) when the board row can't be resolved (AC-TASKS-TASK-ACTIONS-MENU-002.5)", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} actionsMenuBoardRow={null} />);
+
+    expect(screen.queryByTestId(TRIGGER_TEST_ID)).toBeTruthy();
+    openMenu();
+
+    expect(screen.getByRole("menuitem", { name: "Archive" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Move to" })).toBeNull();
+  });
+
+  it("presents only Delete (no Archive, no Edit) for an archived subject", () => {
+    renderTopBar(
+      <TaskTopBar
+        taskId="task-1"
+        taskTitle={TASK_TITLE}
+        isArchived
+        actionsMenuBoardRow={NORMAL_BOARD_ROW}
+      />,
+    );
+
+    openMenu();
+
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+  });
+});
+
+function StoreProbe({ onReady }: { onReady: (store: ReturnType<typeof useAppStoreApi>) => void }) {
+  const store = useAppStoreApi();
+  useEffect(() => onReady(store), [store, onReady]);
+  return null;
+}
+
+describe("TaskTopBar actions menu — subject removed from the board (AC-TASKS-TASK-ACTIONS-MENU-004.5)", () => {
+  // The subject leaving `kanban.tasks` alone is board-row loss, not genuine
+  // removal (AC-TASKS-TASK-ACTIONS-MENU-002.6/004.1c): it must demote the
+  // menu in place, never close it. `actionsMenuBoardRow` is a prop this
+  // harness holds static, so only a real "gone" signal (task.deleted, or
+  // task.updated with archived_at) may close the menu here, and this test has
+  // no WS client wired up to send one.
+  it("keeps an open menu open when the subject merely leaves the board's task collections", () => {
+    let store: ReturnType<typeof useAppStoreApi> | null = null;
+    renderTopBar(
+      <StateProvider
+        initialState={{
+          kanban: {
+            ...defaultState.kanban,
+            tasks: [
+              {
+                id: "task-1",
+                workflowId: "workflow-1",
+                workflowStepId: "step-1",
+                title: TASK_TITLE,
+                position: 0,
+              },
+            ],
+          },
+        }}
+      >
+        <StoreProbe
+          onReady={(api) => {
+            store = api;
+          }}
+        />
+        <TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} actionsMenuBoardRow={NORMAL_BOARD_ROW} />
+      </StateProvider>,
+    );
+
+    openMenu();
+    expectMenuOpen(true);
+
+    act(() => {
+      store!.setState((state) => ({ kanban: { ...state.kanban, tasks: [] } }));
+    });
+
+    expectMenuOpen(true);
+  });
+
+  it("does not close the menu for a task that has simply not loaded into the board yet", () => {
+    renderTopBar(
+      <TaskTopBar taskId="task-1" taskTitle={TASK_TITLE} actionsMenuBoardRow={NORMAL_BOARD_ROW} />,
+    );
+
+    openMenu();
+
+    expectMenuOpen(true);
+  });
+});

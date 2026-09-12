@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -447,7 +448,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 }
 
 // warnIfReviewDecisionMissing flags a review or approval run that finished
-// without the agent ever calling record_step_decision_kandev. A reviewer can
+// without the agent ever recording a workflow decision. A reviewer can
 // post a full critique and reject the work in a comment, but if that comment
 // never becomes a recorded decision the workflow engine has nothing to act
 // on and the task strands in its current step forever. This does not fix
@@ -525,6 +526,16 @@ func (s *Service) handleTasklessAgentCompleted(
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Same reasoning as handleAgentCompleted's and handleAgentFailed's
+			// ErrNoRows exits: no claimed run resolves, so nothing reaches
+			// this function's own clear below, but the agent may still be
+			// "working" from the launch. Scoped to data.RunID for the same
+			// reason.
+			agentProfileID := data.AgentProfileID
+			if agentProfileID == "" {
+				agentProfileID = data.AgentID
+			}
+			s.clearAgentWorking(ctx, agentProfileID, data.RunID)
 			return nil
 		}
 		return err
@@ -686,8 +697,10 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		"session_id":    data.SessionID,
 		"error_message": data.ErrorMessage,
 	})
+	// Clear before routing can make the run claimable again. This prevents
+	// cleanup from this attempt from matching a relaunch that reuses its run ID.
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
-		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return nil
 	}
 	// Office failure path (v1): every agent error is terminal. The
@@ -1014,10 +1027,22 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	return nil
 }
 
-// finalizeDone resolves blockers and notifies parents when a task enters
-// a terminal step. Both side-effects route through the engine via
-// dispatchEngineTrigger (on_blocker_resolved / on_children_completed).
+// finalizeDone resolves blockers, notifies parents, and closes out a
+// linked routine run when a task enters a terminal step. The blocker
+// and parent side-effects route through the engine via
+// dispatchEngineTrigger (on_blocker_resolved / on_children_completed);
+// the routine sync is a direct call since it's a simple status write,
+// not an engine trigger.
 func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
+	if s.routineRunSyncer != nil {
+		terminal := "done"
+		if strings.EqualFold(data.ToStepName, "cancelled") {
+			terminal = "cancelled"
+		}
+		if err := s.routineRunSyncer.SyncRunStatus(ctx, data.TaskID, terminal); err != nil {
+			s.logger.Warn("sync routine run status", zap.Error(err))
+		}
+	}
 	if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
 		s.logger.Error("blocker resolution runs failed", zap.Error(err))
 	}
@@ -1111,8 +1136,7 @@ func (s *Service) lookupChildPRLinks(
 }
 
 // queueChildrenCompletedRun checks if all children of a parent are terminal
-// and, if so, dispatches an on_children_completed trigger to the engine
-// with child summaries in the payload.
+// and, if so, dispatches an on_children_completed trigger to the engine.
 func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string) error {
 	allDone, err := s.repo.AreAllChildrenTerminal(ctx, parentID)
 	if err != nil || !allDone {
@@ -1126,36 +1150,24 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 
 	// Derived the same way as ParentWakeReconciler's recovery dispatch
 	// (wakeOperationID) so both producers land on the identical operation
-	// id for the same parent + child set. That shared id is what lets
-	// idx_run_idempotency actually dedupe the pair when the reconciler
-	// races this edge-triggered path for the same completion wave.
-	childSetKey, err := s.repo.GetChildSetKey(ctx, parentID)
+	// id for the same parent + child set + generation. That shared id is
+	// what lets idx_run_idempotency actually dedupe the pair when the
+	// reconciler races this edge-triggered path for the same completion
+	// wave.
+	childSetKey, generation, err := s.repo.GetChildSetKeyAndGeneration(ctx, parentID)
 	if err != nil {
 		return fmt.Errorf("get child set key: %w", err)
 	}
 
-	children, _, err := s.repo.GetChildSummaries(ctx, parentID)
-	if err != nil {
-		s.logger.Error("get child summaries failed", zap.Error(err))
-		children = nil
-	}
-
-	key := wakeOperationID(parentID, childSetKey)
-	summaries := make([]engine.ChildSummary, 0, len(children))
-	prsByTask := s.lookupChildPRLinks(ctx, children)
-	for _, c := range children {
-		summaries = append(summaries, engine.ChildSummary{
-			TaskID:  c.TaskID,
-			Status:  c.State,
-			Summary: c.LastComment,
-			PRLinks: prsByTask[c.TaskID],
-		})
-	}
+	// No child summaries are assembled here. The prompt path derives the
+	// child list at assembly time from the parent's current children, so a
+	// summary read at this point would pay for data that is discarded and
+	// would make the wake's content depend on which producer won the race.
+	key := wakeOperationID(parentID, childSetKey, generation)
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
 		engine.OnChildrenCompletedPayload{
-			ChildSummaries: summaries,
-			WaveKey:        waveKey,
-			WaveString:     waveString,
+			WaveKey:    waveKey,
+			WaveString: waveString,
 		}, key)
 }
 

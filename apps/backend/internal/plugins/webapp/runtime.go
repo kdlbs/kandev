@@ -108,6 +108,10 @@ func (rt *Runtime) Serve(w http.ResponseWriter, r *http.Request, token, requestP
 			return
 		}
 	}
+	if requestPath == "_kandev/host-runtime.js" || requestPath == "/_kandev/host-runtime.js" {
+		rt.serveHostRuntime(w, r, binding)
+		return
+	}
 	if protocolPath, ok := runtimeProtocolPath(requestPath); ok {
 		if rt.protocol == nil {
 			writeRuntimeError(w, http.StatusNotFound, ErrArtifactUnavailable)
@@ -147,10 +151,36 @@ func (rt *Runtime) Serve(w http.ResponseWriter, r *http.Request, token, requestP
 		contentType = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", contentType)
-	if stat, err := file.Stat(); err == nil {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
+	data, err := io.ReadAll(io.LimitReader(file, MaxFileBytes+1))
+	if err != nil {
+		writeRuntimeError(w, http.StatusNotFound, ErrArtifactUnavailable)
+		return
 	}
-	_, _ = io.Copy(w, file)
+	if int64(len(data)) > MaxFileBytes {
+		writeRuntimeError(w, http.StatusNotFound, ErrRuntimeBootstrapUnavailable)
+		return
+	}
+	if name == strings.TrimPrefix(strings.TrimSpace(binding.Entry), "/") {
+		data, err = injectRuntimeBootstrap(data)
+		if err != nil {
+			writeRuntimeError(w, http.StatusNotFound, err)
+			return
+		}
+	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	_, _ = w.Write(data)
+}
+
+func (rt *Runtime) serveHostRuntime(w http.ResponseWriter, r *http.Request, binding CapabilityBinding) {
+	policy, err := BuildContentSecurityPolicy(binding.NetworkOrigins, rt.frameAncestors)
+	if err != nil {
+		writeRuntimeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	setRuntimeHeaders(w, policy, r.Header.Get("Origin"))
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(hostRuntimeBootstrap)))
+	_, _ = w.Write([]byte(hostRuntimeBootstrap))
 }
 
 // Handler returns a standard-library handler bound to one capability token.
@@ -238,6 +268,7 @@ func writeRuntimeError(w http.ResponseWriter, status int, err error) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Del("Content-Length")
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

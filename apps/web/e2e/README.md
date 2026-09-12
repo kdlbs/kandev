@@ -95,7 +95,7 @@ Same as `chromium` but on Playwright's Pixel-5 viewport, gated on `tests/**/mobi
 This project:
 
 - **Skips entirely** when no Docker daemon is reachable. Contributors without Docker can still run `chromium` + `mobile-chrome`.
-- **Builds container images on demand.** First run builds `kandev-agent:e2e` (slim Node base + git), `kandev-sshd:e2e` (Alpine + openssh-server + git + pre-baked mock-agent), and the Kubernetes runtime/backend image. Subsequent runs hit Docker's layer cache.
+- **Builds container images on demand.** First run builds `kandev-agent:e2e` (slim Node base + git), `kandev-sshd:e2e` (Alpine + openssh-server + git + pre-baked mock-agent), and a Kubernetes runtime/backend image derived from its pinned CI runtime base. Subsequent runs hit Docker's layer cache.
 - **Has a longer per-test timeout** (180s vs 60s) because container starts + agent setup are slow.
 
 How to run it locally (requires Docker running):
@@ -165,6 +165,11 @@ KANDEV_E2E_KUBECTL_BIN=/path/to/kubectl-v1.34.8 \
 KANDEV_E2E_CONTAINERS=1 \
 pnpm e2e:run --host --project kubernetes-compat tests/kubernetes-compat
 ```
+
+The fixture application image uses the immutable `KUBERNETES_E2E_BASE_IMAGE`
+pin from `kubernetes-pins.ts`. CI pre-pulls this prebuilt GHCR runtime image
+with bounded retries. The per-run image build only copies the current backend
+and web artifacts, so it does not contact an Ubuntu package mirror.
 
 The compatibility fixture uses the same exact-name ownership marker, narrow
 teardown, foreign-image refusal, and credential-redacted diagnostics as the full

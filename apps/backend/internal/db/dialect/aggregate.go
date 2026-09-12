@@ -26,22 +26,3 @@ func OrderedIDConcat(driver, where string) string {
 	return fmt.Sprintf(
 		"(SELECT GROUP_CONCAT(w.id, ',') FROM (SELECT id FROM tasks WHERE %s ORDER BY id) w)", where)
 }
-
-// OrderedPairConcat is OrderedIDConcat's sibling for a two-column
-// "id:state" key: it comma-joins `id || ':' || state` from
-// `SELECT id, state FROM tasks WHERE <where>`, in ascending id order, using
-// the same SQLite-subquery-vs-Postgres-aggregate ordering split. Callers
-// that also format the same key in Go (e.g. by concatenating id and state
-// per row) must produce a byte-identical string, since the two forms are
-// compared directly.
-//
-//	SQLite:   (SELECT GROUP_CONCAT(w.id || ':' || w.state, ',') FROM (SELECT id, state FROM tasks WHERE <where> ORDER BY id) w)
-//	Postgres: (SELECT string_agg(w.id || ':' || w.state, ',' ORDER BY w.id) FROM (SELECT id, state FROM tasks WHERE <where>) w)
-func OrderedPairConcat(driver, where string) string {
-	if IsPostgres(driver) {
-		return fmt.Sprintf(
-			"(SELECT string_agg(w.id || ':' || w.state, ',' ORDER BY w.id) FROM (SELECT id, state FROM tasks WHERE %s) w)", where)
-	}
-	return fmt.Sprintf(
-		"(SELECT GROUP_CONCAT(w.id || ':' || w.state, ',') FROM (SELECT id, state FROM tasks WHERE %s ORDER BY id) w)", where)
-}

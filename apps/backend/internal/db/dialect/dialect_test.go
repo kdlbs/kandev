@@ -162,6 +162,15 @@ func TestDateTimeOf(t *testing.T) {
 	}
 }
 
+func TestNullableTimestamp(t *testing.T) {
+	if got := NullableTimestamp(SQLite3, "?"); got != "?" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := NullableTimestamp(PGX, "?"); got != "(?)::timestamptz" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestNaiveUTCTimestampOf(t *testing.T) {
 	got := NaiveUTCTimestampOf(SQLite3, "ts.started_at")
 	if got != "datetime(ts.started_at)" {
@@ -169,6 +178,17 @@ func TestNaiveUTCTimestampOf(t *testing.T) {
 	}
 	got = NaiveUTCTimestampOf(PGX, "ts.started_at")
 	if got != "(ts.started_at AT TIME ZONE 'UTC')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestSecondPrecisionText(t *testing.T) {
+	got := SecondPrecisionText(SQLite3, "MAX(c.updated_at)")
+	if got != "strftime('%Y-%m-%d %H:%M:%S', MAX(c.updated_at))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = SecondPrecisionText(PGX, "MAX(c.updated_at)")
+	if got != "to_char(MAX(c.updated_at), 'YYYY-MM-DD HH24:MI:SS')" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

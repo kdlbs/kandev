@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestTaskStatusSummarySemanticEqualityIgnoresTransportMetadata(t *testing.T) {
@@ -171,9 +173,49 @@ func TestTaskStatusSummaryProjectsTaskOwnedErrorFields(t *testing.T) {
 	if got.ActiveError.Category != "pr_already_closed" {
 		t.Fatalf("active error category = %q", got.ActiveError.Category)
 	}
-	wantActions := []string{"mark_review_done", "retry_default"}
+	wantActions := []string{"mark_review_done"}
 	if !reflect.DeepEqual(got.ActiveError.RecoveryActions, wantActions) {
 		t.Fatalf("active error actions = %#v, want %#v", got.ActiveError.RecoveryActions, wantActions)
+	}
+}
+
+func TestTaskStatusSummaryProjectsBootstrapCorrelationAndCauses(t *testing.T) {
+	now := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
+	got := BuildFromAuthoritative(RebuildInput{
+		Sessions: []RebuildSession{{
+			ID: "session-1",
+			ActiveError: &ActiveErrorSummary{
+				SessionID:   "session-1",
+				ExecutionID: "execution-1",
+				AttemptID:   "attempt-1",
+				Phase:       models.LaunchErrorPhaseBootstrap,
+				Stamp:       "stamp-1",
+				OccurredAt:  now,
+				Preview:     "The agent could not start.",
+				Category:    models.LaunchErrorCategoryGenericLaunchFailure,
+				Causes: []models.AgentErrorCause{{
+					Operation: models.AgentErrorCauseOperationResume,
+					Code:      models.AgentErrorCauseCodePermissionDenied,
+					Detail:    "Contribution access was denied.",
+				}},
+			},
+		}},
+		Now: now,
+	})
+
+	if got.ActiveError == nil {
+		t.Fatal("active error is nil")
+	}
+	if got.ActiveError.Phase != models.LaunchErrorPhaseBootstrap ||
+		got.ActiveError.ExecutionID != "execution-1" || got.ActiveError.AttemptID != "attempt-1" {
+		t.Fatalf("bootstrap correlation = %+v", got.ActiveError)
+	}
+	if !reflect.DeepEqual(got.ActiveError.Causes, []models.AgentErrorCause{{
+		Operation: models.AgentErrorCauseOperationResume,
+		Code:      models.AgentErrorCauseCodePermissionDenied,
+		Detail:    "Contribution access was denied.",
+	}}) {
+		t.Fatalf("bootstrap causes = %#v", got.ActiveError.Causes)
 	}
 }
 

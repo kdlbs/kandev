@@ -116,6 +116,32 @@ func TestQueueRun_DoesNotCoalesceTaskAssignedAcrossTasks(t *testing.T) {
 	}
 }
 
+func TestQueueRun_DoesNotCoalesceManualRecoveryAcrossTasks(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	for _, taskID := range []string{"task-a", "task-b"} {
+		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			AgentProfileID: "agent-primary",
+			TaskID:         taskID,
+			Reason:         "manual_resume_after_failure",
+			IdempotencyKey: "manual_resume_after_failure:" + taskID,
+		}); err != nil {
+			t.Fatalf("queue %s: %v", taskID, err)
+		}
+	}
+
+	var count int
+	if err := repo.Reader().GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM runs WHERE agent_profile_id = ?`,
+		"agent-primary"); err != nil {
+		t.Fatalf("count queued runs: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("manual recovery runs = %d, want 2", count)
+	}
+}
+
 func TestQueueRun_UsesRequestAgentProfileIDAndAddsEnvelopePayload(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()

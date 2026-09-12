@@ -2,9 +2,13 @@
 
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
+import { useTask } from "@/hooks/use-task";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
+import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
 import { useTranslation } from "react-i18next";
@@ -23,29 +27,73 @@ function useIsQuickChatPassthrough(sessionId: string) {
 
 type QuickChatSessionViewProps = {
   session: QuickChatSession;
-  onInitialPromptSent?: () => void;
+  onInitialPromptAttempted?: () => void;
 };
 
-export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChatSessionViewProps) {
+function resolveTaskArchiveState(
+  taskId: string | null,
+  task: { isArchived?: boolean } | null,
+  quickChatTaskId: string | null,
+): boolean | null {
+  if (!taskId) return null;
+  if (task) return task.isArchived === true;
+  // Ephemeral Quick Chat tasks are intentionally absent from the kanban task
+  // cache. Their hydrated tab is the authoritative live-task source.
+  return quickChatTaskId === taskId ? false : null;
+}
+
+export function QuickChatSessionView({
+  session,
+  onInitialPromptAttempted,
+}: QuickChatSessionViewProps) {
   const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
   // Fetch the row on open so such a tab is usable, not just visible.
   useEnsureTaskSession(session.sessionId);
   const taskSession = useAppStore((state) => state.taskSessions.items[session.sessionId] ?? null);
-  const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : null;
-  const resumption = useSessionResumption(taskId, session.sessionId);
+  const quickChatTaskId = useAppStore(
+    (state) =>
+      state.quickChat.sessions.find((item) => item.sessionId === session.sessionId)?.taskId ?? null,
+  );
+  const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : quickChatTaskId;
+  const task = useTask(taskId);
+  const taskArchiveState = resolveTaskArchiveState(taskId, task, quickChatTaskId);
+  const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState);
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
+  const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
+  const bootstrapRecoveryError = taskId
+    ? selectSessionRecoveryError(
+        statusSummary?.active_error,
+        session.sessionId,
+        taskSession?.metadata,
+      )
+    : null;
   const recoveryFeedback = (
     <SessionRecoveryFeedback
       error={resumption.error}
       notice={resumption.notice}
+      recoveryFailure={resumption.recoveryFailure}
       onRetry={() => void resumption.resumeSession()}
+      retryDisabled={
+        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+      }
     />
+  );
+  const recoverySurface = bootstrapRecoveryError ? (
+    <SessionBootstrapRecoveryCard
+      taskId={taskId!}
+      sessionId={session.sessionId}
+      workspaceId={task?.workspaceId ?? null}
+      error={bootstrapRecoveryError}
+      automaticRecovery={resumption}
+    />
+  ) : (
+    recoveryFeedback
   );
   if (isPassthrough) {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {recoveryFeedback}
+        {recoverySurface}
         <div className="min-h-0 flex-1">
           <PassthroughTerminal key={session.sessionId} sessionId={session.sessionId} mode="agent" />
         </div>
@@ -55,14 +103,14 @@ export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChat
   const isConfig = session.kind === "config";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {recoveryFeedback}
+      {recoverySurface}
       <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
           sessionId={session.sessionId}
           minimalToolbar={isConfig}
           placeholderOverride={isConfig ? t("chat:configChatPlaceholder") : undefined}
           initialPrompt={session.initialPrompt}
-          onInitialPromptSent={onInitialPromptSent}
+          onInitialPromptAttempted={onInitialPromptAttempted}
         />
       </div>
     </div>

@@ -7,6 +7,26 @@ import (
 	"strings"
 )
 
+// WorktreeRecoveryError reports an existing checkout that must be preserved
+// instead of passing through destructive recreation.
+type WorktreeRecoveryError struct {
+	TaskID           string
+	Checkout         string
+	PointerTarget    string
+	ExpectedBacklink string
+	ActualBacklink   string
+	State            string
+	Reason           string
+}
+
+func (e *WorktreeRecoveryError) Error() string {
+	return fmt.Sprintf("%s: task %q checkout %q: %s", ErrWorktreeCorrupted, e.TaskID, e.Checkout, e.Reason)
+}
+
+func (e *WorktreeRecoveryError) Unwrap() error {
+	return ErrWorktreeCorrupted
+}
+
 var (
 	// ErrWorktreeExists is returned when attempting to create a worktree that already exists.
 	ErrWorktreeExists = errors.New("worktree already exists for task")
@@ -56,6 +76,10 @@ var (
 
 	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
 	ErrNonFastForward = errors.New("non-fast-forward update rejected")
+
+	// ErrWorkspaceCheckoutFailed is returned when a launch cannot materialize
+	// the requested checkout ref without risking an existing local branch.
+	ErrWorkspaceCheckoutFailed = errors.New("workspace checkout failed")
 
 	// ErrGitCryptFailed is returned when git-crypt unlock fails during worktree creation.
 	ErrGitCryptFailed = errors.New("git-crypt unlock failed")

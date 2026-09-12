@@ -769,3 +769,28 @@ func TestSwitchModelFallback_PreservesExecutorProfileMetadata(t *testing.T) {
 		t.Fatalf("user namespace metadata = %q, want profile value true", got)
 	}
 }
+
+func TestExecutorPromptRejectsRemappedPreloadedExecution(t *testing.T) {
+	repo := newMockRepository()
+	manager := &mockAgentManager{
+		isPassthroughSessionFunc: func(context.Context, string) bool { return false },
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-replacement", nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	preloaded := &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", AgentExecutionID: "execution-original",
+		State: models.TaskSessionStateWaitingForInput,
+	}
+
+	_, err := exec.Prompt(
+		context.Background(), "task-1", "session-1", "prompt", nil, false, preloaded,
+	)
+	if !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("expected stale execution rejection, got %v", err)
+	}
+	if manager.promptAgentCallCount != 0 {
+		t.Fatalf("stale preloaded session dispatched %d prompts", manager.promptAgentCallCount)
+	}
+}

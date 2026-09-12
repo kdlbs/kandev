@@ -87,6 +87,7 @@ jobs:
             apps/prettier.config.mjs
             apps/.prettierignore
             apps/web/**
+            scripts/settings-contract-ci.test.mjs
             apps/packages/**
             apps/pnpm-lock.yaml
             apps/backend/go.mod
@@ -167,6 +168,10 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify settings catalog contract
+        working-directory: ${{ github.workspace }}
+        run: node --test scripts/settings-contract-ci.test.mjs
 
       - name: Regenerate OSS licenses manifest
         run: pnpm --filter @kandev/web licenses:gen

@@ -35,6 +35,42 @@ func TestStoreSaveAndGet(t *testing.T) {
 	}
 }
 
+func TestStoreCompareAndSwap(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	swapped, err := store.CompareAndSwap(ctx, "message_queue", nil, []byte(`{"revision":1}`))
+	if err != nil || !swapped {
+		t.Fatalf("insert compare-and-swap = %v, %v", swapped, err)
+	}
+	swapped, err = store.CompareAndSwap(ctx, "message_queue", nil, []byte(`{"revision":2}`))
+	if err != nil || swapped {
+		t.Fatalf("duplicate insert compare-and-swap = %v, %v", swapped, err)
+	}
+	swapped, err = store.CompareAndSwap(
+		ctx,
+		"message_queue",
+		[]byte(`{"revision":0}`),
+		[]byte(`{"revision":2}`),
+	)
+	if err != nil || swapped {
+		t.Fatalf("stale update compare-and-swap = %v, %v", swapped, err)
+	}
+	swapped, err = store.CompareAndSwap(
+		ctx,
+		"message_queue",
+		[]byte(`{"revision":1}`),
+		[]byte(`{"revision":2}`),
+	)
+	if err != nil || !swapped {
+		t.Fatalf("current update compare-and-swap = %v, %v", swapped, err)
+	}
+	value, found, err := store.GetConsistent(ctx, "message_queue")
+	if err != nil || !found || string(value) != `{"revision":2}` {
+		t.Fatalf("consistent value = (%q, %v, %v)", value, found, err)
+	}
+}
+
 func TestStoreMigratesLegacySystemSettings(t *testing.T) {
 	conn := newSQLite(t)
 	if _, err := conn.Exec(`

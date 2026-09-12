@@ -46,8 +46,9 @@ func (p *DockerPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, on
 }
 
 // nonWorktreeTaskBranch resolves the kandev-managed feature branch for executors
-// that don't go through the host-side worktree path (Docker, Sprites). On a
-// fresh launch it generates a deterministic branch name from the task title +
+// that don't go through the host-side worktree path. An explicit checkout
+// takes precedence over branch generation. Otherwise a fresh launch generates
+// a deterministic branch name from the task title +
 // task ID prefix so the same task always lands on the same branch even when
 // the env row was created before this fix and didn't persist a name. On resume
 // the orchestrator carries the previously-generated branch back via
@@ -55,6 +56,9 @@ func (p *DockerPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, on
 func nonWorktreeTaskBranch(req *EnvPrepareRequest) string {
 	if req.WorktreeBranch != "" {
 		return req.WorktreeBranch
+	}
+	if req.CheckoutBranch != "" {
+		return req.CheckoutBranch
 	}
 	suffix := req.TaskID
 	if len(suffix) > 6 {

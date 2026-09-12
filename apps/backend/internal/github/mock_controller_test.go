@@ -56,6 +56,71 @@ func TestMockControllerSequencesPRCommitFailureThenSuccess(t *testing.T) {
 	}
 }
 
+func TestMockControllerSeedPRFeedbackClearsPRCaches(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	svc.prFeedbackCache.set("feedback", "stale")
+	svc.prStatusCache.set("status", "stale")
+
+	response := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/pr-feedback",
+		`{"owner":"owner","repo":"repo","pr_number":7,"workflow_runs":[{"id":7,"run_attempt":1,"workflow_id":9,"name":"CI","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"head"}],"workflow_jobs":[{"run_id":7,"jobs":[{"id":70,"name":"test","status":"completed","conclusion":"success"}]}]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("seed PR feedback: %d %s", response.Code, response.Body.String())
+	}
+	if _, ok := svc.prFeedbackCache.get("feedback"); ok {
+		t.Fatal("feedback cache still contains the seeded snapshot")
+	}
+	if _, ok := svc.prStatusCache.get("status"); ok {
+		t.Fatal("status cache still contains the seeded snapshot")
+	}
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+	jobs, err := mock.ListWorkflowRunJobs(context.Background(), "owner", "repo", 7, 1)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("workflow jobs with omitted attempt = %#v, err=%v; want attempt 1", jobs, err)
+	}
+}
+
+func TestMockControllerWorkflowMutationsClearCachesAndNormalizeEvidence(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+
+	svc.prFeedbackCache.set("feedback", "stale")
+	runsResponse := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/workflow-runs",
+		`{"owner":"owner","repo":"repo","head_sha":"head-sha","runs":[{"id":7,"workflow_id":9,"name":"CI","head_sha":""}]}`)
+	if runsResponse.Code != http.StatusOK {
+		t.Fatalf("seed workflow runs: %d %s", runsResponse.Code, runsResponse.Body.String())
+	}
+	if _, ok := svc.prFeedbackCache.get("feedback"); ok {
+		t.Fatal("feedback cache still contains workflow-run mutation snapshot")
+	}
+	runs, err := mock.ListWorkflowRuns(context.Background(), "owner", "repo", "head-sha")
+	if err != nil || len(runs) != 1 || runs[0].HeadSHA != "head-sha" {
+		t.Fatalf("workflow runs = %#v, err=%v; want requested head SHA copied into run", runs, err)
+	}
+
+	svc.prStatusCache.set("status", "stale")
+	jobsResponse := serveMockJSON(t, router, http.MethodPost,
+		"/api/v1/github/mock/workflow-jobs",
+		`{"owner":"owner","repo":"repo","run_id":7,"jobs":[{"id":70,"name":"test","status":"completed","conclusion":"success"}]}`)
+	if jobsResponse.Code != http.StatusOK {
+		t.Fatalf("seed workflow jobs: %d %s", jobsResponse.Code, jobsResponse.Body.String())
+	}
+	if _, ok := svc.prStatusCache.get("status"); ok {
+		t.Fatal("status cache still contains workflow-job mutation snapshot")
+	}
+	jobs, err := mock.ListWorkflowRunJobs(context.Background(), "owner", "repo", 7, 1)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("workflow jobs = %#v, err=%v; want omitted attempt normalized to 1", jobs, err)
+	}
+}
+
 func TestMockControllerWorkspaceConnectionsResolveIsolatedPrincipals(t *testing.T) {
 	router, svc, _ := setupWorkspaceAuthMockController(t)
 	registration := serveMockJSON(t, router, http.MethodPut,

@@ -232,7 +232,7 @@ func TestHandleCreateTaskGenesisRowAttributesToSourceSession(t *testing.T) {
 	}))
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspace.ID, sourceResult.Task.ID, "genesis-source-session"), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"source_task_id":    sourceResult.Task.ID,
 		"source_session_id": "genesis-source-session",
 		"workspace_id":      workspace.ID,

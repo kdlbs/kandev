@@ -48,6 +48,28 @@ const translate = vi.hoisted(() => {
     "canvases:permissionWrites": "API writes",
     "canvases:permissionEvents": "Events",
     "canvases:permissionExternalOrigins": "External origins",
+    "canvases:permissionExternalOrigin": "External HTTPS origin",
+    "canvases:permissionSharedState": "Read and write shared canvas state",
+    "canvases:permissionReadTasks": "Read task data",
+    "canvases:permissionReadWorkflows": "Read workflow data",
+    "canvases:permissionWriteTasks": "Write task data",
+    "canvases:permissionWriteMessages": "Write task messages",
+    "canvases:permissionEventTaskUpdated": "Receive task update events",
+    "canvases:permissionEventWorkflowUpdated": "Receive workflow update events",
+    "canvases:unsupportedPermission": "Unsupported permission: {{value}}",
+    "canvases:selectRelease": "Select a release to review",
+    "canvases:releaseOption": "{{date}} ({{status}})",
+    "canvases:releaseDate": "Created",
+    "canvases:releaseStatus": "Status",
+    "canvases:newPermission": "New",
+    "canvases:statusPrevious": "Previous",
+    "canvases:unsupportedReleaseStatus": "Unsupported release status: {{status}}",
+    "canvases:dateUnavailable": "Date unavailable",
+    "canvases:sourceUnavailable": "Source unavailable",
+    "canvases:sourceActorTaskAgent": "Task agent",
+    "canvases:sourceActorUser": "User",
+    "canvases:sourceActorSystem": "Kandev",
+    "canvases:sourceActorUnknown": "Unknown author",
     "canvases:sharedState": "Shared state",
     "canvases:promotionSourceScope": "Source scope",
     "canvases:promotionSourceActor": "Source actor",
@@ -58,11 +80,23 @@ const translate = vi.hoisted(() => {
     "common:cancel": "Cancel",
     "common:close": "Close",
   };
-  return (key: string) => translations[key] ?? key;
+  return (key: string, options?: Record<string, unknown>) => {
+    const value = translations[key] ?? key;
+    return Object.entries(options ?? {}).reduce(
+      (result, [name, replacement]) => result.replace(`{{${name}}}`, String(replacement)),
+      value,
+    );
+  };
 });
+
+const responsive = vi.hoisted(() => ({ isMobile: false }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: translate }),
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
 }));
 
 vi.mock("@kandev/ui/dialog", () => ({
@@ -141,7 +175,9 @@ beforeEach(() => {
     source_actor_kind: "task_agent",
     source_user_id: "user-1",
     source_task_id: "source-task-1",
+    source_task_title: "Source task title",
     source_session_id: "source-session-1",
+    source_session_name: "Source session name",
     current_scope: "task",
     target_scope: "workspace",
     placement: "workspace_sidebar",
@@ -160,7 +196,10 @@ beforeEach(() => {
   mockRollbackCanvas.mockReset();
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  responsive.isMobile = false;
+});
 
 describe("CanvasPromotionDialog", () => {
   it("shows promotion source scope, task/session, placement, and every permission group", async () => {
@@ -171,20 +210,20 @@ describe("CanvasPromotionDialog", () => {
     );
 
     expect(screen.getByTestId("canvas-promotion-source-task").textContent).toContain(
-      "source-task-1",
+      "Source task title",
     );
     expect(screen.getByTestId("canvas-promotion-source-session").textContent).toContain(
-      "source-session-1",
+      "Source session name",
     );
     expect(screen.getByTestId("canvas-promotion-placement").textContent).toContain(
       "workspace_sidebar",
     );
     expect(screen.getByText("API reads")).toBeTruthy();
-    expect(screen.getByText("tasks.read")).toBeTruthy();
+    expect(screen.getByText("Read task data")).toBeTruthy();
     expect(screen.getByText("API writes")).toBeTruthy();
-    expect(screen.getByText("tasks.write")).toBeTruthy();
+    expect(screen.getByText("Write task data")).toBeTruthy();
     expect(screen.getByText("Events")).toBeTruthy();
-    expect(screen.getByText("task.updated")).toBeTruthy();
+    expect(screen.getByText("Receive task update events")).toBeTruthy();
     expect(screen.getByText("Shared state")).toBeTruthy();
     expect(screen.getByText("External origins")).toBeTruthy();
     expect(screen.getByText("https://example.test")).toBeTruthy();
@@ -314,11 +353,10 @@ describe("CanvasReleaseDialog permission review", () => {
       expect(screen.getByTestId("canvas-release-permissions-release-pending")).toBeTruthy(),
     );
     expect(screen.getByText("Declared permissions")).toBeTruthy();
-    expect(screen.getByText(TASKS_READ_PERMISSION)).toBeTruthy();
-    expect(screen.getByText("messages.write")).toBeTruthy();
+    expect(screen.getByText("Read task data")).toBeTruthy();
+    expect(screen.getByText("Write task messages")).toBeTruthy();
     expect(screen.getByText(EXTERNAL_ORIGIN)).toBeTruthy();
-    expect(screen.getByText("Permissions still needed")).toBeTruthy();
-    expect(screen.getByText("api_read:tasks")).toBeTruthy();
+    expect(screen.getByText("New")).toBeTruthy();
     expect(screen.getByRole("button", { name: COPY.approveRelease })).toBeTruthy();
   });
 
@@ -399,6 +437,7 @@ describe("CanvasReleaseDialog actions", () => {
 
     await waitFor(() => expect((approveButton as HTMLButtonElement).disabled).toBe(true));
     expect((rejectButton as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox") as HTMLSelectElement).disabled).toBe(true);
 
     mutation.resolve({ ...canvas, active_release_id: pendingRelease.id });
     await waitFor(() => expect(mockListCanvasReleases).toHaveBeenCalledTimes(2));
@@ -432,5 +471,82 @@ describe("CanvasReleaseDialog actions", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe(COPY.actionFailed);
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("CanvasReleaseDialog review surface", () => {
+  it("uses safe source fallbacks and never renders source identifiers", async () => {
+    mockListCanvasReleases.mockResolvedValue({
+      releases: [
+        release({
+          source_actor_kind: "task_agent",
+          source_task_id: "task-secret-id",
+          source_session_id: "session-secret-id",
+        }),
+      ],
+    });
+
+    render(<CanvasReleaseDialog canvas={canvas} open onOpenChange={vi.fn()} />);
+
+    await screen.findByTestId("canvas-release-review-release-pending");
+    expect(screen.getAllByText("Source unavailable")).toHaveLength(2);
+    expect(screen.queryByText("task-secret-id")).toBeNull();
+    expect(screen.queryByText("session-secret-id")).toBeNull();
+  });
+
+  it("selects pending by default and keeps retained releases actionable", async () => {
+    mockListCanvasReleases.mockResolvedValue({
+      releases: [
+        release({ id: "release-1", validation_status: "valid" }),
+        release({ id: "release-previous", validation_status: "valid" }),
+        release({ id: "release-pending", validation_status: "pending_permission" }),
+      ],
+    });
+
+    render(<CanvasReleaseDialog canvas={canvas} open onOpenChange={vi.fn()} />);
+
+    const selector = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    expect(selector.value).toBe("release-pending");
+    fireEvent.change(selector, { target: { value: "release-previous" } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("canvas-release-status-release-previous").textContent).toBe(
+        "Previous",
+      ),
+    );
+    expect(screen.getByRole("button", { name: COPY.rollbackRelease })).toBeTruthy();
+  });
+
+  it("keeps the phone review full-height with a fixed safe-area footer", async () => {
+    responsive.isMobile = true;
+    mockListCanvasReleases.mockResolvedValue({ releases: [release()] });
+
+    render(<CanvasReleaseDialog canvas={canvas} open onOpenChange={vi.fn()} />);
+
+    await screen.findByTestId("canvas-release-review-release-pending");
+    expect(screen.getByTestId("canvas-releases-dialog").className).toContain("h-dvh");
+    expect(screen.getByTestId("canvas-release-review-scroll").className).toContain(
+      "overflow-y-auto",
+    );
+    expect(screen.getByRole("button", { name: COPY.approveRelease }).className).toContain(
+      "max-md:h-11",
+    );
+  });
+
+  it("does not enable approval for an unknown permission kind", async () => {
+    mockListCanvasReleases.mockResolvedValue({
+      releases: [
+        release({
+          permissions: { reads: ["secrets"] },
+          missing_permissions: ["api_read:secrets"],
+        }),
+      ],
+    });
+
+    render(<CanvasReleaseDialog canvas={canvas} open onOpenChange={vi.fn()} />);
+
+    const approveButton = await screen.findByRole("button", { name: COPY.approveRelease });
+    expect((approveButton as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Unsupported permission: secrets")).toBeTruthy();
   });
 });

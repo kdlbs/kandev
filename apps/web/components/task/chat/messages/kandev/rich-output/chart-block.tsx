@@ -14,6 +14,7 @@ import { createXAxisTickFormatter, formatYAxisTick } from "./chart-format";
 import { useRichOutputChartAnimations } from "./chart-motion";
 import { useChartPlotVisibility } from "./chart-visibility";
 import type { RichOutputChartBlock } from "./types";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const HOST_SERIES_COLORS = [
   "var(--chart-1)",
@@ -85,7 +86,7 @@ function SeriesLegend({
             key={key}
             type="button"
             aria-pressed={isVisible}
-            className={`flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-[opacity,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98] ${isVisible ? "opacity-100" : "opacity-50"}`}
+            className={`${controlSizingClassName("standard")} flex cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-[opacity,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98] ${isVisible ? "opacity-100" : "opacity-50"}`}
             data-testid={`rich-output-chart-legend-${key}`}
             onClick={() => onToggle(key)}
           >

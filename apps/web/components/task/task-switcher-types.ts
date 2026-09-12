@@ -17,6 +17,7 @@ export type StepDef = {
   id: string;
   title: string;
   color?: string;
+  agent_profile_id?: string | null;
   events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
 };
 
@@ -33,6 +34,8 @@ export type TaskSwitcherItem = {
   foregroundActivity?: ForegroundActivity | null;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when parked on background work (spec docs/specs/disambiguate-waiting). */
+  parkedOnBackgroundWork?: boolean;
   description?: string;
   workflowId?: string;
   workflowName?: string;
@@ -100,6 +103,8 @@ export type TaskSwitcherProps = {
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -26,7 +26,11 @@ import {
   usePendingAgentMessageComments,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { buildContextItems } from "../chat-context-items";
-import { useAutoDisablePlanMode, usePlanLayoutHandlers } from "./use-plan-mode-helpers";
+import {
+  useAutoDisablePlanMode,
+  useAutoDisableUnsupportedPlanMode,
+  usePlanLayoutHandlers,
+} from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
@@ -39,6 +43,7 @@ import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
+import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -276,12 +281,15 @@ export function useContextFiles(resolvedSessionId: string | null) {
   };
 }
 
-export function useCommentsState(resolvedSessionId: string | null): CommentsState {
+export function useCommentsState(
+  resolvedSessionId: string | null,
+  taskId: string | null,
+): CommentsState {
   const hydrateComments = useCommentsStore((state) => state.hydrateSession);
   useEffect(() => {
     if (resolvedSessionId) hydrateComments(resolvedSessionId);
   }, [resolvedSessionId, hydrateComments]);
-  const planComments = usePendingPlanComments(resolvedSessionId);
+  const planComments = usePendingPlanComments(taskId);
   const pendingCommentsByFile = usePendingDiffCommentsByFile(resolvedSessionId);
   const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
   const walkthroughComments = usePendingWalkthroughComments(resolvedSessionId);
@@ -567,34 +575,13 @@ export function useChatPanelState({
     [planModeAvailable, rawHandlePlanModeChange, togglePlanLayout, planLayoutVisible],
   );
 
-  // Auto-disable plan mode if agent doesn't support MCP (e.g. started from create dialog).
-  // Only clear state — do NOT call applyBuiltInPreset("default") because the layout
-  // may have just been set via URL intent (?layout=plan) and we don't want to overwrite it.
   const hasAgentProfile = Boolean(sessionState.session?.agent_profile_id);
-  const setPlanMode = useAppStore((s) => s.setPlanMode);
-  const removeCtxFile = useContextFilesStore((s) => s.removeFile);
-  const hasAutoDisabled = useRef(false);
-  useEffect(() => {
-    if (
-      planModeEnabled &&
-      hasAgentProfile &&
-      !planModeAvailable &&
-      resolvedSessionId &&
-      !hasAutoDisabled.current
-    ) {
-      hasAutoDisabled.current = true;
-      setPlanMode(resolvedSessionId, false);
-      removeCtxFile(resolvedSessionId, PLAN_CONTEXT_PATH);
-    }
-    if (!planModeEnabled) hasAutoDisabled.current = false;
-  }, [
+  useAutoDisableUnsupportedPlanMode({
     planModeEnabled,
     hasAgentProfile,
     planModeAvailable,
     resolvedSessionId,
-    setPlanMode,
-    removeCtxFile,
-  ]);
+  });
 
   const contextFilesState = useContextFiles(resolvedSessionId);
   const { contextFiles, removeContextFile, unpinFile } = contextFilesState;
@@ -604,7 +591,8 @@ export function useChatPanelState({
     taskId,
     sessionState.taskDescription,
   );
-  const comments = useCommentsState(resolvedSessionId);
+  const comments = useCommentsState(resolvedSessionId, taskId);
+  const planCommentMigration = usePlanCommentMigration(taskId);
 
   const planContextEnabled = useMemo(
     () => contextFiles.some((f) => f.path === PLAN_CONTEXT_PATH),
@@ -632,6 +620,7 @@ export function useChatPanelState({
     ...contextFilesState,
     ...sessionData,
     ...comments,
+    planCommentMigration,
     contextItems,
     planContextEnabled,
     planModeAvailable,

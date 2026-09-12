@@ -12,6 +12,7 @@ import { createExecutor, createExecutorProfile } from "@/lib/api/domains/setting
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { buildSSHExecutorConfig } from "./ssh-config";
 import type { Executor } from "@/lib/types/http";
 
@@ -102,9 +103,8 @@ function SSHCreateHeader() {
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
           {t("executors:backToExecutors")}
         </Button>

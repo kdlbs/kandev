@@ -71,8 +71,8 @@ const (
 	// already exists in the durable idempotency index, so nothing was inserted.
 	QueueOutcomeDeduped QueueOutcome = "deduped"
 	// QueueOutcomeCoalesced means the request was merged into an existing
-	// queued row for the same agent + reason within the coalescing
-	// window, so nothing new was inserted.
+	// queued row for the same agent, reason, and task bucket within the
+	// coalescing window, so nothing new was inserted.
 	QueueOutcomeCoalesced QueueOutcome = "coalesced"
 )
 
@@ -111,9 +111,11 @@ type QueueRunRequest struct {
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
-// queue_run requests for the same (agent, reason) land within this
-// window, the second is merged into the first by bumping
-// coalesced_count and replacing the payload.
+// queue_run requests for the same agent, reason, and task bucket land
+// within this window, the second is merged into the first by bumping
+// coalesced_count and replacing the payload. A task bucket is the
+// nonempty task_id, or the taskless bucket when task_id is missing,
+// null, or empty.
 const CoalesceWindowSeconds = 5
 
 // IdempotencyWindowHours is the lookback used by the fast duplicate query.
@@ -186,7 +188,7 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 //  1. Resolve agent_profile_id (from the request field, payload fallback,
 //     or a wired resolver).
 //  2. Recent idempotency check on req.IdempotencyKey if set.
-//  3. Coalescing (5s window for same agent + reason).
+//  3. Coalescing (5s window for same agent, reason, and task bucket).
 //  4. Insert into runs table.
 //  5. Publish OfficeRunQueued.
 //  6. Signal the scheduler (B3.5 — event-driven claim).

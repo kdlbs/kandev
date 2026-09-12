@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
@@ -86,14 +87,10 @@ func TestBuildPrompt_LegacyRunReasonsRemainCompatible(t *testing.T) {
 		{name: "review started", reason: "review_started", contains: []string{
 			"You are reviewing",
 			"Legacy workflow task",
-			"record_step_decision_kandev",
-			"Posting a comment alone is not a decision",
 		}},
 		{name: "approval started", reason: "approval_started", contains: []string{
 			"You are approving",
 			"Legacy workflow task",
-			"record_step_decision_kandev",
-			"Posting a comment alone is not a decision",
 		}},
 	}
 
@@ -119,13 +116,14 @@ func TestBuildPrompt_TaskReviewRequestedUsesStageType(t *testing.T) {
 		StageType:      "approval",
 		TaskIdentifier: "KAN-review",
 		TaskTitle:      "Approve release",
+		AllowedActions: []string{officeruntime.AvailableActionRecordStepDecision},
 	})
 
 	if !strings.HasPrefix(prompt, "You are approving") {
 		t.Errorf("task_review_requested approver prompt = %q, want approver framing", prompt)
 	}
-	if !strings.Contains(prompt, "record_step_decision_kandev") {
-		t.Errorf("task_review_requested prompt missing decision tool contract: %q", prompt)
+	if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved --reason "..."`) {
+		t.Errorf("task_review_requested prompt missing decision CLI contract: %q", prompt)
 	}
 }
 
@@ -237,7 +235,7 @@ func TestBuildPrompt_ChildrenCompleted_NoSummaries(t *testing.T) {
 	if !strings.Contains(prompt, "All child tasks") {
 		t.Errorf("prompt missing header:\n%s", prompt)
 	}
-	if strings.Contains(prompt, "Completed children:") {
+	if strings.Contains(prompt, "Child tasks:") {
 		t.Errorf("no summaries section when children are empty:\n%s", prompt)
 	}
 }
@@ -415,6 +413,84 @@ func TestBuildPrompt_ReviewStage(t *testing.T) {
 	}
 }
 
+// TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision is the
+// anti-contradiction assertion: a reviewer whose run holds the decision seat
+// must see record_step_decision in its own allowed-actions list, so it never
+// reads the writeDecisionContract instruction below as excluded by its own
+// stated permissions.
+func TestBuildPrompt_ReviewStageAllowedActionsIncludeRecordStepDecision(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:         service.RunReasonTaskAssigned,
+		TaskIdentifier: "KAN-10",
+		TaskTitle:      "Auth service",
+		StageType:      "review",
+		RunID:          "run-1",
+		AgentID:        "agent-1",
+		AllowedActions: []string{officeruntime.CapabilityPostComment, officeruntime.AvailableActionRecordStepDecision},
+	}
+	prompt := service.BuildPrompt(pc)
+
+	if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved --reason "..."`) {
+		t.Fatalf("expected the decision CLI contract:\n%s", prompt)
+	}
+	allowedIdx := strings.Index(prompt, "- Allowed actions:")
+	if allowedIdx == -1 {
+		t.Fatalf("expected an allowed actions line:\n%s", prompt)
+	}
+	allowedLine := prompt[allowedIdx : strings.Index(prompt[allowedIdx:], "\n")+allowedIdx]
+	if !strings.Contains(allowedLine, officeruntime.AvailableActionRecordStepDecision) {
+		t.Fatalf("allowed actions line must list record_step_decision so it does not contradict the decision contract:\n%s", allowedLine)
+	}
+}
+
+func TestBuildPrompt_DecisionContractUsesCLIAsFinalAction(t *testing.T) {
+	for _, stageType := range []string{"review", "approval"} {
+		t.Run(stageType, func(t *testing.T) {
+			prompt := service.BuildPrompt(&service.PromptContext{
+				Reason:         service.RunReasonTaskAssigned,
+				TaskIdentifier: "KAN-decision",
+				TaskTitle:      "Decision task",
+				StageType:      stageType,
+				AllowedActions: []string{officeruntime.AvailableActionRecordStepDecision},
+			})
+
+			if !strings.Contains(prompt, `$KANDEV_CLI kandev task decision --decision approved --reason "..."`) {
+				t.Fatalf("%s prompt missing CLI decision contract:\n%s", stageType, prompt)
+			}
+			if !strings.Contains(prompt, "final action") {
+				t.Fatalf("%s prompt must make the CLI decision the final action:\n%s", stageType, prompt)
+			}
+			if strings.Contains(prompt, "record_step_decision_kandev") {
+				t.Fatalf("%s prompt still names the retired MCP decision tool:\n%s", stageType, prompt)
+			}
+		})
+	}
+}
+
+func TestBuildPrompt_WithoutDecisionActionOmitsOfficeDecisionContract(t *testing.T) {
+	for _, stageType := range []string{"review", "approval"} {
+		t.Run(stageType, func(t *testing.T) {
+			prompt := service.BuildPrompt(&service.PromptContext{
+				Reason:         service.RunReasonTaskAssigned,
+				TaskIdentifier: "KAN-kanban",
+				TaskTitle:      "Kanban task",
+				StageType:      stageType,
+				AllowedActions: []string{officeruntime.CapabilityPostComment},
+			})
+
+			for _, fragment := range []string{
+				"$KANDEV_CLI kandev task decision",
+				"record_step_decision",
+				"decision_id",
+			} {
+				if strings.Contains(prompt, fragment) {
+					t.Fatalf("%s prompt must not contain Office decision metadata %q:\n%s", stageType, fragment, prompt)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildPrompt_ApprovalStageUsesNeutralLifecycleLanguage(t *testing.T) {
 	prompt := service.BuildPrompt(&service.PromptContext{
 		Reason:         service.RunReasonTaskAssigned,
@@ -522,5 +598,36 @@ func TestBuildPrompt_WorkNoFeedback(t *testing.T) {
 
 	if strings.Contains(prompt, "returned by reviewers") {
 		t.Errorf("no-feedback work prompt should not mention reviewers:\n%s", prompt)
+	}
+}
+
+func TestBuildPrompt_AppendsOneTimeMoveInstructions(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:              service.RunReasonTaskAssigned,
+		TaskIdentifier:      "KAN-9",
+		TaskTitle:           "Ship it",
+		OneTimeInstructions: "only touch the migration file",
+	}
+	prompt := service.BuildPrompt(pc)
+
+	if !strings.Contains(prompt, "One-time workflow move instructions") {
+		t.Errorf("prompt missing one-time instructions heading:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "only touch the migration file") {
+		t.Errorf("prompt missing one-time instructions body:\n%s", prompt)
+	}
+}
+
+func TestBuildPrompt_OmitsEmptyOneTimeInstructions(t *testing.T) {
+	pc := &service.PromptContext{
+		Reason:              service.RunReasonTaskAssigned,
+		TaskIdentifier:      "KAN-9",
+		TaskTitle:           "Ship it",
+		OneTimeInstructions: "   ",
+	}
+	prompt := service.BuildPrompt(pc)
+
+	if strings.Contains(prompt, "One-time workflow move instructions") {
+		t.Errorf("whitespace-only instructions must not add a section:\n%s", prompt)
 	}
 }

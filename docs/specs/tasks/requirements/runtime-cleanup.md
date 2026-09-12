@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-06-22
-updated: 2026-09-05
+updated: 2026-09-10
 owners:
   - cfl
 ---
@@ -46,3 +46,31 @@ and safe when runtimes or task rows are already gone.
   reference exists, and all ownership, path, registration, branch, and commit
   identity checks pass. The existing unique branch preservation rule shall
   remain active.
+- **AC-TASKS-RUNTIME-CLEANUP-001.13:** When a recorded worktree directory and
+  its local branch are absent, cleanup preparation shall permit task archive
+  or deletion. This applies to direct and cascade operations, including tasks
+  with other healthy repositories. Remaining resources shall retain their
+  ownership checks and cleanup guarantees. If the omitted identity's path or
+  registration reappears before execution, cleanup shall remain retryable and
+  shall not adopt the live checkout without an immutable identity captured
+  during preparation.
+- **AC-TASKS-RUNTIME-CLEANUP-001.14:** When every worktree in the selected
+  deletion scope has no tracked or untracked local changes, the confirmation
+  shall hide discard consent and permit deletion without it. A confirmed empty
+  worktree inventory shall have the same behavior. Committed branch differences
+  alone shall not require discard consent.
+- **AC-TASKS-RUNTIME-CLEANUP-001.15:** When at least one selected worktree has
+  local changes, deletion shall require an unchecked discard selection. The
+  scope shall include descendants only when cascade is selected. Bulk selection
+  shall consider every selected task and repository, including retained
+  worktrees for tasks without sessions.
+- **AC-TASKS-RUNTIME-CLEANUP-001.16:** While worktree inspection is pending or
+  unavailable, the confirmation shall hide discard consent and disable deletion.
+  An inspection failure shall provide a localized explanation and retry action.
+  Changing the selection or cascade choice shall invalidate previous inspection
+  results and consent. Reopening shall inspect again.
+- **AC-TASKS-RUNTIME-CLEANUP-001.17:** Desktop and phone shall use the same
+  consent conditions. Archive shall not show a discard selection for a clean
+  workspace. Its independent subtask selection and cleanup behavior shall remain
+  unchanged. A deletion rejected because changes appeared after inspection shall
+  preserve the task and permit a fresh confirmation with explicit consent.

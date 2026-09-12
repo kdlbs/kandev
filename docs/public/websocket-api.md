@@ -204,6 +204,27 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
+`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Moves requested by an active agent use the deferred MCP path and persist the complete options through turn completion, WIP promotion, and backend restart before the retained move is applied.
+
+```json
+{
+  "id": "move-1",
+  "type": "request",
+  "action": "task.move",
+  "payload": {
+    "id": "task-uuid",
+    "workflow_id": "workflow-uuid",
+    "workflow_step_id": "qa-step-uuid",
+    "position": 0,
+    "entry_options": {
+      "reset_context": true,
+      "instructions": "Run the checkout regression first.",
+      "skip_step_prompt": true
+    }
+  }
+}
+```
+
 ### Launch a session
 
 `session.launch` always requires `task_id`. Explicit `intent` values are `prepare`, `start`, `start_created`, `resume`, `workflow_step`, and `restore_workspace`. Other fields are `session_id`, `agent_profile_id`, `executor_id`, `executor_profile_id`, `prompt`, `plan_mode`, `workflow_step_id`, `priority`, `launch_workspace`, `skip_message_record`, `auto_start`, and `attachments`.
@@ -225,6 +246,8 @@ If `intent` is omitted, the backend infers it from those fields. That inference 
 ```
 
 A successful response contains `success`, `task_id`, `state`, and usually `session_id`; it can also contain `agent_execution_id`, `worktree_path`, and `worktree_branch`. Session states use uppercase values such as `CREATED`, `STARTING`, `RUNNING`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`.
+
+Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
 
 ### Search work-item references over HTTP
 
@@ -253,9 +276,13 @@ A successful response returns the normalized query and an ordered `groups` array
 
 `message.queue.add` accepts the same optional array. `message.queue.update` also accepts it and treats the array as a replacement: send `[]` after removing every generated reference link so stale metadata is cleared. Queue status and message responses return validated entries under `metadata.entity_references`.
 
-Ordinary `message.queue.add` admissions use the default-on automatic-merge setting. Capacity is enforced first. The newly admitted row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, plan mode, metadata, attachments, context files, and entity references; the merged context-file union is capped at 200 descriptors. Otherwise it remains separate. A successful fold returns the surviving earlier row's `entry_id`, while a fallback returns the new row's ID. The final state is published through `message.queue.status_changed`. Automatic merging applies only to later ordinary admissions, not existing rows, explicit append/coalesce/restore/retry/send-now operations, or the independent manual merge action.
+Every browser queue read or mutation requires the exact `task_id`, `session_id`, and `session_incarnation_id` triplet. This applies to `message.queue.get`, `message.queue.add`, `message.queue.append`, `message.queue.cancel`, `message.queue.drain`, `message.queue.update`, `message.queue.remove`, `message.queue.merge`, `message.queue.reorder`, `message.queue.send_now`, `message.queue.auto_run.set`, and `message.queue.auto_merge.set`. The gateway authorizes the task/session pair and the queue layer compares the supplied incarnation before acting. A deleted or replaced session returns the same non-enumerating not-found response as an inaccessible session; the request is not redirected to a new session with the same textual ID and clients must not retry it against a freshly looked-up identity.
 
-`message.queue.merge` folds a queued entry into the entry directly above it. The payload requires `session_id` and `entry_id` (the source entry being merged away); `user_id` is optional and defaults to `user`. On success the response carries the surviving merged entry's `entry_id` (the target's id) and the server broadcasts an updated `message.queue.status_changed`. The request is rejected with `entry_not_found` when the entry was already drained or is not owned by the caller, with a validation error when no mergeable entry exists above it, and with `merge_reference_overflow` when the combined entity-reference lists would exceed the per-message cap (the merge is rejected atomically; neither row changes).
+Ordinary `message.queue.add` admissions use one effective automatic-merge policy snapshot. An untouched session inherits the current install-wide value and its global revision. `message.queue.auto_merge.set` accepts required `enabled` and creates a persistent explicit session override; later global changes no longer affect that session. The newly admitted row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, plan mode, metadata, attachments, context files, and entity references; the merged context-file union is capped at 200 descriptors. An eligible direct fold can succeed at or above capacity because it adds no row. A staged-attachment admission at or above capacity is rejected before a fold or attachment claim. Otherwise, capacity or incompatibility leaves the admission rejected or separate as applicable. A successful fold returns the surviving earlier row's `entry_id`, while a separate admission returns the new row's ID. Automatic merging applies only to later ordinary admissions, not existing rows, explicit append/coalesce/restore/retry/send-now operations, or the independent manual merge action.
+
+`message.queue.get`, the Auto-merge mutation response, and `message.queue.status_changed` expose `task_id`, `session_id`, `session_incarnation_id`, `status_epoch`, `status_generation`, `auto_merge_available`, `auto_merge_enabled`, `auto_merge_source`, and `auto_merge_revision` with the queue entries and existing Auto-run/manual-merge fields. `status_epoch` is the session incarnation. Within an epoch, clients apply only increasing status generations. `auto_merge_available:false` means the backend could not establish authoritative policy and the control must remain disabled; it is not an OFF value. A `session` source is an explicit override; a `global` source remains inherited. Session and global revisions are monotonic within their own source. Internal task-only recount events have explicit task scope and are not session status.
+
+`message.queue.merge` folds a queued entry into the entry directly above it. In addition to the required identity triplet, its payload requires `entry_id` (the source entry being merged away); `user_id` is optional and defaults to `user`. On success the response carries the surviving merged entry's `entry_id` (the target's ID) and the server broadcasts an updated `message.queue.status_changed`. The request is rejected with `entry_not_found` when the entry was already drained or is not owned by the caller, with a validation error when no mergeable entry exists above it, and with `merge_reference_overflow` when the combined entity-reference lists would exceed the per-message cap. The overflow rejection is atomic; neither row changes.
 
 If the agent is busy, use the `message.queue.*` operations rather than retrying `message.add`. Permission prompts are represented in persisted/session message data; answer one with `permission.respond`. Its payload requires `session_id` and `pending_id`, plus `option_id` unless `cancelled:true`; optional `rejected:true` distinguishes an explicit denial from dismissing the prompt.
 
@@ -354,11 +381,15 @@ message.add
 message.list
 message.queue.add
 message.queue.append
+message.queue.auto_merge.set
+message.queue.auto_run.set
 message.queue.cancel
 message.queue.drain
 message.queue.get
 message.queue.merge
 message.queue.remove
+message.queue.reorder
+message.queue.send_now
 message.queue.update
 message.search
 
@@ -505,6 +536,17 @@ automation.webhook.reveal_secret
 ```
 
 These are trusted local-administration operations. In particular, `secrets.reveal` and `automation.webhook.reveal_secret` make the lack of WebSocket authentication security-critical.
+
+`secrets.delete` accepts `{ "id": "<secret-id>", "workspace_id": "<optional-workspace-id>", "force": false }`.
+A Workspace secret requires its `workspace_id`. A referenced secret returns `CONFLICT` with `details.code: "secret_in_use"` and `details.references`.
+References contain `kind` (`agent_profile`, `executor_profile`, or `repository`), `id`, `name`, and `key`.
+An inaccessible workspace-scoped profile or repository exposes only its `kind`. Secret values and secret IDs never appear in conflict details.
+The HTTP equivalent, `DELETE /api/v1/secrets/:id`, returns `409` with `code` and `references` at the top level.
+`GET /api/v1/secrets/:id/references` performs the same authorized reference lookup without changing the secret and returns `{ "references": [...] }`. Add `?workspace_id=<workspace-id>` for a Workspace secret. Settings uses this endpoint before it enables deletion; the later `DELETE` still repeats the check.
+
+With `force: true`, deletion preserves the broken bindings. Future launches fail until users repair those bindings.
+The HTTP override is `?force=true`, combined with `workspace_id` for Workspace secrets.
+Force does not bypass authorization. Reference lookup failures return `INTERNAL_ERROR` (HTTP `500`) and leave the secret intact.
 
 `automation.run.stop` requires `automation_id` and `run_id`. It cancels the
 selected open run's exact task/session/turn binding and returns `{run_id,
@@ -665,6 +707,7 @@ workflow.step.updated
 workflow.step.deleted
 agent.profile.created
 agent.profile.updated
+agent.profile.mcp_config.updated
 agent.profile.deleted
 task.created
 task.updated

@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -140,10 +141,17 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 	if e.onExecutionStopOwnerRegistration != nil {
 		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
 	}
-	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
+	// A session already in a terminal state carries its own outcome (e.g. a
+	// launch failure's error_message); a runtime that outlived it in the
+	// in-memory execution store must still be torn down, but the DB row is
+	// not touched. transitionSessionState re-reads the session's current
+	// state itself rather than trusting the caller-supplied snapshot, so a
+	// session that turned terminal between the caller's read and this call
+	// (e.g. StopByTaskID iterating a list read once) can't be clobbered.
+	if _, _, err := e.transitionSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); err != nil {
 		e.logger.Error("failed to update agent session status",
 			zap.String("session_id", session.ID),
-			zap.Error(dbErr))
+			zap.Error(err))
 	}
 	e.scheduleStop(ctx, session.ID, executionID, reason, force)
 	return nil
@@ -169,6 +177,9 @@ func (e *Executor) stopSession(
 	}
 
 	e.logStop(session, executionID, reason, force)
+	if e.onExecutionStopOwnerRegistration != nil {
+		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
+	}
 
 	changed, finalState, stateErr := e.transitionSessionState(
 		ctx,
@@ -377,6 +388,9 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 	}
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
+		return nil, ErrExecutionNotFound
+	}
+	if session.AgentExecutionID != "" && executionID != session.AgentExecutionID {
 		return nil, ErrExecutionNotFound
 	}
 
@@ -654,8 +668,22 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		return nil, err
 	}
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
-	if err := e.stopPreparedModelSwitchAgent(ctx, executionID); err != nil {
+	selectedEnv, err := e.resolveEnvironmentForAdmission(ctx, task.ID, req.TaskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType)
+	if err != nil {
+		return nil, err
+	}
+	launchCtx := ctx
+	if recoveryAdmission != nil {
+		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+	}
+	defer func() { _ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission) }()
+
+	req.Env = e.applyPreferredShellEnv(launchCtx, req.ExecutorType, req.Env)
+	if err := e.stopPreparedModelSwitchAgent(launchCtx, executionID); err != nil {
 		return nil, err
 	}
 
@@ -668,7 +696,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		zap.Bool("use_worktree", req.UseWorktree),
 		zap.String("repository_path", req.RepositoryPath))
 
-	if err := e.launchModelSwitchAgent(ctx, task.ID, sessionID, newModel, session, req, existingRunning); err != nil {
+	if err := e.launchModelSwitchAgent(launchCtx, task.ID, sessionID, newModel, session, req, existingRunning); err != nil {
 		return nil, err
 	}
 

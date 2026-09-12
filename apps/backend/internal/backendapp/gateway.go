@@ -120,6 +120,7 @@ func provideGateway(
 	referenceValidator entityrefs.SubmissionValidator,
 	authSvc *auth.Service,
 	dataDir string,
+	registerCleanup func(func() error),
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
@@ -165,7 +166,19 @@ func provideGateway(
 		referenceValidator,
 	)
 	queueHandlers.SetAttachmentClaimer(taskSvc)
+	queueHandlers.Start(ctx)
+	if registerCleanup != nil {
+		registerCleanup(func() error {
+			queueHandlers.Stop()
+			return nil
+		})
+	}
 	queueHandlers.RegisterHandlers(gateway.Dispatcher)
+	if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
+		gateway.Hub.SetClientDisconnectListener(func(connectionID string) {
+			queue.ReleaseEditLeasesForConnection(connectionID)
+		})
+	}
 
 	if lifecycleMgr != nil && agentRegistry != nil {
 		agentCtrl := agentcontroller.NewController(lifecycleMgr, agentRegistry)
@@ -499,11 +512,16 @@ func loadTaskSessionObservations(
 			input.ActiveError = &statussummary.ActiveErrorSummary{
 				SessionID:        session.ID,
 				TaskRepositoryID: lastError.TaskRepositoryID,
+				ExecutionID:      lastError.ExecutionID,
+				AttemptID:        lastError.AttemptID,
+				Phase:            lastError.Phase,
 				Stamp:            lastError.Stamp(),
 				OccurredAt:       lastError.OccurredAt,
 				Preview:          lastError.Message,
+				Details:          lastError.Details,
 				Category:         lastError.Code,
 				RecoveryActions:  lastError.RecoveryActions,
+				Causes:           lastError.Causes,
 			}
 		}
 		snapshot.Sessions = append(snapshot.Sessions, input)

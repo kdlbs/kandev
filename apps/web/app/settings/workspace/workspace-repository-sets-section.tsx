@@ -74,7 +74,6 @@ export function WorkspaceRepositorySetsSection({
       action={
         readOnly ? undefined : (
           <Button
-            size="sm"
             className="cursor-pointer"
             onClick={() => manager.startCreate()}
             data-testid="repository-set-create"
@@ -109,6 +108,7 @@ export function WorkspaceRepositorySetsSection({
         </div>
       )}
       <RepositorySetEditorDialog
+        workspaceId={workspaceId}
         draft={manager.draft}
         repositories={repositories}
         error={manager.error}
@@ -210,7 +210,17 @@ function RepositorySetRow({
         ) : (
           set.repositories.map((member) => (
             <Badge key={member.repository_id} variant="secondary">
-              {namesById.get(member.repository_id as string)?.name ?? member.repository_id}
+              <span>
+                {namesById.get(member.repository_id as string)?.name ?? member.repository_id}
+              </span>
+              {member.base_branch ? (
+                <span
+                  className="ml-1 text-muted-foreground"
+                  data-testid={`repository-set-member-base-${member.repository_id}`}
+                >
+                  {t("workspaces:repositorySetsMemberBase", { base: member.base_branch })}
+                </span>
+              ) : null}
             </Badge>
           ))
         )}
@@ -256,7 +266,7 @@ function RepositorySetRowActions({
   return (
     <div className="flex shrink-0 gap-1">
       <Button
-        size="sm"
+        size="icon"
         variant="ghost"
         className="cursor-pointer"
         aria-label={t("workspaces:repositorySetsEdit")}
@@ -267,7 +277,7 @@ function RepositorySetRowActions({
       </Button>
       <Button
         ref={deleteAnchorRef}
-        size="sm"
+        size="icon"
         variant="ghost"
         className="cursor-pointer"
         aria-label={t("workspaces:repositorySetsDelete")}

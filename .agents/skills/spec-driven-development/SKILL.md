@@ -52,6 +52,11 @@ Keep a visible task list:
 6. Execute work orders with TDD after an explicit implementation request.
 7. Open the PR, address valid findings, record changes, and report.
 
+When task-plan MCP tools are available, use the Kandev task plan for live phase
+progress and update it after each completed design phase. Keep
+`docs/plans/<initiative>/plan.md` and its work orders as the durable
+implementation package; neither plan replaces the other.
+
 ## Phases 1 to 4: Design
 
 Use `/interview-me` only when the request needs clarification.
@@ -91,6 +96,10 @@ Each work order must contain:
 Work orders do not name a worker role or model tier. Waves can identify
 parallel-safe candidates. They do not authorize subagents.
 
+For rendered UI changes, include ASCII previews in the plan and relevant UI
+work orders through `/plan`. Follow the shared contract in
+`docs/specs/guide/plans-and-work-orders.md#ascii-ui-previews`.
+
 ## Design-package handoff
 
 Before implementation, report:
@@ -100,6 +109,8 @@ Before implementation, report:
 - The plan and work-order paths.
 - Dependency order and exact verification commands.
 - Open risks and exclusions.
+- For UI changes, a compact inline ASCII preview of the proposed UI, with a
+  distinct phone view when composition differs, plus links to the full previews.
 
 Then end the turn. Do not ask the user to approve the package or switch models.
 The user reviews the files and sends a later implementation request.
@@ -122,7 +133,15 @@ For each work order, in dependency order:
 2. Change only that work order to `in_progress`.
 3. Implement with `/tdd`. Use `/e2e` and `/mobile-parity` when applicable.
 4. Run the exact targeted verification commands.
-5. Change the work order to `done` and synchronize `plan.md`.
+5. After implementation and targeted checks pass, change only the current work
+   order to `done`.
+6. After every linked work order passes, verify the implementation still matches
+   each paired draft system design. If it does, promote that design from `draft`
+   to `current`, synchronize affected spec frontmatter and matching
+   `docs/specs/INDEX.md` entries from `building` to `shipped`, then change the
+   plan to `implemented`. If implementation diverged or an open design issue
+   remains, leave the design draft and report the mismatch instead of completing
+   the package.
 
 If the user authorizes subagents, launch only parallel-safe work orders in the
 requested wave. Use native delegation with no full-history fork. Give each

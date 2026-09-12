@@ -245,7 +245,7 @@ test.describe("Task creation", () => {
       await expect(workflowSelector).toContainText("Launch Preview Workflow");
       await dialog.getByTestId("task-description-input").fill("");
       const launchStep = dialog.getByTestId("task-create-launch-step");
-      await expect(launchStep).toHaveText("Start step: Backlog");
+      await expect(launchStep).toHaveText("Backlog");
       await expect(workflowSelector).not.toContainText("Start step:");
       const selectorBox = await workflowSelector.boundingBox();
       const launchStepBox = await launchStep.boundingBox();
@@ -260,16 +260,17 @@ test.describe("Task creation", () => {
         launchStepInfoBox.x + launchStepInfoBox.width - 1,
       );
       await launchStepInfo.hover();
-      await expect(
-        testPage.getByRole("tooltip", {
-          name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
-        }),
-      ).toBeVisible();
+      const launchStepTooltip = testPage.getByRole("tooltip", {
+        name: "The task starts in this workflow step. With a task description, an auto-start step can take priority over the configured Start step.",
+      });
+      await expect(launchStepTooltip).toBeVisible();
+      await testPage.mouse.move(0, 0);
+      await expect(launchStepTooltip).toBeHidden();
 
       await dialog.getByTestId("task-title-input").fill("Preview the launch prompt");
       const description = "Review the launch preview";
       await dialog.getByTestId("task-description-input").fill(description);
-      await expect(launchStep).toHaveText("Start step: In Progress");
+      await expect(launchStep).toHaveText("In Progress");
       const toggle = dialog.getByTestId("task-create-launch-preview-toggle");
       await expect(toggle).toHaveAttribute(
         "aria-label",

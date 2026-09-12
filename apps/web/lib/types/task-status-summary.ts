@@ -1,13 +1,24 @@
 import type { ForegroundActivity, TaskPendingAction, TaskSessionState } from "./http";
 import type { TaskLaunchRecoveryAction } from "./task-launch-error";
 
+export type AgentErrorCause = {
+  operation?: string;
+  code?: string;
+  detail?: string;
+};
+
 export type TaskStatusSummaryActiveError = {
   session_id?: string;
   task_repository_id?: string;
   stamp: string;
   occurred_at: string;
   preview: string;
+  details?: string;
   category?: string;
+  execution_id?: string;
+  phase?: string;
+  attempt_id?: string;
+  causes?: AgentErrorCause[];
   recovery_actions?: TaskLaunchRecoveryAction[];
 };
 
