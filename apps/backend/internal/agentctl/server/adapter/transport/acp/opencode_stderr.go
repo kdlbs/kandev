@@ -13,15 +13,11 @@ import (
 )
 
 const (
-	opencodeAgentID         = "opencode-acp"
-	maxProviderMessageBytes = 2048
+	opencodeAgentID             = "opencode-acp"
+	genericProviderErrorMessage = "provider prompt error"
 )
 
-var (
-	openCodeIdentifierPattern = regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
-	openCodeURLPattern        = regexp.MustCompile(`https?://[^\s]+`)
-	openCodeResetPattern      = regexp.MustCompile(`(?i)\bresets?\s+in\s+(?:(\d+)\s*(?:days?|d)\b)?\s*(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*(?:(\d+)\s*(?:minutes?|mins?|m|min)\b)?`)
-)
+var openCodeResetPattern = regexp.MustCompile(`(?i)\bresets?\s+in\s+(?:(\d+)\s*(?:days?|d)\b)?\s*(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*(?:(\d+)\s*(?:minutes?|mins?|m|min)\b)?`)
 
 type openCodeStderrDiagnostic struct {
 	SessionID     string
@@ -43,14 +39,106 @@ func (e *providerPromptError) Error() string {
 // error without exposing the provider-specific wrapper to lifecycle callers.
 // It first unwraps the correlated stderr diagnostic; for a structured ACP
 // service-failure it reads only the explicit `action_url` field and the safe
-// message — never the raw error string.
-func ProviderErrorFromError(err error) *streams.ProviderError {
+// message — never the raw error string. providerID and modelID are the
+// adapter's own state at the moment of projection and are merged onto
+// whichever projection wins, filling only fields that projection left empty
+// so a richer provider-specific extractor is never overwritten by the generic
+// allowlisted metadata.
+func ProviderErrorFromError(err error, providerID, modelID string) *streams.ProviderError {
+	projection := winningProviderErrorProjection(err)
+	if projection == nil {
+		return nil
+	}
+	mergeAllowlistedProviderErrorMetadata(projection, err, providerID, modelID)
+	return projection
+}
+
+func winningProviderErrorProjection(err error) *streams.ProviderError {
 	var providerErr *providerPromptError
 	if errors.As(err, &providerErr) && providerErr != nil && providerErr.ProviderError.Valid() {
 		copy := providerErr.ProviderError
 		return &copy
 	}
-	return providerErrorFromACPActionURL(err)
+	if providerErr := providerErrorFromACPActionURL(err); providerErr != nil {
+		return providerErr
+	}
+	return providerErrorFromACPPrompt(err)
+}
+
+// providerErrorMetadataPattern bounds error_kind to at most 64 bytes of
+// `[A-Za-z0-9_.-]`: a malformed or oversized value is dropped rather than
+// invalidating the projection. provider_id and model_id are adapter state,
+// never parsed out of error text, so this allowlist does not apply to them.
+var providerErrorMetadataPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+func validProviderErrorMetadataField(value string) string {
+	if providerErrorMetadataPattern.MatchString(value) {
+		return value
+	}
+	return ""
+}
+
+// acpErrorKindFromData reads the allowlisted `errorKind` field from a terminal
+// ACP prompt error's structured Data. Data is adapter-defined `any`; only the
+// exact map[string]any shape encoding/json produces is accepted, and no other
+// field of Data is ever read.
+func acpErrorKindFromData(data any) string {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	kind, ok := m["errorKind"].(string)
+	if !ok {
+		return ""
+	}
+	return validProviderErrorMetadataField(kind)
+}
+
+// mergeAllowlistedProviderErrorMetadata fills provider_id and model_id
+// verbatim from the adapter's own state, and rpc_code/error_kind from the
+// underlying *acp.RequestError when err is (or wraps) one. Raw
+// RequestError.Data never crosses this call other than through the
+// validated error_kind extraction.
+func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, err error, providerID, modelID string) {
+	if projection.ProviderID == "" {
+		projection.ProviderID = providerID
+	}
+	if projection.ModelID == "" {
+		projection.ModelID = modelID
+	}
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) || reqErr == nil {
+		return
+	}
+	if projection.RPCCode == 0 {
+		projection.RPCCode = reqErr.Code
+	}
+	if projection.ErrorKind == "" {
+		projection.ErrorKind = acpErrorKindFromData(reqErr.Data)
+	}
+}
+
+// providerErrorFromACPPrompt projects the safe message from a terminal ACP
+// JSON-RPC error. Error data is adapter-defined and can contain credentials,
+// account identifiers, or opaque gateway details, so it never crosses this
+// boundary. Provider-specific extractors may attach richer allowlisted fields
+// before this generic fallback runs. It always returns non-nil for a genuine
+// *acp.RequestError, so a caller never falls back to the SDK's own Error(),
+// which serializes the raw Data it is this function's job to keep contained.
+func providerErrorFromACPPrompt(err error) *streams.ProviderError {
+	var reqErr *acp.RequestError
+	if !errors.As(err, &reqErr) || reqErr == nil {
+		return nil
+	}
+	message := streams.SanitizeProviderMessage(reqErr.Message)
+	if message == "" {
+		message = genericProviderErrorMessage
+	}
+	return &streams.ProviderError{
+		Source:     streams.ProviderErrorSourceACPPrompt,
+		Message:    message,
+		OccurredAt: time.Now(),
+	}
 }
 
 // providerErrorFromACPActionURL projects a future ACP service-failure
@@ -77,7 +165,7 @@ func providerErrorFromACPActionURL(err error) *streams.ProviderError {
 	if remediationURL == "" {
 		return nil
 	}
-	message := sanitizeOpenCodeMessage(reqErr.Message)
+	message := streams.SanitizeProviderMessage(reqErr.Message)
 	if message == "" {
 		return nil
 	}
@@ -146,7 +234,7 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	if remediationURL == "" {
 		remediationURL = extractOpenCodeActionURL(fields["error.error"])
 	}
-	message := sanitizeOpenCodeMessage(fields["error.error"])
+	message := streams.SanitizeProviderMessage(fields["error.error"])
 	if message == "" {
 		return openCodeStderrDiagnostic{}, false
 	}
@@ -231,17 +319,6 @@ func parseOpenCodeFieldValue(line string, start int) (string, int, bool) {
 		}
 	}
 	return "", len(line), false
-}
-
-func sanitizeOpenCodeMessage(message string) string {
-	message = openCodeURLPattern.ReplaceAllString(message, "")
-	message = openCodeIdentifierPattern.ReplaceAllString(message, "[redacted]")
-	message = strings.Join(strings.Fields(message), " ")
-	message = strings.TrimSpace(strings.TrimRight(message, ".:;,-"))
-	if len(message) > maxProviderMessageBytes {
-		message = message[:maxProviderMessageBytes]
-	}
-	return message
 }
 
 func safeOpenCodeIdentifier(value, prefix string) bool {

@@ -11,6 +11,7 @@ func TestAgentFailedPayloadCarriesTerminalPromptEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		priorActivity bool
+		priorEvents   []agentctl.AgentEvent
 		useErrorEvent bool
 		wantOutput    bool
 		wantEffect    bool
@@ -35,6 +36,31 @@ func TestAgentFailedPayloadCarriesTerminalPromptEvidence(t *testing.T) {
 			wantOutput:    true,
 			wantEffect:    true,
 		},
+		{
+			name:          "matching ACP provider diagnostic is not model output",
+			useErrorEvent: true,
+			priorEvents: []agentctl.AgentEvent{{
+				Type:                        "message_chunk",
+				Text:                        "API Error: Repeated 529 Overloaded errors. The API is at capacity.",
+				ProviderDiagnosticCandidate: true,
+				PromptGeneration:            7,
+			}},
+		},
+		{
+			name:          "provider diagnostic followed by assistant output remains unsafe",
+			useErrorEvent: true,
+			wantOutput:    true,
+			wantEffect:    true,
+			priorEvents: []agentctl.AgentEvent{
+				{
+					Type:                        "message_chunk",
+					Text:                        "API Error: Repeated 529 Overloaded errors. The API is at capacity.",
+					ProviderDiagnosticCandidate: true,
+					PromptGeneration:            7,
+				},
+				{Type: "message_chunk", Text: "I resumed normal work.", PromptGeneration: 7},
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr, eventBus := createTestManagerWithTracking()
@@ -45,6 +71,9 @@ func TestAgentFailedPayloadCarriesTerminalPromptEvidence(t *testing.T) {
 			}
 			if tc.priorActivity {
 				mgr.recordActivity(execution, agentctl.AgentEvent{Type: "message_chunk"})
+			}
+			for _, event := range tc.priorEvents {
+				mgr.handleAgentEvent(execution, event)
 			}
 
 			if tc.useErrorEvent {

@@ -2,8 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"sync"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -18,8 +21,30 @@ type promptAttemptEvidence struct {
 	promptGeneration uint64
 	evidenceKnown    bool
 	output           bool
-	effect           bool
-	dynamic          bool
+	// providerDiagnosticCode records an ACP agent-message diagnostic which is
+	// followed by the matching prompt RPC failure. It is not model output, so it
+	// must not make an otherwise pre-result provider failure unsafe to route.
+	providerDiagnosticCode routingerr.Code
+	// providerDiagnosticText is the normalized text of the recorded diagnostic.
+	// It is written and cleared together with providerDiagnosticCode: a code
+	// match alone is not sufficient evidence that the terminal failure IS the
+	// diagnostic, since prose narrating the same failure classifies identically.
+	providerDiagnosticText string
+	effect                 bool
+	dynamic                bool
+}
+
+// normalizeDiagnosticText applies streams.SanitizeProviderMessage so a raw
+// diagnostic chunk and the already-sanitized terminal failure message it
+// precedes normalize to the same text when their content is otherwise
+// identical. The terminal ProviderError.Message reaches this comparison
+// already sanitized (URLs/identifiers/credentials stripped) by the adapter
+// extractor that built it; applying the same transform here, rather than
+// only a cosmetic whitespace/punctuation trim, keeps both sides of the
+// containment check symmetric instead of leaving raw content on the
+// diagnostic side that the terminal side has already redacted.
+func normalizeDiagnosticText(s string) string {
+	return streams.SanitizeProviderMessage(s)
 }
 
 func (s *Service) beginPromptAttempt(
@@ -137,6 +162,42 @@ func (s *Service) observePromptAttempt(
 	}
 	evidence.output = evidence.output || output
 	evidence.effect = evidence.effect || effect
+	if output {
+		// Any ordinary output makes the turn unsafe to replay. A provider
+		// diagnostic is recorded only by observeProviderDiagnostic below.
+		evidence.providerDiagnosticCode = ""
+		evidence.providerDiagnosticText = ""
+	}
+}
+
+func (s *Service) observeProviderDiagnostic(
+	sessionID, executionID string,
+	promptGeneration uint64,
+	message string,
+) {
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:  routingerr.PhasePromptSend,
+		Stderr: message,
+	})
+	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
+		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
+		return
+	}
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) {
+		return
+	}
+	if evidence.output || evidence.effect {
+		return
+	}
+	evidence.output = true
+	evidence.providerDiagnosticCode = classified.Code
+	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
 }
 
 func (s *Service) observeDynamicAttempt(sessionID, executionID string, output, effect bool) {
@@ -180,16 +241,55 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	if evidence.dynamic {
 		data.DynamicRouteAttempt = true
 	}
+	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
 		data.EvidenceKnown = true
-		data.OutputObserved = lifecycleOutputObserved || evidence.output
+		data.OutputObserved = lifecycleOutputObserved || outputObserved
 		data.EffectObserved = lifecycleEffectObserved || evidence.effect
 	} else {
 		data.EvidenceKnown = evidence.evidenceKnown
-		data.OutputObserved = evidence.output
+		data.OutputObserved = outputObserved
 		data.EffectObserved = evidence.effect
 	}
 	return data
+}
+
+// outputObservedLocked reports whether evidence.output should be treated as
+// generated model output for data's terminal failure. A recorded provider
+// diagnostic clears the fence only when its code matches AND its normalized
+// text is contained in the terminal failure's normalized message: a matching
+// classification code alone is not enough, since assistant prose narrating a
+// failure can classify identically without being the transport diagnostic
+// itself. Callers must hold e.mu.
+func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
+	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
+		matchingProviderFailureCode(data) == e.providerDiagnosticCode &&
+		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
+		// Claude ACP emits a human-readable agent_message_chunk immediately
+		// before returning the same provider error from session/prompt. The
+		// chunk is diagnostic transport, not generated output.
+		return false
+	}
+	return e.output
+}
+
+func matchingProviderFailureMessage(data watcher.AgentEventData) string {
+	message := data.ErrorMessage
+	if data.ProviderError != nil && data.ProviderError.Message != "" {
+		message = data.ProviderError.Message
+	}
+	return message
+}
+
+func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
+	message := matchingProviderFailureMessage(data)
+	if message == "" {
+		return ""
+	}
+	return routingerr.Classify(routingerr.Input{
+		Phase:  routingerr.PhasePromptSend,
+		Stderr: message,
+	}).Code
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
@@ -212,7 +312,7 @@ func (s *Service) promptAttemptPreResultSafe(data watcher.AgentEventData) bool {
 	return !evidence.dynamic && evidence.evidenceKnown &&
 		evidence.executionID == data.AgentExecutionID &&
 		evidence.promptGeneration == data.PromptGeneration &&
-		!evidence.output && !evidence.effect
+		!evidence.outputObservedLocked(data) && !evidence.effect
 }
 
 func (s *Service) clearPromptAttemptEvidence(sessionID, executionID string, promptGeneration uint64) {

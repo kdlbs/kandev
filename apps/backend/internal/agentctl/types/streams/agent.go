@@ -142,6 +142,10 @@ type AgentEvent struct {
 
 	// Text contains streaming text content from the agent.
 	Text string `json:"text,omitempty"`
+	// ProviderDiagnosticCandidate marks a high-confidence ACP provider
+	// diagnostic that remains visible but is not ordinary model progress until
+	// the terminal prompt error is correlated.
+	ProviderDiagnosticCandidate bool `json:"provider_diagnostic_candidate,omitempty"`
 
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.

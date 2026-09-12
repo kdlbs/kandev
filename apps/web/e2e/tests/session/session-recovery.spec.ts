@@ -102,17 +102,14 @@ async function createACPProfileWithFailOnResume(apiClient: ApiClient, name: stri
   });
 }
 
-// Worst-case wait for the manual-recovery banner after `/crash`. The mock
-// agent's crash is a real subprocess exit whose ACP-level error carries the
-// same "peer disconnected before response" text the routingerr classifier
-// now treats as a retryable transport-lost signature (see
-// docs/decisions/2026-08-08-provider-neutral-agent-error-recovery.md) — every
-// genuine production occurrence of that text also means the local subprocess
-// died, so the classifier deliberately does not special-case a crash out of
-// the retry ladder. `/crash` always re-crashes on relaunch, so recovery
-// exhausts the full Kanban backoff (5+10+20+40+60s = 135s) before the manual
-// recovery banner replaces the retry-countdown card. Give it headroom above
-// that worst case rather than the default 30s.
+// Generous wait for the manual-recovery banner after `/crash`. The mock
+// agent's crash kills the subprocess mid-prompt, so the ACP SDK reports it
+// the same way it reports any peer disconnect: an "Internal error" message
+// with the "peer disconnected before response" text only in the error's
+// Data, which the generic prompt-error projection never reads. The failure
+// therefore presents as terminal on the first occurrence, with no retry
+// ladder to wait out. 170s is headroom for process teardown and relaunch,
+// not a computed worst case, so it stays well above the default 30s.
 const CRASH_RECOVERY_TIMEOUT = 170_000;
 
 test.describe("Session recovery", () => {

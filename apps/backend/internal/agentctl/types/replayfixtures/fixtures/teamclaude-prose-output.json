@@ -1,0 +1,25 @@
+{
+  "gateway": "teamclaude",
+  "agentId": "claude-acp",
+  "classifying": true,
+  "case": "prose-output",
+  "capture": "reconstructed",
+  "source": "internal/agent/runtime/routingerr/gateway_server_failure_test.go",
+  "identity": {
+    "sessionId": "teamclaude-prose-output",
+    "executionId": "exec-teamclaude-prose-output",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "The build is failing because API Error: 500 Internal server error keeps coming back from the gateway; I will wait a bit and retry."},
+    {"kind": "message_chunk", "role": "assistant", "text": "Now let me check the deployment logs for more detail."},
+    {"kind": "prompt_error", "code": -32603, "message": "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment.", "data": {"errorKind": "server_error"}}
+  ],
+  "expect": {
+    "events": ["message_chunk:diagnostic", "message_chunk", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "server_error", "providerId": "claude-acp"},
+    "diagnosticCode": "provider_unavailable",
+    "preResultSafe": false,
+    "recordedDiagnosticCode": ""
+  }
+}

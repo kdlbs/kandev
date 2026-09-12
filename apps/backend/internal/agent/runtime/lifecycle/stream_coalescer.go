@@ -8,10 +8,12 @@ import (
 const defaultStreamCoalesceWindow = 100 * time.Millisecond
 
 type coalescedStreamChunk struct {
-	eventType string
-	messageID string
-	content   string
-	isAppend  bool
+	eventType        string
+	messageID        string
+	content          string
+	isAppend         bool
+	diagnostic       bool
+	promptGeneration uint64
 }
 
 // streamCoalescer combines adjacent append chunks for one execution. The
@@ -20,19 +22,21 @@ type coalescedStreamChunk struct {
 // is intentional: combining across another message ID would change wire
 // ordering.
 type streamCoalescer struct {
-	emitMu         sync.Mutex
-	mu             sync.Mutex
-	window         time.Duration
-	pending        *coalescedStreamChunk
-	timer          *time.Timer
-	closed         bool
-	publish        func(coalescedStreamChunk)
-	lastEventType  string
-	lastMessageID  string
-	forceImmediate bool
-	received       int
-	coalesced      int
-	flushed        int
+	emitMu               sync.Mutex
+	mu                   sync.Mutex
+	window               time.Duration
+	pending              *coalescedStreamChunk
+	timer                *time.Timer
+	closed               bool
+	publish              func(coalescedStreamChunk)
+	lastEventType        string
+	lastMessageID        string
+	lastDiagnostic       bool
+	lastPromptGeneration uint64
+	forceImmediate       bool
+	received             int
+	coalesced            int
+	flushed              int
 }
 
 type streamCoalescerStats struct {
@@ -64,14 +68,23 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	}
 	c.received++
 
-	sameAsLast := c.lastEventType == chunk.eventType && c.lastMessageID == chunk.messageID
+	// A diagnostic-marker change is treated as a correlation-key change, just
+	// like a messageID or eventType change: merging a marked chunk's content
+	// into an unmarked pending segment (or vice versa) would silently erase
+	// the marker for the merged text. A promptGeneration change gets the same
+	// treatment: merging chunks from two different prompt attempts would stamp
+	// the merged text with only one attempt's generation, breaking downstream
+	// recovery-evidence correlation for the other attempt's content.
+	sameAsLast := c.lastEventType == chunk.eventType && c.lastMessageID == chunk.messageID &&
+		c.lastDiagnostic == chunk.diagnostic && c.lastPromptGeneration == chunk.promptGeneration
 	immediate := !chunk.isAppend || c.forceImmediate || !sameAsLast
 	c.forceImmediate = false
 	switch {
 	case immediate:
 		ready = c.detachLocked(ready)
 		ready = append(ready, chunk)
-	case c.pending != nil && c.pending.eventType == chunk.eventType && c.pending.messageID == chunk.messageID:
+	case c.pending != nil && c.pending.eventType == chunk.eventType && c.pending.messageID == chunk.messageID &&
+		c.pending.diagnostic == chunk.diagnostic && c.pending.promptGeneration == chunk.promptGeneration:
 		c.pending.content += chunk.content
 		c.coalesced++
 	default:
@@ -83,6 +96,8 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	}
 	c.lastEventType = chunk.eventType
 	c.lastMessageID = chunk.messageID
+	c.lastDiagnostic = chunk.diagnostic
+	c.lastPromptGeneration = chunk.promptGeneration
 	c.mu.Unlock()
 
 	c.publishReady(ready)

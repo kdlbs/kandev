@@ -363,8 +363,12 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		return
 	}
 	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
-		Type:             "error",
-		Error:            "initial prompt delivery failed",
+		Type: toolStatusError,
+		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
+		// provider diagnostic to decide whether a safe pre-result retry or
+		// fallback is permitted; replacing it with a generic label makes a 529
+		// indistinguishable from a local delivery failure.
+		Error:            routingerr.Sanitize(failure.Err.Error()),
 		SessionID:        failure.SessionID,
 		PromptGeneration: failure.PromptGeneration,
 		TurnID:           failure.TurnID,

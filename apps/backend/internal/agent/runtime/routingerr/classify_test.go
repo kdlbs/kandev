@@ -21,6 +21,9 @@ func TestClassify_HTTPStatusMapping(t *testing.T) {
 		{http.StatusForbidden, CodePermissionDeniedByUser},
 		{http.StatusPaymentRequired, CodeSubscriptionRequired},
 		{http.StatusTooManyRequests, CodeRateLimited},
+		{http.StatusInternalServerError, CodeProviderUnavailable},
+		{http.StatusBadGateway, CodeProviderUnavailable},
+		{http.StatusGatewayTimeout, CodeProviderUnavailable},
 		{http.StatusServiceUnavailable, CodeProviderUnavailable},
 	}
 	for _, c := range cases {
@@ -56,6 +59,12 @@ func TestClassify_ProviderRules(t *testing.T) {
 	}{
 		{"claude quota", "claude-acp", "Error: anthropic_quota_exceeded for user", CodeQuotaLimited},
 		{"claude rate", "claude-acp", "you hit the rate-limit", CodeRateLimited},
+		{
+			"claude proxy credentials refused",
+			"claude-acp",
+			`{"type":"error","error":{"type":"proxy_error","message":"All account credentials were refused by the upstream provider. Check your OAuth entitlement."}}`,
+			CodeMissingCredentials,
+		},
 		{"claude auth", "claude-acp", "you are not authenticated", CodeAuthRequired},
 		{"claude model", "claude-acp", "model claude-foo not found here", CodeModelUnavailable},
 		{"codex quota", "codex-acp", "insufficient_quota for project", CodeQuotaLimited},

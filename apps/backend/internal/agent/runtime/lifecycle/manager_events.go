@@ -18,24 +18,35 @@ import (
 const (
 	toolStatusComplete = "complete"
 	toolStatusFailed   = "failed"
+	toolStatusError    = "error"
 )
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
+//
+// ACP message chunks do not carry the lifecycle prompt generation, so each
+// publish below resolves its own execution.promptGenerationSnapshot()
+// immediately before publishing, rather than reusing one value captured at
+// function entry across every publish in the call. This handler never runs
+// while execution.promptLifecycleMu is held, so each snapshot is safe; a new
+// generation cannot begin on this execution until waitForPendingDispatchedPrompt
+// observes the prior generation's completion signal, which itself only fires
+// after this handler's own event stream has finished flushing that prior
+// generation — so no concurrent generation reset can interleave with a single
+// invocation of this handler in the ordinary dispatch flow.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.Role == "user" || event.Text == "" {
 		return
 	}
-	// ACP message chunks do not carry the lifecycle prompt generation. The
-	// messageMu acquisition is therefore the only reliable turn boundary: a
-	// chunk observed before an atomic reset is detached with the old turn,
-	// while one observed after reset is retained for the replacement turn.
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.ProtocolMessageID != "" {
-		m.flushPendingLegacyMessage(execution)
-		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text)
+		m.flushPendingLegacyMessage(execution, execution.promptGenerationSnapshot())
+		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot())
 		return
 	}
+	m.flushMessageBufferOnDiagnosticChange(execution, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot())
+
 	execution.messageMu.Lock()
+	execution.messageBufferDiagnostic = event.ProviderDiagnosticCandidate
 	execution.messageBuffer.WriteString(event.Text)
 	bufferLenAfterWrite := execution.messageBuffer.Len()
 	m.logger.Debug("message_chunk written to buffer",
@@ -54,21 +65,51 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	remainder := bufContent[lastNewline+1:]
 	execution.messageBuffer.Reset()
 	execution.messageBuffer.WriteString(remainder)
+	diagnostic := execution.messageBufferDiagnostic
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
-		m.publishStreamingMessage(execution, toFlush)
+		m.publishStreamingMessage(execution, toFlush, diagnostic, execution.promptGenerationSnapshot())
 	}
 }
 
-// handleReasoningEvent handles a "reasoning" agent event, accumulating and flushing on newlines.
+// flushMessageBufferOnDiagnosticChange publishes any buffered ID-less
+// message content ahead of a chunk whose ProviderDiagnosticCandidate marker
+// differs from what is already buffered. Without this, a diagnostic chunk
+// concatenated with adjacent ordinary text (or vice versa) would publish one
+// merged segment carrying only one of the two markers.
+func (m *Manager) flushMessageBufferOnDiagnosticChange(execution *AgentExecution, diagnostic bool, promptGeneration uint64) {
+	execution.messageMu.Lock()
+	if execution.messageBuffer.Len() == 0 || execution.messageBufferDiagnostic == diagnostic {
+		execution.messageMu.Unlock()
+		return
+	}
+	pending := execution.messageBuffer.String()
+	pendingDiagnostic := execution.messageBufferDiagnostic
+	execution.messageBuffer.Reset()
+	execution.messageBufferDiagnostic = false
+	execution.currentMessageID = ""
+	execution.messageMu.Unlock()
+
+	if strings.TrimSpace(pending) != "" {
+		m.publishStreamingMessage(execution, pending, pendingDiagnostic, promptGeneration)
+		execution.messageMu.Lock()
+		execution.currentMessageID = ""
+		execution.messageMu.Unlock()
+	}
+}
+
+// handleReasoningEvent handles a "reasoning" agent event, accumulating and
+// flushing on newlines. See handleMessageChunkEvent for why each publish
+// below resolves its own fresh promptGenerationSnapshot() rather than reusing
+// one value across the call.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
 		return
 	}
 	if event.ProtocolMessageID != "" {
-		m.flushPendingLegacyThinking(execution)
-		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText)
+		m.flushPendingLegacyThinking(execution, execution.promptGenerationSnapshot())
+		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText, execution.promptGenerationSnapshot())
 		return
 	}
 	execution.messageMu.Lock()
@@ -87,7 +128,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
-		m.publishStreamingThinking(execution, toFlush)
+		m.publishStreamingThinking(execution, toFlush, execution.promptGenerationSnapshot())
 	}
 }
 
@@ -193,7 +234,7 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 	stopReason := "end_turn"
 	errorMsg := ""
 	if isError {
-		stopReason = "error"
+		stopReason = toolStatusError
 		errorMsg = extractErrorMessage(event)
 	} else if event.Data != nil {
 		// Read StopReason from the complete event (set by ACP adapter from PromptResponse)
@@ -277,7 +318,7 @@ func completeEventResult(event *agentctl.AgentEvent) (bool, string) {
 		isError, _ = event.Data["is_error"].(bool)
 	}
 	if isError {
-		return true, "error"
+		return true, toolStatusError
 	}
 	if event.Data != nil {
 		if stopReason, ok := event.Data["stop_reason"].(string); ok && stopReason != "" {
@@ -384,7 +425,11 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 		zap.Bool("is_error", isError))
 
 	// Flush the message buffer to publish any remaining content as a streaming message.
-	flushedText := m.flushMessageBuffer(execution)
+	// event.PromptGeneration is already the validated active generation from
+	// claimPromptCompletion (or 0 when unclaimed): reuse it here rather than
+	// calling execution.promptGenerationSnapshot(), which would deadlock
+	// against the promptLifecycleMu this function already holds when claimed.
+	flushedText := m.flushMessageBuffer(execution, event.PromptGeneration)
 	execution.messageMu.Lock()
 	execution.clearProtocolMessageCorrelationLocked()
 	execution.messageMu.Unlock()
@@ -416,7 +461,11 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // concurrently with the parent agent's own text, so they must NOT flush the
 // buffer — flushing would split the parent's in-flight streaming message into
 // separate DB rows mid-sentence, breaking markdown that spans the boundary.
-func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
+func (m *Manager) handleToolCallEvent(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	promptGeneration uint64,
+) agentctl.AgentEvent {
 	if event.ParentToolCallID == "" {
 		execution.setActiveTool(activeTopLevelTool{
 			ToolCallID: event.ToolCallID,
@@ -426,7 +475,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 		})
 		// flushMessageBuffer publishes any remaining buffered content through
 		// the streaming path itself and always returns "".
-		m.flushMessageBuffer(execution)
+		m.flushMessageBuffer(execution, promptGeneration)
 	}
 	m.flushAssistantHistory(execution)
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
@@ -526,7 +575,7 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 		return false
 	}
 	switch event.ToolStatus {
-	case toolStatusComplete, "completed", "success", "error", toolStatusFailed, "cancelled":
+	case toolStatusComplete, "completed", "success", toolStatusError, toolStatusFailed, "cancelled":
 		return true
 	default:
 		return false
@@ -550,9 +599,10 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 // accidentally re-arm a freshly-booted no-prompt session as Running.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	_, isTurnContent := turnContentEventTypes[event.Type]
+	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
-	if isTurnContent {
+	if isTurnContent && !isProviderDiagnostic {
 		execution.agentEventSincePrompt = true
 		execution.promptActivityEpoch++
 	}
@@ -575,7 +625,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	if isTerminalToolUpdate(event) {
 		return
 	}
-	if _, ok := turnContentEventTypes[event.Type]; !ok {
+	if _, ok := turnContentEventTypes[event.Type]; !ok || isProviderDiagnostic {
 		return
 	}
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {
@@ -642,7 +692,11 @@ func (m *Manager) handleStreamDisconnect(
 			return
 		}
 
-		m.flushMessageBuffer(execution)
+		// promptGeneration is already the validated active generation (checked
+		// against current.promptGeneration above): reuse it rather than calling
+		// execution.promptGenerationSnapshot(), which would deadlock against the
+		// promptLifecycleMu this branch already holds.
+		m.flushMessageBuffer(execution, promptGeneration)
 		m.flushAssistantHistory(execution)
 		m.persistExecutorRunning(context.Background(), updated)
 		m.publishStreamDisconnectError(execution, err)
@@ -653,7 +707,8 @@ func (m *Manager) handleStreamDisconnect(
 	// after promptDoneCh is signaled. Drain the partial assistant transcript
 	// here as well as at prompt setup; the shared buffer lock makes either
 	// path the single owner and prevents a later reset from dropping it.
-	m.flushMessageBuffer(execution)
+	// This branch does not hold promptLifecycleMu, so a fresh snapshot is safe.
+	m.flushMessageBuffer(execution, execution.promptGenerationSnapshot())
 	m.flushAssistantHistory(execution)
 
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusFailed); err != nil {
@@ -727,7 +782,11 @@ func (m *Manager) handlePromptHandoffEvent(
 		return
 	}
 
-	m.flushMessageBuffer(execution)
+	// event.PromptGeneration is already the validated active generation
+	// (ownsGeneration above): reuse it rather than calling
+	// execution.promptGenerationSnapshot(), which would deadlock against the
+	// promptLifecycleMu this function already holds.
+	m.flushMessageBuffer(execution, event.PromptGeneration)
 	execution.messageMu.Lock()
 	execution.clearProtocolMessageCorrelationLocked()
 	execution.messageMu.Unlock()
@@ -764,7 +823,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		m.eventPublisher.PublishAgentStreamEvent(execution, event)
 		return
 	}
-	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != "error") {
+	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {
 		m.recordActivity(execution, event)
 	}
 
@@ -784,16 +843,27 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		return
 
 	case "tool_call":
-		event = m.handleToolCallEvent(execution, event)
+		// ACP tool_call events do not carry the lifecycle prompt generation
+		// either (same gap as message_chunk/reasoning). Neither this dispatch
+		// nor handleToolCallEvent holds execution.promptLifecycleMu, so a
+		// fresh snapshot is safe and is reused for the published event below.
+		promptGeneration := execution.promptGenerationSnapshot()
+		event = m.handleToolCallEvent(execution, event, promptGeneration)
+		if event.PromptGeneration == 0 {
+			event.PromptGeneration = promptGeneration
+		}
 
 	case "tool_update":
 		m.handleToolUpdateEvent(execution, event)
+		if event.PromptGeneration == 0 {
+			event.PromptGeneration = execution.promptGenerationSnapshot()
+		}
 
 	case "plan":
 		m.logger.Debug("agent plan update",
 			zap.String("execution_id", execution.ID))
 
-	case "error":
+	case toolStatusError:
 		m.handleErrorEvent(execution, event)
 		return
 

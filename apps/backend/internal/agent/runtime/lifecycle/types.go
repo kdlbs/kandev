@@ -153,11 +153,17 @@ type AgentExecution struct {
 	isResumedSession bool
 
 	// Buffers for accumulating agent response during a prompt
-	messageBuffer  strings.Builder
-	thinkingBuffer strings.Builder
-	messageMu      sync.Mutex
-	streamMu       sync.Mutex
-	stream         *streamCoalescer
+	messageBuffer strings.Builder
+	// messageBufferDiagnostic is the ProviderDiagnosticCandidate value of the
+	// chunk(s) currently held in messageBuffer (legacy no-protocol-ID path).
+	// A chunk whose marker differs from this flag forces an immediate flush of
+	// the buffered segment first, so a diagnostic chunk's marker is never
+	// merged away by concatenation with ordinary output.
+	messageBufferDiagnostic bool
+	thinkingBuffer          strings.Builder
+	messageMu               sync.Mutex
+	streamMu                sync.Mutex
+	stream                  *streamCoalescer
 
 	// Legacy streaming message tracking for agents that omit protocol message IDs.
 	// These are set when we create a streaming message and cleared on tool_call/complete.

@@ -1,0 +1,24 @@
+{
+  "gateway": "openrouter",
+  "agentId": "claude-acp",
+  "classifying": false,
+  "case": "queued",
+  "capture": "reconstructed",
+  "source": "https://openrouter.ai/docs/api-reference/errors",
+  "identity": {
+    "sessionId": "openrouter-queued",
+    "executionId": "exec-openrouter-queued",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "Upstream provider returned error 502: Bad gateway from the model provider."},
+    {"kind": "prompt_error", "code": -32603, "message": "Provider error: upstream returned 502 Bad gateway from the model provider.", "data": {"errorKind": "upstream_error"}}
+  ],
+  "expect": {
+    "events": ["message_chunk", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "upstream_error", "providerId": "claude-acp"},
+    "diagnosticCode": "agent_runtime_error",
+    "preResultSafe": false,
+    "recordedDiagnosticCode": ""
+  }
+}
