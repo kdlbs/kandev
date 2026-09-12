@@ -769,6 +769,13 @@ type Service struct {
 	// dependencies so nothing is gated.
 	dependencyReader TaskDependencyReader
 
+	// Routes an Office task's terminal-step completion through Office's own
+	// status pipeline (approval gate included) instead of the orchestrator's
+	// raw state write. Nil-safe: when unset, terminal completion for an
+	// Office task is skipped rather than falling back to the raw write,
+	// which would bypass the gate.
+	officeTaskStatusUpdater OfficeTaskStatusUpdater
+
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
 	// exact string comparison.
@@ -797,6 +804,17 @@ type Service struct {
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
 	childCompletionLocksMu sync.Mutex
 	childCompletionLocks   map[string]*childCompletionOperationLock
+	// officeTerminalCompletionLocks serializes concurrent
+	// markOfficeTaskCompletedForTerminalStep deliveries for the same task, so
+	// two deliveries racing past the taskRuntimeStateMu check above cannot
+	// both call the Office status seam and both fire completion side
+	// effects. Keyed per task rather than using taskRuntimeStateMu itself,
+	// because the seam runs Office's reactivity pipeline and publishes
+	// events — holding the global lock across that call risks lock
+	// inversion.
+	officeTerminalCompletionLocksMu sync.Mutex
+	officeTerminalCompletionLocks   map[string]*childCompletionOperationLock
+
 	// agentErrorOperationLocks serializes concurrent on_agent_error dispatches
 	// that carry the same operation id — the load -> evaluate -> commit ->
 	// mark window, held from before the task/session/MachineState load so a

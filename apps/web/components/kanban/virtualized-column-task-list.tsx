@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,6 +14,7 @@ import type { WorkflowStep } from "../kanban-column";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
 
 type VirtualizedColumnTaskListProps = {
+  onContentHeightChange?: (height: number, element: HTMLDivElement) => void;
   orderedTasks: Task[];
   queuedStartIndex: number;
   queuedCount: number;
@@ -132,6 +133,7 @@ function useStableExternalLinkAvailability(
 }
 
 export function VirtualizedColumnTaskList({
+  onContentHeightChange,
   orderedTasks,
   queuedStartIndex,
   queuedCount,
@@ -167,6 +169,10 @@ export function VirtualizedColumnTaskList({
     getItemKey: (index) => orderedTasks[index]?.id ?? index,
     overscan: 5,
   });
+  const totalHeight = virtualizer.getTotalSize();
+  useLayoutEffect(() => {
+    if (scrollRef.current) onContentHeightChange?.(totalHeight, scrollRef.current);
+  }, [onContentHeightChange, totalHeight]);
 
   return (
     <div

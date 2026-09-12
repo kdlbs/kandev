@@ -59,7 +59,10 @@ implementation package; neither plan replaces the other.
 
 ## Phases 1 to 4: Design
 
-Use `/interview-me` only when the request needs clarification.
+Run the `/interview-me` assumption check before drafting the package. Reuse
+confirmed choices across phases; ask only about material unresolved decisions.
+For large uncertain initiatives, use its optional decision-mapping reference
+before creating detailed work orders. Continue the package once blockers resolve.
 
 Run the `/spec` ownership gate before you choose paths. Search adjacent systems
 for the same capability. Choose the owner from the durable contract, not from

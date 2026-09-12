@@ -538,10 +538,11 @@ after Stop returned. The runner's force-kill path acknowledges signalling
 before its wait goroutine retires the process. Existing runner tests already
 wait for that observable completion boundary.
 
-The test now uses its existing `awaitProcessRetired` helper before asserting
-an empty list and HTTP 404. Production lifecycle behavior, timeout values,
-public contracts, and UI are unchanged; no public-doc or specification change
-is needed. The related orphan-workspace cleanup PR does not change this API.
+The test now uses its existing `awaitProcessRetired` helper to wait for
+HTTP 404 before asserting an empty list. Production lifecycle behavior,
+timeout values, public contracts, and UI are unchanged; no public-doc or
+specification change is needed. The related orphan-workspace cleanup PR does
+not change this API.
 
 A temporary signal-ignoring fixture reproduced the exact CI assertions in all
 three race-enabled attempts. With the retirement wait it passed 20 repetitions
@@ -603,6 +604,38 @@ tracked in the external task plan alongside post-commit and review results.
 Production liveness semantics, timeout values, and UI are unchanged. Public
 documentation already describes the correct boundary, so no public-doc change
 is needed.
+
+## Base reconciliation after CI passed (2026-09-12)
+
+The base advanced during the final PR check and introduced equivalent fixes
+for the process-stop test and the forwarded Kubernetes readiness wait. The
+process test now matches the base exactly: its existing helper establishes
+HTTP 404 before the list assertion. The Kubernetes merge retains the base's
+readiness explanation, both `/ready` probes, and the focused polling and pod
+regressions. No production lifecycle or timeout contract changed.
+
+Focused integration validation passed 367 tests across 34 web unit files,
+including Threads, composer disclosure, Kubernetes fixtures, the incoming
+mention Escape handling, and compact-kanban sizing helpers. Web typecheck and
+20 race-enabled repetitions of the process-stop regression passed. Harness,
+specification, documentation catalog, and public-doc validation passed. The
+new documentation-coverage validator accepts all six work orders and their
+nine linked artifacts without an override.
+
+Managed browser checks passed seven desktop composer scenarios and four
+phone disclosure/mention-recency scenarios. Both used one worker, strict
+WebSocket accounting, and zero retries after fresh backend, frontend, and
+fixture-plugin builds:
+
+```bash
+cd apps/web
+GOTOOLCHAIN=go1.26.0 GOMAXPROCS=2 pnpm e2e:run --host --shards 1 --project chromium tests/task/threads-composer-disclosure.spec.ts -- --retries=0
+GOTOOLCHAIN=go1.26.0 GOMAXPROCS=2 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-threads-composer-disclosure.spec.ts tests/chat/mobile-mention-recency.spec.ts -- --retries=0
+```
+
+The normal merge-commit receipt and new exact-head CI/review results remain
+tracked in the external task plan. Prior green CI does not establish
+completion for the merged branch.
 
 ## Risks
 

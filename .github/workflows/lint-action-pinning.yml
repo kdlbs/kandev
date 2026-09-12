@@ -93,6 +93,12 @@ jobs:
       - name: Test pull request size label workflow contract
         run: python3 .github/scripts/pr-size-label-workflow-contract_test.py
 
+      - name: Test pull request documentation workflow contract
+        run: python3 .github/scripts/pr-docs-workflow-contract_test.py
+
+      - name: Test pull request documentation validator
+        run: node --test .github/scripts/pr-docs.test.cjs
+
       - name: Test managed runtime pin update workflow contract
         run: python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py
 

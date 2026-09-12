@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-07-27
-updated: 2026-09-05
+updated: 2026-09-11
 owners:
   - kandev
 ---
@@ -30,6 +30,22 @@ People use Kandev in portrait desktop windows, beside a task preview, and with a
 - **AC-UI-ADAPTIVE-KANBAN-001.8:** Opening or resizing the task preview may change the effective desktop composition without changing the user's saved Kanban, Pipeline, workflow, or preview preferences.
 - **AC-UI-ADAPTIVE-KANBAN-001.9:** When a pointer drag starts or ends without a change to the rendered workflow steps, each desktop column SHALL retain its computed width.
 - **AC-UI-ADAPTIVE-KANBAN-001.10:** A desktop pointer drag MAY extend the workflow's internal scroll range for drag anchoring, but it SHALL NOT widen the document or show a transient horizontal scrollbar solely for that reserve.
+
+### REQ-UI-ADAPTIVE-KANBAN-002: Compact workflow swimlanes
+
+**Intent:** Users can scan several workflows without a viewport of blank space between sparse lanes.
+
+The column area excludes the workflow header and the horizontal scrollbar. Pixel values assume the standard root font.
+
+#### Acceptance criteria
+
+- **AC-UI-ADAPTIVE-KANBAN-002.1:** When several workflow lanes are visible on desktop or tablet, each expanded column area shall fit its tallest column between 200px and 400px.
+- **AC-UI-ADAPTIVE-KANBAN-002.2:** Columns in one lane shall share a height. Content beyond the height limit shall remain reachable through each column's internal scroll.
+- **AC-UI-ADAPTIVE-KANBAN-002.3:** A collapsed lane shall occupy only its header. Other visible lanes shall retain compact sizing, even when only one remains expanded.
+- **AC-UI-ADAPTIVE-KANBAN-002.4:** When exactly one workflow lane is visible, its expanded board shall fill the available height. Filters shall determine visibility before sizing.
+- **AC-UI-ADAPTIVE-KANBAN-002.5:** Task changes, column visibility changes, and preview resizing shall update compact heights. Empty retained lanes shall keep their header and existing recovery controls.
+- **AC-UI-ADAPTIVE-KANBAN-002.6:** Phone Kanban shall retain one focused workflow and column, its navigator, internal scroll, and direct task navigation.
+- **AC-UI-ADAPTIVE-KANBAN-002.7:** Height changes shall preserve virtualization, task order, WIP boundaries, drag actions, and saved display preferences. Workflow overflow shall remain inside the board.
 
 ## Migrated source detail
 
@@ -129,3 +145,5 @@ desktop.
 [Adaptive Kanban implementation plan](../../../plans/adaptive-kanban/plan.md)
 
 [Large-column virtualization repair plan](../../../plans/kanban-large-column-virtualization/plan.md)
+
+[Compact workflow swimlane repair plan](../../../plans/kanban-swimlane-height/plan.md)
