@@ -80,6 +80,8 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### System design
 
+- [Session subscription recovery](system-design/session-subscription-recovery.md)
+
 - [Agent-accessible Kandev settings](system-design/agent-settings-parity.md)
 - [Core settings domain adoption](system-design/agent-settings-domains.md)
 

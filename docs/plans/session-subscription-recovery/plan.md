@@ -136,3 +136,8 @@ contract, so they are intentionally one sequential task.
 
 - The race-specific reload fallback can be removed; the general bounded
   `waitForLoad` reload remains for unrelated startup/SSR hydration failures.
+
+## Follow-up package
+
+The [delayed-entry package](../session-entry-recovery/plan.md) extends recovery after a registration timeout.
+The completed ordering work and its recorded results remain unchanged.
