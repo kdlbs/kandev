@@ -397,7 +397,7 @@ func TestStopByTaskID_MixedActiveAndUnloadableOrphanSurfacesLoadError(t *testing
 		}
 		return nil, nil
 	}
-	stopCalls := make(chan string, 1)
+	stopCalls := make(chan string, 2)
 	manager := &mockAgentManager{
 		listExecutionsForTaskFunc: func(taskID string) []lifecycle.ExecutionReference {
 			if taskID != "task-1" {
@@ -426,13 +426,20 @@ func TestStopByTaskID_MixedActiveAndUnloadableOrphanSurfacesLoadError(t *testing
 		t.Fatalf("error = %v, want it to wrap %v", err, loadFailure)
 	}
 
-	select {
-	case executionID := <-stopCalls:
-		if executionID != "execution-active" {
-			t.Fatalf("stopped execution = %q, want execution-active", executionID)
+	stopped := make(map[string]bool, 2)
+	for range 2 {
+		select {
+		case executionID := <-stopCalls:
+			stopped[executionID] = true
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected both active and orphan executions to be stopped despite the orphan load failure")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("active session's execution was not stopped despite the orphan load failure")
+	}
+	if !stopped["execution-active"] {
+		t.Fatalf("stopped executions = %#v, want execution-active", stopped)
+	}
+	if !stopped["execution-orphan"] {
+		t.Fatalf("stopped executions = %#v, want execution-orphan", stopped)
 	}
 }
 
