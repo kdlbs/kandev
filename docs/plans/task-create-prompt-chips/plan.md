@@ -180,6 +180,17 @@ Implementation checks on 2026-09-12:
 - Task 02: the integration unit command passed with 5 files and 57 tests; full web lint passed with zero warnings; typecheck, i18n check and ratchet, backend build and plugin packaging, E2E build, desktop and phone work-order suites, migrated composer regressions, E2E sleep ratchet, public docs tests and validation, specification tests and lint, and diff checks all passed.
 - Browser totals: 26 desktop work-order tests, 7 phone work-order tests, 12 desktop migrated regression tests, and 5 phone migrated regression tests passed.
 
+Review remediation verification on 2026-09-12:
+
+- Reconciled aliases from the full serialized draft in one transaction, restored plain-text anchor and head offsets, and kept reconciliation outside the undo history.
+- Inserted plugin text as a plain-text ProseMirror fragment so HTML-like strings, entities, whitespace, and line breaks remain literal across synchronous calls.
+- Added explicit textbox semantics to the create-mode contenteditable so the existing dialog locator works in browser accessibility trees.
+- `cd apps/web && pnpm exec vitest run components/task-prompt-reference-editor.test.tsx components/task-create-dialog-selectors.test.tsx`: 2 files and 33 tests passed.
+- `cd apps/web && pnpm exec vitest run components/task-create-dialog-selectors.test.tsx components/task-create-dialog-form-body.test.tsx components/task-create-dialog.test.tsx components/task/new-session-form-prompt.test.tsx components/canvas/canvas-task-create-launcher.test.tsx`: 5 files and 58 tests passed.
+- `cd apps/web && pnpm e2e:run --host --no-build --project=chromium e2e/tests/chat/clarification.spec.ts --grep "pointer-events stuck on body" --retries=0`: 1 test passed.
+- The planned desktop and phone work-order suites passed again with retries disabled: 26 Chromium tests and 7 mobile tests, followed by 12 Chromium migrated composer tests and 5 mobile migrated composer tests.
+- Typecheck, full lint, Prettier, i18n check and ratchet, E2E sleep ratchet, public-doc tests and validation, specification tests and lint, and diff checks passed.
+
 Design validation on 2026-09-12:
 
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.

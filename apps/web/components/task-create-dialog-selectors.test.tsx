@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
+import { StateProvider } from "@/components/state-provider";
 import {
   MAX_FILES,
   MAX_FILE_SIZE,
@@ -43,14 +44,14 @@ vi.mock("@/components/plugins/plugin-slot", () => ({
 // Inert mention popover — the real hook installs a `keydown` listener that
 // drains React's event queue across re-renders and adds noise to assertions.
 vi.mock("@/hooks/use-task-create-prompt-mention", () => {
-  const useMention = () => ({
+  const useMention = ({ onChange }: { onChange?: (value: string) => void } = {}) => ({
     isOpen: false,
     isLoading: false,
     position: null,
     items: [],
     query: "",
     selectedIndex: 0,
-    handleChange: (_: string) => {},
+    handleChange: (value: string) => onChange?.(value),
     handleKeyDown: mentionMocks.handleKeyDown,
     handleSelect: () => {},
     closeMenu: () => {},
@@ -84,10 +85,20 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+function RichPromptWrapper({ children }: { children: ReactNode }) {
+  return (
+    <StateProvider initialState={{ prompts: { items: [], loaded: true, loading: false } }}>
+      <Wrapper>{children}</Wrapper>
+    </StateProvider>
+  );
+}
+
 function renderTaskFormInputs(
   initial: string,
   strict = false,
   launchPreview: TaskCreateLaunchPreview | null = null,
+  promptReferencesEnabled = false,
+  onComposerSubmit?: () => boolean | Promise<boolean>,
 ) {
   const ref = createRef<TaskFormInputsHandle>();
   const form = (
@@ -95,13 +106,16 @@ function renderTaskFormInputs(
       isSessionMode={false}
       autoFocus={false}
       initialDescription={initial}
+      promptReferencesEnabled={promptReferencesEnabled}
+      onComposerSubmit={onComposerSubmit}
       onDescriptionChange={() => {}}
       onKeyDown={() => {}}
       descriptionValueRef={ref}
       launchPreview={launchPreview}
     />
   );
-  const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper: Wrapper });
+  const wrapper = promptReferencesEnabled ? RichPromptWrapper : Wrapper;
+  const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper });
   const textarea = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement;
   return { ...utils, textarea, ref };
 }
@@ -327,6 +341,24 @@ describe("TaskFormInputs plugin composer chained calls", () => {
     });
 
     expect(textarea.value).toBe("first second");
+  });
+
+  it("supports rich prompt references for literal plugin insertion and submit", async () => {
+    const onComposerSubmit = vi.fn(() => true);
+    const { ref } = renderTaskFormInputs("", false, null, true, onComposerSubmit);
+    const composer = lastPluginSlotProps().composer;
+    const first = "<p>hello</p> &amp;\n  first";
+    let result: Awaited<ReturnType<typeof composer.submit>> | undefined;
+
+    await act(async () => {
+      composer.insertText(first);
+      composer.insertText("tail");
+      result = await composer.submit();
+    });
+
+    expect(result).toEqual({ status: "submitted" });
+    expect(ref.current?.getValue()).toBe(`${first} tail`);
+    expect(onComposerSubmit).toHaveBeenCalledTimes(1);
   });
 });
 

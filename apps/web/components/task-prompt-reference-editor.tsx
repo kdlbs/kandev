@@ -9,6 +9,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Text from "@tiptap/extension-text";
 import type { Editor } from "@tiptap/core";
 import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { TextSelection } from "@tiptap/pm/state";
 import {
   forwardRef,
   useCallback,
@@ -23,10 +24,7 @@ import {
 } from "react";
 import { MentionMenu } from "@/components/task/chat/mention-menu";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
-import {
-  useStablePromptMentionNames,
-  splitMarkdownPromptMentionSegments,
-} from "@/components/task/chat/messages/prompt-mention-components";
+import { useStablePromptMentionNames } from "@/components/task/chat/messages/prompt-mention-components";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { detectMentionTrigger } from "@/hooks/use-inline-mention";
 import { useTaskCreatePromptMentionForInput } from "@/hooks/use-task-create-prompt-mention";
@@ -209,6 +207,9 @@ function useTaskPromptTiptap({
         "data-testid": "task-description-input",
         "data-prompt-reference-editor": "true",
         "data-task-description-value": value,
+        role: "textbox",
+        "aria-multiline": "true",
+        "aria-label": placeholder,
         class: cn(
           "min-w-0 max-w-full whitespace-pre-wrap break-words px-2 py-2 text-[13px] leading-relaxed outline-none",
           "min-h-[96px] max-h-[240px] overflow-y-auto",
@@ -253,7 +254,10 @@ function useTaskPromptTiptap({
       if (syncingRef.current) return;
       const nextValue = serializeEditor(nextEditor);
       valueRef.current = nextValue;
-      const cursor = documentPositionToTextOffset(nextEditor, nextEditor.state.selection.from);
+      const cursor = documentPositionToTextOffset(
+        nextEditor.state.doc,
+        nextEditor.state.selection.from,
+      );
       mentionRef.current?.handleChange(nextValue, cursor);
       requestAnimationFrame(() => {
         if (nextEditor.isDestroyed || nextEditor.view.composing) return;
@@ -342,25 +346,25 @@ function createEditorInputHandle(
     focus: () => editor?.commands.focus(),
     blur: () => editor?.commands.blur(),
     getSelectionStart: () =>
-      editor ? documentPositionToTextOffset(editor, editor.state.selection.from) : 0,
+      editor ? documentPositionToTextOffset(editor.state.doc, editor.state.selection.from) : 0,
     getSelectionEnd: () =>
-      editor ? documentPositionToTextOffset(editor, editor.state.selection.to) : 0,
+      editor ? documentPositionToTextOffset(editor.state.doc, editor.state.selection.to) : 0,
     setSelectionRange: (start, end) => {
       if (!editor) return;
       editor
         .chain()
         .focus()
         .setTextSelection({
-          from: textOffsetToDocumentPosition(editor, start),
-          to: textOffsetToDocumentPosition(editor, end),
+          from: textOffsetToDocumentPosition(editor.state.doc, start),
+          to: textOffsetToDocumentPosition(editor.state.doc, end),
         })
         .run();
     },
     getCaretRect: () => {
       if (!editor) return null;
       const position = textOffsetToDocumentPosition(
-        editor,
-        documentPositionToTextOffset(editor, editor.state.selection.from),
+        editor.state.doc,
+        documentPositionToTextOffset(editor.state.doc, editor.state.selection.from),
       );
       const rect = editor.view.coordsAtPos(position);
       return new DOMRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
@@ -387,10 +391,10 @@ function createEditorInputHandle(
         .focus()
         .insertContentAt(
           {
-            from: textOffsetToDocumentPosition(editor, from),
-            to: textOffsetToDocumentPosition(editor, to),
+            from: textOffsetToDocumentPosition(editor.state.doc, from),
+            to: textOffsetToDocumentPosition(editor.state.doc, to),
           },
-          text,
+          createPlainTextFragment(editor, text),
         )
         .run();
       reconcilePromptReferences(editor, promptNames);
@@ -401,36 +405,23 @@ function createEditorInputHandle(
 
 function reconcilePromptReferences(editor: Editor, promptNames: readonly string[]) {
   if (editor.isDestroyed || editor.view.composing) return;
-  const preparedNames = [...promptNames];
-  let transaction = editor.state.tr;
-  let changed = false;
+  const currentDoc = editor.state.doc;
+  const nextDoc = editor.schema.nodeFromJSON(
+    buildTaskPromptDocument(serializeEditor(editor), promptNames),
+  );
+  if (nextDoc.eq(currentDoc)) return;
 
-  for (let index = 0, offset = 0; index < editor.state.doc.childCount; index += 1) {
-    const block = editor.state.doc.child(index);
-    if (block.type.name !== "paragraph") {
-      offset += block.nodeSize;
-      continue;
-    }
-    const blockText = serializeInlineContent(block);
-    const segments = splitMarkdownPromptMentionSegments(blockText, preparedNames);
-    const replacement = segmentsToNodes(editor, segments);
-    if (sameInlineContent(block, replacement)) {
-      offset += block.nodeSize;
-      continue;
-    }
-    const from = offset + 1;
-    transaction = transaction.replaceWith(
-      from,
-      from + block.content.size,
-      Fragment.fromArray(replacement),
-    );
-    changed = true;
-    offset += block.nodeSize;
-  }
-
-  if (changed) {
-    editor.view.dispatch(transaction.setMeta("addToHistory", false));
-  }
+  const anchor = documentPositionToTextOffset(currentDoc, editor.state.selection.anchor);
+  const head = documentPositionToTextOffset(currentDoc, editor.state.selection.head);
+  const transaction = editor.state.tr.replaceWith(0, currentDoc.content.size, nextDoc.content);
+  transaction.setSelection(
+    TextSelection.create(
+      transaction.doc,
+      textOffsetToDocumentPosition(transaction.doc, anchor),
+      textOffsetToDocumentPosition(transaction.doc, head),
+    ),
+  );
+  editor.view.dispatch(transaction.setMeta("addToHistory", false));
 }
 
 function serializeInlineContent(block: ProseMirrorNode): string {
@@ -443,21 +434,10 @@ function serializeInlineContent(block: ProseMirrorNode): string {
     .join("");
 }
 
-function segmentsToNodes(
-  editor: Editor,
-  segments: ReturnType<typeof splitMarkdownPromptMentionSegments>,
-): ProseMirrorNode[] {
+function createPlainTextFragment(editor: Editor, value: string): Fragment {
   const nodes: ProseMirrorNode[] = [];
-  for (const segment of segments) {
-    if (segment.kind === "prompt") {
-      nodes.push(
-        editor.schema.nodes.promptReference.create({ name: segment.name, value: segment.value }),
-      );
-      continue;
-    }
-    appendTextNodes(editor, nodes, segment.value);
-  }
-  return nodes;
+  appendTextNodes(editor, nodes, value);
+  return Fragment.fromArray(nodes);
 }
 
 function appendTextNodes(editor: Editor, nodes: ProseMirrorNode[], value: string) {
@@ -471,22 +451,17 @@ function appendTextNodes(editor: Editor, nodes: ProseMirrorNode[], value: string
   }
 }
 
-function sameInlineContent(block: ProseMirrorNode, replacement: ProseMirrorNode[]) {
-  if (block.childCount !== replacement.length) return false;
-  return replacement.every((next, index) => next.eq(block.child(index)));
-}
-
-function documentPositionToTextOffset(editor: Editor, position: number): number {
+function documentPositionToTextOffset(doc: ProseMirrorNode, position: number): number {
   let textOffset = 0;
   let childOffset = 0;
-  for (let index = 0; index < editor.state.doc.childCount; index += 1) {
-    const block = editor.state.doc.child(index);
+  for (let index = 0; index < doc.childCount; index += 1) {
+    const block = doc.child(index);
     const blockStart = childOffset + 1;
     const blockOffset = blockPositionToTextOffset(block, blockStart, position);
     if (blockOffset !== null) return textOffset + blockOffset;
     textOffset += serializeInlineContent(block).length;
     childOffset += block.nodeSize;
-    if (index < editor.state.doc.childCount - 1) textOffset += 1;
+    if (index < doc.childCount - 1) textOffset += 1;
   }
   return textOffset;
 }
@@ -525,11 +500,11 @@ function nodePositionToTextOffset(
   return position === nodeEnd ? textLength : 0;
 }
 
-function textOffsetToDocumentPosition(editor: Editor, target: number): number {
+function textOffsetToDocumentPosition(doc: ProseMirrorNode, target: number): number {
   let textOffset = 0;
   let childOffset = 0;
-  for (let index = 0; index < editor.state.doc.childCount; index += 1) {
-    const block = editor.state.doc.child(index);
+  for (let index = 0; index < doc.childCount; index += 1) {
+    const block = doc.child(index);
     const blockStart = childOffset + 1;
     const blockText = serializeInlineContent(block);
     const blockEndOffset = textOffset + blockText.length;
@@ -538,12 +513,12 @@ function textOffsetToDocumentPosition(editor: Editor, target: number): number {
     }
     textOffset = blockEndOffset;
     childOffset += block.nodeSize;
-    if (index < editor.state.doc.childCount - 1) {
+    if (index < doc.childCount - 1) {
       if (target === textOffset) return blockStart + block.content.size;
       textOffset += 1;
     }
   }
-  return editor.state.doc.content.size;
+  return doc.content.size;
 }
 
 function inlineTextOffsetToPosition(block: ProseMirrorNode, blockStart: number, target: number) {
