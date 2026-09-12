@@ -1035,12 +1035,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
 	}
-	journalOwnerID := reqWithWorktree.TaskEnvironmentID
+	// The journal is opened by the agentctl process, so concurrent sessions
+	// sharing one task environment must have separate files. A session remains
+	// the stable owner across agentctl replacement; the environment fallback is
+	// only for callers that do not provide a session identity.
+	journalOwnerID := reqWithWorktree.SessionID
 	if journalOwnerID == "" {
-		// Quick-chat sessions do not have a task environment. The durable
-		// delivery owner still needs a stable identity across agentctl
-		// replacement, so use the Kandev session rather than an execution ID.
-		journalOwnerID = reqWithWorktree.SessionID
+		journalOwnerID = reqWithWorktree.TaskEnvironmentID
 	}
 
 	var autoApproveOverride *bool

@@ -119,6 +119,8 @@ func TestLaunchBuildExecutorRequestUsesAuthoritativeKubernetesProfileConfig(t *t
 	req := &LaunchRequest{
 		ExecutorType:         string(models.ExecutorTypeKubernetes),
 		EnvironmentFinalized: true,
+		SessionID:            "session-1",
+		TaskEnvironmentID:    "environment-1",
 		Metadata: map[string]interface{}{
 			"executor_id":                              "executor-1",
 			MetadataKeyExecutorProfileID:               "profile-1",
@@ -140,6 +142,8 @@ func TestLaunchBuildExecutorRequestUsesAuthoritativeKubernetesProfileConfig(t *t
 	require.NoError(t, err)
 	require.Equal(t, []string{"profile-1"}, reader.profileArgs)
 	require.NotNil(t, backend.lastRequest)
+	require.Equal(t, "session-1", backend.lastRequest.DurableJournalOwnerID,
+		"sibling sessions sharing an environment must not contend on one bbolt journal")
 	metadata := backend.lastRequest.Metadata
 	require.Equal(t, "linux/arm64", metadata[MetadataKeyKubernetesProfilePlatform])
 	require.Equal(t, "trusted-main", metadata[MetadataKeyKubernetesProfileMainContainer])

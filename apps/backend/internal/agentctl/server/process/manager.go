@@ -483,7 +483,7 @@ func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	if m.deliveryJournalErr != nil || m.deliveryJournal == nil {
 		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
 	}
-	unresolved, err := m.deliveryJournal.HasUnresolvedWork(context.Background())
+	unresolved, err := m.deliveryJournal.HasUnresolvedSubmissions(context.Background())
 	if err != nil {
 		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
 	}
@@ -612,6 +612,17 @@ func (m *Manager) DeliverySubmissionIdentity() (sessionID, incarnationID string,
 		return "", "", 0
 	}
 	return m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration()
+}
+
+// RetireDeliverySubmission seals one uncertain submission only after a newer
+// harness generation has been admitted by the explicit recovery path.
+func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recoveryGeneration uint64) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
+	return err
 }
 
 // getBaseBranches returns a snapshot of cfg.BaseBranches under the

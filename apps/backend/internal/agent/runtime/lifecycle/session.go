@@ -686,6 +686,40 @@ func (sm *SessionManager) initializeACPConnection(
 	return ctx, result, nil
 }
 
+func retireUnresolvedDeliverySubmissions(
+	ctx context.Context,
+	client *agentctl.Client,
+	execution *AgentExecution,
+) error {
+	if client == nil || execution == nil || execution.SessionID == "" || execution.DeliveryHarnessGeneration == 0 {
+		return nil
+	}
+	submissions, err := client.ListDeliverySubmissions(ctx, execution.SessionID)
+	if err != nil {
+		return fmt.Errorf("list prior durable delivery submissions: %w", err)
+	}
+	for _, submission := range submissions {
+		if submission.HarnessGeneration >= execution.DeliveryHarnessGeneration || !submissionNeedsRecoveryRetirement(submission) {
+			continue
+		}
+		if err := client.RetireDeliverySubmission(ctx, submission.ID); err != nil {
+			return fmt.Errorf("retire durable delivery submission %s: %w", submission.ID, err)
+		}
+	}
+	return nil
+}
+
+func submissionNeedsRecoveryRetirement(submission journal.Submission) bool {
+	switch submission.State {
+	case journal.SubmissionPrepared, journal.SubmissionAccepted, journal.SubmissionDispatching, journal.SubmissionInterruptedUnknown:
+		return true
+	case journal.SubmissionCompleted:
+		return !submission.TerminalEventRetained
+	default:
+		return false
+	}
+}
+
 func (sm *SessionManager) applyProfileSessionLayers(
 	ctx context.Context,
 	execution *AgentExecution,
