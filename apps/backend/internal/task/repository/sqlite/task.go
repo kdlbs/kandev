@@ -752,11 +752,14 @@ func (r *Repository) readTaskWorkflowStepID(ctx context.Context, tx interface {
 		query += forUpdateClause
 	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&stepID)
-	if errors.Is(err, sql.ErrNoRows) || stepID == "" {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
 		return "", false, err
+	}
+	if stepID == "" {
+		return "", false, nil
 	}
 	return stepID, true, nil
 }
