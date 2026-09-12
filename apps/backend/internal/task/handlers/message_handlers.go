@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1356,8 +1357,8 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
 		if !isAgentReportedError(err) &&
-			!isPromptErrorOwnedByRecovery(err) &&
-			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) {
+			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) &&
+			!isPromptErrorOwnedByRecovery(err) {
 			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
 		}
 	}
@@ -1477,14 +1478,11 @@ func isTimeoutError(err error) bool {
 // runs, so retrying here cannot double-send a prompt the agent already
 // accepted.
 //
-// ResumeTaskSession and waitForSessionReady failures return their own errors:
-// neither step reaches PromptTask, so masking the concrete failure with the
-// original pre-dispatch error loses the cause. Once the retry's own PromptTask call runs,
-// though, that call IS a real dispatch attempt — its error is authoritative
-// and takes over from origErr, so the caller's isAgentReportedError check
-// still fires correctly (e.g. the retry failing with a wrapped
-// lifecycle.ErrAgentReported must suppress createPromptErrorMessage, not get
-// masked by the unrelated original timeout).
+// The compound operation returns its concrete resume/readiness failure before
+// prompt admission, preserving that cause instead of masking it with origErr.
+// Once provider admission starts, the retry's prompt error is authoritative,
+// so the caller's isAgentReportedError check still handles a wrapped
+// lifecycle.ErrAgentReported without creating a duplicate message.
 func (h *MessageHandlers) handlePromptWithResume(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -1506,45 +1504,25 @@ func (h *MessageHandlers) handlePromptWithResume(
 				zap.Error(retryErr))
 			if errors.Is(retryErr, orchestrator.ErrResumeAttemptCancelled) ||
 				h.hasActiveSessionRecovery(ctx, taskID, sessionID, retryErr) {
-				return errPromptRecoveryCardOwnsFailure
+				// Preserve the concrete resume/readiness/provider failure below the
+				// suppression sentinel. Queueing and diagnostics still need to see
+				// ErrSessionRuntimeUnavailable and recovery correlation must retain
+				// the attempt identity carried by retryErr.
+				return fmt.Errorf("%w: %w", errPromptRecoveryCardOwnsFailure, retryErr)
 			}
 			return retryErr
 		}
 		return nil
 	}
 
-	if resumeErr := h.orchestrator.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
-		h.logger.Warn("failed to resume task session for prompt",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(resumeErr))
-		if errors.Is(resumeErr, orchestrator.ErrResumeAttemptCancelled) ||
-			h.hasActiveSessionRecovery(ctx, taskID, sessionID, resumeErr) {
-			return errPromptRecoveryCardOwnsFailure
-		}
-		return resumeErr
-	}
-	// Wait for the agent to become ready after resume.
-	// ResumeTaskSession starts the agent asynchronously, so we poll
-	// the session state until it transitions to a promptable state.
-	if waitErr := h.waitForSessionReady(ctx, sessionID); waitErr != nil {
-		h.logger.Warn("session did not become ready after resume",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(waitErr))
-		if h.hasActiveSessionRecovery(ctx, taskID, sessionID, waitErr) {
-			return errPromptRecoveryCardOwnsFailure
-		}
-		return waitErr
-	}
-	if _, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false); err != nil {
-		h.logger.Warn("retry prompt failed after resume",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return err
-	}
-	return nil
+	// A split ResumeTaskSession → wait → PromptTask sequence cannot preserve
+	// recovery ownership across cancellation. The production adapter implements
+	// the compound operation above; an older adapter must fail closed instead of
+	// dispatching the prompt without an attempt identity.
+	h.logger.Warn("session recovery retry is unavailable without compound ownership",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+	return origErr
 }
 
 // createPromptErrorMessage creates an agent error message visible to the user when

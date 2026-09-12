@@ -31,8 +31,8 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	// while one observed after reset is retained for the replacement turn.
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.ProtocolMessageID != "" {
-		m.flushPendingLegacyMessage(execution)
-		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text)
+		m.flushPendingLegacyMessageWithAttempt(execution, event.AttemptID)
+		m.publishProtocolMessageWithAttempt(execution, event.ProtocolMessageID, event.Text, event.AttemptID)
 		return
 	}
 	execution.messageMu.Lock()
@@ -57,7 +57,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
-		m.publishStreamingMessage(execution, toFlush)
+		m.publishStreamingMessageWithAttempt(execution, toFlush, event.AttemptID)
 	}
 }
 
@@ -67,8 +67,8 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 		return
 	}
 	if event.ProtocolMessageID != "" {
-		m.flushPendingLegacyThinking(execution)
-		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText)
+		m.flushPendingLegacyThinkingWithAttempt(execution, event.AttemptID)
+		m.publishProtocolThinkingWithAttempt(execution, event.ProtocolMessageID, event.ReasoningText, event.AttemptID)
 		return
 	}
 	execution.messageMu.Lock()
@@ -87,7 +87,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
-		m.publishStreamingThinking(execution, toFlush)
+		m.publishStreamingThinkingWithAttempt(execution, toFlush, event.AttemptID)
 	}
 }
 
@@ -188,20 +188,18 @@ func (m *Manager) handleCompleteEventMarkState(
 	}
 }
 
-// handleCompleteEventSignal sends the completion signal on the promptDoneCh channel.
-func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
+func handleCompleteEventSignalLeased(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
 	stopReason := "end_turn"
 	errorMsg := ""
 	if isError {
 		stopReason = "error"
 		errorMsg = extractErrorMessage(event)
 	} else if event.Data != nil {
-		// Read StopReason from the complete event (set by ACP adapter from PromptResponse)
 		if sr, ok := event.Data["stop_reason"].(string); ok && sr != "" {
 			stopReason = sr
 		}
 	}
-	execution.signalPromptCompletionForStartupGeneration(
+	execution.signalPromptCompletionForStartupGenerationLeased(
 		execution.startupAttemptSnapshot(),
 		PromptCompletionSignal{
 			StopReason:       stopReason,
@@ -296,7 +294,7 @@ func (m *Manager) finishPromptCompletion(
 	claim promptCompletionClaim,
 	failureEvidence *PromptAttemptEvidence,
 ) {
-	handleCompleteEventSignal(execution, event, isError)
+	handleCompleteEventSignalLeased(execution, event, isError)
 	if event.PromptGeneration == 0 || isError {
 		if isError {
 			setProviderError(execution, event.ProviderError)
@@ -330,6 +328,19 @@ func setProviderError(execution *AgentExecution, providerError *streams.Provider
 
 // handleCompleteEvent handles a "complete" agent event: flushes buffers, marks state, and signals SendPrompt.
 func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	startupGeneration := execution.startupAttemptSnapshot()
+	handled := false
+	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		event.AttemptID = attemptID
+		handled = m.handleCompleteEventLeased(execution, event)
+	})
+	return accepted && handled
+}
+
+// handleCompleteEventLeased processes a completion while its startup callback
+// lease is held by the event dispatcher. Direct test and legacy callers use
+// handleCompleteEvent, which acquires that lease before entering here.
+func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -386,7 +397,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 		zap.Bool("is_error", isError))
 
 	// Flush the message buffer to publish any remaining content as a streaming message.
-	flushedText := m.flushMessageBuffer(execution)
+	flushedText := m.flushMessageBufferWithAttempt(execution, event.AttemptID)
 	execution.messageMu.Lock()
 	execution.clearProtocolMessageCorrelationLocked()
 	execution.messageMu.Unlock()
@@ -428,7 +439,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 		})
 		// flushMessageBuffer publishes any remaining buffered content through
 		// the streaming path itself and always returns "".
-		m.flushMessageBuffer(execution)
+		m.flushMessageBufferWithAttempt(execution, event.AttemptID)
 	}
 	m.flushAssistantHistory(execution)
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
@@ -468,7 +479,7 @@ func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.Age
 	}
 	data["is_error"] = true
 	event.Data = data
-	return m.handleCompleteEvent(execution, &event)
+	return m.handleCompleteEventLeased(execution, &event)
 }
 
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.
@@ -653,7 +664,7 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 			return
 		}
 
-		m.flushMessageBuffer(execution)
+		m.flushMessageBufferWithAttempt(execution, attemptID)
 		m.flushAssistantHistory(execution)
 		m.persistExecutorRunning(context.Background(), updated)
 		m.publishStreamDisconnectErrorWithAttempt(execution, err, attemptID)
@@ -664,7 +675,7 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 	// after promptDoneCh is signaled. Drain the partial assistant transcript
 	// here as well as at prompt setup; the shared buffer lock makes either
 	// path the single owner and prevents a later reset from dropping it.
-	m.flushMessageBuffer(execution)
+	m.flushMessageBufferWithAttempt(execution, attemptID)
 	m.flushAssistantHistory(execution)
 
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusFailed); err != nil {
@@ -682,29 +693,36 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 	promptGeneration uint64,
 	startupGeneration uint64,
 ) {
-	if !execution.acceptsStartupAttempt(startupGeneration) {
+	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		if !execution.signalPromptCompletionForStartupGenerationLeased(
+			startupGeneration,
+			PromptCompletionSignal{
+				IsError:          true,
+				Error:            "agent stream disconnected: " + err.Error(),
+				PromptGeneration: promptGeneration,
+			},
+		) {
+			return
+		}
+		// A startup stream can disconnect before ACP session initialization. The
+		// startup caller owns that failure and may still perform the bounded npm
+		// recovery, so do not publish an intermediate failed state here.
+		if promptGeneration == 0 && !execution.isSessionInitialized() {
+			m.logger.Debug("ignoring startup stream disconnect before ACP initialization",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("startup_generation", startupGeneration),
+				zap.Error(err))
+			return
+		}
+		m.handleStreamDisconnectWithAttempt(execution, err, promptGeneration, attemptID)
+	})
+	if !accepted {
 		m.logger.Debug("ignoring stale managed-runtime stream disconnect",
 			zap.String("execution_id", execution.ID),
 			zap.Uint64("stream_startup_generation", startupGeneration),
 			zap.Uint64("current_startup_generation", execution.startupAttemptSnapshot()))
 		return
 	}
-	// A startup stream can disconnect before ACP session initialization. The
-	// startup caller owns that failure and may still perform the bounded npm
-	// recovery, so do not publish an intermediate failed state here.
-	if promptGeneration == 0 && !execution.isSessionInitialized() {
-		m.logger.Debug("ignoring startup stream disconnect before ACP initialization",
-			zap.String("execution_id", execution.ID),
-			zap.Uint64("startup_generation", startupGeneration),
-			zap.Error(err))
-		return
-	}
-	m.handleStreamDisconnectWithAttempt(
-		execution,
-		err,
-		promptGeneration,
-		execution.startupAttemptIDSnapshot(startupGeneration),
-	)
 }
 
 func (m *Manager) publishStreamDisconnectError(execution *AgentExecution, err error) {
@@ -751,13 +769,13 @@ func (m *Manager) handlePromptHandoffEvent(
 		return
 	}
 
-	m.flushMessageBuffer(execution)
+	m.flushMessageBufferWithAttempt(execution, event.AttemptID)
 	execution.messageMu.Lock()
 	execution.clearProtocolMessageCorrelationLocked()
 	execution.messageMu.Unlock()
 	m.flushAssistantHistory(execution)
 
-	execution.signalPromptCompletionForStartupGeneration(
+	execution.signalPromptCompletionForStartupGenerationLeased(
 		execution.startupAttemptSnapshot(),
 		PromptCompletionSignal{
 			StopReason:       streams.EventTypeForegroundIdle,
@@ -768,7 +786,10 @@ func (m *Manager) handlePromptHandoffEvent(
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	m.handleAgentEventWithAttempt(execution, event, event.AttemptID)
+	startupGeneration := execution.startupAttemptSnapshot()
+	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		m.handleAgentEventWithAttempt(execution, event, attemptID)
+	})
 }
 
 func (m *Manager) handleAgentEventWithAttempt(
@@ -838,7 +859,7 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 		m.handleErrorEvent(execution, *event)
 		return true
 	case toolStatusComplete:
-		return !m.handleCompleteEvent(execution, event)
+		return !m.handleCompleteEventLeased(execution, event)
 	case "permission_request":
 		m.logger.Debug("permission request received",
 			zap.String("execution_id", execution.ID),
@@ -900,23 +921,23 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 	event agentctl.AgentEvent,
 	startupGeneration uint64,
 ) {
-	if !execution.acceptsStartupAttempt(startupGeneration) {
+	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		event.AttemptID = attemptID
+		if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {
+			m.logger.Debug("ignoring startup completion before ACP initialization",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("startup_generation", startupGeneration))
+			return
+		}
+		m.handleAgentEventWithAttempt(execution, event, attemptID)
+	})
+	if !accepted {
 		m.logger.Debug("ignoring stale managed-runtime agent event",
 			zap.String("execution_id", execution.ID),
 			zap.String("event_type", event.Type),
 			zap.Uint64("event_startup_generation", startupGeneration),
 			zap.Uint64("current_startup_generation", execution.startupAttemptSnapshot()))
-		return
 	}
-	attemptID := execution.startupAttemptIDSnapshot(startupGeneration)
-	event.AttemptID = attemptID
-	if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {
-		m.logger.Debug("ignoring startup completion before ACP initialization",
-			zap.String("execution_id", execution.ID),
-			zap.Uint64("startup_generation", startupGeneration))
-		return
-	}
-	m.handleAgentEventWithAttempt(execution, event, attemptID)
 }
 
 func agentEventDataString(data map[string]any, key string) string {

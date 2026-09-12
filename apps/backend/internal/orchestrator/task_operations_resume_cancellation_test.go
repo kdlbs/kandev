@@ -40,6 +40,29 @@ func TestResumeAttemptCancellationInvalidatesOnlyTheCancelledAttempt(t *testing.
 	second.finish(registry)
 }
 
+func TestResumeAttemptRegistryRetainsCancelledAttemptOnce(t *testing.T) {
+	registry := newResumeAttemptRegistry()
+	first, owner := registry.begin(context.Background(), "task-retain-once", "session-retain-once")
+	if !owner {
+		t.Fatal("first resume attempt was not admitted as the owner")
+	}
+	if !registry.invalidate(first.sessionID) {
+		t.Fatal("first resume attempt was not cancelled")
+	}
+	second, owner := registry.begin(context.Background(), first.taskID, first.sessionID)
+	if !owner {
+		t.Fatal("replacement resume attempt was not admitted")
+	}
+	if got := len(registry.tombstones[first.sessionID]); got != 1 {
+		t.Fatalf("tombstones after replacement = %d, want 1", got)
+	}
+	first.finish(registry)
+	if got := len(registry.tombstones[first.sessionID]); got != 1 {
+		t.Fatalf("tombstones after old owner returned = %d, want 1", got)
+	}
+	second.finish(registry)
+}
+
 func TestResumeAttemptCancellationInterruptsDetachedContext(t *testing.T) {
 	requestCtx, cancelRequest := context.WithCancel(context.Background())
 	registry := newResumeAttemptRegistry()
@@ -65,6 +88,73 @@ func TestResumeAttemptCancellationInterruptsDetachedContext(t *testing.T) {
 		t.Fatalf("cancelled attempt validation error = %v, want ErrResumeAttemptCancelled", err)
 	}
 	attempt.finish(registry)
+}
+
+func TestResumeAttemptRegistryFencesEvictedCancelledIdentities(t *testing.T) {
+	const sessionID = "session-evicted-attempt"
+	registry := newResumeAttemptRegistry()
+	first, owner := registry.begin(context.Background(), "task-evicted-attempt", sessionID)
+	if !owner {
+		t.Fatal("first resume attempt was not admitted as the owner")
+	}
+	first.setExecutionID("execution-reused")
+	firstID := first.identity()
+	if !registry.invalidate(sessionID) {
+		t.Fatal("first resume attempt was not cancelled")
+	}
+	first.finish(registry)
+
+	for i := 0; i < maxResumeAttemptTombstones; i++ {
+		attempt, admitted := registry.begin(context.Background(), "task-evicted-attempt", sessionID)
+		if !admitted {
+			t.Fatalf("replacement resume attempt %d was not admitted", i)
+		}
+		if !registry.invalidate(sessionID) {
+			t.Fatalf("replacement resume attempt %d was not cancelled", i)
+		}
+		attempt.setExecutionID("execution-reused")
+		attempt.finish(registry)
+	}
+
+	if got := len(registry.tombstones[sessionID]); got != maxResumeAttemptTombstones {
+		t.Fatalf("tombstone count = %d, want bounded count %d", got, maxResumeAttemptTombstones)
+	}
+	service := &Service{resumeAttempts: registry}
+	if service.resumeAttemptAllowsExecution(sessionID, "execution-reused", firstID) {
+		t.Fatal("an evicted cancelled attempt regained execution ownership")
+	}
+	if service.resumeAttemptAllowsExecution(sessionID, "execution-reused", "resume-18446744073709551615") {
+		t.Fatal("an unknown numeric callback identity bypassed recovery history fencing")
+	}
+	if registry.canCleanup(first) {
+		t.Fatal("an evicted cancelled attempt regained cleanup ownership")
+	}
+}
+
+func TestResumeAttemptBindsFirstCallbackExecutionAndFencesUntaggedCompletion(t *testing.T) {
+	const sessionID = "session-first-callback-execution"
+	registry := newResumeAttemptRegistry()
+	attempt, owner := registry.begin(context.Background(), "task-first-callback-execution", sessionID)
+	if !owner {
+		t.Fatal("resume attempt was not admitted as the owner")
+	}
+	service := &Service{resumeAttempts: registry}
+	attemptID := attempt.identity()
+
+	if !service.resumeAttemptAllowsExecution(sessionID, "execution-first", attemptID) {
+		t.Fatal("the current attempt did not bind its first callback execution")
+	}
+	if got := attempt.execution(); got != "execution-first" {
+		t.Fatalf("bound execution = %q, want execution-first", got)
+	}
+	if service.resumeAttemptAllowsExecution(sessionID, "execution-other", attemptID) {
+		t.Fatal("the current attempt accepted a callback from a different execution")
+	}
+
+	attempt.finish(registry)
+	if service.resumeAttemptAllowsExecution(sessionID, "execution-first") {
+		t.Fatal("an untagged callback was accepted after the attempt finished")
+	}
 }
 
 func TestResumeTaskSessionAndPrompt_CancelAtContinuationBarrierDoesNotDispatchPrompt(t *testing.T) {
@@ -143,7 +233,7 @@ func TestResumeTaskSessionAndPrompt_CancelAtContinuationBarrierDoesNotDispatchPr
 
 	select {
 	case <-continuationReached:
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("resume did not reach the prompt continuation barrier")
 	}
 
@@ -156,7 +246,7 @@ func TestResumeTaskSessionAndPrompt_CancelAtContinuationBarrierDoesNotDispatchPr
 		if cancelErr != nil {
 			t.Fatalf("CancelAgent: %v", cancelErr)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("CancelAgent did not settle while the continuation was waiting")
 	}
 
@@ -166,7 +256,7 @@ func TestResumeTaskSessionAndPrompt_CancelAtContinuationBarrierDoesNotDispatchPr
 		if !errors.Is(resumeErr, ErrResumeAttemptCancelled) {
 			t.Fatalf("resume continuation error = %v, want ErrResumeAttemptCancelled", resumeErr)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("resume did not return after the cancelled continuation was released")
 	}
 
@@ -235,7 +325,7 @@ func TestPromptTask_ResumeAttemptKeepsCancellationOutOfAcceptanceCallback(t *tes
 	}()
 	select {
 	case <-acceptanceEntered:
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("prompt did not reach the provider acceptance callback")
 	}
 
@@ -253,7 +343,7 @@ func TestPromptTask_ResumeAttemptKeepsCancellationOutOfAcceptanceCallback(t *tes
 		if promptErr != nil && !errors.Is(promptErr, ErrResumeAttemptCancelled) {
 			t.Fatalf("prompt after acceptance barrier: %v", promptErr)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("prompt did not return after acceptance callback completed")
 	}
 	select {
@@ -261,7 +351,7 @@ func TestPromptTask_ResumeAttemptKeepsCancellationOutOfAcceptanceCallback(t *tes
 		if cancelErr != nil {
 			t.Fatalf("CancelAgent: %v", cancelErr)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("CancelAgent did not settle after acceptance callback completed")
 	}
 
@@ -323,7 +413,7 @@ func TestResumeTaskSession_CancelDuringReadyWaitReturnsTypedCancellation(t *test
 	}()
 	select {
 	case <-readyChecked:
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("ResumeTaskSession did not reach the readiness wait")
 	}
 
@@ -336,7 +426,7 @@ func TestResumeTaskSession_CancelDuringReadyWaitReturnsTypedCancellation(t *test
 		if cancelErr != nil {
 			t.Fatalf("CancelAgent: %v", cancelErr)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("CancelAgent did not settle the readiness wait")
 	}
 
@@ -345,7 +435,7 @@ func TestResumeTaskSession_CancelDuringReadyWaitReturnsTypedCancellation(t *test
 		if !errors.Is(resumeErr, ErrResumeAttemptCancelled) {
 			t.Fatalf("ResumeTaskSession error = %v, want ErrResumeAttemptCancelled", resumeErr)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(resumeCancellationTestTimeout(t)):
 		t.Fatal("ResumeTaskSession did not return after cancellation")
 	}
 }
@@ -641,4 +731,16 @@ func assertResumeToken(t *testing.T, repo interface {
 	if running.ResumeToken != want {
 		t.Fatalf("resume token for %s = %q, want %q", sessionID, running.ResumeToken, want)
 	}
+}
+
+func resumeCancellationTestTimeout(t *testing.T) time.Duration {
+	t.Helper()
+	const safetyMargin = time.Second
+	const defaultTimeout = 10 * time.Second
+	if deadline, ok := t.Deadline(); ok {
+		if remaining := time.Until(deadline) - safetyMargin; remaining > 0 && remaining < defaultTimeout {
+			return remaining
+		}
+	}
+	return defaultTimeout
 }

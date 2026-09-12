@@ -136,7 +136,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 ) AgentEventPayload {
 	payload := AgentEventPayload{
 		AgentExecutionID:   execution.ID,
-		AttemptID:          execution.ResumeAttemptID,
+		AttemptID:          execution.currentStartupAttemptID(),
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
@@ -184,7 +184,7 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		SessionID:         execution.SessionID,
 		TaskEnvironmentID: execution.TaskEnvironmentID,
 		AgentExecutionID:  execution.ID,
-		AttemptID:         execution.ResumeAttemptID,
+		AttemptID:         execution.currentStartupAttemptID(),
 		ErrorMessage:      errMsg,
 		FailureCode:       execution.FailureCode,
 		FailureDetails:    execution.FailureDetails,
@@ -219,7 +219,7 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 		return
 	}
 	if attemptID == "" {
-		attemptID = execution.ResumeAttemptID
+		attemptID = execution.currentStartupAttemptID()
 	}
 
 	payload := ACPSessionCreatedPayload{
@@ -258,7 +258,7 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		attemptID = event.AttemptID
 	}
 	if attemptID == "" {
-		attemptID = execution.ResumeAttemptID
+		attemptID = execution.currentStartupAttemptID()
 	}
 
 	// event.SessionID is the ACP session ID (internal agent protocol session)

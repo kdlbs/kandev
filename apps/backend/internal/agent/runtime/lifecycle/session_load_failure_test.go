@@ -25,6 +25,10 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			message: "internal error: provider failed while loading the session",
 		},
 		{
+			name:    "unrelated missing resource",
+			message: "internal error: resource not found while resolving configuration",
+		},
+		{
 			name:    "authentication failure",
 			message: "authentication required",
 		},

@@ -36,14 +36,15 @@ func (r *resumeRetryRepo) CreateMessage(_ context.Context, message *models.Messa
 // PromptTask's first call with a caller-supplied error and succeeds on every
 // subsequent call, so tests can observe whether forwardMessageAsPrompt
 // retries automatically after a recoverable failure. Setting retryPromptErr
-// additionally fails the second (retry) call, so tests can assert that a
-// failed retry still surfaces the original error rather than the retry's own.
+// additionally fails the second (retry) call, so tests can assert that the
+// retry's provider error remains authoritative.
 type resumeRetryOrchestrator struct {
 	promptErr        error
 	retryPromptErr   error
 	promptCalls      int
 	resumeCalls      int
 	resumeErr        error
+	resumePromptErr  error
 	recoveryOwned    bool
 	recoveryIdentity orchestrator.SessionRecoveryIdentity
 	callOrder        []string
@@ -104,6 +105,21 @@ func (o *resumeRetryOrchestrator) ResumeTaskSession(context.Context, string, str
 		return &orchestrator.SessionRecoveryFailure{Err: o.resumeErr, Identity: o.recoveryIdentity}
 	}
 	return o.resumeErr
+}
+
+func (o *resumeRetryOrchestrator) ResumeTaskSessionAndPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	if err := o.ResumeTaskSession(ctx, taskID, sessionID); err != nil {
+		return nil, err
+	}
+	if o.resumePromptErr != nil {
+		return nil, o.resumePromptErr
+	}
+	return o.PromptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, false)
 }
 
 func (o *resumeRetryOrchestrator) HasActiveSessionRecoveryForFailure(_ context.Context, _, _ string, failure error) bool {
@@ -241,6 +257,45 @@ func TestForwardMessageAsPrompt_QueuesInsteadOfSurfacingWhenResumeRetryAlsoFails
 	assert.Equal(t, 1, orch.resumeCalls)
 	assert.Equal(t, 1, orch.queuePromptCalls, "a pre-dispatch runtime-unavailable failure must be queued, not dropped")
 	assert.Empty(t, repo.createdMessages, "a queued message must not also surface as an error")
+}
+
+// TestForwardMessageAsPrompt_QueuesConcreteRuntimeFailureOwnedByRecovery
+// covers the case where the compound retry returns a recovery-correlated
+// failure that also carries ErrSessionRuntimeUnavailable. The recovery card
+// owns the visible failure, but the prompt still belongs in the queue for the
+// replacement runtime. Suppression must not erase the queue classification.
+func TestForwardMessageAsPrompt_QueuesConcreteRuntimeFailureOwnedByRecovery(t *testing.T) {
+	readinessErr := fmt.Errorf("%w: %w", orchestrator.ErrAgentNotReadyForPrompt, context.DeadlineExceeded)
+	promptErr := fmt.Errorf("failed to ensure session is running: %w", readinessErr)
+	resumeErr := fmt.Errorf("%w: resume: no executor record", orchestrator.ErrSessionRuntimeUnavailable)
+
+	repo := &resumeRetryRepo{
+		sessionStateSequencer: sessionStateSequencer{
+			states: []models.TaskSessionState{models.TaskSessionStateWaitingForInput},
+		},
+	}
+	orch := &resumeRetryOrchestrator{
+		promptErr:     promptErr,
+		resumeErr:     resumeErr,
+		recoveryOwned: true,
+		recoveryIdentity: orchestrator.SessionRecoveryIdentity{
+			AttemptID:   "attempt-1",
+			ExecutionID: "execution-1",
+		},
+	}
+	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+
+	h.forwardMessageAsPrompt(
+		context.Background(), "task-1", "session-1", "profile-1", "continue",
+		"", false, nil, nil, false, "",
+	)
+
+	assert.Equal(t, 1, orch.promptCalls)
+	assert.Equal(t, 1, orch.resumeCalls)
+	assert.Equal(t, 1, orch.queuePromptCalls,
+		"the concrete runtime-unavailable failure must still queue the prompt")
+	assert.Empty(t, repo.createdMessages,
+		"the matching recovery owner must suppress the duplicate error message")
 }
 
 // TestForwardMessageAsPrompt_SurfacesErrorWhenResumeRetryFailsForNonRuntimeError
@@ -441,9 +496,8 @@ func TestForwardMessageAsPrompt_SurfacesReadinessWaitError(t *testing.T) {
 	}
 	orch := &resumeRetryOrchestrator{promptErr: promptErr}
 	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
-	h.waitForSessionReadyFn = func(context.Context, string) error {
-		return errors.New("session failed after resume: session failed during resume")
-	}
+	waitErr := errors.New("session failed after resume: session failed during resume")
+	orch.resumePromptErr = waitErr
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",

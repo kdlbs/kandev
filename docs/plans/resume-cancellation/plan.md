@@ -36,11 +36,10 @@ Retained backend logs on September 11 show this sequence in Lisbon time:
 | 18:23:35 | Startup publishes a new provider conversation identity. |
 | 18:23:36 | One prompt dispatches and another receives the already-running rejection. |
 
-The log is `/root/.kandev/logs/backend-logs-2026-09-11-000022.log`.
-The task conversation records the generic failed-send message and no later
-agent response. These records confirm the overlap but do not identify why the
-provider load timed out. No claim about the provider's internal cause is needed
-for this repair.
+The retained backend log for the affected session records the generic
+failed-send message and no later agent response. These records confirm the
+overlap but do not identify why the provider load timed out. No claim about the
+provider's internal cause is needed for this repair.
 
 Current source still permits fallback after unclassified load errors.
 `isTransportDeadErr` recognizes typed deadlines but misses this serialized one.
@@ -173,6 +172,14 @@ Implementation checks on 2026-09-12:
 - Existing desktop failed-resume E2E coverage remains in `session-recovery.spec.ts` and shares the same `--fail-on-resume` fixture.
 - `make -C apps/backend build`: passed for the backend binaries and helper targets.
 - Specification lint and `git diff --check`: passed.
+- Review remediation rerun: startup callback leases cover boot-ready, stream,
+  token, failure, and disconnect mutation; prefixed attempt identities bind
+  the first callback execution and fence untagged or compacted callbacks; the
+  dynamic launch callback remains fail-closed while a recovery owner is active.
+- Review remediation tests include the exact handler cancellation-to-retry
+  barrier, provider acceptance barrier, same-execution replacement callbacks,
+  bounded cleanup, shutdown, browser disconnect, Auto-run-off queue parking,
+  unrelated historical recovery errors, and recovery-owned runtime queueing.
 
 Design validation on 2026-09-12:
 
@@ -185,8 +192,8 @@ The work-order references resolve to requirement 007 and its six criteria.
 The existing agents index already links both amended specification files.
 
 The aggregate `make -C apps/backend test` command remains non-green because
-the active Kandev environment injects `/root/.kandev/config.yaml` and port
-settings into configuration tests, the Office FTS migration fixtures are
+the active Kandev environment injects runtime configuration and port settings
+into configuration tests, the Office FTS migration fixtures are
 missing expected columns, and two unrelated process-probe tests are
 environment-sensitive. It also reports the existing nil-executor async test
 panic and one unrelated completed-task follow-up failure. The prescribed

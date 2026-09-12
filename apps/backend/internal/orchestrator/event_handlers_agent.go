@@ -2308,6 +2308,9 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 			zap.String("attempt_id", data.AttemptID))
 		lock.Unlock()
 		release()
+		s.cleanupStaleResumeExecution(
+			data.AgentExecutionID, data.TaskID, data.SessionID, data.AttemptID,
+		)
 		return
 	}
 

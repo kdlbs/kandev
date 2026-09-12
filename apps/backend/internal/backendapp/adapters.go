@@ -840,6 +840,10 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error {
+	return a.mgr.BindResumeAttempt(ctx, sessionID, attemptID)
+}
+
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsPassthroughSession(ctx, sessionID)

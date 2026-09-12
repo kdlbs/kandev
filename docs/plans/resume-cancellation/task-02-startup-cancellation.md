@@ -92,4 +92,9 @@ helpers: cancellation at the continuation and provider-acceptance barriers,
 readiness cancellation, old boot/token/failure callbacks after cancellation
 and same-execution replacement, browser disconnect, shutdown, exact cleanup,
 and parked Auto-run-off work. The lifecycle, orchestrator, executor, and
-message-handler race suites pass.
+message-handler race suites pass. Lifecycle startup callbacks now hold an
+immutable generation lease through mutation and publication. Registry attempt
+identities use an explicit prefix, bind the first callback execution
+atomically, and fail closed for untagged or compacted callbacks. Dynamic launch
+callbacks preserve their originating resume context instead of borrowing the
+current replacement identity.

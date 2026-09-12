@@ -130,6 +130,10 @@ preserved when recovery fails before redispatch. Existing recovery UI behavior
 remains available on desktop and phone, including wrapped details, reload
 persistence, keyboard access, touch targets, and transcript scrolling.
 
+The retry path also keeps the concrete runtime-unavailable sentinel under the
+recovery suppression marker, so unrelated queued work remains queued while
+the matching recovery owner suppresses only its duplicate error message.
+
 The focused handler and launch-error component tests, localization checks, and
 typecheck pass. Desktop delayed-resume cancel/retry, mobile delayed-resume
 cancel/retry, and mobile failed saved-session load E2E tests pass. The desktop

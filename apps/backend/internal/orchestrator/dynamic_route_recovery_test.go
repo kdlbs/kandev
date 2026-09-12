@@ -649,6 +649,41 @@ func TestHandleAgentProcessStartedSkipsCancelledSession(t *testing.T) {
 	}
 }
 
+func TestHandleAgentProcessStartedRejectsUntaggedCallbackDuringResume(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-untagged-start"
+		sessionID   = "session-dynamic-untagged-start"
+		executionID = "execution-dynamic-untagged-start"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil || !owner {
+		t.Fatalf("begin resume attempt: attempt=%v owner=%v err=%v", attempt, owner, err)
+	}
+	t.Cleanup(func() { attempt.finish(svc.resumeAttemptStore()) })
+
+	// finalizeLaunch's ordinary callback has no recovery value in its context.
+	// It must not borrow the active resume identity and settle the replacement
+	// route as if the callback belonged to that recovery attempt.
+	svc.handleAgentProcessStarted(ctx, taskID, sessionID, executionID)
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != "starting" {
+		t.Fatalf("route state after untagged callback = %#v, want unchanged starting generation %d", state, decision.Generation)
+	}
+}
+
 func TestHandleAgentProcessStartFailedMarksDynamicRouteActionRequired(t *testing.T) {
 	ctx := context.Background()
 	const (

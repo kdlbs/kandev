@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -32,16 +33,24 @@ type resumeAttempt struct {
 	finishOnce  sync.Once
 	executionMu sync.Mutex
 	executionID string
+	// retained is protected by resumeAttemptRegistry.mu. A cancelled attempt
+	// can be retained when a replacement is admitted and retained again when
+	// its owner eventually returns; both paths must describe one tombstone.
+	retained bool
 }
 
 type resumeAttemptRegistry struct {
-	mu         sync.Mutex
-	nextID     uint64
-	attempts   map[string]*resumeAttempt
-	tombstones map[string][]resumeAttemptTombstone
+	mu              sync.Mutex
+	nextID          uint64
+	attempts        map[string]*resumeAttempt
+	tombstones      map[string][]resumeAttemptTombstone
+	recoveryHistory map[string]struct{}
+	latestExecution map[string]map[string]uint64
 }
 
 const maxResumeAttemptTombstones = 16
+
+const resumeAttemptIdentityPrefix = "resume-"
 
 type resumeAttemptTombstone struct {
 	id          uint64
@@ -51,8 +60,10 @@ type resumeAttemptTombstone struct {
 
 func newResumeAttemptRegistry() *resumeAttemptRegistry {
 	return &resumeAttemptRegistry{
-		attempts:   make(map[string]*resumeAttempt),
-		tombstones: make(map[string][]resumeAttemptTombstone),
+		attempts:        make(map[string]*resumeAttempt),
+		tombstones:      make(map[string][]resumeAttemptTombstone),
+		recoveryHistory: make(map[string]struct{}),
+		latestExecution: make(map[string]map[string]uint64),
 	}
 }
 
@@ -70,10 +81,11 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 	if r.attempts == nil {
 		r.attempts = make(map[string]*resumeAttempt)
 	}
-	if current := r.attempts[sessionID]; current != nil && current.ctx.Err() == nil {
+	current := r.attempts[sessionID]
+	if current != nil && current.ctx.Err() == nil {
 		return current, false
 	}
-	if current := r.attempts[sessionID]; current != nil {
+	if current != nil {
 		r.retainLocked(current)
 		delete(r.attempts, sessionID)
 	}
@@ -154,6 +166,9 @@ func (r *resumeAttemptRegistry) canCleanup(attempt *resumeAttempt) bool {
 			return false
 		}
 	}
+	if latest := r.latestExecution[attempt.sessionID][executionID]; latest > attempt.id {
+		return false
+	}
 	return true
 }
 
@@ -164,16 +179,52 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 	if r.tombstones == nil {
 		r.tombstones = make(map[string][]resumeAttemptTombstone)
 	}
+	if r.recoveryHistory == nil {
+		r.recoveryHistory = make(map[string]struct{})
+	}
+	r.recoveryHistory[attempt.sessionID] = struct{}{}
+	executionID := attempt.execution()
+	if executionID != "" {
+		if r.latestExecution == nil {
+			r.latestExecution = make(map[string]map[string]uint64)
+		}
+		if r.latestExecution[attempt.sessionID] == nil {
+			r.latestExecution[attempt.sessionID] = make(map[string]uint64)
+		}
+		if attempt.id > r.latestExecution[attempt.sessionID][executionID] {
+			r.latestExecution[attempt.sessionID][executionID] = attempt.id
+		}
+	}
+	// begin() may retain a cancelled attempt before its asynchronous launch
+	// returns an execution ID. Complete the existing record when that ID
+	// becomes known, but never append a second record for the same attempt.
+	if attempt.retained {
+		entries := r.tombstones[attempt.sessionID]
+		for index := range entries {
+			if entries[index].id == attempt.id && entries[index].executionID == "" && executionID != "" {
+				entries[index].executionID = executionID
+				break
+			}
+		}
+		r.tombstones[attempt.sessionID] = entries
+		return
+	}
+	attempt.retained = true
 	entries := r.tombstones[attempt.sessionID]
 	entries = append(entries, resumeAttemptTombstone{
 		id:          attempt.id,
-		executionID: attempt.execution(),
+		executionID: executionID,
 		cancelled:   attempt.ctx.Err() != nil,
 	})
 	if len(entries) > maxResumeAttemptTombstones {
 		entries = entries[len(entries)-maxResumeAttemptTombstones:]
 	}
 	r.tombstones[attempt.sessionID] = entries
+}
+
+func (r *resumeAttemptRegistry) hasRecoveryHistoryLocked(sessionID string) bool {
+	_, ok := r.recoveryHistory[sessionID]
+	return ok
 }
 
 func (r *resumeAttemptRegistry) tombstoneLocked(sessionID string, attemptID uint64) (resumeAttemptTombstone, bool) {
@@ -183,6 +234,29 @@ func (r *resumeAttemptRegistry) tombstoneLocked(sessionID string, attemptID uint
 		}
 	}
 	return resumeAttemptTombstone{}, false
+}
+
+// canCleanupIdentity reports whether a stale callback still owns cleanup for
+// its exact retained attempt. Unknown or compacted identities fail closed so
+// a delayed failure cannot stop a later attempt that reused the execution ID.
+func (r *resumeAttemptRegistry) canCleanupIdentity(sessionID, executionID, originID string) bool {
+	if sessionID == "" || executionID == "" || originID == "" {
+		return false
+	}
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tombstone, found := r.tombstoneLocked(sessionID, id)
+	if !found || tombstone.executionID != executionID {
+		return false
+	}
+	if current := r.attempts[sessionID]; current != nil && current.id > id {
+		return false
+	}
+	return r.latestExecution[sessionID][executionID] <= id
 }
 
 func (r *resumeAttemptRegistry) cancelledExecutionLocked(sessionID, executionID string) bool {
@@ -208,7 +282,7 @@ func (attempt *resumeAttempt) identity() string {
 	if attempt == nil {
 		return ""
 	}
-	return strconv.FormatUint(attempt.id, 10)
+	return resumeAttemptIdentityPrefix + strconv.FormatUint(attempt.id, 10)
 }
 
 func (attempt *resumeAttempt) validate(registry *resumeAttemptRegistry) error {
@@ -216,7 +290,7 @@ func (attempt *resumeAttempt) validate(registry *resumeAttemptRegistry) error {
 		if attempt == nil {
 			return ErrResumeAttemptCancelled
 		}
-		return fmt.Errorf("%w: %d", ErrResumeAttemptCancelled, attempt.id)
+		return fmt.Errorf("%w: %s", ErrResumeAttemptCancelled, attempt.identity())
 	}
 	return nil
 }
@@ -337,13 +411,11 @@ func cancellableResumeContext(attempt *resumeAttempt) context.Context {
 func (s *Service) resumeAttemptAllowsExecution(sessionID, executionID string, origin ...string) bool {
 	originID := resumeAttemptOrigin(origin)
 	registry := s.resumeAttemptStore()
-	current, hasCurrent := registry.current(sessionID)
-	if hasCurrent && current != nil {
-		return s.activeResumeAttemptAllowsExecution(current, executionID, originID)
-	}
-
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
+	if current := registry.attempts[sessionID]; current != nil {
+		return activeResumeAttemptAllowsExecutionLocked(registry, current, executionID, originID)
+	}
 	return resumeAttemptTombstoneAllowsExecution(registry, sessionID, executionID, originID)
 }
 
@@ -354,19 +426,38 @@ func resumeAttemptOrigin(origin []string) string {
 	return origin[0]
 }
 
-func (s *Service) activeResumeAttemptAllowsExecution(
+func activeResumeAttemptAllowsExecutionLocked(
+	registry *resumeAttemptRegistry,
 	current *resumeAttempt,
 	executionID, originID string,
 ) bool {
-	if originID == "" {
+	if registry == nil || current == nil || originID == "" {
 		return false
 	}
-	id, err := strconv.ParseUint(originID, 10, 64)
-	if err != nil || id != current.id || s.validateResumeAttempt(current) != nil {
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok || id != current.id || current.ctx.Err() != nil {
 		return false
 	}
-	knownExecutionID := current.execution()
+	current.executionMu.Lock()
+	knownExecutionID := current.executionID
+	if knownExecutionID == "" && executionID != "" {
+		// The first callback may arrive before ResumeSessionWithOptions returns
+		// its execution. Bind that callback's execution while the registry lock
+		// still proves that this attempt is current; later callbacks must match
+		// this captured execution exactly.
+		current.executionID = executionID
+		knownExecutionID = executionID
+	}
+	current.executionMu.Unlock()
 	return knownExecutionID == "" || executionID == "" || knownExecutionID == executionID
+}
+
+func parseResumeAttemptIdentity(identity string) (uint64, bool) {
+	if !strings.HasPrefix(identity, resumeAttemptIdentityPrefix) {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(strings.TrimPrefix(identity, resumeAttemptIdentityPrefix), 10, 64)
+	return id, err == nil
 }
 
 func resumeAttemptTombstoneAllowsExecution(
@@ -374,23 +465,29 @@ func resumeAttemptTombstoneAllowsExecution(
 	sessionID, executionID, originID string,
 ) bool {
 	if originID == "" {
+		// Once this session has entered recovery, every recovery callback must
+		// carry its immutable identity. An untagged callback after the active
+		// entry is removed cannot be attributed safely, even if the completed
+		// attempt was successful rather than cancelled.
+		if registry.hasRecoveryHistoryLocked(sessionID) {
+			return false
+		}
 		return !registry.cancelledExecutionLocked(sessionID, executionID)
 	}
-	id, err := strconv.ParseUint(originID, 10, 64)
-	if err != nil {
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok {
 		// Ordinary execution callbacks may use a provider execution ID in
-		// the legacy attempt field. Only decimal registry identities can
-		// refer to a retained recovery attempt.
+		// the legacy attempt field. The resume- prefix makes registry identities
+		// unambiguous even when a provider execution ID is numeric.
 		return true
 	}
 	tombstone, found := registry.tombstoneLocked(sessionID, id)
 	if !found {
-		// An attempt ID is optional on callbacks from ordinary (non-resume)
-		// starts. Those callers historically used the execution ID in the
-		// same field, so an unknown origin is legacy/unmanaged identity. A
-		// retained tombstone remains authoritative: only an origin that was
-		// actually owned by a finished attempt is fenced here.
-		return true
+		// Provider execution identifiers are opaque and may remain in this
+		// legacy field, while decimal values are reserved for registry attempt
+		// identities. Once recovery has started for this session, fail closed
+		// for an unknown decimal identity even after its tombstone was compacted.
+		return !registry.hasRecoveryHistoryLocked(sessionID)
 	}
 	if tombstone.cancelled {
 		return false
@@ -460,4 +557,16 @@ func (s *Service) cleanupCancelledResumeAttempt(attempt *resumeAttempt) {
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
 	}
+}
+
+// cleanupStaleResumeExecution tears down an exact execution named by a late
+// resume failure. The retained attempt check is required before the generic
+// teardown claim: without it, an unknown or compacted callback could stop a
+// successor that reused the provider execution ID.
+func (s *Service) cleanupStaleResumeExecution(executionID, taskID, sessionID, attemptID string) {
+	if s == nil || s.executor == nil || executionID == "" ||
+		!s.resumeAttemptStore().canCleanupIdentity(sessionID, executionID, attemptID) {
+		return
+	}
+	go s.cleanupAgentExecution(executionID, taskID, sessionID)
 }

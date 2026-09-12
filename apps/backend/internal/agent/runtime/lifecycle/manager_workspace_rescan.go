@@ -59,7 +59,7 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 		TaskWorkspacePath: wt.TaskWorkspacePath,
 	}
 	if execution != nil {
-		payload.AttemptID = execution.ResumeAttemptID
+		payload.AttemptID = execution.currentStartupAttemptID()
 	}
 	event := bus.NewEvent(events.AgentctlReady, "branch-materializer", payload)
 	if err := m.eventPublisher.eventBus.Publish(ctx, events.AgentctlReady, event); err != nil {

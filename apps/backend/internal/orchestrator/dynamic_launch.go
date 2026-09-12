@@ -302,6 +302,10 @@ func (s *Service) handleAgentProcessStarted(
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
+	// The executor callback preserves the launch context's attempt value. An
+	// ordinary launch has no recovery identity and must be rejected while a
+	// newer recovery attempt is active; borrowing that newer identity here
+	// would let a delayed finalizeLaunch callback mutate the replacement route.
 	if !s.resumeAttemptAllowsExecution(sessionID, agentExecutionID, executor.ResumeAttemptIDFromContext(ctx)) {
 		return
 	}
@@ -328,6 +332,9 @@ func (s *Service) handleAgentProcessStartFailed(
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
+	// See handleAgentProcessStarted: missing origin is intentionally fail-closed
+	// during an active recovery attempt rather than being relabelled as the
+	// current attempt.
 	if !s.resumeAttemptAllowsExecution(sessionID, agentExecutionID, executor.ResumeAttemptIDFromContext(ctx)) {
 		return
 	}

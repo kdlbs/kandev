@@ -248,7 +248,7 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.String("existing_session_id", existingSessionID),
 			zap.String("reason", err.Error()),
 			zap.Bool("method_not_found", isMethodNotFoundErr(err)),
-			zap.Bool("capability_mismatch", strings.Contains(err.Error(), "LoadSession capability is false")),
+			zap.Bool("capability_mismatch", hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)")),
 			zap.Bool("session_unknown", isSessionUnknownErr(err)))
 		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
 	}
@@ -1877,8 +1877,10 @@ func isSessionUnknownErr(err error) bool {
 		return true
 	}
 	// Some agents return the error in the wrapped message string instead of a
-	// structured RequestError. Match the canonical phrase as a safety net.
-	return strings.Contains(err.Error(), "Resource not found")
+	// structured RequestError. Match only the canonical projected phrase; a
+	// broader substring would discard an unrelated internal error that happens
+	// to mention a missing resource.
+	return hasCanonicalSessionLoadMessage(err, "Resource not found")
 }
 
 // isSessionLoadFallbackErr reports the small set of session/load failures for
@@ -1892,10 +1894,18 @@ func isSessionLoadFallbackErr(err error) bool {
 	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) {
 		return true
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "method not found") ||
-		strings.Contains(msg, "loadsession capability is false") ||
-		strings.Contains(msg, "resource not found")
+	return hasCanonicalSessionLoadMessage(err, "Method not found") ||
+		hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)") ||
+		hasCanonicalSessionLoadMessage(err, "Resource not found")
+}
+
+func hasCanonicalSessionLoadMessage(err error, canonical string) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.TrimSpace(strings.ToLower(err.Error()))
+	want := strings.TrimSpace(strings.ToLower(canonical))
+	return message == want || strings.HasSuffix(message, ": "+want)
 }
 
 func isAgentStreamNotConnectedErr(err error) bool {

@@ -155,6 +155,10 @@ type agentPromptStreamRecoverer interface {
 	RecoverAgentPromptStream(ctx context.Context, sessionID string) error
 }
 
+type resumeAttemptBinder interface {
+	BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error
+}
+
 func isAgentPromptInProgressError(err error) bool {
 	return err != nil && errors.Is(err, ErrAgentPromptInProgress)
 }
@@ -2585,7 +2589,10 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		// branch together. Keep the registry join behavior explicit for callers
 		// that entered through a different recovery path: share the completed
 		// result instead of launching a second provider execution.
-		if waitErr := attempt.wait(context.WithoutCancel(ctx)); waitErr != nil {
+		waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+		waitErr := attempt.wait(waitCtx)
+		cancelWait()
+		if waitErr != nil {
 			return nil, waitErr
 		}
 		if attempt.context().Err() != nil {
@@ -2785,6 +2792,9 @@ func (s *Service) recoverAlreadyRunningResume(
 	existing, ok := s.executor.GetExecutionBySession(sessionID)
 	if !ok || existing == nil {
 		return nil, nil, executor.ErrExecutionAlreadyRunning
+	}
+	if err := s.bindExistingResumeAttempt(resumeCtx, sessionID); err != nil {
+		return nil, nil, err
 	}
 
 	readySession, waitErr := s.waitForResumedSessionReady(resumeCtx, sessionID)
@@ -3045,7 +3055,10 @@ func (s *Service) waitForSharedResumeAttempt(
 	sessionID string,
 	startupAttempt *resumeAttempt,
 ) (*resumeAttempt, error) {
-	if waitErr := startupAttempt.wait(context.WithoutCancel(ctx)); waitErr != nil {
+	waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+	waitErr := startupAttempt.wait(waitCtx)
+	cancelWait()
+	if waitErr != nil {
 		return nil, waitErr
 	}
 	if startupAttempt.context().Err() != nil {
@@ -3103,6 +3116,9 @@ func (s *Service) prepareExistingSessionForResume(
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); !ok || exec == nil {
 		return session, false, nil
 	}
+	if err := s.bindExistingResumeAttempt(ctx, sessionID); err != nil {
+		return nil, false, err
+	}
 	s.recoverAgentPromptStreamIfNeeded(ctx, sessionID)
 	readinessErr := s.waitForAgentPromptReady(ctx, sessionID)
 	if readinessErr == nil {
@@ -3119,6 +3135,21 @@ func (s *Service) prepareExistingSessionForResume(
 		return nil, false, reapErr
 	}
 	return refreshed, false, nil
+}
+
+func (s *Service) bindExistingResumeAttempt(ctx context.Context, sessionID string) error {
+	attemptID := executor.ResumeAttemptIDFromContext(ctx)
+	if attemptID == "" {
+		return nil
+	}
+	binder, ok := s.agentManager.(resumeAttemptBinder)
+	if !ok {
+		return fmt.Errorf("agent manager cannot bind resume attempt to existing execution")
+	}
+	if err := binder.BindResumeAttempt(ctx, sessionID, attemptID); err != nil {
+		return fmt.Errorf("failed to bind resume attempt to existing execution: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) coldResumeSession(
@@ -3317,7 +3348,9 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		zap.String("session_id", sessionID),
 		zap.String("agent_execution_id", executionID),
 		zap.Error(cause))
-	if err := s.executor.StopExecution(ctx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+	defer cancelCleanup()
+	if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
 		return err
 	}
 	s.markExecutionFailed(sessionID, executionID)
@@ -5282,7 +5315,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			guard, err := s.lockResumeAttemptAdmission(resumePromptCtx, sessionID, resumeAttempt)
 			if err != nil {
 				s.cleanupCancelledResumeAttempt(resumeAttempt)
-				s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
+				failureCtx, cancel := options.failureContext(resumePromptCtx)
+				defer cancel()
+				s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+				s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
 				return nil, err
 			}
 			var releaseOnce sync.Once
@@ -5294,6 +5330,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			defer releaseDispatchGuard()
 		} else if err := s.validateResumeAttempt(resumeAttempt); err != nil {
 			s.cleanupCancelledResumeAttempt(resumeAttempt)
+			failureCtx, cancel := options.failureContext(resumePromptCtx)
+			defer cancel()
+			s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+			s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
 			return nil, err
 		}
 	}
@@ -5363,6 +5403,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		}
 		if resumeErr := s.validateResumeAttempt(resumeAttempt); resumeErr != nil {
 			s.cleanupCancelledResumeAttempt(resumeAttempt)
+			failureCtx, cancel := options.failureContext(resumePromptCtx)
+			defer cancel()
+			s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+			s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
 			return nil, resumeErr
 		}
 		return s.finishPromptDispatchFailure(
@@ -5372,6 +5416,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	}
 	if resumeErr := s.validateResumeAttempt(resumeAttempt); resumeErr != nil {
 		s.cleanupCancelledResumeAttempt(resumeAttempt)
+		failureCtx, cancel := options.failureContext(resumePromptCtx)
+		defer cancel()
+		s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+		s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
 		return nil, resumeErr
 	}
 	if publicationErr != nil {
