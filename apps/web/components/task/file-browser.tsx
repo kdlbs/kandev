@@ -622,6 +622,7 @@ export function FileBrowser({
           addSourcesDisabledReason={addSourcesDisabledReason}
         />
         <FileBrowserTreeContent
+          key={`${sessionId}:${environmentId ?? ""}`}
           scrollAreaRef={scrollAreaRef}
           data={data}
           handlers={handlers}

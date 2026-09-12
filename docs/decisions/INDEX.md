@@ -266,4 +266,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-08-domain-owned-settings-catalog | [Discover settings through domain-owned contracts](2026-09-08-domain-owned-settings-catalog.md) | accepted | backend, frontend, protocol | 2026-09-08 |
 | 2026-09-09-task-completion-conversation-availability | [Separate task completion from conversation availability](2026-09-09-task-completion-conversation-availability.md) | accepted | workflow | 2026-09-09 |
 | 2026-09-09-count-application-files-for-pr-size | [Count Application Files for Pull Request Size](2026-09-09-count-application-files-for-pr-size.md) | accepted | workflow, infra | 2026-09-09 |
+| 2026-09-10-mobile-confirmation-surfaces | [Focus mobile confirmation in one surface](2026-09-10-mobile-confirmation-surfaces.md) | accepted | frontend | 2026-09-10 |
 | 2026-09-11-contribution-resume-preflight | [Separate resume admission from push history readiness](2026-09-11-contribution-resume-preflight.md) | proposed | backend, protocol, security | 2026-09-11 |

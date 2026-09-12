@@ -167,8 +167,9 @@ test.describe("Mobile code walkthrough", () => {
     await expect(discardConfirmation).toBeVisible();
     await expect(discardConfirmation).toHaveAttribute("role", "group");
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
     await prCapture.screenshot("mobile-walkthrough-discard-confirmation", {
-      caption: "Mobile walkthrough keeps discard confirmation inside its touch launcher",
+      caption: "Mobile walkthrough discard uses a named bottom sheet with stacked actions",
     });
     const actionBoxes = await Promise.all(
       ["Cancel", "Discard walkthrough"].map((name) =>

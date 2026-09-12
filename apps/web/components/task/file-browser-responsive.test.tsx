@@ -4,6 +4,8 @@ import type * as FileBrowserParts from "./file-browser-parts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const NODE_ACTIONS_TEST_ID = "file-tree-node-actions";
+
 const { responsive, node } = vi.hoisted(() => ({
   responsive: { isMobile: false, isFinePointer: true },
   node: { name: "README.md", path: "README.md", is_dir: false, size: 0 },
@@ -111,11 +113,19 @@ afterEach(() => {
 });
 
 describe("FileBrowser responsive touch action wiring", () => {
+  it("releases row-owned confirmations when the file session changes", () => {
+    responsive.isMobile = true;
+    const { rerender } = render(<FileBrowser sessionId="session-1" onOpenFile={vi.fn()} />);
+    const trigger = screen.getByTestId(NODE_ACTIONS_TEST_ID);
+    rerender(<FileBrowser sessionId="session-2" onOpenFile={vi.fn()} />);
+    expect(trigger.isConnected).toBe(false);
+    expect(screen.getByTestId(NODE_ACTIONS_TEST_ID)).not.toBe(trigger);
+  });
   it("renders the 44px action for a coarse-pointer desktop workbench", () => {
     responsive.isFinePointer = false;
     renderFileBrowser();
 
-    const trigger = screen.getByTestId("file-tree-node-actions");
+    const trigger = screen.getByTestId(NODE_ACTIONS_TEST_ID);
     expect(trigger.className).toContain("min-h-11");
     expect(trigger.className).toContain("min-w-11");
   });
@@ -123,13 +133,13 @@ describe("FileBrowser responsive touch action wiring", () => {
   it("hides the touch action only for fine-pointer desktop", () => {
     renderFileBrowser();
 
-    expect(screen.queryByTestId("file-tree-node-actions")).toBeNull();
+    expect(screen.queryByTestId(NODE_ACTIONS_TEST_ID)).toBeNull();
   });
 
   it("renders the touch action for mobile", () => {
     responsive.isMobile = true;
     renderFileBrowser();
 
-    expect(screen.getByTestId("file-tree-node-actions")).toBeTruthy();
+    expect(screen.getByTestId(NODE_ACTIONS_TEST_ID)).toBeTruthy();
   });
 });

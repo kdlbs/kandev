@@ -158,27 +158,23 @@ function PromptListItem({
           deleteAnchorRef={deleteAnchorRef}
           onStartEditing={onStartEditing}
           onOpenDelete={onOpenDelete}
-          onDeleteClose={onDeleteCancel}
-          onDeleteCancel={onDeleteCancel}
-          onDeleteConfirm={onDeleteConfirm}
           isBusy={isBusy}
           showCreate={showCreate}
           isFinePointer={isFinePointer}
           isDeleteTarget={isDeleteTarget}
         />
       </div>
-      {!isFinePointer ? (
-        <PromptDeleteConfirmation
-          promptName={prompt.name}
-          open={isDeleteTarget}
-          isFinePointer={isFinePointer}
-          anchorRef={deleteAnchorRef}
-          isBusy={isBusy}
-          onClose={onDeleteCancel}
-          onCancel={onDeleteCancel}
-          onConfirm={onDeleteConfirm}
-        />
-      ) : null}
+      <PromptDeleteConfirmation
+        promptId={prompt.id}
+        promptName={prompt.name}
+        open={isDeleteTarget}
+        isFinePointer={isFinePointer}
+        anchorRef={deleteAnchorRef}
+        isBusy={isBusy}
+        onClose={onDeleteCancel}
+        onCancel={onDeleteCancel}
+        onConfirm={onDeleteConfirm}
+      />
       {isEditing ? (
         <div className="space-y-3">
           <Input
