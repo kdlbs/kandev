@@ -8,6 +8,10 @@ const moveTasks = vi.fn();
 vi.mock("./use-task-actions", () => ({
   useTaskActions: () => ({ deleteTaskById, archiveTaskById }),
 }));
+vi.mock("./use-task-removal", () => ({
+  useTaskRemovalSuccessNotifier: () => vi.fn(),
+  useTaskRemoval: () => ({ removeTaskFromBoard: vi.fn(), runTaskRemovalBatch: vi.fn() }),
+}));
 vi.mock("./use-task-workflow-move", () => ({ useTaskWorkflowMove: () => moveTasks }));
 
 type FakeTask = { id: string; workflowStepId: string };
