@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { memo, useCallback, useRef } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
@@ -61,6 +61,20 @@ function useStableTaskIds(tasks: Task[]): string[] {
     previous.length === next.length && previous.every((taskId, index) => taskId === next[index]);
   if (!isUnchanged) previousRef.current = next;
   return isUnchanged ? previous : next;
+}
+
+function useStableExternalLinkAvailability(
+  availability: KanbanExternalLinkAvailability,
+): KanbanExternalLinkAvailability {
+  const previousRef = useRef(availability);
+  const previous = previousRef.current;
+  const isUnchanged =
+    previous.gitlab === availability.gitlab &&
+    previous.jira === availability.jira &&
+    previous.linear === availability.linear &&
+    previous.sentry === availability.sentry;
+  if (!isUnchanged) previousRef.current = availability;
+  return isUnchanged ? previous : availability;
 }
 
 /**
@@ -177,8 +191,6 @@ type VirtualizedTaskRowProps = Pick<
   | "repositories"
   | "externalLinkAvailability"
   | "showMaximizeButton"
-  | "deletingTaskId"
-  | "archivingTaskId"
   | "selectedIds"
   | "keyboardDraft"
   | "onCardKeyDown"
@@ -201,10 +213,81 @@ type VirtualizedTaskRowProps = Pick<
   insertionEdge: "top" | "bottom" | null;
   forceShowIndicator: boolean;
   columnTaskIds: string[];
+  isDeleting: boolean;
+  isArchiving: boolean;
 };
 
+function rowIdentityEqual(
+  previous: VirtualizedTaskRowProps,
+  next: VirtualizedTaskRowProps,
+): boolean {
+  return (
+    previous.task === next.task &&
+    previous.queuedCount === next.queuedCount &&
+    previous.queuedStartIndex === next.queuedStartIndex &&
+    previous.virtualIndex === next.virtualIndex &&
+    previous.top === next.top &&
+    previous.columnTaskIds === next.columnTaskIds &&
+    previous.insertionEdge === next.insertionEdge &&
+    previous.forceShowIndicator === next.forceShowIndicator &&
+    previous.keyboardDraft === next.keyboardDraft
+  );
+}
+
+function rowDisplayPropsEqual(
+  previous: VirtualizedTaskRowProps,
+  next: VirtualizedTaskRowProps,
+): boolean {
+  return (
+    previous.step === next.step &&
+    previous.steps === next.steps &&
+    previous.presentation === next.presentation &&
+    previous.workspaceId === next.workspaceId &&
+    previous.repositories === next.repositories &&
+    previous.externalLinkAvailability === next.externalLinkAvailability &&
+    previous.showMaximizeButton === next.showMaximizeButton &&
+    previous.isDeleting === next.isDeleting &&
+    previous.isArchiving === next.isArchiving &&
+    previous.selectedIds === next.selectedIds &&
+    previous.isMultiSelectMode === next.isMultiSelectMode
+  );
+}
+
+function rowCallbacksEqual(
+  previous: VirtualizedTaskRowProps,
+  next: VirtualizedTaskRowProps,
+): boolean {
+  return (
+    previous.onCardKeyDown === next.onCardKeyDown &&
+    previous.onPreviewTask === next.onPreviewTask &&
+    previous.onOpenTask === next.onOpenTask &&
+    previous.onEditTask === next.onEditTask &&
+    previous.onDeleteTask === next.onDeleteTask &&
+    previous.onArchiveTask === next.onArchiveTask &&
+    previous.onMoveTask === next.onMoveTask &&
+    previous.onToggleSelect === next.onToggleSelect &&
+    previous.onSelectRange === next.onSelectRange
+  );
+}
+
+/**
+ * `measureElement` is excluded: it is a virtualizer-bound ref callback whose
+ * identity is an implementation detail of the (possibly mocked) virtualizer
+ * instance, not a signal that this row's rendered output should change.
+ */
+function virtualizedTaskRowPropsEqual(
+  previous: VirtualizedTaskRowProps,
+  next: VirtualizedTaskRowProps,
+): boolean {
+  return (
+    rowIdentityEqual(previous, next) &&
+    rowDisplayPropsEqual(previous, next) &&
+    rowCallbacksEqual(previous, next)
+  );
+}
+
 /** One rendered card row, including its optional "Queued" section header. */
-function VirtualizedTaskRow({
+const VirtualizedTaskRow = memo(function VirtualizedTaskRow({
   task,
   queuedCount,
   queuedStartIndex,
@@ -221,8 +304,8 @@ function VirtualizedTaskRow({
   repositories,
   externalLinkAvailability,
   showMaximizeButton,
-  deletingTaskId,
-  archivingTaskId,
+  isDeleting,
+  isArchiving,
   selectedIds,
   keyboardDraft,
   onCardKeyDown,
@@ -271,8 +354,8 @@ function VirtualizedTaskRow({
         onMove={onMoveTask}
         steps={steps}
         showMaximizeButton={showMaximizeButton}
-        isDeleting={deletingTaskId === task.id}
-        isArchiving={archivingTaskId === task.id}
+        isDeleting={isDeleting}
+        isArchiving={isArchiving}
         isSelected={selectedIds?.has(task.id)}
         selectedIds={selectedIds}
         onToggleSelect={onToggleSelect}
@@ -281,7 +364,7 @@ function VirtualizedTaskRow({
       />
     </DroppableTaskRow>
   );
-}
+}, virtualizedTaskRowPropsEqual);
 
 export function VirtualizedColumnTaskList({
   orderedTasks,
@@ -312,6 +395,8 @@ export function VirtualizedColumnTaskList({
 }: VirtualizedColumnTaskListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnTaskIds = useStableTaskIds(orderedTasks);
+  const stableExternalLinkAvailability =
+    useStableExternalLinkAvailability(externalLinkAvailability);
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: orderedTasks.length,
     getScrollElement: () => scrollRef.current,
@@ -359,10 +444,10 @@ export function VirtualizedColumnTaskList({
               presentation={presentation}
               workspaceId={workspaceId}
               repositories={repositories}
-              externalLinkAvailability={externalLinkAvailability}
+              externalLinkAvailability={stableExternalLinkAvailability}
               showMaximizeButton={showMaximizeButton}
-              deletingTaskId={deletingTaskId}
-              archivingTaskId={archivingTaskId}
+              isDeleting={deletingTaskId === task.id}
+              isArchiving={archivingTaskId === task.id}
               selectedIds={selectedIds}
               keyboardDraft={keyboardDraft}
               onCardKeyDown={onCardKeyDown}
