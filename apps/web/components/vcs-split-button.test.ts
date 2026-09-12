@@ -129,18 +129,21 @@ describe("vcs split-button remote action semantics", () => {
     const onReplaceContribution = vi.fn();
     const onUseContribution = vi.fn();
     const onViewContribution = vi.fn();
+    const onCompareContribution = vi.fn();
     const callbacks = buildSingleRepoContributionCallbacks(
-      { onReplaceContribution, onUseContribution, onViewContribution },
+      { onReplaceContribution, onUseContribution, onViewContribution, onCompareContribution },
       "widget-a",
     );
 
     callbacks.onReplaceContribution();
     callbacks.onUseContribution();
     callbacks.onViewContribution();
+    callbacks.onCompareContribution();
 
     expect(onReplaceContribution).toHaveBeenCalledWith("widget-a");
     expect(onUseContribution).toHaveBeenCalledWith("widget-a");
     expect(onViewContribution).toHaveBeenCalledWith("widget-a");
+    expect(onCompareContribution).toHaveBeenCalledWith("widget-a");
   });
 });
 
