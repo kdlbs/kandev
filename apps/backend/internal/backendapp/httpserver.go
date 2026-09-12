@@ -64,13 +64,13 @@ func newBootstrapHandler(version string, reporters ...*startup.Reporter) http.Ha
 		progress = reporters[0]
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/health" {
+		if r.Method != http.MethodGet || r.URL.Path != healthRoutePath {
 			body := map[string]any{
 				statusKey:       startingStatus,
 				serviceFieldKey: kandevName,
 				versionFieldKey: version,
 			}
-			if r.Method == http.MethodGet && r.URL.Path == "/ready" {
+			if r.Method == http.MethodGet && r.URL.Path == readyRoutePath {
 				body["startup"] = progress.Snapshot()
 			}
 			writeBootstrapJSON(w, http.StatusServiceUnavailable, body)

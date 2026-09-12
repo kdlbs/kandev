@@ -119,6 +119,9 @@ const (
 	serviceFieldKey          = "service"
 	kandevName               = "kandev"
 	startingStatus           = "starting"
+	healthRoutePath          = "/health"
+	readyRoutePath           = "/ready"
+	websocketRoutePath       = "/ws"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -890,7 +893,7 @@ func registerRoutes(p routeParams) {
 	// but it does not gate on that flag — liveness must not depend on
 	// readiness, or the crash loop docs/specs/startup-listener-before-
 	// recovery/spec.md exists to fix comes back.
-	p.router.GET("/health", healthHandler(p))
+	p.router.GET(healthRoutePath, healthHandler(p))
 
 	// /ready is a readiness probe. It returns 200 only after main has
 	// flipped the package-level `ready` flag — which happens after route
@@ -901,7 +904,7 @@ func registerRoutes(p routeParams) {
 	// instead of racing ahead and hitting 404s on routes that aren't wired
 	// yet. See docs/specs/health-endpoint-version/spec.md for the exact
 	// contract this endpoint now owns.
-	p.router.GET("/ready", readyHandler(p))
+	p.router.GET(readyRoutePath, readyHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -938,7 +941,7 @@ func registerRoutes(p routeParams) {
 		} else {
 			p.router.NoRoute(func(c *gin.Context) {
 				path := c.Request.URL.Path
-				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" || path == "/ready" {
+				if strings.HasPrefix(path, "/api/") || path == websocketRoutePath || path == healthRoutePath || path == readyRoutePath {
 					c.AbortWithStatus(http.StatusNotFound)
 					return
 				}
@@ -1059,7 +1062,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:                         "/api/v1",
-		WebSocketPath:                     "/ws",
+		WebSocketPath:                     websocketRoutePath,
 		LSPAutoInstallPreferenceLanguages: lspinstaller.AutoInstallPreferenceLanguages(),
 		Debug:                             debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the

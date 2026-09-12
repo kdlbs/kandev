@@ -1229,7 +1229,7 @@ func startGatewayAndServe(
 	}
 
 	log.Info("API configured",
-		zap.String("websocket", "/ws"),
+		zap.String("websocket", websocketRoutePath),
 		zap.String("health", "/health"),
 		zap.String("http", "/api/v1"),
 	)
