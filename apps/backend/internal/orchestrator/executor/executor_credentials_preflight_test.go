@@ -133,13 +133,14 @@ func TestPreflightManagedGitCredentialsValidatesEveryBindingInOrder(t *testing.T
 // TestPreflightManagedGitCredentialsSkipsWhenExecutorModePolicy covers the
 // workspace policy applicability rule: when the resolved policy routes Git
 // credentials through the executor rather than the managed broker, no
-// repository identity is validated at all - matching
-// configureGitCredentialBrokerForRepositories' own unconditional skip.
+// GitHub repository identity is validated - matching the shared route's
+// executor-mode bypass. Plugin repository bindings remain independently
+// validated because executor mode still issues their opaque leases.
 func TestPreflightManagedGitCredentialsSkipsWhenExecutorModePolicy(t *testing.T) {
 	repo := newMockRepository()
 	seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{
-		ID: "repo-1", SourceType: sourceTypeLocal, Provider: "acme-forge",
-		RemoteURL: "https://forge.example/acme/widgets.git",
+		ID: "repo-1", SourceType: sourceTypeLocal, Provider: gitHubProviderID,
+		RemoteURL: "https://github.com/acme/widgets.git",
 	})
 	exec := newPreflightTestExecutor(t, repo)
 	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
@@ -151,11 +152,25 @@ func TestPreflightManagedGitCredentialsSkipsWhenExecutorModePolicy(t *testing.T)
 	}
 }
 
+func TestPreflightManagedGitCredentialsSkipsGitHubPolicyForPluginOnlyTask(t *testing.T) {
+	repo := newMockRepository()
+	seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{
+		ID: "repo-1", SourceType: sourceTypeLocal, Provider: "bitbucket",
+		ProviderHost: "https://bitbucket.example", RemoteURL: "https://bitbucket.example/acme/widgets.git",
+	})
+	exec := newPreflightTestExecutor(t, repo)
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{err: errors.New("GitHub policy unavailable")})
+
+	if err := exec.PreflightManagedGitCredentials(context.Background(), "workspace-1", "task-1", "", ""); err != nil {
+		t.Fatalf("PreflightManagedGitCredentials() error = %v, want plugin-only task to bypass GitHub policy", err)
+	}
+}
+
 func TestPrepareSessionSkipsManagedIdentityForRemoteProfileGitHubToken(t *testing.T) {
 	repo := newMockRepository()
 	seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{
-		ID: "repo-1", SourceType: sourceTypeLocal, Provider: "acme-forge",
-		RemoteURL: "https://forge.example/acme/widgets.git",
+		ID: "repo-1", SourceType: sourceTypeLocal, Provider: gitHubProviderID,
+		RemoteURL: "https://github.com/acme/widgets.git",
 	})
 	repo.executors["exec-ssh"] = &models.Executor{ID: "exec-ssh", Type: models.ExecutorTypeSSH}
 	repo.executorProfiles["profile-token"] = &models.ExecutorProfile{

@@ -940,7 +940,7 @@ func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable
 	}
 }
 
-func TestConfigureAndStartAgentReplacesComposedRuntimeEnvironment(t *testing.T) {
+func TestConfigureAndStartAgentSendsComposedRuntimeEnvironmentAsOverlay(t *testing.T) {
 	mgr := newTestManager(t)
 	var configuredEnv map[string]string
 	var replaced bool
@@ -973,8 +973,8 @@ func TestConfigureAndStartAgentReplacesComposedRuntimeEnvironment(t *testing.T) 
 	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
-	if !replaced {
-		t.Fatal("runtime snapshot was sent through overlay mode, want complete replacement")
+	if replaced {
+		t.Fatal("runtime snapshot was sent through complete replacement mode, want overlay mode")
 	}
 	if configuredEnv["GIT_CONFIG_COUNT"] != "3" ||
 		configuredEnv["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||

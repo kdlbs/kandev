@@ -73,8 +73,10 @@ Existing Git helpers remain earlier in the chain, so the new helper fills an aut
 
 Task 02 closes the full-launch, resume, and prepared-workspace paths.
 The strict resolver composes the indexed Git block by source after all managed definitions exist.
-The lifecycle sends a complete composed snapshot through agentctl's replacement mode, while
-request-only configuration keeps overlay semantics for ordinary callers.
+Lifecycle sends a composed runtime snapshot through agentctl's normal overlay mode; the indexed
+merge recognizes an already-forwarded snapshot, while complete replacement remains an explicit API
+for callers that own the full indexed block. Reconfiguration removes obsolete Kandev-generated
+ordinary credential variables and host helpers before composing the next snapshot.
 It tests profile environment selection before probing and the final agentctl child environment.
 Managed helper failure must never invoke the host CLI.
 Task 03 documents the completed behavior and synchronizes results.
@@ -143,9 +145,11 @@ Implementation validation:
 - `make -C apps/backend build` passed for the host and remote runtime binaries.
 - The strict production-shaped test `TestBuildEnvForExecutionHostGHBridge_ComposesStrictProfileBlocks`
   composes agent-profile, executor-profile, and managed Git blocks while preserving each indexed entry.
-- `TestConfigureAndStartAgentReplacesComposedRuntimeEnvironment` verifies that lifecycle sends one
-  composed snapshot with `replace_env: true`; process-manager tests cover reconfiguration, tracker,
-  one-shot, shell/process propagation, user hooks/notes, and removal of obsolete marker-owned helpers.
+- `TestConfigureAndStartAgentSendsComposedRuntimeEnvironmentAsOverlay` verifies that lifecycle sends
+  one composed snapshot through the normal configure path; process-manager tests cover reconfiguration,
+  tracker, one-shot, shell/process propagation, user hooks/notes, complete-block removal, and removal
+  of obsolete marker-owned helpers. `TestComposeExecutionRuntimeEnvironmentRemovesObsoleteManagedCredentials`
+  also covers stale ordinary broker variables at the lifecycle boundary.
 - `TestLaunchPreparedSessionProbesEffectiveProfileCredentialStore` exercises HOME and GH_CONFIG_DIR
   mismatches through the production prepared-session entry point. The profile tests also cover both
   profile sources, request precedence, unavailable replacement behavior, and no token output.

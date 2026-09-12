@@ -504,6 +504,145 @@ func TestManagedGitCredentialProviderTreatsEmptyProviderAsGitHub(t *testing.T) {
 	}
 }
 
+func TestManagedGitCredentialProviderScopesExplicitTokensByHost(t *testing.T) {
+	public := &models.Repository{
+		ID: "public", Provider: gitHubProviderID, ProviderHost: "https://github.com",
+		RemoteURL: "https://github.com/acme/public.git",
+	}
+	enterprise := &models.Repository{
+		ID: "enterprise", Provider: gitHubProviderID, ProviderHost: "https://ghe.example",
+		RemoteURL: "https://ghe.example/acme/enterprise.git",
+	}
+	env := map[string]string{envGHToken: "public-token"}
+	if got := managedGitCredentialProviderForProfile(public, true, env, nil); got != "" {
+		t.Fatalf("public provider = %q, want explicit public token to bypass broker", got)
+	}
+	if got := managedGitCredentialProviderForProfile(enterprise, true, env, nil); got != gitHubProviderID {
+		t.Fatalf("enterprise provider = %q, want broker despite public token", got)
+	}
+}
+
+func TestExplicitGitHubTokenClearsOnlyMatchingContributionRepositories(t *testing.T) {
+	publicDestination := &models.ContributionDestination{}
+	enterpriseDestination := &models.ContributionDestination{}
+	public := &repoInfo{
+		RepositoryID: "public", Repository: &models.Repository{
+			ID: "public", Provider: gitHubProviderID, ProviderHost: "https://github.com",
+			RemoteURL: "https://github.com/acme/public.git",
+		}, ContributionDestination: publicDestination,
+	}
+	enterprise := &repoInfo{
+		RepositoryID: "enterprise", Repository: &models.Repository{
+			ID: "enterprise", Provider: gitHubProviderID, ProviderHost: "https://ghe.example",
+			RemoteURL: "https://ghe.example/acme/enterprise.git",
+		}, ContributionDestination: enterpriseDestination,
+	}
+	req := &LaunchAgentRequest{
+		RepositoryID: "public",
+		Env:          map[string]string{"GH_ENTERPRISE_TOKEN": "enterprise-token"},
+		Repositories: []RepoSpec{
+			{RepositoryID: "public", ContributionDestination: publicDestination},
+			{RepositoryID: "enterprise", ContributionDestination: enterpriseDestination},
+		},
+		ContributionDestination: publicDestination,
+	}
+
+	clearManagedContributionDestinationsForExplicitTokens(req, []*repoInfo{public, enterprise}, nil)
+	if public.ContributionDestination == nil || req.ContributionDestination == nil || req.Repositories[0].ContributionDestination == nil {
+		t.Fatal("public contribution destination was cleared by an enterprise token")
+	}
+	if enterprise.ContributionDestination != nil || req.Repositories[1].ContributionDestination != nil {
+		t.Fatal("enterprise contribution destination remained with an explicit enterprise token")
+	}
+}
+
+func TestConfigureManagedGitCredentialsKeepsMixedHostRepositoriesScoped(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "enterprise-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged},
+	})
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker),
+		Env:          map[string]string{envGHToken: "public-token"},
+	}
+	infos := []*repoInfo{
+		{RepositoryID: "public", Repository: &models.Repository{
+			ID: "public", Provider: gitHubProviderID, ProviderHost: "https://github.com",
+			RemoteURL: "https://github.com/acme/public.git",
+		}},
+		{RepositoryID: "enterprise", Repository: &models.Repository{
+			ID: "enterprise", Provider: gitHubProviderID, ProviderHost: "https://ghe.example",
+			RemoteURL: "https://ghe.example/acme/enterprise.git",
+		}},
+	}
+	if err := exec.configureGitCredentialBrokerForRepositories(context.Background(), req, infos); err != nil {
+		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v", err)
+	}
+	if issuer.calls != 1 || len(issuer.requests) != 1 || issuer.requests[0].Host != "ghe.example" {
+		t.Fatalf("credential leases = %#v, want one enterprise lease", issuer.requests)
+	}
+	if got := req.Env[githubauth.CredentialHostEnv]; got != "ghe.example" {
+		t.Fatalf("credential host = %q, want enterprise host", got)
+	}
+}
+
+func TestConfigureGitCredentialsSkipsGitHubPolicyForPluginOnlyLaunch(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "plugin-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{err: errors.New("GitHub policy unavailable")})
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		ID: "repo-1", Provider: "bitbucket", ProviderHost: "https://bitbucket.example",
+		RemoteURL: "https://bitbucket.example/acme/widgets.git",
+	}}
+	if err := exec.configureGitCredentialBrokerForRepositories(context.Background(), req, []*repoInfo{info}); err != nil {
+		t.Fatalf("plugin-only credential configuration failed: %v", err)
+	}
+	if issuer.calls != 1 || issuer.request.ProviderID != "bitbucket" {
+		t.Fatalf("plugin lease = %#v, calls=%d, want one bitbucket lease", issuer.request, issuer.calls)
+	}
+}
+
+func TestConfigureExecutorGitCredentialsIssuesPluginLeaseBeforeHostBridge(t *testing.T) {
+	setupHostGHExecutable(t)
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	exec.SetHostGitHubCredentialProbe(func(context.Context, string, string, map[string]string) error { return nil })
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeWorktree), Env: map[string]string{},
+	}
+	infos := []*repoInfo{
+		{RepositoryID: "github", Repository: &models.Repository{
+			ID: "github", Provider: gitHubProviderID, RemoteURL: "https://github.com/acme/widgets.git",
+		}},
+		{RepositoryID: "plugin", Repository: &models.Repository{
+			ID: "plugin", Provider: "bitbucket", ProviderHost: "https://bitbucket.example",
+			RemoteURL: "https://bitbucket.example/acme/tools.git",
+		}},
+	}
+	if err := exec.configureGitCredentialBrokerForRepositories(context.Background(), req, infos); err != nil {
+		t.Fatalf("executor credential configuration failed: %v", err)
+	}
+	if issuer.calls != 1 || issuer.request.ProviderID != "bitbucket" {
+		t.Fatalf("plugin lease = %#v, calls=%d, want one plugin lease", issuer.request, issuer.calls)
+	}
+	if !hasHostGitHubHelper(req.Env) {
+		t.Fatalf("host bridge helper missing after plugin lease configuration: %#v", req.Env)
+	}
+}
+
 func TestConfigureGitCredentialBrokerSkipsLocalRepositoryWithoutProvider(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "opaque-lease"}}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
@@ -647,7 +786,7 @@ func TestConfigureGitHubCredentialBrokerDisablesDestinationForExplicitProfileTok
 	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
 	destination := testCredentialDestination()
 	req := &LaunchAgentRequest{
-		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1", RepositoryID: "repo-1",
 		ExecutorType:            string(models.ExecutorTypeRemoteDocker),
 		Env:                     map[string]string{envGHToken: "profile-token"},
 		ContributionDestination: &destination,

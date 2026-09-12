@@ -68,6 +68,7 @@ func mergeEnvFillMissing(dst, src map[string]string) {
 // entries and are removed before composition so a later request can replace
 // or remove them without hiding inherited user configuration.
 func composeExecutionRuntimeEnvironment(base, overlay map[string]string) (map[string]string, error) {
+	removeObsoleteManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
 		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
 	})
@@ -75,6 +76,27 @@ func composeExecutionRuntimeEnvironment(base, overlay map[string]string) (map[st
 		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
 	}
 	return gitconfigenv.Merge(filtered, overlay)
+}
+
+func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
+	for _, key := range []string{
+		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialHelperPathEnv,
+		githubauth.CredentialCLIShimDirEnv,
+		githubauth.CredentialCLIBashEnvEnv,
+		githubauth.CredentialParentBashEnv,
+		githubauth.CredentialLeaseEnv,
+		githubauth.CredentialReissueCapabilityEnv,
+		githubauth.CredentialTaskIDEnv,
+		githubauth.CredentialSessionIDEnv,
+		githubauth.CredentialRepositoryEnv,
+		githubauth.CredentialOwnerEnv,
+		githubauth.CredentialRepoEnv,
+		githubauth.CredentialHostEnv,
+		githubauth.CredentialScopesEnv,
+	} {
+		delete(env, key)
+	}
 }
 
 // resolveAgentProfileEnvVars resolves profile env entries. SecretID wins over

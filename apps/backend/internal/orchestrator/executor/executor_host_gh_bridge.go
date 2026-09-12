@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -18,11 +19,19 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const hostGitHubCredentialProbeTimeout = 5 * time.Second
+const (
+	hostGitHubCredentialProbeTimeout = 5 * time.Second
+	hostGitHubCredentialProbeWorkers = 4
+)
 
 // hostGitHubCredentialProbe checks whether the host gh account can provide a
 // token for one validated GitHub host. It must never return the token itself.
 type hostGitHubCredentialProbe func(context.Context, string, string, map[string]string) error
+
+type hostGitHubProbeResult struct {
+	index     int
+	available bool
+}
 
 // SetHostGitHubCredentialProbe replaces the host CLI availability check. The
 // seam keeps policy tests deterministic while production uses the real gh CLI.
@@ -92,24 +101,91 @@ func (e *Executor) probeHostGitHubHosts(
 	hosts []string,
 	probeEnv map[string]string,
 ) ([]string, error) {
-	available := make([]string, 0, len(hosts))
-	for _, host := range hosts {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	candidates := hostGitHubProbeCandidates(req, profileEnvVars, hosts)
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	workerCount := hostGitHubCredentialProbeWorkers
+	if workerCount > len(candidates) {
+		workerCount = len(candidates)
+	}
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan int, len(candidates))
+	results := make(chan hostGitHubProbeResult, len(candidates))
+	for _, index := range candidates {
+		jobs <- index
+	}
+	close(jobs)
+
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go runHostGitHubProbeWorker(probeCtx, &workers, jobs, results, probe, executable, hosts, probeEnv)
+	}
+
+	availableByIndex := make([]bool, len(hosts))
+	completed := 0
+	for completed < len(candidates) {
+		select {
+		case result := <-results:
+			availableByIndex[result.index] = result.available
+			completed++
+		case <-ctx.Done():
+			cancel()
+			workers.Wait()
+			return nil, ctx.Err()
+		}
+	}
+	cancel()
+	workers.Wait()
+
+	available := make([]string, 0, len(candidates))
+	for _, index := range candidates {
+		if availableByIndex[index] {
+			available = append(available, hosts[index])
+		}
+	}
+	return available, nil
+}
+
+func hostGitHubProbeCandidates(req *LaunchAgentRequest, profileEnvVars []models.ProfileEnvVar, hosts []string) []int {
+	candidates := make([]int, 0, len(hosts))
+	for index, host := range hosts {
 		if hasExplicitGitHubToken(req.Env, host) || hasExplicitGitHubTokenInProfile(profileEnvVars, host) {
 			continue
 		}
-		probeCtx, cancel := context.WithTimeout(ctx, hostGitHubCredentialProbeTimeout)
-		probeErr := probe(probeCtx, executable, host, probeEnv)
-		probeContextErr := probeCtx.Err()
-		cancel()
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if probeContextErr != nil || probeErr != nil {
-			continue
-		}
-		available = append(available, host)
+		candidates = append(candidates, index)
 	}
-	return available, nil
+	return candidates
+}
+
+func runHostGitHubProbeWorker(
+	ctx context.Context,
+	workers *sync.WaitGroup,
+	jobs <-chan int,
+	results chan<- hostGitHubProbeResult,
+	probe hostGitHubCredentialProbe,
+	executable string,
+	hosts []string,
+	probeEnv map[string]string,
+) {
+	defer workers.Done()
+	for index := range jobs {
+		hostCtx, hostCancel := context.WithTimeout(ctx, hostGitHubCredentialProbeTimeout)
+		probeErr := probe(hostCtx, executable, hosts[index], probeEnv)
+		timedOut := hostCtx.Err() != nil
+		hostCancel()
+		select {
+		case results <- hostGitHubProbeResult{index: index, available: probeErr == nil && !timedOut}:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // resolveHostGitHubBridgeProfileEnv returns profile definitions in the order
@@ -146,33 +222,10 @@ func (e *Executor) hostGitHubProbeEnvironment(
 	if len(profileEnvVars) == 0 {
 		return requestEnv, true
 	}
-	overrides := make(map[string]string, len(profileEnvVars))
-	for _, envVar := range profileEnvVars {
-		if !isGitHubCredentialSelectionEnv(envVar.Key) {
-			continue
-		}
-		// Request values are the effective managed source. Do not reveal a
-		// profile-backed directory that cannot affect the selected account.
-		if nonEmptyEnvValue(requestEnv, envVar.Key) {
-			continue
-		}
-		if envVar.SecretID != "" {
-			if e == nil || e.secretStore == nil {
-				return nil, false
-			}
-			value, err := e.revealGlobalSecret(ctx, envVar.SecretID)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil, false
-				}
-				return nil, false
-			}
-			overrides[envVar.Key] = value
-			continue
-		}
-		if envVar.Value != "" {
-			overrides[envVar.Key] = envVar.Value
-		}
+	selected := winningGitHubCredentialSelection(profileEnvVars)
+	overrides, ok := e.resolveHostGitHubProbeOverrides(ctx, requestEnv, selected)
+	if !ok {
+		return nil, false
 	}
 	if len(overrides) == 0 {
 		return requestEnv, true
@@ -185,6 +238,57 @@ func (e *Executor) hostGitHubProbeEnvironment(
 		probeEnv[key] = value
 	}
 	return probeEnv, true
+}
+
+func winningGitHubCredentialSelection(profileEnvVars []models.ProfileEnvVar) map[string]models.ProfileEnvVar {
+	selected := make(map[string]models.ProfileEnvVar, len(profileEnvVars))
+	for _, envVar := range profileEnvVars {
+		if !isGitHubCredentialSelectionEnv(envVar.Key) ||
+			(envVar.SecretID == "" && strings.TrimSpace(envVar.Value) == "") {
+			continue
+		}
+		// The effective profile is ordered from weaker agent values to stronger
+		// executor values. Resolve the winning definition before revealing a
+		// secret so a stale weaker reference cannot disable a valid override.
+		selected[envVar.Key] = envVar
+	}
+	return selected
+}
+
+func (e *Executor) resolveHostGitHubProbeOverrides(
+	ctx context.Context,
+	requestEnv map[string]string,
+	selected map[string]models.ProfileEnvVar,
+) (map[string]string, bool) {
+	overrides := make(map[string]string, len(selected))
+	keys := make([]string, 0, len(selected))
+	for key := range selected {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		envVar := selected[key]
+		// Request values are the effective managed source. Do not reveal a
+		// profile-backed directory that cannot affect the selected account.
+		if nonEmptyEnvValue(requestEnv, envVar.Key) {
+			continue
+		}
+		if envVar.SecretID == "" {
+			if envVar.Value != "" {
+				overrides[envVar.Key] = envVar.Value
+			}
+			continue
+		}
+		if e == nil || e.secretStore == nil {
+			return nil, false
+		}
+		value, err := e.revealGlobalSecret(ctx, envVar.SecretID)
+		if err != nil {
+			return nil, false
+		}
+		overrides[envVar.Key] = value
+	}
+	return overrides, true
 }
 
 func isGitHubCredentialSelectionEnv(key string) bool {
@@ -203,24 +307,13 @@ func hasExplicitGitHubTokenInProfile(profileEnvVars []models.ProfileEnvVar, host
 		}
 		switch envVar.Key {
 		case envGHToken, envGitHubToken:
-			return true
+			if strings.EqualFold(host, defaultGitHubHost) {
+				return true
+			}
 		case "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
 			if !strings.EqualFold(host, defaultGitHubHost) {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-func hasExplicitGitHubTokenInAnyProfile(profileEnvVars []models.ProfileEnvVar) bool {
-	for _, envVar := range profileEnvVars {
-		if envVar.SecretID == "" && strings.TrimSpace(envVar.Value) == "" {
-			continue
-		}
-		switch envVar.Key {
-		case envGHToken, envGitHubToken, "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
-			return true
 		}
 	}
 	return false
@@ -288,11 +381,8 @@ func hostGitHubIdentityAllowed(repository *models.Repository, host string) bool 
 }
 
 func hasExplicitGitHubToken(env map[string]string, host string) bool {
-	if nonEmptyEnvValue(env, envGHToken) || nonEmptyEnvValue(env, envGitHubToken) {
-		return true
-	}
 	if strings.EqualFold(host, defaultGitHubHost) {
-		return false
+		return nonEmptyEnvValue(env, envGHToken) || nonEmptyEnvValue(env, envGitHubToken)
 	}
 	return nonEmptyEnvValue(env, "GH_ENTERPRISE_TOKEN") ||
 		nonEmptyEnvValue(env, "GITHUB_ENTERPRISE_TOKEN")
@@ -358,15 +448,17 @@ func shellQuote(value string) string {
 }
 
 func hostGitHubCommandEnvironment(overrides map[string]string) []string {
-	envMap := make(map[string]string, len(os.Environ())+len(overrides))
+	envMap := make(map[string]string, len(overrides)+4)
 	for _, entry := range os.Environ() {
 		key, value, found := strings.Cut(entry, "=")
-		if found && key != "" {
+		if found && isHostGitHubCommandEnvironmentKey(key) {
 			envMap[key] = value
 		}
 	}
 	for key, value := range overrides {
-		envMap[key] = value
+		if isHostGitHubCommandEnvironmentKey(key) {
+			envMap[key] = value
+		}
 	}
 	keys := make([]string, 0, len(envMap))
 	for key := range envMap {
@@ -378,4 +470,13 @@ func hostGitHubCommandEnvironment(overrides map[string]string) []string {
 		env = append(env, key+"="+envMap[key])
 	}
 	return env
+}
+
+func isHostGitHubCommandEnvironmentKey(key string) bool {
+	switch key {
+	case "PATH", "HOME", "GH_CONFIG_DIR", "XDG_CONFIG_HOME":
+		return true
+	default:
+		return false
+	}
 }

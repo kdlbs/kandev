@@ -276,8 +276,9 @@ Invalid or ambiguous optional bridge identities are skipped without weakening ma
 A local-source repository qualifies only when its recorded metadata establishes a GitHub identity.
 Deduplicate hosts within each preparation operation.
 
-A non-empty explicit `GH_TOKEN` or `GITHUB_TOKEN` in the request bypasses host probing and bridge injection.
-For enterprise hosts, respect the corresponding `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` variables too.
+For `github.com`, a non-empty explicit `GH_TOKEN` or `GITHUB_TOKEN` in the request bypasses probing and bridge injection for that host.
+For a non-public host, only a non-empty `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` bypasses probing and bridge injection for that host.
+Mixed-host launches evaluate these token variables independently for each attached host.
 Later profile merges must preserve the same effective token precedence.
 The helper invokes ordinary `gh`, which selects explicit environment tokens before stored login credentials.
 An invalid explicit token must not trigger a retry with a stored host login.
@@ -315,9 +316,10 @@ Existing user helpers remain earlier in the chain. Do not insert an empty reset 
 Compose the helper block through `gitconfigenv.Merge`, never a map overlay or a hardcoded count.
 Keep the existing malformed-block error behavior and preserve meaningful duplicate entries.
 Validate the combined count against the existing 256-entry limit before dispatch.
-Cleanup removes only host-scoped helpers carrying the Kandev marker; a user-selected quoted `gh` command,
-an unrelated host helper, and an old generated helper with no available replacement CLI remain safe according
-to ownership. Do not premerge the entire host environment into a request that agentctl will merge with that same host environment again.
+Complete replacement and the agentctl composition boundary remove obsolete host bridge helpers carrying the
+Kandev marker, including when no replacement is available. A user-selected quoted `gh` command and an
+unrelated host helper remain according to ownership. Do not premerge the entire host environment into a
+request that agentctl will merge with that same host environment again.
 
 The strict source-aware resolver treats `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`, and
 `GIT_CONFIG_VALUE_*` as one indexed block per environment source. It composes agent-profile,
@@ -332,10 +334,12 @@ Reuse the repository set already resolved for preparation instead of cloning or 
 An environment delivery failure must prevent a claim that the refreshed environment is active.
 
 The agentctl configure boundary has two explicit modes. The existing API mode composes a request-only
-overlay with the instance block, removing only marker-owned bridge entries first. The lifecycle uses
-the complete-environment mode for a composed launch snapshot, which replaces the indexed block without
-appending the snapshot to itself. Both modes update the agent environment, one-shot adapter, workspace
-tracker, task shells, and task-scoped processes from the same canonical slice.
+overlay with the instance block, removing only marker-owned bridge entries first. Lifecycle launch and
+Kubernetes restart pass a composed runtime snapshot through this overlay mode; the indexed merge recognizes
+an already-forwarded snapshot and does not append it to itself. Complete-environment mode remains available
+to callers that supply the complete indexed block, including an intentional empty block. Both modes update
+the agent environment, one-shot adapter, workspace tracker, task shells, and task-scoped processes from the
+same canonical slice.
 A reused executor must replace obsolete generated entries when a policy, token, or host eligibility changes,
 including when a later preparation supplies no bridge at all.
 A login-shell test covers executable paths with spaces and a replaced `PATH`.

@@ -151,6 +151,12 @@ func entriesFrom(env map[string]string) ([]Entry, error) {
 }
 
 func removeBoundaryOverlap(base, overlay []Entry) []Entry {
+	// A caller may forward a complete snapshot that already starts with the
+	// current base block and adds a new suffix. Treat that as an already
+	// composed snapshot instead of duplicating the inherited entries.
+	if len(overlay) >= len(base) && entriesEqual(overlay[:len(base)], base) {
+		return append([]Entry{}, overlay...)
+	}
 	maxOverlap := min(len(base), len(overlay))
 	for overlap := maxOverlap; overlap > 0; overlap-- {
 		if entriesEqual(base[len(base)-overlap:], overlay[:overlap]) {

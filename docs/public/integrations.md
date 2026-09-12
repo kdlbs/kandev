@@ -167,7 +167,9 @@ option remains available.
   For GitHub HTTPS remotes, Kandev also checks the host account's `gh` login for each attached
   GitHub host. When `gh auth token` succeeds, Kandev adds a temporary HTTPS helper to the task
   environment. The helper uses the GitHub CLI configuration visible to the Kandev backend service
-  account. It does not write Git configuration or save tokens. An explicit `GH_TOKEN` or
+  account. Run `gh auth login` as the OS account that runs the backend; a login in another desktop
+  terminal is not enough. The host bridge does not write global Git configuration or persist helper
+  or token state. An explicit `GH_TOKEN` or
   `GITHUB_TOKEN` takes precedence over stored CLI credentials. For GitHub Enterprise hosts,
   `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` have the same effect. If `gh` is unavailable
   or not authenticated for a host, the task keeps its other inherited Git and SSH credentials.

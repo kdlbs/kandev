@@ -52,6 +52,29 @@ func TestIndexedGitConfigMergeCollapsesOnlyExactBoundaryOverlap(t *testing.T) {
 	}
 }
 
+func TestIndexedGitConfigMergeRecognizesAlreadyForwardedSnapshot(t *testing.T) {
+	base := environmentWithEntries(
+		Entry{Key: "notes.augment.mergeStrategy", Value: "union"},
+		Entry{Key: "core.hooksPath", Value: "/user/hooks"},
+	)
+	forwarded := environmentWithEntries(
+		Entry{Key: "notes.augment.mergeStrategy", Value: "union"},
+		Entry{Key: "core.hooksPath", Value: "/user/hooks"},
+		Entry{Key: "credential.https://github.com.helper", Value: "!kandev host helper"},
+	)
+	merged, err := Merge(base, forwarded)
+	if err != nil {
+		t.Fatalf("Merge() error = %v", err)
+	}
+
+	if got := merged["GIT_CONFIG_COUNT"]; got != "3" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 3", got)
+	}
+	if got := merged["GIT_CONFIG_KEY_2"]; got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want forwarded helper", got)
+	}
+}
+
 func TestIndexedGitConfigMergeRetainsMeaningfulRepeatedEntries(t *testing.T) {
 	merged, err := Merge(environmentWithEntries(
 		Entry{Key: "url.https://github.com/.insteadOf", Value: "git@github.com:"},

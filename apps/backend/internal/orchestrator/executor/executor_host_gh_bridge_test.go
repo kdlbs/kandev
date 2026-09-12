@@ -9,8 +9,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -94,6 +98,36 @@ exit 2
 	if !strings.Contains(string(output), "username=x-access-token") ||
 		!strings.Contains(string(output), "password=host-token") {
 		t.Fatalf("credential output = %q, want fake host helper credentials", output)
+	}
+}
+
+func TestExecutorHostGHBridgePreflightComposesIndexedProfileBlock(t *testing.T) {
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := executorHostGHBridgeRequest(indexedGitConfigTestEnvironment(
+		gitConfigTestEntry{key: "credential.https://github.com.helper", value: hostGitHubCredentialHelper("/host/gh")},
+	))
+	profileEnv := []models.ProfileEnvVar{
+		{Key: "GIT_CONFIG_COUNT", Value: "2"},
+		{Key: "GIT_CONFIG_KEY_0", Value: "notes.augment.mergeStrategy"},
+		{Key: "GIT_CONFIG_VALUE_0", Value: "union"},
+		{Key: "GIT_CONFIG_KEY_1", Value: "core.hooksPath"},
+		{Key: "GIT_CONFIG_VALUE_1", Value: "/profile/hooks"},
+	}
+
+	if err := executor.resolveLaunchEnvironment(context.Background(), req, profileEnv, nil); err != nil {
+		t.Fatalf("resolveLaunchEnvironment() error = %v", err)
+	}
+	indexedDefinitions := 0
+	for _, definition := range req.EnvironmentDefinitions {
+		if gitconfigenv.IsIndexedKey(definition.Key) {
+			indexedDefinitions++
+		}
+		if definition.Origin != runtimeenv.OriginManagedRuntime && definition.Origin != runtimeenv.OriginExecutorProfile {
+			t.Fatalf("unexpected definition origin %q", definition.Origin)
+		}
+	}
+	if indexedDefinitions != 8 {
+		t.Fatalf("indexed environment definitions = %d, want request and profile indexed blocks", indexedDefinitions)
 	}
 }
 
@@ -288,6 +322,60 @@ func TestExecutorHostGHBridgeCredentialPrecedence(t *testing.T) {
 	}
 }
 
+func TestExecutorHostGHBridgeCleanupPreservesUserHelpersWhenReplacementUnavailable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	userHelper := "!f() { '/opt/custom/gh' auth git-credential \"$@\"; }; f"
+	generatedHelper := hostGitHubCredentialHelper("/old/gh")
+	req := executorHostGHBridgeRequest(indexedGitConfigTestEnvironment(
+		gitConfigTestEntry{key: "credential.https://github.com.helper", value: userHelper},
+		gitConfigTestEntry{key: "credential.https://ghe.example.helper", value: userHelper},
+		gitConfigTestEntry{key: "credential.https://github.com.helper", value: generatedHelper},
+	))
+
+	if err := executor.configureGitCredentialBrokerForRepositories(
+		context.Background(), req, []*repoInfo{executorHostGHBridgeRepository("repo-1", "github.com")},
+	); err != nil {
+		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v", err)
+	}
+
+	entries := gitConfigEntriesFromEnvironment(t, req.Env)
+	if len(entries) != 2 {
+		t.Fatalf("configured Git helpers = %d, want two user entries: %#v", len(entries), entries)
+	}
+	if !containsGitConfigEntry(entries, "credential.https://github.com.helper", userHelper) ||
+		!containsGitConfigEntry(entries, "credential.https://ghe.example.helper", userHelper) {
+		t.Fatalf("user-owned helpers were not preserved: %#v", entries)
+	}
+	if containsGitConfigEntry(entries, "credential.https://github.com.helper", generatedHelper) {
+		t.Fatalf("generated helper remained after cleanup: %#v", entries)
+	}
+}
+
+func TestExplicitGitHubTokensAreScopedToTheirGitHubHost(t *testing.T) {
+	tests := []struct {
+		name string
+		host string
+		env  map[string]string
+		want bool
+	}{
+		{name: "public token for public host", host: "github.com", env: map[string]string{envGHToken: "public"}, want: true},
+		{name: "enterprise token for enterprise host", host: "ghe.example", env: map[string]string{"GH_ENTERPRISE_TOKEN": "enterprise"}, want: true},
+		{name: "public token does not bypass enterprise host", host: "ghe.example", env: map[string]string{envGHToken: "public"}},
+		{name: "enterprise token does not bypass public host", host: "github.com", env: map[string]string{"GH_ENTERPRISE_TOKEN": "enterprise"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := hasExplicitGitHubToken(test.env, test.host); got != test.want {
+				t.Fatalf("hasExplicitGitHubToken(%q) = %v, want %v", test.host, got, test.want)
+			}
+		})
+	}
+}
+
 func TestExecutorHostGHBridgeEligibility(t *testing.T) {
 	t.Run("local and worktree only", func(t *testing.T) {
 		setupHostGHExecutable(t)
@@ -345,8 +433,11 @@ func TestExecutorHostGHBridgeEligibility(t *testing.T) {
 		executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 		executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor}})
 		var hosts []string
+		var hostsMu sync.Mutex
 		executor.SetHostGitHubCredentialProbe(func(_ context.Context, _ string, host string, _ map[string]string) error {
+			hostsMu.Lock()
 			hosts = append(hosts, host)
+			hostsMu.Unlock()
 			return nil
 		})
 		req := executorHostGHBridgeRequest(nil)
@@ -361,6 +452,8 @@ func TestExecutorHostGHBridgeEligibility(t *testing.T) {
 		if err := executor.configureGitCredentialBrokerForRepositories(context.Background(), req, infos); err != nil {
 			t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v", err)
 		}
+		hostsMu.Lock()
+		defer hostsMu.Unlock()
 		if strings.Join(hosts, ",") != "github.com,ghe.example" {
 			t.Fatalf("probed hosts = %v, want [github.com ghe.example]", hosts)
 		}
@@ -420,6 +513,96 @@ func TestExecutorHostGHBridgeProbeTimeoutAndCancellation(t *testing.T) {
 			t.Fatalf("error = %v, want context cancellation", err)
 		}
 	})
+}
+
+func TestHostGitHubCommandEnvironmentUsesOnlyCredentialSelectionInputs(t *testing.T) {
+	t.Setenv("PATH", "/host/bin")
+	t.Setenv("HOME", "/host/home")
+	env := hostGitHubCommandEnvironment(map[string]string{
+		"GH_CONFIG_DIR":   "/profile/gh",
+		"XDG_CONFIG_HOME": "/profile/config",
+		"GH_TOKEN":        "secret-token",
+		"DATABASE_URL":    "postgres://secret",
+	})
+
+	values := make(map[string]string, len(env))
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("environment entry %q has no separator", entry)
+		}
+		values[key] = value
+	}
+	for key := range values {
+		if !isHostGitHubCommandEnvironmentKey(key) {
+			t.Fatalf("probe environment contains unrelated key %q", key)
+		}
+	}
+	for key, want := range map[string]string{
+		"PATH":            "/host/bin",
+		"HOME":            "/host/home",
+		"GH_CONFIG_DIR":   "/profile/gh",
+		"XDG_CONFIG_HOME": "/profile/config",
+	} {
+		if got := values[key]; got != want {
+			t.Errorf("probe environment %s = %q, want %q", key, got, want)
+		}
+	}
+	if _, ok := values["GH_TOKEN"]; ok {
+		t.Fatal("probe environment exposed GH_TOKEN")
+	}
+	if _, ok := values["DATABASE_URL"]; ok {
+		t.Fatal("probe environment exposed DATABASE_URL")
+	}
+}
+
+func TestExecutorHostGHBridgeProbesHostsConcurrentlyAndPreservesOrder(t *testing.T) {
+	setupHostGHExecutable(t)
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	hosts := []string{"github.com", "ghe-one.example", "ghe-two.example", "ghe-three.example"}
+	started := make(chan string, len(hosts))
+	release := make(chan struct{})
+	executor.SetHostGitHubCredentialProbe(func(_ context.Context, _, host string, _ map[string]string) error {
+		started <- host
+		<-release
+		return nil
+	})
+	infos := make([]*repoInfo, 0, len(hosts))
+	for index, host := range hosts {
+		infos = append(infos, executorHostGHBridgeRepository(strconv.Itoa(index), host))
+	}
+	req := executorHostGHBridgeRequest(nil)
+	done := make(chan error, 1)
+	go func() {
+		done <- executor.configureGitCredentialBrokerForRepositories(context.Background(), req, infos)
+	}()
+
+	for range hosts {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			close(release)
+			t.Fatal("host probes did not run concurrently")
+		}
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v", err)
+	}
+
+	entries := gitConfigEntriesFromEnvironment(t, req.Env)
+	if len(entries) != len(hosts) {
+		t.Fatalf("configured Git helpers = %d, want %d: %#v", len(entries), len(hosts), entries)
+	}
+	for index, host := range hosts {
+		wantKey := "credential.https://" + host + ".helper"
+		if entries[index].key != wantKey || !isHostGitHubCredentialHelper(entries[index].value) {
+			t.Fatalf("helper %d = %#v, want host %q", index, entries[index], host)
+		}
+	}
 }
 
 func TestExecutorHostGHBridgePreparedWorkspace(t *testing.T) {

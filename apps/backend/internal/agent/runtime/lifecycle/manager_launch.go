@@ -2300,8 +2300,6 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 	runtimeSnapshot := execution.RuntimeEnvironment()
 	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
 	var env map[string]string
-	var configureEnv map[string]string
-	var replaceConfiguredEnv bool
 	if runtimeSnapshot == nil {
 		env = cloneStringMap(metadataEnv)
 		if env == nil {
@@ -2311,31 +2309,24 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
 			return "", fmt.Errorf("resolve agent profile environment: %w", err)
 		}
-		configureEnv = cloneStringMap(env)
 	} else {
 		// SetExecutionEnv carries per-run values such as repository credentials.
 		// Compose them with the launch snapshot without re-reading profile
-		// secrets. The agentctl instance already owns the launch snapshot, so a
-		// complete effective snapshot is sent through the replacement boundary.
-		// This prevents an already complete indexed block from being appended to
-		// itself while also removing obsolete generated helpers.
+		// secrets. Host bridge entries are filtered here, while the normal
+		// agentctl Configure boundary composes the request with the instance's
+		// canonical environment and preserves inherited user entries.
 		var err error
 		env, err = composeExecutionRuntimeEnvironment(runtimeSnapshot, metadataEnv)
 		if err != nil {
 			m.updateExecutionError(execution.ID, "failed to compose agent env: "+err.Error())
 			return "", fmt.Errorf("compose agent environment: %w", err)
 		}
-		configureEnv = cloneStringMap(env)
-		replaceConfiguredEnv = true
 	}
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
 	}
-	if err := spillLargeWakePayloadEnv(configureEnv, execution.WorkspacePath, m.logger.Zap()); err != nil {
-		m.updateExecutionError(execution.ID, "failed to prepare agent configure env: "+err.Error())
-		return "", fmt.Errorf("failed to prepare agent configure env: %w", err)
-	}
+	configureEnv := cloneStringMap(env)
 	execution.setRuntimeEnvironment(env)
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
@@ -2343,14 +2334,10 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
-	var configureErr error
-	if replaceConfiguredEnv {
-		configureErr = client.ConfigureAgentWithEnvironment(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
-	} else {
-		configureErr = client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs)
-	}
-	if configureErr != nil {
-		return "", fmt.Errorf("failed to configure agent: %w", configureErr)
+	// Starting with stale agent configuration could expose an old credential
+	// set, so the subprocess must not start when configuration delivery fails.
+	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
+		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 
 	fullCommand, err := client.Start(ctx)

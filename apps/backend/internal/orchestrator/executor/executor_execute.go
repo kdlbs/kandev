@@ -2394,6 +2394,8 @@ func (e *Executor) configureExistingWorkspace(
 			return fmt.Errorf("compose executor profile environment for existing workspace: %w", err)
 		}
 	}
+	// A failed delivery leaves the running workspace on its previous credential
+	// snapshot, so do not continue to agent start and report refreshed state.
 	if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
 		return fmt.Errorf("set execution env for existing workspace: %w", err)
 	}

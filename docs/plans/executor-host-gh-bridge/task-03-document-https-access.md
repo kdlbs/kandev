@@ -85,11 +85,12 @@ The guide must not promise that a token can authenticate SSH or access every rep
 ## Results
 
 - Updated `docs/public/integrations.md` with the Local and Worktree host `gh`
-  fallback, backend service-account scope, explicit token precedence, preserved
-  Git configuration, remote-executor limits, and permission boundary.
+  fallback, backend service-account scope including the required `gh auth login`
+  account, host-specific explicit token precedence, preserved Git configuration,
+  remote-executor limits, and permission boundary.
 - Synchronized the implementation plan and all work-order statuses with the
   completed production and regression work, including the strict resolver,
-  replacement configure path, marker ownership, and profile-aware probing.
+  configure-boundary composition, marker ownership, and profile-aware probing.
 - `node --test scripts/validate-public-docs.test.mjs` passed with 62 tests.
 - `node scripts/validate-public-docs.mjs` validated 46 published docs pages.
 - `python3 scripts/list-docs.py validate` passed for 264 decisions and 818 specifications.

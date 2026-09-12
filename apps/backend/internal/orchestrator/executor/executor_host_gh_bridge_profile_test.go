@@ -112,6 +112,23 @@ func TestExecutorHostGHBridgeProbeUsesProfileCredentialDirectories(t *testing.T)
 	}
 }
 
+func TestExecutorHostGHBridgeProbeRevealsOnlyWinningProfileDirectory(t *testing.T) {
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.secretStore = &mockSecretStore{secrets: map[string]string{
+		"executor-home": "/executor/home",
+	}}
+	probeEnv, ok := executor.hostGitHubProbeEnvironment(context.Background(), nil, []models.ProfileEnvVar{
+		{Key: "HOME", SecretID: "missing-agent-home"},
+		{Key: "HOME", SecretID: "executor-home"},
+	})
+	if !ok {
+		t.Fatal("hostGitHubProbeEnvironment() failed while resolving the winning profile directory")
+	}
+	if got := probeEnv["HOME"]; got != "/executor/home" {
+		t.Fatalf("probe HOME = %q, want winning executor-profile directory", got)
+	}
+}
+
 func TestExecutorHostGHBridgeResolvesEffectiveAgentAndExecutorProfiles(t *testing.T) {
 	setupHostGHExecutable(t)
 	manager := &mockAgentManager{
@@ -184,6 +201,7 @@ func TestLaunchPreparedSessionProbesEffectiveProfileCredentialStore(t *testing.T
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(test.selectionKey, "/backend/credential-store")
 			repo := newMockRepository()
 			const taskID = "task-effective-profile-store"
 			const sessionID = "session-effective-profile-store"

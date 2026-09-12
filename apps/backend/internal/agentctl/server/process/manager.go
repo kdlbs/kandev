@@ -1747,6 +1747,13 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 		}
 	}
 
+	// Compose the environment before changing any other configuration so a
+	// malformed indexed Git block leaves the instance fully unchanged.
+	mergedEnv, err := composeConfiguredAgentEnvironment(m.cfg.AgentEnv, env, replaceEnv)
+	if err != nil {
+		return fmt.Errorf("compose configured agent environment: %w", err)
+	}
+
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
@@ -1764,17 +1771,6 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 		m.cfg.ContinueArgs = continueArgs
 	}
 
-	// Compose the instance environment through the same Git indexed
-	// configuration boundary used by process and shell consumers. The initial
-	// environment can contain inherited user entries plus a generated host
-	// helper; reconfiguration must preserve the former and remove only the
-	// latter when the new request no longer supplies it. A complete launch
-	// snapshot replaces the indexed block, while the default API path treats
-	// env as a request-only overlay.
-	mergedEnv, err := composeConfiguredAgentEnvironment(m.cfg.AgentEnv, env, replaceEnv)
-	if err != nil {
-		return fmt.Errorf("compose configured agent environment: %w", err)
-	}
 	m.cfg.AgentEnv = mergedEnv
 	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = append([]string(nil), m.cfg.AgentEnv...)
@@ -1793,6 +1789,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
 	base := environmentMapFromSlice(current)
+	removeObsoleteManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
 		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
 	})
@@ -1800,14 +1797,12 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
 	}
 	if replaceIndexed {
-		if _, hasIndexedBlock := overlay["GIT_CONFIG_COUNT"]; hasIndexedBlock {
-			// A complete environment owns the entire indexed block. Remove the
-			// previous block before installing the composed replacement so a
-			// full launch snapshot is never appended to itself.
-			filtered, err = gitconfigenv.Filter(filtered, func(int, []gitconfigenv.Entry) bool { return false })
-			if err != nil {
-				return nil, fmt.Errorf("replace indexed Git configuration: %w", err)
-			}
+		// A complete environment owns the entire indexed block, including an
+		// empty block. Remove the previous block unconditionally so a logout or
+		// policy change cannot retain stale generated entries.
+		filtered, err = gitconfigenv.Filter(filtered, func(int, []gitconfigenv.Entry) bool { return false })
+		if err != nil {
+			return nil, fmt.Errorf("replace indexed Git configuration: %w", err)
 		}
 	}
 	if len(filtered) == 0 && len(overlay) == 0 {
@@ -1827,6 +1822,27 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 		result = append(result, key+"="+merged[key])
 	}
 	return result, nil
+}
+
+func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
+	for _, key := range []string{
+		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialHelperPathEnv,
+		githubauth.CredentialCLIShimDirEnv,
+		githubauth.CredentialCLIBashEnvEnv,
+		githubauth.CredentialParentBashEnv,
+		githubauth.CredentialLeaseEnv,
+		githubauth.CredentialReissueCapabilityEnv,
+		githubauth.CredentialTaskIDEnv,
+		githubauth.CredentialSessionIDEnv,
+		githubauth.CredentialRepositoryEnv,
+		githubauth.CredentialOwnerEnv,
+		githubauth.CredentialRepoEnv,
+		githubauth.CredentialHostEnv,
+		githubauth.CredentialScopesEnv,
+	} {
+		delete(env, key)
+	}
 }
 
 func environmentMapFromSlice(env []string) map[string]string {

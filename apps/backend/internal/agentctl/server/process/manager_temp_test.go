@@ -262,12 +262,76 @@ func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.
 		t.Fatalf("ConfigureWithEnvironment() removal error = %v", err)
 	}
 	env = environmentMap(mgr.cfg.AgentEnv)
-	if env["GIT_CONFIG_COUNT"] != "2" || env["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
-		env["GIT_CONFIG_KEY_1"] != "core.hooksPath" || env["GIT_CONFIG_VALUE_1"] != "/user/hooks" {
-		t.Fatalf("removed configured environment = %#v, want preserved user block", env)
+	if len(env["GIT_CONFIG_COUNT"]) != 0 {
+		t.Fatalf("removed configured environment = %#v, want complete indexed block removed", env)
 	}
-	if _, present := env["GIT_CONFIG_VALUE_2"]; present {
-		t.Fatalf("generated helper remained after complete removal: %#v", env)
+	for key := range env {
+		if strings.HasPrefix(key, "GIT_CONFIG_KEY_") || strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+			t.Fatalf("indexed entry remained after complete removal: %#v", env)
+		}
+	}
+}
+
+func TestManagerConfigureLeavesConfigurationUnchangedWhenEnvironmentIsInvalid(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:        t.TempDir(),
+		AgentCommand:   "old-command",
+		AgentArgs:      []string{"old-command", "--old"},
+		ApprovalPolicy: "old-policy",
+		AgentEnv: []string{
+			"KEEP_ME=yes",
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=core.hooksPath",
+			"GIT_CONFIG_VALUE_0=/user/hooks",
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	err := mgr.ConfigureWithEnvironment(
+		"new-command", []string{"new-command"}, true,
+		map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "missing-value"},
+		"new-policy", "", nil, false,
+	)
+	if err == nil {
+		t.Fatal("ConfigureWithEnvironment() succeeded with malformed indexed Git block")
+	}
+	if mgr.cfg.AgentCommand != "old-command" || strings.Join(mgr.cfg.AgentArgs, " ") != "old-command --old" ||
+		mgr.cfg.ApprovalPolicy != "old-policy" {
+		t.Fatalf("configuration mutated after failed composition: command=%q args=%#v policy=%q", mgr.cfg.AgentCommand, mgr.cfg.AgentArgs, mgr.cfg.ApprovalPolicy)
+	}
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["KEEP_ME"] != "yes" || env["GIT_CONFIG_COUNT"] != "1" || env["GIT_CONFIG_VALUE_0"] != "/user/hooks" {
+		t.Fatalf("environment mutated after failed composition: %#v", env)
+	}
+}
+
+func TestManagerConfigureRemovesObsoleteManagedCredentialEnvironment(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			"KEEP_ME=yes",
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL=https://broker.example/resolve",
+			"KANDEV_GITHUB_CREDENTIAL_LEASE=stale-lease",
+			"KANDEV_GITHUB_CLI_SHIM_DIR=/stale/shim",
+		},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	if err := mgr.Configure("echo", nil, false, nil, "", "", nil, false); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	env := environmentMap(mgr.cfg.AgentEnv)
+	if env["KEEP_ME"] != "yes" {
+		t.Fatalf("ordinary environment was removed: %#v", env)
+	}
+	for _, key := range []string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL",
+		"KANDEV_GITHUB_CREDENTIAL_LEASE",
+		"KANDEV_GITHUB_CLI_SHIM_DIR",
+	} {
+		if _, ok := env[key]; ok {
+			t.Fatalf("obsolete managed credential %s remained: %#v", key, env)
+		}
 	}
 }
 

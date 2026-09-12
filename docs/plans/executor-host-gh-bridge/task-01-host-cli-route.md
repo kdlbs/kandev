@@ -121,6 +121,9 @@ Malformed optional repository identities must not become trusted hosts.
   removing only marker-owned stale bridge entries and enforcing the combined 256-entry limit.
 - Added regressions for quoted user-owned `gh` helpers, unrelated hosts, unavailable
   replacement CLIs, agent/executor profile directory mismatches, and request-level precedence.
+- Added host-specific token precedence coverage for mixed public and enterprise hosts,
+  a bounded concurrent probe with deterministic helper order, and an allowlisted probe
+  environment that excludes token and unrelated process secrets.
 - `TestLaunchPreparedSessionProbesEffectiveProfileCredentialStore` covers the HOME and
   GH_CONFIG_DIR mismatch cases through the production prepared-session entry point.
 - `(cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor -run 'TestExecutorHostGHBridge|TestConfigureGitHubCredentialBroker|TestConfigureGitCredentialBroker' -count=1)` passed.

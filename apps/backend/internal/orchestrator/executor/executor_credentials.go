@@ -217,6 +217,12 @@ func (e *Executor) configureGitCredentialBrokerForRepositoriesWithProfileEnvAndB
 	if len(infos) == 0 {
 		return nil
 	}
+	// Plugin-owned repositories do not need the workspace GitHub policy. Keep
+	// their opaque lease path independent so a missing GitHub policy cannot
+	// block an otherwise valid plugin launch.
+	if !includesGitHubRepository(infos) {
+		return e.configurePluginGitCredentials(ctx, req, infos, profileEnvVars)
+	}
 	policy, err := e.resolveTaskGitCredentialPolicy(ctx, req.WorkspaceID)
 	if err != nil {
 		return err
@@ -250,10 +256,35 @@ func (e *Executor) configureExecutorGitCredentials(
 		return err
 	}
 	clearManagedContributionDestinations(req, infos)
+	if err := e.configurePluginGitCredentials(ctx, req, infos, profileEnvVars); err != nil {
+		return err
+	}
 	if !hostBridgeProfileResolved {
 		return nil
 	}
 	return e.configureHostGitHubCredentialBridgeWithProfileEnv(ctx, req, infos, profileEnvVars)
+}
+
+func (e *Executor) configurePluginGitCredentials(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+	profileEnvVars []models.ProfileEnvVar,
+) error {
+	if e.gitCredentialIssuer == nil {
+		if hasManagedContributionDestination(infos) {
+			return errors.New("managed contribution destination cannot be activated without the GitHub credential broker")
+		}
+		return nil
+	}
+	scopes, helpers, err := e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, false, profileEnvVars)
+	if err != nil {
+		return err
+	}
+	if len(scopes) == 0 {
+		return nil
+	}
+	return e.configureGitCredentialEnvironment(req, scopes, helpers)
 }
 
 func (e *Executor) configureManagedGitCredentials(
@@ -262,20 +293,17 @@ func (e *Executor) configureManagedGitCredentials(
 	infos []*repoInfo,
 	profileEnvVars []models.ProfileEnvVar,
 ) error {
-	if req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" || hasExplicitGitHubTokenInAnyProfile(profileEnvVars) {
-		if err := removeManagedGitHubCredentials(req); err != nil {
-			return err
-		}
-		clearManagedContributionDestinations(req, infos)
-		return nil
+	if err := removeManagedGitHubCredentials(req); err != nil {
+		return err
 	}
+	clearManagedContributionDestinationsForExplicitTokens(req, infos, profileEnvVars)
 	if e.gitCredentialIssuer == nil {
 		if hasManagedContributionDestination(infos) {
 			return errors.New("managed contribution destination cannot be activated without the GitHub credential broker")
 		}
 		return nil
 	}
-	scopes, helpers, err := e.issueGitCredentialScopes(ctx, req, infos, true)
+	scopes, helpers, err := e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, true, profileEnvVars)
 	if err != nil {
 		return err
 	}
@@ -336,24 +364,15 @@ func (e *Executor) preflightManagedGitCredentials(
 		// nothing here will ever attempt to resolve a repository's identity.
 		return nil
 	}
-	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
-	if e.githubCredentialPolicyResolver != nil {
-		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, workspaceID)
-		if err != nil {
-			return fmt.Errorf("resolve task Git credential policy: %w", err)
-		}
-		policy = resolved
-	}
-	if policy.Mode == taskGitCredentialsModeExecutor {
-		return nil
-	}
-	if executorProfileHasGitHubToken(execConfig) {
-		return nil
-	}
 	taskRepos, err := e.repo.ListTaskRepositories(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("list task repositories: %w", err)
 	}
+	type preflightRepository struct {
+		repository *models.Repository
+	}
+	repositories := make([]preflightRepository, 0, len(taskRepos))
+	hasGitHub := false
 	for _, taskRepo := range taskRepos {
 		if taskRepo == nil || taskRepo.RepositoryID == "" {
 			continue
@@ -362,7 +381,31 @@ func (e *Executor) preflightManagedGitCredentials(
 		if err != nil {
 			return fmt.Errorf("load repository %q: %w", taskRepo.RepositoryID, err)
 		}
-		if repository == nil || managedGitCredentialProvider(repository, true, nil) == "" {
+		if repository == nil {
+			continue
+		}
+		repositories = append(repositories, preflightRepository{repository: repository})
+		if repositoryCanUseGitHubCredentials(repository) {
+			hasGitHub = true
+		}
+	}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if hasGitHub && e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, workspaceID)
+		if err != nil {
+			return fmt.Errorf("resolve task Git credential policy: %w", err)
+		} else {
+			policy = resolved
+		}
+	}
+	for _, entry := range repositories {
+		repository := entry.repository
+		providerID := managedGitCredentialProvider(repository, true, nil)
+		if providerID == "" {
+			continue
+		}
+		if providerID == gitHubProviderID &&
+			(policy.Mode == taskGitCredentialsModeExecutor || executorProfileHasGitHubToken(execConfig)) {
 			continue
 		}
 		if _, _, _, _, err := gitCredentialCloneIdentity(repository, repository.ID); err != nil {
@@ -370,6 +413,14 @@ func (e *Executor) preflightManagedGitCredentials(
 		}
 	}
 	return nil
+}
+
+func repositoryCanUseGitHubCredentials(repository *models.Repository) bool {
+	if repository == nil {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(repository.Provider))
+	return provider == gitHubProviderID || (provider == "" && repository.SourceType != sourceTypeLocal)
 }
 
 func executorProfileHasGitHubToken(execConfig executorConfig) bool {
@@ -393,13 +444,20 @@ func (e *Executor) issueGitCredentialScopes(
 	infos []*repoInfo,
 	githubManaged bool,
 ) ([]githubCredentialScope, map[string]struct{}, error) {
+	return e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, githubManaged, nil)
+}
+
+func (e *Executor) issueGitCredentialScopesWithProfileEnv(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+	githubManaged bool,
+	profileEnvVars []models.ProfileEnvVar,
+) ([]githubCredentialScope, map[string]struct{}, error) {
 	// Validate every managed repository before issuing the first lease. This avoids
 	// leaving a partial lease set when a later task binding is invalid.
 	for _, info := range infos {
-		if info == nil || info.Repository == nil || managedGitCredentialProvider(info.Repository, githubManaged, req.Env) == "" {
-			continue
-		}
-		if _, _, _, _, err := gitCredentialCloneIdentity(info.Repository, info.RepositoryID); err != nil {
+		if err := validateGitCredentialScopeInfo(info, req, githubManaged, profileEnvVars); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -407,32 +465,69 @@ func (e *Executor) issueGitCredentialScopes(
 	scopes := make([]githubCredentialScope, 0, len(infos)*2)
 	helpers := make(map[string]struct{}, len(infos))
 	for _, info := range infos {
-		scope, err := e.issueGitCredentialScope(ctx, req, info, githubManaged)
+		infoScopes, err := e.issueGitCredentialScopesForInfo(ctx, req, info, githubManaged, profileEnvVars)
 		if err != nil {
 			return nil, nil, err
 		}
-		if scope != nil {
-			scopes = append(scopes, *scope)
+		for _, scope := range infoScopes {
+			scopes = append(scopes, scope)
 			helpers[scope.Host] = struct{}{}
-		}
-		contributionScope, err := e.issueGitHubContributionCredentialScope(ctx, req, info)
-		if err != nil {
-			return nil, nil, err
-		}
-		if contributionScope != nil {
-			scopes = append(scopes, *contributionScope)
-			helpers[contributionScope.Host] = struct{}{}
-		}
-		destinationScope, err := e.issueGitHubContributionDestinationCredentialScope(ctx, req, info)
-		if err != nil {
-			return nil, nil, err
-		}
-		if destinationScope != nil {
-			scopes = append(scopes, *destinationScope)
-			helpers[destinationScope.Host] = struct{}{}
 		}
 	}
 	return scopes, helpers, nil
+}
+
+func validateGitCredentialScopeInfo(
+	info *repoInfo,
+	req *LaunchAgentRequest,
+	githubManaged bool,
+	profileEnvVars []models.ProfileEnvVar,
+) error {
+	if info == nil || info.Repository == nil ||
+		managedGitCredentialProviderForProfile(info.Repository, githubManaged, req.Env, profileEnvVars) == "" {
+		return nil
+	}
+	_, _, _, _, err := gitCredentialCloneIdentity(info.Repository, info.RepositoryID)
+	return err
+}
+
+func (e *Executor) issueGitCredentialScopesForInfo(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+	githubManaged bool,
+	profileEnvVars []models.ProfileEnvVar,
+) ([]githubCredentialScope, error) {
+	providerID := ""
+	if info != nil && info.Repository != nil {
+		providerID = managedGitCredentialProviderForProfile(info.Repository, githubManaged, req.Env, profileEnvVars)
+	}
+	scopes := make([]githubCredentialScope, 0, 3)
+	scope, err := e.issueGitCredentialScopeWithProfileEnv(ctx, req, info, githubManaged, profileEnvVars)
+	if err != nil {
+		return nil, err
+	}
+	if scope != nil {
+		scopes = append(scopes, *scope)
+	}
+	if !githubManaged || providerID != gitHubProviderID {
+		return scopes, nil
+	}
+	contributionScope, err := e.issueGitHubContributionCredentialScope(ctx, req, info)
+	if err != nil {
+		return nil, err
+	}
+	if contributionScope != nil {
+		scopes = append(scopes, *contributionScope)
+	}
+	destinationScope, err := e.issueGitHubContributionDestinationCredentialScope(ctx, req, info)
+	if err != nil {
+		return nil, err
+	}
+	if destinationScope != nil {
+		scopes = append(scopes, *destinationScope)
+	}
+	return scopes, nil
 }
 
 func (e *Executor) configureGitCredentialEnvironment(
@@ -472,7 +567,7 @@ func (e *Executor) configureGitCredentialEnvironment(
 
 func includesGitHubRepository(infos []*repoInfo) bool {
 	for _, info := range infos {
-		if info != nil && info.Repository != nil && strings.EqualFold(info.Repository.Provider, gitHubProviderID) {
+		if info != nil && info.Repository != nil && managedGitCredentialProvider(info.Repository, true, nil) == gitHubProviderID {
 			return true
 		}
 	}
@@ -558,11 +653,21 @@ func (e *Executor) issueGitCredentialScope(
 	info *repoInfo,
 	githubManaged bool,
 ) (*githubCredentialScope, error) {
+	return e.issueGitCredentialScopeWithProfileEnv(ctx, req, info, githubManaged, nil)
+}
+
+func (e *Executor) issueGitCredentialScopeWithProfileEnv(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+	githubManaged bool,
+	profileEnvVars []models.ProfileEnvVar,
+) (*githubCredentialScope, error) {
 	if info == nil || info.Repository == nil {
 		return nil, nil
 	}
 	repository := info.Repository
-	providerID := managedGitCredentialProvider(repository, githubManaged, req.Env)
+	providerID := managedGitCredentialProviderForProfile(repository, githubManaged, req.Env, profileEnvVars)
 	if providerID == "" {
 		return nil, nil
 	}
@@ -735,6 +840,18 @@ func (e *Executor) issueGitCredentialLease(
 }
 
 func managedGitCredentialProvider(repository *models.Repository, githubManaged bool, env map[string]string) string {
+	return managedGitCredentialProviderForProfile(repository, githubManaged, env, nil)
+}
+
+func managedGitCredentialProviderForProfile(
+	repository *models.Repository,
+	githubManaged bool,
+	env map[string]string,
+	profileEnvVars []models.ProfileEnvVar,
+) string {
+	if repository == nil {
+		return ""
+	}
 	if repository.SourceType == sourceTypeLocal && strings.TrimSpace(repository.Provider) == "" {
 		return ""
 	}
@@ -748,10 +865,57 @@ func managedGitCredentialProvider(repository *models.Repository, githubManaged b
 	if providerID == gitLabProviderID || providerID == providerAzureDevOps {
 		return ""
 	}
-	if providerID == gitHubProviderID && (!githubManaged || env[envGitHubToken] != "" || env[envGHToken] != "") {
+	if providerID == gitHubProviderID && (!githubManaged || hasExplicitGitHubTokenForRepository(env, profileEnvVars, repository)) {
 		return ""
 	}
 	return providerID
+}
+
+func clearManagedContributionDestinationsForExplicitTokens(
+	req *LaunchAgentRequest,
+	infos []*repoInfo,
+	profileEnvVars []models.ProfileEnvVar,
+) {
+	explicitRepositories := make(map[string]struct{}, len(infos))
+	var env map[string]string
+	if req != nil {
+		env = req.Env
+	}
+	for _, info := range infos {
+		if info == nil || info.Repository == nil ||
+			managedGitCredentialProvider(info.Repository, true, nil) != gitHubProviderID ||
+			!hasExplicitGitHubTokenForRepository(env, profileEnvVars, info.Repository) {
+			continue
+		}
+		info.ContributionDestination = nil
+		explicitRepositories[info.RepositoryID] = struct{}{}
+	}
+	if req == nil {
+		return
+	}
+	if _, found := explicitRepositories[req.RepositoryID]; found {
+		req.ContributionDestination = nil
+	}
+	for index := range req.Repositories {
+		if _, found := explicitRepositories[req.Repositories[index].RepositoryID]; found {
+			req.Repositories[index].ContributionDestination = nil
+		}
+	}
+}
+
+func hasExplicitGitHubTokenForRepository(
+	env map[string]string,
+	profileEnvVars []models.ProfileEnvVar,
+	repository *models.Repository,
+) bool {
+	if repository == nil {
+		return false
+	}
+	host, _, _, _, err := gitCredentialCloneIdentity(repository, repository.ID)
+	if err != nil {
+		return false
+	}
+	return hasExplicitGitHubToken(env, host) || hasExplicitGitHubTokenInProfile(profileEnvVars, host)
 }
 
 func gitCredentialCloneIdentity(repository *models.Repository, repositoryID string) (string, string, string, string, error) {

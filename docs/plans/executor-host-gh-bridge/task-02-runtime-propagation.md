@@ -115,16 +115,22 @@ Prepared-workspace starts can bypass the full credential route or retain an old 
   prepared-workspace agent starts.
 - Composed agent-profile, executor-profile, managed-runtime, and repository Git
   blocks at strict resolution, then sent the resulting lifecycle snapshot through
-  an explicit agentctl replacement mode.
+  agentctl's normal overlay mode. The indexed merge recognizes an already-forwarded
+  snapshot and does not append inherited entries twice.
 - Refreshed agent and executor profile credential-store values before the host probe,
   preserved request precedence, replaced stale marker-owned entries, and returned
   environment delivery errors.
-- The process manager tests verify both request-only overlay reconfiguration and
-  complete replacement reconfiguration. They preserve user hooks/notes and remove
-  generated helpers when the next request supplies none.
+- The process manager tests verify request-only overlay reconfiguration, complete
+  replacement for callers that own the full indexed block, and invalid-config atomicity.
+  The overlay path preserves user hooks/notes and removes generated helpers when the
+  next request supplies none. Agent, tracker, one-shot, shell, and task processes use
+  the resulting canonical environment.
+- `TestComposeExecutionRuntimeEnvironmentRemovesObsoleteManagedCredentials` verifies
+  lifecycle composition also removes stale ordinary broker variables before forwarding
+  a request-only reconfiguration.
 - The lifecycle test verifies that a prepared execution with an existing runtime
-  snapshot sends one complete indexed block with `replace_env: true`, so the first
-  agent start cannot append the snapshot to itself.
+  snapshot sends one composed indexed block through normal Configure. The Kubernetes
+  restart path uses the same overlay contract, and lifecycle spills the environment once.
 - `TestBuildEnvForExecutionHostGHBridge_ComposesStrictProfileBlocks` verifies the
   production strict resolver composes agent-profile, executor-profile, and managed
   indexed Git definitions while retaining the supplied entries.
