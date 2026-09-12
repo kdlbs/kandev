@@ -288,19 +288,50 @@ function savedBaseSubmitBlockedReasonForRows(
   );
 }
 
+function useRefreshBranchPolicies(fs: DialogFormState) {
+  const storeApi = useAppStoreApi();
+  const setRepositoryBranchPolicies = useAppStore((state) => state.setRepositoryBranchPolicies);
+  const setRepositoryBranchPoliciesLoading = useAppStore(
+    (state) => state.setRepositoryBranchPoliciesLoading,
+  );
+  return useCallback(async () => {
+    const repositoryIds = [
+      ...new Set(
+        fs.repositories
+          .map((row) => row.repositoryId)
+          .filter((repositoryId): repositoryId is string => Boolean(repositoryId)),
+      ),
+    ];
+    await Promise.all(
+      repositoryIds.map(async (repositoryId) => {
+        const requestRevision =
+          storeApi.getState().repositoryBranchPolicies.revisionByRepositoryId[repositoryId] ?? 0;
+        setRepositoryBranchPoliciesLoading(repositoryId, true);
+        try {
+          const response = await listRepositoryBranchPolicies(repositoryId, { cache: "no-store" });
+          setRepositoryBranchPolicies(
+            repositoryId,
+            response.repository_branch_policies,
+            requestRevision,
+          );
+        } catch {
+          // Keep the original task error visible when recovery cannot refresh.
+        } finally {
+          setRepositoryBranchPoliciesLoading(repositoryId, false);
+        }
+      }),
+    );
+  }, [fs.repositories, setRepositoryBranchPolicies, setRepositoryBranchPoliciesLoading, storeApi]);
+}
+
 function useDialogSetupData(
   props: TaskCreateDialogProps,
   fs: ReturnType<typeof useDialogFormState>,
 ) {
   const { open, workspaceId, workflowId, defaultStepId, initialValues } = props;
   const { toast } = useToast();
-  const storeApi = useAppStoreApi();
   const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
   const repositoryBranches = useAppStore((state) => state.repositoryBranches);
-  const setRepositoryBranchPolicies = useAppStore((state) => state.setRepositoryBranchPolicies);
-  const setRepositoryBranchPoliciesLoading = useAppStore(
-    (state) => state.setRepositoryBranchPoliciesLoading,
-  );
   const data = useTaskCreateDialogData({
     open,
     workspaceId,
@@ -354,34 +385,7 @@ function useDialogSetupData(
     fs.repositories,
     repositoryBranches,
   );
-  const refreshBranchPolicies = useCallback(async () => {
-    const repositoryIds = [
-      ...new Set(
-        fs.repositories
-          .map((row) => row.repositoryId)
-          .filter((repositoryId): repositoryId is string => Boolean(repositoryId)),
-      ),
-    ];
-    await Promise.all(
-      repositoryIds.map(async (repositoryId) => {
-        const requestRevision =
-          storeApi.getState().repositoryBranchPolicies.revisionByRepositoryId[repositoryId] ?? 0;
-        setRepositoryBranchPoliciesLoading(repositoryId, true);
-        try {
-          const response = await listRepositoryBranchPolicies(repositoryId, { cache: "no-store" });
-          setRepositoryBranchPolicies(
-            repositoryId,
-            response.repository_branch_policies,
-            requestRevision,
-          );
-        } catch {
-          // Keep the original task error visible when recovery cannot refresh.
-        } finally {
-          setRepositoryBranchPoliciesLoading(repositoryId, false);
-        }
-      }),
-    );
-  }, [fs.repositories, setRepositoryBranchPolicies, setRepositoryBranchPoliciesLoading, storeApi]);
+  const refreshBranchPolicies = useRefreshBranchPolicies(fs);
   return {
     ...data,
     handlers,
