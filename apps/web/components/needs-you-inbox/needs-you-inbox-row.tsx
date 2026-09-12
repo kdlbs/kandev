@@ -29,7 +29,10 @@ import type {
   ClarificationInboxBundle,
   ClarificationInboxSnoozeDuration,
 } from "@/lib/types/clarification-inbox";
-import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
+import type {
+  ClarificationOutcome,
+  ResolvedStatus,
+} from "@/hooks/domains/session/use-clarification-group";
 import { ClarificationPanelSection } from "@/components/task/chat/clarification-panel-section";
 import { rowPrimaryText, rowSecondaryText } from "@/lib/needs-you-inbox/row-presentation";
 import { resolveThreadSessionStatus } from "@/lib/threads/thread-session-status";
@@ -63,13 +66,22 @@ function useSidecarAction(pendingId: string, onDone: () => void, onFailed: () =>
   return { busy, run };
 }
 
+// The winner's status is absent only against a pre-R10 backend that never
+// sent an envelope status; treating that as "answered" preserves this
+// notice's pre-existing wording for that case.
+function anotherCallerOutcomeKey(status: ResolvedStatus | undefined): string {
+  return status === "rejected"
+    ? "needsYouInbox:anotherCallerRejected"
+    : "needsYouInbox:anotherCallerResolved";
+}
+
 function useRowOutcomeNotice(primaryText: string, bumpRefreshTick: () => void) {
   const { t } = useTranslation();
   return useCallback(
     (outcome: ClarificationOutcome) => {
       if (outcome.kind === "resolved") {
         if (!outcome.claimedByThisCaller) {
-          toast(t("needsYouInbox:anotherCallerResolved", { question: primaryText }));
+          toast(t(anotherCallerOutcomeKey(outcome.status), { question: primaryText }));
         }
         bumpRefreshTick();
         return;
@@ -79,7 +91,7 @@ function useRowOutcomeNotice(primaryText: string, bumpRefreshTick: () => void) {
         bumpRefreshTick();
       }
       // submission_failed: the shared overlay's own inline banner already
-      // offers a retry (AC .35); the row and count stay untouched here.
+      // offers a retry; the row and count stay untouched here.
     },
     [bumpRefreshTick, primaryText, t],
   );

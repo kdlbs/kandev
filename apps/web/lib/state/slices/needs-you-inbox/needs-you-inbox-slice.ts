@@ -71,7 +71,7 @@ export const createNeedsYouInboxSlice = (set: ImmerSet): NeedsYouInboxSlice => (
       if (draft.needsYouInbox.generationByWorkspaceId[workspaceId] !== generation) return;
       // A failed read clears the rows it was replacing in the SAME update
       // (design-02#Failure-and-recovery) -- stale rows over an absent badge
-      // is the disagreement AC .12 forbids.
+      // is a disagreement the badge and the list must never show.
       draft.needsYouInbox.byWorkspaceId[workspaceId] = {
         ...emptyWorkspaceState(),
         status: "error",

@@ -102,6 +102,7 @@ export type {
   NeedsYouInboxSliceState,
   NeedsYouInboxWorkspaceState,
   NeedsYouInboxReadStatus,
+  NeedsYouInboxBootSeed,
 } from "./needs-you-inbox/types";
 
 // Re-export commonly used types from each domain

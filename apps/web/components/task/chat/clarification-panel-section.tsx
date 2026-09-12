@@ -22,7 +22,7 @@ type ClarificationPanelSectionProps = {
    * responding before its own visible ceiling.
    */
   maxHeightVh: number;
-  // Additive (AC .39): forwarded straight through to ClarificationInputOverlay.
+  // Additive: forwarded straight through to ClarificationInputOverlay.
   // Existing hosts (task chat, Quick Chat) leave this unset.
   onOutcome?: (outcome: ClarificationOutcome) => void;
 };

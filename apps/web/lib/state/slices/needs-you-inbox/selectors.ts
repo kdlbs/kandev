@@ -21,8 +21,9 @@ function selectActiveWorkspaceState(state: AppState): NeedsYouInboxWorkspaceStat
 }
 
 /** The sidebar badge count for the active workspace. Absent workspace or
- * absent state renders no badge (0), matching AC .13's "absent is not zero"
- * intent at the presentation layer (callers gate visibility separately). */
+ * absent state renders no badge, not a zero -- distinguishing "not seeded"
+ * from "confirmed empty" at the presentation layer (callers gate visibility
+ * separately). */
 export function selectNeedsYouInboxCount(state: AppState): number {
   return selectActiveWorkspaceState(state).count;
 }

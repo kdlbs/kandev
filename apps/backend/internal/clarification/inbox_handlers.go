@@ -65,8 +65,9 @@ const (
 	errInboxInternal = "failed to read needs-you inbox"
 )
 
-// inboxSnoozeDurations is AC .32's closed set: any other value, including a
-// well-formed "2h", is 400 (F-nothing, design-01#Sidecar-write-and-restore-contracts).
+// inboxSnoozeDurations is the closed set of accepted snooze durations: any
+// other value, including a well-formed "2h", is 400
+// (design-01#Sidecar-write-and-restore-contracts).
 var inboxSnoozeDurations = map[string]time.Duration{
 	"1h":  time.Hour,
 	"4h":  4 * time.Hour,
@@ -96,7 +97,7 @@ type inboxListResponse struct {
 }
 
 // inboxHiddenBundleView is one row of the hidden-bundles enumeration: the
-// same shape as inboxBundleView plus why it is hidden (AC .37).
+// same shape as inboxBundleView plus why it is hidden.
 type inboxHiddenBundleView struct {
 	inboxBundleView
 	State       string  `json:"state"`
@@ -104,7 +105,7 @@ type inboxHiddenBundleView struct {
 }
 
 // inboxHiddenListResponse is GET /api/v1/clarification-inbox/hidden's
-// response envelope. total is workspace-wide (AC .37); count is page-scoped.
+// response envelope. total is workspace-wide; count is page-scoped.
 type inboxHiddenListResponse struct {
 	Bundles    []inboxHiddenBundleView `json:"bundles"`
 	Count      int                     `json:"count"`
@@ -131,7 +132,7 @@ func respondInboxError(c *gin.Context, status int, message string) {
 	c.JSON(status, gin.H{"error": message})
 }
 
-// httpListInbox backs GET /api/v1/clarification-inbox (AC .1-.21, .38, .40).
+// httpListInbox backs GET /api/v1/clarification-inbox.
 func (h *Handlers) httpListInbox(c *gin.Context) {
 	ctx := c.Request.Context()
 	workspaceID, limit, cursorCreatedAt, cursorPendingID, ok := h.parseInboxListQuery(c)
@@ -143,7 +144,7 @@ func (h *Handlers) httpListInbox(c *gin.Context) {
 		return
 	}
 
-	userID := inboxUserID(ctx)
+	userID := InboxUserID(ctx)
 	now := h.now()
 	page, err := h.inboxBundles.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
 		Unscoped:        true,
@@ -167,7 +168,7 @@ func (h *Handlers) httpListInbox(c *gin.Context) {
 
 	// F45: the hidden-count query failing fails the whole read rather than
 	// defaulting hidden_count/next_snooze_expiry, which would misreport both
-	// AC .20's empty state and AC .41's snooze timer.
+	// the empty state and the snooze timer.
 	summary, err := h.inboxBundles.CountHiddenClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
 		Unscoped: true, WorkspaceID: workspaceID, Limit: 1,
 		Sidecar: &taskmodels.ClarificationSidecarFilter{UserID: userID, Only: true, Now: now},
@@ -191,8 +192,7 @@ func (h *Handlers) httpListInbox(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// httpListInboxHidden backs GET /api/v1/clarification-inbox/hidden (AC .33,
-// .37).
+// httpListInboxHidden backs GET /api/v1/clarification-inbox/hidden.
 func (h *Handlers) httpListInboxHidden(c *gin.Context) {
 	ctx := c.Request.Context()
 	workspaceID, limit, cursorCreatedAt, cursorPendingID, ok := h.parseInboxListQuery(c)
@@ -204,7 +204,7 @@ func (h *Handlers) httpListInboxHidden(c *gin.Context) {
 		return
 	}
 
-	userID := inboxUserID(ctx)
+	userID := InboxUserID(ctx)
 	now := h.now()
 	sidecar := &taskmodels.ClarificationSidecarFilter{UserID: userID, Only: true, Now: now}
 	page, err := h.inboxBundles.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
@@ -269,8 +269,8 @@ func (h *Handlers) buildInboxHiddenResponse(
 	return resp, nil
 }
 
-// buildInboxBundleViews hydrates each bundle's durable messages (AC .10,
-// F43, F44) and task_title/session_state enrichment (F41). A bundle whose
+// buildInboxBundleViews hydrates each bundle's durable messages (F43, F44)
+// and task_title/session_state enrichment (F41). A bundle whose
 // messages cannot be read fails the whole page rather than omitting a row
 // silently; a bundle with zero resolvable messages (should not happen given
 // the bundle query's own filters) is skipped and logged.
@@ -305,8 +305,8 @@ func (h *Handlers) buildInboxBundleViews(
 
 // renderInboxMessages projects each message through Message.ToAPI() and
 // rewrites its emitted metadata.question_index to its 0-based rank within
-// this order (F44, design-01's "rewrite" rule): the shared client sort
-// (AC .39) is then a no-op against normalized ranks. A fresh metadata map is
+// this order (F44, design-01's "rewrite" rule): the shared client sort is
+// then a no-op against normalized ranks. A fresh metadata map is
 // built rather than written through the map ToAPI() returns, because that
 // map may be the SAME reference as the source message's own metadata.
 func renderInboxMessages(ordered []*taskmodels.Message) []*v1.Message {
@@ -364,7 +364,7 @@ func (h *Handlers) resolveSessionState(ctx context.Context, sessionID string) st
 	return string(session.State)
 }
 
-// parseInboxListQuery implements AC .38's validation table, shared by the
+// parseInboxListQuery implements the query-validation table shared by the
 // main read and the hidden enumeration.
 func (h *Handlers) parseInboxListQuery(c *gin.Context) (
 	workspaceID string, limit int, cursorCreatedAt time.Time, cursorPendingID string, ok bool,
@@ -390,8 +390,8 @@ func (h *Handlers) parseInboxListQuery(c *gin.Context) (
 	return workspaceID, limit, cursorCreatedAt, cursorPendingID, true
 }
 
-// parseInboxLimit implements AC .38's limit rules: absent defaults to 50,
-// non-numeric or <= 0 is rejected (not clamped), and > 200 clamps to 200.
+// parseInboxLimit implements the limit validation rules: absent defaults to
+// 50, non-numeric or <= 0 is rejected (not clamped), and > 200 clamps to 200.
 func parseInboxLimit(raw string) (int, error) {
 	if raw == "" {
 		return defaultInboxLimit, nil
@@ -421,8 +421,7 @@ func (h *Handlers) respondInboxWorkspaceAuthzError(c *gin.Context, err error) {
 	}
 }
 
-// httpUpsertInboxSidecar backs PUT /api/v1/clarification-inbox/sidecar/:pendingID
-// (AC .22-.25, .32, .36).
+// httpUpsertInboxSidecar backs PUT /api/v1/clarification-inbox/sidecar/:pendingID.
 func (h *Handlers) httpUpsertInboxSidecar(c *gin.Context) {
 	pendingID := c.Param("pendingID")
 	var body inboxSidecarPutBody
@@ -461,7 +460,7 @@ func (h *Handlers) httpUpsertInboxSidecar(c *gin.Context) {
 	if !h.authorizeBundleAccessOrRespond(c, pendingID) {
 		return
 	}
-	if err := h.inboxBundles.UpsertClarificationInboxSidecar(c.Request.Context(), inboxUserID(c.Request.Context()), pendingID, state, snoozeUntil, now); err != nil {
+	if err := h.inboxBundles.UpsertClarificationInboxSidecar(c.Request.Context(), InboxUserID(c.Request.Context()), pendingID, state, snoozeUntil, now); err != nil {
 		h.logger.Error("failed to upsert needs-you inbox sidecar",
 			zap.String("pending_id", pendingID), zap.Error(err))
 		respondInboxError(c, http.StatusInternalServerError, "failed to update needs-you inbox")
@@ -470,15 +469,14 @@ func (h *Handlers) httpUpsertInboxSidecar(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// httpDeleteInboxSidecar backs DELETE /api/v1/clarification-inbox/sidecar/:pendingID
-// (AC .22, .36): restore is deleting the sidecar row, idempotent by
-// construction.
+// httpDeleteInboxSidecar backs DELETE /api/v1/clarification-inbox/sidecar/:pendingID:
+// restore is deleting the sidecar row, idempotent by construction.
 func (h *Handlers) httpDeleteInboxSidecar(c *gin.Context) {
 	pendingID := c.Param("pendingID")
 	if !h.authorizeBundleAccessOrRespond(c, pendingID) {
 		return
 	}
-	if err := h.inboxBundles.DeleteClarificationInboxSidecar(c.Request.Context(), inboxUserID(c.Request.Context()), pendingID); err != nil {
+	if err := h.inboxBundles.DeleteClarificationInboxSidecar(c.Request.Context(), InboxUserID(c.Request.Context()), pendingID); err != nil {
 		h.logger.Error("failed to delete needs-you inbox sidecar",
 			zap.String("pending_id", pendingID), zap.Error(err))
 		respondInboxError(c, http.StatusInternalServerError, "failed to update needs-you inbox")
@@ -523,15 +521,45 @@ func formatOptionalInboxTime(t *time.Time) *string {
 	return &s
 }
 
-// inboxUserID resolves the calling operator's identity for sidecar scoping.
+// InboxUserID resolves the calling operator's identity for sidecar scoping.
 // A real identity uses its own user id; an unscoped caller (auth disabled, or
 // no identity at all) uses the pre-auth default user, keeping single-user
 // behavior byte-identical -- the same convention internal/notifications uses
-// for pre-auth ownership.
-func inboxUserID(ctx context.Context) string {
+// for pre-auth ownership. Exported so the boot-state builder can resolve the
+// same identity for the boot-hydration producer (InboxBootSummary).
+func InboxUserID(ctx context.Context) string {
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || identity.Synthetic || identity.UserID == "" {
 		return userstore.DefaultUserID
 	}
 	return identity.UserID
+}
+
+// InboxBootSummary computes the Needs-you Inbox boot-hydration producer: the
+// same bounded count, truncation flag, and next snooze expiry the list
+// endpoint returns, at the same default limit and workspace/sidecar scope,
+// for a workspace the boot builder has already resolved as the caller's own.
+func InboxBootSummary(
+	ctx context.Context,
+	bundles inboxBundleStore,
+	workspaceID, userID string,
+	now time.Time,
+) (count int, hasMore bool, nextSnoozeExpiry *time.Time, err error) {
+	page, err := bundles.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
+		Unscoped:    true,
+		WorkspaceID: workspaceID,
+		Limit:       defaultInboxLimit,
+		Sidecar:     &taskmodels.ClarificationSidecarFilter{UserID: userID, Now: now},
+	})
+	if err != nil {
+		return 0, false, nil, err
+	}
+	summary, err := bundles.CountHiddenClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
+		Unscoped: true, WorkspaceID: workspaceID, Limit: 1,
+		Sidecar: &taskmodels.ClarificationSidecarFilter{UserID: userID, Only: true, Now: now},
+	})
+	if err != nil {
+		return 0, false, nil, err
+	}
+	return len(page.Bundles), page.HasMore, summary.NextSnoozeExpiry, nil
 }

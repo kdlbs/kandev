@@ -2,6 +2,17 @@ import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
 
 export type NeedsYouInboxReadStatus = "idle" | "loading" | "ready" | "error";
 
+// The boot-hydration producer's wire shape (needs-you-inbox
+// design-01#Data-and-contracts): carried on the boot payload's
+// `initialState.needsYouInboxBoot`, distinct from the `needsYouInbox` slice
+// shape itself, and consumed once via seedNeedsYouInboxBoot.
+export type NeedsYouInboxBootSeed = {
+  workspaceId: string;
+  count: number;
+  hasMore: boolean;
+  nextSnoozeExpiry: string | null;
+};
+
 export type NeedsYouInboxWorkspaceState = {
   bundles: ClarificationInboxBundle[];
   count: number;
@@ -10,7 +21,7 @@ export type NeedsYouInboxWorkspaceState = {
   hasMore: boolean;
   status: NeedsYouInboxReadStatus;
   // The generation of the last response actually applied to this workspace's
-  // rows, for the AC .38 stale-response guard.
+  // rows, for the stale-response guard.
   appliedGeneration: number;
 };
 

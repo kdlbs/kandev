@@ -9,6 +9,7 @@
   "snoozeDuration24h": "24 小时",
   "snoozeFailed": "无法延后此问题,请重试。",
   "anotherCallerResolved": "其他人已经回答了“{{question}}”。",
+  "anotherCallerRejected": "其他人已经拒绝了“{{question}}”。",
   "bundleNoLongerActive": "“{{question}}”已不再等待回答。",
   "errorTitle": "无法加载您的收件箱",
   "errorDescription": "加载等待您处理的问题时出错。",

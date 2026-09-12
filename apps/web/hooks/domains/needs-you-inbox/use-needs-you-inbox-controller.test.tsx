@@ -13,6 +13,11 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => null,
 }));
 
+const readBootPayloadMock = vi.fn();
+vi.mock("@/src/boot-payload", () => ({
+  readBootPayload: () => readBootPayloadMock(),
+}));
+
 import { useNeedsYouInboxController } from "./use-needs-you-inbox-controller";
 
 const WORKSPACE_ID = "w1";
@@ -51,6 +56,8 @@ function renderController(enabled = true) {
 beforeEach(() => {
   listClarificationInboxMock.mockReset();
   listClarificationInboxMock.mockResolvedValue(page());
+  readBootPayloadMock.mockReset();
+  readBootPayloadMock.mockReturnValue({ initialState: {} });
 });
 
 afterEach(() => {
@@ -131,5 +138,75 @@ describe("useNeedsYouInboxController", () => {
     });
 
     expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useNeedsYouInboxController boot-hydration seed (AC .34, .40, .41)", () => {
+  it("seeds the count from the boot payload before the live read resolves", async () => {
+    readBootPayloadMock.mockReturnValue({
+      initialState: {
+        needsYouInboxBoot: {
+          workspaceId: WORKSPACE_ID,
+          count: 5,
+          hasMore: true,
+          nextSnoozeExpiry: "2026-01-01T00:00:00Z",
+        },
+      },
+    });
+
+    const { result } = renderController(true);
+
+    // Synchronous, before the mocked fetch's promise has settled: only the
+    // layout-effect seed and beginNeedsYouInboxRead's own effect have run.
+    const seeded = result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID];
+    expect(seeded?.count).toBe(5);
+    expect(seeded?.hasMore).toBe(true);
+    expect(seeded?.nextSnoozeExpiry).toBe("2026-01-01T00:00:00Z");
+
+    await waitFor(() => {
+      const settled = result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID];
+      expect(settled?.status).toBe("ready");
+      expect(settled?.count).toBe(0);
+    });
+  });
+
+  it("does not seed when the boot payload names a different workspace", async () => {
+    readBootPayloadMock.mockReturnValue({
+      initialState: {
+        needsYouInboxBoot: {
+          workspaceId: "some-other-workspace",
+          count: 5,
+          hasMore: true,
+          nextSnoozeExpiry: null,
+        },
+      },
+    });
+
+    const { result } = renderController(true);
+
+    const seeded = result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID];
+    expect(seeded?.count ?? 0).toBe(0);
+
+    await waitFor(() => expect(listClarificationInboxMock).toHaveBeenCalledWith(WORKSPACE_ID));
+  });
+
+  it("does not seed when the flag is disabled", async () => {
+    readBootPayloadMock.mockReturnValue({
+      initialState: {
+        needsYouInboxBoot: {
+          workspaceId: WORKSPACE_ID,
+          count: 5,
+          hasMore: true,
+          nextSnoozeExpiry: null,
+        },
+      },
+    });
+
+    const { result } = renderController(false);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]).toBeUndefined();
   });
 });

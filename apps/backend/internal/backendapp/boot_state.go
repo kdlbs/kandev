@@ -121,6 +121,7 @@ func bootInitialState(
 		builder.addOfficeRouteState(ctx, req, state)
 	}
 	builder.addQuickChatState(ctx, req, state, route)
+	builder.addNeedsYouInboxState(ctx, req, state, route)
 	return state
 }
 

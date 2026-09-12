@@ -108,11 +108,12 @@ function parseClarificationResponseBody(value: unknown): ClarificationRespondRes
   return { state: "ok", claimed, status, ...responseFields };
 }
 
-// ClarificationOutcome is the settled-submission report AC .39 requires:
-// built directly from the same ClarificationRespondResult this hook already
-// parses (design-01#Components / design-02#Failure-and-recovery), so no host
-// (including the Needs-you Inbox) ever derives a second representation of
-// "what happened" from raw wire fields.
+// ClarificationOutcome is the settled-submission report every outcome
+// consumer needs: built directly from the same ClarificationRespondResult
+// this hook already parses (design-01#Components /
+// design-02#Failure-and-recovery), so no host (including the Needs-you
+// Inbox) ever derives a second representation of "what happened" from raw
+// wire fields.
 export type ClarificationOutcome =
   | { kind: "resolved"; claimedByThisCaller: boolean; status?: ResolvedStatus }
   | { kind: "no_longer_active" }
@@ -142,7 +143,7 @@ export type ClarificationGroupApi = {
   // any submission has settled. Callers that need to distinguish "this
   // caller won" from "another caller won" read this alongside submitState;
   // see ClarificationOutcome / the outcome callback threaded through
-  // ClarificationInputOverlay -> ClarificationPanelSection (AC .39).
+  // ClarificationInputOverlay -> ClarificationPanelSection.
   lastResult: ClarificationRespondResult | null;
 };
 

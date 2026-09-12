@@ -70,8 +70,8 @@ function useHiddenList(workspaceId: string | null) {
   return { status, bundles, load };
 }
 
-// AC .33/.37: discloses how many answerable bundles this operator's own
-// dismiss or snooze is hiding, and lets them enumerate and restore one.
+// Discloses how many answerable bundles this operator's own dismiss or
+// snooze is hiding, and lets them enumerate and restore one.
 export function NeedsYouInboxHiddenPanel({ hiddenCount }: { hiddenCount: number }) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);

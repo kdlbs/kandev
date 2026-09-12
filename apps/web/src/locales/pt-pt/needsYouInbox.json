@@ -9,6 +9,7 @@
   "snoozeDuration24h": "24 horas",
   "snoozeFailed": "Não foi possível adiar esta pergunta. Tente novamente.",
   "anotherCallerResolved": "Outra pessoa já respondeu a \"{{question}}\".",
+  "anotherCallerRejected": "Outra pessoa já rejeitou \"{{question}}\".",
   "bundleNoLongerActive": "\"{{question}}\" já não está à espera de uma resposta.",
   "errorTitle": "Não foi possível carregar a sua caixa de entrada",
   "errorDescription": "Ocorreu um erro ao carregar as perguntas que aguardam a sua resposta.",

@@ -9,6 +9,7 @@
   "snoozeDuration24h": "24 小時",
   "snoozeFailed": "無法延後此問題,請重試。",
   "anotherCallerResolved": "其他人已經回答了「{{question}}」。",
+  "anotherCallerRejected": "其他人已經拒絕了「{{question}}」。",
   "bundleNoLongerActive": "「{{question}}」已不再等待回答。",
   "errorTitle": "無法載入您的收件箱",
   "errorDescription": "載入等待您處理的問題時出錯。",

@@ -156,48 +156,74 @@ describe("NeedsYouInboxRow", () => {
     expect(mocks.toastError).toHaveBeenCalledOnce();
     expect(mocks.bumpRefreshTick).not.toHaveBeenCalled();
   });
+});
 
-  describe("onOutcome (AC .17, .35, .39)", () => {
-    function expand() {
-      fireEvent.click(screen.getByTestId("needs-you-inbox-row-toggle"));
-    }
+describe("NeedsYouInboxRow onOutcome (AC .17, .35, .39)", () => {
+  function expand() {
+    fireEvent.click(screen.getByTestId("needs-you-inbox-row-toggle"));
+  }
 
-    it("this caller won: re-reads with no notice", () => {
-      render(<NeedsYouInboxRow bundle={bundle()} />);
-      expand();
-      act(() => capturedOnOutcome?.({ kind: "resolved", claimedByThisCaller: true }));
+  it("this caller won: re-reads with no notice", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+    expand();
+    act(() => capturedOnOutcome?.({ kind: "resolved", claimedByThisCaller: true }));
 
-      expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
-      expect(mocks.toast).not.toHaveBeenCalled();
-    });
+    expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
 
-    it("another caller won: shows a transient non-error notice and re-reads", () => {
-      render(<NeedsYouInboxRow bundle={bundle()} />);
-      expand();
-      act(() => capturedOnOutcome?.({ kind: "resolved", claimedByThisCaller: false }));
+  it("another caller won by answering: notice names 'answered'", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+    expand();
+    act(() =>
+      capturedOnOutcome?.({ kind: "resolved", claimedByThisCaller: false, status: "answered" }),
+    );
 
-      expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
-      expect(mocks.toast).toHaveBeenCalledOnce();
-      expect(mocks.toastError).not.toHaveBeenCalled();
-    });
+    expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
+    expect(mocks.toast).toHaveBeenCalledOnce();
+    expect(mocks.toast.mock.calls[0][0]).toMatch(/answered/i);
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
 
-    it("bundle no longer active: shows a transient non-error notice and re-reads", () => {
-      render(<NeedsYouInboxRow bundle={bundle()} />);
-      expand();
-      act(() => capturedOnOutcome?.({ kind: "no_longer_active" }));
+  it("another caller won by rejecting: notice names 'rejected', not 'answered' (AC .17)", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+    expand();
+    act(() =>
+      capturedOnOutcome?.({ kind: "resolved", claimedByThisCaller: false, status: "rejected" }),
+    );
 
-      expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
-      expect(mocks.toast).toHaveBeenCalledOnce();
-    });
+    expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
+    expect(mocks.toast).toHaveBeenCalledOnce();
+    expect(mocks.toast.mock.calls[0][0]).toMatch(/rejected/i);
+    expect(mocks.toast.mock.calls[0][0]).not.toMatch(/answered/i);
+  });
 
-    it("submission failed: leaves the row and count untouched (AC .35)", () => {
-      render(<NeedsYouInboxRow bundle={bundle()} />);
-      expand();
-      act(() => capturedOnOutcome?.({ kind: "submission_failed" }));
+  it("another caller won with no reported status (legacy backend): falls back to 'answered' wording", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+    expand();
+    act(() => capturedOnOutcome?.({ kind: "resolved", claimedByThisCaller: false }));
 
-      expect(mocks.bumpRefreshTick).not.toHaveBeenCalled();
-      expect(mocks.toast).not.toHaveBeenCalled();
-      expect(mocks.toastError).not.toHaveBeenCalled();
-    });
+    expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
+    expect(mocks.toast).toHaveBeenCalledOnce();
+    expect(mocks.toast.mock.calls[0][0]).toMatch(/answered/i);
+  });
+
+  it("bundle no longer active: shows a transient non-error notice and re-reads", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+    expand();
+    act(() => capturedOnOutcome?.({ kind: "no_longer_active" }));
+
+    expect(mocks.bumpRefreshTick).toHaveBeenCalledTimes(1);
+    expect(mocks.toast).toHaveBeenCalledOnce();
+  });
+
+  it("submission failed: leaves the row and count untouched (AC .35)", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+    expand();
+    act(() => capturedOnOutcome?.({ kind: "submission_failed" }));
+
+    expect(mocks.bumpRefreshTick).not.toHaveBeenCalled();
+    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 });

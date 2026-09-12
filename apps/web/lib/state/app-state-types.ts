@@ -71,6 +71,7 @@ import type {
   PreviewDevicePreset,
   ConnectionState,
   KanbanSlice,
+  NeedsYouInboxBootSeed,
 } from "./slices";
 import type { AppStateExtraActions } from "./app-state-extra-actions";
 import type {
@@ -640,4 +641,8 @@ export type AppState = KanbanSlice & {
 export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
   quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
+  // The Needs-you Inbox boot-hydration producer's raw wire shape, carried
+  // alongside (not inside) the `needsYouInbox` slice's own hydration key. See
+  // useNeedsYouInboxController's boot-seed effect, the only consumer.
+  needsYouInboxBoot?: NeedsYouInboxBootSeed;
 };

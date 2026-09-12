@@ -18,8 +18,8 @@ import { NeedsYouInboxHiddenPanel } from "@/components/needs-you-inbox/needs-you
 type ViewMode = "error" | "loading" | "empty" | "list";
 
 // F42: a page reporting truncation while listing zero rows means enrichment
-// emptied a page the query had filled, so this resolves to "error" (the
-// AC .21 retry state) rather than "empty" (design-01#Data-and-contracts).
+// emptied a page the query had filled, so this resolves to the retryable
+// "error" state rather than "empty" (design-01#Data-and-contracts).
 function resolveViewMode(
   status: string,
   bundleCount: number,

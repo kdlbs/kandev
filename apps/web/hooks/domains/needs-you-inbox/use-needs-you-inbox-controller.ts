@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { listClarificationInbox } from "@/lib/api/domains/clarification-inbox-api";
 import { selectNeedsYouInboxNextSnoozeExpiry } from "@/lib/state/slices/needs-you-inbox/selectors";
+import { readBootPayload } from "@/src/boot-payload";
 
 // "At most once every 60 seconds" (design-02#Control-flow): the residual
 // catch-all for exits none of the other four triggers observes.
@@ -12,11 +13,39 @@ const PERIODIC_REFRESH_MS = 60_000;
 // A skewed client clock asking early must not spin; floor the reschedule.
 const MIN_SNOOZE_RESCHEDULE_MS = 5_000;
 
+// Applies the boot-hydration producer (needs-you-inbox
+// design-01#Data-and-contracts) via seedNeedsYouInboxBoot, so the badge
+// carries a value before the live read below ever resolves. A
+// useLayoutEffect, not useEffect, so it always runs before this hook's own
+// refresh-trigger effects in the same commit -- seedNeedsYouInboxBoot's own
+// generation-0 guard makes the ordering a belt-and-suspenders correctness
+// property rather than the only thing preventing a stale overwrite, but boot
+// data seeding after the first live read started would otherwise waste the
+// one chance it has to avoid the pre-read flash.
+function useNeedsYouInboxBootSeed(
+  enabled: boolean,
+  workspaceId: string | null,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  const seededRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!enabled || !workspaceId || seededRef.current) return;
+    seededRef.current = true;
+    const boot = readBootPayload().initialState?.needsYouInboxBoot;
+    if (!boot || boot.workspaceId !== workspaceId) return;
+    storeApi.getState().seedNeedsYouInboxBoot(workspaceId, {
+      count: boot.count,
+      hasMore: boot.hasMore,
+      nextSnoozeExpiry: boot.nextSnoozeExpiry,
+    });
+  }, [enabled, workspaceId, storeApi]);
+}
+
 /**
  * Owns every Needs-you Inbox refresh trigger (design-02#Control-flow) and the
- * AC .41 snooze-expiry timer. Mounted once, unconditionally of route, so the
- * badge stays right whether or not the Inbox is open (AC .34). The Inbox
- * route component subscribes to the same slice and adds no triggers of its
+ * snooze-expiry timer. Mounted once, unconditionally of route, so the badge
+ * stays right whether or not the Inbox is open. The Inbox route component
+ * subscribes to the same slice and adds no triggers of its
  * own -- it may call `refresh` again on mount, which is a harmless extra
  * bounded read.
  */
@@ -27,6 +56,8 @@ export function useNeedsYouInboxController() {
   const nextSnoozeExpiry = useAppStore(selectNeedsYouInboxNextSnoozeExpiry);
   const refreshTick = useAppStore((s) => s.needsYouInbox.refreshTick);
   const storeApi = useAppStoreApi();
+
+  useNeedsYouInboxBootSeed(enabled, workspaceId, storeApi);
 
   const refresh = useCallback(
     async (targetWorkspaceId: string) => {
@@ -107,9 +138,9 @@ export function useNeedsYouInboxController() {
     return () => window.clearInterval(interval);
   }, [enabled, workspaceId, refresh]);
 
-  // Snooze-expiry timer (AC .24/.41): cancelled and re-armed whenever the
-  // workspace or the carried expiry changes, so it never fires for a
-  // workspace the operator has left.
+  // Snooze-expiry timer: cancelled and re-armed whenever the workspace or the
+  // carried expiry changes, so it never fires for a workspace the operator
+  // has left.
   useEffect(() => {
     if (!enabled || !workspaceId || !nextSnoozeExpiry) return;
     const delay = Math.max(

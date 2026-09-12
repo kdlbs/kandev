@@ -42,8 +42,8 @@ const upsertClarificationInboxSidecarSQL = `
 `
 
 // UpsertClarificationInboxSidecar dismisses or snoozes one bundle for one
-// operator. Idempotent by construction (AC .25): repeating the same call
-// leaves the single row the primary key allows. Re-snoozing REPLACES
+// operator. Idempotent by construction: repeating the same call leaves the
+// single row the primary key allows. Re-snoozing REPLACES
 // snooze_until with a fresh absolute instant rather than extending the old
 // one, matching the design's "no accumulation" rule.
 func (r *Repository) UpsertClarificationInboxSidecar(
@@ -60,9 +60,9 @@ func (r *Repository) UpsertClarificationInboxSidecar(
 }
 
 // DeleteClarificationInboxSidecar restores a bundle: the sidecar row is
-// deleted, which is the whole of restore (AC .22 — the underlying record was
-// never touched). Deleting an absent row is a no-op success (AC .36), which
-// is what makes this endpoint idempotent.
+// deleted, which is the whole of restore (the underlying record was never
+// touched). Deleting an absent row is a no-op success, which is what makes
+// this endpoint idempotent.
 func (r *Repository) DeleteClarificationInboxSidecar(ctx context.Context, userID, pendingID string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM clarification_inbox_sidecar WHERE user_id = ? AND pending_id = ?
@@ -115,8 +115,8 @@ func summaryFromScan(count int, hasExpiry bool, expiry time.Time) models.Clarifi
 
 // GetClarificationInboxSidecarStates resolves each addressed pending_id's
 // hidden state and snooze expiry for one operator, used to enrich the hidden-
-// bundles enumeration (AC .37) after ListUnresolvedClarificationBundles has
-// already produced the bundle identities with the Only=true sidecar filter.
+// bundles enumeration after ListUnresolvedClarificationBundles has already
+// produced the bundle identities with the Only=true sidecar filter.
 // A pending_id with no sidecar row (should not happen given the caller's own
 // filter, but the map lookup degrades safely) is simply absent from the map.
 func (r *Repository) GetClarificationInboxSidecarStates(

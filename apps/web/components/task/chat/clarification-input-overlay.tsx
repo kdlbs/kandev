@@ -37,8 +37,8 @@ type ClarificationInputOverlayProps = {
   // Called by the expanded header's collapse control.
   onCollapse?: () => void;
   collapseContentId?: string;
-  // Additive (AC .39): reports every settled submission outcome, distinct
-  // from onResolved's narrower "this caller's own answer landed" signal. The
+  // Additive: reports every settled submission outcome, distinct from
+  // onResolved's narrower "this caller's own answer landed" signal. The
   // task session and Quick Chat hosts leave this unset and keep their
   // existing behavior identical; the Needs-you Inbox is the first host that
   // needs to tell "this caller won" apart from "another caller won" /
@@ -214,9 +214,10 @@ function ClarificationCard(props: CardProps) {
 }
 
 // buildOutcome projects a settled submitState + the hook's lastResult into
-// the AC .39 report. "submitting"/"idle" never reach here (guarded by the
-// caller's transition check), and "ok" always has a lastResult by the time
-// the transition fires (set in the same ownsRequest branch as submitState).
+// the settled-outcome report. "submitting"/"idle" never reach here (guarded
+// by the caller's transition check), and "ok" always has a lastResult by the
+// time the transition fires (set in the same ownsRequest branch as
+// submitState).
 function buildOutcome(
   submitState: "ok" | "error" | "expired",
   lastResult: ReturnType<typeof useClarificationGroup>["lastResult"],
@@ -233,7 +234,7 @@ function buildOutcome(
 // useOutcomeCallback mirrors useResolveCallback's transition guard (fire
 // once per settle, inheriting the hook's ownership fence for free since
 // lastResult/submitState only update for the request that still owns it) but
-// covers all four AC .39 outcomes instead of only the "this caller won" one.
+// covers all four settled outcomes instead of only the "this caller won" one.
 function useOutcomeCallback(
   submitState: ReturnType<typeof useClarificationGroup>["submitState"],
   lastResult: ReturnType<typeof useClarificationGroup>["lastResult"],

@@ -9,6 +9,7 @@
   "snoozeDuration24h": "24 hours",
   "snoozeFailed": "Could not snooze this question. Try again.",
   "anotherCallerResolved": "Someone else already answered \"{{question}}\".",
+  "anotherCallerRejected": "Someone else already rejected \"{{question}}\".",
   "bundleNoLongerActive": "\"{{question}}\" is no longer waiting on an answer.",
   "errorTitle": "Could not load your inbox",
   "errorDescription": "Something went wrong loading the questions waiting on you.",

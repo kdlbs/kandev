@@ -156,8 +156,8 @@ export function resolveSpaRoute(
   );
 }
 
-// AC .1-.2: the destination resolves only where the flag is enabled; disabled
-// falls through to the kanban catch-all like an unrecognized path would.
+// The destination resolves only where the flag is enabled; disabled falls
+// through to the kanban catch-all like an unrecognized path would.
 function resolveNeedsYouInboxRoute(normalized: string, enabled: boolean): SpaRoute | null {
   if (!enabled) return null;
   return normalized === NEEDS_YOU_INBOX_HREF ? { kind: "needsYouInbox" } : null;

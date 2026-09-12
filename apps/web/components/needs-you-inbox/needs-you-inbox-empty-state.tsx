@@ -4,8 +4,8 @@ import { IconCircleCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { NeedsYouInboxHiddenPanel } from "./needs-you-inbox-hidden-panel";
 
-// AC .20: names what it does not count, and only mentions hidden bundles when
-// the operator actually has some hidden -- it must never imply otherwise.
+// Names what it does not count, and only mentions hidden bundles when the
+// operator actually has some hidden -- it must never imply otherwise.
 export function NeedsYouInboxEmptyState({ hiddenCount }: { hiddenCount: number }) {
   const { t } = useTranslation();
   return (
