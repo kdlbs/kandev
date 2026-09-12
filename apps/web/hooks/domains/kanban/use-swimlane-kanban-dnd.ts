@@ -45,7 +45,7 @@ export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveT
       const snapshot = state.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
 
-      const originalTasks = snapshot.tasks;
+      const originalStepId = task.workflowStepId;
 
       // The server always computes a cross-step arrival's position itself
       // (REQ-TASKS-KANBAN-TASK-REORDERING-001.28: it sorts last in the
@@ -67,9 +67,15 @@ export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveT
       } catch (error) {
         const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
         if (currentSnapshot) {
-          store
-            .getState()
-            .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
+          // Revert only this task's optimistic step change, not the whole
+          // array: a concurrent update to another task while this move was
+          // in flight must survive the rollback.
+          store.getState().setWorkflowSnapshot(workflowId, {
+            ...currentSnapshot,
+            tasks: currentSnapshot.tasks.map((t: KanbanState["tasks"][number]) =>
+              t.id === taskId ? { ...t, workflowStepId: originalStepId } : t,
+            ),
+          });
         }
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });

@@ -22,7 +22,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => store,
 }));
 
-import { useSwimlaneKanbanDnd } from "./use-swimlane-kanban-dnd";
+import { useCrossStepMove, useSwimlaneKanbanDnd } from "./use-swimlane-kanban-dnd";
 
 const WORKFLOW_ID = "wf1";
 
@@ -87,5 +87,46 @@ describe("useSwimlaneKanbanDnd — Escape/drop-outside cancellation (AC.9)", () 
     expect(reorderBand).not.toHaveBeenCalled();
     expect(mockMoveTaskById).not.toHaveBeenCalled();
     expect(storeState.setWorkflowSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("useCrossStepMove — rollback on failure", () => {
+  it("reverts only the moved task's step, preserving a concurrent update to another task", async () => {
+    const taskA = makeTask("a", "step-1");
+    const taskB = makeTask("b", "step-1");
+    storeState.kanbanMulti.snapshots[WORKFLOW_ID] = { tasks: [taskA, taskB] };
+
+    let rejectMove!: (error: unknown) => void;
+    mockMoveTaskById.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectMove = reject;
+      }),
+    );
+
+    const { result } = renderHook(() => useCrossStepMove(WORKFLOW_ID));
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current("a", "step-2", taskA);
+    });
+
+    // A concurrent, unrelated update lands on task b while the move is
+    // still in flight — the rollback must not discard it.
+    storeState.kanbanMulti.snapshots[WORKFLOW_ID] = {
+      tasks: [
+        storeState.setWorkflowSnapshot.mock.calls.at(-1)?.[1].tasks.find((t: Task) => t.id === "a"),
+        { ...taskB, title: "b (concurrently renamed)" },
+      ],
+    };
+
+    await act(async () => {
+      rejectMove(new Error("network error"));
+      await pending;
+    });
+
+    const lastCall = storeState.setWorkflowSnapshot.mock.calls.at(-1);
+    const finalTasks = lastCall?.[1].tasks as Task[];
+    expect(finalTasks.find((t) => t.id === "a")?.workflowStepId).toBe("step-1");
+    expect(finalTasks.find((t) => t.id === "b")?.title).toBe("b (concurrently renamed)");
   });
 });
