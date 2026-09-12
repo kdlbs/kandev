@@ -5,7 +5,7 @@ description: "Install, start, and operate Kandev from the command line."
 
 # Kandev CLI
 
-The packaged `kandev` executable is a single native Go binary with the compiled web frontend embedded. It starts the backend and serves the web UI, HTTP API, WebSocket API, and MCP endpoint from one listener. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](desktop-app.md) instead.
+The packaged `kandev` executable is a single native Go binary with the compiled web frontend embedded. It starts the backend and serves the web UI, HTTP API, WebSocket API, and MCP endpoint from one listener. Use it for a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](desktop-app.md) instead.
 
 ## Quick path
 
