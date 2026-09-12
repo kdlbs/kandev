@@ -23,9 +23,10 @@ The packaged `kandev` executable is a single native Go binary with the compiled 
 | Windows | `x64` | Scoop, npm/npx |
 
 The `kandev` binary contains the backend and compiled web application. A
-release bundle also contains `agentctl` and cross-platform `agentctl` helpers
-for task environments. These helpers support agent execution. They do not
-serve the Kandev web application.
+release bundle also contains the host `agentctl` and Linux/macOS remote
+`agentctl` helpers for task environments. These helpers support agent
+execution in SSH and container environments. They do not serve the Kandev web
+application.
 
 The npm package is a small Node.js shim. It selects an exact, same-version
 native runtime package for `process.platform` and `process.arch`, then starts

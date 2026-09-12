@@ -25,13 +25,13 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 
 Kandev is distributed as a native Go binary for each supported platform. The
 compiled web frontend is embedded in that binary. The binary serves the web UI
-and API, so a release install does not need Node.js, a separate web server, or
-a frontend build.
+and API, so the application server does not need Node.js, a separate web
+server, or a frontend build at runtime.
 
-Homebrew, Scoop, npm, and release archives use this native binary. The npm
-package adds a small platform selector. The desktop app bundles the same
-runtime inside Tauri. Release bundles also include `agentctl` helpers for task
-environments.
+Homebrew, Scoop, release archives, and the desktop app run this native binary
+directly. The npm/npx package adds a small Node.js platform selector, so Node.js
+is required to launch Kandev through npm/npx but not by the application server.
+Release bundles also include `agentctl` helpers for task environments.
 
 ## Vision
 
