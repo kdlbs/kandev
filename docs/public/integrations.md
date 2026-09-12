@@ -358,7 +358,7 @@ managed preflight validates the persisted GitHub repository identity and skips e
 mode. It does not test SSH or HTTPS transport authentication. A successful preflight or GitHub
 status check is therefore not proof that a task can clone, fetch, or push.
 
-For recovery:
+For managed workspace connections that still block task Git access after the policy change:
 
 - Replace an invalid PAT or select the exact CLI account again; validation must succeed before Kandev swaps the connection.
 - Run `gh auth status --hostname github.com` as the Kandev service user when a selected CLI login disappears, then sign in that account again if necessary.

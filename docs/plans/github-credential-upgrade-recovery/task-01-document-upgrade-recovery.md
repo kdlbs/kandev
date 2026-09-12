@@ -58,6 +58,7 @@ No new test is required because the correction changes documentation only.
 ## Files likely touched
 
 - `docs/public/integrations.md`
+- `docs/public/use-kandev.md` (cross-page summary)
 - `docs/plans/github-credential-upgrade-recovery/plan.md` (status and results)
 - `docs/plans/github-credential-upgrade-recovery/task-01-document-upgrade-recovery.md` (status and results)
 
@@ -102,4 +103,8 @@ All three acceptance conditions pass by manual review. Public-doc tests (62), pu
 validation (46 pages), catalog validation, specification lint, focused Go tests, both backend and
 web builds, and `git diff --check` pass. A follow-up source review corrected the conditional
 connection entry point and the requirement to create a fresh terminal process; no builds or tests
-were rerun for that review.
+were rerun for that review. The PR fixup review then clarified preservation of either saved task
+Git policy for historical workspaces, scoped the recovery list to managed connections, aligned the
+plan's control labels with the UI, and completed the touched-file inventory. Post-fixup focused
+documentation validation passed: public-doc validation (46 pages), catalog validation (264
+decisions and 818 specifications), specification lint, and `git diff --check`.

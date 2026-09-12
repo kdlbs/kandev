@@ -73,7 +73,7 @@ A code test that expects automatic policy conversion would contradict the curren
 
 Update the existing task-access and upgrade sections in `docs/public/integrations.md`.
 Keep workspace API authentication separate from credentials inside task processes.
-Use **Workspace GitHub access**, **Change GitHub connection**, and **Inherit executor Git credentials** as the existing control labels.
+Use **Workspace GitHub access**, **Change connection** when an automation connection exists, **Connect GitHub** otherwise, and **Inherit executor Git credentials** as the existing control labels.
 Explain that a later launch or resume applies the saved policy to Kandev-managed Local and Worktree origins.
 Existing agent processes retain their launch environment until a later launch or resume.
 
@@ -133,6 +133,11 @@ Build validation passed: `make -C apps/backend build` and
 `pnpm --filter @kandev/web build`.
 Follow-up source review corrected the disconnected-workspace entry point and the fresh-terminal
 recovery instruction; no builds or tests were rerun for that review.
+Review follow-up also clarified that historical workspaces may preserve either saved task Git
+policy, scoped the recovery list to managed workspace connections, aligned the plan's control
+labels with the UI, and completed the work-order touched-file inventory. Focused post-fixup
+documentation validation passed: public-doc validation (46 pages), catalog validation (264
+decisions and 818 specifications), specification lint, and `git diff --check`.
 No temporary tests, instances, or database mutations were needed.
 
 ## Risks
