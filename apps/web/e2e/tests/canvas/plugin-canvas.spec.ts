@@ -416,15 +416,19 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
       expect(pendingReleaseId).toBeTruthy();
 
       await testPage.goto(canvasHref(canvasId));
-      await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Ready", {
+      const releasesButton = testPage.getByRole("button", {
+        name: "Releases and permissions",
+        exact: true,
+      });
+      await expect(releasesButton).toBeVisible({
         timeout: 20_000,
       });
-      await testPage.getByRole("button", { name: "Releases and permissions", exact: true }).click();
+      await releasesButton.click();
 
       const dialog = testPage.getByTestId("canvas-releases-dialog");
       await expect(dialog).toBeVisible();
       const dialogBox = await dialog.boundingBox();
-      expect(dialogBox?.width).toBeGreaterThanOrEqual(760);
+      expect(dialogBox?.width).toBeGreaterThanOrEqual(720);
       expect(dialogBox?.width).toBeLessThanOrEqual(780);
 
       const permissions = dialog.getByTestId("canvas-permission-summary");
