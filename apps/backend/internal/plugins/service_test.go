@@ -693,10 +693,16 @@ func TestServiceUninstallDeletesPluginUserStateForEveryUser(t *testing.T) {
 func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	svc, fsStore, rt := newTestService(t)
 	svc.SetUserState(newTestUserStateStore(t))
-	rec := installTestPlugin(t, svc, "kandev-plugin-notes")
 	ctx := context.Background()
+	rec, err := svc.Install(ctx, testPackageWithAPIRead(t, "kandev-plugin-notes", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install plugin: %v", err)
+	}
 	if _, err := svc.UserState().Set(ctx, rec.ID, "user_1", "task", "task_1", "note", json.RawMessage(`"a"`), nil); err != nil {
 		t.Fatalf("seed user state: %v", err)
+	}
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("seed approval: %v", err)
 	}
 
 	cleanupErr := errors.New("user state database unavailable")
@@ -708,7 +714,7 @@ func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	deliverer := &fakeDeliverer{}
 	svc.SetDeliverer(deliverer)
 
-	err := svc.Uninstall(ctx, rec.ID)
+	err = svc.Uninstall(ctx, rec.ID)
 	if err == nil || !strings.Contains(err.Error(), cleanupErr.Error()) {
 		t.Fatalf("Uninstall() error = %v, want user-state cleanup failure", err)
 	}
@@ -730,6 +736,14 @@ func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	if deliverer.refreshCount != 1 {
 		t.Fatalf("deliverer refreshes after failed uninstall = %d, want stopped-state reconciliation only", deliverer.refreshCount)
 	}
+	firstApproval, ok, err := svc.approvalCurrent(rec.InstallationID, "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("approvalCurrent after failed uninstall: ok=%v err=%v", ok, err)
+	}
+	if firstApproval.Revision != 2 || firstApproval.TombstonedAt == nil {
+		t.Fatalf("approval after failed uninstall = %#v", firstApproval)
+	}
+	firstTombstone := *firstApproval.TombstonedAt
 
 	cleanup.deleteErr = nil
 	if err := svc.Uninstall(ctx, rec.ID); err != nil {
@@ -747,6 +761,75 @@ func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("user state rows after successful retry = %d, want 0", len(entries))
+	}
+	secondApproval, ok, err := svc.approvalCurrent(rec.InstallationID, "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("approvalCurrent after successful retry: ok=%v err=%v", ok, err)
+	}
+	if secondApproval.Revision != firstApproval.Revision || secondApproval.TombstonedAt == nil || !secondApproval.TombstonedAt.Equal(firstTombstone) {
+		t.Fatalf("approval after uninstall retry changed tombstone state: first=%#v second=%#v", firstApproval, secondApproval)
+	}
+	ledger, err := svc.approvalLedger().load()
+	if err != nil {
+		t.Fatalf("load approvals after successful retry: %v", err)
+	}
+	if len(ledger.Events) != 2 {
+		t.Fatalf("approval event count after uninstall retry = %d, want grant plus single revoke", len(ledger.Events))
+	}
+}
+
+func TestServiceUninstallReconcilesRuntimeStateWhenApprovalTombstoneFails(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	rec, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install plugin: %v", err)
+	}
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("seed approval: %v", err)
+	}
+	if err := os.Remove(svc.approvalLedger().path()); err != nil {
+		t.Fatalf("remove approval ledger: %v", err)
+	}
+	if err := os.Mkdir(svc.approvalLedger().path(), 0o755); err != nil {
+		t.Fatalf("replace approval ledger with directory: %v", err)
+	}
+
+	err = svc.Uninstall(context.Background(), rec.ID)
+	if err == nil {
+		t.Fatal("Uninstall() expected tombstone failure")
+	}
+	if !rt.stopped(rec.ID) {
+		t.Fatal("Uninstall() did not stop the runtime before tombstone failure")
+	}
+	current, getErr := svc.Get(rec.ID)
+	if getErr != nil {
+		t.Fatalf("Get() after failed uninstall: %v", getErr)
+	}
+	if current.Status != StatusError {
+		t.Fatalf("status after failed tombstone = %q, want %q", current.Status, StatusError)
+	}
+}
+
+func TestServiceUninstallFencesOldApprovalAsRevokedAfterRegistryRemoval(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	rec, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-notes", "1.0.0", "tasks"))
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := svc.approvalGrant(rec.InstallationID, "ws-1", 1, ManifestCapabilityDigest(rec.Manifest), []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
+		t.Fatalf("grant approval: %v", err)
+	}
+
+	if err := svc.Uninstall(context.Background(), rec.ID); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	decision := svc.AuthorizeCapability(rec.InstallationID, "ws-1", "host.v2.read:tasks", 1, "request-digest", "method-digest")
+	if decision.Allowed {
+		t.Fatalf("AuthorizeCapability() allowed tombstoned installation: %#v", decision)
+	}
+	if decision.Reason != ApprovalDenyRevokedApproval {
+		t.Fatalf("AuthorizeCapability() reason = %q, want %q", decision.Reason, ApprovalDenyRevokedApproval)
 	}
 }
 
