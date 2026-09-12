@@ -119,6 +119,18 @@ func (a *CodexACP) Runtime() *RuntimeConfig {
 		Protocol:        agent.ProtocolACP,
 		ProjectSkillDir: ".agents/skills",
 		UserSkillDir:    ".codex/skills",
+		// Belt-and-suspenders for HTTP MCP. @agentclientprotocol/codex-acp 1.6.0
+		// advertises mcpCapabilities.http = true, so the capability filter alone
+		// keeps HTTP servers; if a future bridge release (or a downstream fork)
+		// drops the http flag to false the filter would silently strip every
+		// HTTP-only server and the agent would see tool_count=0 from the
+		// kandev MCP server. AssumeMcpHttp forces the filter to keep HTTP
+		// servers regardless of what the agent advertises. SSE is intentionally
+		// left at false because codex-acp rejects SSE transport with
+		// invalidRequest at startup; pretending it works would surface that
+		// error per-server rather than letting the filter drop the duplicate
+		// SSE entry cleanly.
+		AssumeMcpHttp: true,
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
