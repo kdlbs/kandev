@@ -88,12 +88,13 @@ async function openMenuAndSnapshot() {
  * only destructive, enabled entry. Asserting this exact array per fixture is
  * what proves the menu's identity/order/enablement/destructive styling is
  * unaffected by badge-driving task state (blocked, queued, review, repos,
- * plugins) — not just that a menu renders.
+ * plugins) — not just that a menu renders. Group order (priority, edit,
+ * relationships, move, plugins, remove) comes from `buildGroupedMenuEntries`.
  */
 function expectedMenuEntries() {
   return [
-    { text: t("common:edit"), disabled: true, destructive: false },
     { text: t("kanban:priority"), disabled: false, destructive: false },
+    { text: t("common:edit"), disabled: true, destructive: false },
     { text: t("kanban:link"), disabled: false, destructive: false },
     { text: t("kanban:archive"), disabled: true, destructive: false },
     { text: t("kanban:delete"), disabled: false, destructive: true },
