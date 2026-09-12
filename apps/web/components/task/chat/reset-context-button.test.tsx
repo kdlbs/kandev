@@ -41,6 +41,7 @@ function renderResetButton(
 
 afterEach(() => {
   cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   vi.clearAllMocks();
 });
 
@@ -117,6 +118,25 @@ describe("ResetContextButton context-window invalidation", () => {
 });
 
 describe("ResetContextButton mobile presentation", () => {
+  it("does not leave a phone tooltip floating over a hosted confirmation", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    renderResetButton("mobile");
+    act(() => screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID).focus());
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+  it("uses a phone sheet while keeping the reset trigger mounted", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    renderResetButton("mobile");
+    const trigger = screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID);
+    fireEvent.click(trigger);
+    const sheet = await screen.findByRole("dialog", { name: "Reset agent context?" });
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(trigger.isConnected).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(mocks.request).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     mocks.request.mockResolvedValue({ success: true });
   });

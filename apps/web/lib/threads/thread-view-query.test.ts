@@ -443,3 +443,63 @@ describe("thread view fingerprint", () => {
     expect(first.fingerprint).not.toBe(changed.fingerprint);
   });
 });
+
+// @covers AC-TASKS-THREADS-ACTIONS-003.7, AC-TASKS-THREADS-ACTIONS-003.8
+describe("pending archive exclusion", () => {
+  it("excludes pending tasks before scopes, counts and column limits", () => {
+    const snapshots = {
+      "workflow-1": snapshot([task({ id: "a" }), task({ id: "b" }), task({ id: "c" })]),
+    };
+    const activeView = view({
+      taskScope: { mode: "selected", taskIds: ["a", "b", "c"] },
+      maxColumns: 1,
+    });
+    const baseline = queryThreadView(snapshots, activeView);
+    const result = queryThreadView(snapshots, activeView, {
+      requestedTaskId: "a",
+      excludedTaskIds: new Set(["a"]),
+    });
+
+    for (const candidates of [
+      result.candidates,
+      result.matchingCandidates,
+      result.stableCandidates,
+    ]) {
+      expect(candidates.map(({ taskId }) => taskId)).toEqual(["b", "c"]);
+    }
+    expect(result.admittedCandidates.map(({ taskId }) => taskId)).toEqual(["b"]);
+    expect(result).toMatchObject({ matchingCount: 2, temporaryAdmissionCount: 0, hiddenCount: 1 });
+    expect(result.fingerprint).toBe(baseline.fingerprint);
+    expect(result.effectiveView).toEqual(activeView);
+    expect(snapshots["workflow-1"].tasks.map(({ id }) => id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not temporarily admit an excluded deep link outside the saved filter", () => {
+    const result = queryThreadView(
+      { "workflow-1": snapshot([task({ id: "a" }), task({ id: "b" })]) },
+      view({ filters: [clause("titleMatch", "Task b", "matches")], maxColumns: 1 }),
+      { requestedTaskId: "a", excludedTaskIds: new Set(["a"]) },
+    );
+
+    expect(result.admittedCandidates.map(({ taskId }) => taskId)).toEqual(["b"]);
+    expect(result).toMatchObject({ matchingCount: 1, temporaryAdmissionCount: 0, hiddenCount: 0 });
+  });
+
+  it("excludes every covered descendant and returns an empty query when none survive", () => {
+    const result = queryThreadView(
+      {
+        "workflow-1": snapshot([
+          task({ id: "parent" }),
+          task({ id: "child", parentTaskId: "parent" }),
+        ]),
+      },
+      view(),
+      { excludedTaskIds: new Set(["parent", "child"]) },
+    );
+
+    expect(result.candidates).toEqual([]);
+    expect(result.stableCandidates).toEqual([]);
+    expect(result.admittedCandidates).toEqual([]);
+    expect(result).toMatchObject({ matchingCount: 0, temporaryAdmissionCount: 0, hiddenCount: 0 });
+  });
+});

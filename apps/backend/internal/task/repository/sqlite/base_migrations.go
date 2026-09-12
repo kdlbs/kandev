@@ -2,6 +2,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -395,7 +396,8 @@ func (r *Repository) runMigrations() error {
 	return nil
 }
 func (r *Repository) backfillTaskSessionQueueIncarnations() error {
-	rows, err := r.db.Queryx(`SELECT id FROM task_sessions WHERE queue_incarnation_id = ''`)
+	ctx := r.migrationContext()
+	rows, err := r.db.QueryxContext(ctx, `SELECT id FROM task_sessions WHERE queue_incarnation_id = ''`)
 	if err != nil {
 		return fmt.Errorf("list sessions missing queue incarnation: %w", err)
 	}
@@ -415,7 +417,7 @@ func (r *Repository) backfillTaskSessionQueueIncarnations() error {
 		return fmt.Errorf("iterate sessions missing queue incarnation: %w", err)
 	}
 	for _, sessionID := range sessionIDs {
-		if _, err := r.db.Exec(r.db.Rebind(`
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			UPDATE task_sessions
 			   SET queue_incarnation_id = ?
 			 WHERE id = ? AND queue_incarnation_id = ''
@@ -444,7 +446,8 @@ func (r *Repository) backfillPromptSeq() error {
 			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
 		)
 		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
-	if _, err := r.db.Exec(update); err != nil {
+	ctx := r.migrationContext()
+	if _, err := r.db.ExecContext(ctx, update); err != nil {
 		return fmt.Errorf("backfill prompt_seq: %w", err)
 	}
 	seed := `
@@ -453,7 +456,7 @@ func (r *Repository) backfillPromptSeq() error {
 		WHERE author_type = 'user' AND prompt_seq > 0
 		GROUP BY task_session_id
 		ON CONFLICT(task_session_id) DO NOTHING`
-	if _, err := r.db.Exec(seed); err != nil {
+	if _, err := r.db.ExecContext(ctx, seed); err != nil {
 		return fmt.Errorf("seed prompt sequence counters: %w", err)
 	}
 	return nil
@@ -606,14 +609,14 @@ func jsonBoolToInt(postgres bool, column, parent, key string) string {
 // the initial implementation, reconciles legacy bootstrap duplicates, then
 // enforces uniqueness only for the two hidden workflows created by this flow.
 func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("begin improve kandev workflow migration: %w", err)
 	}
 	// Keep this template list synchronized with every hidden Improve Kandev
 	// workflow bootstrapped by internal/improvekandev. Add new IDs to both this
 	// reconciliation query and the partial-index predicate below.
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(r.migrationContext(), `
 		UPDATE workflows
 		SET workflow_template_id = ''
 		WHERE id IN (
@@ -635,11 +638,11 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 		_ = tx.Rollback()
 		return fmt.Errorf("reconcile improve kandev workflow duplicates: %w", err)
 	}
-	if _, err := tx.Exec(`DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("drop broad workflow template index: %w", err)
 	}
-	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_improve_kandev_workflows
+	if _, err := tx.ExecContext(r.migrationContext(), `CREATE UNIQUE INDEX IF NOT EXISTS uniq_improve_kandev_workflows
 		ON workflows(workspace_id, workflow_template_id, hidden)
 		WHERE workflow_template_id IN ('improve-kandev', 'report-kandev-issue')`); err != nil {
 		_ = tx.Rollback()
@@ -655,7 +658,7 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 // folder attachments existed. CREATE TABLE/INDEX IF NOT EXISTS is replay-safe
 // on SQLite and Postgres.
 func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS task_workspace_folders (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
@@ -680,7 +683,7 @@ func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 // existed. It replays the same DDL as the schema-init step; CREATE TABLE/INDEX
 // IF NOT EXISTS is replay-safe on SQLite and Postgres.
 func (r *Repository) ensureRepositorySetsSchema() error {
-	if _, err := r.db.Exec(repositorySetsSchemaDDL); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), repositorySetsSchemaDDL); err != nil {
 		return fmt.Errorf("create repository sets schema: %w", err)
 	}
 	return nil
@@ -689,7 +692,7 @@ func (r *Repository) ensureRepositorySetsSchema() error {
 // ensureRepositoryBranchPoliciesSchema replays the policy DDL for databases
 // created before repository branch policies existed.
 func (r *Repository) ensureRepositoryBranchPoliciesSchema() error {
-	if _, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), repositoryBranchPoliciesSchemaDDL); err != nil {
 		return fmt.Errorf("create repository branch policies schema: %w", err)
 	}
 	return nil
@@ -709,7 +712,7 @@ func (r *Repository) recreateTable(tableName, triggerPhrase string, statements [
 	}
 
 	var tableSql string
-	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, tableName).Scan(&tableSql)
+	err := r.db.QueryRowContext(r.migrationContext(), `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, tableName).Scan(&tableSql)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // Table doesn't exist yet; migration not applicable
 	}
@@ -720,19 +723,21 @@ func (r *Repository) recreateTable(tableName, triggerPhrase string, statements [
 		return false, nil // Trigger phrase absent; migration already applied or not needed
 	}
 
-	if _, err := r.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `PRAGMA foreign_keys=OFF`); err != nil {
 		return false, fmt.Errorf("disable foreign keys: %w", err)
 	}
-	defer func() { _, _ = r.db.Exec(`PRAGMA foreign_keys=ON`) }()
+	// This restoration is cleanup, so it must not inherit a canceled startup
+	// context and leave the shared SQLite writer with foreign-key checks off.
+	defer func() { _, _ = r.db.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`) }()
 
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return false, fmt.Errorf("begin migration transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	for _, stmt := range statements {
-		if _, err := tx.Exec(stmt); err != nil {
+		if _, err := tx.ExecContext(r.migrationContext(), stmt); err != nil {
 			return false, fmt.Errorf("migration %s failed: %w", tableName, err)
 		}
 	}
@@ -810,7 +815,7 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 	// Check whether task_sessions still has the column. If migration already ran,
 	// the column is gone and there's nothing to backfill.
 	var tableSql string
-	if err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='task_sessions'`).Scan(&tableSql); err != nil {
+	if err := r.db.QueryRowContext(r.migrationContext(), `SELECT sql FROM sqlite_master WHERE type='table' AND name='task_sessions'`).Scan(&tableSql); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -824,7 +829,7 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 	// SELECT … LEFT JOIN to find sessions with execution data but no executors_running row.
 	// Insert with the minimum field set; runtime/status are best-effort defaults
 	// (subsequent Launch / Resume will overwrite via the lifecycle manager's persistence).
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		INSERT INTO executors_running (
 			id, session_id, task_id, executor_id, runtime, status, resumable,
 			resume_token, last_message_uuid, agent_execution_id, container_id,
@@ -891,7 +896,7 @@ const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
 // exist, so a failure here must abort boot (propagated below) rather than
 // leave every future commit insert failing silently forever.
 func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		DELETE FROM task_session_commits
 		WHERE id NOT IN (
 			SELECT id FROM (
@@ -907,7 +912,7 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 	`); err != nil {
 		return fmt.Errorf("dedupe task_session_commits: %w", err)
 	}
-	if _, err := r.db.Exec(
+	if _, err := r.db.ExecContext(r.migrationContext(),
 		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha)`,
 	); err != nil {
 		return fmt.Errorf("create uniq_session_commits_session_sha: %w", err)
@@ -920,7 +925,7 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 	// production (persistence.Provide creates it before opening any
 	// repository), but repo-level tests build a bare DB via NewWithDB where
 	// it does not, so recreate it defensively.
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS kandev_meta (
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT ''
@@ -928,7 +933,7 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 		return fmt.Errorf("ensure kandev_meta: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := r.db.Exec(r.db.Rebind(`
+	if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
 		INSERT INTO kandev_meta (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO NOTHING
 	`), commitCaptureActivatedAtMetaKey, now); err != nil {
@@ -1085,10 +1090,10 @@ func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
 }
 
 func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranchPostgres() error {
-	if _, err := r.db.Exec(`ALTER TABLE task_environment_repos ADD COLUMN IF NOT EXISTS branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `ALTER TABLE task_environment_repos ADD COLUMN IF NOT EXISTS branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("add task_environment_repos.branch_slug: %w", err)
 	}
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 DO $$
 DECLARE
 	old_constraint_name text;
@@ -1258,13 +1263,13 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 // Runs before ensureTaskEnvironmentTaskUniqueIndex so the unique constraint
 // can be added cleanly. Idempotent — a no-op once the data is healed.
 func (r *Repository) healDuplicateTaskEnvironments() error {
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("heal duplicate envs: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	rows, err := tx.Query(`
+	rows, err := tx.QueryContext(r.migrationContext(), `
 		SELECT task_id
 		  FROM task_environments
 		 GROUP BY task_id
@@ -1289,7 +1294,7 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 	_ = rows.Close()
 
 	for _, taskID := range taskIDs {
-		if err := healDuplicateTaskEnvForTask(tx, taskID); err != nil {
+		if err := healDuplicateTaskEnvForTask(r.migrationContext(), tx, taskID); err != nil {
 			return err
 		}
 	}
@@ -1298,9 +1303,9 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 
 // healDuplicateTaskEnvForTask keeps the most recently updated env for a task,
 // re-points sessions on the loser rows to the winner, then deletes losers.
-func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
+func healDuplicateTaskEnvForTask(ctx context.Context, tx *sql.Tx, taskID string) error {
 	var winnerID string
-	if err := tx.QueryRow(`
+	if err := tx.QueryRowContext(ctx, `
 		SELECT id FROM task_environments
 		 WHERE task_id = ?
 		 ORDER BY updated_at DESC, created_at DESC
@@ -1309,7 +1314,7 @@ func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
 		return fmt.Errorf("heal duplicate envs: find winner for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE task_sessions
 		   SET task_environment_id = ?
 		 WHERE task_id = ?
@@ -1318,7 +1323,7 @@ func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
 		return fmt.Errorf("heal duplicate envs: relink sessions for task %s: %w", taskID, err)
 	}
 
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM task_environments
 		 WHERE task_id = ?
 		   AND id != ?
@@ -1333,7 +1338,7 @@ func healDuplicateTaskEnvForTask(tx *sql.Tx, taskID string) error {
 // instead of silently producing two rows for the same task. Must run AFTER
 // healDuplicateTaskEnvironments, which collapses any pre-existing duplicates.
 func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
 		    ON task_environments(task_id)
 	`)
@@ -1355,7 +1360,7 @@ func (r *Repository) healSessionTaskEnvironmentIDs() error {
 	// ensureTaskEnvironmentTaskUniqueIndex guarantees ≤1 row per task at
 	// runtime, but the SQL reads as non-deterministic in isolation. Belt
 	// and suspenders.
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		UPDATE task_sessions
 		   SET task_environment_id = (
 		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id LIMIT 1

@@ -151,6 +151,7 @@ export function useSheetData(workspaceId: string | null) {
 }
 
 type SheetNavOptions = {
+  navigate: (taskId: string) => void;
   workspaceId: string | null;
   store: ReturnType<typeof useAppStoreApi>;
   loadTaskSessionsForTask: (
@@ -205,7 +206,7 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
       } else {
         setActiveTask(mostRecentTask.id);
       }
-      replaceTaskUrl(mostRecentTask.id);
+      opts.navigate(mostRecentTask.id);
     }
     onOpenChange(false);
   } catch (error) {
@@ -328,6 +329,7 @@ function buildKanbanTaskUpsert(
 
 function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
   const {
+    navigate,
     workspaceId,
     store,
     loadTaskSessionsForTask,
@@ -340,6 +342,7 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
     async (newWorkspaceId: string) => {
       if (newWorkspaceId === workspaceId) return;
       await switchWorkspace(newWorkspaceId, {
+        navigate,
         workspaceId,
         store,
         loadTaskSessionsForTask,
@@ -350,7 +353,15 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
     },
     // Spread the individual fields rather than the `opts` object so callers
     // re-passing a fresh literal each render don't defeat memoization.
-    [workspaceId, store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange],
+    [
+      workspaceId,
+      store,
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      onOpenChange,
+      navigate,
+    ],
   );
 
   const handleTaskCreated = useCallback(
@@ -379,10 +390,10 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
       }
-      replaceTaskUrl(task.id);
+      navigate(task.id);
       onOpenChange(false);
     },
-    [store, setActiveTask, setActiveSession, onOpenChange],
+    [store, setActiveTask, setActiveSession, onOpenChange, navigate],
   );
 
   return { handleWorkspaceChange, handleTaskCreated };
@@ -523,6 +534,7 @@ export function useSheetActions(
   workspaceId: string | null,
   onOpenChange: (open: boolean) => void,
   selection: TaskSheetSelectionController,
+  navigate: (taskId: string) => void = replaceTaskUrl,
 ) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -556,14 +568,23 @@ export function useSheetActions(
           const selectedTask = findSheetTask(store.getState(), selectedTaskId);
           return selectedTask ? taskPendingSelectionSnapshot(selectedTask) : undefined;
         },
-        navigate: replaceTaskUrl,
+        navigate,
         onOpenChange,
       });
     },
-    [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange, selection],
+    [
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      store,
+      onOpenChange,
+      selection,
+      navigate,
+    ],
   );
 
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({
+    navigate,
     workspaceId,
     store,
     loadTaskSessionsForTask,

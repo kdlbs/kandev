@@ -9,7 +9,10 @@ import {
 } from "./agent-profile-delete-dialog";
 import type { AgentProfileDeleteConflict } from "./agent-profile-delete-dialog";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+});
 
 function renderLocalConfirmation(
   isFinePointer: boolean,
@@ -25,6 +28,8 @@ function renderLocalConfirmation(
           Delete
         </button>
         <AgentProfileDeleteConfirmation
+          profileId="profile-1"
+          profileName="Code reviewer"
           open={open}
           isFinePointer={isFinePointer}
           anchorRef={anchorRef}
@@ -40,6 +45,19 @@ function renderLocalConfirmation(
 }
 
 describe("AgentProfileDeleteConfirmation", () => {
+  it("names the phone target and restores the original trigger on Cancel", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const onConfirm = vi.fn();
+    renderLocalConfirmation(false, onConfirm);
+    const sheet = screen.getByRole("dialog", { name: "Delete agent profile?" });
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(within(sheet).getByText("Code reviewer", { selector: "p" })).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId("profile-delete-trigger")),
+    );
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
   it("uses touch-sized inline actions on coarse pointers and cancels without mutating", async () => {
     const onConfirm = vi.fn();
     renderLocalConfirmation(false, onConfirm);

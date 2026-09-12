@@ -47,6 +47,7 @@ Git state.
 
 ### System design
 
+- [Local repository creation](system-design/create-local-repository.md)
 - [Secret reference protection](system-design/repository-secrets.md)
 - [Empty Remote Repositories](system-design/empty-remote-repositories.md)
 - [Improve Kandev](system-design/improve-kandev.md)

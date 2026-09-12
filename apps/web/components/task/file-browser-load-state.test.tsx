@@ -24,4 +24,32 @@ describe("renderSessionOrLoadState", () => {
     expect(screen.getByText("raw environment preparation failure")).toBeTruthy();
     expect(screen.queryByText("Session failed")).toBeNull();
   });
+
+  it("surfaces workspace restoration failures instead of waiting forever", () => {
+    const onRestoreWorkspace = () => {};
+    const result = renderSessionOrLoadState({
+      isSessionFailed: false,
+      sessionError: null,
+      loadState: "waiting",
+      isLoadingTree: true,
+      tree: null,
+      loadError: null,
+      onRetry: () => {},
+      workspaceRestoration: {
+        taskId: "task-1",
+        sessionId: "session-1",
+        environmentId: "environment-1",
+        revision: 1,
+        status: "error",
+        details: "workspace restore failed",
+      },
+      onRestoreWorkspace,
+    });
+
+    render(<>{result}</>);
+
+    expect(screen.getByText("Couldn't reconnect to this task's workspace.")).toBeTruthy();
+    expect(screen.queryByTestId("file-tree-waiting")).toBeNull();
+    expect(screen.getByTestId("workspace-retry")).toBeTruthy();
+  });
 });

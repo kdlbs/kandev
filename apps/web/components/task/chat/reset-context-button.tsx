@@ -8,6 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useTranslation } from "react-i18next";
 
@@ -32,8 +34,10 @@ function ResetContextTrigger({
   tooltip,
   onOpen,
 }: ResetContextTriggerProps) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   return (
-    <Tooltip>
+    <Tooltip open={!isMobile && tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
         <Button
           ref={actionRef}
@@ -64,11 +68,11 @@ export function ResetContextButton({
   onConfirmationOpenChange,
 }: ResetContextButtonProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
+  const { isResetting, handleReset } = useContextResetRequest(sessionId);
   const actionRef = useRef<HTMLButtonElement>(null);
   const restoreFocusAfterCancelRef = useRef(false);
-  const clearContextWindow = useAppStore((state) => state.clearContextWindow);
   const resetContextLabel = t("task:resetContext");
   const resetContextAriaLabel = t("task:resetAgentContext");
   const resetContextTooltip = t("task:resetAgentContextClearsConversationHistory");
@@ -94,20 +98,6 @@ export function ResetContextButton({
     actionRef.current?.focus();
   }, [confirmOpen]);
 
-  const handleReset = useCallback(async () => {
-    setIsResetting(true);
-    try {
-      const client = getWebSocketClient();
-      if (!client) return;
-      await client.request("session.reset_context", { session_id: sessionId }, 30000);
-      clearContextWindow(sessionId);
-    } catch (error) {
-      console.error("Failed to reset agent context:", error);
-    } finally {
-      setIsResetting(false);
-    }
-  }, [clearContextWindow, sessionId]);
-
   const handleMobileCancel = () => {
     restoreFocusAfterCancelRef.current = true;
     updateConfirmationOpen(false);
@@ -123,42 +113,66 @@ export function ResetContextButton({
     />
   );
 
-  if (presentation === "mobile") {
-    return confirmOpen ? (
+  const confirmationProps = {
+    description: t("task:thisWillClearTheAgentS"),
+    cancelLabel: t("common:cancel"),
+    confirmLabel: resetContextLabel,
+    confirmAriaLabel: resetContextLabel,
+    confirmTestId: "reset-context-confirm",
+    onConfirm: handleReset,
+  };
+  const fallback =
+    presentation === "mobile" ? (
       <InlineConfirmActions
+        {...confirmationProps}
         density="touch"
         testId="reset-context-inline-confirm"
         ariaLabel={resetContextAriaLabel}
-        description={t("task:thisWillClearTheAgentS")}
-        cancelLabel={t("common:cancel")}
-        confirmLabel={resetContextLabel}
-        confirmAriaLabel={resetContextLabel}
-        confirmTestId="reset-context-confirm"
         onCancel={handleMobileCancel}
         onClose={() => updateConfirmationOpen(false)}
-        onConfirm={handleReset}
       />
     ) : (
-      resetContextTrigger
-    );
-  }
-
-  return (
-    <>
-      {resetContextTrigger}
       <ActionConfirmPopover
+        {...confirmationProps}
         open={confirmOpen}
         anchorRef={actionRef}
         title={resetContextAriaLabel}
-        description={t("task:thisWillClearTheAgentS")}
-        cancelLabel={t("common:cancel")}
-        confirmLabel={resetContextLabel}
-        confirmAriaLabel={resetContextLabel}
-        confirmTestId="reset-context-confirm"
         testId="reset-context-confirm-popover"
         onOpenChange={updateConfirmationOpen}
-        onConfirm={handleReset}
+      />
+    );
+
+  return (
+    <>
+      {isMobile || presentation !== "mobile" || !confirmOpen ? resetContextTrigger : null}
+      <MobileActionConfirmation
+        {...confirmationProps}
+        open={confirmOpen}
+        targetKey={sessionId}
+        title={resetContextAriaLabel}
+        focusReturnRef={actionRef}
+        onOpenChange={updateConfirmationOpen}
+        fallback={fallback}
       />
     </>
   );
+}
+
+function useContextResetRequest(sessionId: string) {
+  const [isResetting, setIsResetting] = useState(false);
+  const clearContextWindow = useAppStore((state) => state.clearContextWindow);
+  const handleReset = useCallback(async () => {
+    setIsResetting(true);
+    try {
+      const client = getWebSocketClient();
+      if (!client) return;
+      await client.request("session.reset_context", { session_id: sessionId }, 30000);
+      clearContextWindow(sessionId);
+    } catch (error) {
+      console.error("Failed to reset agent context:", error);
+    } finally {
+      setIsResetting(false);
+    }
+  }, [clearContextWindow, sessionId]);
+  return { isResetting, handleReset };
 }

@@ -3,6 +3,7 @@ import { expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import { waitForLatestSessionDone } from "../../helpers/session";
 
 export const MOVE_INSTRUCTIONS = "Reproduce the checkout failure before editing.";
 
@@ -52,6 +53,13 @@ export async function seedMoveOverrideFixture(
       workflow_step_id: sourceStep.id,
       repository_ids: [seedData.repositoryId],
     },
+  );
+  await waitForLatestSessionDone(
+    apiClient,
+    task.id,
+    1,
+    "Move fixture agent must finish before navigation",
+    30_000,
   );
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);

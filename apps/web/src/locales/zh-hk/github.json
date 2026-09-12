@@ -1,4 +1,13 @@
 {
+  "views": "視圖",
+  "viewPicker": "視圖：{{view}}",
+  "loadingSavedQueries": "正在載入已儲存的查詢...",
+  "savedQueriesLoadFailed": "無法載入已儲存的查詢。",
+  "pageOf": "第 {{page}} 頁，共 {{total}} 頁",
+  "choosePage": "選擇結果頁",
+  "resultRange": "第 {{start}}–{{end}} 項，共 {{total}} 項",
+  "previousPage": "上一頁",
+  "nextPage": "下一頁",
   "aRegistrationCanBeReusedAcross": "一個註冊可跨工作區複用，也可將工作和個人應用分開。每個工作區自行選擇並安裝認證資料。",
   "accountsUnavailable": "帳戶不可用",
   "actionPromptPlaceholderHelp": "輸入 {{token}} 可查看可用佔位符。執行操作時會替換 <4>{{url}}</4> 和 <7>{{title}}</7>。",

@@ -28,7 +28,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
 import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
 import {
-  useSavedTaskViewDeleteConfirmation,
+  useSavedTaskViewDeleteMenu,
   type SavedTaskViewDeleteTarget,
 } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
@@ -179,15 +179,15 @@ function ViewsDropdown({
   activeName: string | undefined;
 }) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
-  const [open, setOpen] = useState(false);
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const contentRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const builtin = views.filter((v) => v.builtin);
   const custom = views.filter((v) => !v.builtin);
-  const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(custom);
+  const deletion = useSavedTaskViewDeleteMenu<HTMLButtonElement>(custom, isMobile);
 
   const deleteProps: ViewDeletionProps = {
-    isFinePointer,
+    isFinePointer: !isMobile && isFinePointer,
     deleteTarget: deletion.target,
     deleteAnchorRef: deletion.anchorRef,
     onDeleteOpenChange: (nextOpen) => {
@@ -199,15 +199,9 @@ function ViewsDropdown({
   };
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (!nextOpen) deletion.close();
-      }}
-    >
+    <Popover open={deletion.open} onOpenChange={deletion.onOpenChange}>
       <PopoverTrigger asChild>
-        <Button variant="outline" className="cursor-pointer text-xs gap-1.5">
+        <Button ref={triggerRef} variant="outline" className="cursor-pointer text-xs gap-1.5">
           <IconBookmark className="h-3.5 w-3.5" />
           {activeName ?? t("jira:noView")}
         </Button>
@@ -216,6 +210,7 @@ function ViewsDropdown({
         ref={contentRef}
         align="start"
         className="w-60 max-w-[calc(100vw-1rem)] overflow-x-hidden p-0"
+        onCloseAutoFocus={deletion.onCloseAutoFocus}
         onFocusOutside={(event) => {
           if (isActionConfirmationTarget(event.target)) event.preventDefault();
         }}
@@ -229,7 +224,7 @@ function ViewsDropdown({
           activeViewId={activeViewId}
           onSelect={(id) => {
             onSelect(id);
-            setOpen(false);
+            deletion.onOpenChange(false);
           }}
           {...deleteProps}
         />
@@ -242,19 +237,19 @@ function ViewsDropdown({
               activeViewId={activeViewId}
               onSelect={(id) => {
                 onSelect(id);
-                setOpen(false);
+                deletion.onOpenChange(false);
               }}
               {...deleteProps}
             />
           </>
         )}
       </PopoverContent>
-      {isFinePointer && deletion.target ? (
+      {(isMobile || isFinePointer) && deletion.target ? (
         <SavedTaskViewDeleteConfirmation
           target={deletion.target}
           presentation="popover"
           open
-          anchorRef={deletion.anchorRef}
+          anchorRef={isMobile ? triggerRef : deletion.anchorRef}
           focusBoundaryRef={contentRef}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) deletion.close();

@@ -33,7 +33,12 @@ function visibleEditor(scope: Locator): Locator {
 }
 
 async function typeMention(editor: Locator, query: string): Promise<Locator> {
-  await editor.fill("");
+  await expect(editor).toBeEditable();
+  await editor.click();
+  await editor.press("ControlOrMeta+A");
+  await editor.press("Backspace");
+  await expect.poll(() => editor.textContent()).toBe("");
+  await editor.click();
   await editor.pressSequentially(`@${query}`);
   const menu = editor.page().getByRole("listbox", { name: /Mention tasks, files, prompts/i });
   await expect(menu).toBeVisible({ timeout: 10_000 });

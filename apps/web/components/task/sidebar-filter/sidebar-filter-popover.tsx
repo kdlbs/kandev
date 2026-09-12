@@ -20,6 +20,10 @@ import {
   type SavedTaskViewDeleteTarget,
 } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import {
+  MobileConfirmationHost,
+  MobileConfirmationHostBody,
+} from "@/components/confirmation/mobile-confirmation-host";
 
 type Props = {
   trigger: React.ReactNode;
@@ -207,28 +211,36 @@ function MobileSidebarFilterSurface({
   title,
 }: SidebarFilterSurfaceProps & { title: string }) {
   return (
-    <Drawer
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) deletion.close();
-        onOpenChange(nextOpen);
-      }}
-    >
-      <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-      <DrawerContent
-        data-testid="sidebar-filter-drawer"
-        className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden rounded-t-xl"
-      >
-        <DrawerHeader className="shrink-0 border-b px-4 pb-3 pt-5 text-left">
-          <DrawerTitle>{title}</DrawerTitle>
-        </DrawerHeader>
-        <div
-          data-testid="sidebar-filter-popover"
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(1rem+env(safe-area-inset-bottom))]"
+    <MobileConfirmationHost open={open} surface="drawer">
+      {({ contentProps }) => (
+        <Drawer
+          open={open}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) deletion.close();
+            onOpenChange(nextOpen);
+          }}
         >
-          {editor}
-        </div>
-      </DrawerContent>
-    </Drawer>
+          <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+          <DrawerContent
+            aria-describedby={undefined}
+            {...contentProps}
+            data-testid="sidebar-filter-drawer"
+            className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden rounded-t-xl"
+          >
+            <MobileConfirmationHostBody>
+              <DrawerHeader className="shrink-0 border-b px-4 pb-3 pt-5 text-left">
+                <DrawerTitle>{title}</DrawerTitle>
+              </DrawerHeader>
+              <div
+                data-testid="sidebar-filter-popover"
+                className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(1rem+env(safe-area-inset-bottom))]"
+              >
+                {editor}
+              </div>
+            </MobileConfirmationHostBody>
+          </DrawerContent>
+        </Drawer>
+      )}
+    </MobileConfirmationHost>
   );
 }
