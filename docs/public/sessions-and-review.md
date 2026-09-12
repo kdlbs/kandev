@@ -81,9 +81,44 @@ A CLI-passthrough profile displays the agent's native terminal interface in a PT
 
 Use **Threads** to read active task conversations side by side without opening each task. Open it from the workspace view control or navigation, or go to **`/threads`**.
 
-Threads shows one column for each task with an active primary agent session. The column header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
+Threads shows one conversation tile for each task with an active primary agent session. The tile header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
 
-On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
+On desktop, use the session tabs in a tile to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. You can reply in the selected conversation without leaving Threads.
+
+### Choose a layout and composer visibility
+
+1. Open **View settings** beside the saved view name. On a phone or touch
+   tablet, tap the view name first, then **View settings**.
+2. Under **Display**, choose **Columns** for full-height chats or **Grid** for
+   two rows. Layout choices are kept inside View settings.
+3. Optionally enable **Auto-hide composer** and adjust **Maximum chats**.
+4. Changes preview immediately. Use **Save** to update the view, **Save as**
+   to create another view, or **Discard** to restore its saved settings.
+
+Defaults are Columns, auto-hide off, and five total chats. Grid uses that same
+chat limit across both rows; increase Maximum chats if you want more chats.
+Each conversation scrolls independently, and the deck scrolls sideways when
+needed. Short windows temporarily show Columns with an explanation; Grid
+returns when there is enough height, without changing the saved choice.
+
+With auto-hide enabled on a mouse or trackpad, the whole composer and its
+controls hide when idle. Only the existing CI popover remains, when available.
+Hover over a chat or focus its tile with the keyboard to reveal the composer.
+The composer slides and fades in or out; reduced-motion settings make the
+change immediate. CI stays available throughout.
+Its normal **Cancel** control remains available there while an agent runs.
+
+Typing, attachments, focused menus, and pending send/upload/cancellation
+operations keep the composer open. Questions, permissions, and recovery
+actions remain visible without hovering. **Hide composer** preserves an
+unsent draft and returns focus to the tile; press **Enter** or move the pointer
+out and back in to reopen it. Hiding does not cancel plugin operations.
+
+### Navigate on a phone
+
+Phones show one conversation at a time, even when Grid is saved. On phones
+and touch tablets, the composer stays visible; the saved auto-hide preference
+still applies when you return to a mouse or trackpad layout.
 
 On a phone, each conversation fills the screen width. The topbar shows your
 position beside the view name; small decks also show page dots. Position follows
@@ -96,7 +131,9 @@ topbar menu button for Quick Chat, Quick Terminal, and system status.
 If a warning appears beside the view name on a phone, open the view picker to
 retry the failed saved-view update or dismiss the warning.
 
-Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+### Open or manage a task
+
+Select **Open task** in a tile when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
 
 To manage the task without leaving Threads, select **Task actions** (the three
 dots beside **Open task**). On desktop, you can also right-click the task

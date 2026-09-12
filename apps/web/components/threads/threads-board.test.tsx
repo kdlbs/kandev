@@ -65,6 +65,8 @@ import { ThreadsBoard } from "./threads-board";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   sessionMocks.useTaskSessions.mockClear();
   sessionMocks.sessionLists.clear();
   sessionMocks.sessionErrors.clear();
@@ -73,6 +75,7 @@ afterEach(() => {
 });
 
 const COLUMN_A = "thread-column-a";
+const BOARD_TEST_ID = "threads-board";
 const FOCUSED_ATTR = "data-focused";
 const COLUMN_B = "thread-column-b";
 const TASK_A = "a";
@@ -96,6 +99,75 @@ function thread(overrides: Partial<ActiveThread> & { taskId: string }): ActiveTh
     ...overrides,
   };
 }
+
+describe("ThreadsBoard — presentation reflow", () => {
+  // @covers AC-UI-THREADS-DECK-004.6
+  it("reasserts an unretired deep link after width-only reflow", () => {
+    let resize: ResizeObserverCallback = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    render(
+      <ThreadsBoard
+        threads={[thread({ taskId: "a" }), thread({ taskId: "b" })]}
+        focusedTaskId="b"
+        onOpenTask={() => {}}
+      />,
+    );
+    const measure = (width: number) =>
+      act(() =>
+        resize(
+          [{ contentRect: { height: 700, width } } as ResizeObserverEntry],
+          {} as ResizeObserver,
+        ),
+      );
+    measure(1100);
+    scroll.mockClear();
+    measure(800);
+    expect(scroll.mock.contexts).toEqual([screen.getByTestId(COLUMN_B)]);
+
+    fireEvent.wheel(screen.getByTestId(COLUMN_A));
+    scroll.mockClear();
+    measure(700);
+    expect(scroll).not.toHaveBeenCalled();
+  });
+  // @covers AC-UI-THREADS-DECK-004.1, AC-UI-THREADS-DECK-004.2
+  it("uses two column-major rows without replacing the task shells", () => {
+    let resize: ResizeObserverCallback = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const threads = ["a", "b", "c"].map((taskId) => thread({ taskId }));
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    const view = render(<ThreadsBoard threads={threads} focusedTaskId="b" onOpenTask={() => {}} />);
+    const shells = [...screen.getByTestId(BOARD_TEST_ID).children];
+    act(() =>
+      resize([{ contentRect: { height: 700 } } as ResizeObserverEntry], {} as ResizeObserver),
+    );
+    view.rerender(
+      <ThreadsBoard threads={threads} layout="grid" focusedTaskId="b" onOpenTask={() => {}} />,
+    );
+    const board = screen.getByTestId(BOARD_TEST_ID);
+    expect(board.style.gridTemplateRows).toBe("repeat(2, minmax(0, 1fr))");
+    expect([...board.children]).toEqual(shells);
+    expect(scroll).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("ThreadsBoard — basic layout", () => {
   // @covers AC-TASKS-THREADS-ACTIONS-003.2, AC-TASKS-THREADS-ACTIONS-004.6
@@ -166,7 +238,7 @@ describe("ThreadsBoard — basic layout", () => {
       />,
     );
 
-    expect(screen.getByTestId("threads-board").className).toContain("md:snap-none");
+    expect(screen.getByTestId(BOARD_TEST_ID).className).toContain("md:snap-none");
     expect(screen.getByTestId(COLUMN_A).className).toContain("md:w-auto");
     expect(screen.getByTestId(COLUMN_A).className).not.toContain("sm:w-auto");
   });
@@ -383,7 +455,7 @@ describe("ThreadsBoard — status, interaction and empty states", () => {
 
     expect(screen.getByTestId("threads-empty-state")).not.toBeNull();
     expect(screen.getByText("No agent is working right now")).not.toBeNull();
-    expect(screen.queryByTestId("threads-board")).toBeNull();
+    expect(screen.queryByTestId(BOARD_TEST_ID)).toBeNull();
   });
 
   it("shows a loading state before the first snapshot lands, not the empty state", () => {
@@ -480,7 +552,7 @@ describe("ThreadsBoard — focusing a column from a deep link", () => {
 });
 
 describe("ThreadsBoard — retiring the deep-link mark", () => {
-  it("drops the mark once the reader touches the deck", () => {
+  it.each(["pointerDown", "wheel"] as const)("drops the mark on reader %s", (event) => {
     render(
       <ThreadsBoard
         threads={[thread({ taskId: "a" }), thread({ taskId: "b" })]}
@@ -490,7 +562,7 @@ describe("ThreadsBoard — retiring the deep-link mark", () => {
     );
     expect(screen.getByTestId(COLUMN_B).getAttribute(FOCUSED_ATTR)).toBe("true");
 
-    fireEvent.pointerDown(screen.getByTestId(COLUMN_A));
+    fireEvent[event](screen.getByTestId(COLUMN_A));
 
     expect(screen.getByTestId(COLUMN_B).getAttribute(FOCUSED_ATTR)).toBeNull();
   });

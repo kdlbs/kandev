@@ -15,6 +15,8 @@ export function createDefaultThreadView(id: string, name: string): ThreadView {
     filters: [],
     sort: { key: "attention", direction: "asc" },
     maxColumns: DEFAULT_THREAD_VIEW_MAX_COLUMNS,
+    layout: "columns",
+    autoHideComposer: false,
   };
 }
 

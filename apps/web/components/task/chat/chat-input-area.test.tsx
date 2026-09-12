@@ -73,6 +73,7 @@ vi.mock("./dynamic-route-recovery", () => ({
 }));
 
 vi.mock("./chat-status-bar", () => ({
+  ComposerCIStatus: () => null,
   ChatStatusBar: (props: {
     nextStepName: string | null;
     isAgentBusy: boolean;

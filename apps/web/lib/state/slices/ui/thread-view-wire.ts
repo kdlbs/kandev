@@ -135,6 +135,8 @@ export function fromApiThreadView(api: ThreadViewApi): ThreadView {
     filters: fromApiFilters(api?.filters),
     sort: normalizeSort(api?.sort),
     maxColumns: normalizeMaxColumns(api?.max_columns),
+    layout: api?.layout === "grid" ? "grid" : "columns",
+    autoHideComposer: api?.auto_hide_composer === true,
   };
 }
 
@@ -145,6 +147,8 @@ export function fromApiThreadDraft(api: ThreadViewDraftApi): ThreadViewDraft {
     filters: fromApiFilters(api?.filters),
     sort: normalizeSort(api?.sort),
     maxColumns: normalizeMaxColumns(api?.max_columns),
+    layout: api?.layout === "grid" ? "grid" : "columns",
+    autoHideComposer: api?.auto_hide_composer === true,
   };
 }
 
@@ -169,6 +173,8 @@ export function toApiThreadView(view: ThreadView): ThreadViewApi {
     filters: view.filters.map(toApiClause),
     sort: { key: view.sort.key, direction: view.sort.direction },
     max_columns: view.maxColumns,
+    layout: view.layout,
+    auto_hide_composer: view.autoHideComposer,
   };
 }
 
@@ -179,5 +185,7 @@ export function toApiThreadDraft(draft: ThreadViewDraft): ThreadViewDraftApi {
     filters: draft.filters.map(toApiClause),
     sort: { key: draft.sort.key, direction: draft.sort.direction },
     max_columns: draft.maxColumns,
+    layout: draft.layout,
+    auto_hide_composer: draft.autoHideComposer,
   };
 }

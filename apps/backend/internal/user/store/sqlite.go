@@ -826,7 +826,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SidebarDraft                      *models.SidebarViewDraft            `json:"sidebar_draft"`
 		ThreadViews                       json.RawMessage                     `json:"thread_views"`
 		ThreadActiveViewID                json.RawMessage                     `json:"thread_active_view_id"`
-		ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
+		ThreadViewDraft                   json.RawMessage                     `json:"thread_view_draft"`
 		SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 		SidebarTaskColorAutomation        json.RawMessage                     `json:"sidebar_task_color_automation"`
 		SidebarTaskColors                 json.RawMessage                     `json:"sidebar_task_colors"`
@@ -951,8 +951,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.SidebarDraft = payload.SidebarDraft
 	if len(payload.ThreadViews) > 0 {
-		var threadViews []models.ThreadView
-		if err := json.Unmarshal(payload.ThreadViews, &threadViews); err != nil {
+		threadViews, err := decodeStoredThreadViews(payload.ThreadViews)
+		if err != nil {
 			return nil, err
 		}
 		if len(threadViews) > 0 {
@@ -976,7 +976,11 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		}
 		settings.ThreadActiveViewID = settings.ThreadViews[0].ID
 	}
-	settings.ThreadViewDraft = payload.ThreadViewDraft
+	threadDraft, err := decodeStoredThreadDraft(payload.ThreadViewDraft)
+	if err != nil {
+		return nil, err
+	}
+	settings.ThreadViewDraft = threadDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
 	settings.SidebarTaskColorAutomation = decodeSidebarTaskColorAutomation(payload.SidebarTaskColorAutomation)
 	settings.SidebarTaskColors = decodeSidebarTaskColors(payload.SidebarTaskColors)

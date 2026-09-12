@@ -20,6 +20,7 @@ import {
   useStablePluginComposerCapability,
 } from "@/lib/plugins/composer-capability";
 import type { PluginComposerCapability } from "@/lib/plugins/types";
+import { useComposerActivity, useComposerFocus } from "./composer-disclosure";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -140,6 +141,7 @@ function useChatPluginComposer(p: {
   identity: string;
   onSubmit: () => void;
 }): PluginComposerCapability {
+  const focus = useComposerFocus(p.inputRef);
   return useStablePluginComposerCapability(
     {
       insertText: (text) => {
@@ -147,13 +149,13 @@ function useChatPluginComposer(p: {
         if (!editor) return false;
         const insertion = composerInsertionText(text, editor.getCharBefore());
         if (!insertion) return false;
+        focus();
         editor.insertText(insertion, editor.getSelectionStart(), editor.getSelectionEnd());
-        editor.focus();
         return true;
       },
       focus: () => {
         if (!p.inputRef.current) return false;
-        p.inputRef.current.focus();
+        focus();
         return true;
       },
       // Revalidated at call time against the same gate the slot advertises as
@@ -178,6 +180,7 @@ function useChatPluginComposer(p: {
 }
 
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
+  useComposerActivity({ busy: Boolean(p.isEnhancingPrompt) });
   const { t } = useTranslation("chat");
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
   const { isDisabled, planModeEnabled, planModeAvailable, mcpServers } = p;

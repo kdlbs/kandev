@@ -38,6 +38,7 @@ type Props = Pick<ThreadViewQueryResult, "matchingCount" | "hiddenCount"> & {
   candidates: ThreadCandidate[];
   repositories?: ReadonlyArray<Pick<Repository, "id" | "name">>;
   admittedCount: number;
+  gridHeightFallback?: boolean;
 };
 
 // eslint-disable-next-line max-lines-per-function -- Coordinates the desktop and touch entry points for one saved-view state adapter.
@@ -47,9 +48,10 @@ export function ThreadsViewControls({
   admittedCount,
   matchingCount,
   hiddenCount,
+  gridHeightFallback = false,
 }: Props) {
   const { t } = useTranslation();
-  const { usesDesktopWorkbench } = useResponsiveBreakpoint();
+  const { usesDesktopWorkbench, isFinePointer } = useResponsiveBreakpoint();
   const views = useAppStore((state) => state.threadViews.views);
   const activeViewId = useAppStore((state) => state.threadViews.activeViewId);
   const draft = useAppStore((state) => state.threadViews.draft);
@@ -87,7 +89,7 @@ export function ThreadsViewControls({
     openSettingsAfterPickerClose.current = true;
   }
 
-  if (!usesDesktopWorkbench) {
+  if (!usesDesktopWorkbench || !isFinePointer) {
     return (
       <MobileThreadsViewControls
         activeView={activeView}
@@ -98,6 +100,7 @@ export function ThreadsViewControls({
         admittedCount={admittedCount}
         matchingCount={matchingCount}
         hiddenCount={hiddenCount}
+        gridHeightFallback={gridHeightFallback}
         syncError={syncError}
         disabledReason={disabledReason}
         viewCount={views.length}
@@ -210,6 +213,7 @@ export function ThreadsViewControls({
           <ThreadsViewEditor
             activeView={activeView}
             draft={draft}
+            gridHeightFallback={gridHeightFallback}
             candidates={candidates}
             repositories={repositories}
             viewCount={views.length}
@@ -243,10 +247,16 @@ export function ThreadsViewControls({
 }
 
 type ThreadViewDraftUpdate = (
-  patch: Partial<Pick<ThreadView, "taskScope" | "filters" | "sort" | "maxColumns">>,
+  patch: Partial<
+    Pick<
+      ThreadView,
+      "taskScope" | "filters" | "sort" | "maxColumns" | "layout" | "autoHideComposer"
+    >
+  >,
 ) => void;
 
 type MobileThreadsViewControlsProps = {
+  gridHeightFallback: boolean;
   activeView: ThreadView;
   views: ThreadView[];
   draft: ThreadViewDraft | null;
@@ -275,6 +285,7 @@ type MobileThreadsViewControlsProps = {
 
 // eslint-disable-next-line max-lines-per-function -- Keeps the single mobile drawer lifecycle and its shared editor wiring together.
 function MobileThreadsViewControls({
+  gridHeightFallback,
   activeView,
   views,
   draft,
@@ -446,6 +457,7 @@ function MobileThreadsViewControls({
                 viewCount={viewCount}
                 canDelete={canDelete}
                 mobile
+                gridHeightFallback={gridHeightFallback}
                 onUpdate={onUpdate}
                 onSave={onSave}
                 onSaveAs={onSaveAs}

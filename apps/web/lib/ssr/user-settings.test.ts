@@ -97,6 +97,8 @@ describe("Threads saved-view hydration", () => {
       taskScope: { mode: "all", taskIds: [] },
       sort: { key: "attention", direction: "asc" },
       maxColumns: 5,
+      layout: "columns",
+      autoHideComposer: false,
     });
     expect(settings.threadActiveViewId).toBe("view-all-threads");
   });
@@ -114,6 +116,8 @@ describe("Threads saved-view hydration", () => {
             filters: [],
             sort: { key: "priority", direction: "desc" },
             max_columns: 3,
+            layout: "grid",
+            auto_hide_composer: true,
           },
         ],
       },
@@ -124,8 +128,11 @@ describe("Threads saved-view hydration", () => {
       taskScope: { mode: "selected", taskIds: ["task-a"] },
       sort: { key: "priority", direction: "desc" },
       maxColumns: 3,
+      layout: "grid",
+      autoHideComposer: true,
     });
     expect(result.threadActiveViewId).toBe("current");
+    expect(buildCoreFields({}, { ...current, ...result }).threadViews).toEqual(result.threadViews);
   });
 });
 

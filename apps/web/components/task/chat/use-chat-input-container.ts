@@ -16,6 +16,12 @@ import type {
   ChatInputContainerHandle,
 } from "./chat-input-container";
 import { t } from "@/lib/i18n";
+import {
+  useComposerActivity,
+  useComposerDisclosureContext,
+  useComposerFocus,
+} from "./composer-disclosure";
+import type { ComposerActivity } from "./use-composer-disclosure";
 
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
@@ -58,10 +64,11 @@ function useInputHandle(
   inputRef: React.RefObject<TipTapInputHandle | null>,
   getAttachments: () => MessageAttachment[],
 ) {
+  const focusInput = useComposerFocus(inputRef);
   useImperativeHandle(
     ref,
     () => ({
-      focusInput: () => inputRef.current?.focus(),
+      focusInput,
       getTextareaElement: () => inputRef.current?.getTextareaElement() ?? null,
       getValue: () => inputRef.current?.getValue() ?? "",
       getSelectionStart: () => inputRef.current?.getSelectionStart() ?? 0,
@@ -71,7 +78,7 @@ function useInputHandle(
       clear: () => inputRef.current?.clear(),
       getAttachments,
     }),
-    [inputRef, getAttachments],
+    [inputRef, getAttachments, focusInput],
   );
 }
 
@@ -190,14 +197,42 @@ function computeDerivedState(params: {
   };
 }
 
+function useComposerInputPresentation({
+  inputRef,
+  addFiles,
+  showRequestChangesTooltip,
+  ...activity
+}: ComposerActivity & {
+  inputRef: React.RefObject<TipTapInputHandle | null>;
+  addFiles: ReturnType<typeof useChatInputState>["addFiles"];
+  showRequestChangesTooltip: boolean;
+}) {
+  const [processingFiles, setProcessingFiles] = useState(0);
+  const visible = useComposerDisclosureContext()?.expanded !== false;
+  useComposerActivity({ ...activity, busy: activity.busy || processingFiles > 0 });
+  useEffect(() => {
+    if (visible && showRequestChangesTooltip) inputRef.current?.focus();
+  }, [visible, showRequestChangesTooltip, inputRef]);
+  return useCallback(
+    async (...args: Parameters<typeof addFiles>) => {
+      setProcessingFiles((count) => count + 1);
+      try {
+        await addFiles(...args);
+      } finally {
+        setProcessingFiles((count) => count - 1);
+      }
+    },
+    [addFiles],
+  );
+}
+
 export function useChatInputContainer(params: UseChatInputContainerParams) {
   const { t } = useTranslation("chat");
   const { ref, sessionId, isSending, isStarting, isPreparingEnvironment, isMoving } = params;
   const { isFailed, needsRecovery, executorUnavailable, isAgentBusy, hasAgentCommands } = params;
   const { supportsSteering } = params;
-  const { placeholder, contextItems, pendingClarification, onClarificationResolved } = params;
+  const { placeholder, pendingClarification, onClarificationResolved } = params;
   const { pendingCommentsByFile, showRequestChangesTooltip } = params;
-  const { onRequestChangesTooltipDismiss, onSubmit } = params;
 
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
@@ -212,6 +247,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     value,
+    attachments,
     inputRef,
     addFiles,
     handleChange,
@@ -219,21 +255,20 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     allItems,
     getAttachments,
     hasPendingAttachmentUploads,
-  } = useChatInputState({
-    sessionId,
-    workspaceId: params.workspaceId,
-    isSending,
-    contextItems,
-    pendingCommentsByFile,
-    hasContextComments: params.hasContextComments,
-    showRequestChangesTooltip,
-    onRequestChangesTooltipDismiss,
-    onSubmit,
-  });
+  } = useChatInputState(params);
 
   useSyncTipTapRef(tiptapRef, inputRef);
 
   useInputHandle(ref, inputRef, getAttachments);
+  const addFilesWithHold = useComposerInputPresentation({
+    inputRef,
+    addFiles,
+    showRequestChangesTooltip,
+    draft: value.trim().length > 0 || attachments.length > 0 || params.hasContextComments,
+    busy: isSending || isMoving || hasPendingAttachmentUploads,
+    required: isFailed || needsRecovery || executorUnavailable || Boolean(pendingClarification),
+    overlay: contextPopoverOpen || showNewSessionDialog,
+  });
 
   // Auto-expand the input container as the user types more lines
   const handleChangeWithAutoExpand = useCallback(
@@ -243,10 +278,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     },
     [handleChange, autoExpand],
   );
-
-  useEffect(() => {
-    if (showRequestChangesTooltip && inputRef.current) inputRef.current.focus();
-  }, [showRequestChangesTooltip, inputRef]);
 
   const handleSubmitWithReset = useCallback(
     () => handleSubmit(resetHeight),
@@ -287,7 +318,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     resizeHandleProps,
     value,
     inputRef,
-    addFiles,
+    addFiles: addFilesWithHold,
     fileInputRef,
     handleChange: handleChangeWithAutoExpand,
     handleSubmitWithReset,
