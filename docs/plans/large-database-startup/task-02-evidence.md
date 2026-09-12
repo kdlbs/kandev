@@ -97,3 +97,11 @@ Lifecycle regression coverage now includes delayed success past a short health
 deadline, active SQL cancellation through `NewWithDBContext`, worker-only
 restore quiescing with `restart_required`, explicit post-readiness signal
 handling, and initializer joining after cancellation.
+
+PR review follow-up also verifies the retry boundaries: pre-migration snapshots
+are created in a private staging directory, validated, set to mode `0600`, and
+installed only after validation; a failed `VACUUM INTO` destination is removed
+when the path did not exist before the attempt. The authenticated system-job
+notification path remains on the process lifetime while restore workers are
+quiesced. These changes do not alter backup retention or the deferred backup
+registry redesign.

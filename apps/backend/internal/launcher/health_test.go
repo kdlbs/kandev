@@ -461,6 +461,72 @@ func TestWaitForReadyReturnsNilOnReadyResponse(t *testing.T) {
 	}
 }
 
+func TestWaitForHealthThenReadyKeepsDelayedBootstrapAlive(t *testing.T) {
+	const healthToken = "delayed-bootstrap-token"
+	var initialized atomic.Bool
+	readyStarted := make(chan struct{})
+	var readyStartedOnce sync.Once
+	var readyCalls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.Header().Set("X-Kandev-Desktop-Health-Token", healthToken)
+			w.WriteHeader(http.StatusOK)
+		case "/ready":
+			readyCalls.Add(1)
+			readyStartedOnce.Do(func() { close(readyStarted) })
+			if !initialized.Load() {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"startup":{"phase":"opening_database","elapsed_ms":1,"phase_elapsed_ms":1}}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	// The launcher must decide that the process is healthy within this short
+	// budget, then keep waiting for readiness while initialization remains
+	// gated beyond that budget.
+	if readyURL, err := waitForHealth(context.Background(), singleHealthTarget(srv.URL), fakeChild{}, 50*time.Millisecond, healthToken, nil); err != nil {
+		t.Fatalf("waitForHealth() = %v, want healthy bootstrap", err)
+	} else if readyURL != srv.URL {
+		t.Fatalf("waitForHealth() URL = %q, want %q", readyURL, srv.URL)
+	}
+
+	readyCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	readyDone := make(chan error, 1)
+	go func() { readyDone <- waitForReady(readyCtx, srv.URL, fakeChild{}) }()
+	select {
+	case <-readyStarted:
+	case <-time.After(time.Second):
+		t.Fatal("waitForReady did not probe the bootstrap readiness endpoint")
+	}
+	select {
+	case err := <-readyDone:
+		t.Fatalf("waitForReady returned before initialization release: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	initialized.Store(true)
+	select {
+	case err := <-readyDone:
+		if err != nil {
+			t.Fatalf("waitForReady after initialization release: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForReady did not observe the released readiness endpoint")
+	}
+	if readyCalls.Load() < 1 {
+		t.Fatal("waitForReady did not issue a readiness request")
+	}
+}
+
 func TestWaitForReadyRejectsChildExitDuringSuccessfulProbe(t *testing.T) {
 	requestStarted := make(chan struct{})
 	responseRelease := make(chan struct{})

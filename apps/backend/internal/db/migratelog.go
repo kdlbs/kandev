@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -78,9 +79,18 @@ func (m *MigrateLogger) ApplyContext(ctx context.Context, name, stmt string) err
 		return m.recordFailure(name, err)
 	}
 	if _, err := m.db.ExecContext(ctx, stmt); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return m.recordFailure(name, errors.Join(err, ctxErr))
+		}
 		if IsAlreadyExistsError(err) {
 			return nil
 		}
+		return m.recordFailure(name, err)
+	}
+	// SQLite can finish an interruptible statement successfully at the same
+	// time that its context is canceled. Treat cancellation observed at this
+	// boundary as a failed migration so the next store is never admitted.
+	if err := ctx.Err(); err != nil {
 		return m.recordFailure(name, err)
 	}
 	if m.log != nil {

@@ -903,7 +903,7 @@ func closeBoundListeners(server *http.Server, listeners *serverListeners, log *l
 		return
 	}
 	listeners.Stop()
-	if err := server.Close(); err != nil {
+	if err := server.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Warn("failed to close HTTP listeners after startup failure", zap.Error(err))
 	}
 }
@@ -1032,7 +1032,7 @@ func startGatewayAndServe(
 			log.Info("GitHub poller started")
 		},
 	); err != nil {
-		if !errors.Is(err, errServerBindFailed) {
+		if shouldLogStartupOrchestratorError(err) {
 			log.Error("Failed to start orchestrator", zap.Error(err))
 		}
 		closeBoundListeners(server, listeners, log)
@@ -1200,7 +1200,7 @@ func startGatewayAndServe(
 	}
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
-	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterSystemNotifications(processRuntimeContext(ctx), eventBus, gateway.Hub, log)
 	gateways.RegisterAgentRuntimeNotifications(ctx, eventBus, gateway.Hub, func() (any, bool) {
 		if agentRuntimeAvailability == nil {
 			return nil, false
@@ -1250,7 +1250,7 @@ func startGatewayAndServe(
 	// publishReadiness for why the order matters and
 	// TestPublishReadinessFlipsReadyBeforeSwappingHandler for the regression
 	// test pinning it.
-	if ctx.Err() != nil {
+	if !bootstrap.beginReadinessPublication(ctx) {
 		return false
 	}
 	publishReadiness(func() {
@@ -2452,6 +2452,7 @@ func awaitShutdown(
 	if controller := startupSignalControllerFromContext(ctx); controller != nil {
 		sig := controller.wait(shutdownCtx)
 		if sig == nil {
+			log.Info("Shutdown context canceled without OS signal", zap.Int("pid", os.Getpid()))
 			return
 		}
 		log.Info("Received shutdown signal",
@@ -2480,6 +2481,12 @@ func awaitShutdown(
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
 	runGracefulShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
+}
+
+func shouldLogStartupOrchestratorError(err error) bool {
+	return !errors.Is(err, errServerBindFailed) &&
+		!errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded)
 }
 
 // migrateDefaultUtilityProfile upgrades the portable user's legacy default

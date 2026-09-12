@@ -105,11 +105,10 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 			_ = pool.Close()
 			return nil, nil, fmt.Errorf("create backup dir: %w", err)
 		}
-		path := snapshotPath(backupDir, storedVersion)
-		size, err := snapshotSQLiteContext(ctx, writer, path)
+		path, size, err := createPreMigrationBackup(ctx, writer, backupDir, storedVersion)
 		if err != nil {
 			_ = pool.Close()
-			return nil, nil, fmt.Errorf("pre-migration backup failed: %w", err)
+			return nil, nil, err
 		}
 		if log != nil {
 			log.Info("pre-migration backup taken",
@@ -140,6 +139,37 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 		return pool.Close()
 	}
 	return pool, cleanup, nil
+}
+
+func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, storedVersion string) (string, int64, error) {
+	path := snapshotPath(backupDir, storedVersion)
+	stagingDir, err := os.MkdirTemp(backupDir, ".kandev-backup-*")
+	if err != nil {
+		return "", 0, fmt.Errorf("create private backup staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(stagingDir) }()
+
+	stagedPath := filepath.Join(stagingDir, filepath.Base(path))
+	size, err := snapshotSQLiteContext(ctx, writer, stagedPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("pre-migration backup failed: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", 0, fmt.Errorf("startup canceled after pre-migration backup: %w", err)
+	}
+	if err := os.Chmod(stagedPath, 0o600); err != nil {
+		return "", 0, fmt.Errorf("protect staged pre-migration backup: %w", err)
+	}
+	if _, err := inspectSQLiteCandidate(stagedPath); err != nil {
+		return "", 0, fmt.Errorf("validate staged pre-migration backup: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", 0, fmt.Errorf("startup canceled before installing pre-migration backup: %w", err)
+	}
+	if err := installStagedSQLite(stagedPath, path); err != nil {
+		return "", 0, fmt.Errorf("install pre-migration backup: %w", err)
+	}
+	return path, size, nil
 }
 
 func providePostgres(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, error) {

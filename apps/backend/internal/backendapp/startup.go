@@ -19,10 +19,13 @@ import (
 type bootstrapContextKey struct{}
 
 type bootstrapRuntime struct {
-	handler   *handlerSwitch
-	server    *http.Server
-	listeners *serverListeners
-	ready     atomic.Bool
+	handler             *handlerSwitch
+	server              *http.Server
+	listeners           *serverListeners
+	ready               atomic.Bool
+	readinessMu         sync.Mutex
+	readinessPublishing bool
+	startupClosing      bool
 }
 
 type startupSignalContextKey struct{}
@@ -85,6 +88,39 @@ func withProcessContext(ctx, process context.Context) context.Context {
 func processContextFromContext(ctx context.Context) context.Context {
 	process, _ := ctx.Value(processContextKey{}).(context.Context)
 	return process
+}
+
+// processRuntimeContext returns the process lifetime carried by startup
+// workers. Restore cancels workers while the process remains alive to finish
+// the restore and deliver its terminal job update.
+func processRuntimeContext(ctx context.Context) context.Context {
+	if process := processContextFromContext(ctx); process != nil {
+		return process
+	}
+	return ctx
+}
+
+// beginReadinessPublication serializes the readiness handoff with the startup
+// cancellation watcher. Once startup cancellation claims listener closure,
+// initialization cannot publish a router into a closing server.
+func (runtime *bootstrapRuntime) beginReadinessPublication(ctx context.Context) bool {
+	runtime.readinessMu.Lock()
+	defer runtime.readinessMu.Unlock()
+	if runtime.startupClosing || ctx.Err() != nil {
+		return false
+	}
+	runtime.readinessPublishing = true
+	return true
+}
+
+func (runtime *bootstrapRuntime) claimStartupClose() bool {
+	runtime.readinessMu.Lock()
+	defer runtime.readinessMu.Unlock()
+	if runtime.ready.Load() || runtime.readinessPublishing {
+		return false
+	}
+	runtime.startupClosing = true
+	return true
 }
 
 func withWorkerCancel(ctx context.Context, cancel context.CancelFunc) context.Context {
@@ -168,7 +204,7 @@ func runWithBootstrap(ctx context.Context, cfg *config.Config, log *logger.Logge
 		for {
 			select {
 			case <-startupCtx.Done():
-				if !runtime.ready.Load() {
+				if runtime.claimStartupClose() {
 					closeBoundListeners(server, listeners, log)
 				}
 				return

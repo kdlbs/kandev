@@ -177,6 +177,9 @@ func TestBootstrapDelayedSuccessKeepsLivenessUntilReadiness(t *testing.T) {
 				}
 				writeBootstrapJSON(w, http.StatusNotFound, map[string]any{statusKey: "not_found"})
 			})
+			if !runtime.beginReadinessPublication(ctx) {
+				return false
+			}
 			publishReadiness(func() {
 				ready.Store(true)
 				runtime.ready.Store(true)
@@ -319,6 +322,9 @@ func TestBootstrapRestoreKeepsProcessAliveUntilResultAndShutdown(t *testing.T) {
 				}
 				writeBootstrapJSON(w, http.StatusNotFound, map[string]any{statusKey: "not_found"})
 			})
+			if !runtime.beginReadinessPublication(ctx) {
+				return false
+			}
 			publishReadiness(func() {
 				ready.Store(true)
 				runtime.ready.Store(true)
@@ -557,6 +563,9 @@ func TestBootstrapSignalAfterReadiness(t *testing.T) {
 			application := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				writeBootstrapJSON(w, http.StatusOK, map[string]any{statusKey: "ok"})
 			})
+			if !runtime.beginReadinessPublication(ctx) {
+				t.Fatal("readiness publication rejected before signal test")
+			}
 			publishReadiness(func() {
 				ready.Store(true)
 				runtime.ready.Store(true)
