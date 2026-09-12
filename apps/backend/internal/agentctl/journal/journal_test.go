@@ -237,6 +237,49 @@ func TestJournalTerminalEventMarksSubmissionAtomically(t *testing.T) {
 	}
 }
 
+func TestJournalUnacknowledgedEventsDoNotBlockPromptAdmission(t *testing.T) {
+	j, err := Open(Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	ctx := context.Background()
+	if _, err := j.Append(ctx, Event{
+		SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 1,
+		StreamID: "stream-1", Type: "message", Payload: []byte("boot metadata"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	unresolved, err := j.HasUnresolvedSubmissions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unresolved {
+		t.Fatal("an unacknowledged replayable event blocked prompt admission")
+	}
+	work, err := j.HasUnresolvedWork(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !work {
+		t.Fatal("expected unacknowledged event to remain unresolved work")
+	}
+
+	if _, err := j.PutSubmission(ctx, Submission{
+		ID: "submission-1", Hash: "hash-1", Payload: []byte("prompt"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unresolved, err = j.HasUnresolvedSubmissions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unresolved {
+		t.Fatal("an unsettled prompt submission did not block prompt admission")
+	}
+}
+
 func TestJournalMissingStreamHasDistinctError(t *testing.T) {
 	j, err := Open(Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
 	if err != nil {

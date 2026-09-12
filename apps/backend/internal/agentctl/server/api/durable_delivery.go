@@ -142,6 +142,45 @@ func (s *Server) handleDeliverySubmissionByID(c *gin.Context) {
 	c.JSON(http.StatusOK, submission)
 }
 
+func (s *Server) handleDeliverySubmissions(c *gin.Context) {
+	deliveryJournal, ok := s.getDeliveryJournal(c)
+	if !ok {
+		return
+	}
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	sessionID, _, _ := s.procMgr.DeliverySubmissionIdentity()
+	if c.Query("session_id") != sessionID {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	submissions, err := deliveryJournal.ListSubmissions(c.Request.Context(), c.Query("session_id"))
+	if err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, submissions)
+}
+
+func (s *Server) handleDeliverySubmissionRetire(c *gin.Context) {
+	if _, ok := s.getDeliveryJournal(c); !ok {
+		return
+	}
+	if s.procMgr == nil {
+		writeDeliveryError(c, journal.ErrOwnerMismatch)
+		return
+	}
+	if err := s.procMgr.RetireDeliverySubmission(
+		c.Request.Context(), c.Param("id"), s.procMgr.DeliveryHarnessGeneration(),
+	); err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (s *Server) handleDeliveryReplay(c *gin.Context) {
 	deliveryJournal, ok := s.getDeliveryJournal(c)
 	if !ok {
