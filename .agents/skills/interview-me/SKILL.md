@@ -1,6 +1,6 @@
 ---
 name: interview-me
-description: Check assumptions before feature or fix planning. Clarify material choices through focused questions, stress-test intent, and map unresolved decisions for large uncertain initiatives.
+description: Clarify a standalone idea or check assumptions before feature or fix planning. Use focused questions, stress-test intent, and map unresolved decisions for large uncertain initiatives.
 ---
 
 # Interview Me
@@ -40,7 +40,15 @@ user to define the behavior again.
 Identify which decisions depend on other answers. Ask only questions whose
 prerequisites are settled. Use the active harness's user-question tool and obey
 its limits and waiting rules. Ask one to four independent questions per round,
-within those limits. Without a question tool, ask one question at a time in chat.
+within those limits. Without a question tool, ask one question at a time in chat
+during a normal interactive session.
+
+If this is an autopilot root or another non-interactive session with no question
+tool, record each unresolved material choice as an assumption. Continue only
+when the caller permits autonomous planning for that choice and use the most
+conservative reversible option. Otherwise return the assumption as a blocker to
+the caller. Never present an assumption as confirmed, and preserve the normal
+chat fallback for interactive sessions.
 
 Give each question concrete options, a recommended answer, and a short reason.
 Align the question with the recommendation so agreement has one clear meaning.

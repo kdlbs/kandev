@@ -12,7 +12,8 @@ Use this as the routing map for Kandev's local skills. Prefer the repo's existin
 ```text
 Task arrives
 |
-|-- Feature/fix planning assumptions? ------> /interview-me (question only material unknowns)
+|-- Standalone interview or stress test? --> /interview-me
+|-- Feature/fix planning assumptions? -----> /interview-me (question only material unknowns)
 |-- Large initiative with dependent unknowns? -> /interview-me decision-mapping reference
 |-- Create/change/fix/publish Kandev plugin? -> /create-kandev-plugin plus /fix or /tdd as needed
 |-- New feature or behavior-changing fix? --> /spec-driven-development

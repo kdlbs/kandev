@@ -42,6 +42,11 @@ choices that evidence and prior instructions do not settle.
 Read `docs/specs/README.md`, the owning system index, and the relevant
 requirement and system-design documents. Use the legacy catalog only when the
 system has not migrated.
+Read the owning system `README.md` and use this command for discovery:
+
+    python3 scripts/list-docs.py specs --format paths
+
+Add `--kind legacy` when the system has not migrated.
 
 Search adjacent systems before you create or move an artifact. A UI symptom does
 not make the repair UI-owned. Update the system that owns the failed contract,

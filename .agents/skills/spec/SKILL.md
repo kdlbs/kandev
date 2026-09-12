@@ -48,12 +48,18 @@ confirmation.
 
 ### 1. Locate the owning system
 
-Read `docs/specs/README.md` and the likely system `README.md`. If the system has
-not migrated, use `docs/specs/INDEX.md` to locate the legacy source.
+Read `docs/specs/README.md` and the likely system `README.md`. If the system
+has not migrated, run this command to locate the legacy source:
 
-Search all system indexes, requirements, and designs for the capability name
-and its main nouns. Update an existing capability when it owns the same actor,
-lifecycle, and contract.
+    python3 scripts/list-docs.py specs --kind legacy --format paths
+
+Search the catalog, requirements, and designs for the capability name and its
+main nouns:
+
+    python3 scripts/list-docs.py specs --text <capability-term> --format paths
+
+Update an existing capability when it owns the same actor, lifecycle, and
+contract.
 
 Choose the system that owns the source of truth and durable contract. Do not
 choose an owner from the code directories that change. Record one sentence in
@@ -122,10 +128,12 @@ design can include backend services, storage, projections, frontend components,
 responsive behavior, and tests. Do not create a parallel UI design for those
 same requirements.
 
-### 5. Update the system index
+### 5. Update the system boundary
 
-Add the new documents to the system `README.md`. State the system boundary and
-link adjacent systems when ownership can be confused.
+Update the system `README.md` only when the system boundary, migration record,
+or related-system links change. State the system boundary and link adjacent
+systems when ownership can be confused. Do not add a requirement or
+system-design list.
 
 Before and after adding required links, run `wc -c <system>/README.md`. Near
 the 12 KiB `system-index` limit, keep every required link but use concise
@@ -158,11 +166,12 @@ Review the artifacts before you run the linter:
 - Each design identifier that names existing code matches the current source.
   Use `rg` to confirm exact symbols before the artifact is complete.
 - New files do not copy the legacy `Migrated source detail` wrapper.
-- New artifacts appear in the owning system index.
+- New artifacts appear in the catalog command output for the owning system.
 
 Run:
 
 ```bash
+python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
 git diff --check -- docs/specs docs/decisions
