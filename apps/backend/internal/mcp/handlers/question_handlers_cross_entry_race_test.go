@@ -45,7 +45,7 @@ func TestAnswerQuestion_RESTvsMCP_OnlyOneClaims(t *testing.T) {
 	resolver := newTestResolver(t, store, repo, svc)
 
 	engine := gin.New()
-	clarification.RegisterRoutes(engine, store, noopBroadcaster{}, &svcMessageUpdater{Service: svc}, repo, stubDetachedResumer{}, resolver, testLogger(t))
+	clarification.RegisterRoutes(engine, store, noopBroadcaster{}, &svcMessageUpdater{Service: svc}, repo, stubDetachedResumer{}, resolver, testLogger(t), svc, repo)
 
 	mcpH := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
 

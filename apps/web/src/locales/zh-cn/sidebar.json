@@ -49,6 +49,7 @@
   "logOut": "退出登录",
   "maxViews_one": "最多 {{count}} 个",
   "maxViews_other": "最多 {{count}} 个",
+  "needsYouInbox": "需要你处理",
   "nestUnder": "嵌套到“{{title}}”下",
   "newKanbanWorkspace": "新建看板工作区",
   "newOfficeWorkspace": "新建办公室工作区",

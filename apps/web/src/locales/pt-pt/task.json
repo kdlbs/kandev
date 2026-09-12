@@ -92,6 +92,7 @@
   "annotationCount_other": "{{count}} anotações",
   "annotationPin": "Marcador",
   "answer": "resposta",
+  "answeredOfTotal": "{{answeredCount}} de {{total}} respondidas",
   "anyUncommittedOrUnpushedChangesAre": "Quaisquer alterações sem commit ou sem push são perdidas.",
   "anyUncommittedOrUnpushedChangesIn": "Quaisquer alterações sem commit ou sem push na área de trabalho serão perdidas.",
   "anyoneWithThisLinkCanView": "Qualquer pessoa com esta ligação pode ver esta conversa. Reveja a pré-visualização com atenção antes de publicar; depois de publicado, o retrato é carregado para o GitHub Gist na sua conta.",

@@ -92,6 +92,7 @@
   "annotationCount_other": "{{count}} 个标注",
   "annotationPin": "图钉",
   "answer": "回答",
+  "answeredOfTotal": "已回答 {{answeredCount}} / {{total}}",
   "anyUncommittedOrUnpushedChangesAre": "任何未提交或未推送的更改都会丢失。",
   "anyUncommittedOrUnpushedChangesIn": "工作区中任何未提交或未推送的更改都会丢失。",
   "anyoneWithThisLinkCanView": "任何拥有此链接的人都可以查看此对话。发布前请仔细检查预览；发布后，快照会上传到你账户的 GitHub Gist。",

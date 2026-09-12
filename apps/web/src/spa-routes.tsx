@@ -30,7 +30,7 @@ import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
-import { useRouter, usePathname, useSearchParams } from "@/lib/routing/client-router";
+import { usePathname, useSearchParams } from "@/lib/routing/client-router";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import {
   PluginErrorBoundary,
@@ -53,11 +53,10 @@ import type {
   WorkflowStep,
 } from "@/lib/types/http";
 import { TaskDetailRoute } from "./task-detail-route";
-import { useTranslation } from "react-i18next";
-import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
-import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
-import { WorkspaceCanvasesPage } from "@/components/settings/workspace-canvases-page";
-import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
+import { CanvasRoute } from "./canvas-route";
+import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
+import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
+import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 
 const OfficeRoutes = lazy(() =>
   import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
@@ -72,7 +71,6 @@ const ThreadsPageClient = lazy(() =>
     default: mod.ThreadsPageClient,
   })),
 );
-
 const EMPTY_REPOSITORIES: Repository[] = [];
 
 type SpaRoute =
@@ -103,6 +101,7 @@ type SpaRoute =
   | { kind: "runDetail"; automationId: string; tab?: string; runId?: string }
   | { kind: "canvas"; canvasId: string }
   | { kind: "canvasSettings"; workspaceId: string }
+  | { kind: "needsYouInbox" }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
   | { kind: "plugin"; path: string }
@@ -117,6 +116,7 @@ type DataBackedSpaRoute = Exclude<
       | "kanban"
       | "canvas"
       | "canvasSettings"
+      | "needsYouInbox"
       | "settings"
       | "office"
       | "login"
@@ -135,6 +135,7 @@ type RouteDataState = {
 
 type SpaRouteOptions = {
   canvasesEnabled?: boolean;
+  needsYouInboxEnabled?: boolean;
 };
 
 export function resolveSpaRoute(
@@ -148,10 +149,18 @@ export function resolveSpaRoute(
     resolveRunsRoute(normalized, searchParams) ??
     resolveTopLevelRoute(normalized, searchParams) ??
     resolveCanvasRoute(normalized, options.canvasesEnabled === true) ??
+    resolveNeedsYouInboxRoute(normalized, options.needsYouInboxEnabled === true) ??
     resolveNestedRoute(normalized) ??
     resolvePluginRoute(normalized) ??
     resolveKanbanRoute(searchParams)
   );
+}
+
+// AC .1-.2: the destination resolves only where the flag is enabled; disabled
+// falls through to the kanban catch-all like an unrecognized path would.
+function resolveNeedsYouInboxRoute(normalized: string, enabled: boolean): SpaRoute | null {
+  if (!enabled) return null;
+  return normalized === NEEDS_YOU_INBOX_HREF ? { kind: "needsYouInbox" } : null;
 }
 
 function resolveCanvasRoute(normalized: string, canvasesEnabled: boolean): SpaRoute | null {
@@ -285,7 +294,8 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const canvasesEnabled = useFeature("canvases");
-  const route = resolveSpaRoute(pathname, searchParams, { canvasesEnabled });
+  const needsYouInboxEnabled = useFeature("needsYouInbox");
+  const route = resolveSpaRoute(pathname, searchParams, { canvasesEnabled, needsYouInboxEnabled });
 
   // Reaching /login, /setup, or /invite here means the pre-auth gate in
   // main.tsx already decided the app shell should render (authenticated, or
@@ -294,15 +304,10 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
     return <AuthRouteRedirect />;
   }
   if (route.kind === "canvas" || route.kind === "canvasSettings") {
-    if (!canvasesEnabled) return <AuthRouteRedirect />;
-    if (route.kind === "canvas") return <CanvasHostRoute canvasId={route.canvasId} />;
-    return (
-      <SettingsLayoutClient>
-        <WorkspaceSettingsShell workspaceId={route.workspaceId} activeTab="canvases">
-          <WorkspaceCanvasesPage workspaceId={route.workspaceId} />
-        </WorkspaceSettingsShell>
-      </SettingsLayoutClient>
-    );
+    return <CanvasRoute route={route} enabled={canvasesEnabled} />;
+  }
+  if (route.kind === "needsYouInbox") {
+    return <NeedsYouInboxRoute enabled={needsYouInboxEnabled} />;
   }
   if (route.kind === "plugin") {
     return <PluginRoute path={route.path} />;
@@ -345,27 +350,6 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
 
   return <DataBackedRoute route={route} routeData={routeData} />;
-}
-
-// Takes the route name as a catalog KEY, not resolved copy: a `t()` at the call
-// site would sit in a plain route-dispatch function with no hook of its own.
-function RouteLoading({ routeNameKey }: { routeNameKey: string }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
-      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-        {t("common:loadingRoute", { routeName: t(routeNameKey) })}
-      </p>
-    </div>
-  );
-}
-
-function AuthRouteRedirect() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace("/");
-  }, [router]);
-  return null;
 }
 
 /**

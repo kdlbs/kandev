@@ -169,6 +169,13 @@ type Handlers struct {
 	eventBus       EventBus
 	resolver       *Resolver
 	logger         *logger.Logger
+
+	// inboxTasks/inboxBundles back the Needs-you Inbox endpoints
+	// (inbox_handlers.go) only; the original clarification endpoints above
+	// never read them.
+	inboxTasks   inboxTaskService
+	inboxBundles inboxBundleStore
+	now          func() time.Time
 }
 
 // NewHandlers creates new clarification handlers.
@@ -180,6 +187,8 @@ func NewHandlers(
 	eventBus EventBus,
 	resolver *Resolver,
 	log *logger.Logger,
+	inboxTasks inboxTaskService,
+	inboxBundles inboxBundleStore,
 ) *Handlers {
 	return &Handlers{
 		store:          store,
@@ -189,6 +198,9 @@ func NewHandlers(
 		eventBus:       eventBus,
 		resolver:       resolver,
 		logger:         log.WithFields(zap.String("component", "clarification-handlers")),
+		inboxTasks:     inboxTasks,
+		inboxBundles:   inboxBundles,
+		now:            time.Now,
 	}
 }
 
@@ -202,14 +214,22 @@ func RegisterRoutes(
 	eventBus EventBus,
 	resolver *Resolver,
 	log *logger.Logger,
+	inboxTasks inboxTaskService,
+	inboxBundles inboxBundleStore,
 ) {
-	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log)
+	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log, inboxTasks, inboxBundles)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)
 	api.GET("/:id", h.httpGetRequest)
 	api.GET("/:id/wait", h.httpWaitForResponse)
 	api.POST("/:id/respond", h.httpRespond)
 	api.POST("/:id/cancel", h.httpCancelRequest)
+
+	inbox := router.Group("/api/v1/clarification-inbox")
+	inbox.GET("", h.httpListInbox)
+	inbox.GET("/hidden", h.httpListInboxHidden)
+	inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
+	inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)
 }
 
 // CreateRequestBody is the request body for creating a clarification request.

@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultState } from "@/lib/state/default-state";
+import { defaultFeatureFlags, type FeatureFlags } from "@/lib/state/slices/features/types";
 
 const mocks = vi.hoisted(() => ({
   openQuickChat: vi.fn(),
@@ -10,7 +11,9 @@ const mocks = vi.hoisted(() => ({
 const state = {
   workspaces: { activeId: "ws-1" as string | null },
   userSettings: { ...defaultState.userSettings },
+  features: { ...defaultFeatureFlags } as FeatureFlags,
   office: { inboxCountByWorkspaceId: {} as Record<string, number> },
+  needsYouInbox: { byWorkspaceId: {} as Record<string, { count: number; hasMore?: boolean }> },
   quickChat: {
     isOpen: false,
     sessions: [] as Array<{
@@ -67,6 +70,8 @@ describe("AppSidebarPrimaryNav", () => {
   beforeEach(() => {
     state.workspaces.activeId = "ws-1";
     state.userSettings = { ...defaultState.userSettings };
+    state.features = { ...defaultFeatureFlags };
+    state.needsYouInbox = { byWorkspaceId: {} };
     state.office.inboxCountByWorkspaceId = {};
     state.quickChat.isOpen = false;
     state.quickChat.sessions = [];
@@ -160,5 +165,61 @@ describe("AppSidebarPrimaryNav", () => {
     renderNav(false);
 
     expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
+  });
+});
+
+describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = "ws-1";
+    state.userSettings = { ...defaultState.userSettings };
+    state.features = { ...defaultFeatureFlags };
+    state.needsYouInbox = { byWorkspaceId: {} };
+    state.office.inboxCountByWorkspaceId = {};
+    mode = "kanban";
+    pathname = "/";
+  });
+
+  afterEach(() => cleanup());
+
+  it("is hidden when the feature flag is off", () => {
+    state.features.needsYouInbox = false;
+    renderNav(false);
+
+    expect(screen.queryByRole("link", { name: "Needs you" })).toBeNull();
+  });
+
+  it("renders gated on the flag alone, independent of Office mode", () => {
+    state.features.needsYouInbox = true;
+    mode = "kanban";
+    renderNav(false);
+
+    const link = screen.getByRole("link", { name: "Needs you" });
+    expect(link.getAttribute("href")).toBe("/needs-you-inbox");
+  });
+
+  it("still renders while in Office mode", () => {
+    state.features.needsYouInbox = true;
+    mode = "office";
+    renderNav(false);
+
+    expect(screen.getByRole("link", { name: "Needs you" })).not.toBeNull();
+  });
+
+  it("shows the count from the active workspace's needs-you-inbox state as a badge", () => {
+    state.features.needsYouInbox = true;
+    state.needsYouInbox.byWorkspaceId["ws-1"] = { count: 3 };
+    renderNav(false);
+
+    const link = screen.getByRole("link", { name: "Needs you" });
+    expect(link.textContent).toContain("3");
+  });
+
+  it("presents the count as capped when the list is truncated (AC .14)", () => {
+    state.features.needsYouInbox = true;
+    state.needsYouInbox.byWorkspaceId["ws-1"] = { count: 50, hasMore: true };
+    renderNav(false);
+
+    const link = screen.getByRole("link", { name: "Needs you" });
+    expect(link.textContent).toContain("50+");
   });
 });

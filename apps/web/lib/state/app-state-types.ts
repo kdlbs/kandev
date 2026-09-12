@@ -43,6 +43,7 @@ import {
   defaultSystemState,
   defaultPluginsState,
   defaultReviewState,
+  defaultNeedsYouInboxState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -69,20 +70,9 @@ import type {
   PreviewViewMode,
   PreviewDevicePreset,
   ConnectionState,
-  SystemSliceActions,
-  AutomationsSliceActions,
-  FeaturesSliceActions,
-  AuthSliceActions,
-  GitHubSliceActions,
-  GitLabSliceActions,
-  AzureDevOpsSliceActions,
-  JiraSliceActions,
-  LinearSliceActions,
-  OfficeSliceActions,
-  PluginsSliceActions,
-  ReviewSliceActions,
   KanbanSlice,
 } from "./slices";
+import type { AppStateExtraActions } from "./app-state-extra-actions";
 import type {
   AvailableCommand,
   SessionModeEntry,
@@ -223,6 +213,10 @@ export type AppState = KanbanSlice & {
 
   // Review slice (actions merged via ReviewSliceActions intersection on AppState)
   taskReview: (typeof defaultReviewState)["taskReview"];
+
+  // Needs-you Inbox slice (actions merged via NeedsYouInboxSliceActions
+  // intersection on AppState)
+  needsYouInbox: (typeof defaultNeedsYouInboxState)["needsYouInbox"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -635,20 +629,7 @@ export type AppState = KanbanSlice & {
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & Pick<UIA, "setThreadActiveView" | "createThreadView"> &
-  GitHubSliceActions &
-  GitLabSliceActions &
-  JiraSliceActions &
-  LinearSliceActions &
-  OfficeSliceActions &
-  import("./store-reexports").WorkspaceSourceStoreState &
-  AzureDevOpsSliceActions &
-  SystemSliceActions &
-  FeaturesSliceActions &
-  AuthSliceActions &
-  AutomationsSliceActions &
-  PluginsSliceActions &
-  ReviewSliceActions;
+} & AppStateExtraActions;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many

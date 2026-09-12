@@ -1,27 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
+import { IconInfoCircle } from "@tabler/icons-react";
 import type {
   Message,
   ClarificationRequestMetadata,
   ClarificationAnswer,
   ClarificationQuestion,
 } from "@/lib/types/http";
-import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
+import {
+  useClarificationGroup,
+  type ClarificationOutcome,
+} from "@/hooks/domains/session/use-clarification-group";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
   CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
   ClarificationCarouselNav,
   ClarificationCustomInput,
   ClarificationOptions,
-  ClarificationStepper,
   countRunes,
 } from "./clarification-overlay-parts";
-import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { ClarificationMarkdown } from "./clarification-markdown";
-import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -36,6 +37,14 @@ type ClarificationInputOverlayProps = {
   // Called by the expanded header's collapse control.
   onCollapse?: () => void;
   collapseContentId?: string;
+  // Additive (AC .39): reports every settled submission outcome, distinct
+  // from onResolved's narrower "this caller's own answer landed" signal. The
+  // task session and Quick Chat hosts leave this unset and keep their
+  // existing behavior identical; the Needs-you Inbox is the first host that
+  // needs to tell "this caller won" apart from "another caller won" /
+  // "no longer active" / "submission failed" to decide whether to remove its
+  // row (design-02#Failure-and-recovery).
+  onOutcome?: (outcome: ClarificationOutcome) => void;
 };
 
 type SingleQuestionMeta = {
@@ -44,15 +53,6 @@ type SingleQuestionMeta = {
   question: ClarificationQuestion;
   questionId: string;
 };
-
-function clarificationHeaderClassName(total: number): string {
-  return cn(
-    "flex min-h-11 justify-between",
-    total > 1
-      ? "flex-col items-stretch gap-2 px-3 py-2 md:flex-row md:items-center md:gap-3 md:px-4 md:py-0"
-      : "items-center gap-3 px-4",
-  );
-}
 
 function readSingleQuestionMeta(message: Message | null | undefined): SingleQuestionMeta | null {
   if (!message) return null;
@@ -211,6 +211,43 @@ function ClarificationCard(props: CardProps) {
       />
     </div>
   );
+}
+
+// buildOutcome projects a settled submitState + the hook's lastResult into
+// the AC .39 report. "submitting"/"idle" never reach here (guarded by the
+// caller's transition check), and "ok" always has a lastResult by the time
+// the transition fires (set in the same ownsRequest branch as submitState).
+function buildOutcome(
+  submitState: "ok" | "error" | "expired",
+  lastResult: ReturnType<typeof useClarificationGroup>["lastResult"],
+): ClarificationOutcome {
+  if (submitState === "expired") return { kind: "no_longer_active" };
+  if (submitState === "error") return { kind: "submission_failed" };
+  return {
+    kind: "resolved",
+    claimedByThisCaller: lastResult?.claimed !== false,
+    status: lastResult?.status,
+  };
+}
+
+// useOutcomeCallback mirrors useResolveCallback's transition guard (fire
+// once per settle, inheriting the hook's ownership fence for free since
+// lastResult/submitState only update for the request that still owns it) but
+// covers all four AC .39 outcomes instead of only the "this caller won" one.
+function useOutcomeCallback(
+  submitState: ReturnType<typeof useClarificationGroup>["submitState"],
+  lastResult: ReturnType<typeof useClarificationGroup>["lastResult"],
+  onOutcome: ((outcome: ClarificationOutcome) => void) | undefined,
+) {
+  const last = useRef(submitState);
+  useEffect(() => {
+    if (last.current !== submitState && onOutcome) {
+      if (submitState === "ok" || submitState === "error" || submitState === "expired") {
+        onOutcome(buildOutcome(submitState, lastResult));
+      }
+    }
+    last.current = submitState;
+  }, [submitState, lastResult, onOutcome]);
 }
 
 function useResolveCallback(
@@ -583,6 +620,7 @@ function ClarificationCarouselBody({
 export function ClarificationInputOverlay({
   messages,
   onResolved,
+  onOutcome,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
   onDismiss,
@@ -607,6 +645,7 @@ export function ClarificationInputOverlay({
   const sharedContext = readSharedContext(sortedMessages[0]);
 
   useResolveCallback(group.submitState, onResolved);
+  useOutcomeCallback(group.submitState, group.lastResult, onOutcome);
 
   // group is a fresh object every render, but its submitCollected callback is
   // memoised by the hook — depend on the function only so this useCallback
@@ -631,40 +670,20 @@ export function ClarificationInputOverlay({
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div
-        className={clarificationHeaderClassName(total)}
-        data-testid="clarification-overlay-header"
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
-          {total > 1 && (
-            <ClarificationStepper
-              total={total}
-              activeIndex={activeIndex}
-              isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
-              onJump={setActiveIndex}
-              isSubmitting={isSubmitting}
-            />
-          )}
-          {total > 1 && (
-            <span
-              data-testid="clarification-group-progress"
-              className="ml-auto min-w-0 truncate text-xs text-muted-foreground md:ml-0"
-            >
-              {group.answeredCount} of {group.total} answered
-            </span>
-          )}
-        </div>
-        <ClarificationHeaderActions
-          total={total}
-          allAnswered={allAnswered}
-          isSubmitting={isSubmitting}
-          onSubmit={handleSubmit}
-          onSkip={() => void group.skipAll("User skipped")}
-          onCollapse={onCollapse}
-          collapseContentId={collapseContentId}
-        />
-      </div>
+      <ClarificationOverlayTopBar
+        total={total}
+        activeIndex={activeIndex}
+        isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
+        onJump={setActiveIndex}
+        isSubmitting={isSubmitting}
+        answeredCount={group.answeredCount}
+        answerableTotal={group.total}
+        allAnswered={allAnswered}
+        onSubmit={handleSubmit}
+        onSkip={() => void group.skipAll("User skipped")}
+        onCollapse={onCollapse}
+        collapseContentId={collapseContentId}
+      />
       {(group.submitState === "error" || group.submitState === "expired") && (
         <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
       )}

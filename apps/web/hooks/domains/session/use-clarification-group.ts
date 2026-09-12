@@ -20,13 +20,13 @@ const CLARIFICATION_RESPONSE_TIMEOUT_MS = 40_000;
 // The bundle status the backend can report on a resolved response (R10).
 // Upstream's claim cannot produce a cancelled winner, so a loss only ever
 // resolves to one of these two (W3a is retired: no "cancelled" union member).
-type ResolvedStatus = "answered" | "rejected";
+export type ResolvedStatus = "answered" | "rejected";
 
 // Parsed shape of the clarification respond/cancel envelope
 // (internal/clarification/handlers.go's writeResolutionResult). Both the
 // answer batch and the skip/reject call hit the same endpoint and get the
 // same envelope back.
-type ClarificationRespondResult = {
+export type ClarificationRespondResult = {
   state: SubmitState;
   // Present only when the server returned a parseable 200 body. Absent on a
   // 409 (legacy backend, no body), malformed 200 body, or a network/non-2xx
@@ -108,6 +108,16 @@ function parseClarificationResponseBody(value: unknown): ClarificationRespondRes
   return { state: "ok", claimed, status, ...responseFields };
 }
 
+// ClarificationOutcome is the settled-submission report AC .39 requires:
+// built directly from the same ClarificationRespondResult this hook already
+// parses (design-01#Components / design-02#Failure-and-recovery), so no host
+// (including the Needs-you Inbox) ever derives a second representation of
+// "what happened" from raw wire fields.
+export type ClarificationOutcome =
+  | { kind: "resolved"; claimedByThisCaller: boolean; status?: ResolvedStatus }
+  | { kind: "no_longer_active" }
+  | { kind: "submission_failed" };
+
 export type ClarificationGroupApi = {
   pendingId: string | null;
   total: number;
@@ -127,6 +137,13 @@ export type ClarificationGroupApi = {
   // retries use the current live answers; skip retries keep the original
   // reason. A no-op before either has been called.
   retry: () => Promise<void>;
+  // The most recent settled ClarificationRespondResult this submission still
+  // owned (see runClarificationRequest's ownsRequest fence), or null before
+  // any submission has settled. Callers that need to distinguish "this
+  // caller won" from "another caller won" read this alongside submitState;
+  // see ClarificationOutcome / the outcome callback threaded through
+  // ClarificationInputOverlay -> ClarificationPanelSection (AC .39).
+  lastResult: ClarificationRespondResult | null;
 };
 
 function questionIdsFromMessages(messages: readonly Message[]): string[] {
@@ -265,6 +282,7 @@ type RunClarificationRequestArgs = {
   requestGenerationRef: { current: number };
   inflightRef: { current: boolean };
   setSubmitState: (state: SubmitState) => void;
+  setLastResult: (result: ClarificationRespondResult) => void;
   updateMessage: (message: Message) => void;
 };
 
@@ -282,6 +300,7 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     requestGenerationRef,
     inflightRef,
     setSubmitState,
+    setLastResult,
     updateMessage,
   } = args;
   const requestGeneration = ++requestGenerationRef.current;
@@ -292,7 +311,10 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
   setSubmitState("submitting");
   try {
     const result = await post();
-    if (ownsRequest()) setSubmitState(result.state);
+    if (ownsRequest()) {
+      setSubmitState(result.state);
+      setLastResult(result);
+    }
     if (result.state === "ok") {
       // Applies against the submit-time bundle snapshot regardless of which
       // bundle is now on screen -- this client's own messages really were
@@ -306,7 +328,10 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     }
   } catch (err) {
     console.error("Clarification request threw:", err);
-    if (ownsRequest()) setSubmitState("error");
+    if (ownsRequest()) {
+      setSubmitState("error");
+      setLastResult({ state: "error" });
+    }
   } finally {
     // Only release the mutex if this exact request still owns it. A bundle
     // swap can return to the same pending ID before this request settles, so
@@ -363,9 +388,29 @@ type UseClarificationSubmissionArgs = {
   inflightRef: { current: boolean };
   setAnswers: (answers: Record<string, ClarificationAnswer>) => void;
   setSubmitState: (state: SubmitState) => void;
+  setLastResult: (result: ClarificationRespondResult) => void;
   updateMessage: (message: Message) => void;
   defaultSkipReason: string;
 };
+
+// Factors out the request-plumbing fields shared by submitCollected and
+// skipAll's runClarificationRequest calls, keeping useClarificationSubmission
+// itself under the file's max-lines-per-function limit.
+function baseClarificationRequestArgs(
+  requestPendingId: string,
+  common: UseClarificationSubmissionArgs,
+) {
+  return {
+    bundle: common.submitBundleRef.current.slice(),
+    requestPendingId,
+    activePendingIdRef: common.activePendingIdRef,
+    requestGenerationRef: common.requestGenerationRef,
+    inflightRef: common.inflightRef,
+    setSubmitState: common.setSubmitState,
+    setLastResult: common.setLastResult,
+    updateMessage: common.updateMessage,
+  };
+}
 
 // Submission plumbing shared by useClarificationGroup: submitCollected/skipAll
 // each POST through runClarificationRequest, and retry() replays whichever of
@@ -382,6 +427,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     inflightRef,
     setAnswers,
     setSubmitState,
+    setLastResult,
     updateMessage,
     defaultSkipReason,
   } = args;
@@ -407,13 +453,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
         post: () => postClarificationBatch(pendingId, ordered),
         ownStatus: "answered",
         ownAnswers: current,
-        bundle: submitBundleRef.current.slice(),
-        requestPendingId: pendingId,
-        activePendingIdRef,
-        requestGenerationRef,
-        inflightRef,
-        setSubmitState,
-        updateMessage,
+        ...baseClarificationRequestArgs(pendingId, args),
       });
     },
     [
@@ -426,6 +466,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       inflightRef,
       setAnswers,
       setSubmitState,
+      setLastResult,
       updateMessage,
     ],
   );
@@ -440,13 +481,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
         post: () => postClarificationSkip(pendingId, effectiveReason),
         ownStatus: "rejected",
         ownAnswers: {},
-        bundle: submitBundleRef.current.slice(),
-        requestPendingId: pendingId,
-        activePendingIdRef,
-        requestGenerationRef,
-        inflightRef,
-        setSubmitState,
-        updateMessage,
+        ...baseClarificationRequestArgs(pendingId, args),
       });
     },
     [
@@ -456,6 +491,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       requestGenerationRef,
       inflightRef,
       setSubmitState,
+      setLastResult,
       updateMessage,
       defaultSkipReason,
     ],
@@ -499,6 +535,7 @@ export function useClarificationGroup(
     answersRef.current = answers;
   }, [answers]);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [lastResult, setLastResult] = useState<ClarificationRespondResult | null>(null);
   // Re-entry guard: multiple submit paths can race (Cmd+Enter inside the
   // custom input fires both the input's onSubmit and onRequestFinalSubmit;
   // a double-click on the Submit button can also race). The hook owns the
@@ -557,6 +594,7 @@ export function useClarificationGroup(
     inflightRef,
     setAnswers,
     setSubmitState,
+    setLastResult,
     updateMessage: storeApi.getState().updateMessage,
     defaultSkipReason: t("task:userSkippedClarification"),
   });
@@ -579,6 +617,7 @@ export function useClarificationGroup(
       answersRef.current = {};
       setAnswers({});
       setSubmitState("idle");
+      setLastResult(null);
       resetLastAction();
       inflightRef.current = false;
     }
@@ -595,5 +634,6 @@ export function useClarificationGroup(
     submitCollected,
     skipAll,
     retry,
+    lastResult,
   };
 }

@@ -486,6 +486,12 @@ type FeaturesConfig struct {
 	// kill switch that restores runner-seat binding and task-active-session
 	// decision re-evaluation when disabled.
 	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
+
+	// NeedsYouInbox gates the Needs-you Inbox: a workspace-scoped sidebar
+	// destination, independent of Office, listing exactly the answerable
+	// clarification bundles for the active workspace. Off in prod until the
+	// feature is user-ready.
+	NeedsYouInbox bool `mapstructure:"needs_you_inbox" json:"needsYouInbox"`
 }
 
 // LoggingConfig holds logging configuration.

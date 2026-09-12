@@ -106,6 +106,15 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # Needs-you Inbox: a workspace-scoped sidebar destination listing exactly
+  # the answerable clarification bundles for the active workspace. Off in
+  # prod until the feature is user-ready; on in dev/e2e so contributors and
+  # tests exercise it.
+  KANDEV_FEATURES_NEEDS_YOU_INBOX:
+    prod: "false"
+    dev:  "true"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

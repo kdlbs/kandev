@@ -93,6 +93,7 @@
   "annotationCount_other": "{{count}} annotations",
   "annotationPin": "Pin",
   "answer": "answer",
+  "answeredOfTotal": "{{answeredCount}} of {{total}} answered",
   "anyUncommittedOrUnpushedChangesAre": "Any uncommitted or unpushed changes are lost.",
   "anyUncommittedOrUnpushedChangesIn": "Any uncommitted or unpushed changes in the workspace will be lost.",
   "anyoneWithThisLinkCanView": "Anyone with this link can view this conversation. Review the preview carefully before publishing; once published, the snapshot is uploaded to GitHub Gist on your account.",
