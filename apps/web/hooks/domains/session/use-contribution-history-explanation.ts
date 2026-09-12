@@ -38,6 +38,8 @@ export type ContributionHistoryExplanationTarget = {
   expectedRemoteHead: string;
 };
 
+type ContributionHistoryRequestTarget = Omit<ContributionHistoryExplanationTarget, "selectedPRKey">;
+
 export type ContributionHistoryExplanationStatus = "idle" | "loading" | "ready" | "unavailable";
 
 type ExplanationSnapshot = {
@@ -90,7 +92,6 @@ export function contributionHistoryExplanationKey(
     target.sessionId,
     target.repositoryScope,
     target.branch,
-    target.selectedPRKey,
     target.expectedLocalHead,
     target.expectedRemoteHead,
   ]);
@@ -98,7 +99,7 @@ export function contributionHistoryExplanationKey(
 
 function responseMatchesTarget(
   response: ContributionHistoryExplanation,
-  target: ContributionHistoryExplanationTarget,
+  target: ContributionHistoryRequestTarget,
 ): boolean {
   return (
     (response.repo ?? "") === target.repositoryScope &&
@@ -108,7 +109,7 @@ function responseMatchesTarget(
   );
 }
 
-function startEntry(key: string, target: ContributionHistoryExplanationTarget): ExplanationEntry {
+function startEntry(key: string, target: ContributionHistoryRequestTarget): ExplanationEntry {
   const entry: ExplanationEntry = {
     ...emptySnapshot(),
     status: "loading",
@@ -160,10 +161,7 @@ function startEntry(key: string, target: ContributionHistoryExplanationTarget): 
   return entry;
 }
 
-function getOrStartEntry(
-  key: string,
-  target: ContributionHistoryExplanationTarget,
-): ExplanationEntry {
+function getOrStartEntry(key: string, target: ContributionHistoryRequestTarget): ExplanationEntry {
   return entries.get(key) ?? startEntry(key, target);
 }
 
@@ -199,6 +197,24 @@ export function useContributionHistoryExplanation(
       target?.expectedRemoteHead,
     ],
   );
+  const requestFields = useMemo(
+    () => ({
+      sessionId: requestTarget.sessionId,
+      workspaceId: requestTarget.workspaceId,
+      repositoryScope: requestTarget.repositoryScope,
+      branch: requestTarget.branch,
+      expectedLocalHead: requestTarget.expectedLocalHead,
+      expectedRemoteHead: requestTarget.expectedRemoteHead,
+    }),
+    [
+      requestTarget.sessionId,
+      requestTarget.workspaceId,
+      requestTarget.repositoryScope,
+      requestTarget.branch,
+      requestTarget.expectedLocalHead,
+      requestTarget.expectedRemoteHead,
+    ],
+  );
   const key = enabled ? contributionHistoryExplanationKey(requestTarget) : null;
   const [boundSnapshot, setBoundSnapshot] = useState<BoundExplanationSnapshot>(() => ({
     key: null,
@@ -207,12 +223,12 @@ export function useContributionHistoryExplanation(
   const snapshot = boundSnapshot.key === key ? boundSnapshot.snapshot : emptySnapshot();
 
   useEffect(() => {
-    if (!key || !targetIsRequestable(requestTarget)) {
+    if (!key) {
       setBoundSnapshot({ key: null, snapshot: emptySnapshot() });
       return;
     }
 
-    const entry = getOrStartEntry(key, requestTarget);
+    const entry = getOrStartEntry(key, requestFields);
     let active = true;
     const sync = () => {
       if (active) setBoundSnapshot({ key, snapshot: snapshotOf(entry) });
@@ -225,12 +241,11 @@ export function useContributionHistoryExplanation(
       entry.listeners.delete(sync);
       if (entry.listeners.size === 0) entries.delete(key);
     };
-  }, [key, requestTarget]);
+  }, [key, requestFields]);
 
   return {
     ...snapshot,
     isLoading: snapshot.status === "loading",
-    cancel: () => undefined,
   };
 }
 

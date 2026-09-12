@@ -227,11 +227,12 @@ export function buildSingleRepoContributionCallbacks(
   >,
   blockedRepositoryName?: string,
 ) {
+  const repositoryScope = blockedRepositoryName ?? "";
   return {
-    onReplaceContribution: () => callbacks.onReplaceContribution(blockedRepositoryName),
-    onUseContribution: () => callbacks.onUseContribution(blockedRepositoryName),
-    onViewContribution: () => callbacks.onViewContribution(blockedRepositoryName),
-    onCompareContribution: () => callbacks.onCompareContribution(blockedRepositoryName),
+    onReplaceContribution: () => callbacks.onReplaceContribution(repositoryScope),
+    onUseContribution: () => callbacks.onUseContribution(repositoryScope),
+    onViewContribution: () => callbacks.onViewContribution(repositoryScope),
+    onCompareContribution: () => callbacks.onCompareContribution(repositoryScope),
   };
 }
 

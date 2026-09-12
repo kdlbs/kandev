@@ -195,6 +195,21 @@ describe("useContributionHistoryExplanation identity reuse", () => {
     expect(requestMock).toHaveBeenCalledOnce();
   });
 
+  it("shares an observation when only the selected PR identity changes", () => {
+    const pending = deferred<typeof explanation>();
+    requestMock.mockReturnValue(pending.promise);
+    const hook = renderHook(
+      ({ currentTarget }) => useContributionHistoryExplanation(currentTarget, true),
+      { initialProps: { currentTarget: target } },
+    );
+
+    hook.rerender({
+      currentTarget: { ...target, selectedPRKey: "acme/frontend/43" },
+    });
+
+    expect(requestMock).toHaveBeenCalledOnce();
+  });
+
   it("keeps separate repository and PR identities isolated", () => {
     requestMock.mockResolvedValue(explanation);
     const otherTarget = {
