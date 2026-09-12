@@ -28,6 +28,7 @@ const (
 	// (CreateTask + CreateComment). Gated on this key so unrelated webhook
 	// deliveries don't attempt writes.
 	writeProbeWebhookKey        = "write"
+	priorityProbeWebhookKey     = "priority"
 	fixtureReferenceSource      = "fixture-pull-requests"
 	fixturePullRequestID        = "pull-request-42"
 	revokedPullRequestID        = "pull-request-revoked"
@@ -163,7 +164,93 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 	if req.WebhookKey == writeProbeWebhookKey {
 		p.snapshotWriteProbeBestEffort(ctx)
 	}
+	if req.WebhookKey == priorityProbeWebhookKey {
+		return p.priorityProbe(ctx)
+	}
 	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil
+}
+
+// priorityProbeResult is deliberately limited to the Host contract values the
+// external-process integration test needs to observe after each write.
+type priorityProbeResult struct {
+	CreateHighReadback     string `json:"create_high_readback"`
+	CreateDefaultReadback  string `json:"create_default_readback"`
+	UpdateHighReadback     string `json:"update_high_readback"`
+	InvalidCreateError     string `json:"invalid_create_error"`
+	InvalidCreateTaskCount int    `json:"invalid_create_task_count"`
+	InvalidUpdateError     string `json:"invalid_update_error"`
+	InvalidUpdateReadback  string `json:"invalid_update_readback"`
+}
+
+// priorityProbe performs Create and Update writes through the injected Host,
+// then immediately reads each persisted task back through Host.Tasks().Get.
+// It is an integration-only fixture hook: production plugins choose their own
+// webhook behavior.
+func (p *fixturePlugin) priorityProbe(ctx context.Context) (*pluginsdk.WebhookResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte("no host")}, nil
+	}
+	result := priorityProbeResult{}
+	createdHigh, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
+		Title: "priority high", Priority: "high",
+	})
+	if err != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
+	}
+	if readback, readErr := host.Tasks().Get(ctx, createdHigh.ID); readErr != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(readErr.Error())}, nil
+	} else {
+		result.CreateHighReadback = readback.Priority
+	}
+	createdDefault, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
+		Title: "priority default",
+	})
+	if err != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
+	}
+	if readback, readErr := host.Tasks().Get(ctx, createdDefault.ID); readErr != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(readErr.Error())}, nil
+	} else {
+		result.CreateDefaultReadback = readback.Priority
+	}
+	high := "high"
+	if _, err := host.Tasks().Update(ctx, pluginsdk.UpdateTaskInput{ID: createdDefault.ID, Priority: &high}); err != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
+	}
+	if readback, readErr := host.Tasks().Get(ctx, createdDefault.ID); readErr != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(readErr.Error())}, nil
+	} else {
+		result.UpdateHighReadback = readback.Priority
+	}
+	invalid := "invalid"
+	if _, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
+		Title: "invalid priority", Priority: invalid,
+	}); err != nil {
+		result.InvalidCreateError = err.Error()
+	}
+	tasks, _, err := host.Tasks().List(ctx, pluginsdk.TaskFilter{WorkspaceIDs: []string{createdHigh.WorkspaceID}}, pluginsdk.Page{})
+	if err != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
+	}
+	for _, task := range tasks {
+		if task.Title == "invalid priority" {
+			result.InvalidCreateTaskCount++
+		}
+	}
+	if _, err := host.Tasks().Update(ctx, pluginsdk.UpdateTaskInput{ID: createdDefault.ID, Priority: &invalid}); err != nil {
+		result.InvalidUpdateError = err.Error()
+	}
+	if readback, readErr := host.Tasks().Get(ctx, createdDefault.ID); readErr != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(readErr.Error())}, nil
+	} else {
+		result.InvalidUpdateReadback = readback.Priority
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginsdk.WebhookResponse{Status: 200, Body: body}, nil
 }
 
 // HandleAction provides fixture-only authenticated actions. The response is
