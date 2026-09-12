@@ -79,3 +79,37 @@ func TestHandleAgentEvent_DefersUninitializedStartupFailure(t *testing.T) {
 		t.Fatal("startup process failure published agent.failed before lifecycle recovery classified it")
 	}
 }
+
+func TestStartupGenerationPublishesOriginatingAttemptIDOnReusedExecution(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-reused", "task-1", "session-1")
+	execution.ResumeAttemptID = "legacy-execution-label"
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	oldGeneration := execution.beginStartupAttemptWithID("attempt-old")
+	newGeneration := execution.beginStartupAttemptWithID("attempt-new")
+
+	// The old stream callback is delivered after the same execution has been
+	// reused for a replacement startup. Generation fencing drops it before it
+	// can publish or mutate lifecycle state.
+	mgr.handleAgentEventWithStartupGeneration(execution, agentctl.AgentEvent{
+		Type:             "plan",
+		PromptGeneration: 1,
+	}, oldGeneration)
+	if got := len(eventBus.getStreamEvents()); got != 0 {
+		t.Fatalf("stale startup callback published %d stream events", got)
+	}
+
+	mgr.handleAgentEventWithStartupGeneration(execution, agentctl.AgentEvent{
+		Type:             "plan",
+		PromptGeneration: 1,
+	}, newGeneration)
+	streamEvents := eventBus.getStreamEvents()
+	if len(streamEvents) != 1 {
+		t.Fatalf("replacement startup published %d stream events, want 1", len(streamEvents))
+	}
+	if streamEvents[0].AttemptID != "attempt-new" {
+		t.Fatalf("replacement stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	}
+}

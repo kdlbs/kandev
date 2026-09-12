@@ -395,6 +395,7 @@ func TestAutoStartTransientError_AutoResumesWhenAgentDead(t *testing.T) {
 	//      (which polls every 500ms) has at least one full cycle to pick up
 	//      WAITING_FOR_INPUT and exit — preventing a goroutine leak caught by goleak.
 	agentMgr.launchAgentFunc = func(lctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		attemptID := executor.ResumeAttemptIDFromContext(lctx)
 		agentResumed.Store(true) // mark alive before anything polls for it
 		close(launchCalled)
 		go func() {
@@ -420,6 +421,7 @@ func TestAutoStartTransientError_AutoResumesWhenAgentDead(t *testing.T) {
 					svc.handleAgentBootReady(context.Background(), watcher.AgentEventData{
 						TaskID:    req.TaskID,
 						SessionID: req.SessionID,
+						AttemptID: attemptID,
 					})
 					// handleAgentBootReady wrote WAITING_FOR_INPUT to DB.
 					// waitForSessionReady polls every 500ms — sleep one full cycle so

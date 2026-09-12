@@ -145,15 +145,33 @@ func executorNeedsResolvedCredentials(executorType string) bool {
 // background bootstrap error does not destructively overwrite the task's
 // existing state (e.g. REVIEW). fromResume is forwarded to onAgentStartFailed
 // so the orchestrator can suppress user-facing toasts on background recovery.
-// On success it calls onSuccess with a non-cancellable context derived from ctx.
-// ctx is used with WithoutCancel so trace spans are preserved without inheriting cancellation.
+// On success it calls onSuccess with a context derived from ctx. Ordinary
+// starts detach from request cancellation; resume starts marked by
+// WithCancellableResumeContext retain cancellation so an explicit stop can
+// interrupt a startup that is still waiting for ACP readiness.
 func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context), escalateTaskOnFailure, fromResume bool) {
 	go func() {
-		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		startParent := context.WithoutCancel(ctx)
+		updateCtx := startParent
+		if isCancellableResumeContext(ctx) {
+			startParent = ctx
+			updateCtx = ctx
+		}
+		startCtx, cancel := context.WithTimeout(startParent, 5*time.Minute)
 		defer cancel()
-		updateCtx := context.WithoutCancel(ctx)
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
+			if isCancellableResumeContext(ctx) && ctx.Err() != nil {
+				// A cancelled resume owns no failure projection. Use the exact
+				// execution ID for bounded cleanup, then let the orchestrator
+				// release any launch-side claim without publishing FAILED.
+				cleanupCtx := context.WithoutCancel(ctx)
+				e.stopFailedStartExecution(cleanupCtx, agentExecutionID, "cancelled resume startup")
+				if e.onAgentProcessStartFailed != nil {
+					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
+				}
+				return
+			}
 			e.handleAgentProcessStartFailure(
 				updateCtx, taskID, sessionID, agentExecutionID, err,
 				escalateTaskOnFailure, fromResume,
@@ -169,6 +187,16 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 			agentExecutionID,
 			"terminal post-start race",
 		); terminal {
+			return
+		}
+		if isCancellableResumeContext(ctx) && ctx.Err() != nil {
+			// The provider ignored cancellation and reported success late. Do
+			// not run the resume success callback or restore task/session state.
+			// Teardown is exact-execution scoped so a retry cannot be stopped.
+			e.stopFailedStartExecution(context.WithoutCancel(ctx), agentExecutionID, "cancelled resume startup")
+			if e.onAgentProcessStartFailed != nil {
+				e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
+			}
 			return
 		}
 

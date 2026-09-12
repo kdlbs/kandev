@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -515,6 +516,14 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 		return
 	}
+	if !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		s.logger.Debug("ignoring agent.boot_ready from a stale resume attempt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("attempt_id", data.AttemptID))
+		return
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -725,6 +734,14 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			lock.Unlock()
 		}
 	}()
+	if !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		s.logger.Debug("ignoring agent.ready from a stale resume attempt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("attempt_id", data.AttemptID))
+		return
+	}
 	waitedForReservation := false
 	for {
 		for s.isCancelInFlight(data.SessionID) {
@@ -2283,6 +2300,16 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		release()
 		return
 	}
+	if !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		s.logger.Debug("ignoring agent.failed from a stale resume attempt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("attempt_id", data.AttemptID))
+		lock.Unlock()
+		release()
+		return
+	}
 
 	dispatch := s.handleAgentFailedLocked(ctx, data)
 	lock.Unlock()
@@ -3081,8 +3108,11 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		failureData.FailureCode = models.LaunchErrorCategoryGenericLaunchFailure
 		failureData.Phase = models.LaunchErrorPhaseBootstrap
 		failureData.AttemptID = agentExecutionID
+		if attemptID := executor.ResumeAttemptIDFromContext(ctx); attemptID != "" {
+			failureData.AttemptID = attemptID
+		}
 		failureData.ErrorStamp = models.StableLaunchErrorStamp(
-			taskID, sessionID, agentExecutionID, models.LaunchErrorPhaseBootstrap,
+			taskID, sessionID, agentExecutionID, failureData.AttemptID, models.LaunchErrorPhaseBootstrap,
 		)
 		operation := bootstrapFailure.Operation
 		if operation == "" && fromResume {
@@ -3124,6 +3154,23 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.Error(err))
+			return true
+		}
+		failureData.AttemptID = executor.ResumeAttemptIDFromContext(ctx)
+		if failureData.AttemptID == "" {
+			failureData.AttemptID = agentExecutionID
+		}
+		if failureData.ErrorStamp == "" {
+			failureData.ErrorStamp = models.StableLaunchErrorStamp(
+				taskID, sessionID, agentExecutionID, failureData.AttemptID, failureData.FailureCode,
+			)
+		}
+		if !s.resumeAttemptAllowsExecution(sessionID, agentExecutionID, failureData.AttemptID) {
+			s.logger.Debug("ignoring agent process start failure from a stale resume attempt",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("agent_execution_id", agentExecutionID),
+				zap.String("attempt_id", failureData.AttemptID))
 			return true
 		}
 

@@ -285,6 +285,7 @@ func (m *Manager) publishStreamingContentNow(
 		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
 		AgentID:        execution.ID,
 		ExecutionID:    execution.ID,
+		AttemptID:      execution.ResumeAttemptID,
 		AgentProfileID: execution.officeProfileID(),
 		TaskID:         execution.TaskID,
 		SessionID:      execution.SessionID,

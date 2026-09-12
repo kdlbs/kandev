@@ -41,7 +41,14 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 	if data.SessionID == "" || data.ACPSessionID == "" {
 		return
 	}
-	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "")
+	guard := s.lockCancelInFlightGuard(data.SessionID)
+	defer guard.release()
+	// A cancellation operation has already claimed the session. Let its owner
+	// invalidate the startup identity before accepting any late provider event.
+	if s.currentCancellation(data.SessionID) != nil || !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		return
+	}
+	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "", data.AttemptID)
 }
 
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.
@@ -61,7 +68,15 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // The token is always stored when CAS succeeds. NativeSessionResume only gates ACP
 // session/load vs session/new in session.go — agents without native resume (e.g.,
 // Claude Code) use the token for their own --resume CLI flag instead.
-func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string) {
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string, origin ...string) {
+	if !s.resumeAttemptAllowsExecution(sessionID, expectedExecID, origin...) {
+		s.logger.Info("dropping resume token from cancelled or superseded resume attempt",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID),
+			zap.String("resume_token", acpSessionID))
+		return
+	}
 	// The lifecycle manager updates its in-memory ACP session ID before it
 	// publishes reset/start events. Events from the previous ACP session can
 	// still be queued after that point, so reject those events before the

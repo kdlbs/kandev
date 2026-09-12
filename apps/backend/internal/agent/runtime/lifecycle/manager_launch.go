@@ -1760,6 +1760,7 @@ func (m *Manager) buildExecutionFromInstance(
 	prepResult *EnvPrepareResult,
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
+	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID

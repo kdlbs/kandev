@@ -1021,6 +1021,18 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 	return err
 }
 
+// HasActiveSessionRecoveryForFailure forwards the correlated prompt-error
+// ownership seam. Historical session errors never suppress a new failure.
+func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Context, taskID, taskSessionID string, failure error) bool {
+	return w.svc.HasActiveSessionRecoveryForFailure(ctx, taskID, taskSessionID, failure)
+}
+
+// ResumeTaskSessionAndPrompt keeps the recovery attempt alive through prompt
+// provider acceptance for the handler's internal retry.
+func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.ResumeTaskSessionAndPrompt(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
+}
+
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
 func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error {
 	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)

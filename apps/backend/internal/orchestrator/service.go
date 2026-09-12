@@ -1318,6 +1318,13 @@ type Service struct {
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
 
+	// resumeAttempts owns process-local startup identity. It is separate from
+	// dynamicAttemptEvidence because a provider execution may be reused by
+	// several prompt attempts, while a cancelled startup must fence every late
+	// continuation from that startup.
+	resumeAttemptsMu sync.Mutex
+	resumeAttempts   *resumeAttemptRegistry
+
 	// Service state
 	mu        sync.RWMutex
 	running   bool
@@ -3105,6 +3112,9 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	// Stop owns every in-flight resume attempt. Its detached request context
+	// must not let startup callbacks outlive the service generation.
+	s.cancelResumeAttempts()
 	// Stop detached dynamic successors before the scheduler and watcher. Their
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
