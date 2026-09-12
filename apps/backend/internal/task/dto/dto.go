@@ -1188,12 +1188,18 @@ type WorkflowStepDTO struct {
 	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
-	StageType                  string    `json:"stage_type,omitempty"`
-	AutoAdvanceRequiresSignal  bool      `json:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
-	CompleteTaskOnEnter        bool      `json:"complete_task_on_enter"`
-	CreatedAt                  time.Time `json:"created_at"`
-	UpdatedAt                  time.Time `json:"updated_at"`
+	StageType                  string `json:"stage_type,omitempty"`
+	AutoAdvanceRequiresSignal  bool   `json:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool   `json:"cancel_triggers_turn_complete"`
+	CompleteTaskOnEnter        bool   `json:"complete_task_on_enter"`
+	// OrderRevision lets a client seed its last-known revision for this step
+	// before accepting any task.reordered WS event, so a stale event received
+	// right after hydration cannot be mistaken for the first order this
+	// client has ever seen (see kanban-task-reordering system design,
+	// "Reorder contract").
+	OrderRevision int64     `json:"order_revision"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // StepEventsDTO represents step events for API responses

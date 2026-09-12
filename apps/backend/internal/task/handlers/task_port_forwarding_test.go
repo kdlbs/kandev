@@ -38,6 +38,10 @@ func (r *portForwardingHandlerRepo) UpdateTask(_ context.Context, task *models.T
 	return nil
 }
 
+func (r *portForwardingHandlerRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func newPortForwardingHandler(t *testing.T, repo *portForwardingHandlerRepo) *TaskHandlers {
 	t.Helper()
 	taskService := service.NewService(service.Repos{

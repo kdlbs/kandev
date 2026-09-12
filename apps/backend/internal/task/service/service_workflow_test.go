@@ -1303,7 +1303,7 @@ func createMoveTask(t *testing.T, ctx context.Context, repo interface {
 
 func setMoveTaskOrder(t *testing.T, ctx context.Context, repo interface {
 	GetTask(context.Context, string) (*models.Task, error)
-	UpdateTask(context.Context, *models.Task) error
+	UpdateTaskWithExplicitPosition(context.Context, *models.Task) error
 }, id string, position int, priority string) {
 	t.Helper()
 	task, err := repo.GetTask(ctx, id)
@@ -1312,8 +1312,8 @@ func setMoveTaskOrder(t *testing.T, ctx context.Context, repo interface {
 	}
 	task.Position = position
 	task.Priority = priority
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("UpdateTask(%s): %v", id, err)
+	if err := repo.UpdateTaskWithExplicitPosition(ctx, task); err != nil {
+		t.Fatalf("UpdateTaskWithExplicitPosition(%s): %v", id, err)
 	}
 }
 

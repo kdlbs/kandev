@@ -21,6 +21,7 @@ import {
   shouldReplaceMcpAttachmentHistory,
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
+import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -111,6 +112,24 @@ function backfillServerDerivedFields(
   }
 }
 
+/**
+ * Seeds `kanbanMulti.orderRevisionByStepId` from a batch of freshly-hydrated
+ * steps (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37) so a `task.reordered`
+ * WS event received right after this hydration is compared against the
+ * step's real last-known revision instead of the "no revision recorded yet"
+ * fallback, which would otherwise accept a stale event as the first order
+ * this client has ever seen.
+ */
+function seedOrderRevisionsFromSteps(
+  draft: Draft<AppState>,
+  steps: KanbanState["steps"] | undefined,
+): void {
+  draft.kanbanMulti.orderRevisionByStepId = mergeStepOrderRevisions(
+    draft.kanbanMulti.orderRevisionByStepId,
+    steps,
+  );
+}
+
 /** Hydrate kanban and workspace slices. */
 function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState): void {
   if (state.kanban) {
@@ -118,8 +137,14 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
     const { tasks, ...kanbanRest } = state.kanban;
     if (Object.keys(kanbanRest).length > 0) deepMerge(draft.kanban, kanbanRest);
     mergeKanbanTasks(draft.kanban, tasks);
+    seedOrderRevisionsFromSteps(draft, state.kanban.steps);
   }
-  if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
+  if (state.kanbanMulti) {
+    deepMerge(draft.kanbanMulti, state.kanbanMulti);
+    for (const snapshot of Object.values(state.kanbanMulti.snapshots ?? {})) {
+      seedOrderRevisionsFromSteps(draft, snapshot?.steps);
+    }
+  }
   if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);

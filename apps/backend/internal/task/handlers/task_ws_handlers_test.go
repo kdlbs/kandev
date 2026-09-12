@@ -80,6 +80,10 @@ func (r *wsTaskRepo) UpdateTask(_ context.Context, task *models.Task) error {
 	return nil
 }
 
+func (r *wsTaskRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func (r *wsTaskRepo) DeleteTask(_ context.Context, id string) error {
 	r.deleted = append(r.deleted, id)
 	return nil

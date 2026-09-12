@@ -152,6 +152,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         wip_limit: step.wip_limit,
         pull_from_step_id: step.pull_from_step_id ?? null,
         stage_type: step.stage_type,
+        order_revision: step.order_revision,
       })),
       tasks,
     },

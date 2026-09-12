@@ -1580,11 +1580,11 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	// target here and letting each per-task MoveTask acquire its own source
 	// step deadlocks against an ordinary single move running the opposite
 	// direction between the same two steps.
-	if locker, ok := s.tasks.(stepArrivalBatchLocker); ok {
-		var unlock func()
-		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, bulkMoveLockStepIDs(orderedTasks, targetStepID)...)
-		defer unlock()
+	ctx, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
+	if err != nil {
+		return nil, err
 	}
+	defer unlock()
 	if s.bulkMoveAfterLockForTest != nil {
 		s.bulkMoveAfterLockForTest()
 	}
@@ -1626,6 +1626,78 @@ func bulkMoveLockStepIDs(tasks []*models.Task, targetStepID string) []string {
 		ids = append(ids, task.WorkflowStepID)
 	}
 	return ids
+}
+
+// bulkMoveLockRetryLimit bounds acquireBulkMoveStepLocks' re-read/retry loop.
+// A source step can only drift a bounded number of times before some other
+// caller's own work stalls behind this batch's locks, so a low limit is
+// sufficient to converge on the real, uncontended case while still failing
+// loudly instead of spinning forever if something is pathologically racing
+// this batch on every attempt.
+const bulkMoveLockRetryLimit = 8
+
+// acquireBulkMoveStepLocks locks every step BulkMoveSelectedTasks/
+// BulkMoveTasks will touch — the target step plus each task's current
+// source step — using bulkMoveLockStepIDs' set for a stepArrivalBatchLocker.
+//
+// tasks is read once, before any lock is held, to compute that initial
+// step set. A source step named by that pre-lock read can still change
+// between the read and lock acquisition (another mover wins the race),
+// which would leave this batch holding a stale source step's lock while a
+// concurrent move on the true current source step tries to lock the target
+// step this batch already holds — the AB-BA deadlock this exists to avoid.
+// So once the lock is held, tasks are re-read by ID under it; if any
+// task's step moved, the stale lock set is released and a fresh set is
+// acquired for the corrected steps, repeating until the read matches the
+// locked set or bulkMoveLockRetryLimit is exhausted.
+func (s *Service) acquireBulkMoveStepLocks(
+	ctx context.Context, tasks []*models.Task, targetStepID string,
+) (context.Context, func(), error) {
+	locker, ok := s.tasks.(stepArrivalBatchLocker)
+	if !ok {
+		return ctx, func() {}, nil
+	}
+	if s.bulkMoveBeforeLockForTest != nil {
+		s.bulkMoveBeforeLockForTest()
+	}
+	taskIDs := make([]string, len(tasks))
+	for i, task := range tasks {
+		taskIDs[i] = task.ID
+	}
+	current := tasks
+	for attempt := 0; attempt < bulkMoveLockRetryLimit; attempt++ {
+		lockedCtx, unlock := locker.LockStepArrivalsForBatch(ctx, bulkMoveLockStepIDs(current, targetStepID)...)
+		fresh, err := s.tasks.GetTasksByIDs(lockedCtx, taskIDs)
+		if err != nil {
+			unlock()
+			return ctx, func() {}, fmt.Errorf("failed to verify bulk move lock set: %w", err)
+		}
+		if bulkMoveTaskStepsMatch(current, fresh) {
+			return lockedCtx, unlock, nil
+		}
+		unlock()
+		current = fresh
+	}
+	return ctx, func() {}, fmt.Errorf("bulk move step lock set did not stabilize after %d attempts", bulkMoveLockRetryLimit)
+}
+
+// bulkMoveTaskStepsMatch reports whether a and b agree on every task's
+// current WorkflowStepID, keyed by task ID rather than slice position since
+// GetTasksByIDs does not guarantee the requested order.
+func bulkMoveTaskStepsMatch(a, b []*models.Task) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	stepByID := make(map[string]string, len(a))
+	for _, task := range a {
+		stepByID[task.ID] = task.WorkflowStepID
+	}
+	for _, task := range b {
+		if stepByID[task.ID] != task.WorkflowStepID {
+			return false
+		}
+	}
+	return true
 }
 
 // orderTasksForBulkMove re-derives the
@@ -1779,11 +1851,11 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	// Hold every step this batch will touch, for the same reason and in the
 	// same ascending-ordered way as BulkMoveSelectedTasks — see its lock
 	// call for the deadlock this avoids.
-	if locker, ok := s.tasks.(stepArrivalBatchLocker); ok {
-		var unlock func()
-		ctx, unlock = locker.LockStepArrivalsForBatch(ctx, bulkMoveLockStepIDs(orderedTasks, targetStepID)...)
-		defer unlock()
+	ctx, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
+	if err != nil {
+		return nil, err
 	}
+	defer unlock()
 	if s.bulkMoveAfterLockForTest != nil {
 		s.bulkMoveAfterLockForTest()
 	}

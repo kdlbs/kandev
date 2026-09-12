@@ -541,6 +541,15 @@ export type WorkflowStepDTO = {
   complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;
+  /**
+   * Bumped by the reorder endpoint each time this step's task order changes
+   * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37). Seed
+   * `kanbanMulti.orderRevisionByStepId` from this on hydration so a
+   * `task.reordered` WS event received right after page load is not
+   * mistaken for the first order this client has ever seen. Optional only
+   * because older test fixtures omit it; the backend always sends it.
+   */
+  order_revision?: number;
   created_at?: string;
   updated_at?: string;
 };

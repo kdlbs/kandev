@@ -1002,7 +1002,7 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, "")
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, "", true)
 	if err != nil {
 		return err
 	}
@@ -1037,7 +1037,7 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID)
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, true)
 	if err != nil {
 		return err
 	}
@@ -1049,7 +1049,67 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 	return nil
 }
 
-func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID string) (entryID string, err error) {
+// UpdateTaskWithExplicitPosition performs the same write as UpdateTask
+// except it writes task.Position as given rather than preserving whatever
+// is currently persisted. It is the one path allowed to write a
+// caller-supplied position outside the reorder and arrival contract
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/.31): the generic task-update
+// API's explicit position field, which predates that contract.
+func (r *Repository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, "", false)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID)
+	return nil
+}
+
+// readTaskPositionInTx reads a task's currently-persisted position inside
+// the write transaction, taking the same Postgres row lock as
+// readTaskStepInTx. A writer that must not disturb position (AC-TASKS-
+// KANBAN-TASK-REORDERING-001.28/.31: only a renumbering or an arrival may
+// rewrite it) uses this to observe the value after any concurrent reorder or
+// arrival of the same row rather than before, instead of writing back
+// whatever a pre-transaction read left in memory.
+func (r *Repository) readTaskPositionInTx(ctx context.Context, tx *sql.Tx, taskID string) (position int, found bool, err error) {
+	query := `SELECT position FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&position)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return position, true, nil
+}
+
+// updateTaskTx writes the full task row. preservePosition, true for every
+// caller except the one path that honors an explicit caller-supplied
+// position (UpdateTaskWithExplicitPosition), overwrites task.Position with
+// the value read fresh inside this transaction rather than the one already
+// in the struct: a caller's task object was read before this transaction
+// began, and by the time this write commits a concurrent reorder or arrival
+// (AC-TASKS-KANBAN-TASK-REORDERING-001.28) may have moved the row to a
+// different position that this write must not clobber.
+func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID string, preservePosition bool) (entryID string, err error) {
 	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
 		return "", err
@@ -1062,6 +1122,15 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		// is reserved for the addressed resource and wins the precedence
 		// ladder over every other case (design's error-mapping table).
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if preservePosition {
+		currentPosition, positionFound, posErr := r.readTaskPositionInTx(ctx, tx, task.ID)
+		if posErr != nil {
+			return "", posErr
+		}
+		if positionFound {
+			task.Position = currentPosition
+		}
 	}
 	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
 		// Checked here, immediately before the UPDATE below and using the
@@ -1261,7 +1330,7 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	if err != nil {
 		return false, err
 	}
-	if _, err := r.updateTaskTx(ctx, tx, task, metadata, ""); err != nil {
+	if _, err := r.updateTaskTx(ctx, tx, task, metadata, "", true); err != nil {
 		return false, err
 	}
 	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
@@ -1565,7 +1634,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	if err != nil {
 		metadata = []byte("{}")
 	}
-	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID)
+	entryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, false)
 	if err != nil {
 		return false, false, err
 	}

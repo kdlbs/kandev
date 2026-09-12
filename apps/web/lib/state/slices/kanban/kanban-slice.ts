@@ -8,6 +8,7 @@ import {
   recordTaskRemovalResult,
   releaseTaskRemoval,
 } from "@/lib/state/task-removal";
+import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
@@ -237,6 +238,15 @@ export const createKanbanSlice: StateCreator<
   setWorkflowSnapshot: (workflowId, data) =>
     set((draft) => {
       draft.kanbanMulti.snapshots[workflowId] = data;
+      // Seed this workflow's steps into orderRevisionByStepId even when it
+      // is not the currently-active board (hydrate() only walks the active
+      // kanban.steps), so a task.reordered WS event for a background
+      // "All Workflows" column is still gated on a real revision rather
+      // than the no-recorded-revision fallback.
+      draft.kanbanMulti.orderRevisionByStepId = mergeStepOrderRevisions(
+        draft.kanbanMulti.orderRevisionByStepId,
+        data.steps,
+      );
     }),
   setKanbanMultiLoading: (loading) =>
     set((draft) => {

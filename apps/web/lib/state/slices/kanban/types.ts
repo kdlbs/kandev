@@ -63,6 +63,15 @@ export type KanbanState = {
      * decisions). Backend never branches on this field.
      */
     stage_type?: "work" | "review" | "approval" | "custom";
+    /**
+     * Last order-revision this step's task order was written at
+     * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37), as of when this step
+     * record was fetched. Seeded into `kanbanMulti.orderRevisionByStepId` on
+     * hydration so a `task.reordered` WS event received right after page
+     * load is compared against the hydrated value instead of the "no
+     * revision recorded yet" fallback.
+     */
+    order_revision?: number;
   }>;
   tasks: Array<{
     id: string;

@@ -250,9 +250,14 @@ type WorkflowStep struct {
 	// this step's ordinary on_turn_complete actions.
 	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete"`
 	// CompleteTaskOnEnter marks the final step as completing its task on entry.
-	CompleteTaskOnEnter bool      `json:"complete_task_on_enter"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	CompleteTaskOnEnter bool `json:"complete_task_on_enter"`
+	// OrderRevision is bumped by ReorderStepTasks (AC-TASKS-KANBAN-TASK-
+	// REORDERING-001.25/.37) each time this step's task order changes. A
+	// consumer that records the value it last saw can reject a WS event
+	// carrying a revision no greater than that.
+	OrderRevision int64     `json:"order_revision"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // HasOnEnterAction checks if the step has a specific on_enter action type.
