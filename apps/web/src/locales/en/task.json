@@ -2093,5 +2093,5 @@
   "restoringSavedPlanComments": "Restoring saved plan comments...",
   "planCommentMigrationFailed": "Some saved plan comments could not be restored.",
   "planCommentMigrationNeedsPlan": "Create or restore a plan to recover saved comments.",
-  "planCommentMigrationPending": "Saved plan comments are still being restored. Retry before sending."
+  "planCommentMigrationPending": "Saved plan comments are still being restored. Connection issues retry automatically; your message is kept."
 }

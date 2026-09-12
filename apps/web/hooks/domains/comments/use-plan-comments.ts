@@ -13,10 +13,10 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   createTaskPlanComment,
   deleteTaskPlanComment,
-  getTaskPlanComments,
   updateTaskPlanComment,
 } from "@/lib/api/domains/plan-comment-api";
-import { getTaskPlan } from "@/lib/api/domains/plan-api";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { planCommentLoaderFor } from "./plan-comment-loading";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPlan, TaskPlanComment } from "@/lib/types/http";
@@ -24,23 +24,7 @@ import { generateUUID } from "@/lib/utils";
 import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
 
 const EMPTY_COMMENTS: PlanComment[] = [];
-interface CommentLoad {
-  planId: string;
-  promise: Promise<void>;
-}
-
 type AppStore = ReturnType<typeof useAppStoreApi>;
-
-const commentLoadsByStore = new WeakMap<AppStore, Map<string, CommentLoad>>();
-const planLoadsByStore = new WeakMap<AppStore, Map<string, Promise<TaskPlan | null>>>();
-
-function loadsFor<T>(registry: WeakMap<AppStore, Map<string, T>>, store: AppStore) {
-  const existing = registry.get(store);
-  if (existing) return existing;
-  const loads = new Map<string, T>();
-  registry.set(store, loads);
-  return loads;
-}
 
 function projectPlanComment(comment: TaskPlanComment): PlanComment {
   return {
@@ -58,73 +42,6 @@ function projectPlanComment(comment: TaskPlanComment): PlanComment {
     updatedAt: comment.updated_at,
     status: "pending",
   };
-}
-
-function loadComments(
-  taskId: string,
-  planId: string,
-  store: AppStore,
-  errorMessage: string,
-): Promise<void> {
-  const commentLoads = loadsFor(commentLoadsByStore, store);
-  const existing = commentLoads.get(taskId);
-  if (existing?.planId === planId) return existing.promise;
-  const state = store.getState();
-  state.setTaskPlanCommentsLoading(taskId, true);
-  state.setTaskPlanCommentsError(taskId);
-  const request = getTaskPlanComments(taskId)
-    .then((snapshot) => store.getState().setTaskPlanComments(taskId, snapshot))
-    .catch((error) => {
-      // i18n-exempt: developer diagnostic; localized copy is stored in state.
-      console.error("Failed to load task plan comments:", error);
-      const current = store.getState();
-      if (current.taskPlans.byTaskId[taskId]?.id === planId) {
-        current.setTaskPlanCommentsError(taskId, errorMessage);
-      }
-    })
-    .finally(() => {
-      setTimeout(() => {
-        const active = commentLoads.get(taskId);
-        if (active?.promise === request) commentLoads.delete(taskId);
-      }, 0);
-      const current = store.getState();
-      if (current.taskPlans.byTaskId[taskId]?.id === planId) {
-        current.setTaskPlanCommentsLoading(taskId, false);
-      }
-    });
-  commentLoads.set(taskId, { planId, promise: request });
-  return request;
-}
-
-function loadPlan(
-  taskId: string,
-  store: AppStore,
-  errorMessage: string,
-  force: boolean,
-): Promise<TaskPlan | null> {
-  const planLoads = loadsFor(planLoadsByStore, store);
-  const existing = planLoads.get(taskId);
-  if (existing) return existing;
-  const state = store.getState();
-  const cached = state.taskPlans.byTaskId[taskId];
-  if (!force && cached !== undefined) return Promise.resolve(cached);
-  state.setTaskPlanLoading(taskId, true);
-  state.setTaskPlanCommentsError(taskId);
-  const request = getTaskPlan(taskId)
-    .then((next) => {
-      store.getState().setTaskPlan(taskId, next);
-      return next;
-    })
-    .catch((error) => {
-      // i18n-exempt: developer diagnostic; localized copy is stored below.
-      console.error("Failed to load task plan for comments:", error);
-      store.getState().setTaskPlanCommentsError(taskId, errorMessage);
-      store.getState().setTaskPlanLoading(taskId, false);
-      return null;
-    })
-    .finally(() => planLoads.delete(taskId));
-  planLoads.set(taskId, request);
-  return request;
 }
 
 function applyMutationFailure(error: unknown, taskId: string, state: AppState) {
@@ -369,21 +286,6 @@ function usePlanCommentReconnectRefresh(connectionStatus: string, refetch: () =>
   }, [connectionStatus, refetch]);
 }
 
-function usePlanCommentForegroundRefresh(refetch: () => Promise<void>) {
-  useEffect(() => {
-    const refreshOnFocus = () => void refetch();
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refetch();
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [refetch]);
-}
-
 /** Task-owned current-plan comments shared by every session surface. */
 export function usePlanComments(taskId: string | null | undefined) {
   const { t } = useTranslation("task");
@@ -405,16 +307,13 @@ export function usePlanComments(taskId: string | null | undefined) {
   const isPlanLoading = useAppStore((state) =>
     taskId ? (state.taskPlans.loadingByTaskId[taskId] ?? false) : false,
   );
-  const refresh = useCallback(
-    async (forcePlan: boolean) => {
-      if (!taskId) return;
-      const resolvedPlan = await loadPlan(taskId, store, t("failedToLoadPlanComments"), forcePlan);
-      if (!resolvedPlan) return;
-      await loadComments(taskId, resolvedPlan.id, store, t("failedToLoadPlanComments"));
-    },
+  const loader = useMemo(
+    () => (taskId ? planCommentLoaderFor(store, taskId, t("failedToLoadPlanComments")) : null),
     [store, t, taskId],
   );
-  const refetch = useCallback(() => refresh(true), [refresh]);
+  useEffect(() => loader?.attach(), [loader]);
+  const refetch = useCallback(() => loader?.load(true) ?? Promise.resolve(), [loader]);
+  const wake = useCallback(() => loader?.wake() ?? Promise.resolve(), [loader]);
 
   useEffect(() => {
     if (
@@ -427,10 +326,10 @@ export function usePlanComments(taskId: string | null | undefined) {
     ) {
       return;
     }
-    void refresh(false);
-  }, [connectionStatus, isLoaded, isLoading, isPlanLoading, loadError, refresh, taskId]);
-  usePlanCommentReconnectRefresh(connectionStatus, refetch);
-  usePlanCommentForegroundRefresh(refetch);
+    void loader?.load(false);
+  }, [connectionStatus, isLoaded, isLoading, isPlanLoading, loadError, loader, taskId]);
+  usePlanCommentReconnectRefresh(connectionStatus, wake);
+  useForegroundRefresh(wake, Boolean(taskId) && connectionStatus === "connected", loader);
 
   const comments = useMemo(() => {
     if (!snapshot || snapshot.comments.length === 0) return EMPTY_COMMENTS;

@@ -220,7 +220,7 @@ export const defaultSessionState: SessionSliceState = {
     commentsLoadingByTaskId: {},
     commentsLoadedByTaskId: {},
     commentsErrorByTaskId: {},
-    commentsMigrationStatusByTaskId: {},
+    commentsMigrationByTaskId: {},
     revisionsByTaskId: {},
     revisionsLoadingByTaskId: {},
     revisionsLoadedByTaskId: {},
@@ -378,7 +378,8 @@ function reconcilePlanCommentIdentity(
   const previousPlanId = previousPlan?.id ?? null;
   if (previousPlan !== undefined && previousPlanId === nextPlanId) return;
   if (previousPlanId !== nextPlanId) {
-    taskPlans.commentsMigrationStatusByTaskId[taskId] = "idle";
+    const pendingCount = taskPlans.commentsMigrationByTaskId[taskId]?.pendingCount ?? 0;
+    taskPlans.commentsMigrationByTaskId[taskId] = { status: "idle", pendingCount, failure: null };
   }
   const snapshot = taskPlans.commentsByTaskId[taskId];
   if (nextPlanId !== null && snapshot?.plan_id === nextPlanId) return;
@@ -414,12 +415,12 @@ function buildTaskPlanCommentActions(set: ImmerSet) {
         if (error) draft.taskPlans.commentsErrorByTaskId[taskId] = error;
         else delete draft.taskPlans.commentsErrorByTaskId[taskId];
       }),
-    setTaskPlanCommentMigrationStatus: (
+    setTaskPlanCommentMigrationState: (
       taskId: string,
-      status: Parameters<SessionSlice["setTaskPlanCommentMigrationStatus"]>[1],
+      state: Parameters<SessionSlice["setTaskPlanCommentMigrationState"]>[1],
     ) =>
       set((draft) => {
-        draft.taskPlans.commentsMigrationStatusByTaskId[taskId] = status;
+        draft.taskPlans.commentsMigrationByTaskId[taskId] = state;
       }),
   };
 }
@@ -468,7 +469,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
         delete draft.taskPlans.commentsLoadingByTaskId[taskId];
         delete draft.taskPlans.commentsLoadedByTaskId[taskId];
         delete draft.taskPlans.commentsErrorByTaskId[taskId];
-        delete draft.taskPlans.commentsMigrationStatusByTaskId[taskId];
+        delete draft.taskPlans.commentsMigrationByTaskId[taskId];
         delete draft.taskPlans.revisionsByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
         delete draft.taskPlans.revisionsLoadedByTaskId[taskId];

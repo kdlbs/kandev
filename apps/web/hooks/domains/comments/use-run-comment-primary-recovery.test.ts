@@ -122,7 +122,11 @@ function makeStoreState() {
     taskSessionsByTask: {
       itemsByTaskId: { [TASK_ID]: [primary, selected] } as Record<string, MockSession[]>,
     },
-    taskPlans: { commentsMigrationStatusByTaskId: { [TASK_ID]: "complete" } },
+    taskPlans: {
+      commentsMigrationByTaskId: {
+        [TASK_ID]: { status: "complete", pendingCount: 0, failure: null },
+      },
+    },
     queue: { metaBySessionId: {} },
     chatInput: { planModeBySessionId: {} },
     addMessage: mockAddMessage,
@@ -174,6 +178,23 @@ function setup() {
 
 describe("useRunComment primary-session recovery", () => {
   beforeEach(setup);
+
+  it("runs a persisted comment despite unrelated legacy recovery", async () => {
+    mockStoreState.taskPlans.commentsMigrationByTaskId[TASK_ID] = {
+      status: "failed",
+      pendingCount: 1,
+      failure: null,
+    };
+    const { result } = renderCommentHook();
+    await result.current.runComment(makePlanComment());
+    expect(mockSendMessageRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolvedSessionId: PRIMARY_SESSION_ID,
+        planCommentRefs: [{ id: "comment-1", version: 2 }],
+      }),
+    );
+    expect(mockQueueMessage).not.toHaveBeenCalled();
+  });
 
   it("applies refreshed primary details before retry", async () => {
     const replacement = makeSession(NEW_PRIMARY_ID, "STARTING", false, "inc-new-primary");

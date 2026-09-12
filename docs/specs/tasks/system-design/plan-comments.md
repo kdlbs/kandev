@@ -23,6 +23,11 @@ the superseded [Plan Comment Drafts design](../../ui/system-design/plan-comment-
 Other comment sources remain session-scoped and keep their existing browser
 persistence and client-side formatting.
 
+The recovery refinements are pending in the
+[Plan comment recovery package](../../../plans/plan-comment-recovery/plan.md).
+The existing persistence, task ownership, and atomic admission boundaries remain
+the basis for implementation.
+
 ## Requirement mapping
 
 | Requirement                   | Design sections                                                                                                                 |
@@ -30,7 +35,7 @@ persistence and client-side formatting.
 | `REQ-TASKS-PLAN-COMMENTS-001` | [Persistence model](#persistence-model), [Frontend projection](#frontend-projection), [Plan lifecycle](#plan-lifecycle)         |
 | `REQ-TASKS-PLAN-COMMENTS-002` | [Composer delivery](#composer-delivery), [Atomic acceptance](#atomic-acceptance), [Failure and recovery](#failure-and-recovery) |
 | `REQ-TASKS-PLAN-COMMENTS-003` | [Run routing](#run-routing), [Atomic acceptance](#atomic-acceptance)                                                            |
-| `REQ-TASKS-PLAN-COMMENTS-004` | [Legacy migration](#legacy-migration)                                                                                           |
+| `REQ-TASKS-PLAN-COMMENTS-004` | [Legacy migration](#legacy-migration), [Failure and recovery](#failure-and-recovery), [Responsive and accessibility behavior](#responsive-and-accessibility-behavior) |
 
 ## Ownership decision
 
@@ -324,28 +329,127 @@ new plan ID and an empty comment collection.
 
 ## Legacy migration
 
-The first frontend version with backend comments runs a bounded migration for
-the open task after it knows the current plan and the task's session IDs:
+### Separate discovery, migration, and snapshot loading
 
-1. Inspect `kandev.comments.<sessionId>` for every known session in the task.
-2. Extract only records whose source is `plan`; retain their existing UUID,
-   text, selected text, and anchor positions.
-3. Create each backend row against the current plan. Exact UUID replays are
-   successful, so interrupted migration can restart safely.
-4. After each acknowledgement, remove only that plan record from its legacy
-   session payload. Preserve all other comment sources and every failed plan
-   record.
-5. Fetch the authoritative snapshot and mark migration complete for the task.
+`usePlanCommentMigration` owns only promotion of legacy browser drafts.
+`usePlanComments` continues to own current-plan and authoritative comment reads.
+The latter's `commentsErrorByTaskId` is not evidence that a legacy draft exists
+and must not be converted into migration failure.
 
-Composer Send and plan-comment Run wait for this migration gate. Comment CRUD
-and other local comment types are not blocked. If no current plan exists, the
-legacy records remain in storage for recovery rather than being discarded.
+Discovery reads `kandev.comments.<sessionId>` only for sessions attributed to the
+task by `useTaskSessions` or current task-session state. It can inspect known
+session records while the authoritative session list is pending, and rescans
+when membership becomes available or the browser returns to the foreground.
+Failed or incomplete discovery is not a completed scan, but has no delivery
+restriction in the absence of identified task-owned draft content. Do not
+attribute an unrelated session's stored rows to the open task. No server request
+is required by migration when its task scan contains zero legacy records.
+
+Once identified, retain each pending record in the recovery state until exact
+backend acknowledgement and selective storage cleanup. A later failed or empty
+storage read must not erase that known pending set. Keep other comment sources,
+malformed-but-readable payload entries, original UUIDs, and concurrent local
+edits intact. `listLegacyPlanComments` and
+`removeAcknowledgedLegacyPlanComment` remain the persistence boundaries; any
+additional read outcome must distinguish unavailable storage from an
+authoritative empty result without changing unrelated storage helpers.
+
+For a task with identified drafts:
+
+1. Resolve its current plan while connected. If no plan exists, retain the
+   drafts and wait for plan availability; do not repeatedly upload or delete.
+2. Upload each draft with its existing UUID and content. Each create response
+   already supplies an authoritative snapshot; reconcile it by task, plan ID,
+   and revision before acknowledging the exact stored record.
+3. Re-read after acknowledgement and retain failed or concurrently edited rows.
+   Retry only unresolved rows. A conflict snapshot alone does not acknowledge
+   the conflicting local body.
+4. Complete migration when every identified row has been acknowledged. Do not
+   append an unconditional list request: a failed background snapshot refresh
+   must not undo successful migration or keep an empty migration blocked.
+
+### Recovery state and lifetime
+
+Replace the status-only `commentsMigrationStatusByTaskId` projection with one
+task-keyed recovery record in the existing task-plan slice. The proposed
+`PlanCommentMigrationState` contains status, identified pending-record count,
+and actionable failure classification; the
+`commentsMigrationByTaskId` map and `setTaskPlanCommentMigrationState` action
+update that projection together. The old map and setter are removed, not kept
+as a second source of truth. Phases distinguish discovery, active migration,
+retry waiting, missing plan, actionable failure, and completion.
+
+Promise, timer, pending-record, and subscriber bookkeeping stays in one
+store-scoped coordinator keyed by task with a plan-identity generation. React
+consumers share it, including simultaneous
+Plan, structured-composer, and passthrough mounts. At most one operation and one
+retry timer per task are active. StrictMode and repeated focus events must not
+create duplicate uploads or reset the retry budget on every render.
+
+Use connected, visible consumers to admit network attempts. Replace the
+uncoalesced focus/visibility listeners in `usePlanComments` with
+`useForegroundRefresh`; defer work while disconnected and resume on the next
+connected transition. Discovery and legacy recovery use the same foreground
+trigger and connection check. `plan-comment-loading.ts` owns the ordinary
+read promise, bounded retry timer, and plan generation behind `usePlanComments`;
+`plan-comment-migration.ts` owns identified drafts and acknowledgements behind
+`usePlanCommentMigration`. Both layers preserve successful snapshots through
+read failures; no application-wide transport timeout or retry policy changes.
+
+Transient failures get three connected attempts with delays of one and two
+seconds after the first two failures. After that burst, schedule single
+background attempts at 30, 60, then at most once per 120 seconds while visible
+and connected. These are implementation constants, not operator settings.
+Coalesced reconnect, foreground, and explicit Retry triggers can bring the next
+attempt forward, but share the in-flight operation. Only explicit Retry or
+successful recovery resets the failure budget. Disconnected or hidden periods
+do not spend attempts. Stop scheduled work when the last consumer unmounts;
+remount rescans and resumes without a browser-global completed marker.
+
+Typed content, limit, authorization, and UUID-conflict rejections are actionable
+and do not enter an automatic mutation loop. Resolve a plan-not-found response
+through current-plan lookup. Untyped transport failures and server read failures
+use bounded retry. Manual Retry rechecks prerequisites as well as remaining
+records, and cannot clear identified draft evidence just to release Send.
+
+Each operation captures task/plan identity and a generation. Recheck before
+each upload, state write, and acknowledgement. Task or plan invalidation cancels
+future work and rejects late completion from the previous generation. A
+successful current-generation upload removes only its exact legacy row; it
+does not delete an entire storage key containing other records.
+
+### Delivery restriction
+
+Use one shared selector for composer migration blocking: at least one
+identified legacy record for that task remains unresolved. Neither an idle
+phase nor a general read error satisfies that predicate. The structured
+`useSubmitHandler` and passthrough submission guard both use it. A blocked
+attempt preserves the typed message and returns localized pending-context
+feedback; recovery never resubmits it.
+
+Persisted snapshot comments remain visible during failed background reads.
+Normal Send continues to freeze their IDs and versions with
+`toTaskPlanCommentRefs`, so backend exact-version admission protects their
+content. A successful refresh, including an empty snapshot or confirmed absent
+plan, clears obsolete read errors but never acknowledges unresolved local rows.
+
+Run selects one persisted comment. Remove the unrelated task-wide migration
+status check from `runTaskPlanComment` and the selection toolbar; keep persisted
+version, primary availability, exact reference, and server acceptance checks.
+Other legacy records remain pending. Add-and-Run must still await persistence
+of the selected new comment before invoking Run.
 
 ## Failure and recovery
 
-- Failed load or migration shows a retryable comment-context error. Kandev does
-  not allow a comment-bearing delivery until it can establish the task
-  snapshot, preventing silent omission.
+- Discovery and transient background recovery are quiet. A comment restoration
+  notice is eligible only for identified unresolved drafts after the initial
+  retry burst or for an actionable failure, including an absent current plan.
+  General read failures never produce that notice. A task with no identified
+  drafts has no migration restriction, independently of plan availability.
+- Known pending feedback remains protected as described in
+  [Delivery restriction](#delivery-restriction). A partial upload cannot release
+  a Send that would omit a remaining row; an unrelated pending row cannot block
+  Run of an already persisted comment.
 - Failed create or edit keeps the entered body and selection in the open
   editor. Failed delete keeps the annotation visible. Desktop outside-click or
   Escape dismissal and mobile Drawer dismissal are ignored while any mutation
@@ -387,6 +491,18 @@ Run control exposes why it is unavailable when no eligible primary exists.
 Session switching must not dismiss or mutate a persisted comment merely as a
 side effect of changing responsive navigation.
 
+`PlanCommentMigrationNotice` remains an inline context notice in the existing
+Plan surface and both composers, but renders only actionable recovery state.
+No progress banner is mounted for discovery or automatic retry. Retain draft
+focus when it appears or disappears. The existing task mobile composition in
+`task-layout.tsx` and the Plan Drawer are the shipped exemplars: chat remains
+the primary phone destination and its scroll/safe-area ownership is unchanged.
+Do not add a recovery modal or a second scroll region. Retry keeps a 28 px
+desktop control and a minimum 44 px coarse-pointer target. Shared logic owns
+eligibility; responsive wrappers own wrapping and containment. Pending-Send
+copy describes preserved feedback and automatic recovery through translations,
+without instructing users to perform a migration.
+
 ## Verification
 
 - Repository tests cover schema replay on SQLite and Postgres, task/plan
@@ -400,12 +516,21 @@ side effect of changing responsive navigation.
   session changes do not filter it, async editors retain failed input, Run
   chooses the primary, and legacy migration removes only acknowledged plan
   records.
+- Recovery tests cover empty and unknown plan state, initial discovery failure,
+  automatic reconnect and foreground recovery, exhausted retries, mixed
+  acknowledged/unacknowledged rows, unmount and plan-identity races, unrelated
+  task records, and persisted-comment Run during another draft's recovery.
 - Desktop Playwright coverage distinguishes selected-session Send from
   primary-session Run in a two-session task and proves task-wide removal after
   acceptance.
 - Mobile Playwright coverage proves the same shared context and routing through
   the session picker and Plan Drawer, with no horizontal overflow or undersized
   actions.
+- Desktop and phone recovery scenarios inject correlated comment/read failures
+  while leaving unrelated chat frames live, send plain text without Retry on
+  empty tasks, and prove actual legacy feedback recovers without a manual
+  action. Existing selected-session Send and primary-session Run scenarios
+  remain part of those focused suites.
 
 ## Observability
 
@@ -423,3 +548,8 @@ correctness boundary.
 - [Keep Queue Auto-run Server Owned](../../../decisions/2026-08-16-server-owned-queue-auto-run.md)
 - [Separate Message Queue Provenance, Cancellation, and Capacity](../../../decisions/2026-08-03-separate-message-queue-provenance-cancellation-and-capacity.md)
 - [Keep Saved-Prompt Expansion Server-Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
+
+## Implementation plans
+
+- [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)
+- [Plan comment recovery](../../../plans/plan-comment-recovery/plan.md)

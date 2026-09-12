@@ -142,9 +142,6 @@ function makeStoreState(sessionState: string, planMode = false, foregroundActivi
     chatInput: {
       planModeBySessionId: { "sess-1": planMode },
     },
-    taskPlans: {
-      commentsMigrationStatusByTaskId: { "task-1": "complete" },
-    },
     queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: mockAddMessage,
     setTaskPlanComments: mockSetTaskPlanComments,
@@ -485,19 +482,6 @@ describe("useRunComment — plan routing", () => {
     expect(mockSendMessageRequest).toHaveBeenCalledWith(
       expect.objectContaining({ resolvedSessionId: "new-primary" }),
     );
-  });
-
-  it("rejects Run until legacy plan comments finish migrating", async () => {
-    const state = makeStoreState("WAITING_FOR_INPUT");
-    state.taskPlans.commentsMigrationStatusByTaskId["task-1"] = "failed";
-    mockStoreState = state;
-    const { result } = renderCommentHook();
-
-    await expect(result.current.runComment(makePlanComment())).rejects.toMatchObject({
-      code: "plan-comment-migration-pending",
-    });
-    expect(mockSendMessageRequest).not.toHaveBeenCalled();
-    expect(mockQueueMessage).not.toHaveBeenCalled();
   });
 
   it("queues a busy primary as a distinct idempotent entry instead of appending", async () => {

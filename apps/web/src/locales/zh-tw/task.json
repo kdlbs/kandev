@@ -2093,5 +2093,5 @@
   "restoringSavedPlanComments": "正在恢復已儲存的計劃評論...",
   "planCommentMigrationFailed": "無法恢復部分已儲存的計劃評論。",
   "planCommentMigrationNeedsPlan": "請建立或恢復計劃，以恢復已儲存的評論。",
-  "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。請重試後再傳送。"
+  "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。連接出錯時會自動重試；您的訊息會保留。"
 }

@@ -5,6 +5,10 @@ import { waitForStableActiveSession } from "../../helpers/session-store";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import {
+  assertPlainSendDuringRecovery,
+  assertLegacyRecoveryPreservesDraft,
+} from "./plan-comment-recovery-helpers";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PLAN_CONTENT = "## Shared plan\n\nReview this shared implementation step";
@@ -65,6 +69,29 @@ async function openPlanCommentComposer(page: Page, session: SessionPage) {
 }
 
 test.describe("task-owned plan comments", () => {
+  // @covers AC-TASKS-PLAN-COMMENTS-004.5, AC-TASKS-PLAN-COMMENTS-004.6
+  for (const withPlan of [false, true]) {
+    test(`plain Send survives failed comment reads ${withPlan ? "with" : "without"} a plan`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      await assertPlainSendDuringRecovery(
+        { testPage, apiClient, seedData, mobile: false },
+        withPlan,
+      );
+    });
+  }
+  // @covers AC-TASKS-PLAN-COMMENTS-004.3, AC-TASKS-PLAN-COMMENTS-004.4, AC-TASKS-PLAN-COMMENTS-004.6
+  test("automatically restores real feedback without submitting or losing the draft", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await assertLegacyRecoveryPreservesDraft({ testPage, apiClient, seedData, mobile: false });
+  });
   // @covers AC-TASKS-PLAN-COMMENTS-001.2
   // @covers AC-TASKS-PLAN-COMMENTS-002.2
   // @covers AC-TASKS-PLAN-COMMENTS-002.5
