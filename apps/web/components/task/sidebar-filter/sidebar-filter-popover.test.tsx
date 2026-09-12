@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
@@ -6,6 +6,7 @@ import { SidebarFilterPopover } from "./sidebar-filter-popover";
 const responsive = vi.hoisted(() => ({
   usesDesktopWorkbench: true,
   isFinePointer: true,
+  isMobile: false,
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -66,6 +67,7 @@ afterEach(() => {
   state.sidebarViews.activeViewId = VIEW.id;
   responsive.usesDesktopWorkbench = true;
   responsive.isFinePointer = true;
+  responsive.isMobile = false;
 });
 
 describe("SidebarFilterPopover task-row editor", () => {
@@ -95,6 +97,7 @@ describe("SidebarFilterPopover task-row editor", () => {
   });
 
   it("keeps deletion touch-reachable in a phone drawer with a fine pointer", async () => {
+    responsive.isMobile = true;
     responsive.usesDesktopWorkbench = false;
     responsive.isFinePointer = true;
     state.sidebarViews.views = [VIEW, SECOND_VIEW];
@@ -107,11 +110,19 @@ describe("SidebarFilterPopover task-row editor", () => {
     );
 
     const deleteButton = screen.getByTestId("view-delete-button");
+    const drawer = screen.getByTestId("sidebar-filter-drawer");
+    const dialogId = drawer.id;
     expect(deleteButton.className).toContain("min-h-11");
     fireEvent.click(deleteButton);
 
     expect(state.deleteSidebarView).not.toHaveBeenCalled();
     expect(await screen.findByRole("group", { name: "Delete All tasks?" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Delete All tasks?" }).id).toBe(dialogId);
+    expect(document.querySelectorAll('[data-slot="drawer-content"]')).toHaveLength(1);
+    expect(deleteButton.isConnected).toBe(true);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton));
+    expect(state.deleteSidebarView).not.toHaveBeenCalled();
   });
 
   it("keeps view settings collapsed until the user opens them", () => {

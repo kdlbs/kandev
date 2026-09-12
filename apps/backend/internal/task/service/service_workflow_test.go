@@ -58,6 +58,31 @@ func (testStepNotFound) Error() string { return "step not found" }
 
 var errStepNotFoundForTest = testStepNotFound{}
 
+type fakeWorkflowMovePreflight struct {
+	err          error
+	calls        int
+	taskID       string
+	sessionID    string
+	targetStepID string
+}
+
+func (f *fakeWorkflowMovePreflight) PreflightWorkflowStepMove(
+	_ context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	f.calls++
+	f.taskID = taskID
+	if currentSession != nil {
+		f.sessionID = currentSession.ID
+	}
+	if targetStep != nil {
+		f.targetStepID = targetStep.ID
+	}
+	return f.err
+}
+
 // TestService_SetWorkflowHidden_HealsStaleRecord verifies the helper used by
 // the improve-kandev bootstrap to flip Hidden=true on workflows created
 // before the flag was honored on insert.
@@ -234,6 +259,46 @@ func TestService_MoveTaskAllowsPendingReviewWhenSessionIdle(t *testing.T) {
 	}
 	if moved.Task.WorkflowStepID != "step-review-target" {
 		t.Fatalf("expected step-review-target, got %s", moved.Task.WorkflowStepID)
+	}
+}
+
+func TestService_MoveTaskPreflightsWorkflowLifecycleBeforeCommit(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-preflight", "wf-source", "step-source", nil)
+	createMoveSession(t, ctx, repo, "session-preflight", "task-preflight", models.TaskSessionStateRunning, models.ReviewStatusNone)
+	preflightErr := errors.New("managed credentials are invalid")
+	preflight := &fakeWorkflowMovePreflight{err: preflightErr}
+	svc.SetWorkflowMovePreflight(preflight)
+
+	_, err := svc.MoveTaskWithOptions(ctx, "task-preflight", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		AllowActivePrimarySession: true,
+	})
+	if !errors.Is(err, preflightErr) {
+		t.Fatalf("MoveTaskWithOptions error = %v, want %v", err, preflightErr)
+	}
+	if preflight.calls != 1 {
+		t.Fatalf("workflow move preflight calls = %d, want 1", preflight.calls)
+	}
+	if preflight.taskID != "task-preflight" || preflight.sessionID != "session-preflight" || preflight.targetStepID != "step-review-target" {
+		t.Fatalf("preflight inputs = (%q, %q, %q), want (%q, %q, %q)",
+			preflight.taskID, preflight.sessionID, preflight.targetStepID,
+			"task-preflight", "session-preflight", "step-review-target")
+	}
+
+	task, err := repo.GetTask(ctx, "task-preflight")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.WorkflowStepID != "step-source" {
+		t.Fatalf("task step = %q, want source step after preflight failure", task.WorkflowStepID)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TaskMoved {
+			t.Fatal("task.moved published after preflight failure")
+		}
 	}
 }
 

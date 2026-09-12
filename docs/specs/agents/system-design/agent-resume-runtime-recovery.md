@@ -35,6 +35,10 @@ that environment and does not acquire its own worktree lifecycle.
 
 ## Archive transition eligibility
 
+Workspace-only registration and recovery presentation amendments are defined in
+[Session recovery failures](session-recovery-failures.md).
+
+
 `GetTaskSessionStatus` resolves the owning task after session authorization and
 task/session binding validation. Before runtime probing, state healing, or
 resume eligibility evaluation, an archived task returns its persisted session

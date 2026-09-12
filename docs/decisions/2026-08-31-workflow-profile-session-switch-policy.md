@@ -32,10 +32,17 @@ The defaults are `reuse` and `complete`. These defaults preserve existing
 behavior. The router reuses an eligible nonterminal destination session when one
 exists. It completes the source session.
 
-For profile-only routing, the settings apply only when the effective agent
-profile changes. Consecutive steps with the same effective profile keep the
-active session. The proposed explicit-target extension below distinguishes
-session identity from profile identity.
+For profile-only routing, consecutive steps with the same effective profile
+keep the active session when the destination uses `reuse`. A destination with
+`new` creates a fresh conversation even when profile IDs match. The source
+step's end policy applies when that conversation is replaced.
+
+This paragraph was reconciled on 2026-09-11 with existing acceptance criterion
+AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.5. Profile comparison uses logical profile
+IDs. Reuse preserves user-selected runtime model and reasoning overrides; it
+does not compare or restore model settings. The
+[repair package](../plans/workflow-same-profile-new-session/plan.md) tracks the
+remaining implementation gap.
 
 The workflow engine keeps its transition graph, actions, events, and states. The
 transition integration must provide both source and destination settings to the

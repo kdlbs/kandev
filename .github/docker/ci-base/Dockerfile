@@ -32,6 +32,7 @@ FROM mcr.microsoft.com/playwright:v1.61.1-noble AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PNPM_HOME=/pnpm \
+    COREPACK_HOME=/root/.cache/node/corepack \
     PATH=/pnpm:$PATH
 
 # --- System packages -------------------------------------------------------

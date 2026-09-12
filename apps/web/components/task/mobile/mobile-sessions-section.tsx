@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { IconDotsVertical, IconPlus, IconStar } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { AgentLogo } from "@/components/agent-logo";
-import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import {
@@ -32,7 +32,7 @@ import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/ty
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
-import { SessionDeleteDescription } from "../session-delete-description";
+import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
 
 type SessionRow = {
   id: string;
@@ -144,6 +144,7 @@ function StateBadge({
 }
 
 function SessionActionsMenu({
+  triggerRef,
   taskId,
   state,
   isPrimary,
@@ -153,6 +154,7 @@ function SessionActionsMenu({
   onAskDelete,
   onHandoffProfile,
 }: {
+  triggerRef: RefObject<HTMLButtonElement | null>;
   taskId: string;
   state: TaskSessionState | null;
   isPrimary: boolean;
@@ -163,6 +165,8 @@ function SessionActionsMenu({
   onHandoffProfile: (profileId: string) => void;
 }) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const pendingDelete = useRef(false);
   const hasLifecycleAction =
     !!state &&
     (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
@@ -171,16 +175,26 @@ function SessionActionsMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          ref={triggerRef}
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer h-7 w-7"
+          className="cursor-pointer h-11 w-11 md:h-7 md:w-7"
           onClick={(e) => e.stopPropagation()}
           aria-label={t("task:sessionActions")}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+      <DropdownMenuContent
+        align="end"
+        onClick={(e) => e.stopPropagation()}
+        onCloseAutoFocus={(event) => {
+          if (!pendingDelete.current) return;
+          event.preventDefault();
+          pendingDelete.current = false;
+          onAskDelete();
+        }}
+      >
         <DropdownMenuItem
           className="cursor-pointer"
           onSelect={onSetPrimary}
@@ -202,7 +216,10 @@ function SessionActionsMenu({
         {state && isSessionDeletable(state) && (
           <DropdownMenuItem
             className="cursor-pointer text-destructive focus:text-destructive"
-            onSelect={onAskDelete}
+            onSelect={() => {
+              if (isMobile) pendingDelete.current = true;
+              else onAskDelete();
+            }}
           >
             {t("task:delete")}
           </DropdownMenuItem>
@@ -211,39 +228,6 @@ function SessionActionsMenu({
         <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function SessionDeleteInlineConfirmation({
-  isPrimary,
-  isOnlySession,
-  targetName,
-  onCancel,
-  onClose,
-  onConfirm,
-}: {
-  isPrimary: boolean;
-  isOnlySession: boolean;
-  targetName: string;
-  onCancel: () => void;
-  onClose: () => void;
-  onConfirm: () => void | Promise<void>;
-}) {
-  const { t } = useTranslation();
-  return (
-    <InlineConfirmActions
-      density="touch"
-      testId="mobile-session-delete-confirmation"
-      ariaLabel={t("task:deleteSession")}
-      description={<SessionDeleteDescription isPrimary={isPrimary} isOnlySession={isOnlySession} />}
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t("task:delete")}
-      confirmAriaLabel={t("task:delete2", { name: targetName })}
-      confirmTestId="mobile-session-delete-confirm"
-      onCancel={onCancel}
-      onClose={onClose}
-      onConfirm={onConfirm}
-    />
   );
 }
 
@@ -282,9 +266,14 @@ function SessionRowTrailingActions({
   onHandoffProfile: (profileId: string) => void;
   actions: ReturnType<typeof useSessionActions>;
 }) {
-  if (isConfirming) {
-    return (
-      <SessionDeleteInlineConfirmation
+  const { isMobile } = useResponsiveBreakpoint();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <MobileSessionDeleteConfirmation
+        focusReturnRef={triggerRef}
+        open={isConfirming}
+        targetKey={`${taskId}:${row.id}`}
         isPrimary={row.isPrimary}
         isOnlySession={totalSessions === 1}
         targetName={row.agentLabel}
@@ -292,19 +281,20 @@ function SessionRowTrailingActions({
         onClose={onCancelDelete}
         onConfirm={() => void actions.remove()}
       />
-    );
-  }
-  return (
-    <SessionActionsMenu
-      taskId={taskId}
-      state={row.state}
-      isPrimary={row.isPrimary}
-      onSetPrimary={() => void actions.setPrimary()}
-      onStop={() => void actions.stop()}
-      onResume={() => void actions.resume()}
-      onAskDelete={onAskDelete}
-      onHandoffProfile={onHandoffProfile}
-    />
+      {(!isConfirming || isMobile) && (
+        <SessionActionsMenu
+          triggerRef={triggerRef}
+          taskId={taskId}
+          state={row.state}
+          isPrimary={row.isPrimary}
+          onSetPrimary={() => void actions.setPrimary()}
+          onStop={() => void actions.stop()}
+          onResume={() => void actions.resume()}
+          onAskDelete={onAskDelete}
+          onHandoffProfile={onHandoffProfile}
+        />
+      )}
+    </>
   );
 }
 
@@ -596,7 +586,13 @@ export const MobileSessionsPicker = memo(function MobileSessionsPicker({
         data-testid="mobile-sessions-pill"
         ariaLabel={ariaLabel}
       />
-      <MobilePickerSheet open={open} onOpenChange={setOpen} title={t("task:sessions")}>
+      <MobilePickerSheet
+        key={taskId}
+        open={open}
+        onOpenChange={setOpen}
+        title={t("task:sessions")}
+        confirmationHost
+      >
         <MobileSessionsList
           taskId={taskId}
           activeSessionId={effectiveSessionId}

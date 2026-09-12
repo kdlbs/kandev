@@ -352,6 +352,10 @@ run but reported no matching tests in the current checkout.
 
 ## Risks
 
+Follow-up: [same-profile fresh-session repair](../workflow-same-profile-new-session/plan.md)
+covers the profile-only `new` shortcut discovered on 2026-09-11. The completed
+explicit-target results above do not establish coverage for that case.
+
 - Existing same-profile early returns can bypass explicit recipient intent.
 - Initial provenance must survive primary changes without acquiring new markers.
 - A step binding written before a failed promotion could misroute later work.

@@ -83,7 +83,25 @@ It returns HTTP 200 as soon as the listener accepts connections, with:
 curl -fsS http://127.0.0.1:38429/ready
 ```
 
-It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready, then HTTP 200. The supplied Kubernetes liveness probe uses `/health`; the readiness probe uses `/ready`. Both are unauthenticated even when auth is enabled, so they're also a credential-free way for monitoring to read the running version; there is no need to authenticate to **System > About** just to check what build is deployed.
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready, then HTTP 200. During startup, the response also includes a bounded `startup` object:
+
+```json
+{
+  "phase": "backing_up_database",
+  "elapsed_ms": 42000,
+  "phase_elapsed_ms": 18000
+}
+```
+
+The phase is a label such as `opening_database`, `backing_up_database`,
+`applying_migrations`, `initializing_services`, or `recovering_sessions`.
+Elapsed values are status measurements, not progress estimates. The launcher
+prints phase changes and periodic elapsed status, and names the last phase if
+the backend exits before readiness. The supplied Kubernetes liveness probe uses
+`/health`; the readiness probe uses `/ready`. Both are unauthenticated even
+when auth is enabled, so they're also a credential-free way for monitoring to
+read the running version; there is no need to authenticate to **System > About**
+just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 
@@ -431,7 +449,7 @@ The UI flow applies to the configured SQLite path:
 
 1. Stop or finish active agent sessions and preserve unpushed work.
 2. Open **Settings > System > Backups**, choose **Restore**, type `RESTORE`, and confirm.
-3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files.
+3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files. The restore job remains available long enough to report `restart_required` before process shutdown.
 4. Click **Restart Kandev** in the success dialog. If automatic restart is unavailable, quit and relaunch Kandev manually. The backend must restart before database-backed work resumes.
 5. Check `/ready`, **System > Status**, database schema version, secrets, and representative tasks.
 

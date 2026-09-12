@@ -255,12 +255,16 @@ func (s *Service) loadAuthoritativeTaskLaunchRecoveryError(
 			ActiveError: &statussummary.ActiveErrorSummary{
 				SessionID:        session.ID,
 				TaskRepositoryID: lastError.TaskRepositoryID,
+				ExecutionID:      lastError.ExecutionID,
+				AttemptID:        lastError.AttemptID,
+				Phase:            lastError.Phase,
 				Stamp:            lastError.Stamp(),
 				OccurredAt:       lastError.OccurredAt,
 				Preview:          lastError.Message,
 				Details:          lastError.Details,
 				Category:         lastError.Code,
 				RecoveryActions:  lastError.RecoveryActions,
+				Causes:           lastError.Causes,
 			},
 		})
 	}

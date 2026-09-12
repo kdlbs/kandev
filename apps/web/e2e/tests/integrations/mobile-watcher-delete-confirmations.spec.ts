@@ -1,9 +1,10 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { seedLinearWatcher } from "./watcher-delete-confirmation-flow";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test.describe("watcher delete confirmations (mobile)", () => {
-  test("keeps Linear delete inline, touch-sized, and inside the viewport", async ({
+  test("keeps Linear delete in a named touch-sized phone sheet", async ({
     testPage,
     apiClient,
     seedData,
@@ -26,13 +27,21 @@ test.describe("watcher delete confirmations (mobile)", () => {
     await expect(trigger).toHaveCSS("height", "44px");
 
     await trigger.tap();
-    const confirmation = row.getByTestId("watcher-delete-confirmation");
+    const confirmation = testPage.getByTestId("watcher-delete-confirmation");
     await expect(confirmation).toBeVisible();
-    await expect(testPage.getByRole("dialog")).toHaveCount(0);
-    await expect(confirmation.getByRole("button", { name: "Cancel" })).toHaveCSS("height", "44px");
-    await expect(confirmation.getByRole("button", { name: "Delete" })).toHaveCSS("height", "44px");
+    await expect(testPage.getByRole("dialog")).toHaveCount(1);
+    await expect(confirmation).toContainText("team:ENG");
+    await expect(confirmation.getByRole("button", { name: "Cancel" })).toHaveCSS(
+      "min-height",
+      "48px",
+    );
+    await expect(confirmation.getByRole("button", { name: "Delete" })).toHaveCSS(
+      "min-height",
+      "48px",
+    );
+    await waitForFiniteAnimations(testPage.getByRole("dialog"));
     await prCapture.screenshot("watcher-delete-confirmation-mobile", {
-      caption: "Mobile inline watcher delete confirmation with touch-sized actions",
+      caption: "Mobile watcher delete confirmation sheet with a named filter",
     });
 
     const viewportFits = await testPage.evaluate(
@@ -43,7 +52,7 @@ test.describe("watcher delete confirmations (mobile)", () => {
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(confirmation).toBeHidden();
     await trigger.tap();
-    await row.getByTestId("linear-watch-delete-confirm").tap();
+    await testPage.getByTestId("linear-watch-delete-confirm").tap();
     await expect(row).toHaveCount(0);
     expect(nativeDialogSeen).toBe(false);
   });

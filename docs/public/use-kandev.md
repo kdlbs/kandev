@@ -151,7 +151,7 @@ Remote repository and issue/PR URLs are not added from this settings page. Use t
 
 Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add TUI Agent** creates a passthrough integration; passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
 
-For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** already has one empty initial commit and no project files, and Kandev selects a direct Local profile for that flow. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
+For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** has one empty initial commit and no project files. Creation selects a direct Local profile for a single-row task when one is available and preserves the selected executor for multiple rows. Without a direct Local profile, single-row creation remains disabled. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
 
 ## Create and start the first task
 
@@ -174,7 +174,7 @@ If another actor initializes the remote first, Kandev stops without replacing th
 The dialog also supports multiple repositories, remote GitHub rows, and a single-repository **Fork a new branch** option when the Local executor is selected. Important boundaries:
 
 - Multi-repository tasks require the Worktree executor in the current task-create path.
-- Creating an empty repository is available only for a single repository row and switches the task to a direct Local profile.
+- Every editable local repository row offers **Refresh repositories** and **Create new repository**, regardless of existing repositories or search results. Creation preserves the executor for multiple rows and selects a direct Local profile for a single row.
 - No-repository tasks cannot use the Worktree executor.
 - The local fork option is off by default and requires explicit consent before Kandev discards dirty source-checkout changes.
 - Agent and executor choices can be disabled when their remote credential requirements are incompatible.

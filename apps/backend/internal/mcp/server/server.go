@@ -1371,10 +1371,14 @@ func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("report_pr_auto_fix_outcome_kandev",
 			mcp.WithDescription(
-				"Report the one explicit outcome for the current GitHub PR auto-fix turn. "+
+				"Report the one explicit outcome for the current Kandev-dispatched auto-fix turn. "+
+					"Use this tool only when this turn received the server-owned outcome protocol. "+
+					"Do not use it for manual PR fixup, sibling review messages, or instructions carried over from an earlier auto-fix turn. "+
+					"Tool availability or enabled automation settings alone do not establish an obligation to report. "+
 					"Use action_taken when a concrete provider-visible change was made, "+
 					"non_actionable when the feedback identifies no change this task can make, "+
 					"or blocked when an external condition prevents the needed change. "+
+					"Report exactly once for the dispatched turn. "+
 					"The task, session, turn, and PR are bound by Kandev and are not tool arguments.",
 			),
 			mcp.WithString("outcome", mcp.Required(), mcp.Enum("action_taken", "non_actionable", "blocked"), mcp.Description("The disposition of this auto-fix turn.")),

@@ -611,6 +611,12 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, err
 	}
 
+	if stepChanged && targetStep != nil && s.workflowMovePreflight != nil {
+		currentSession := s.resolvePrimaryOrActiveSession(ctx, id)
+		if err := s.workflowMovePreflight.PreflightWorkflowStepMove(ctx, id, currentSession, targetStep); err != nil {
+			return nil, fmt.Errorf("failed to preflight workflow move: %w", err)
+		}
+	}
 	stateAfterAdmission := *task
 	if stepChanged {
 		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID, opts); err != nil {

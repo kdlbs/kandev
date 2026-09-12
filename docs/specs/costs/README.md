@@ -24,25 +24,11 @@ and cheap-model profiles used by task and Office execution.
 - Agent profile identity belongs to the [agent system](../agents/README.md).
 - Office-specific routing policy belongs to the [Office system](../office/README.md).
 
-## Specification map
-
-### Requirements
-
-
-
-- [Cheap Model Profiles](requirements/cheap-model-profiles.md)
-- [Subscription Usage Tracking](requirements/subscription-usage.md)
-
-### System design
-
-
-
-- None.
-
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+canonical requirement and system-design documents. Use the catalog command to
+find them.
 
 ## Related systems
 

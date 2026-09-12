@@ -3,6 +3,7 @@ import {
   expectCompactionCount,
   expectSourceRightOfTokenCount,
   seedContextWindowTask,
+  setContextWindowFixture,
 } from "./context-window-source-helpers";
 
 test("context window announces unmeasured usage before the first sample", async ({
@@ -80,4 +81,31 @@ test("context source help stays open when hovered", async ({
   await prCapture.screenshot("context-source-help", {
     caption: "Context source and inferred compaction count shown with their help visible",
   });
+});
+
+test("context ring transitions only its arc when usage crosses a color threshold", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { sessionId } = await seedContextWindowTask(testPage, apiClient, seedData);
+  const usageCircle = testPage.locator('button[aria-label^="Context window:"] circle').nth(1);
+  const initialOffset = await usageCircle.getAttribute("stroke-dashoffset");
+
+  await expect(usageCircle).toHaveCSS("transition-property", "stroke-dashoffset");
+  await expect(usageCircle).toHaveClass(/text-blue-300/);
+
+  await setContextWindowFixture(testPage, sessionId, {
+    size: 258_400,
+    used: 200_000,
+    remaining: 58_400,
+    efficiency: 77,
+    compactionCount: 2,
+    source: "acp",
+  });
+
+  await expect(testPage.getByRole("button", { name: "Context window: 77% used" })).toBeVisible();
+  await expect.poll(() => usageCircle.getAttribute("stroke-dashoffset")).not.toBe(initialOffset);
+  await expect(usageCircle).toHaveCSS("transition-property", "stroke-dashoffset");
+  await expect(usageCircle).toHaveClass(/text-yellow-300/);
 });

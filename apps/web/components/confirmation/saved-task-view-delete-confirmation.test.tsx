@@ -67,7 +67,23 @@ function ReplacingHarness() {
 }
 
 describe("SavedTaskViewDeleteConfirmation", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+  });
+
+  it.each(["inline", "popover"] as const)(
+    "uses a phone sheet before the %s presentation hint",
+    async (presentation) => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+      const onConfirm = vi.fn();
+      render(<Harness presentation={presentation} onConfirm={onConfirm} />);
+      const dialog = screen.getByRole("dialog", { name: TARGET_TITLE });
+      expect(dialog.getAttribute("data-slot")).toBe("drawer-content");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete Needs review" }));
+      await waitFor(() => expect(onConfirm).toHaveBeenCalledExactlyOnceWith(TARGET.id));
+    },
+  );
 
   it("names the target and dispatches its captured id only after fine-pointer confirmation", async () => {
     const onConfirm = vi.fn();

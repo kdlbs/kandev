@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { firstAnimationListValue, parseCssTime } from "@kandev/ui/animation-utils";
+import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-visibility";
 
 type GridSpinnerProps = {
   className?: string;
@@ -24,13 +25,27 @@ export function GridSpinner({ className }: GridSpinnerProps) {
     const cubes = Array.from(
       gridRef.current?.querySelectorAll<HTMLElement>(".spinner-grid-cube") ?? [],
     );
+    const grid = gridRef.current;
+    if (!grid) return;
+    const visibility = createPersistentMotionVisibility(grid);
+    const registrations = cubes.map((cube) => visibility.register(cube));
     const animations = startGridAnimations(cubes);
-    if (!animations) return;
+    if (!animations) {
+      return () => {
+        for (const registration of registrations) registration.unregister();
+        visibility.dispose();
+      };
+    }
 
-    for (const cube of cubes) cube.style.animation = "none";
+    for (let index = 0; index < cubes.length; index += 1) {
+      registrations[index]?.setAnimation(animations[index] ?? null);
+      cubes[index].style.animation = "none";
+    }
 
     return () => {
       for (const animation of animations) animation.cancel();
+      for (const registration of registrations) registration.unregister();
+      visibility.dispose();
       for (const cube of cubes) cube.style.removeProperty("animation");
     };
   }, []);
