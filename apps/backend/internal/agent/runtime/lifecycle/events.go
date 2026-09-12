@@ -31,7 +31,11 @@ func NewEventPublisher(eventBus bus.EventBus, log *logger.Logger) *EventPublishe
 
 // PublishAgentEvent publishes an agent lifecycle event (started, stopped, ready, completed, failed).
 func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string, execution *AgentExecution) {
-	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
+	payload := newAgentEventPayload(execution)
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		payload.AttemptID = attemptID
+	}
+	p.publishAgentEventPayload(ctx, eventType, payload)
 }
 
 // publishAgentEventWithTurnID publishes a lifecycle event with a turn captured
@@ -50,7 +54,11 @@ func (p *EventPublisher) publishAgentEventWithTurnIDAndEvidence(
 	turnID string,
 	evidence *PromptAttemptEvidence,
 ) {
-	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayloadWithTurnIDAndEvidence(execution, turnID, evidence))
+	payload := newAgentEventPayloadWithTurnIDAndEvidence(execution, turnID, evidence)
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		payload.AttemptID = attemptID
+	}
+	p.publishAgentEventPayload(ctx, eventType, payload)
 }
 
 // PublishAgentStalled publishes one inactivity signal for a prompt.
@@ -128,6 +136,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 ) AgentEventPayload {
 	payload := AgentEventPayload{
 		AgentExecutionID:   execution.ID,
+		AttemptID:          execution.ResumeAttemptID,
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
@@ -175,12 +184,16 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		SessionID:         execution.SessionID,
 		TaskEnvironmentID: execution.TaskEnvironmentID,
 		AgentExecutionID:  execution.ID,
+		AttemptID:         execution.ResumeAttemptID,
 		ErrorMessage:      errMsg,
 		FailureCode:       execution.FailureCode,
 		FailureDetails:    execution.FailureDetails,
 		WorktreeID:        worktreeID,
 		WorktreePath:      execution.WorkspacePath,
 		WorktreeBranch:    worktreeBranch,
+	}
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		payload.AttemptID = attemptID
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
@@ -194,8 +207,19 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 
 // PublishACPSessionCreated publishes an event when an ACP session is created.
 func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, sessionID string) {
+	p.PublishACPSessionCreatedWithAttempt(execution, sessionID, "")
+}
+
+// PublishACPSessionCreatedWithAttempt publishes an ACP session-created event
+// with the startup invocation's identity. This context-aware variant keeps a
+// reused execution from relabelling a delayed callback with a replacement
+// attempt's mutable execution field.
+func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExecution, sessionID, attemptID string) {
 	if p.eventBus == nil || sessionID == "" {
 		return
+	}
+	if attemptID == "" {
+		attemptID = execution.ResumeAttemptID
 	}
 
 	payload := ACPSessionCreatedPayload{
@@ -203,6 +227,7 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 		SessionID:        execution.SessionID,
 		AgentProfileID:   execution.ID,
 		AgentExecutionID: execution.ID,
+		AttemptID:        attemptID,
 		ACPSessionID:     sessionID,
 	}
 
@@ -218,13 +243,56 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 // PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.
 // This is different from PublishAgentEvent which publishes lifecycle events (started, stopped, etc.).
 func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	p.publishAgentStreamEventWithAttempt(execution, event, event.AttemptID)
+}
+
+func (p *EventPublisher) publishAgentStreamEventWithAttempt(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	attemptID string,
+) {
 	if p.eventBus == nil {
 		return
 	}
+	if attemptID == "" {
+		attemptID = event.AttemptID
+	}
+	if attemptID == "" {
+		attemptID = execution.ResumeAttemptID
+	}
 
-	// Build the nested event data
 	// event.SessionID is the ACP session ID (internal agent protocol session)
-	eventData := &AgentStreamEventData{
+	eventData := buildAgentStreamEventData(event)
+
+	// Build agent event message payload
+	// session_id is the task session ID (execution.SessionID)
+	// acp_session_id in eventData is the internal agent protocol session
+	payload := AgentStreamEventPayload{
+		Type:           "agent/event",
+		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:        execution.ID,
+		ExecutionID:    execution.ID,
+		AttemptID:      attemptID,
+		AgentProfileID: execution.officeProfileID(),
+		TaskID:         execution.TaskID,
+		SessionID:      execution.SessionID,
+		Data:           eventData,
+	}
+
+	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
+	subject := events.BuildAgentStreamSubject(execution.SessionID)
+
+	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
+		p.logger.Error("failed to publish agent stream event",
+			zap.String("instance_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
+}
+
+func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData {
+	return &AgentStreamEventData{
 		Type:                    event.Type,
 		ACPSessionID:            event.SessionID,
 		Text:                    event.Text,
@@ -268,31 +336,6 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		PlanContent:             event.PlanContent,
 		MCPAttachment:           event.MCPAttachment,
 		MCPAttachmentAttempt:    event.MCPAttachmentAttempt,
-	}
-
-	// Build agent event message payload
-	// session_id is the task session ID (execution.SessionID)
-	// acp_session_id in eventData is the internal agent protocol session
-	payload := AgentStreamEventPayload{
-		Type:           "agent/event",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:        execution.ID,
-		ExecutionID:    execution.ID,
-		AgentProfileID: execution.officeProfileID(),
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		Data:           eventData,
-	}
-
-	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
-	subject := events.BuildAgentStreamSubject(execution.SessionID)
-
-	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
-		p.logger.Error("failed to publish agent stream event",
-			zap.String("instance_id", execution.ID),
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", execution.SessionID),
-			zap.Error(err))
 	}
 }
 

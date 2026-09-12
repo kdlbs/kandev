@@ -58,6 +58,9 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 		WorktreeBranch:    wt.WorktreeBranch,
 		TaskWorkspacePath: wt.TaskWorkspacePath,
 	}
+	if execution != nil {
+		payload.AttemptID = execution.ResumeAttemptID
+	}
 	event := bus.NewEvent(events.AgentctlReady, "branch-materializer", payload)
 	if err := m.eventPublisher.eventBus.Publish(ctx, events.AgentctlReady, event); err != nil {
 		m.logger.Warn("failed to publish worktree materialized event",

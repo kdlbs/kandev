@@ -1319,7 +1319,9 @@ func (m *Manager) initializeACPSessionForRestart(
 	execution.ACPSessionID = result.SessionID
 
 	if m.sessionManager.eventPublisher != nil {
-		m.sessionManager.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
+		m.sessionManager.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+		)
 	}
 
 	return nil
@@ -1902,6 +1904,18 @@ func (m *Manager) markCompletedWithTurnID(
 	errorMessage, turnID string,
 	failureEvidence *PromptAttemptEvidence,
 ) error {
+	return m.markCompletedWithTurnIDAndAttempt(
+		executionID, exitCode, errorMessage, turnID, failureEvidence, "",
+	)
+}
+
+func (m *Manager) markCompletedWithTurnIDAndAttempt(
+	executionID string,
+	exitCode int,
+	errorMessage, turnID string,
+	failureEvidence *PromptAttemptEvidence,
+	attemptID string,
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -1931,10 +1945,7 @@ func (m *Manager) markCompletedWithTurnID(
 			zap.Int("exit_code", exitCode))
 		return nil
 	}
-	if (exitCode != 0 || errorMessage != "") && failureEvidence == nil {
-		evidence := execution.promptAttemptEvidenceSnapshot()
-		failureEvidence = &evidence
-	}
+	failureEvidence = ensureCompletionFailureEvidence(execution, exitCode, errorMessage, failureEvidence)
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		now := time.Now()
@@ -1974,13 +1985,28 @@ func (m *Manager) markCompletedWithTurnID(
 	}
 	if eventType == events.AgentFailed {
 		m.eventPublisher.publishAgentEventWithTurnIDAndEvidence(
-			context.Background(), eventType, execution, turnID, failureEvidence,
+			WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID, failureEvidence,
 		)
 		return nil
 	}
-	m.eventPublisher.publishAgentEventWithTurnID(context.Background(), eventType, execution, turnID)
+	m.eventPublisher.publishAgentEventWithTurnID(
+		WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID,
+	)
 
 	return nil
+}
+
+func ensureCompletionFailureEvidence(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage string,
+	failureEvidence *PromptAttemptEvidence,
+) *PromptAttemptEvidence {
+	if (exitCode == 0 && errorMessage == "") || failureEvidence != nil {
+		return failureEvidence
+	}
+	evidence := execution.promptAttemptEvidenceSnapshot()
+	return &evidence
 }
 
 // isTerminalStatus reports whether a status is a final execution state that

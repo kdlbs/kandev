@@ -161,6 +161,9 @@ func (e *Executor) buildBootstrapLastAgentError(
 	details = models.NormalizeAgentErrorDetails(details, causes)
 	occurredAt := time.Now().UTC()
 	attemptID := agentExecutionID
+	if contextAttemptID := ResumeAttemptIDFromContext(ctx); contextAttemptID != "" {
+		attemptID = contextAttemptID
+	}
 	return models.LastAgentError{
 		Message:          classification.message,
 		OccurredAt:       occurredAt,

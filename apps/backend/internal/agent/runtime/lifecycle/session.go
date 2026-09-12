@@ -226,14 +226,23 @@ func (sm *SessionManager) createOrLoadSession(
 				zap.String("reason", err.Error()))
 			return "", err
 		}
-		// session/load can fail for reasons that don't justify aborting the
-		// session: agent doesn't support the method (capability mismatch /
-		// method not found), the upstream agent CLI no longer recognises the
-		// stored token (expired / version drift / agent-side GC), etc. In all
-		// those cases we want to start a fresh ACP session — the kandev-side
-		// row identity is still preserved, only the agent CLI's conversation
-		// memory is reset. The caller (executor) overwrites the stored token
-		// when the new session ID flows back through the events pipeline.
+		// Only explicitly recognized compatibility failures authorize replacing
+		// the provider conversation. An internal error, timeout, cancellation,
+		// authentication failure, or unknown transport error is inconclusive:
+		// preserve the stored identity so a later retry can load it.
+		if !isSessionLoadFallbackErr(err) {
+			sm.logger.Warn("session/load failed with an inconclusive error, preserving session identity",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("existing_session_id", existingSessionID),
+				zap.String("reason", err.Error()))
+			return "", err
+		}
+		// The agent does not support loading or no longer recognizes the stored
+		// token (expired / version drift / agent-side GC). In those confirmed
+		// cases start a fresh ACP session. The kandev-side row identity remains
+		// unchanged; only the provider's conversation memory is reset. The
+		// caller (executor) overwrites the stored token when the new session ID
+		// flows back through the events pipeline.
 		sm.logger.Warn("session/load failed, falling back to session/new",
 			zap.String("agent_type", agentConfig.ID()),
 			zap.String("existing_session_id", existingSessionID),
@@ -460,7 +469,9 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 
 	// Publish session created event
 	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
+		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+		)
 	}
 
 	// Send the task prompt if provided, or mark the execution as ready.
@@ -1870,6 +1881,23 @@ func isSessionUnknownErr(err error) bool {
 	return strings.Contains(err.Error(), "Resource not found")
 }
 
+// isSessionLoadFallbackErr reports the small set of session/load failures for
+// which replacing the provider conversation is known to be safe. Errors from
+// the agentctl WebSocket boundary are message-only, so retain the structured
+// ACP checks and match only their canonical projected messages here.
+func isSessionLoadFallbackErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "method not found") ||
+		strings.Contains(msg, "loadsession capability is false") ||
+		strings.Contains(msg, "resource not found")
+}
+
 func isAgentStreamNotConnectedErr(err error) bool {
 	if err == nil {
 		return false
@@ -1898,5 +1926,6 @@ func isTransportDeadErr(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "peer disconnected") ||
 		strings.Contains(msg, "connection closed") ||
-		strings.Contains(msg, "notification queue overflow")
+		strings.Contains(msg, "notification queue overflow") ||
+		strings.Contains(msg, context.DeadlineExceeded.Error())
 }

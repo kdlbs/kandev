@@ -55,6 +55,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		eventExecutionID = payload.AgentID
 	}
 	eventType := payload.Data.Type
+	if !s.resumeAttemptAllowsExecution(payload.SessionID, eventExecutionID, payload.AttemptID) {
+		s.logger.Debug("ignoring stream event from a stale resume attempt",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("event_execution_id", eventExecutionID),
+			zap.String("attempt_id", payload.AttemptID))
+		return
+	}
 	if !s.cancellationOwnsStreamEvent(
 		payload.SessionID,
 		eventExecutionID,
@@ -397,7 +405,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "")
+		s.storeResumeToken(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -2773,7 +2781,7 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
+	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
 }
 
 func (s *Service) resolveCompleteEventTurnID(
@@ -3288,6 +3296,9 @@ func promptUsageMetadata(usage *streams.PromptUsage) map[string]interface{} {
 
 func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil || payload.SessionID == "" || s.repo == nil {
+		return
+	}
+	if !s.resumeAttemptAllowsExecution(payload.SessionID, payload.ExecutionID, payload.AttemptID) {
 		return
 	}
 	info, err := s.mergedACPSessionInfo(ctx, payload.SessionID, payload.Data)

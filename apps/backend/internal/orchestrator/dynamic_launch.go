@@ -302,6 +302,9 @@ func (s *Service) handleAgentProcessStarted(
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
+	if !s.resumeAttemptAllowsExecution(sessionID, agentExecutionID, executor.ResumeAttemptIDFromContext(ctx)) {
+		return
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
 		return
@@ -323,6 +326,9 @@ func (s *Service) handleAgentProcessStartFailed(
 	_ error,
 ) {
 	if s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	if !s.resumeAttemptAllowsExecution(sessionID, agentExecutionID, executor.ResumeAttemptIDFromContext(ctx)) {
 		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)

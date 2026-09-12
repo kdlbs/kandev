@@ -141,7 +141,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
-	execution.beginStartupAttempt()
+	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {

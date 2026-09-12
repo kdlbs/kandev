@@ -58,6 +58,19 @@ type taskTitleSessionClaimer interface {
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type correlatedSessionRecoveryProvider interface {
+	HasActiveSessionRecoveryForFailure(ctx context.Context, taskID, sessionID string, failure error) bool
+}
+
+type resumeAndPromptOrchestrator interface {
+	ResumeTaskSessionAndPrompt(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+	) (*orchestrator.PromptResult, error)
+}
+
 // AtomicQueuedPromptCoordinator exposes admission limits and committed prompt delivery.
 type AtomicQueuedPromptCoordinator interface {
 	MaxQueuedPromptsPerSession() int
@@ -1343,6 +1356,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		// The agent failure path (handleAgentFailed) already sets the session to FAILED
 		// with the error_message, which the UI displays via agent-status.
 		if !isAgentReportedError(err) &&
+			!isPromptErrorOwnedByRecovery(err) &&
 			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) {
 			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
 		}
@@ -1409,6 +1423,17 @@ func isAgentReportedError(err error) bool {
 	return errors.Is(err, lifecycle.ErrAgentReported)
 }
 
+var errPromptRecoveryCardOwnsFailure = errors.New("session recovery owns prompt failure")
+
+func isPromptErrorOwnedByRecovery(err error) bool {
+	return errors.Is(err, orchestrator.ErrResumeAttemptCancelled) || errors.Is(err, errPromptRecoveryCardOwnsFailure)
+}
+
+func (h *MessageHandlers) hasActiveSessionRecovery(ctx context.Context, taskID, sessionID string, failure error) bool {
+	provider, ok := h.orchestrator.(correlatedSessionRecoveryProvider)
+	return ok && provider.HasActiveSessionRecoveryForFailure(ctx, taskID, sessionID, failure)
+}
+
 // isTimeoutError reports whether err looks like a timeout. Used by
 // createPromptErrorMessage to render the "Request timed out…" UX hint.
 //
@@ -1452,9 +1477,9 @@ func isTimeoutError(err error) bool {
 // runs, so retrying here cannot double-send a prompt the agent already
 // accepted.
 //
-// ResumeTaskSession and waitForSessionReady failures return origErr: neither
-// step ever reaches PromptTask, so the original pre-dispatch error is still
-// the only meaningful signal. Once the retry's own PromptTask call runs,
+// ResumeTaskSession and waitForSessionReady failures return their own errors:
+// neither step reaches PromptTask, so masking the concrete failure with the
+// original pre-dispatch error loses the cause. Once the retry's own PromptTask call runs,
 // though, that call IS a real dispatch attempt — its error is authoritative
 // and takes over from origErr, so the caller's isAgentReportedError check
 // still fires correctly (e.g. the retry failing with a wrapped
@@ -1471,12 +1496,33 @@ func (h *MessageHandlers) handlePromptWithResume(
 		!errors.Is(origErr, orchestrator.ErrAgentNotReadyForPrompt) {
 		return origErr
 	}
+	if runner, ok := h.orchestrator.(resumeAndPromptOrchestrator); ok {
+		if _, retryErr := runner.ResumeTaskSessionAndPrompt(
+			ctx, taskID, sessionID, content, model, planMode, attachments,
+		); retryErr != nil {
+			h.logger.Warn("resume and prompt retry failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(retryErr))
+			if errors.Is(retryErr, orchestrator.ErrResumeAttemptCancelled) ||
+				h.hasActiveSessionRecovery(ctx, taskID, sessionID, retryErr) {
+				return errPromptRecoveryCardOwnsFailure
+			}
+			return retryErr
+		}
+		return nil
+	}
+
 	if resumeErr := h.orchestrator.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
 		h.logger.Warn("failed to resume task session for prompt",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(resumeErr))
-		return origErr
+		if errors.Is(resumeErr, orchestrator.ErrResumeAttemptCancelled) ||
+			h.hasActiveSessionRecovery(ctx, taskID, sessionID, resumeErr) {
+			return errPromptRecoveryCardOwnsFailure
+		}
+		return resumeErr
 	}
 	// Wait for the agent to become ready after resume.
 	// ResumeTaskSession starts the agent asynchronously, so we poll
@@ -1486,7 +1532,10 @@ func (h *MessageHandlers) handlePromptWithResume(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(waitErr))
-		return origErr
+		if h.hasActiveSessionRecovery(ctx, taskID, sessionID, waitErr) {
+			return errPromptRecoveryCardOwnsFailure
+		}
+		return waitErr
 	}
 	if _, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false); err != nil {
 		h.logger.Warn("retry prompt failed after resume",
