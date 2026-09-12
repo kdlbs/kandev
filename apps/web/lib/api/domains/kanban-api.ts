@@ -269,6 +269,7 @@ export type WorkflowMoveEntryOptions = {
 export type MoveTaskPayload = {
   workflow_id: string;
   workflow_step_id: string;
+  /** @deprecated Server computes arrival position per AC.28; this field is transmitted but ignored. */
   position?: number;
   entry_options?: WorkflowMoveEntryOptions | null;
 };
