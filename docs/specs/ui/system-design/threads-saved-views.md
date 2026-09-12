@@ -1,11 +1,12 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-THREADS-SAVED-VIEWS-001
   - REQ-UI-THREADS-SAVED-VIEWS-002
   - REQ-UI-THREADS-SAVED-VIEWS-003
   - REQ-UI-THREADS-SAVED-VIEWS-004
+  - REQ-UI-THREADS-SAVED-VIEWS-005
 ---
 
 # Threads Saved Views System Design
@@ -14,7 +15,9 @@ requirements:
 
 This design adds user-owned task queries to `/threads`. A query controls the
 task scope, filter clauses, sort, and maximum admitted columns. The existing
-Threads deck continues to own session selection and viewport activation.
+Threads deck continues to own session selection, viewport activation, layout
+composition, and composer disclosure. This design owns persistence of its
+presentation preferences with each view.
 
 Threads and the task sidebar share query primitives. They keep separate saved
 view collections because their presentation fields and active-view lifecycles
@@ -31,6 +34,7 @@ Stored task IDs never grant access to a task or cause a direct task fetch.
 | `REQ-UI-THREADS-SAVED-VIEWS-002` | [Candidate projection](#candidate-projection), [Filter catalog](#filter-catalog), [Query pipeline](#query-pipeline)               |
 | `REQ-UI-THREADS-SAVED-VIEWS-003` | [Sort, admission, and stable order](#sort-admission-and-stable-order), [Deep links](#deep-links)                                  |
 | `REQ-UI-THREADS-SAVED-VIEWS-004` | [Top-bar controls](#top-bar-controls), [Responsive behavior](#responsive-behavior), [Failure and recovery](#failure-and-recovery) |
+| `REQ-UI-THREADS-SAVED-VIEWS-005` | [Presentation preferences](#presentation-preferences) |
 
 ## Saved view state
 
@@ -48,6 +52,8 @@ type ThreadView = {
   filters: ThreadFilterClause[];
   sort: ThreadSortSpec;
   maxColumns: number | null;
+  layout: "columns" | "grid";
+  autoHideComposer: boolean;
 };
 
 type ThreadViewDraft = Omit<ThreadView, "id" | "name"> & {
@@ -68,13 +74,19 @@ keys remain unchanged.
 
 The store reuses the sidebar action semantics:
 
-- view selection persists immediately;
+- view selection persists immediately when there is no active draft;
 - edits create or update a persisted draft;
 - Save replaces the active saved definition and clears the draft;
 - Save as creates and activates another view;
 - Discard restores the active saved definition;
 - create, rename, and delete use optimistic updates with rollback;
 - the 50-view limit is checked in the UI and backend.
+
+While a draft exists, both view pickers disable saved-view selection and show
+a localized explanation directing the user to View settings. The existing
+Save/Discard actions clear the draft before switching. `setThreadActiveView`
+also rejects selection while a draft exists, including same-view selection,
+so a stale UI event cannot clear an unsaved draft.
 
 ## Persistence and synchronization
 
@@ -100,7 +112,9 @@ The existing `users.settings` JSON object adds these portable fields:
   },
   "filters": [],
   "sort": { "key": "attention", "direction": "asc" },
-  "max_columns": 3
+  "max_columns": 3,
+  "layout": "grid",
+  "auto_hide_composer": true
 }
 ```
 
@@ -120,12 +134,87 @@ The backend rejects these invalid values:
 - an empty view name;
 - more than 20 filter clauses in one view;
 - more than 200 selected task IDs in one view;
-- a numeric column limit outside 1 through 30;
+- a numeric chat limit outside 1 through 30;
 - an active or draft base ID that does not identify a saved view.
 
 The user-settings revision orders boot hydration, PATCH responses, and live
 events. The frontend rejects older settings snapshots. A queued settings sync
 serializes rapid view mutations and preserves unrelated user settings.
+
+## Presentation preferences
+
+`layout` and `auto_hide_composer` belong to both saved views and drafts. The
+backend `models.ThreadView` and `models.ThreadViewDraft` add these fields; DTOs
+already carry those model types. Extend the existing service validation and
+store normalization rather than creating another settings endpoint or table.
+The request/response shape remains the same through PATCH, boot hydration,
+and `user.settings.updated`.
+
+The native boot projection in `backendapp/boot_thread_views.go` also maps
+`layout` and `autoHideComposer` for both views and drafts. It emits the
+frontend's camel-case state directly, so the API wire mapper cannot repair
+fields omitted there.
+
+The backend supplies `columns` and `false` for omitted presentation fields in
+stored definitions, canonical defaults, new views, and legacy draft payloads.
+It normalizes unknown stored presentation values independently without losing
+the rest of the view. Decode these new stored fields tolerantly at the existing
+`scanUserSettings` JSON boundary before constructing their typed values; a
+malformed new field must not make the whole user-settings read fail. Normal
+request decoding and service validation reject explicitly unsupported new
+values before persistence. Preserve existing top-level PATCH semantics:
+omitted collections/drafts are unchanged, a null draft clears it, and supplied
+view lists are complete replacements. Missing nested fields in such a
+replacement use the compatibility defaults; they are not a partial view patch.
+
+Keep `DefaultThreadViews` as the backend default owner. Extend the one frontend
+wire mapper in `thread-view-wire.ts` for `layout` and `autoHideComposer`, using
+the same compatibility fallbacks. `createDefaultThreadView` supplies only the
+matching render/new-view shape; it does not write defaults during hydration.
+No browser storage fallback or DB schema migration is introduced.
+
+Update every view/draft constructor and clone in `thread-view-actions.ts`,
+including optimistic before/after snapshots, failed-write retry payloads,
+deferred server state, overwrite, Save as, and Duplicate. Extend
+`updateThreadViewDraft` and its exported slice type. A filter-only draft must
+carry its base view's presentation fields; a presentation-only patch must
+retain all existing query fields. The draft merge in
+`thread-view-query.ts:cloneViewWithDraft` returns the effective presentation.
+Its existing `queryFingerprint` explicitly selects query fields; keep the new
+presentation fields out so editing, saving, rollback, and remote presentation
+updates do not reorder task tiles. Real view selection/query edits retain
+their existing reset behavior.
+
+Add a Display section to `ThreadsViewEditor`, reusing shared Select/Switch and
+the existing Save/Save as/Discard footer. Fields are Layout (Columns/Grid) and
+Auto-hide composer. Descriptions explain full-height reading, two-row
+monitoring, CI-only collapsed footers, hover/keyboard disclosure, and the
+visible-composer touch fallback. Keep layout selection exclusively inside
+Display in the existing configurator, with its draft and Save/Discard flow.
+The top bar does not duplicate the layout selector.
+Keep ordinary desktop controls at 28px and touch controls at least 44px.
+
+Phone/tablet use the existing view drawer and its internal editor page. Phone
+layout controls edit the saved wider-screen choice and explain why the phone
+continues to show one chat. Auto-hide's helper explains that phone and coarse
+pointers retain their normal composer without changing the saved preference.
+The grid-height fallback is derived by the board,
+with a reason made available to the layout control/editor; it never changes
+the draft. Preserve one inset drawer, its header/back controls, one body scroll
+owner, safe-area padding, and existing error/retry presentation.
+
+Relabel the editor's `maxColumns` field Maximum chats across all locales,
+without changing the internal or wire name. The helper explains that five
+means five task tiles in either layout, with the existing hidden-match count.
+No automatic new view, limit increase, global preference, or default auto-hide
+activation accompanies choosing Grid.
+
+All copy uses `threads` translations. Update English, Portuguese, Simplified
+Chinese, the generated Traditional Chinese pair, and pseudo output with the
+repository translation tools. Existing synchronized settings revisions,
+authorization, rollback, and retry remain the failure/consistency boundary.
+The implementation package must test a second client's update and a rejected
+rapid edit, not only reload serialization.
 
 ## Candidate projection
 
@@ -236,7 +325,7 @@ uses activity recency inside each group. Plain `WAITING_FOR_INPUT` does not
 become a person-action rank.
 
 The query fingerprint contains the active view ID, effective scope, filters,
-sort, and column limit. A fingerprint change or explicit Reapply sort action
+sort, and chat limit. A fingerprint change or explicit Reapply sort action
 increments the order-reset generation. The next render uses the complete
 sorted order.
 
@@ -267,15 +356,19 @@ session membership.
 place the slot before `ViewToggleGroup`. Phone groups the page label and active
 view in the title control, with inline pagination and no scrolling action strip.
 
-Threads supplies two compact desktop/tablet controls:
+Threads supplies the existing view selector/settings controls:
 
 ```text
-[All threads v] [View settings] [Kanban] [Pipeline] [Threads] [List]
+[All threads v] [View settings] [Listing views]
 ```
 
 The first control switches saved views and exposes New view. The second opens
 the editor and shows a dirty indicator for a draft. Its accessible name
 includes the active view and admitted count.
+
+Layout selection stays inside Display as described in
+[Presentation preferences](#presentation-preferences). Touch layouts keep
+Display in the existing view drawer.
 
 The existing `KanbanDisplayDropdown` does not render on Threads. Workflow,
 repository, and task filters on that surface create a second query owner.
@@ -370,3 +463,11 @@ return, and zero document overflow.
 - [Surface-owned Saved Task Views](../../../decisions/2026-08-31-surface-owned-saved-task-views.md)
 - [Backend-owned Portable User Settings](../../../decisions/0041-backend-owned-portable-user-settings.md)
 - [Viewport Activation Owns Threads Session Streams](../../../decisions/2026-08-28-viewport-activation-owns-thread-streams.md)
+
+## Implementation plans
+
+- [Threads layouts and composer disclosure](../../../plans/threads-layouts/plan.md)
+  implements presentation preferences under `REQ-UI-THREADS-SAVED-VIEWS-005`.
+- [Threads saved views](../../../plans/threads-saved-views/plan.md) records the
+  completed query, editor, and persistence foundation. Its completed results
+  do not claim coverage of the later presentation additions.

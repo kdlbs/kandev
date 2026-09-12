@@ -24,9 +24,15 @@ import {
 } from "./threads-view-filter-registry";
 import { MAX_THREAD_VIEW_COLUMNS } from "./threads-view-editor-utils";
 import { threadViewName } from "@/lib/state/slices/ui/thread-view-builtins";
+import { ThreadsViewDisplay } from "./threads-view-display";
 
 type ThreadViewDraftUpdate = (
-  patch: Partial<Pick<ThreadView, "taskScope" | "filters" | "sort" | "maxColumns">>,
+  patch: Partial<
+    Pick<
+      ThreadView,
+      "taskScope" | "filters" | "sort" | "maxColumns" | "layout" | "autoHideComposer"
+    >
+  >,
 ) => void;
 
 export type EditorBodyProps = {
@@ -35,6 +41,7 @@ export type EditorBodyProps = {
   candidates: ThreadCandidate[];
   repositoryNames: ReadonlyMap<string, string>;
   mobile: boolean;
+  gridHeightFallback: boolean;
   showHeader: boolean;
   nameMode: "rename" | "saveAs" | null;
   name: string;
@@ -67,6 +74,7 @@ export function EditorBody({
   candidates,
   repositoryNames,
   mobile,
+  gridHeightFallback,
   showHeader,
   nameMode,
   name,
@@ -94,7 +102,7 @@ export function EditorBody({
 }: EditorBodyProps) {
   return (
     <div
-      className={`flex min-h-0 flex-col${mobile ? " [&_button]:min-h-11 [&_input]:min-h-11 [&_[role=combobox]]:min-h-11" : ""}`}
+      className={`flex min-h-0 flex-col${mobile ? " [&_button:not([role=switch])]:min-h-11 [&_input]:min-h-11 [&_[role=combobox]]:min-h-11" : ""}`}
       data-testid="threads-view-editor"
     >
       {showHeader && (
@@ -118,6 +126,7 @@ export function EditorBody({
         candidates={candidates}
         repositoryNames={repositoryNames}
         mobile={mobile}
+        gridHeightFallback={gridHeightFallback}
         invalidSelectedScope={invalidSelectedScope}
         invalidDraft={invalidDraft}
         hasDraft={hasDraft}
@@ -147,6 +156,7 @@ type EditorSectionsProps = Pick<
   | "candidates"
   | "repositoryNames"
   | "mobile"
+  | "gridHeightFallback"
   | "invalidSelectedScope"
   | "invalidDraft"
   | "hasDraft"
@@ -172,6 +182,7 @@ function EditorSections({
   candidates,
   repositoryNames,
   mobile,
+  gridHeightFallback,
   invalidSelectedScope,
   invalidDraft,
   hasDraft,
@@ -225,12 +236,19 @@ function EditorSections({
         onChange={(sort) => onUpdate({ sort })}
         onReapplySort={onReapplySort}
       />
-      <MaxColumnsSection
-        value={maxColumnsInput}
-        invalid={maxColumnsInvalid}
+      <ThreadsViewDisplay
+        current={current}
         mobile={mobile}
-        onChange={onSetMaxColumns}
-      />
+        gridHeightFallback={gridHeightFallback}
+        onUpdate={onUpdate}
+      >
+        <MaxColumnsSection
+          value={maxColumnsInput}
+          invalid={maxColumnsInvalid}
+          mobile={mobile}
+          onChange={onSetMaxColumns}
+        />
+      </ThreadsViewDisplay>
       <EditorActions
         hasDraft={hasDraft}
         canDelete={canDelete}
@@ -537,11 +555,8 @@ function MaxColumnsSection({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-2 border-b p-2">
-      <label
-        className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-        htmlFor="threads-max-columns"
-      >
+    <div className="space-y-2">
+      <label className="text-xs font-medium" htmlFor="threads-max-columns">
         {t("threads:maxColumns")}
       </label>
       <Input
@@ -552,7 +567,7 @@ function MaxColumnsSection({
         step={1}
         value={value}
         onChange={(event) => onChange(event.target.value, event.target.validity.badInput)}
-        className={`${mobile ? "h-11" : "h-9"} text-xs`}
+        className={`${mobile ? "h-11" : "h-7"} text-xs`}
         placeholder={t("threads:noColumnLimit")}
         data-testid="threads-max-columns"
         aria-invalid={invalid}

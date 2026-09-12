@@ -12,6 +12,8 @@ const ALL_VIEW: ThreadView = {
   filters: [],
   sort: { key: "attention", direction: "asc" },
   maxColumns: null,
+  layout: "columns",
+  autoHideComposer: false,
 };
 
 const state = {
@@ -41,7 +43,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ usesDesktopWorkbench: true }),
+  useResponsiveBreakpoint: () => ({ usesDesktopWorkbench: true, isFinePointer: true }),
 }));
 
 afterEach(() => {

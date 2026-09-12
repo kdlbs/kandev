@@ -25,6 +25,8 @@ test.describe("Repository branch policies on mobile", () => {
     await drawer.getByRole("textbox", { name: "Policy name" }).fill("Mobile policy");
     await drawer.getByRole("combobox", { name: "Base branch" }).tap();
     await drawer.getByRole("option", { name: /^main local/ }).tap();
+    // The closing popover remains mounted for its exit animation.
+    await expect(drawer.getByRole("option")).toHaveCount(0);
     await drawer.getByRole("combobox", { name: "Pull request target" }).tap();
     await drawer.getByRole("option", { name: /^main local/ }).tap();
     await drawer

@@ -28,6 +28,8 @@ import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
 import { shouldShowProceed } from "./types";
+import { useComposerDisclosureContext } from "./composer-disclosure";
+import { cn } from "@/lib/utils";
 
 type TodoDisplayItem = {
   text: string;
@@ -118,6 +120,27 @@ export type ChatStatusBarProps = {
   onScrollToStart?: () => void;
 };
 
+export function ComposerCIStatus({
+  taskId,
+  sessionId,
+  standalone = false,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  standalone?: boolean;
+}) {
+  return (
+    <div
+      className={cn("flex flex-wrap items-center gap-1.5 empty:hidden", standalone && "px-2 py-1")}
+    >
+      <PRStatusChip taskId={taskId} />
+      <MRStatusChip taskId={taskId} />
+      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
+      <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
+    </div>
+  );
+}
+
 export function ChatStatusBar({
   todoItems,
   taskId,
@@ -135,6 +158,7 @@ export function ChatStatusBar({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarProps) {
+  const separateCI = useComposerDisclosureContext()?.enabled;
   const showTodos = todoItems.length > 0;
   const showProceed = shouldShowProceed(nextStepName, isAgentBusy, hasPendingClarification);
   const autopilot = useTaskAutopilot(taskId);
@@ -173,10 +197,7 @@ export function ChatStatusBar({
       {showTodos && <TodoIndicator todos={todoItems} />}
       {autopilot && <AutopilotChatChip />}
       <TaskDependencyChip taskId={taskId} />
-      <PRStatusChip taskId={taskId} />
-      <MRStatusChip taskId={taskId} />
-      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
-      <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
+      {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch
           so its dismissed state re-initialises, and keeping the two suffixes

@@ -47,6 +47,7 @@ export type ThreadSortKey =
   | "primaryAgent";
 export type ThreadSortDirection = "asc" | "desc";
 export type ThreadSortSpec = { key: ThreadSortKey; direction: ThreadSortDirection };
+export type ThreadLayout = "columns" | "grid";
 
 export type ThreadView = {
   id: string;
@@ -55,6 +56,8 @@ export type ThreadView = {
   filters: ThreadFilterClause[];
   sort: ThreadSortSpec;
   maxColumns: number | null;
+  layout: ThreadLayout;
+  autoHideComposer: boolean;
 };
 
 export type ThreadViewDraft = Omit<ThreadView, "id" | "name"> & {

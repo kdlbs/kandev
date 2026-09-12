@@ -31,11 +31,17 @@ import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
-import { ChatStatusBar, resolveStatusRowTaskId } from "./chat-status-bar";
+import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
 import { hasPendingClarification } from "./types";
 import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
+import {
+  ComposerCollapseButton,
+  ComposerDisclosureRegion,
+  useComposerActivity,
+  useComposerDisclosureContext,
+} from "./composer-disclosure";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -430,32 +436,24 @@ function useChatInputDerived(
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
  */
-export function ChatInputArea({
-  chatInputRef,
-  clarificationKey,
-  onClarificationResolved,
-  handleSubmit,
-  handleCancelTurn,
-  showRequestChangesTooltip,
-  onRequestChangesTooltipDismiss,
-  panelState,
-  isSending,
-  hideSessionsDropdown,
-  minimalToolbar,
-  hideAgentControls,
-  hidePlanMode,
-  placeholderOverride,
-  surfaceClassName,
-  showScrollToLastPrompt,
-  onScrollToLastPrompt,
-  lastPromptScrollDirection,
-  showScrollToStart,
-  onScrollToStart,
-  statusTaskId = null,
-  showAgentStartHint = false,
-  launchErrorOwned = false,
-}: ChatInputAreaProps) {
+export function ChatInputArea(props: ChatInputAreaProps) {
+  const {
+    chatInputRef,
+    clarificationKey,
+    panelState,
+    placeholderOverride,
+    surfaceClassName,
+    showScrollToLastPrompt,
+    onScrollToLastPrompt,
+    lastPromptScrollDirection,
+    showScrollToStart,
+    onScrollToStart,
+    statusTaskId = null,
+    showAgentStartHint = false,
+  } = props;
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
+  const disclosure = useComposerDisclosureContext();
+  useComposerActivity({ required: Boolean(panelState.session?.pending_action) });
   const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
   const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
   const sessionState = panelState.session?.state ?? null;
@@ -470,61 +468,60 @@ export function ChatInputArea({
   );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
-    panelState,
+    ...props,
     composerWorkspaceId,
     isMoving,
     implementPlanHandler,
     executor,
     placeholder,
-    handleSubmit,
-    handleCancelTurn,
-    isSending,
-    showRequestChangesTooltip,
-    onRequestChangesTooltipDismiss,
-    onClarificationResolved,
-    hideSessionsDropdown,
-    minimalToolbar,
-    hideAgentControls,
-    hidePlanMode,
-    launchErrorOwned,
   });
   return (
     <div
       data-testid="chat-input-area"
-      className={cn("bg-card flex-shrink-0 px-2 pb-2 pt-1", surfaceClassName)}
+      className={cn(
+        "bg-card flex-shrink-0",
+        !disclosure?.enabled && "px-2 pb-2 pt-1",
+        surfaceClassName,
+      )}
     >
-      <DynamicRouteRecovery session={panelState.session} />
-      <ComposerAgentStartHint
-        show={showAgentStartHint}
-        needsRecovery={panelState.needsRecovery}
-        executorUnavailable={executor.unavailable}
-        hasPendingClarification={Boolean(panelState.pendingClarification)}
-      />
-      <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
-      <QueueAffordance
-        sessionId={resolvedSessionId}
-        renderStatusBar={(queueChip) => (
-          <ChatStatusBar
-            todoItems={panelState.todoItems}
-            taskId={statusRowTaskId}
-            sessionId={resolvedSessionId}
-            sessionState={sessionState}
-            nextStepName={proceedStepName}
-            onProceed={proceed}
-            isAgentBusy={isAgentBusy}
-            hasPendingClarification={clarificationPending}
-            isMoving={isMoving}
-            queueChip={queueChip}
-            showScrollToLastPrompt={showScrollToLastPrompt}
-            onScrollToLastPrompt={onScrollToLastPrompt}
-            lastPromptScrollDirection={lastPromptScrollDirection}
-            showScrollToStart={showScrollToStart}
-            onScrollToStart={onScrollToStart}
-          />
-        )}
-      >
-        <ChatInputContainer ref={chatInputRef} key={clarificationKey} {...composerProps} />
-      </QueueAffordance>
+      {disclosure?.enabled && (
+        <ComposerCIStatus taskId={statusRowTaskId} sessionId={resolvedSessionId} standalone />
+      )}
+      <ComposerDisclosureRegion className={disclosure?.enabled ? "px-2 pb-2 pt-1" : undefined}>
+        <DynamicRouteRecovery session={panelState.session} />
+        <ComposerAgentStartHint
+          show={showAgentStartHint}
+          needsRecovery={panelState.needsRecovery}
+          executorUnavailable={executor.unavailable}
+          hasPendingClarification={Boolean(panelState.pendingClarification)}
+        />
+        <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
+        <QueueAffordance
+          sessionId={resolvedSessionId}
+          renderStatusBar={(queueChip) => (
+            <ChatStatusBar
+              todoItems={panelState.todoItems}
+              taskId={statusRowTaskId}
+              sessionId={resolvedSessionId}
+              sessionState={sessionState}
+              nextStepName={proceedStepName}
+              onProceed={proceed}
+              isAgentBusy={isAgentBusy}
+              hasPendingClarification={clarificationPending}
+              isMoving={isMoving}
+              queueChip={queueChip}
+              showScrollToLastPrompt={showScrollToLastPrompt}
+              onScrollToLastPrompt={onScrollToLastPrompt}
+              lastPromptScrollDirection={lastPromptScrollDirection}
+              showScrollToStart={showScrollToStart}
+              onScrollToStart={onScrollToStart}
+            />
+          )}
+        >
+          <ChatInputContainer ref={chatInputRef} key={clarificationKey} {...composerProps} />
+        </QueueAffordance>
+        <ComposerCollapseButton />
+      </ComposerDisclosureRegion>
     </div>
   );
 }

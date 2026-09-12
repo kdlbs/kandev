@@ -33,6 +33,7 @@ type EditorProps = {
   onReapplySort: () => void;
   showHeader?: boolean;
   mobile?: boolean;
+  gridHeightFallback?: boolean;
   deleteFocusBoundaryRef?: RefObject<HTMLElement | null>;
 };
 
@@ -53,6 +54,7 @@ export function ThreadsViewEditor({
   onReapplySort,
   showHeader = true,
   mobile = false,
+  gridHeightFallback = false,
   deleteFocusBoundaryRef,
 }: EditorProps) {
   const { t } = useTranslation();
@@ -61,15 +63,13 @@ export function ThreadsViewEditor({
   const [nameMode, setNameMode] = useState<"rename" | "saveAs" | null>(null);
   const [name, setName] = useState("");
   const current = draft && draft.baseViewId === activeView.id ? draft : activeView;
-  const [maxColumnsInput, setMaxColumnsInput] = useState(() =>
-    formatMaxColumns(current.maxColumns),
-  );
-  const [maxColumnsInvalid, setMaxColumnsInvalid] = useState(false);
+  const maxColumns = useMaxColumnsInput(activeView.id, current.maxColumns, onUpdate);
   const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>([activeView]);
   const invalidSelectedScope =
     current.taskScope.mode === "selected" && current.taskScope.taskIds.length === 0;
   const hasDraft = !!draft && draft.baseViewId === activeView.id;
   const repositoryNames = useMemo(() => mapRepositoryNames(repositories), [repositories]);
+  const invalidDraft = invalidSelectedScope || maxColumns.invalid;
   const deleteConfirmation = deletion.target ? (
     <ThreadViewDeleteConfirmation
       deletion={deletion}
@@ -78,11 +78,6 @@ export function ThreadsViewEditor({
       onConfirm={onDelete}
     />
   ) : null;
-
-  useEffect(() => {
-    setMaxColumnsInput(formatMaxColumns(current.maxColumns));
-    setMaxColumnsInvalid(false);
-  }, [activeView.id, current.maxColumns]);
 
   if (pickerOpen) {
     return (
@@ -103,13 +98,14 @@ export function ThreadsViewEditor({
         candidates={candidates}
         repositoryNames={repositoryNames}
         mobile={mobile}
+        gridHeightFallback={gridHeightFallback}
         showHeader={showHeader}
         nameMode={nameMode}
         name={name}
-        maxColumnsInput={maxColumnsInput}
-        maxColumnsInvalid={maxColumnsInvalid}
+        maxColumnsInput={maxColumns.input}
+        maxColumnsInvalid={maxColumns.invalid}
         invalidSelectedScope={invalidSelectedScope}
-        invalidDraft={invalidSelectedScope || maxColumnsInvalid}
+        invalidDraft={invalidDraft}
         hasDraft={hasDraft}
         viewCount={viewCount}
         canDelete={canDelete}
@@ -127,12 +123,7 @@ export function ThreadsViewEditor({
         deleteConfirmation={mobile && !isMobile ? deleteConfirmation : undefined}
         onDuplicate={onDuplicate}
         onReapplySort={onReapplySort}
-        onSetMaxColumns={(value, badInput = false) => {
-          setMaxColumnsInput(value);
-          const parsed = parseThreadMaxColumns(value, badInput);
-          setMaxColumnsInvalid(parsed === undefined);
-          if (parsed !== undefined) onUpdate({ maxColumns: parsed });
-        }}
+        onSetMaxColumns={maxColumns.onChange}
         onOpenPicker={() => setPickerOpen(true)}
       />
       {!mobile || isMobile ? deleteConfirmation : null}
@@ -202,4 +193,27 @@ function mapRepositoryNames(
 
 function formatMaxColumns(value: number | null): string {
   return value === null ? "" : String(value);
+}
+
+function useMaxColumnsInput(
+  viewId: string,
+  value: number | null,
+  onUpdate: EditorProps["onUpdate"],
+) {
+  const [input, setInput] = useState(() => formatMaxColumns(value));
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => {
+    setInput(formatMaxColumns(value));
+    setInvalid(false);
+  }, [viewId, value]);
+  return {
+    input,
+    invalid,
+    onChange: (next: string, badInput = false) => {
+      setInput(next);
+      const parsed = parseThreadMaxColumns(next, badInput);
+      setInvalid(parsed === undefined);
+      if (parsed !== undefined) onUpdate({ maxColumns: parsed });
+    },
+  };
 }

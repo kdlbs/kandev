@@ -431,6 +431,8 @@ export type UISliceActions = {
       filters: ThreadFilterClause[];
       sort: ThreadSortSpec;
       maxColumns: number | null;
+      layout: ThreadView["layout"];
+      autoHideComposer: boolean;
     }>,
   ) => void;
   saveThreadViewDraftAs: (name: string) => void;

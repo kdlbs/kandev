@@ -11,6 +11,13 @@ import { requireBox } from "../../helpers/layout-assertions";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
 import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
+import {
+  captureThreadSettings,
+  capturePresentation,
+  expectTwoRows,
+  seedThreadPresentation,
+  startPresentationThread,
+} from "./threads-presentation-helpers";
 
 const AGENT_TITLE = "Mobile threads live work";
 
@@ -58,6 +65,53 @@ test.describe("Mobile Threads view", () => {
     );
     previousViewSettings = null;
     expect(restored.ok).toBe(true);
+  });
+
+  // @covers AC-UI-THREADS-DECK-004.4, AC-UI-THREADS-DECK-004.6, AC-UI-THREADS-DECK-004.8
+  test("keeps phone navigation single-chat while restoring Grid on a touch tablet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(240_000);
+    const original = await captureThreadSettings(apiClient);
+    try {
+      const tasks = [];
+      for (const title of ["A responsive grid", "B responsive grid", "C responsive grid"]) {
+        tasks.push(await startPresentationThread(testPage, apiClient, seedData, title));
+      }
+      await seedThreadPresentation(apiClient, { layout: "grid" });
+      await testPage.goto("/threads");
+      const board = testPage.getByTestId("threads-board");
+      await expect(board).toHaveAttribute("data-layout", "columns");
+      await expect(board.getByTestId("session-chat")).toHaveCount(1);
+      await testPage
+        .getByTestId(`thread-column-${tasks[0].id}`)
+        .getByTestId("thread-picker-trigger")
+        .tap();
+      await testPage.getByTestId(`thread-picker-row-${tasks[1].id}`).tap();
+      await expect(testPage.getByTestId("thread-swipe-cue")).toHaveText("2/3");
+      await expect(board.getByTestId("session-chat")).toHaveCount(1);
+      await capturePresentation(testPage, testInfo, "grid-phone-fallback");
+      await testPage.setViewportSize({ width: 767, height: 1100 });
+      await expect(board).toHaveAttribute("data-layout", "columns");
+      await expect(testPage.getByTestId("thread-swipe-cue")).toHaveText("2/3");
+      await testPage.setViewportSize({ width: 768, height: 1100 });
+      await expectTwoRows(board);
+      await expect(board.getByTestId("session-chat")).toHaveCount(3);
+      const openTask = board
+        .getByTestId(`thread-column-${tasks[0].id}`)
+        .getByRole("button", { name: "Open task", exact: true });
+      expect((await openTask.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await capturePresentation(testPage, testInfo, "grid-touch-tablet");
+      await testPage.setViewportSize({ width: 393, height: 851 });
+      await expect(testPage.getByTestId("thread-swipe-cue")).toHaveText("2/3");
+      await expect(board.getByTestId("session-chat")).toHaveCount(1);
+      expect((await captureThreadSettings(apiClient)).thread_views[0].layout).toBe("grid");
+      await assertNoHorizontalOverflow(testPage, "phone Grid fallback after tablet resize");
+    } finally {
+      await apiClient.saveUserSettings(original);
+    }
   });
   test("reaches the deck from the drawer and pages one full-width column", async ({
     testPage,

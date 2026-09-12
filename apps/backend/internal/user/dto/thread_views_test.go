@@ -11,15 +11,17 @@ func TestThreadViewDTOMapsPersistedFields(t *testing.T) {
 	maxColumns := 3
 	settings := &models.UserSettings{
 		ThreadViews: []models.ThreadView{{
-			ID:         "view-one",
-			Name:       "One",
-			TaskScope:  models.ThreadTaskScope{Mode: models.ThreadTaskScopeSelected, TaskIDs: []string{"task-a"}},
-			Filters:    []models.ThreadViewClause{},
-			Sort:       models.ThreadViewSort{Key: "priority", Direction: "desc"},
-			MaxColumns: &maxColumns,
+			ID:               "view-one",
+			Name:             "One",
+			TaskScope:        models.ThreadTaskScope{Mode: models.ThreadTaskScopeSelected, TaskIDs: []string{"task-a"}},
+			Filters:          []models.ThreadViewClause{},
+			Sort:             models.ThreadViewSort{Key: "priority", Direction: "desc"},
+			MaxColumns:       &maxColumns,
+			Layout:           models.ThreadLayoutGrid,
+			AutoHideComposer: true,
 		}},
 		ThreadActiveViewID: "view-one",
-		ThreadViewDraft:    &models.ThreadViewDraft{BaseViewID: "view-one"},
+		ThreadViewDraft:    &models.ThreadViewDraft{BaseViewID: "view-one", Layout: models.ThreadLayoutColumns, AutoHideComposer: true},
 	}
 	got := FromUserSettings(settings)
 	if len(got.ThreadViews) != 1 || got.ThreadViews[0].ID != "view-one" {
@@ -27,6 +29,12 @@ func TestThreadViewDTOMapsPersistedFields(t *testing.T) {
 	}
 	if got.ThreadActiveViewID != "view-one" || got.ThreadViewDraft == nil {
 		t.Fatalf("active/draft = %q/%+v, want persisted values", got.ThreadActiveViewID, got.ThreadViewDraft)
+	}
+	if got.ThreadViews[0].Layout != models.ThreadLayoutGrid || !got.ThreadViews[0].AutoHideComposer {
+		t.Fatal("saved presentation was lost in the DTO")
+	}
+	if got.ThreadViewDraft.Layout != models.ThreadLayoutColumns || !got.ThreadViewDraft.AutoHideComposer {
+		t.Fatal("draft presentation was lost in the DTO")
 	}
 }
 

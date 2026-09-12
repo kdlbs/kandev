@@ -1,78 +1,11 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render as renderReact,
-  screen,
-  waitFor,
-} from "@testing-library/react";
-import type { ReactElement } from "react";
-import { StateProvider } from "@/components/state-provider";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { ActiveThread } from "@/lib/threads/active-threads";
-
-const sessionMocks = vi.hoisted(() => {
-  const startedAt = "2026-08-27T10:00:00Z";
-  const updatedAt = "2026-08-27T12:00:00Z";
-  return {
-    startedAt,
-    updatedAt,
-    sessionLists: new Map<string, Array<Record<string, unknown>>>(),
-    sessionErrors: new Map<string, string | null>(),
-    sessionLoaded: new Map<string, boolean>(),
-    sessionLoaders: new Map<string, ReturnType<typeof vi.fn>>(),
-    useTaskSessions: vi.fn((taskId: string) => {
-      let sessions = sessionMocks.sessionLists.get(taskId);
-      if (!sessions) {
-        sessions = [
-          {
-            id: `session-${taskId}`,
-            task_id: taskId,
-            state: "RUNNING" as const,
-            is_primary: true,
-            started_at: sessionMocks.startedAt,
-            updated_at: sessionMocks.updatedAt,
-          },
-        ];
-        sessionMocks.sessionLists.set(taskId, sessions);
-      }
-      return {
-        sessions,
-        isLoading: false,
-        isLoaded: sessionMocks.sessionLoaded.get(taskId) ?? true,
-        error: sessionMocks.sessionErrors.get(taskId) ?? null,
-        loadSessions: sessionMocks.sessionLoaders.get(taskId) ?? vi.fn(),
-      };
-    }),
-  };
-});
-
-vi.mock("./thread-conversation", () => ({
-  ThreadConversation: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`thread-conversation-${sessionId}`} />
-  ),
-}));
-
-vi.mock("@/hooks/use-task-sessions", () => ({
-  useTaskSessions: sessionMocks.useTaskSessions,
-}));
-
-function render(element: ReactElement) {
-  return renderReact(element, { wrapper: StateProvider });
-}
-
+import { render, sessionMocks } from "./threads-board.test-helpers";
 import { ThreadsBoard } from "./threads-board";
 
-afterEach(() => {
-  cleanup();
-  sessionMocks.useTaskSessions.mockClear();
-  sessionMocks.sessionLists.clear();
-  sessionMocks.sessionErrors.clear();
-  sessionMocks.sessionLoaded.clear();
-  sessionMocks.sessionLoaders.clear();
-});
-
 const COLUMN_A = "thread-column-a";
+const BOARD_TEST_ID = "threads-board";
 const FOCUSED_ATTR = "data-focused";
 const COLUMN_B = "thread-column-b";
 const CONVERSATION_A = "thread-conversation-session-a";
@@ -97,6 +30,112 @@ function thread(overrides: Partial<ActiveThread> & { taskId: string }): ActiveTh
     ...overrides,
   };
 }
+
+function mockBoardResize() {
+  let resize: ResizeObserverCallback = () => {};
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  return (width?: number) =>
+    act(() =>
+      resize(
+        [{ contentRect: { height: 700, width } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      ),
+    );
+}
+
+describe("ThreadsBoard — presentation reflow", () => {
+  // @covers AC-UI-THREADS-DECK-004.6
+  it("reasserts an unretired deep link after width-only reflow", () => {
+    const measure = mockBoardResize();
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    render(
+      <ThreadsBoard
+        threads={[thread({ taskId: "a" }), thread({ taskId: "b" })]}
+        focusedTaskId="b"
+        onOpenTask={() => {}}
+      />,
+    );
+    measure(1100);
+    scroll.mockClear();
+    measure(800);
+    expect(scroll.mock.contexts).toEqual([screen.getByTestId(COLUMN_B)]);
+
+    fireEvent.wheel(screen.getByTestId(COLUMN_A));
+    scroll.mockClear();
+    measure(700);
+    expect(scroll).not.toHaveBeenCalled();
+  });
+  // @covers AC-UI-THREADS-DECK-004.1, AC-UI-THREADS-DECK-004.2
+  it("uses two column-major rows without replacing the task shells", () => {
+    const measure = mockBoardResize();
+    const threads = ["a", "b", "c"].map((taskId) => thread({ taskId }));
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    const view = render(<ThreadsBoard threads={threads} focusedTaskId="b" onOpenTask={() => {}} />);
+    const shells = [...screen.getByTestId(BOARD_TEST_ID).children];
+    measure();
+    view.rerender(
+      <ThreadsBoard threads={threads} layout="grid" focusedTaskId="b" onOpenTask={() => {}} />,
+    );
+    const board = screen.getByTestId(BOARD_TEST_ID);
+    expect(board.style.gridTemplateRows).toBe("repeat(2, minmax(0, 1fr))");
+    expect([...board.children]).toEqual(shells);
+    expect(scroll).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ThreadsBoard — reader recovery", () => {
+  it("anchors the wheel-read tile across a layout reflow", () => {
+    const measure = mockBoardResize();
+    const threads = ["a", "b", "c", "d", "e", "f"].map((taskId) => thread({ taskId }));
+    const view = render(<ThreadsBoard threads={threads} onOpenTask={() => {}} />);
+    const board = screen.getByTestId(BOARD_TEST_ID);
+    vi.spyOn(board, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 600, 700));
+    let grid = false;
+    threads.forEach(({ taskId }, index) => {
+      vi.spyOn(
+        screen.getByTestId(`thread-column-${taskId}`),
+        "getBoundingClientRect",
+      ).mockImplementation(
+        () =>
+          new DOMRect((grid ? Math.floor(index / 2) : index) * 372 - board.scrollLeft, 0, 360, 300),
+      );
+    });
+    measure(600);
+    board.scrollLeft = 1660;
+    fireEvent.wheel(screen.getByTestId("thread-column-f"), { deltaY: 100 });
+    grid = true;
+    view.rerender(<ThreadsBoard threads={threads} layout="grid" onOpenTask={() => {}} />);
+    expect(board.scrollLeft).toBe(544);
+    expect(screen.getByTestId("thread-column-f").getBoundingClientRect().left).toBe(200);
+  });
+
+  it.each([true, false])("honors reduced motion (%s) when revealing a deep link", (reduced) => {
+    const originalMatchMedia = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) =>
+      query === "(prefers-reduced-motion: reduce)"
+        ? { ...originalMatchMedia(query), matches: reduced }
+        : originalMatchMedia(query),
+    );
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    render(
+      <ThreadsBoard threads={[thread({ taskId: "a" })]} focusedTaskId="a" onOpenTask={() => {}} />,
+    );
+    expect(scroll).toHaveBeenCalledWith({
+      inline: "center",
+      block: "nearest",
+      behavior: reduced ? "instant" : "smooth",
+    });
+  });
+});
 
 describe("ThreadsBoard — basic layout", () => {
   // @covers AC-TASKS-THREADS-ACTIONS-003.2, AC-TASKS-THREADS-ACTIONS-004.6
@@ -167,7 +206,7 @@ describe("ThreadsBoard — basic layout", () => {
       />,
     );
 
-    expect(screen.getByTestId("threads-board").className).toContain("md:snap-none");
+    expect(screen.getByTestId(BOARD_TEST_ID).className).toContain("md:snap-none");
     expect(screen.getByTestId(COLUMN_A).className).toContain("md:w-auto");
     expect(screen.getByTestId(COLUMN_A).className).not.toContain("sm:w-auto");
   });
@@ -384,7 +423,7 @@ describe("ThreadsBoard — status, interaction and empty states", () => {
 
     expect(screen.getByTestId("threads-empty-state")).not.toBeNull();
     expect(screen.getByText("No agent is working right now")).not.toBeNull();
-    expect(screen.queryByTestId("threads-board")).toBeNull();
+    expect(screen.queryByTestId(BOARD_TEST_ID)).toBeNull();
   });
 
   it("shows a loading state before the first snapshot lands, not the empty state", () => {
@@ -550,7 +589,7 @@ describe("ThreadsBoard — retiring the deep-link mark", () => {
     expect(screen.getByTestId(COLUMN_A).getAttribute(FOCUSED_ATTR)).toBe("true");
   });
 
-  it("drops the mark once the reader touches the deck", () => {
+  it.each(["pointerDown", "wheel"] as const)("drops the mark on reader %s", (event) => {
     render(
       <ThreadsBoard
         threads={[thread({ taskId: "a" }), thread({ taskId: "b" })]}
@@ -560,7 +599,7 @@ describe("ThreadsBoard — retiring the deep-link mark", () => {
     );
     expect(screen.getByTestId(COLUMN_B).getAttribute(FOCUSED_ATTR)).toBe("true");
 
-    fireEvent.pointerDown(screen.getByTestId(COLUMN_A));
+    fireEvent[event](screen.getByTestId(COLUMN_A));
 
     expect(screen.getByTestId(COLUMN_B).getAttribute(FOCUSED_ATTR)).toBeNull();
   });

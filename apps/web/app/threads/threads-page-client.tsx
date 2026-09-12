@@ -26,12 +26,14 @@ function ThreadsPageHeader({
   repositories,
   threads,
   activeMobileTaskId,
+  gridHeightFallback,
 }: {
   workspaceId: string | null | undefined;
   query: ThreadViewQueryResult;
   repositories: ComponentProps<typeof ThreadsViewControls>["repositories"];
   threads: readonly ActiveThread[];
   activeMobileTaskId: string | null;
+  gridHeightFallback: boolean;
 }) {
   return (
     <KanbanHeader
@@ -45,6 +47,7 @@ function ThreadsPageHeader({
             admittedCount={query.admittedCandidates.length}
             matchingCount={query.matchingCount + query.temporaryAdmissionCount}
             hiddenCount={query.hiddenCount}
+            gridHeightFallback={gridHeightFallback}
           />
           <MobileThreadPagination
             position={threads.findIndex((thread) => thread.taskId === activeMobileTaskId) + 1}
@@ -193,19 +196,22 @@ export function ThreadsPageClient() {
     <div className="flex h-full min-h-0 min-w-0 w-full flex-col bg-background">
       <ThreadsBoard
         threads={threads}
+        layout={query.effectiveView.layout}
+        autoHideComposer={query.effectiveView.autoHideComposer}
         isLoading={isLoading}
         focusedTaskId={focusedTaskId}
         focusedSessionId={focusedSessionId}
         focusRequestKey={JSON.stringify([scopedWorkspaceId, requestedTaskId, requestedSessionId])}
         onInvalidRequestedSession={handleInvalidRequestedSession}
         onOpenTask={handleOpenTask}
-        renderHeader={(activeMobileTaskId) => (
+        renderHeader={(activeMobileTaskId, gridHeightFallback) => (
           <ThreadsPageHeader
             workspaceId={activeWorkspaceId}
             query={query}
             repositories={repositories}
             threads={threads}
             activeMobileTaskId={activeMobileTaskId}
+            gridHeightFallback={gridHeightFallback}
           />
         )}
       />

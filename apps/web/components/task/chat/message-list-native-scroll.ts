@@ -23,6 +23,7 @@ import {
   useActivationPending,
 } from "./transcript-auto-scroll";
 import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
+import { useTranscriptViewportResize } from "./transcript-viewport-resize";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const paginationDebug = createDebugLogger("messages:pagination");
@@ -625,6 +626,15 @@ export function useAutoScroll(params: {
   const markNotNearBottom = useCallback(() => {
     isNearBottomRef.current = false;
   }, []);
+
+  useTranscriptViewportResize({
+    scrollRef,
+    sessionId,
+    enabled,
+    isVisible,
+    initialPlacementPending,
+    isProgrammaticScrollLocked,
+  });
 
   usePersistedTranscriptScroll({
     scrollRef,

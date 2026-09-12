@@ -43,6 +43,7 @@ import { QueuePanelHeader } from "./queued-ghost-panel-header";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { QueueEditLease } from "@/lib/api/domains/queue-api";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import { useComposerActivity } from "./composer-disclosure";
 
 const HEAD_PREVIEW_MAX = 80;
 
@@ -383,6 +384,7 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
   });
   const { value: pinned, toggle: togglePin } = useQueuePinned(sessionId);
   const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entries.length, pinned);
+  useComposerActivity({ overlay: isOpen && !pinned, draft: editingEntryId !== null });
   const {
     handleSave: handlePanelSave,
     handleRemove,

@@ -5,6 +5,8 @@ import "encoding/json"
 const (
 	ThreadTaskScopeAll      = "all"
 	ThreadTaskScopeSelected = "selected"
+	ThreadLayoutColumns     = "columns"
+	ThreadLayoutGrid        = "grid"
 )
 
 // ThreadTaskScope limits a Threads saved view to all eligible tasks or to an
@@ -16,12 +18,14 @@ type ThreadTaskScope struct {
 
 // ThreadView stores one persisted Threads task query.
 type ThreadView struct {
-	ID         string             `json:"id"`
-	Name       string             `json:"name"`
-	TaskScope  ThreadTaskScope    `json:"task_scope"`
-	Filters    []ThreadViewClause `json:"filters"`
-	Sort       ThreadViewSort     `json:"sort"`
-	MaxColumns *int               `json:"max_columns"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	TaskScope        ThreadTaskScope    `json:"task_scope"`
+	Filters          []ThreadViewClause `json:"filters"`
+	Sort             ThreadViewSort     `json:"sort"`
+	MaxColumns       *int               `json:"max_columns"`
+	Layout           string             `json:"layout"`
+	AutoHideComposer bool               `json:"auto_hide_composer"`
 }
 
 // ThreadViewClause stores an opaque filter clause. The frontend owns the
@@ -40,9 +44,11 @@ type ThreadViewSort struct {
 
 // ThreadViewDraft stores an unsaved edit against one saved Threads view.
 type ThreadViewDraft struct {
-	BaseViewID string             `json:"base_view_id"`
-	TaskScope  ThreadTaskScope    `json:"task_scope"`
-	Filters    []ThreadViewClause `json:"filters"`
-	Sort       ThreadViewSort     `json:"sort"`
-	MaxColumns *int               `json:"max_columns"`
+	BaseViewID       string             `json:"base_view_id"`
+	TaskScope        ThreadTaskScope    `json:"task_scope"`
+	Filters          []ThreadViewClause `json:"filters"`
+	Sort             ThreadViewSort     `json:"sort"`
+	MaxColumns       *int               `json:"max_columns"`
+	Layout           string             `json:"layout"`
+	AutoHideComposer bool               `json:"auto_hide_composer"`
 }

@@ -1,0 +1,46 @@
+.thread-composer-disclosure {
+  --composer-duration: 160ms;
+  --composer-ease: cubic-bezier(0.2, 0, 0, 1);
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--composer-duration) var(--composer-ease);
+}
+
+.thread-composer-disclosure[data-state="open"] {
+  --composer-duration: 200ms;
+  grid-template-rows: 1fr;
+}
+
+.thread-composer-clip {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.thread-composer-content {
+  opacity: 0;
+  transform: translateY(6px);
+  visibility: hidden;
+  transition:
+    opacity var(--composer-duration) var(--composer-ease),
+    transform var(--composer-duration) var(--composer-ease),
+    visibility 0s var(--composer-duration);
+}
+
+.thread-composer-disclosure[data-state="open"] > .thread-composer-clip > .thread-composer-content {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-disclosure,
+  .thread-composer-content {
+    transition: none;
+  }
+
+  .thread-composer-content {
+    transform: none;
+  }
+}

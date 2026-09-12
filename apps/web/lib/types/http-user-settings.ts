@@ -68,6 +68,8 @@ export type ThreadViewApi = {
   filters: ThreadViewClauseApi[];
   sort: ThreadViewSortApi;
   max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
 };
 
 export type ThreadViewDraftApi = {
@@ -76,6 +78,8 @@ export type ThreadViewDraftApi = {
   filters: ThreadViewClauseApi[];
   sort: ThreadViewSortApi;
   max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
 };
 export type SidebarTaskColorDimension =
   | "workflow_step"

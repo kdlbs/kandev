@@ -60,6 +60,8 @@ function view(overrides: Partial<ThreadView> = {}): ThreadView {
     filters: [],
     sort: { key: "attention", direction: "asc" },
     maxColumns: null,
+    layout: "columns",
+    autoHideComposer: false,
     ...overrides,
   };
 }
@@ -422,6 +424,8 @@ describe("queryThreadView sort and admission", () => {
           filters: [],
           sort: { key: "title", direction: "asc" },
           maxColumns: 1,
+          layout: "columns",
+          autoHideComposer: false,
         },
       },
     );
@@ -433,6 +437,19 @@ describe("queryThreadView sort and admission", () => {
 });
 
 describe("thread view fingerprint", () => {
+  // @covers AC-UI-THREADS-SAVED-VIEWS-005.7
+  it("applies draft presentation without changing admission or the query fingerprint", () => {
+    const snapshots = { "workflow-1": snapshot([task({ id: "one" }), task({ id: "two" })]) };
+    const saved = view();
+    const before = queryThreadView(snapshots, saved);
+    const after = queryThreadView(snapshots, saved, {
+      draft: { ...saved, baseViewId: saved.id, layout: "grid", autoHideComposer: true },
+    });
+    expect(after.effectiveView).toMatchObject({ layout: "grid", autoHideComposer: true });
+    expect(after.fingerprint).toBe(before.fingerprint);
+    expect(after.admittedCandidates).toEqual(before.admittedCandidates);
+    expect(after.stableCandidates).toEqual(before.stableCandidates);
+  });
   it("changes when query inputs change and remains stable for equivalent views", () => {
     const snapshots = { "workflow-1": snapshot([task({ id: "one" })]) };
     const first = queryThreadView(snapshots, view({ maxColumns: 2 }));

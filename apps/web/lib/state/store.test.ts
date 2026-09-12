@@ -56,6 +56,8 @@ describe("createAppStore", () => {
             filters: [],
             sort: { key: "title", direction: "asc" },
             maxColumns: 1,
+            layout: "columns",
+            autoHideComposer: false,
           },
         ],
         threadActiveViewId: "capped",

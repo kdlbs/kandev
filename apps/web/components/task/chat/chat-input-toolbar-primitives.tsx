@@ -21,6 +21,7 @@ import { ChatSubmitPluginDecoration } from "./chat-submit-plugin-decoration";
 import type { PluginPresentation } from "@/lib/plugins/types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { useComposerActivity } from "./composer-disclosure";
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
@@ -152,6 +153,7 @@ export function SubmitButton({
       state.chatInput.cancellingBySessionId[sessionId] === true
     );
   });
+  useComposerActivity({ busy: isCancelling });
   const tooltipDescription = submitTooltipDescription(
     isAgentBusy,
     planModeEnabled,
