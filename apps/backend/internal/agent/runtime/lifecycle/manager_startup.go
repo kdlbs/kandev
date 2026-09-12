@@ -242,7 +242,7 @@ func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, executi
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		result, err := client.GitPushPreflight(ctx, key)
+		result, err := client.GitPushPreflight(ctx, key, agentctl.PushOptions{})
 		if err != nil {
 			return &BootstrapFailure{
 				Operation: bootstrapOperation(execution),
