@@ -5,8 +5,8 @@ status: done
 wave: 3
 depends_on: ["02-terminal-stall-teardown"]
 plan: "plan.md"
-spec: "../../specs/tasks/requirements/task-stop-reachability.md"
-system_design: "../../specs/tasks/system-design/task-stop-reachability.md"
+system_design:
+  - ../../specs/tasks/system-design/task-stop-reachability.md
 requirements:
   - REQ-TASKS-TASK-STOP-REACHABILITY-001
 acceptance_criteria:

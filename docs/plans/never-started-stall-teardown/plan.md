@@ -1,17 +1,18 @@
 ---
-spec: docs/specs/agents/requirements/agent-stall-recovery.md
 requirements:
   - REQ-AGENTS-AGENT-STALL-RECOVERY-001
   - REQ-TASKS-TASK-STOP-REACHABILITY-001
-system_designs:
-  - docs/specs/agents/system-design/agent-stall-recovery.md
-  - docs/specs/tasks/system-design/task-stop-reachability.md
-decision: docs/decisions/2026-09-02-terminal-stall-owns-process-teardown.md
+system_design:
+  - ../../specs/agents/system-design/agent-stall-recovery.md
+  - ../../specs/tasks/system-design/task-stop-reachability.md
+legacy_specs: []
 created: 2026-09-02
 status: implemented
 ---
 
 # Implementation Plan: Never-Started Stall Teardown
+
+This plan implements the [terminal stall teardown decision](../../decisions/2026-09-02-terminal-stall-owns-process-teardown.md).
 
 ## Overview
 

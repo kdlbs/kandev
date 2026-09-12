@@ -5,8 +5,8 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/requirements/agent-stall-recovery.md"
-system_design: "../../specs/agents/system-design/agent-stall-recovery.md"
+system_design:
+  - ../../specs/agents/system-design/agent-stall-recovery.md
 requirements:
   - REQ-AGENTS-AGENT-STALL-RECOVERY-001
 acceptance_criteria:
