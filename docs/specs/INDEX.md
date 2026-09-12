@@ -48,4 +48,3 @@ file-size limits.
 Keep system purpose, ownership, exclusions, migration history, and related
 links in each system README. Do not add catalog rows to this page or repeat
 requirement and system-design lists in a system README.
-
