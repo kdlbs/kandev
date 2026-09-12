@@ -65,6 +65,21 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
+	if err := r.backfillRoutineTriggerTimezones(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// backfillRoutineTriggerTimezones sets an explicit "UTC" on cron triggers
+// created before the column default changed from empty to 'UTC', so the
+// empty string no longer means anything at read time.
+func (r *Repository) backfillRoutineTriggerTimezones() error {
+	if _, err := r.db.Exec(
+		`UPDATE office_routine_triggers SET timezone = 'UTC' WHERE kind = 'cron' AND timezone = ''`,
+	); err != nil {
+		return fmt.Errorf("office_routine_triggers.timezone backfill: %w", err)
+	}
 	return nil
 }
 
@@ -187,13 +202,26 @@ func (r *Repository) migrateParentWakeIndexes() error {
 }
 
 // migrateParentWakeReceiptColumns adds operation identity for receipts
-// created by workflow-engine dispatch. Existing direct-run receipts keep
-// their delivered_run_id and receive the empty operation id default.
+// created by workflow-engine dispatch, and the child generation a receipt
+// was delivered against. Existing rows receive the empty default for both;
+// an existing receipt with an empty child_generation is treated by
+// ListStuckParents' third OR arm as not matching any non-empty generation,
+// so it is re-admitted once on the next tick after upgrade rather than
+// silently trusted as current.
 func (r *Repository) migrateParentWakeReceiptColumns() {
-	r.migrate.Apply(
+	// Apply's errors are swallowed by design (see db.MigrateLogger.Apply) and
+	// surface instead through r.migrate.Err(), which runMigrations checks
+	// once after every migration step — explicitly discarded here rather
+	// than left unchecked, matching that contract for errcheck.
+	_ = r.migrate.Apply(
 		"parent_child_wake_receipts.delivery_operation_id",
 		`ALTER TABLE parent_child_wake_receipts
 		 ADD COLUMN delivery_operation_id TEXT NOT NULL DEFAULT ''`,
+	)
+	_ = r.migrate.Apply(
+		"parent_child_wake_receipts.child_generation",
+		`ALTER TABLE parent_child_wake_receipts
+		 ADD COLUMN child_generation TEXT NOT NULL DEFAULT ''`,
 	)
 }
 

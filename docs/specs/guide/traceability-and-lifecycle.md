@@ -26,8 +26,8 @@ commit.
 
 ## Status values
 
-System indexes use `draft`, `active`, or `retired`. Their `migration` field uses
-`in_progress` or `complete`.
+System README files use `draft`, `active`, or `retired`. Their `migration` field
+uses `in_progress` or `complete`.
 
 Requirement documents use:
 
@@ -64,10 +64,11 @@ Migrate one system at a time. Use this sequence:
 3. Extract observable behavior into requirement documents.
 4. Extract technical contracts and design into system-design documents.
 5. Add stable IDs and cross-references.
-6. Name the new documents as authoritative in the system index.
+6. Keep the system boundary and migration record in the system `README.md`.
 7. Add a short link to the system `README.md`, or archive the legacy document
    outside `docs/specs/<system>/`.
-8. Set `migration: complete` and remove obsolete size exceptions.
+8. Run the catalog and specification linters.
+9. Set `migration: complete` and remove obsolete size exceptions.
 
 Do not keep two editable sources of truth during migration.
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { PluginKey } from "@tiptap/pm/state";
+import { exitSuggestion } from "@tiptap/suggestion";
 import type {
   SuggestionOptions,
   SuggestionProps,
@@ -122,6 +123,7 @@ export function createMentionSuggestion(
             // keypress.
             kd.event.stopPropagation();
             setMenuState(EMPTY_MENTION_STATE);
+            exitSuggestion(kd.view, MentionSuggestionPluginKey);
             return true;
           }
           return onKeyDown(kd.event);

@@ -311,9 +311,9 @@ func TestHandleStopProcess_UnknownIDIsIdempotentSuccess(t *testing.T) {
 }
 
 // TestHandleStopProcess_RetiresRunningProcess asserts the stop reaches a
-// long-running command: the call returns success and the process is retired
-// from both the per-session list and the per-id fetch. A `sleep 120` that was
-// merely marked stopped would still be listed.
+// long-running command: the call returns success and the process is eventually
+// retired from both the per-session list and the per-id fetch. Stop signals the
+// process before its background waiter completes the final reap.
 func TestHandleStopProcess_RetiresRunningProcess(t *testing.T) {
 	srv := newTestServer(t)
 	id := startTestProcess(t, srv, "session-d", "sleep 120")
@@ -339,6 +339,8 @@ func TestHandleStopProcess_RetiresRunningProcess(t *testing.T) {
 		t.Fatalf("stop reported failure: %+v", body)
 	}
 
+	awaitProcessRetired(t, srv, id)
+
 	after := processRequest(t, srv, http.MethodGet, "/api/v1/processes?session_id=session-d", nil)
 	var remaining []process.ProcessInfo
 	if err := json.Unmarshal(after.Body.Bytes(), &remaining); err != nil {
@@ -346,9 +348,6 @@ func TestHandleStopProcess_RetiresRunningProcess(t *testing.T) {
 	}
 	if len(remaining) != 0 {
 		t.Errorf("list after stop = %+v, want it emptied", remaining)
-	}
-	if got := processRequest(t, srv, http.MethodGet, "/api/v1/processes/"+id, nil); got.Code != http.StatusNotFound {
-		t.Errorf("get after stop status = %d, want 404 (body %s)", got.Code, got.Body.String())
 	}
 }
 

@@ -338,7 +338,8 @@ func (r *SSHExecutor) isTransportLost(state *sshSessionState) bool {
 
 // transportTeardown performs transport teardown for state
 // (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.5): set the marker, close the
-// forward then the client (each through its once-guard), and log one warning
+// forward then the client (each through its once-guard), close the optional
+// runtime API tunnel after the client, and log one warning
 // naming the executor instance, remote host, and silence interval. Runs at
 // most once per session (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.5); it does
 // not remove the session from the tracked-sessions map
@@ -350,6 +351,7 @@ func (r *SSHExecutor) transportTeardown(instanceID string, state *sshSessionStat
 		r.mu.Unlock()
 		forwarderErr := r.closeForwarderOnce(state)
 		clientErr := r.closeClientOnce(state)
+		_ = state.runtimeAPITunnel.Close()
 		r.logTransportLoss(instanceID, state, reason, silence, forwarderErr, clientErr)
 	})
 }

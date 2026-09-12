@@ -7,7 +7,7 @@ import {
 
 test.describe.configure({ timeout: 120_000 });
 
-test("mobile reset context confirms inline without stacking another overlay", async ({
+test("mobile reset context opens a sheet and preserves composer controls", async ({
   testPage,
   apiClient,
   seedData,
@@ -26,7 +26,7 @@ test("mobile reset context confirms inline without stacking another overlay", as
   await expect(contextRing).toBeVisible();
 
   await session.resetContextButton().tap();
-  const inlineConfirmation = testPage.getByTestId("reset-context-inline-confirm");
+  const inlineConfirmation = testPage.getByTestId("mobile-action-confirmation");
   const warning = inlineConfirmation.getByText(
     "This will clear the agent's conversation history and start a fresh context. Your workspace, files, and git state will be preserved.",
     { exact: true },
@@ -34,8 +34,11 @@ test("mobile reset context confirms inline without stacking another overlay", as
   await expect(inlineConfirmation).toBeVisible();
   await expect(warning).toBeVisible();
   await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+  await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
+  await expect(session.resetContextButton()).toBeAttached();
+  await expect(testPage.getByTestId("submit-message-button")).toBeAttached();
   await prCapture.screenshot("mobile-reset-context-confirmation", {
-    caption: "Mobile toolbar reset context confirmation",
+    caption: "Mobile context reset preserves the composer behind its compact sheet",
   });
 
   const confirmBox = await inlineConfirmation.getByTestId("reset-context-confirm").boundingBox();
@@ -57,8 +60,8 @@ test("mobile reset context confirms inline without stacking another overlay", as
   });
   expect(warningIsTopmost).toBe(true);
   const confirmationBackground = await testPage
-    .getByTestId("mobile-chat-input-toolbar")
-    .evaluate((element) => getComputedStyle(element).backgroundColor);
+    .getByRole("dialog")
+    .evaluate((element) => getComputedStyle(element, "::before").backgroundColor);
   expect(confirmationBackground).not.toBe("rgba(0, 0, 0, 0)");
 
   await inlineConfirmation.getByRole("button", { name: "Cancel" }).tap();

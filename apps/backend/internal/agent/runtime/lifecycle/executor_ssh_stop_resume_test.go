@@ -185,8 +185,8 @@ func TestSSHExecutorStopInstanceIsSafeWithoutTrackedState(t *testing.T) {
 	if err := exec.StopInstance(context.Background(), nil, false); err != nil {
 		t.Fatalf("StopInstance(nil): %v", err)
 	}
-	if err := exec.StopInstance(context.Background(), &ExecutorInstance{InstanceID: "gone"}, false); err != nil {
-		t.Fatalf("StopInstance(untracked): %v", err)
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{InstanceID: "gone"}, false); err == nil {
+		t.Fatal("StopInstance(untracked) succeeded without persisted metadata")
 	}
 }
 

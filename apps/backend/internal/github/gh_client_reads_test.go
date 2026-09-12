@@ -54,6 +54,46 @@ func TestGHClient_GetIssue(t *testing.T) {
 	}
 }
 
+func TestGHClient_ListWorkflowRunsAndJobs(t *testing.T) {
+	calls := newFakeGH(t,
+		ghResponse{
+			Prefix: "api --paginate repos/acme/widget/actions/runs?head_sha=feature%2Fsha&per_page=100",
+			Stdout: `{"id":7,"run_attempt":2,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"feature/sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}
+{"id":8,"run_attempt":1,"workflow_id":10,"name":"Lint","event":"push","status":"completed","conclusion":"success","head_sha":"feature/sha","head_branch":"feature","html_url":"https://github.com/acme/widget/actions/runs/8","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}`,
+		},
+		ghResponse{
+			Prefix: "api --paginate repos/acme/widget/actions/runs/7/attempts/2/jobs?per_page=100",
+			Stdout: `{"id":70,"name":"approval gate","status":"completed","conclusion":null}
+{"id":71,"name":"test","status":"completed","conclusion":"success"}`,
+		},
+	)
+
+	runs, err := NewGHClient().ListWorkflowRuns(context.Background(), "acme", "widget", "feature/sha")
+	if err != nil {
+		t.Fatalf("ListWorkflowRuns: %v", err)
+	}
+	assertGHArgv(t, calls(t), 0, []string{
+		"api", "--paginate", "repos/acme/widget/actions/runs?head_sha=feature%2Fsha&per_page=100", "--jq", ".workflow_runs[]",
+	})
+	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" {
+		t.Fatalf("runs = %#v", runs)
+	}
+	if runs[0].Conclusion != "action_required" || runs[0].RunAttempt != 2 || len(runs[0].PullRequests) != 0 {
+		t.Fatalf("run[0] = %#v", runs[0])
+	}
+
+	jobs, err := NewGHClient().ListWorkflowRunJobs(context.Background(), "acme", "widget", 7, 2)
+	if err != nil {
+		t.Fatalf("ListWorkflowRunJobs: %v", err)
+	}
+	assertGHArgv(t, calls(t), 1, []string{
+		"api", "--paginate", "repos/acme/widget/actions/runs/7/attempts/2/jobs?per_page=100", "--jq", ".jobs[]",
+	})
+	if len(jobs) != 2 || jobs[0].Name != "approval gate" || jobs[0].Conclusion != "" {
+		t.Fatalf("jobs = %#v", jobs)
+	}
+}
+
 // The gh CLI emits "" (not null) for an open issue's closedAt.
 func TestGHClient_GetIssue_EmptyClosedAtDecodesToNil(t *testing.T) {
 	newFakeGH(t, ghResponse{

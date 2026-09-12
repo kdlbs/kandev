@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -444,10 +445,12 @@ test.describe("mobile PR CI automation options", () => {
     const drawer = session.prStatusChipDrawer();
     const retry = drawer.getByRole("button", { name: "Retry" });
     await expect(retry).toBeVisible();
+    await waitForFiniteAnimations(drawer);
     const retryBox = await retry.boundingBox();
     expect(retryBox).not.toBeNull();
-    expect(retryBox!.height).toBeGreaterThanOrEqual(44);
-    expect(retryBox!.width).toBeGreaterThanOrEqual(44);
+    // The settled transform can still introduce subpixel subtraction error.
+    expect(retryBox!.height + 0.001).toBeGreaterThanOrEqual(44);
+    expect(retryBox!.width + 0.001).toBeGreaterThanOrEqual(44);
 
     await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
     await retry.tap();

@@ -5,6 +5,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 async function setupMobileFileTask(
   testPage: Page,
@@ -13,7 +14,7 @@ async function setupMobileFileTask(
   backend: BackendContext,
 ) {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const filePath = `mobile-delete-file-${suffix}.md`;
+  const filePath = `mobile-delete-very-long-unbroken-document-name-for-confirmation-${suffix}.md`;
   const git = new GitHelper(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
@@ -56,7 +57,7 @@ test.describe("Mobile file confirmations", () => {
     restoreRepository = undefined;
   });
 
-  test("confirms one file deletion inline without horizontal overflow", async ({
+  test("confirms one file deletion in a sheet without changing its row", async ({
     testPage,
     apiClient,
     seedData,
@@ -74,6 +75,7 @@ test.describe("Mobile file confirmations", () => {
     const file = session.fileTreeNode(filePath);
     await expect(file).toBeVisible({ timeout: 15_000 });
     const trigger = session.fileTreeNodeActions(filePath);
+    const rowHeight = (await file.boundingBox())!.height;
     await expect(trigger).toBeVisible();
     const triggerBox = await trigger.boundingBox();
     expect(triggerBox).not.toBeNull();
@@ -101,8 +103,12 @@ test.describe("Mobile file confirmations", () => {
     expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport.height);
 
     await deleteItem.tap();
-    const inline = testPage.getByTestId("file-delete-inline-confirmation");
+    const inline = testPage.getByTestId("mobile-action-confirmation");
     await expect(inline).toBeVisible();
+    await expect(menu).toBeHidden();
+    await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
+    await waitForFiniteAnimations(testPage.getByRole("dialog"));
+    expect((await file.boundingBox())!.height).toBe(rowHeight);
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     const confirm = inline.getByTestId("file-delete-confirm");
     const cancel = inline.getByRole("button", { name: "Cancel" });
@@ -123,6 +129,15 @@ test.describe("Mobile file confirmations", () => {
       expect(buttonBox).not.toBeNull();
       expect(buttonBox!.x).toBeGreaterThanOrEqual(0);
       expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(viewport.width);
+      expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(viewport.height);
+      expect(
+        await button.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return element.contains(
+            document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2),
+          );
+        }),
+      ).toBe(true);
     }
     await expect
       .poll(async () => (await confirm.boundingBox())?.height ?? 0, { timeout: 2_000 })
@@ -137,9 +152,15 @@ test.describe("Mobile file confirmations", () => {
       ),
     ).toBe(true);
     await prCapture.screenshot("mobile-file-delete-confirmation", {
-      caption: "Pixel 5 file actions keep one-file deletion confirmation inline and touch-safe",
+      caption: "A long file name wraps inside a compact phone confirmation sheet",
     });
 
+    await cancel.tap();
+    await expect(trigger).toBeFocused();
+    await expect(file).toBeVisible();
+    await trigger.tap();
+    await deleteItem.tap();
+    await expect(inline).toBeVisible();
     await confirm.tap();
     await expect(file).not.toBeVisible({ timeout: 15_000 });
   });

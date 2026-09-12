@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { IconEdit, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 
-import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { CustomPrompt } from "@/lib/types/http";
 
 type PromptRowActionsProps = {
@@ -13,9 +13,6 @@ type PromptRowActionsProps = {
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
-  onDeleteClose: () => void;
-  onDeleteCancel: () => void;
-  onDeleteConfirm: () => void;
   isBusy: boolean;
   showCreate: boolean;
   isFinePointer: boolean;
@@ -27,18 +24,16 @@ export function PromptRowActions({
   deleteAnchorRef,
   onStartEditing,
   onOpenDelete,
-  onDeleteClose,
-  onDeleteCancel,
-  onDeleteConfirm,
   isBusy,
   showCreate,
   isFinePointer,
   isDeleteTarget,
 }: PromptRowActionsProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   return (
     <div className="flex items-center gap-2">
-      {isFinePointer || !isDeleteTarget ? (
+      {isMobile || isFinePointer || !isDeleteTarget ? (
         <>
           <Button
             variant="ghost"
@@ -64,18 +59,6 @@ export function PromptRowActions({
             <IconTrash className="h-4 w-4" />
           </Button>
         </>
-      ) : null}
-      {isFinePointer ? (
-        <PromptDeleteConfirmation
-          promptName={prompt.name}
-          open={isDeleteTarget}
-          isFinePointer={isFinePointer}
-          anchorRef={deleteAnchorRef}
-          isBusy={isBusy}
-          onClose={onDeleteClose}
-          onCancel={onDeleteCancel}
-          onConfirm={onDeleteConfirm}
-        />
       ) : null}
     </div>
   );

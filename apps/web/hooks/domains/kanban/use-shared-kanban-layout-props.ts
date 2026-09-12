@@ -4,6 +4,8 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import type { KanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
 
 export type SharedKanbanLayoutProps = {
+  columnHeight?: string;
+  onNaturalHeightChange?: (stepId: string, height: number) => void;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
   tasks: Task[];
@@ -46,6 +48,8 @@ export function useSharedKanbanLayoutProps(
   const { drag, displayTasks, externalLinkAvailability } = options;
   return useMemo(
     () => ({
+      columnHeight: options.columnHeight,
+      onNaturalHeightChange: options.onNaturalHeightChange,
       steps: drag.renderedSteps,
       moveTargetSteps: options.moveTargetSteps,
       tasks: displayTasks,
@@ -67,6 +71,8 @@ export function useSharedKanbanLayoutProps(
       isDragging: !!drag.activeTask,
     }),
     [
+      options.columnHeight,
+      options.onNaturalHeightChange,
       drag.renderedSteps,
       drag.moveTaskToStep,
       drag.temporaryStepIds,

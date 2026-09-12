@@ -11,6 +11,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { IconMailForward, IconUserPlus, IconUsers } from "@tabler/icons-react";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import {
+  MobileActionConfirmation,
+  useConfirmationBoundary,
+} from "@/components/confirmation/mobile-action-confirmation";
 import { useToast } from "@/components/toast-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { ApiError } from "@/lib/api/client";
@@ -171,8 +175,10 @@ function UserActionRegion({
   const statusAnchorRef = useRef<HTMLButtonElement>(null);
   const action = pending?.user.id === user.id ? pending : null;
   const anchorRef = action?.next.role !== undefined ? roleAnchorRef : statusAnchorRef;
+  const targetKey = `${user.id}:${JSON.stringify(action?.next)}`;
+  const { isMobile } = useConfirmationBoundary(!!action, targetKey, () => onCancel());
 
-  if (!isFinePointer && action) {
+  if (!isMobile && !isFinePointer && action) {
     return (
       <InlineConfirmActions
         density="touch"
@@ -195,14 +201,14 @@ function UserActionRegion({
       <UserActionButtons
         user={user}
         isLastActiveAdmin={isLastActiveAdmin}
-        isFinePointer={isFinePointer}
+        isFinePointer={!isMobile && isFinePointer}
         roleAnchorRef={roleAnchorRef}
         statusAnchorRef={statusAnchorRef}
         onToggleRole={onToggleRole}
         onToggleStatus={onToggleStatus}
         isMutating={isMutating}
       />
-      {isFinePointer && action ? (
+      {(isMobile || isFinePointer) && action ? (
         <UserConfirmPopover
           action={action}
           anchorRef={anchorRef}
@@ -285,19 +291,32 @@ function UserConfirmPopover({
   onConfirm: (action: PendingAction) => void;
 }) {
   const { t } = useTranslation();
+  const actions = {
+    title: action.label,
+    description: t("system:usersTakesEffectImmediately", { email: action.user.email }),
+    cancelLabel: t("common:cancel"),
+    confirmLabel: t("system:usersConfirm"),
+    confirmAriaLabel: action.label,
+    confirmTestId: "users-table-confirm",
+    onOpenChange: (open: boolean) => {
+      if (!open) onCancel();
+    },
+    onConfirm: () => onConfirm(action),
+  };
   return (
-    <ActionConfirmPopover
+    <MobileActionConfirmation
+      {...actions}
       open
-      anchorRef={anchorRef}
-      title={action.label}
-      description={t("system:usersTakesEffectImmediately", { email: action.user.email })}
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t("system:usersConfirm")}
-      confirmAriaLabel={action.label}
-      confirmTestId="users-table-confirm"
-      testId="users-table-confirm-popover"
-      onOpenChange={(open) => !open && onCancel()}
-      onConfirm={() => onConfirm(action)}
+      targetKey={`${action.user.id}:${JSON.stringify(action.next)}`}
+      focusReturnRef={anchorRef}
+      fallback={
+        <ActionConfirmPopover
+          {...actions}
+          open
+          anchorRef={anchorRef}
+          testId="users-table-confirm-popover"
+        />
+      }
     />
   );
 }

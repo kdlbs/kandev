@@ -69,12 +69,14 @@ export function ChangeRequestRow({
           target="_blank"
           rel="noopener noreferrer"
           title={title}
-          className="flex min-w-0 cursor-pointer items-center gap-1.5 text-sm font-semibold hover:underline"
+          className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1.5 text-sm font-semibold hover:underline md:min-h-0 [@media(pointer:coarse)]:min-h-11"
         >
-          <span className="truncate">{title}</span>
+          <span className="min-w-0 wrap-anywhere md:truncate [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:overflow-visible">
+            {title}
+          </span>
           <IconExternalLink aria-hidden="true" className="h-3 w-3 shrink-0 text-muted-foreground" />
         </Link>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground [&>span]:max-w-full [&>span]:wrap-anywhere [&>span]:whitespace-normal md:[&>span]:whitespace-nowrap [@media(pointer:coarse)]:[&>span]:whitespace-normal">
           {metadata}
           {taskIndicator}
         </div>

@@ -6,7 +6,7 @@ system: plugins
 owners:
   - kandev
 created: 2026-08-26
-last_updated: 2026-08-30
+last_updated: 2026-09-10
 requirements:
   - REQ-PLUGINS-ISOLATED-WEB-APPS-001
   - REQ-PLUGINS-ISOLATED-WEB-APPS-002
@@ -19,6 +19,7 @@ requirements:
   - REQ-PLUGINS-ISOLATED-WEB-APPS-009
   - REQ-PLUGINS-ISOLATED-WEB-APPS-010
   - REQ-PLUGINS-ISOLATED-WEB-APPS-011
+  - REQ-PLUGINS-ISOLATED-WEB-APPS-012
 ---
 
 # Isolated plugin web-application contributions system design
@@ -53,6 +54,7 @@ It extends the data boundary from
 | `REQ-PLUGINS-ISOLATED-WEB-APPS-009` | Diagnostics and observability                    |
 | `REQ-PLUGINS-ISOLATED-WEB-APPS-010` | Artifact storage, Protocol compatibility         |
 | `REQ-PLUGINS-ISOLATED-WEB-APPS-011` | Host appearance protocol                         |
+| `REQ-PLUGINS-ISOLATED-WEB-APPS-012` | Runtime startup protocol                         |
 
 ## Existing plugin contracts
 
@@ -223,6 +225,12 @@ If the release needs a new grant, the service records it as pending. The active
 release stays unchanged. A user can approve the permissions and activate the
 pending release in one transaction.
 
+The canvas service can supply recorded initial creation authority through
+[its creation transaction](../../canvases/system-design/local-creation-authority.md).
+The instance store validates and inserts the exact grants in that transaction.
+The generic plugin publication and import paths cannot infer this exception
+from a package manifest, source-user field, or instance ownership.
+
 The initial retention rule keeps the active release and one prior valid
 release for each local canvas instance. A pending release is also retained
 until approval, replacement, or removal.
@@ -276,10 +284,22 @@ top-level document. The response permits only `allow-scripts` and
 `allow-forms`. It does not permit `allow-same-origin`, and `form-action
 'none'` denies form submissions to external origins.
 
-The desktop shell adds a narrow `frame-src` rule for the loopback backend. The
-runtime `frame-ancestors` policy permits the configured web host,
-`tauri://localhost`, and `http://tauri.localhost`. It denies other parents.
-Desktop packaging tests cover both Tauri origin forms and direct browser use.
+The desktop shell adds a narrow `frame-src` rule for the loopback backend.
+`BuildContentSecurityPolicy` always prepends the literal CSP source `'self'`
+to `frame-ancestors`, then appends normalized explicit launcher and Tauri
+origins. Keep `normalizeFrameAncestors` restricted to exact origins; the host
+adds the keyword separately. Never derive ancestors from inbound Host, Origin,
+Referer, or forwarded headers, and never use wildcard hosts or ports.
+
+Relative capability URLs keep the browser UI and runtime on the same public
+origin, including TLS termination at a reverse proxy. Each DNS alias works
+independently without a configured list. An alias does not authorize framing a
+different alias. Cross-origin frontend/runtime hosting requires an explicitly
+trusted origin; this repair adds no new operator configuration for that topology.
+Preserve the current exact development ports and Tauri exceptions. CSP `'self'`
+does not add `allow-same-origin` to either sandbox or grant ambient credentials.
+Browser coverage must use real runtime responses through two custom HTTPS hosts
+and an unrelated-parent negative case, not just assert the header text.
 
 The iframe can use `prefers-color-scheme` and responsive CSS as fallbacks. The
 host appearance protocol supplies the exact active Kandev semantic colors.
@@ -318,10 +338,9 @@ a bounded serialized CSS color from a fixed key allowlist. The envelope
 contains no identity, capability, data, storage, navigation, or action field.
 
 After the iframe load event, the host sends the initial envelope to that
-iframe's `contentWindow`. The loading cover remains for one animation frame so
-the application can apply the values before it becomes visible. The host sends
-another envelope when the resolved Kandev theme changes. It does not reload the
-iframe.
+iframe's `contentWindow`. Reveal additionally requires the current startup
+acknowledgement described below and one animation frame for appearance. The
+host sends another envelope when the resolved theme changes without reload.
 
 The opaque iframe has no stable origin, so the host targets its exact window
 with `targetOrigin: "*"`. The application listener accepts only messages whose
@@ -334,6 +353,52 @@ The bundled scaffold maps the token keys to documented CSS custom properties.
 It includes safe light and dark fallbacks. An application can ignore this
 message, but it does not receive another theme API or a privileged reply
 channel.
+
+## Runtime startup protocol
+
+The plugin runtime owns a bounded startup monitor, not authored application
+code or an optional scaffold. During entry-HTML serving, insert a host-owned
+bootstrap before authored scripts using the existing Go HTML tokenizer
+dependency. Preserve the doctype, encoding, entry-relative paths, and original
+markup bytes around the insertion. Support valid HTML with an omitted head.
+Bound processing by the entry-file limit; fail safely if insertion cannot be
+performed. Non-entry assets stay byte-identical. Stored files, digests, and
+edit source never change. Compute Content-Length from the served representation.
+
+Serve the bootstrap from a reserved capability-relative
+`_kandev/host-runtime.js` route before versioned protocol dispatch. Validate the
+capability and apply normal runtime headers. Package files cannot shadow it.
+The bootstrap installs capture-phase script/asset error and unhandled-rejection
+listeners before authored code. It waits for document load, then fetches
+`./_kandev/v1/context` using the existing capability path. It reports only safe
+startup result codes. A handled application data error can still render inside
+a successfully started frame; Ready is not proof of application correctness or
+business-operation success.
+
+`WebAppFrame` creates a fresh bounded attempt nonce for every mount/runtime URL.
+After load it sends `kandev.web_app.startup_probe` version 1 with that nonce to
+the exact frame window. The bootstrap accepts only `window.parent` and echoes
+the nonce with `kandev.web_app.startup_result`, version 1, and result `ready` or
+`failed` after the startup outcome is known. It retains one pending probe and
+one outcome; no repeating message or polling loop is required. Failure codes
+are a closed vocabulary (`document_error`, `context_unavailable`). Arbitrary
+error text and request URLs are never forwarded.
+
+The parent checks exact message shape, version, nonce, and
+`event.source === iframe.contentWindow`. An opaque `event.origin` of `null`
+is not sufficient authority. Replies from a previous mount, sibling window,
+wrong nonce, or unsupported version are ignored. The reply changes presentation
+only. No domain APIs, grants, navigation, or credentials cross this channel.
+Top-level capability navigation has no host probe and remains sandboxed.
+
+The 15-second startup deadline begins when the iframe is mounted. It is separate
+from the 15-minute capability lifetime. No acknowledgement, including CSP-blocked
+navigation, causes unavailable status and frame teardown. Retry obtains a fresh
+descriptor and nonce through existing host actions. Late replies cannot clear
+failure; listeners and timers are cancelled on teardown. Authority changes still
+unmount the frame immediately. Renewal mounts a new attempt; live theme changes
+do not restart startup. Existing retained releases receive the bootstrap at
+serve time and need no author edits or republish.
 
 ## Runtime token
 
@@ -484,7 +549,8 @@ The runtime document response uses this minimum header policy:
 - `Content-Security-Policy` includes `sandbox allow-scripts allow-forms`,
   `default-src 'none'`, `form-action 'none'`, `base-uri 'none'`, and
   `object-src 'none'`
-- `frame-ancestors` contains only normalized Kandev web and Tauri host origins
+- `frame-ancestors` contains the host-owned `'self'` keyword and normalized
+  explicit Kandev launcher and Tauri origins
 - `X-Content-Type-Options` is `nosniff`
 - `Referrer-Policy` is `no-referrer`
 - `Cross-Origin-Resource-Policy` is `cross-origin` because the document has an
@@ -607,6 +673,9 @@ state values, bodies, payloads, runtime capabilities, and user credentials.
 - Event tests cover scope filtering, reconnect replay, generation changes, and
   resync.
 - Frontend component tests cover host state and iframe lifecycle.
+- Startup tests cover blocked documents, asset failure, missing/failed context,
+  stale and sibling replies, cleanup, retry, renewal, and unchanged artifact
+  digests. Browser tests load a retained application without an authored monitor.
 - Appearance tests cover initial delivery, source validation, token bounds,
   live changes, and computed colors in direct, Dockview, and phone hosts.
 

@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/task/statussummary"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -1441,13 +1442,14 @@ func (h *TaskHandlers) prepareTaskSession(
 		// upgraded to a full launch here so the terminal has a PTY to attach to.
 		// (Contrast the start_agent branch below, which sets DeferredStart=true.)
 		resp, err := h.orchestrator.LaunchSession(c.Request.Context(), &orchestrator.LaunchSessionRequest{
-			TaskID:            taskID,
-			Intent:            orchestrator.IntentPrepare,
-			AgentProfileID:    body.AgentProfileID,
-			ExecutorID:        body.ExecutorID,
-			ExecutorProfileID: body.ExecutorProfileID,
-			WorkflowStepID:    resolvedStepID,
-			LaunchWorkspace:   true,
+			InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+			TaskID:               taskID,
+			Intent:               orchestrator.IntentPrepare,
+			AgentProfileID:       body.AgentProfileID,
+			ExecutorID:           body.ExecutorID,
+			ExecutorProfileID:    body.ExecutorProfileID,
+			WorkflowStepID:       resolvedStepID,
+			LaunchWorkspace:      true,
 		})
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
@@ -1475,12 +1477,13 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	resolvedStepID string,
 ) *startAgentDispatch {
 	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		TaskID:            taskID,
-		Intent:            orchestrator.IntentPrepare,
-		AgentProfileID:    body.AgentProfileID,
-		ExecutorID:        body.ExecutorID,
-		ExecutorProfileID: body.ExecutorProfileID,
-		WorkflowStepID:    resolvedStepID,
+		InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+		TaskID:               taskID,
+		Intent:               orchestrator.IntentPrepare,
+		AgentProfileID:       body.AgentProfileID,
+		ExecutorID:           body.ExecutorID,
+		ExecutorProfileID:    body.ExecutorProfileID,
+		WorkflowStepID:       resolvedStepID,
 		// The async IntentStartCreated dispatch below carries the prompt. Mark
 		// this as a deferred start so a passthrough profile is not eagerly
 		// launched here with an empty prompt (which would pre-empt that
@@ -1725,9 +1728,10 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
-	Position       int    `json:"position"`
+	WorkflowID     string                     `json:"workflow_id"`
+	WorkflowStepID string                     `json:"workflow_step_id"`
+	Position       int                        `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
 func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
@@ -1743,7 +1747,11 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
+		service.MoveTaskOptions{
+			AllowActivePrimarySession: true,
+			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
+			EntryOptions:              body.EntryOptions,
+		},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -1751,7 +1759,9 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	}
 
 	response := dto.MoveTaskResponse{
-		Task: dto.FromTask(result.Task),
+		Task:         dto.FromTask(result.Task),
+		MoveID:       result.MoveID,
+		EntryOptions: result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

@@ -38,13 +38,15 @@ import (
 
 // TestServer holds the test server and its dependencies
 type TestServer struct {
-	Server     *httptest.Server
-	Gateway    *gateways.Gateway
-	TaskRepo   *sqliterepo.Repository
-	TaskSvc    *taskservice.Service
-	EventBus   bus.EventBus
-	Logger     *logger.Logger
-	cancelFunc context.CancelFunc
+	Server             *httptest.Server
+	Gateway            *gateways.Gateway
+	TaskRepo           *sqliterepo.Repository
+	TaskSvc            *taskservice.Service
+	EventBus           bus.EventBus
+	Logger             *logger.Logger
+	mcpCallerTaskID    string
+	mcpCallerSessionID string
+	cancelFunc         context.CancelFunc
 }
 
 // testWorkspacePolicyAttacher keeps this integration harness focused on the

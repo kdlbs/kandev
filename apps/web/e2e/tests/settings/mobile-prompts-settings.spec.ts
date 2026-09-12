@@ -10,7 +10,7 @@ test.describe("Prompts settings on a phone", () => {
     }
   });
 
-  test("morphs prompt delete into a touch-sized inline confirmation", async ({
+  test("opens prompt deletion in a touch-sized confirmation sheet", async ({
     testPage,
     apiClient,
   }) => {
@@ -25,7 +25,7 @@ test.describe("Prompts settings on a phone", () => {
     await expect(row).toBeVisible();
     await row.getByTestId("prompt-delete-button").tap();
 
-    const inline = testPage.getByTestId("prompt-delete-inline-confirmation");
+    const inline = testPage.getByRole("dialog", { name: "Delete prompt" });
     await expect(inline).toBeVisible();
     await expect(testPage.getByTestId("prompt-delete-confirm-popover")).toHaveCount(0);
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
@@ -52,5 +52,10 @@ test.describe("Prompts settings on a phone", () => {
     await row.getByTestId("prompt-delete-button").tap();
     await testPage.getByTestId("prompt-delete-confirm").tap();
     await expect(row).toHaveCount(0);
+    expect(
+      (await apiClient.listPrompts()).prompts.some(
+        (prompt) => prompt.name === "mobile-delete-prompt",
+      ),
+    ).toBe(false);
   });
 });

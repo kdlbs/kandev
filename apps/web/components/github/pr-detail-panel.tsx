@@ -20,10 +20,11 @@ import { useCommentsStore, isPRFeedbackComment } from "@/lib/state/slices/commen
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
 import { submitPRReview } from "@/lib/api/domains/github-pr-api";
-import type { TaskPR, PRFeedback } from "@/lib/types/github";
+import type { TaskPR, PRFeedback, MergeableState } from "@/lib/types/github";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
 import { hasActiveMergeQueueEntry, PRMergeQueueStatus } from "./pr-merge-queue-status";
+import { PRWorkflowAttentionNotice } from "./pr-workflow-attention-notice";
 import { usePRScopedReviewRequest } from "./use-pr-scoped-review-request";
 
 // --- Dockview panel wrapper ---
@@ -387,6 +388,47 @@ function useConflictQueued(sessionId: string, prNumber: number): boolean {
   );
 }
 
+function PRDetailNotice({
+  displayPR,
+  attention,
+  mergeableState,
+  mergeable,
+  isDraft,
+  prState,
+  baseBranch,
+  onResolveConflicts,
+  resolveDisabled,
+}: {
+  displayPR: TaskPR;
+  attention?: PRFeedback["workflow_attention"];
+  mergeableState: MergeableState | undefined;
+  mergeable: boolean;
+  isDraft: boolean;
+  prState: TaskPR["state"];
+  baseBranch: string;
+  onResolveConflicts: () => void;
+  resolveDisabled: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <PRWorkflowAttentionNotice pr={displayPR} attention={attention} />
+      {hasActiveMergeQueueEntry(displayPR) ? (
+        <PRMergeQueueStatus pr={displayPR} />
+      ) : (
+        <PRMergeabilityNotice
+          state={mergeableState}
+          mergeable={mergeable}
+          isDraft={isDraft}
+          prState={prState}
+          baseBranch={baseBranch}
+          onResolveConflicts={onResolveConflicts}
+          resolveDisabled={resolveDisabled}
+        />
+      )}
+    </div>
+  );
+}
+
 export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -458,19 +500,17 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         </>
       }
       notice={
-        hasActiveMergeQueueEntry(displayPR) ? (
-          <PRMergeQueueStatus pr={displayPR} />
-        ) : (
-          <PRMergeabilityNotice
-            state={mergeableState}
-            mergeable={isMergeable}
-            isDraft={isDraft}
-            prState={liveState}
-            baseBranch={taskPR.base_branch}
-            onResolveConflicts={onResolveConflicts}
-            resolveDisabled={conflictQueued}
-          />
-        )
+        <PRDetailNotice
+          displayPR={displayPR}
+          attention={feedback?.workflow_attention}
+          mergeableState={mergeableState}
+          mergeable={isMergeable}
+          isDraft={isDraft}
+          prState={liveState}
+          baseBranch={taskPR.base_branch}
+          onResolveConflicts={onResolveConflicts}
+          resolveDisabled={conflictQueued}
+        />
       }
     />
   );

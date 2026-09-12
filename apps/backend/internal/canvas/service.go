@@ -96,15 +96,16 @@ func (s *Service) createLocked(ctx context.Context, request CreateCanvasRequest)
 		scopeKind = ScopeTask
 	}
 	metadata := CanvasMetadata{
-		ID:                 canvasID,
-		PluginInstanceID:   instanceID,
-		WorkspaceID:        request.WorkspaceID,
-		TaskID:             request.TaskID,
-		OriginTaskID:       request.OriginTaskID,
-		Title:              request.Title,
-		CreatedBySessionID: request.CreatedBySessionID,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  canvasID,
+		PluginInstanceID:    instanceID,
+		WorkspaceID:         request.WorkspaceID,
+		TaskID:              request.TaskID,
+		OriginTaskID:        request.OriginTaskID,
+		Title:               request.Title,
+		CreatedBySessionID:  request.CreatedBySessionID,
+		CreationOwnerUserID: request.OwnerUserID,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	instance := plugininstances.Instance{
 		ID:          instanceID,
@@ -772,6 +773,7 @@ func normalizeCreateRequest(request CreateCanvasRequest) (CreateCanvasRequest, e
 	request.TaskID = strings.TrimSpace(request.TaskID)
 	request.OriginTaskID = strings.TrimSpace(request.OriginTaskID)
 	request.CreatedBySessionID = strings.TrimSpace(request.CreatedBySessionID)
+	request.OwnerUserID = strings.TrimSpace(request.OwnerUserID)
 	request.PluginID = strings.TrimSpace(request.PluginID)
 	request.Title = strings.TrimSpace(request.Title)
 	if request.PluginID == "" {

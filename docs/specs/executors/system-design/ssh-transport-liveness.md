@@ -207,6 +207,8 @@ Ordered, and the order is contract (`-001.5`):
    termination (`-001.8`).
 4. Log one warning (`-001.9`).
 
+Close runtime listener after client.
+
 Step 2 runs through the session's forwarder once-guard and step 3 through its
 client once-guard — the two separate guards described in
 [Components and responsibilities](#components-and-responsibilities), which the

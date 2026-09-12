@@ -184,7 +184,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
           {panel.session ? (
             <QuickChatSessionView
               session={panel.session}
-              onInitialPromptSent={() =>
+              onInitialPromptAttempted={() =>
                 panel.setQuickChatInitialPrompt(panel.session!.sessionId, undefined)
               }
             />
