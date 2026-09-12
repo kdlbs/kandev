@@ -100,6 +100,7 @@ func runtimeBootstrapInsertion(entry []byte) (int, error) {
 	position := 0
 	insertion := -1
 	fallback := -1
+	templateDepth := 0
 	for {
 		tokenType := tokenizer.Next()
 		raw := tokenizer.Raw()
@@ -112,7 +113,7 @@ func runtimeBootstrapInsertion(entry []byte) (int, error) {
 		if len(raw) == 0 {
 			return -1, ErrRuntimeBootstrapUnavailable
 		}
-		insertion, fallback = updateRuntimeBootstrapPosition(tokenizer, tokenType, raw, position, insertion, fallback)
+		insertion, fallback, templateDepth = updateRuntimeBootstrapPosition(tokenizer, tokenType, raw, position, insertion, fallback, templateDepth)
 		position += len(raw)
 	}
 	if position != len(entry) {
@@ -121,38 +122,79 @@ func runtimeBootstrapInsertion(entry []byte) (int, error) {
 	if insertion < 0 {
 		insertion = fallback
 	}
+	if insertion < 0 {
+		// HTML supplies implied head and body elements when an entry omits the
+		// corresponding wrapper tags. Appending here keeps the original doctype
+		// and encoding declarations intact while placing the script in the
+		// implied body, outside any inert template content.
+		insertion = len(entry)
+	}
 	if insertion < 0 || insertion > len(entry) {
 		return -1, ErrRuntimeBootstrapUnavailable
 	}
 	return insertion, nil
 }
 
-func updateRuntimeBootstrapPosition(tokenizer *html.Tokenizer, tokenType html.TokenType, raw []byte, position, insertion, fallback int) (int, int) {
+func updateRuntimeBootstrapPosition(tokenizer *html.Tokenizer, tokenType html.TokenType, raw []byte, position, insertion, fallback, templateDepth int) (int, int, int) {
 	name, hasTagName := runtimeBootstrapTagName(tokenizer, tokenType)
 	if !hasTagName {
-		return insertion, fallback
+		return insertion, fallback, templateDepth
+	}
+	tagName := strings.ToLower(name)
+	if tagName == "template" {
+		return insertion, fallback, updateRuntimeBootstrapTemplateDepth(tokenType, templateDepth)
 	}
 	if tokenType == html.StartTagToken {
-		switch strings.ToLower(name) {
-		case "script":
-			if insertion < 0 {
-				insertion = position
-			}
-		case "head":
-			if fallback < 0 {
-				fallback = position + len(raw)
-			}
-		case "body":
-			if fallback < 0 {
-				fallback = position
-			}
+		if templateDepth > 0 {
+			return insertion, fallback, templateDepth
 		}
-		return insertion, fallback
+		insertion, fallback = updateRuntimeBootstrapStartTag(tagName, raw, position, insertion, fallback)
+		return insertion, fallback, templateDepth
 	}
-	if fallback < 0 && (strings.EqualFold(name, "head") || strings.EqualFold(name, "body") || strings.EqualFold(name, "html")) {
+	if templateDepth > 0 {
+		return insertion, fallback, templateDepth
+	}
+	if fallback < 0 && isRuntimeBootstrapFallbackTag(tagName) {
 		fallback = position
 	}
+	return insertion, fallback, templateDepth
+}
+
+func updateRuntimeBootstrapTemplateDepth(tokenType html.TokenType, templateDepth int) int {
+	if tokenType == html.StartTagToken {
+		return templateDepth + 1
+	}
+	if templateDepth > 0 {
+		return templateDepth - 1
+	}
+	return templateDepth
+}
+
+func updateRuntimeBootstrapStartTag(tagName string, raw []byte, position, insertion, fallback int) (int, int) {
+	switch tagName {
+	case "script":
+		if insertion < 0 {
+			insertion = position
+		}
+	case "head":
+		if fallback < 0 {
+			fallback = position + len(raw)
+		}
+	case "body":
+		if fallback < 0 {
+			fallback = position
+		}
+	}
 	return insertion, fallback
+}
+
+func isRuntimeBootstrapFallbackTag(tagName string) bool {
+	switch tagName {
+	case "head", "body", "html":
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeBootstrapTagName(tokenizer *html.Tokenizer, tokenType html.TokenType) (string, bool) {
