@@ -588,6 +588,10 @@ type TaskStatusUpdateRequest struct {
 	// ResumeIntent=true is an explicit "pick this up again" with required
 	// follow-up comment. Forces task_reopened_via_comment.
 	ResumeIntent bool
+	// SuppressStatusActivity is used by the orchestrator when it will publish
+	// the canonical task.state_changed event that owns the activity row. Gate
+	// redirects still log here because they do not publish that event.
+	SuppressStatusActivity bool
 }
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
@@ -620,18 +624,29 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		preStatus = exec.State
 	}
 
-	gateErr := s.applyApprovalGate(ctx, req.TaskID, &dbState, &req.NewStatus)
+	expectedStepID := ""
+	gateErr := s.applyApprovalGate(ctx, req.TaskID, &dbState, &req.NewStatus, &expectedStepID)
 	var pendingErr *ApprovalsPendingError
 	if gateErr != nil && !errors.As(gateErr, &pendingErr) {
 		return gateErr
 	}
 
-	if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
+	if dbState == stateCompleted {
+		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
+		if err != nil {
+			return fmt.Errorf("update task state: %w", err)
+		}
+		if !updated {
+			return &WorkflowStepChangedError{TaskID: req.TaskID}
+		}
+	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
 		return fmt.Errorf("update task state: %w", err)
 	}
 
 	commentID := s.maybeCreateStatusComment(ctx, req)
-	s.logTaskStatusChangeActivity(ctx, req)
+	if !req.SuppressStatusActivity || pendingErr != nil {
+		s.logTaskStatusChangeActivity(ctx, req)
+	}
 	s.publishTaskStatusChanged(ctx, req)
 	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
 	s.runReactivityForStatus(ctx, req, commentID, preStatus)
@@ -705,11 +720,16 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 // justify. Only a successful read reporting "not terminal" persists the
 // in_review redirect.
 func (s *DashboardService) applyApprovalGate(
-	ctx context.Context, taskID string, dbState, apiStatus *string,
+	ctx context.Context, taskID string, dbState, apiStatus, expectedStepID *string,
 ) error {
 	if *dbState != stateCompleted {
 		return nil
 	}
+	currentStepID, err := s.repo.GetTaskWorkflowStepID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("approval gate: resolve task workflow step: %w", err)
+	}
+	*expectedStepID = currentStepID
 	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
@@ -717,7 +737,7 @@ func (s *DashboardService) applyApprovalGate(
 	if hasStep && !terminal {
 		*dbState = stateInReview
 		*apiStatus = statusInReviewLowercase
-		return &ApprovalsPendingError{}
+		return &ApprovalsPendingError{Reason: ApprovalGateReasonWorkflowStep}
 	}
 	pending, err := s.pendingApprovers(ctx, taskID)
 	if err != nil || len(pending) == 0 {
@@ -725,7 +745,7 @@ func (s *DashboardService) applyApprovalGate(
 	}
 	*dbState = stateInReview
 	*apiStatus = statusInReviewLowercase
-	return &ApprovalsPendingError{Pending: pending}
+	return &ApprovalsPendingError{Pending: pending, Reason: ApprovalGateReasonApprovals}
 }
 
 // maybeCreateStatusComment creates the optional status-change comment

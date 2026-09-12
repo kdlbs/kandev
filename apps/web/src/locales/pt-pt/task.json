@@ -224,6 +224,7 @@
   "cancelling": "A cancelar...",
   "cannotMarkDoneAwaitingApprovalFrom": "Não é possível marcar como concluída: a aguardar a aprovação de {{names}}",
   "cannotMarkDoneAwaitingApprovals": "Não é possível marcar como concluída: a aguardar aprovações",
+  "cannotMarkDoneBeforeFinalWorkflowStep": "Não é possível marcar como concluída: mova primeiro a tarefa para o passo final do fluxo de trabalho",
   "cannotPreviewThisFile": "Não é possível pré-visualizar este ficheiro",
   "changeGithubIssue": "Alterar a issue do GitHub",
   "changes": "Alterações",

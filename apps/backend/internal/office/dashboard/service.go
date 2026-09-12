@@ -73,6 +73,7 @@ type Repository interface {
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
 	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
+	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error

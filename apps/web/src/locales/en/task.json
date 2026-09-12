@@ -225,6 +225,7 @@
   "cancelling": "Cancelling...",
   "cannotMarkDoneAwaitingApprovalFrom": "Cannot mark done: awaiting approval from {{names}}",
   "cannotMarkDoneAwaitingApprovals": "Cannot mark done: awaiting approvals",
+  "cannotMarkDoneBeforeFinalWorkflowStep": "Cannot mark done: move the task to the final workflow step first",
   "cannotPreviewThisFile": "Cannot preview this file",
   "changeGithubIssue": "Change GitHub issue",
   "changes": "Changes",

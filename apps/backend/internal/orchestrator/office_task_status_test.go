@@ -193,6 +193,54 @@ func TestMarkOfficeTaskCompleted_StaleStep_SkipsSeam(t *testing.T) {
 	}
 }
 
+type staleOfficeTaskReloadRepo struct {
+	*sqliterepo.Repository
+	loads int
+}
+
+func (r *staleOfficeTaskReloadRepo) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	task, err := r.Repository.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	r.loads++
+	if r.loads == 2 {
+		task.WorkflowStepID = "child_work"
+	}
+	return task, nil
+}
+
+func TestMarkOfficeTaskCompleted_RechecksStepAfterPerTaskLock(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "parent-recheck", "parent-recheck-session", "step_wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, baseRepo, &models.Task{
+		ID: "office-recheck", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Office task", State: v1.TaskStateInProgress, ParentID: "parent-recheck",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	repo := &staleOfficeTaskReloadRepo{Repository: baseRepo}
+	svc := &Service{logger: testLogger(), repo: repo}
+	updater := &recordingOfficeStatusUpdater{repo: baseRepo}
+	svc.SetOfficeTaskStatusUpdater(updater)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-recheck", "child_done")
+
+	if len(updater.calls) != 0 {
+		t.Fatalf("seam calls = %+v, want none after the locked reload observes a new step", updater.calls)
+	}
+	task, err := baseRepo.GetTask(ctx, "office-recheck")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.State != v1.TaskStateInProgress {
+		t.Fatalf("state = %q, want unchanged IN_PROGRESS", task.State)
+	}
+}
+
 // TestMarkOfficeTaskCompleted_AlreadyCancelled_SkipsSeam asserts an Office
 // task already in a terminal state (CANCELLED) never reaches the seam and
 // is not resurrected as COMPLETED.

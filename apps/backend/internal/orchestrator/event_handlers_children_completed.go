@@ -78,7 +78,7 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 	}
 	if task.IsFromOffice {
 		s.taskRuntimeStateMu.Unlock()
-		s.markOfficeTaskCompletedForTerminalStep(ctx, taskID)
+		s.markOfficeTaskCompletedForTerminalStep(ctx, taskID, terminalStepID)
 		return
 	}
 	oldState := task.State
@@ -131,7 +131,7 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 // lockChildCompletionOperation. Holding this task's lock across that call
 // would invert lock order against a concurrent completion elsewhere in the
 // same ancestry and risk deadlock.
-func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, taskID string) {
+func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, taskID, terminalStepID string) {
 	if s.officeTaskStatusUpdater == nil {
 		// No seam wired (partial wiring, or a test): skip the write rather
 		// than falling through to the raw path, which would bypass the gate.
@@ -152,11 +152,16 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 		unlock()
 		return
 	}
+	if terminalStepID != "" && task.WorkflowStepID != terminalStepID {
+		unlock()
+		return
+	}
 	oldState := task.State
 
 	err = s.officeTaskStatusUpdater.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
-		TaskID:    task.ID,
-		NewStatus: "done",
+		TaskID:                 task.ID,
+		NewStatus:              "done",
+		SuppressStatusActivity: true,
 	})
 	var pending *dashboard.ApprovalsPendingError
 	if err != nil {

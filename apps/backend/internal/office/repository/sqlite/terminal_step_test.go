@@ -89,3 +89,38 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateTaskStateIfWorkflowStepRequiresCurrentStep(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+	seedParticipantTask(t, repo, "task-state-cas", "step-current")
+
+	updated, err := repo.UpdateTaskStateIfWorkflowStep(ctx, "task-state-cas", "step-old", "COMPLETED")
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfWorkflowStep (stale): %v", err)
+	}
+	if updated {
+		t.Fatal("stale workflow step updated the task")
+	}
+	var state string
+	if err := repo.ReaderDB().Get(&state, `SELECT state FROM tasks WHERE id = 'task-state-cas'`); err != nil {
+		t.Fatalf("read unchanged state: %v", err)
+	}
+	if state != "TODO" {
+		t.Fatalf("state after stale write = %q, want TODO", state)
+	}
+
+	updated, err = repo.UpdateTaskStateIfWorkflowStep(ctx, "task-state-cas", "step-current", "COMPLETED")
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfWorkflowStep (current): %v", err)
+	}
+	if !updated {
+		t.Fatal("current workflow step did not update the task")
+	}
+	if err := repo.ReaderDB().Get(&state, `SELECT state FROM tasks WHERE id = 'task-state-cas'`); err != nil {
+		t.Fatalf("read updated state: %v", err)
+	}
+	if state != "COMPLETED" {
+		t.Fatalf("state after current write = %q, want COMPLETED", state)
+	}
+}

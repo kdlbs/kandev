@@ -64,6 +64,9 @@ func TestUpdateTaskStatus_AgentDoneAtWork_RedirectsToReview(t *testing.T) {
 	if len(pending.Pending) != 0 {
 		t.Errorf("pending = %v, want none: the redirect is on step position, not approvers", pending.Pending)
 	}
+	if got := pending.ReasonCode(); got != dashboard.ApprovalGateReasonWorkflowStep {
+		t.Errorf("reason = %q, want %q", got, dashboard.ApprovalGateReasonWorkflowStep)
+	}
 	if state := readTaskState(t, deps, "wk1"); state != "REVIEW" {
 		t.Errorf("state = %q, want REVIEW", state)
 	}

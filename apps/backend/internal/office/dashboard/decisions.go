@@ -29,6 +29,8 @@ const (
 	approvalCallerErrEmpty           = "caller type and id are required"
 	approvalCommentRequiredOnRequest = "comment is required for request_changes"
 	decisionStoreNotWiredErr         = "decision store not wired"
+	ApprovalGateReasonWorkflowStep   = "workflow_step"
+	ApprovalGateReasonApprovals      = "approvals"
 )
 
 // userParticipantSentinel is the participant_id used for decisions
@@ -47,6 +49,20 @@ type ApprovalsPendingError struct {
 	// approved decision. Empty when the gate fired on the step-position
 	// check instead.
 	Pending []string
+	// Reason identifies the gate that caused the redirect. It is stable API
+	// data for clients that need to distinguish workflow position from votes.
+	Reason string
+}
+
+// WorkflowStepChangedError reports that the task moved to another workflow
+// step after the completion gate read it. The caller can retry against the
+// new step without risking a stale completion write.
+type WorkflowStepChangedError struct {
+	TaskID string
+}
+
+func (e *WorkflowStepChangedError) Error() string {
+	return fmt.Sprintf("task %s workflow step changed during status update", e.TaskID)
 }
 
 // InvalidTaskStatusError identifies a caller-provided status value that the
@@ -73,6 +89,17 @@ func (e *ApprovalsPendingError) Error() string {
 		"approvals pending from %d approver(s): %s",
 		len(e.Pending), strings.Join(e.Pending, ","),
 	)
+}
+
+// ReasonCode returns the stable gate reason used in HTTP responses.
+func (e *ApprovalsPendingError) ReasonCode() string {
+	if e.Reason == "" {
+		if len(e.Pending) == 0 {
+			return ApprovalGateReasonWorkflowStep
+		}
+		return ApprovalGateReasonApprovals
+	}
+	return e.Reason
 }
 
 // PendingApproverIDs exposes the pending identities to runtime transports
