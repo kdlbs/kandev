@@ -62,10 +62,25 @@ func (r *Repository) runMigrations() error {
 	r.migrateParentWakeReceiptColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateWorkspacePauseSkipAttribution()
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
 	return nil
+}
+
+// migrateWorkspacePauseSkipAttribution adds the columns a blocked routine
+// fire uses to record why it was skipped and which pause blocked it. The
+// partial unique index runs after both ADD COLUMNs so it never executes
+// against a schema that lacks pause_id.
+func (r *Repository) migrateWorkspacePauseSkipAttribution() {
+	_ = r.migrate.Apply("office_routine_runs.skip_reason",
+		`ALTER TABLE office_routine_runs ADD COLUMN skip_reason TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("office_routine_runs.pause_id",
+		`ALTER TABLE office_routine_runs ADD COLUMN pause_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_office_routine_run_pause_once",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_office_routine_run_pause_once
+			ON office_routine_runs(routine_id, pause_id) WHERE pause_id != ''`)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases

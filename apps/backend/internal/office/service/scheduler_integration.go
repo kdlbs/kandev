@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -225,6 +226,32 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		return
 	}
 
+	// Pause gate sits before the agent-active check (F47): a paused
+	// workspace should finish the run as workspace_paused, not
+	// agent_inactive, regardless of the agent's own status. A gate-read
+	// error requeues the run (nothing about the run itself failed) so
+	// the next tick tries again.
+	paused, gateErr := si.svc.pauseGateState(ctx, agent.WorkspaceID)
+	if gateErr != nil {
+		pause.RecordGateError("process_run")
+		si.logger.Warn("process run: pause gate read failed",
+			zap.String("run_id", runID), zap.Error(gateErr))
+		if _, reqErr := si.svc.repo.RequeueClaimedRun(ctx, runID); reqErr != nil {
+			si.logger.Warn("process run: requeue after gate error failed",
+				zap.String("run_id", runID), zap.Error(reqErr))
+		}
+		return
+	}
+	if paused {
+		pause.RecordBlocked("process_run")
+		// This run may have been requeued after an earlier launch marked
+		// the agent working (see the comment on the mark-before-launch
+		// call below); the CAS makes this a safe no-op otherwise.
+		si.svc.clearAgentWorking(ctx, agent.ID, runID)
+		_ = si.svc.FinishRun(ctx, runID, RunOutcomeWorkspacePaused)
+		return
+	}
+
 	if !isAgentActive(agent.Status) {
 		si.logger.Info("run skipped (agent not active)",
 			zap.String("run_id", runID),
@@ -352,6 +379,36 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		ProfileID:            profileID,
 		AdditionalSkillSlugs: decisionSkillSlugs(runCtx.AvailableActions),
 	}
+
+	// Final pause gate, immediately before the launch that actually
+	// starts the agent process. A pause confirmed between processRun's
+	// earlier read and here must still stop the launch. The checkout
+	// this run holds is released first in both outcomes — a paused
+	// workspace's task isn't in progress, and a gate-read error leaves
+	// nothing to hold the checkout for.
+	paused, gateErr := si.svc.pauseGateState(ctx, agent.WorkspaceID)
+	if gateErr != nil {
+		pause.RecordGateError("prepare_and_launch")
+		si.logger.Warn("prepare and launch: pause gate read failed",
+			zap.String("run_id", run.ID), zap.Error(gateErr))
+		si.releaseCheckoutIfNeeded(ctx, run)
+		if _, reqErr := si.svc.repo.RequeueClaimedRun(ctx, run.ID); reqErr != nil {
+			si.logger.Warn("prepare and launch: requeue after gate error failed",
+				zap.String("run_id", run.ID), zap.Error(reqErr))
+		}
+		return
+	}
+	if paused {
+		pause.RecordBlocked("prepare_and_launch")
+		si.releaseCheckoutIfNeeded(ctx, run)
+		// Safe no-op via CAS on a run that never launched; guards the case
+		// where an earlier launch attempt on this same run marked the
+		// agent working before this requeue.
+		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
+		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeWorkspacePaused)
+		return
+	}
+
 	// launchAgent returns true only when the adapter was actually invoked.
 	// When it was, leave the run `claimed` and let the AgentCompleted/
 	// AgentStopped event subscribers in event_subscribers.go finish it.

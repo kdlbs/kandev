@@ -335,6 +335,12 @@ type Service struct {
 	// task reaches a terminal step. Wired to the routines.RoutineService
 	// at startup; nil in tests that don't exercise routines.
 	routineRunSyncer RoutineRunSyncer
+
+	// pauseGate is the workspace-pause read used to block run queuing
+	// (QueueRun) and finalize processing terminally (see
+	// scheduler_integration.go). Optional — nil means the kill switch
+	// gate is not wired (older tests, transitional deployments).
+	pauseGate shared.PauseGate
 }
 
 // RoutineRunSyncer is the surface the office service needs from the
@@ -387,6 +393,11 @@ func (s *Service) SetBudgetChecker(b BudgetEvaluator) { s.budgetChecker = b }
 
 // SetPricingLookup wires the models.dev pricing lookup.
 func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p }
+
+// SetPauseGate wires the workspace-pause read used by QueueRun and run
+// processing to enforce the operator kill switch. Optional — when nil,
+// neither gate is enforced.
+func (s *Service) SetPauseGate(g shared.PauseGate) { s.pauseGate = g }
 
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {

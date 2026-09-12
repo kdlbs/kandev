@@ -98,7 +98,7 @@ func (h *ParentWakeReconciler) reconcileOne(
 	if svc.engineDispatcher == nil {
 		return
 	}
-	if err := svc.guardAgentStatus(ctx, c.AssigneeAgentProfileID); err != nil {
+	if _, err := svc.guardAgentStatus(ctx, c.AssigneeAgentProfileID); err != nil {
 		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, err.Error())
 		return
 	}

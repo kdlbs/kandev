@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Wakeup request status constants — kept in sync with the spec's
@@ -309,14 +311,20 @@ func (r *Repository) MarkWakeupRequestFailed(ctx context.Context, id, reason str
 	return err
 }
 
-// isUniqueConstraintErr returns true when err looks like a SQLite
-// UNIQUE constraint violation. Driver-specific error inspection would
-// be cleaner but the go-sqlite3 driver's typed error doesn't surface
-// outside the package; matching on the prefix is the documented work-
-// around used elsewhere in the codebase.
+// isUniqueConstraintErr returns true when err is a UNIQUE constraint
+// violation, on either supported dialect. This package's SQLite driver
+// doesn't surface a typed error outside the package, so that side still
+// matches on the documented message prefix; pgx exposes a typed SQLSTATE
+// 23505 error for PostgreSQL. See isSlugUniqueConstraintErr
+// (office/skills/system_sync.go) for the same pattern applied to a single
+// named constraint.
 func isUniqueConstraintErr(err error) bool {
 	if err == nil {
 		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "UNIQUE constraint failed") ||

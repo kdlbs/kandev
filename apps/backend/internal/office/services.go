@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/infra"
 	"github.com/kandev/kandev/internal/office/labels"
 	"github.com/kandev/kandev/internal/office/onboarding"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routines"
@@ -36,6 +37,7 @@ type Services struct {
 	Dashboard    *dashboard.DashboardService
 	Labels       *labels.LabelService
 	Onboarding   *onboarding.OnboardingService
+	Pause        *pause.Service
 	Scheduler    *scheduler.SchedulerService
 	TreeControls *officeservice.Service
 	Workspaces   *officeservice.Service

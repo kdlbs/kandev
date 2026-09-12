@@ -89,6 +89,7 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 		`DELETE FROM office_channels WHERE workspace_id = ?`,
 		`DELETE FROM office_approvals WHERE workspace_id = ?`,
 		`DELETE FROM office_activity_log WHERE workspace_id = ?`,
+		`DELETE FROM office_workspace_pauses WHERE workspace_id = ?`,
 		`DELETE FROM office_routines WHERE workspace_id = ?`,
 		`DELETE FROM office_skills WHERE workspace_id = ?`,
 		`DELETE FROM office_projects WHERE workspace_id = ?`,

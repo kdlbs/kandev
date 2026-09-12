@@ -13,7 +13,7 @@
   "actionDone": "完成",
   "actionFailed": "失敗",
   "actionRunning": "執行中…",
-  "backupsAdminOnly": "只有管理員可以建立、下載、恢復或刪除備份。",
+  "backupsAdminOnly": "只有管理員可以建立、下載、還原或刪除備份。",
   "backupsColumnActions": "操作",
   "backupsColumnCreated": "建立時間",
   "backupsColumnKind": "類型",
