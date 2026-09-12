@@ -221,7 +221,13 @@ type AgentExecution struct {
 	promptFinished   chan struct{}
 	promptFinishedMu sync.Mutex
 
-	// Last time an agent event was received (for stall detection)
+	// Last time a turn-content event was received (for stall detection).
+	// Advanced only by recordActivity for turnContentEventTypes, plus
+	// armPromptActivity, markAgentActivity, and recordSteerActivity. A
+	// metadata-only event (usage_update, context_window,
+	// available_commands_update, session_info_update, ...) does not move it,
+	// so a never-started prompt cannot be kept alive by traffic that carries
+	// no evidence of a turn.
 	lastActivityAt time.Time
 	// agentEventSincePrompt is armed (false) on each prompt dispatch and set
 	// true by the first genuine agent event (recordActivity/handleCompleteEvent)

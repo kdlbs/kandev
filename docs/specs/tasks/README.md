@@ -43,5 +43,5 @@ migration state.
 
 - [Agents](../agents): supplies agent identity and execution profiles.
 - [Office](../office): builds autonomous workflows on task primitives.
-- [UI](../ui): owns presentation-specific task surfaces.
+- [UI](../ui): owns presentation-only task surfaces.
 - [Workspaces](../workspaces): owns repositories and task worktrees.

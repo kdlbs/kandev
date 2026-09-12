@@ -550,13 +550,13 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 // accidentally re-arm a freshly-booted no-prompt session as Running.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	_, isTurnContent := turnContentEventTypes[event.Type]
-	execution.lastActivityAtMu.Lock()
-	execution.lastActivityAt = time.Now()
 	if isTurnContent {
+		execution.lastActivityAtMu.Lock()
+		execution.lastActivityAt = time.Now()
 		execution.agentEventSincePrompt = true
 		execution.promptActivityEpoch++
+		execution.lastActivityAtMu.Unlock()
 	}
-	execution.lastActivityAtMu.Unlock()
 
 	// Gate firstActivityOnce on `Status != Ready` so a delayed metadata
 	// event arriving after MarkBootReady can't accidentally fire

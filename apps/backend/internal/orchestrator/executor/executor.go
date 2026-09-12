@@ -242,6 +242,13 @@ var (
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
 	ErrSessionStateSuperseded = errors.New("session state superseded by terminal transition")
+	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
+	// found but could not load at least one registry-only orphan's row, so the
+	// task-scoped stop is not fully confirmed. Callers that already observed a
+	// successful stop should log this rather than treat it as a hard failure;
+	// it stays distinguishable from ErrExecutionNotFound so a retry keeps
+	// happening instead of being reported as a false all-clear.
+	ErrOrphanRecoveryIncomplete = errors.New("orphaned execution recovery incomplete")
 )
 
 // SessionStateSupersededError records the terminal state that rejected a
@@ -401,6 +408,13 @@ type AgentManagerClient interface {
 	// in-memory execution store. Returns empty string and error if not found.
 	// Used to detect stale AgentExecutionID values in the database after restart.
 	GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error)
+
+	// ListExecutionsForTask returns a snapshot of the session and execution IDs
+	// registered in-memory for taskID, independent of persisted session state.
+	// StopByTaskID uses the paired IDs to recover a registered execution whose
+	// session row is already terminal in the database (for example, FAILED
+	// after a never-started stall whose teardown attempt failed).
+	ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference
 
 	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
 	// If targetBranch is provided, uses dynamic merge-base calculation for accurate filtering.

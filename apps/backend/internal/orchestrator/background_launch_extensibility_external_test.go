@@ -158,6 +158,9 @@ func (extAgentManager) GetGitStatusFresh(context.Context, string) (*client.GitSt
 	return nil, nil
 }
 func (extAgentManager) WaitForAgentctlReady(context.Context, string) error { return nil }
+func (extAgentManager) ListExecutionsForTask(string) []lifecycle.ExecutionReference {
+	return nil
+}
 
 var _ executor.AgentManagerClient = extAgentManager{}
 

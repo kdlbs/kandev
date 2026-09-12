@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -29,6 +30,7 @@ type mockAgentManager struct {
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
+	listExecutionsForTaskFunc        func(taskID string) []lifecycle.ExecutionReference
 	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
 	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
@@ -226,6 +228,12 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 		return m.getExecutionIDForSessionFunc(ctx, sessionID)
 	}
 	return "", fmt.Errorf("no execution found for session %s", sessionID)
+}
+func (m *mockAgentManager) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	if m.listExecutionsForTaskFunc != nil {
+		return m.listExecutionsForTaskFunc(taskID)
+	}
+	return nil
 }
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
