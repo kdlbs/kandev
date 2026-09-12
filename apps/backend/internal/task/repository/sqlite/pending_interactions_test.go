@@ -309,13 +309,28 @@ func TestListPendingInteractionsReturnsWholeBundleWhenPartiallyAnswered(t *testi
 // started_at/created_at/id with no lifecycle exclusion, so the newer
 // lifecycle-only turn won current-turn resolution and the bundle on the
 // previous turn was never joined into pending_bundles — a false negative.
+//
+// The clarification turn is completed (not left open) so it ties the
+// open-turn-first ranking key with the lifecycle-only turn; only the
+// lifecycle exclusion can then rescue it. TestListPendingInteractionsRanksOpenTurnAheadOfNewerCompletedTurn
+// pins the open-turn-first ranking key on its own.
 func TestListPendingInteractionsSkipsLifecycleOnlyTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	base := time.Date(2026, time.September, 12, 9, 0, 0, 0, time.UTC)
 
 	seedPendingActionSession(t, repo, "task-lifecycle", "session-lifecycle")
-	createPendingActionTurn(t, repo, "task-lifecycle", "session-lifecycle", "turn-question", base, base)
+	questionCompletedAt := base.Add(30 * time.Second)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-question",
+		TaskSessionID: "session-lifecycle",
+		TaskID:        "task-lifecycle",
+		StartedAt:     base,
+		CreatedAt:     base,
+		CompletedAt:   &questionCompletedAt,
+	}); err != nil {
+		t.Fatalf("CreateTurn(turn-question): %v", err)
+	}
 	createClarificationBundleMessage(t, repo, "clar-q1", "task-lifecycle", "session-lifecycle", "turn-question", "pending-lifecycle", "q1", base)
 	createClarificationBundleMessage(t, repo, "clar-q2", "task-lifecycle", "session-lifecycle", "turn-question", "pending-lifecycle", "q2", base.Add(time.Second))
 
@@ -374,5 +389,45 @@ func TestListPendingInteractionsSkipsLifecycleOnlyTurn(t *testing.T) {
 	}
 	if !foundBundle {
 		t.Fatal("bundle query disagrees with the interaction list: session not reported pending")
+	}
+}
+
+// TestListPendingInteractionsRanksOpenTurnAheadOfNewerCompletedTurn pins the
+// other half of currentTurnAuthority's ordering: an open turn (completed_at
+// IS NULL) outranks a newer completed turn regardless of started_at. Without
+// that open-turn-first key, ranking by raw started_at/created_at/id would
+// resolve current_turn to the newer completed turn and strand the open
+// turn's clarification bundle exactly as
+// TestListPendingInteractionsSkipsLifecycleOnlyTurn strands one behind a
+// lifecycle-only turn — but via the ordering axis, not the lifecycle
+// predicate.
+func TestListPendingInteractionsRanksOpenTurnAheadOfNewerCompletedTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 12, 9, 0, 0, 0, time.UTC)
+
+	seedPendingActionSession(t, repo, "task-openrace", "session-openrace")
+	createPendingActionTurn(t, repo, "task-openrace", "session-openrace", "turn-open-older", base, base)
+	createClarificationBundleMessage(t, repo, "clar-open-q1", "task-openrace", "session-openrace", "turn-open-older", "pending-openrace", "q1", base)
+
+	newerCompletedAt := base.Add(2 * time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-completed-newer",
+		TaskSessionID: "session-openrace",
+		TaskID:        "task-openrace",
+		StartedAt:     base.Add(time.Minute),
+		CreatedAt:     base.Add(time.Minute),
+		CompletedAt:   &newerCompletedAt,
+	}); err != nil {
+		t.Fatalf("CreateTurn(turn-completed-newer): %v", err)
+	}
+
+	got, err := repo.ListPendingInteractions(ctx, models.PendingInteractionFilter{SessionIDs: []string{"session-openrace"}})
+	if err != nil {
+		t.Fatalf("ListPendingInteractions: %v", err)
+	}
+	ids := interactionMessageIDs(got)
+	if len(ids) != 1 || ids[0] != "clar-open-q1" {
+		t.Fatalf("ids = %v, want the still-open older turn ranked as current over the newer completed turn", ids)
 	}
 }

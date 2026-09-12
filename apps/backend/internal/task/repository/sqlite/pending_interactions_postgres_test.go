@@ -113,6 +113,12 @@ func TestPostgresPendingInteractionsMatchSQLiteAuthority(t *testing.T) {
 // (json_extract on SQLite, ::jsonb->> on Postgres), so the lifecycle_only
 // exclusion needs its own coverage on this dialect rather than trusting the
 // SQLite run. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+//
+// The clarification turn is completed (not left open) so it ties the
+// open-turn-first ranking key with the lifecycle-only turn; only the
+// lifecycle exclusion can then rescue it.
+// TestPostgresListPendingInteractionsRanksOpenTurnAheadOfNewerCompletedTurn
+// pins the open-turn-first ranking key on its own.
 func TestPostgresListPendingInteractionsSkipsLifecycleOnlyTurn(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)
@@ -123,7 +129,17 @@ func TestPostgresListPendingInteractionsSkipsLifecycleOnlyTurn(t *testing.T) {
 	base := time.Date(2026, time.September, 12, 9, 0, 0, 0, time.UTC)
 
 	seedPendingActionSession(t, repo, "task-lifecycle-pg", "session-lifecycle-pg")
-	createPendingActionTurn(t, repo, "task-lifecycle-pg", "session-lifecycle-pg", "turn-question-pg", base, base)
+	questionCompletedAt := base.Add(30 * time.Second)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-question-pg",
+		TaskSessionID: "session-lifecycle-pg",
+		TaskID:        "task-lifecycle-pg",
+		StartedAt:     base,
+		CreatedAt:     base,
+		CompletedAt:   &questionCompletedAt,
+	}); err != nil {
+		t.Fatalf("CreateTurn(turn-question-pg): %v", err)
+	}
 	createClarificationBundleMessage(t, repo, "clar-q1-pg", "task-lifecycle-pg", "session-lifecycle-pg", "turn-question-pg", "pending-lifecycle-pg", "q1", base)
 	createClarificationBundleMessage(t, repo, "clar-q2-pg", "task-lifecycle-pg", "session-lifecycle-pg", "turn-question-pg", "pending-lifecycle-pg", "q2", base.Add(time.Second))
 
@@ -182,5 +198,45 @@ func TestPostgresListPendingInteractionsSkipsLifecycleOnlyTurn(t *testing.T) {
 	}
 	if !foundBundle {
 		t.Fatal("bundle query disagrees with the interaction list: session not reported pending")
+	}
+}
+
+// TestPostgresListPendingInteractionsRanksOpenTurnAheadOfNewerCompletedTurn
+// mirrors TestListPendingInteractionsRanksOpenTurnAheadOfNewerCompletedTurn
+// on PostgreSQL: an open turn (completed_at IS NULL) must outrank a newer
+// completed turn regardless of started_at. Skips unless
+// KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresListPendingInteractionsRanksOpenTurnAheadOfNewerCompletedTurn(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 12, 9, 0, 0, 0, time.UTC)
+
+	seedPendingActionSession(t, repo, "task-openrace-pg", "session-openrace-pg")
+	createPendingActionTurn(t, repo, "task-openrace-pg", "session-openrace-pg", "turn-open-older-pg", base, base)
+	createClarificationBundleMessage(t, repo, "clar-open-q1-pg", "task-openrace-pg", "session-openrace-pg", "turn-open-older-pg", "pending-openrace-pg", "q1", base)
+
+	newerCompletedAt := base.Add(2 * time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-completed-newer-pg",
+		TaskSessionID: "session-openrace-pg",
+		TaskID:        "task-openrace-pg",
+		StartedAt:     base.Add(time.Minute),
+		CreatedAt:     base.Add(time.Minute),
+		CompletedAt:   &newerCompletedAt,
+	}); err != nil {
+		t.Fatalf("CreateTurn(turn-completed-newer-pg): %v", err)
+	}
+
+	got, err := repo.ListPendingInteractions(ctx, models.PendingInteractionFilter{SessionIDs: []string{"session-openrace-pg"}})
+	if err != nil {
+		t.Fatalf("ListPendingInteractions: %v", err)
+	}
+	ids := interactionMessageIDs(got)
+	if len(ids) != 1 || ids[0] != "clar-open-q1-pg" {
+		t.Fatalf("ids = %v, want the still-open older turn ranked as current over the newer completed turn", ids)
 	}
 }
