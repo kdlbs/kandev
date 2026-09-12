@@ -40,7 +40,7 @@ func launchedWorkingAgent(
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, project_id, title, created_at, updated_at)
 		VALUES (?, 'ws-1', ?, 'Working status task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		taskID, project.ID)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}

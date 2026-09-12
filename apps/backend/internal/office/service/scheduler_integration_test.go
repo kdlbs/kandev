@@ -20,7 +20,7 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestSchedulerIntegration_CancelsRunForMovedWorkflowStep(t *testing.T) {
 
 	// The run was queued while the task was on step-old. A later workflow
 	// move must prevent the scheduler from launching that stale step.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-moved-step","workflow_step_id":"step-old"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestSchedulerIntegration_ResolvesExecutorFromTaskProject(t *testing.T) {
 		VALUES ('task-project-exec', 'ws-1', ?, 'Project executor task', 'desc',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, project.ID)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-project-exec"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSchedulerIntegration_PausedAgentSkipped(t *testing.T) {
 	}
 
 	// Queue while agent is active.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -210,10 +210,10 @@ func TestSchedulerIntegration_AtCapacityStaysQueued(t *testing.T) {
 	}
 
 	// Queue two runs.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, "k1"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, "k1"); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t2"}`, "k2"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t2"}`, "k2"); err != nil {
 		t.Fatalf("queue second: %v", err)
 	}
 
@@ -296,7 +296,7 @@ func TestSchedulerIntegration_PromptBuiltCorrectly(t *testing.T) {
 				t.Fatalf("create agent: %v", err)
 			}
 
-			if err := svc.QueueRun(ctx, agent.ID, tt.reason, tt.payload, ""); err != nil {
+			if _, err := svc.QueueRun(ctx, agent.ID, tt.reason, tt.payload, ""); err != nil {
 				t.Fatalf("queue: %v", err)
 			}
 

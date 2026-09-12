@@ -330,8 +330,12 @@ func TestUpdateTaskAssignee_WritesUpdatesAndClearsRunnerRow(t *testing.T) {
 		t.Fatalf("seed task: %v", err)
 	}
 
-	if err := repo.UpdateTaskAssignee(ctx, "as-1", "agent-one"); err != nil {
+	gen1, err := repo.UpdateTaskAssignee(ctx, "as-1", "agent-one")
+	if err != nil {
 		t.Fatalf("UpdateTaskAssignee (insert): %v", err)
+	}
+	if gen1 != 1 {
+		t.Fatalf("generation = %d, want 1 for the first assignment", gen1)
 	}
 	if got := taskRunner(t, repo, "as-1"); got != "agent-one" {
 		t.Fatalf("runner = %q, want agent-one", got)
@@ -340,9 +344,14 @@ func TestUpdateTaskAssignee_WritesUpdatesAndClearsRunnerRow(t *testing.T) {
 		t.Fatalf("runner rows = %d, want 1", n)
 	}
 
-	// A second assignment updates the existing row instead of adding one.
-	if err := repo.UpdateTaskAssignee(ctx, "as-1", "agent-two"); err != nil {
+	// A second assignment updates the existing row instead of adding one,
+	// and bumps the generation again.
+	gen2, err := repo.UpdateTaskAssignee(ctx, "as-1", "agent-two")
+	if err != nil {
 		t.Fatalf("UpdateTaskAssignee (update): %v", err)
+	}
+	if gen2 != 2 {
+		t.Fatalf("generation = %d, want 2 for the second assignment", gen2)
 	}
 	if got := taskRunner(t, repo, "as-1"); got != "agent-two" {
 		t.Errorf("runner = %q, want agent-two", got)
@@ -351,9 +360,14 @@ func TestUpdateTaskAssignee_WritesUpdatesAndClearsRunnerRow(t *testing.T) {
 		t.Errorf("runner rows = %d, want the row updated in place", n)
 	}
 
-	// An empty assignee deletes the runner row.
-	if err := repo.UpdateTaskAssignee(ctx, "as-1", ""); err != nil {
+	// An empty assignee deletes the runner row and still bumps the
+	// generation: an unassignment is itself an assignment write.
+	gen3, err := repo.UpdateTaskAssignee(ctx, "as-1", "")
+	if err != nil {
 		t.Fatalf("UpdateTaskAssignee (clear): %v", err)
+	}
+	if gen3 != 3 {
+		t.Fatalf("generation = %d, want 3 for the clear", gen3)
 	}
 	if n := runnerRowCount(t, repo, "as-1"); n != 0 {
 		t.Errorf("runner rows = %d, want 0 after clearing", n)
@@ -362,12 +376,40 @@ func TestUpdateTaskAssignee_WritesUpdatesAndClearsRunnerRow(t *testing.T) {
 		t.Errorf("runner = %q, want empty after clearing", got)
 	}
 
-	err := repo.UpdateTaskAssignee(ctx, "missing", "agent-one")
+	_, err = repo.UpdateTaskAssignee(ctx, "missing", "agent-one")
 	if err == nil {
 		t.Fatal("UpdateTaskAssignee(missing) = nil error, want not-found")
 	}
 	if !strings.Contains(err.Error(), "task not found: missing") {
 		t.Errorf("error = %q, want it to name the task", err)
+	}
+}
+
+// TestUpdateTaskAssignee_RepeatAssignmentBumpsGeneration covers AC-001.3: a
+// repeat assignment to the agent that already holds the seat is a real
+// occurrence (the operator is asking for the work again), not a no-op, so it
+// must mint a new generation rather than leave the counter unchanged.
+func TestUpdateTaskAssignee_RepeatAssignmentBumpsGeneration(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, workflow_step_id, title, created_at, updated_at)
+		VALUES ('as-repeat', 'ws-1', 'step-1', 'Repeat assign', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	gen1, err := repo.UpdateTaskAssignee(ctx, "as-repeat", "agent-a")
+	if err != nil {
+		t.Fatalf("first assignment: %v", err)
+	}
+	gen2, err := repo.UpdateTaskAssignee(ctx, "as-repeat", "agent-a")
+	if err != nil {
+		t.Fatalf("repeat assignment: %v", err)
+	}
+	if gen2 != gen1+1 {
+		t.Fatalf("repeat assignment generation = %d, want %d (one more than %d)", gen2, gen1+1, gen1)
 	}
 }
 
@@ -384,7 +426,7 @@ func TestUpdateTaskAssignee_WorksWithoutAWorkflowStep(t *testing.T) {
 		t.Fatalf("seed task: %v", err)
 	}
 
-	if err := repo.UpdateTaskAssignee(ctx, "as-nostep", "agent-channel"); err != nil {
+	if _, err := repo.UpdateTaskAssignee(ctx, "as-nostep", "agent-channel"); err != nil {
 		t.Fatalf("UpdateTaskAssignee: %v", err)
 	}
 	if got := taskRunner(t, repo, "as-nostep"); got != "agent-channel" {
@@ -405,13 +447,13 @@ func TestUpdateTaskAssignee_LeavesOtherTasksAlone(t *testing.T) {
 		t.Fatalf("seed tasks: %v", err)
 	}
 
-	if err := repo.UpdateTaskAssignee(ctx, "as-a", "agent-a"); err != nil {
+	if _, err := repo.UpdateTaskAssignee(ctx, "as-a", "agent-a"); err != nil {
 		t.Fatalf("assign as-a: %v", err)
 	}
-	if err := repo.UpdateTaskAssignee(ctx, "as-b", "agent-b"); err != nil {
+	if _, err := repo.UpdateTaskAssignee(ctx, "as-b", "agent-b"); err != nil {
 		t.Fatalf("assign as-b: %v", err)
 	}
-	if err := repo.UpdateTaskAssignee(ctx, "as-b", ""); err != nil {
+	if _, err := repo.UpdateTaskAssignee(ctx, "as-b", ""); err != nil {
 		t.Fatalf("clear as-b: %v", err)
 	}
 

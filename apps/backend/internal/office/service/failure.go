@@ -470,6 +470,9 @@ func (s *Service) autoPauseAgent(
 	return nil
 }
 
+// requeueRunForTask is a manual resume: the failed run's own id is the
+// occurrence identity (falling back to the task id if it is somehow empty),
+// so a duplicate "Mark fixed" click dedupes instead of double-queuing.
 func (s *Service) requeueRunForTask(
 	ctx context.Context, agentID, taskID, failedRunID string,
 ) error {
@@ -479,7 +482,8 @@ func (s *Service) requeueRunForTask(
 		identity = taskID
 	}
 	key := fmt.Sprintf("%s:%s:%s", RunReasonManualResumeAfterFailure, agentID, identity)
-	return s.QueueRun(ctx, agentID, RunReasonManualResumeAfterFailure, payload, key)
+	_, err := s.QueueRun(ctx, agentID, RunReasonManualResumeAfterFailure, payload, key)
+	return err
 }
 
 func (s *Service) publishRunFailed(

@@ -109,7 +109,7 @@ func TestSchedulerIntegration_RoutingReceivesBuiltPromptAndEnv(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, priority, created_at, updated_at)
 		VALUES ('task-routing-1', 'ws-1', 'ROUTING_PROMPT_SENTINEL_TITLE',
 		        'Implement endpoint', 'medium', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-routing-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSchedulerIntegration_SeatActionFlowsToPromptAndLaunch(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, workflow_step_id, title, description, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		"task-decision", "ws-1", "step-decision", "Decision task", "Review the change")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-decision"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestSchedulerIntegration_NonSeatRunDoesNotReceiveDecisionSkill(t *testing.T
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, workflow_step_id, title, description, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		"task-non-seat", "ws-1", "step-non-seat", "Non-seat task", "Review the change")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-non-seat"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestSchedulerIntegration_RoutingFallThrough_FallsBackToLegacy(t *testing.T)
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-ft-1', 'ws-1', 'Fall-through Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-ft-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestSchedulerIntegration_RoutingParked_LeavesAgentIdle(t *testing.T) {
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-parked-1', 'ws-1', 'Parked Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-parked-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestSchedulerIntegration_RoutingDispatchError_LeavesAgentIdle(t *testing.T)
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-routing-err-1', 'ws-1', 'Routing Error Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-routing-err-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

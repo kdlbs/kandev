@@ -55,7 +55,7 @@ func TestSchedulerTick_InactiveAgentRunDoesNotStealCheckout(t *testing.T) {
 	// Queue while idle (QueueRun itself refuses to queue for a paused
 	// agent), then go paused before the tick runs - reproducing the race
 	// where an agent is deactivated between queueing and processing.
-	if err := svc.QueueRun(ctx, inactive.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, inactive.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-inactive-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestSchedulerTick_SameAgentPreCheckoutRunDoesNotStealOwnLiveCheckout(t *tes
 	// queued while idle, then the agent goes paused before the tick picks
 	// it up - reproducing the race where the holder is deactivated after
 	// a second run was already queued behind its own live run.
-	if err := svc.QueueRun(ctx, holder.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, holder.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-same-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

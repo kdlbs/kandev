@@ -30,7 +30,7 @@ func TestClaimNextRun_ClaimsQueued(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestFinishAndFailRun(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -132,7 +132,7 @@ func TestFailRun_WritesFailedStatusAndNullOutcome(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -173,7 +173,7 @@ func TestTransitionRunTerminal_LastWriterWinsOnStatusAndOutcome(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k1"); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		req, _ := svc.ClaimNextRun(ctx)

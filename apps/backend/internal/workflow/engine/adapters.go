@@ -34,6 +34,12 @@ const (
 	// queued row for the same agent + reason within the coalescing
 	// window, so nothing new was inserted.
 	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	// QueueOutcomeNone means no enqueue was attempted, or the attempt
+	// returned an error. It is the zero value, so it is what a widened
+	// signature yields on any path that returns before deciding an
+	// outcome. Declared identically in internal/runs/service — both
+	// declarations MUST match.
+	QueueOutcomeNone QueueOutcome = ""
 )
 
 // QueueRunRequest is the typed payload the engine hands to RunQueueAdapter.

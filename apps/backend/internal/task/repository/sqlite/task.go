@@ -390,6 +390,14 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		if err := upsertRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 			return "", err
 		}
+		// A task created already assigned starts at generation 1, the same
+		// value UpdateTaskAssignee would commit for a first assignment - a
+		// creation and a following first assignment must not both mint
+		// generation 1.
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(
+			`UPDATE tasks SET assignment_generation = 1 WHERE id = ?`), task.ID); err != nil {
+			return "", err
+		}
 	}
 	return entryID, nil
 }

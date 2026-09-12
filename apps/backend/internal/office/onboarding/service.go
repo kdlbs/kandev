@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
@@ -349,7 +350,11 @@ func (s *OnboardingService) maybeCreateOnboardingTask(
 		return ""
 	}
 	if s.runQueuer != nil {
-		if wakeErr := s.runQueuer.QueueRun(ctx, agentID, runReasonTaskAssigned,
+		// A third task_assigned producer alongside queueTaskAssignedRun; it is
+		// never handed the assigning transaction's generation, so it enqueues
+		// keyless rather than deriving a divergent key.
+		runsservice.ReportKeylessEnqueue(runReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "onboarding_no_generation")
+		if _, wakeErr := s.runQueuer.QueueRun(ctx, agentID, runReasonTaskAssigned,
 			fmt.Sprintf(`{"task_id":%q}`, taskID), ""); wakeErr != nil {
 			s.logger.Warn("enqueue onboarding run failed", zap.Error(wakeErr))
 		}

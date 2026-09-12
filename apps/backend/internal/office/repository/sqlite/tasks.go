@@ -134,21 +134,32 @@ func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) 
 // task_id) so the projection's per-task runner clause still resolves it
 // (the (step_id="" / step_id="") match holds because the SELECT joins
 // step_id = task.workflow_step_id which is also "").
-func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error {
+//
+// This is one of the two assignment_generation bump sites (the other is
+// insertTaskTx -> upsertRunnerInTx on create). It increments
+// tasks.assignment_generation unconditionally on every committed call —
+// including a repeat assignment to the agent that already holds the seat,
+// which is a real occurrence, not a no-op — and reads the new value back
+// inside this same transaction before Commit, returning it so callers carry
+// it forward instead of re-reading it later (a later re-read could observe a
+// different, more recent occurrence's value). A read-back failure rolls the
+// whole assignment back rather than commit a write whose generation could
+// not be reported.
+func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error) {
 	var stepID string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
 		`SELECT COALESCE(workflow_step_id, '') FROM tasks WHERE id = ?`),
 		taskID).Scan(&stepID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("task not found: %s", taskID)
+			return 0, fmt.Errorf("task not found: %s", taskID)
 		}
-		return err
+		return 0, err
 	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -157,7 +168,7 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 			DELETE FROM workflow_step_participants
 			WHERE step_id = ? AND task_id = ? AND role = 'runner'
 		`), stepID, taskID); err != nil {
-			return err
+			return 0, err
 		}
 	} else {
 		var existing string
@@ -170,7 +181,7 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 			if _, err := tx.ExecContext(ctx, tx.Rebind(
 				`UPDATE workflow_step_participants SET agent_profile_id = ? WHERE id = ?`),
 				assigneeID, existing); err != nil {
-				return err
+				return 0, err
 			}
 		case sql.ErrNoRows:
 			if _, err := tx.ExecContext(ctx, tx.Rebind(`
@@ -178,19 +189,30 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
 				VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
 			`), newParticipantUUID(), stepID, taskID, assigneeID, time.Now().UTC()); err != nil {
-				return err
+				return 0, err
 			}
 		default:
-			return probeErr
+			return 0, probeErr
 		}
 	}
 
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
+		UPDATE tasks SET assignment_generation = assignment_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?
 	`), taskID); err != nil {
-		return err
+		return 0, err
 	}
-	return tx.Commit()
+
+	var generation int64
+	if err := tx.QueryRowxContext(ctx, tx.Rebind(
+		`SELECT assignment_generation FROM tasks WHERE id = ?`),
+		taskID).Scan(&generation); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return generation, nil
 }
 
 // TaskBasicInfo contains the minimal task fields needed for prompt building.

@@ -36,7 +36,7 @@ func TestHandleRunFailure_CEOOwnFailure_DoesNotSelfEscalate(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		if err := svc.QueueRun(
+		if _, err := svc.QueueRun(
 			ctx, ceo.ID, service.RunReasonAgentError, `{}`, "",
 		); err != nil {
 			t.Fatalf("queue ceo run %d: %v", i, err)

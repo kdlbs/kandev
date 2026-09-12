@@ -580,6 +580,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		{"external_id", `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`},
 		{"external_id_settled_at", `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`},
 		{"assignee_user_id", `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`},
+		{"assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := conn.ExecContext(ctx, column.stmt); err != nil && !db.IsDuplicateColumnError(err) {
@@ -642,7 +643,8 @@ func taskPriorityMigrationStatements() []string {
 			checkout_run_id TEXT,
 			external_id TEXT COLLATE BINARY,
 			external_id_settled_at TIMESTAMP,
-			assignee_user_id TEXT NOT NULL DEFAULT ''
+			assignee_user_id TEXT NOT NULL DEFAULT '',
+			assignment_generation INTEGER NOT NULL DEFAULT 0
 		)`,
 		// archived_by_cascade_id and external_id/external_id_settled_at are
 		// added to the task schema by task/repository/sqlite/base.go
@@ -662,7 +664,7 @@ func taskPriorityMigrationStatements() []string {
 			origin, project_id,
 			labels, identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at, assignee_user_id
+			external_id, external_id_settled_at, assignee_user_id, assignment_generation
 		) SELECT
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
@@ -677,7 +679,7 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(labels,'[]'), identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
 			external_id, external_id_settled_at,
-			COALESCE(assignee_user_id,'')
+			COALESCE(assignee_user_id,''), COALESCE(assignment_generation,0)
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_priority_new RENAME TO tasks`,

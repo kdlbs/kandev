@@ -21,7 +21,7 @@ func queueAndReadRun(
 	ctx := context.Background()
 	payload := mustMarshalJSON(map[string]string{"task_id": taskID})
 	idem := agentID + ":" + taskID
-	if err := svc.QueueRun(ctx, agentID, service.RunReasonTaskAssigned, payload, idem); err != nil {
+	if _, err := svc.QueueRun(ctx, agentID, service.RunReasonTaskAssigned, payload, idem); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	rows, err := svc.ListRuns(ctx, "ws-1")
@@ -247,7 +247,7 @@ func TestMarkAgentPausedFixed_RecoversAgent(t *testing.T) {
 
 	// Proves the guardAgentStatus rejection is gone: QueueRun must
 	// succeed now that the agent is actually idle.
-	if err := svc.QueueRun(ctx, "agent-recover", service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, "agent-recover", service.RunReasonTaskAssigned,
 		mustMarshalJSON(map[string]string{"task_id": "agent-recover-task-a"}),
 		"agent-recover:post-fix"); err != nil {
 		t.Fatalf("expected QueueRun to succeed after mark fixed, got: %v", err)

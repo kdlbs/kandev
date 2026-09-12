@@ -42,7 +42,8 @@ func (d *queueRunDispatcher) HandleTrigger(
 	case engine.TriggerOnComment:
 		p, _ := payload.(engine.OnCommentPayload)
 		body, _ := json.Marshal(map[string]string{"task_id": taskID, "comment_id": p.CommentID})
-		return d.svc.QueueRun(ctx, assignee, service.RunReasonTaskComment, string(body), opID)
+		_, err := d.svc.QueueRun(ctx, assignee, service.RunReasonTaskComment, string(body), opID)
+		return err
 	case engine.TriggerOnBlockerResolved:
 		p, _ := payload.(engine.OnBlockerResolvedPayload)
 		var resolved string
@@ -50,10 +51,12 @@ func (d *queueRunDispatcher) HandleTrigger(
 			resolved = p.ResolvedBlockerIDs[0]
 		}
 		body, _ := json.Marshal(map[string]string{"task_id": taskID, "resolved_blocker_id": resolved})
-		return d.svc.QueueRun(ctx, assignee, service.RunReasonTaskBlockersResolved, string(body), opID)
+		_, err := d.svc.QueueRun(ctx, assignee, service.RunReasonTaskBlockersResolved, string(body), opID)
+		return err
 	case engine.TriggerOnChildrenCompleted:
 		body, _ := json.Marshal(map[string]string{"task_id": taskID})
-		return d.svc.QueueRun(ctx, assignee, service.RunReasonTaskChildrenCompleted, string(body), opID)
+		_, err := d.svc.QueueRun(ctx, assignee, service.RunReasonTaskChildrenCompleted, string(body), opID)
+		return err
 	case engine.TriggerOnApprovalResolved:
 		p, _ := payload.(engine.OnApprovalResolvedPayload)
 		body, _ := json.Marshal(map[string]string{
@@ -61,7 +64,8 @@ func (d *queueRunDispatcher) HandleTrigger(
 			"status":        p.Status,
 			"decision_note": p.Note,
 		})
-		return d.svc.QueueRun(ctx, assignee, service.RunReasonApprovalResolved, string(body), opID)
+		_, err := d.svc.QueueRun(ctx, assignee, service.RunReasonApprovalResolved, string(body), opID)
+		return err
 	}
 	return nil
 }

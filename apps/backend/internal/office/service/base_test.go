@@ -54,6 +54,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		state TEXT NOT NULL DEFAULT 'TODO',
 		title TEXT DEFAULT '',
 		assignee_user_id TEXT NOT NULL DEFAULT '',
+		assignment_generation INTEGER NOT NULL DEFAULT 0,
 		description TEXT DEFAULT '',
 		identifier TEXT DEFAULT '',
 		workflow_id TEXT DEFAULT '',
