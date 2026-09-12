@@ -41,6 +41,30 @@ marketplace — while keeping install-by-URL and sideloading as escape hatches.
 - **AC-PLUGINS-MARKETPLACE-001.7:** A catalog entry for a plugin that is already installed SHALL show an **Installed** state; when the catalog's latest version is newer than the installed version, it SHALL show an **Update available** affordance (which reinstalls the newer tarball).
 - **AC-PLUGINS-MARKETPLACE-001.8:** The catalog SHALL be assembled from **one or more marketplace sources**. kandev ships with the **official kandev source** enabled by default; operators MAY add **additional sources** (a team or corporate registry) and the catalog merges them.
 
+### REQ-PLUGINS-MARKETPLACE-002: Prompt curated-release publication
+
+**Intent:** A valid release from an already-curated plugin repository should become discoverable
+without waiting for a Kandev source commit or a manual registry rebuild, while preserving central
+curation and package-integrity authority.
+
+#### Acceptance criteria
+
+- **AC-PLUGINS-MARKETPLACE-002.1:** The official registry SHALL poll only repositories listed in the
+  checked-out `plugin-registry/plugins.yaml` every five minutes and target publication within 10
+  minutes under normal provider scheduling. The provider's best-effort scheduling caveat SHALL be
+  documented and the 06:00 UTC daily rebuild SHALL remain enabled.
+- **AC-PLUGINS-MARKETPLACE-002.2:** A release SHALL enter the official index only when its exact
+  `<id>-<version>.tar.gz` asset passes the package checksum and manifest safety gate and the verified
+  manifest ID/version matches the curated ID/release version.
+- **AC-PLUGINS-MARKETPLACE-002.3:** A bad or missing release SHALL preserve the last known-good record
+  for that still-curated repository and emit visible workflow evidence. A provider-wide failure SHALL
+  preserve the published Pages site rather than replacing it.
+- **AC-PLUGINS-MARKETPLACE-002.4:** All official registry deployments SHALL share one serialized,
+  coalescing concurrency group. A release signal SHALL carry no repository selector or release
+  payload from a plugin repository.
+
+Decision: `ADR-2026-08-30-central-curated-plugin-release-polling`.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/marketplace.md).

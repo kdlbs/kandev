@@ -175,15 +175,14 @@ asset is required; a second is optional:
 - `<id>-<version>.tar.gz` (**required**); the plugin package. It carries its
   own internal `checksums.txt` covering every packaged file, which the install
   pipeline verifies on extraction.
-- `checksums.txt` (optional); the sha256 of the tarball itself. Advisory
-  provenance: the catalog reserves a `package_sha256` field for it, but the
-  index builder does not populate or enforce the digest yet, so it is included
-  only for forward compatibility.
+- `checksums.txt` (optional); the SHA-256 of the tarball itself. The registry
+  always computes `package_sha256` from the downloaded archive and, when this
+  release-level file is present, requires its digest to match before publishing.
 
 The release must pass the standard package integrity gate. The
 [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
-  starter repo is the recommended way to bootstrap a repo with the right layout.
-its `.github/workflows/release.yml` produces both assets automatically when you
+starter repo is the recommended way to bootstrap a repo with the right layout.
+Its `.github/workflows/release.yml` produces both assets automatically when you
 push a version tag.
 
 ### 2. Add an icon (optional)
@@ -216,13 +215,35 @@ a PR that lists it.
    pin; leave it out of submissions. The pointer-list shape is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
 2. Open a pull request. The registry index-build workflow runs on your PR
-   (build + tests, no Pages deploy), resolving your entry against the GitHub API
-   Your repo must have a latest release that publishes a `.tar.gz` package
-   asset (an accompanying `checksums.txt` asset is optional). An entry whose repo
-   has no release or no package asset is skipped.
+   (build + tests, no Pages deploy), resolving your entry against the GitHub
+   API. Your latest release must publish the exact `<id>-<version>.tar.gz`
+   asset. The builder verifies its internal checksums and managed manifest and
+   requires the manifest ID and version to match the curated entry and release
+   tag. A release-level `checksums.txt` is optional; when present, its package
+   digest must also match.
 3. A maintainer reviews and merges; maintainer approval is what gates the
    official catalog. The index-build workflow then picks up your entry and your
    plugin appears in the in-app catalog on the next build.
+
+After a repository is curated, Kandev checks its latest release centrally every
+five minutes. A valid new release targets publication in the official index
+within 10 minutes under normal GitHub Actions scheduling, without a Kandev
+source commit or manual rebuild. GitHub schedules can be delayed or dropped, so
+10 minutes is an operational SLO rather than a hard guarantee; the daily 06:00
+UTC rebuild remains the fallback and star-count refresh.
+
+The checked-out registry list is the only allowlist. Plugin repositories do not
+receive Kandev credentials and cannot send a repository or deployment payload.
+Before publication, Kandev requires the exact `<id>-<version>.tar.gz`, verifies
+its internal checksums and managed manifest, matches the manifest ID/version to
+the curated entry and release tag, computes the package SHA-256, and compares an
+optional release-level checksum when present.
+
+If one latest release is missing or invalid, the official builder retains that
+still-curated plugin's previous record while valid peers may advance. A
+provider-wide failure leaves the published catalog unchanged. Maintainers can
+inspect the failed GitHub Actions run, annotations, and step summary; the daily
+build retries the complete catalog even when no release poll succeeded.
 
 Ranking in the catalog is **GitHub stars only**: there is no download or usage
 telemetry to game. Full submission details are in
@@ -242,14 +263,13 @@ source](#add-a-team-or-corporate-source)), and its plugins merge into the Browse
 tab alongside the official ones. This is the recommended path for a team or
 corporate registry, no PR to the main repo.
 
-The `index.json` document is the fetch contract between a source and kandev. The
-simplest way to produce one is to copy the official registry's
-`plugin-registry/` directory into your own repo; its `plugins.yaml` +
-[`build-index.mjs`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/build-index.mjs)
-build script (zero-dependency Node) + GitHub Action resolve each listed repo's
-latest release into a full catalog record and publish the generated
-`index.json` to GitHub Pages. Point kandev at that Pages URL. The document
-shape, the build pipeline, and the source data model are specified in the
+The `index.json` document is the fetch contract between a source and kandev.
+One way to produce one is to adapt the official registry's pointer list,
+[`build-index.mjs`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/build-index.mjs),
+Go package verifier, and GitHub Actions workflows. Together they resolve each
+listed repo's latest release into a verified catalog record and publish the
+generated `index.json` to GitHub Pages. Point kandev at that Pages URL. The
+document shape, the build pipeline, and the source data model are specified in the
 [plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/requirements/marketplace.md).
 
 Related: [Plugins](plugins.md), [Authoring a

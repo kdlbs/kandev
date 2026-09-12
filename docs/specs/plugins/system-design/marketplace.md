@@ -3,6 +3,7 @@ status: draft
 system: plugins
 requirements:
   - REQ-PLUGINS-MARKETPLACE-001
+  - REQ-PLUGINS-MARKETPLACE-002
 created: 2026-07-18
 owners:
   - jcfs
@@ -18,6 +19,7 @@ This design preserves the technical source detail for `REQ-PLUGINS-MARKETPLACE-0
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLUGINS-MARKETPLACE-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLUGINS-MARKETPLACE-002` | [Curated release propagation](#curated-release-propagation) |
 
 ## Migrated source detail
 
@@ -110,6 +112,27 @@ source list, enriches it, emits a static JSON API, and serves it from GitHub Pag
   count) and publishes it to **GitHub Pages**. A scheduled run refreshes star counts.
 - kandev fetches `index.json` — the official one plus any operator-added source URLs
   pointing at the same-shaped document.
+
+### Curated release propagation
+
+The official repository owns a five-minute, off-boundary poll. It reads repository identities only
+from the checked-out `plugins.yaml`, compares their latest exact package releases with the published
+official index, and calls the reusable index workflow only when a curated candidate changed. The
+detector has read-only contents permission; plugin repositories receive no Kandev credential and
+cannot provide a repository selector or deployment payload. See
+`ADR-2026-08-30-central-curated-plugin-release-polling`.
+
+The builder downloads the exact `<id>-<version>.tar.gz`, verifies the archive through the same
+`pkgtar` checksum/manifest authority used by installation, checks manifest identity and version, and
+publishes the computed package SHA-256. An optional release-level `checksums.txt` is compared when
+present. If one latest release fails, the builder retains only that still-curated repository's prior
+record and reports the failure; other valid releases may advance. A provider-wide failure or missing
+trusted prior aborts before Pages upload, leaving the published site unchanged.
+
+The release poll, source-triggered builds, manual rebuilds, and the daily 06:00 UTC fallback share
+the static `plugin-registry-pages` concurrency group. Active deployment finishes and pending work
+coalesces. The five-minute poll targets a 10-minute propagation SLO under normal GitHub Actions
+scheduling; GitHub schedules may be delayed or dropped, so this is not a deterministic guarantee.
 
 The per-repo publishing convention and the two Actions are an operational contract,
 not a user-facing API; their normative shape is the `schema.json` and the
