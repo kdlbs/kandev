@@ -126,7 +126,8 @@ PR integration preserves the newer Threads listing-context trigger and sync
 status, fixed picker content, shared control sizing and close-focus handlers.
 The newly extracted task-action dialog owner passes the captured task ID to
 detach confirmation. Current post-integration checks are recorded in the parent
-plan; the original results below remain historical evidence.
+plan, including the test-only CI remediation of the archive and Quick Chat
+scenarios; the original results below remain historical evidence.
 
 - RED: the Threads fixture measured a 581.59px sheet against a 436.2px compact
   limit. The failure was rendered geometry, not visibility or fixture setup.

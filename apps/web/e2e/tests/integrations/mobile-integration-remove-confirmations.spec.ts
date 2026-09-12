@@ -12,10 +12,11 @@ function guardAgainstNativeDialogs(testPage: Page) {
   return () => seen;
 }
 
-async function expectTouchSized(locator: Locator) {
+async function expectTouchSized(locator: Locator, minimumHeight = 48) {
   const box = await locator.boundingBox();
   expect(box).not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(48);
+  expect(box!.height).toBeGreaterThanOrEqual(minimumHeight);
+  expect(box!.width).toBeGreaterThanOrEqual(44);
 }
 
 async function expectNoHorizontalOverflow(testPage: Page) {
@@ -120,9 +121,9 @@ test.describe("integration configuration removal confirmations on mobile", () =>
     await settings.goto(seedData.workspaceId);
 
     const card = settings.cardByName("Mobile Sentry");
-    await expectTouchSized(card.getByTestId("sentry-instance-edit-button"));
+    await expectTouchSized(card.getByTestId("sentry-instance-edit-button"), 44);
     const removeButton = card.getByTestId("sentry-instance-delete-button");
-    await expectTouchSized(removeButton);
+    await expectTouchSized(removeButton, 44);
     await removeButton.tap();
     const inline = testPage.getByRole("dialog");
     await expect(inline).toBeVisible();

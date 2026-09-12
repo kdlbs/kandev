@@ -7,6 +7,7 @@ test("Quick Chat hosts context reset without losing its draft or dialog", async 
   prCapture,
 }) => {
   await testPage.goto("/");
+  await testPage.getByTestId("mobile-topbar-menu").tap();
   await testPage.getByTestId("mobile-quick-chat-button").tap();
   const chat = testPage.getByRole("dialog", { name: "Quick Chat" });
   await startQuickChatFromSetup(chat, testPage);

@@ -228,8 +228,45 @@ Post-integration checks:
 - Four desktop GitHub scope/saved-query and sidebar/Threads deletion checks
   passed without retries against the same build.
 
-Remote CI and review verification remain pending until the integration commit
-is pushed. Earlier exact-head and screenshot evidence is superseded.
+The integration commit was pushed and its remote checks were inspected. Static
+and frontend checks passed; four E2E shards exposed five stale mobile test
+expectations and three intermittent assertion/fixture interactions. The
+dependent E2E aggregate failures came from those shards.
+
+## PR CI remediation
+
+This remediation is test-only. It changes no application behavior, public
+contract, copy, or screenshots, so the requirements, system design and public
+how-to need no further change.
+
+- Archive and plugin-uninstall regressions now require compact bottom sheets,
+  48px confirmation actions and restored origin state, rather than inline rows.
+- Quick Chat enters through the current mobile menu. Sentry's ordinary row
+  controls use the shared 44px minimum; confirmation actions still require 48px.
+- Mobile CI retry bounds settle finite animations and allow only 0.001px of
+  floating-point error around the existing 44px target requirement.
+- File-tree readiness checks a visibly collapsed parent folder rather than a
+  virtualized root file pushed offscreen by preceding LSP fixtures.
+- Copy-files progress accepts an unrelated remote-sync warning but still requires
+  the exact two-file count and a successfully completed copy step.
+
+Local evidence before the remediation commit:
+
+- The five failing mobile scenarios reproduced with retries disabled, then
+  passed after the assertion/entry updates.
+- Running the LSP file-intelligence spec before file-tree search reproduced the
+  virtualized-row failure. The corrected ordered desktop run passed all 18
+  cases, including both copy-files progress scenarios, without retries:
+  `pnpm e2e:run --no-build --project chromium tests/lsp/lsp-file-intelligence.spec.ts tests/task/file-tree-search.spec.ts tests/session/copyfiles-progress.spec.ts -- --retries=0`.
+- All 29 cases in the five affected mobile specs passed without retries:
+  `pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts tests/task/mobile-content-confirmations.spec.ts tests/plugins/mobile-plugin-settings-row.spec.ts tests/integrations/mobile-integration-remove-confirmations.spec.ts tests/pr/mobile-ci-automation-options.spec.ts -- --retries=0`.
+- Typecheck, seven-file ESLint with zero warnings, Prettier,
+  `python3 scripts/lint-spec-files.py --all` and `git diff --check` passed.
+
+No timeouts were increased, retries added or production behavior changed.
+Earlier exact-head CI/review evidence becomes historical after the remediation
+push. Final remote CI, delayed review comments and mergeability must be checked
+on that new head before delivery; they are not claimed complete here.
 
 ## Risks
 
