@@ -14,14 +14,17 @@ const REORDER_PATH = /\/workflow-steps\/.+\/tasks\/reorder$/;
  * pointer on a card's center targets that exact card.
  */
 async function dragCardOntoCard(page: Page, fromCard: Locator, toCard: Locator) {
+  // Both boxes are read before the mouse button goes down: settledBoundingBox
+  // scrolls and polls, and doing that while the drag is active could scroll
+  // the viewport mid-drag and make startX/startY stale.
   const from = await settledBoundingBox(fromCard);
+  const to = await settledBoundingBox(toCard);
   const startX = from.x + from.width / 2;
   const startY = from.y + from.height / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   // Exceed the 8px PointerSensor activation distance so the drag starts.
   await page.mouse.move(startX + 12, startY, { steps: 3 });
-  const to = await settledBoundingBox(toCard);
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
   await page.mouse.up();
 }
