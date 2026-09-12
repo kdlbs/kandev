@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
 
 // TestPostgresListStuckParents_KeyedRunRetiresTimestampFallbackForParent is
@@ -33,6 +34,9 @@ func TestPostgresListStuckParents_KeyedRunRetiresTimestampFallbackForParent(t *t
 	}
 	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)
+	}
+	if _, err := workflowrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init workflow repo: %v", err)
 	}
 	repo, err := sqlite.NewWithDB(db, db, nil)
 	if err != nil {

@@ -79,7 +79,7 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 	var fields TaskExecutionFields
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT tasks.id,
-		       `+RunnerProjection(r.ro.DriverName(), "tasks")+` as assignee_agent_profile_id,
+		       `+RunnerProjection("tasks")+` as assignee_agent_profile_id,
 		       COALESCE(tasks.state, '') as state,
 		       COALESCE(tasks.workspace_id, '') as workspace_id,
 		       `+taskrepo.IsFromOfficePredicate("tasks")+` AS is_from_office
@@ -286,7 +286,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		       COALESCE(t.priority, 'medium') AS priority,
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
-		       ` + RunnerProjection(r.ro.DriverName(), "t") + ` AS assignee_agent_profile_id,
+		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
 		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
@@ -373,7 +373,7 @@ func (r *Repository) ListTasksFiltered(
 	sysPh, sysArgs := systemTasksPlaceholders()
 	args := []interface{}{}
 	args = append(args, sysArgs...) // for the IS_SYSTEM projection
-	whereParts, whereArgs := buildTaskWhereClause(r.ro.DriverName(), workspaceID, opts, resolved)
+	whereParts, whereArgs := buildTaskWhereClause(workspaceID, opts, resolved)
 	args = append(args, whereArgs...)
 	if !opts.IncludeSystem && len(sysArgs) > 0 {
 		whereParts = append(whereParts, "COALESCE(w.workflow_template_id,'') NOT IN ("+sysPh+")")
@@ -390,7 +390,7 @@ func (r *Repository) ListTasksFiltered(
 	                 COALESCE(t.priority, 'medium') AS priority,
 	                 COALESCE(t.parent_id, '') AS parent_id,
 	                 COALESCE(t.project_id, '') AS project_id,
-	                 ` + RunnerProjection(r.ro.DriverName(), "t") + ` AS assignee_agent_profile_id,
+	                 ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
 	                 COALESCE(t.labels, '[]') AS labels,
 	                 t.created_at,
 	                 t.updated_at,
@@ -451,7 +451,7 @@ func resolveListTasksOptions(opts ListTasksOptions) (resolvedListTasksOptions, e
 }
 
 func buildTaskWhereClause(
-	driver, workspaceID string, opts ListTasksOptions, resolved resolvedListTasksOptions,
+	workspaceID string, opts ListTasksOptions, resolved resolvedListTasksOptions,
 ) ([]string, []interface{}) {
 	args := []interface{}{workspaceID}
 	parts := []string{
@@ -471,7 +471,7 @@ func buildTaskWhereClause(
 		args = append(args, vals...)
 	}
 	if opts.AssigneeID != "" {
-		parts = append(parts, RunnerProjection(driver, "t")+" = ?")
+		parts = append(parts, RunnerProjection("t")+" = ?")
 		args = append(args, opts.AssigneeID)
 	}
 	if opts.ProjectID != "" {
@@ -534,7 +534,7 @@ func (r *Repository) GetTaskByID(ctx context.Context, taskID string) (*TaskRow, 
 		       COALESCE(t.priority, 'medium') AS priority,
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
-		       `+RunnerProjection(r.ro.DriverName(), "t")+` AS assignee_agent_profile_id,
+		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
 		       COALESCE(t.assignee_user_id, '') AS assignee_user_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
@@ -563,7 +563,7 @@ func (r *Repository) ListChildTasks(ctx context.Context, parentID string) ([]*Ta
 		       COALESCE(t.priority, 'medium') AS priority,
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
-		       `+RunnerProjection(r.ro.DriverName(), "t")+` AS assignee_agent_profile_id,
+		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at
@@ -632,7 +632,7 @@ func (r *Repository) searchTasksFTS(ctx context.Context, workspaceID, query stri
 		       COALESCE(t.priority, 'medium') AS priority,
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
-		       `+RunnerProjection(r.ro.DriverName(), "t")+` AS assignee_agent_profile_id,
+		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at
@@ -665,7 +665,7 @@ func (r *Repository) searchTasksLike(ctx context.Context, workspaceID, query str
 		       COALESCE(t.priority, 'medium') AS priority,
 		       COALESCE(t.parent_id, '') AS parent_id,
 		       COALESCE(t.project_id, '') AS project_id,
-		       `+RunnerProjection(r.ro.DriverName(), "t")+` AS assignee_agent_profile_id,
+		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
 		       COALESCE(t.labels, '[]') AS labels,
 		       t.created_at,
 		       t.updated_at
@@ -709,7 +709,7 @@ func (r *Repository) CountActionableTasksForAgent(ctx context.Context, agentID s
 	var count int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*) FROM tasks t
-		WHERE `+RunnerProjection(r.ro.DriverName(), "t")+` = ?
+		WHERE `+RunnerProjection("t")+` = ?
 		  AND t.state IN ('TODO', 'IN_PROGRESS')
 		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
 	`), agentID).Scan(&count)
@@ -1013,12 +1013,12 @@ func (r *Repository) ListUnstartedTasks(
 	var rows []*UnstartedTaskRow
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT t.id,
-		       `+RunnerProjection(r.ro.DriverName(), "t")+` AS assignee_agent_profile_id,
+		       `+RunnerProjection("t")+` AS assignee_agent_profile_id,
 		       t.workspace_id
 		FROM tasks t
 		WHERE t.state = 'TODO'
 		  AND `+taskrepo.IsFromOfficePredicate("t")+`
-		  AND `+RunnerProjection(r.ro.DriverName(), "t")+` != ''
+		  AND `+RunnerProjection("t")+` != ''
 		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
 		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
 		  AND NOT EXISTS (

@@ -124,7 +124,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		WITH stuck AS (
 			SELECT
 				p.id AS parent_task_id,
-				`+RunnerProjection(driver, "p")+` AS assignee_agent_profile_id,
+				`+RunnerProjection("p")+` AS assignee_agent_profile_id,
 				p.workflow_step_id AS workflow_step_id,
 				COALESCE(`+dialect.OrderedPairConcat(driver, "parent_id = p.id AND archived_at IS NULL")+`, '') AS child_set_key,
 				p.id || '|' || COALESCE(`+dialect.OrderedIDConcat(driver, waveMemberPredicate)+`, '') AS wave_string,

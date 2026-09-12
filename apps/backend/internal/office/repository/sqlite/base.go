@@ -32,19 +32,14 @@ func newParticipantUUID() string { return uuid.New().String() }
 // the resulting SQL fragment evaluates to "" when neither a runner row
 // nor a step primary exists.
 //
-// The third fallback's ordering is dialect-branched: SQLite orders by
-// wsp.rowid, which Postgres does not have. Postgres has no column here that
-// preserves insertion order (workflow_step_participants carries no
-// created_at, and ctid is unstable across VACUUM/UPDATE), so it orders by
-// wsp.id instead — a last-resort tiebreak among rows that already fell
-// through both earlier, more specific fallbacks.
-func RunnerProjection(driver, alias string) string {
+// The third fallback orders by workflow_step_participants.created_at, a
+// persisted, dialect-portable column, with agent_profile_id as a named
+// tiebreak — the same ordering ResolveCurrentRunner uses for its identical
+// tier, so both resolvers agree and both database engines return the same
+// runner for the same data.
+func RunnerProjection(alias string) string {
 	if alias == "" {
 		alias = "tasks"
-	}
-	fallbackOrder := "wsp.rowid DESC"
-	if dialect.IsPostgres(driver) {
-		fallbackOrder = "wsp.id DESC"
 	}
 	return `COALESCE(
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
@@ -56,7 +51,7 @@ func RunnerProjection(driver, alias string) string {
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
 		 WHERE wsp.task_id = ` + alias + `.id
 		   AND wsp.role = 'runner'
-		 ORDER BY ` + fallbackOrder + ` LIMIT 1), ''),
+		 ORDER BY wsp.created_at DESC, wsp.agent_profile_id ASC LIMIT 1), ''),
 		''
 	)`
 }

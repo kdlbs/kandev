@@ -550,3 +550,52 @@ func TestListStuckParents_OrdersDeterministically(t *testing.T) {
 		}
 	}
 }
+
+// TestListStuckParents_ThirdTierOrdersByCreatedAtNotID is RunnerProjection's
+// third-tier regression test: when no participant matches the parent's
+// current step and the step has no primary agent, the pick among the
+// task's other runner rows must follow created_at, not the row identifier.
+// created_at and id are set in opposite order here, so a pick driven by id
+// (or by insertion order) returns the wrong agent.
+func TestListStuckParents_ThirdTierOrdersByCreatedAtNotID(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const parentID = "parent-tier3"
+	insertTask(t, repo, ctx, parentID, "ws-1", "Parent", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET project_id = 'office-project', workflow_step_id = 'step-parent' WHERE id = ?
+	`, parentID); err != nil {
+		t.Fatalf("mark parent: %v", err)
+	}
+	childID := parentID + "-child-0"
+	insertTask(t, repo, ctx, childID, "ws-1", "Child", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = ?, state = 'COMPLETED' WHERE id = ?`, parentID, childID,
+	); err != nil {
+		t.Fatalf("set child state: %v", err)
+	}
+
+	seedWakeAgentProfile(t, repo, ctx, "agent-recent", "idle")
+	seedWakeAgentProfile(t, repo, ctx, "agent-old", "idle")
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, created_at)
+		VALUES
+			('aa-tier3-1', 'other-step-1', ?, 'runner', 'agent-recent', '2024-06-01 00:00:00'),
+			('zz-tier3-2', 'other-step-2', ?, 'runner', 'agent-old',    '2024-01-01 00:00:00')
+	`, parentID, parentID); err != nil {
+		t.Fatalf("seed tier-3 runners: %v", err)
+	}
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != parentID {
+		t.Fatalf("candidates = %#v, want exactly [%s]", candidates, parentID)
+	}
+	if candidates[0].AssigneeAgentProfileID != "agent-recent" {
+		t.Fatalf("assignee = %q, want %q (latest created_at, not largest id)", candidates[0].AssigneeAgentProfileID, "agent-recent")
+	}
+}

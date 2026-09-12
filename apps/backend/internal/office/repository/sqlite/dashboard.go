@@ -81,7 +81,7 @@ func (r *Repository) QueryRecentTasks(ctx context.Context, workspaceID string, l
 		       COALESCE(identifier,'') as identifier,
 		       title,
 		       COALESCE(state,'') as state,
-		       `+RunnerProjection(r.ro.DriverName(), "tasks")+` as assignee,
+		       `+RunnerProjection("tasks")+` as assignee,
 		       updated_at
 		FROM tasks
 		WHERE workspace_id = ?
