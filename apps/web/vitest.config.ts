@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig, mergeConfig } from "vitest/config";
 
 import viteConfig from "./vite.config";
+import { BASE_TEST_EXCLUDES, projectDefinitions } from "./scripts/vitest-project-selection";
 import { resolveMaxWorkers } from "./scripts/vitest-worker-budget";
 
 if (process.env.DEBUG === "1") process.env.DEBUG = "";
@@ -29,27 +30,68 @@ export default mergeConfig(
       ],
     },
     test: {
-      environment: "happy-dom",
-      environmentOptions: {
-        happyDOM: {
-          settings: {
-            navigation: {
-              disableMainFrameNavigation: true,
-              disableChildFrameNavigation: true,
-            },
-          },
-        },
-      },
-      setupFiles: ["./vitest.setup.ts"],
-      // `e2e/**/*.spec.ts` belongs to Playwright, but plain unit tests for the
-      // e2e helpers themselves (`*.test.ts`) still run here — excluding the
-      // whole tree would let them sit in the repo without ever executing.
-      exclude: ["e2e/**/*.spec.ts", "e2e/fixtures/**", "e2e/pages/**", "node_modules/**"],
+      // Each project below inherits these shared worker and empty-selection
+      // safeguards. Environment and setup are project-specific so Node-only
+      // helpers do not pay for happy-dom, React, or locale catalogs.
+      exclude: [...BASE_TEST_EXCLUDES],
       pool: "threads",
       maxWorkers,
       // Already the default, pinned because it is load-bearing: a run that
       // collects nothing must exit non-zero rather than read as a green suite.
       passWithNoTests: false,
+      projects: [
+        {
+          extends: true,
+          test: {
+            name: "node",
+            include: [...projectDefinitions.node.include],
+            exclude: [...projectDefinitions.node.exclude],
+            setupFiles: ["./vitest.setup.node.ts"],
+            environment: "node",
+            testTimeout: 15_000,
+          },
+        },
+        {
+          extends: true,
+          test: {
+            name: "browser",
+            include: [...projectDefinitions.browser.include],
+            exclude: [...projectDefinitions.browser.exclude],
+            setupFiles: ["./vitest.setup.ts"],
+            environment: "happy-dom",
+            environmentOptions: {
+              happyDOM: {
+                settings: {
+                  navigation: {
+                    disableMainFrameNavigation: true,
+                    disableChildFrameNavigation: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          extends: true,
+          test: {
+            name: "browser-locales",
+            include: [...projectDefinitions["browser-locales"].include],
+            exclude: [...projectDefinitions["browser-locales"].exclude],
+            setupFiles: ["./vitest.setup.ts", "./vitest.setup.locales.ts"],
+            environment: "happy-dom",
+            environmentOptions: {
+              happyDOM: {
+                settings: {
+                  navigation: {
+                    disableMainFrameNavigation: true,
+                    disableChildFrameNavigation: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
     },
   }),
 );

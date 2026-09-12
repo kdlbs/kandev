@@ -40,6 +40,30 @@ def run_tests_step(workflow: str) -> str:
     return remainder.partition(NEXT_STEP_MARKER)[0]
 
 
+def frontend_job(workflow: str) -> str:
+    """Return the static frontend job body, up to the test matrix."""
+    _, separator, remainder = workflow.partition("  frontend:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no frontend job")
+    return remainder.partition("\n  frontend_tests:")[0]
+
+
+def frontend_tests_job(workflow: str) -> str:
+    """Return the frontend test matrix body, up to the required gate."""
+    _, separator, remainder = workflow.partition("  frontend_tests:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no frontend_tests job")
+    return remainder.partition("\n  frontend-gate:")[0]
+
+
+def frontend_gate_job(workflow: str) -> str:
+    """Return the required frontend gate body."""
+    _, separator, remainder = workflow.partition("  frontend-gate:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no frontend-gate job")
+    return remainder
+
+
 def trigger_block(workflow: str, trigger: str) -> str:
     """Return `trigger`'s block under `on:`, up to the next top-level key."""
     block = re.search(rf"(?m)^  {trigger}:\n(?:^ {{4}}.*\n|^\n)*", workflow)
@@ -49,6 +73,108 @@ def trigger_block(workflow: str, trigger: str) -> str:
 
 
 class FrontendTestsWorkflowContractTest(unittest.TestCase):
+    def test_cache_resolves_the_container_pnpm_store_before_restore(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        resolve_index = job.find("- name: Resolve pnpm store path")
+        cache_index = job.find("- name: Cache pnpm store")
+        install_index = job.find("- name: Install dependencies")
+
+        self.assertGreaterEqual(resolve_index, 0, "store resolution step is missing")
+        self.assertGreaterEqual(cache_index, 0, "cache step is missing")
+        self.assertGreaterEqual(install_index, 0, "dependency installation step is missing")
+        self.assertLess(resolve_index, cache_index)
+        self.assertLess(cache_index, install_index)
+        resolve_step = job[resolve_index:cache_index]
+        cache_step = job[cache_index:install_index]
+
+        self.assertIn("id: pnpm-store", resolve_step)
+        self.assertIn("pnpm store path --silent", resolve_step)
+        self.assertIn('pnpm --version', resolve_step)
+        self.assertIn('mkdir -p "${STORE_PATH}"', resolve_step)
+        self.assertIn('printf \'path=%s\\n\' "${STORE_PATH}"', resolve_step)
+        self.assertIn("path: ${{ steps.pnpm-store.outputs.path }}", cache_step)
+        self.assertIn("runner.os", cache_step)
+        self.assertIn("runner.arch", cache_step)
+        self.assertIn("steps.pnpm-store.outputs.version", cache_step)
+        self.assertIn("hashFiles('apps/pnpm-lock.yaml')", cache_step)
+        self.assertIn(
+            "restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-",
+            cache_step,
+        )
+        self.assertIn("continue-on-error: true", cache_step)
+
+    def test_cache_failure_does_not_replace_frozen_installation(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        cache_index = job.index("- name: Cache pnpm store")
+        install_index = job.index("- name: Install dependencies")
+        install_step = job[install_index:].partition(NEXT_STEP_MARKER)[0]
+
+        self.assertLess(cache_index, install_index)
+        self.assertIn("pnpm install --frozen-lockfile", install_step)
+
+    def test_static_job_keeps_checks_and_build_without_running_unit_tests(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+
+        self.assertNotIn("- name: Run tests\n", job)
+        self.assertIn("- name: Run lint\n", job)
+        self.assertIn("- name: Run typecheck\n", job)
+        self.assertIn("- name: Build\n", job)
+
+    def test_unit_tests_use_the_planned_matrix_and_publish_unique_reports(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        planner = workflow.partition("  changes:\n")[0]
+        job = frontend_tests_job(workflow)
+
+        self.assertIn('"name":"frontend_tests"', planner)
+        self.assertIn(
+            "matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_tests_matrix }}",
+            job,
+        )
+        self.assertIn("fail-fast: false", job)
+        self.assertIn("runs-on: ${{ matrix.runner }}", job)
+        self.assertIn("FRONTEND_TEST_SHARD: ${{ matrix.shard }}", job)
+        self.assertIn("FRONTEND_TEST_TOTAL: ${{ matrix.total }}", job)
+        self.assertIn(
+            '--shard="${FRONTEND_TEST_SHARD}/${FRONTEND_TEST_TOTAL}"',
+            job,
+        )
+        self.assertIn("--reporter=json", job)
+        self.assertIn(
+            'frontend-tests-${FRONTEND_TEST_SHARD}-${FRONTEND_TEST_TOTAL}.json',
+            job,
+        )
+        self.assertIn("uses: actions/upload-artifact@", job)
+        self.assertIn(
+            "name: frontend-test-results-${{ matrix.shard }}-${{ matrix.total }}",
+            job,
+        )
+        self.assertIn("if-no-files-found: ignore", job)
+
+    def test_unit_test_matrix_reproduces_the_production_environment(self) -> None:
+        job = frontend_tests_job(WORKFLOW.read_text(encoding="utf-8"))
+
+        self.assertIn("NODE_ENV: production", job)
+        self.assertIn("pnpm --filter @kandev/web test", job)
+        self.assertIn("pnpm install --frozen-lockfile", job)
+
+    def test_required_gate_requires_every_frontend_verification_result(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        gate = frontend_gate_job(workflow)
+
+        self.assertIn(
+            "needs: [changes, frontend, frontend_tests, runner_plan]",
+            gate,
+        )
+        self.assertIn("FRONTEND_TESTS_RESULT:", gate)
+        self.assertIn(
+            'if [[ "${FRONTEND_TESTS_RESULT}" != "success" && "${FRONTEND_TESTS_RESULT}" != "skipped" ]]',
+            gate,
+        )
+        self.assertIn("Frontend test matrix finished with result:", gate)
+
     def test_test_step_reproduces_the_production_environment(self) -> None:
         step = run_tests_step(WORKFLOW.read_text(encoding="utf-8"))
 

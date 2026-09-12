@@ -31,6 +31,16 @@ def workflow_step(workflow: str, name: str) -> str:
     return remainder.partition("\n      - name:")[0]
 
 
+def job_block(workflow: str, job: str, next_job: str | None) -> str:
+    marker = f"  {job}:\n"
+    _, separator, remainder = workflow.partition(marker)
+    if not separator:
+        raise AssertionError(f"Workflow has no {job} job")
+    if next_job is None:
+        return remainder
+    return remainder.partition(f"\n  {next_job}:\n")[0]
+
+
 class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
     def test_review_workflow_ignores_pr_updates(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -65,6 +75,27 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
         self.assertIn(
             "contains(github.event.comment.body, '@claude')",
             workflow,
+        )
+
+    def test_claude_execution_jobs_have_a_thirty_minute_budget(self) -> None:
+        review_workflow = WORKFLOW.read_text(encoding="utf-8")
+        for job, next_job in (
+            ("claude-review-same-repo", "label-allowlisted-fork"),
+            ("claude-review-fork", None),
+        ):
+            block = job_block(review_workflow, job, next_job)
+            self.assertRegex(
+                block,
+                r"runs-on: ubuntu-latest\n    timeout-minutes: 30\n",
+                f"{job} must bound Claude execution at 30 minutes",
+            )
+
+        mention_workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
+        block = job_block(mention_workflow, "claude", None)
+        self.assertRegex(
+            block,
+            r"runs-on: ubuntu-latest\n    timeout-minutes: 30\n",
+            "the shared interactive Claude job must bound execution at 30 minutes",
         )
 
     def test_manual_pr_review_does_not_checkout_untrusted_content(self) -> None:

@@ -35,6 +35,8 @@ retains ownership of its values, validation, authority, and persistence.
 
 ### Requirements
 
+- [CI performance](requirements/ci-performance.md)
+
 - [Startup lifecycle](requirements/startup-lifecycle.md)
 
 - [Agent-accessible Kandev settings](requirements/agent-settings-parity.md)
@@ -81,6 +83,8 @@ retains ownership of its values, validation, authority, and persistence.
 - [Workspace Git Status](requirements/workspace-git-status.md)
 
 ### System design
+
+- [CI performance](system-design/ci-performance.md)
 
 - [Startup lifecycle](system-design/startup-lifecycle.md)
 
