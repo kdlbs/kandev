@@ -4,6 +4,7 @@
  */
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 
 const MENU_TITLE = /Mention tasks, files, prompts/i;
 
@@ -49,9 +50,9 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     await expect(testPage.getByRole("option", { name: /qa-alpha/ })).toBeVisible();
@@ -66,23 +67,23 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-es");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-es");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Escape");
+    await editor.press("Escape");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
 
     // The @query text is preserved (Esc just closes the menu, doesn't undo typing).
-    await expect(textarea).toHaveValue("@qa-es");
+    await expectTaskDescription(editor, "@qa-es");
 
     // The open state must persist after the close animation window.
     await expect(testPage.getByTestId("create-task-dialog")).toHaveAttribute("data-state", "open");
-    await expect(textarea).toBeFocused();
+    await expect(editor).toBeFocused();
 
-    await textarea.pressSequentially(" continued");
-    await expect(textarea).toHaveValue("@qa-es continued");
+    await editor.pressSequentially(" continued");
+    await expectTaskDescription(editor, "@qa-es continued");
     await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
   });
 
@@ -97,15 +98,15 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
 
     const dialog = testPage.getByTestId("create-task-dialog");
-    const textarea = testPage.getByTestId("task-description-input");
+    const editor = testPage.getByTestId("task-description-input");
     await expect(dialog).toHaveAttribute("data-state", "open");
-    await textarea.fill("Keep this draft");
+    await editor.fill("Keep this draft");
     await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
 
-    await textarea.press("Escape");
+    await editor.press("Escape");
 
     await expect(dialog).toHaveAttribute("data-state", "open");
-    await expect(textarea).toHaveValue("Keep this draft");
+    await expectTaskDescription(editor, "Keep this draft");
     await prCapture.screenshot("create-task-dialog-after-escape-desktop", {
       caption: "Create Task stays open with the draft after Escape on desktop.",
     });
@@ -122,9 +123,9 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-arr");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-arr");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     // Both should be visible.
@@ -133,20 +134,18 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const secondOption = testPage.getByRole("option", { name: /qa-arr-2/ });
     await expect(async () => {
-      await textarea.focus();
-      await textarea.press("ArrowDown");
+      await editor.focus();
+      await editor.press("ArrowDown");
       await expect(secondOption).toHaveAttribute("aria-selected", "true", { timeout: 500 });
     }).toPass({ timeout: 5_000, intervals: [100, 250, 500] });
-    await textarea.press("Enter");
+    await editor.press("Enter");
 
-    const value = await textarea.inputValue();
-    // Equal filter scores → insertion order (stable sort): qa-arr-1 at index 0,
-    // qa-arr-2 at index 1. One ArrowDown moves from 0 → 1, so "SECOND" is selected.
-    expect(value).toBe("SECOND");
+    // Equal filter scores keep insertion order. One ArrowDown selects qa-arr-2.
+    await expectTaskDescription(editor, "@qa-arr-2");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
   });
 
-  test("clicking a menu item with the mouse inlines the prompt", async ({
+  test("clicking a menu item with the mouse inserts a prompt reference", async ({
     testPage,
     apiClient,
   }) => {
@@ -158,18 +157,18 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-mo");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-mo");
 
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
     await testPage.getByRole("option", { name: /qa-mouse/ }).click();
 
-    await expect(textarea).toHaveValue("MOUSE_CONTENT");
+    await expectTaskDescription(editor, "@qa-mouse");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
   });
 
-  test("inserted prompt with multi-line content auto-grows the textarea", async ({
+  test("selecting a prompt with multi-line content keeps the alias compact", async ({
     testPage,
     apiClient,
   }) => {
@@ -184,20 +183,17 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
       await kanban.createTaskButton.first().click();
       await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-      const textarea = testPage.getByTestId("task-description-input");
-      await textarea.fill("");
-      await textarea.click();
-      await textarea.pressSequentially(`@${promptName}`);
+      const editor = testPage.getByTestId("task-description-input");
+      await editor.fill("");
+      await editor.click();
+      await editor.pressSequentially(`@${promptName}`);
       await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
       // Select the exact prompt row. Keyboard selection can use a stale
       // filtered item while the prompt store is still hydrating.
       await testPage.getByRole("option", { name: new RegExp(promptName) }).click();
 
-      await expect(textarea).toHaveValue(lines);
-
-      // Height should reflect content (8 lines should be taller than the default ~96px min-h).
-      const height = await textarea.evaluate((el) => (el as HTMLTextAreaElement).scrollHeight);
-      expect(height).toBeGreaterThan(100);
+      await expectTaskDescription(editor, `@${promptName}`);
+      await expect(editor).toContainText(`@${promptName}`);
     } finally {
       await apiClient.deletePrompt(prompt.id).catch(() => undefined);
     }
@@ -212,11 +208,11 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.pressSequentially(" foo");
+    await editor.pressSequentially(" foo");
     // After a space immediately follows @, trigger detection should yield null.
     await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
   });
@@ -230,25 +226,20 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Backspace");
-    await textarea.press("Backspace");
-    await textarea.press("Backspace"); // deletes the @
-    await expect(textarea).toHaveValue("");
+    await editor.press("Backspace");
+    await editor.press("Backspace");
+    await editor.press("Backspace"); // deletes the @
+    await expectTaskDescription(editor, "");
     await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
   });
 
-  test("ArrowUp/ArrowDown don't propagate to native textarea cursor motion", async ({
-    testPage,
-    apiClient,
-  }) => {
-    // When the menu is open, the hook calls preventDefault on Arrow keys, so the
-    // textarea's selection cursor should NOT move. Probe by verifying that
-    // arrow-up does not change the textarea content/cursor in a way that
-    // breaks the subsequent Enter selection.
+  test("ArrowUp/ArrowDown stay in the suggestion menu", async ({ testPage, apiClient }) => {
+    // When the menu is open, the hook calls preventDefault on Arrow keys, so
+    // the editor keeps the active query while the menu changes selection.
     test.setTimeout(60_000);
     await apiClient.createPrompt("qa-arrow", "ARROW_CONTENT");
 
@@ -257,28 +248,24 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-arr");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-arr");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
 
-    const before = await textarea.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
-    await textarea.press("ArrowDown");
-    await textarea.press("ArrowUp");
-    const after = await textarea.evaluate((el) => (el as HTMLTextAreaElement).selectionStart);
-    expect(after).toBe(before);
+    await editor.press("ArrowDown");
+    await editor.press("ArrowUp");
 
-    await textarea.press("Enter");
-    await expect(textarea).toHaveValue("ARROW_CONTENT");
+    await editor.press("Enter");
+    await expectTaskDescription(editor, "@qa-arrow");
   });
 
-  test("description with inlined prompt is sent to backend on submit", async ({
+  test("description with a prompt alias is sent to backend on submit", async ({
     testPage,
     apiClient,
   }) => {
-    // Acceptance criterion: the textarea contains the inlined prompt content before submit
-    // and the form completes successfully. API-level task description verification is a
-    // follow-up — it requires retrieving the created task by title after creation.
+    // The visible alias is submitted and the existing server launch path
+    // resolves its definition later.
     test.setTimeout(60_000);
     const content = "INLINED_FROM_PROMPT_PAYLOAD";
     await apiClient.createPrompt("qa-submit", content);
@@ -291,12 +278,12 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     // Use scratch mode so submit does not depend on a pre-selected repository.
     await testPage.getByTestId("source-mode-scratch").click();
     await testPage.getByTestId("task-title-input").fill("qa-submit-task");
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-su");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@qa-su");
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await textarea.press("Enter");
-    await expect(textarea).toHaveValue(content);
+    await editor.press("Enter");
+    await expectTaskDescription(editor, "@qa-submit");
 
     const start = testPage.getByTestId("submit-start-agent");
     await expect(start).toBeEnabled({ timeout: 30_000 });

@@ -41,6 +41,10 @@ The work is one vertical frontend slice with no dependency on backend changes.
 
 ## Risks and exclusions
 
+The proposed [task-create chip package](../task-create-prompt-chips/plan.md)
+extends the shared renderer to task authoring. Its work orders own that change
+and its verification. This package retains its existing statuses and scope.
+
 - Prompt history currently uses a single-line text projection; the fix must not
   replace that layout with a second Markdown layout or break overflow detection.
 - Pinned content has no message metadata, so it reuses alias rendering but does

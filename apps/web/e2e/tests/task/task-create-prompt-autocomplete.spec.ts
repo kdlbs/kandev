@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 import type { Page } from "@playwright/test";
 
 const PROMPT_NAME = "e2e-bug-template";
@@ -24,7 +25,7 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     }
   });
 
-  test("typing @<name> opens the menu and selecting inlines the prompt content", async ({
+  test("typing @<name> opens the menu and selecting inserts a prompt reference", async ({
     testPage,
     apiClient,
   }) => {
@@ -40,14 +41,14 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
+    const editor = testPage.getByTestId("task-description-input");
     // A draft can be restored by the dialog after the storage cleanup above
     // if the previous dialog-close save is still settling. This scenario is
     // specifically about inserting into an empty composer, so establish that
     // user-visible starting state before typing the mention.
-    await textarea.fill("");
-    await textarea.click();
-    await textarea.pressSequentially("@e2e-bu");
+    await editor.fill("");
+    await editor.click();
+    await editor.pressSequentially("@e2e-bu");
 
     const menu = testPage.getByText(MENU_TITLE);
     await expect(menu).toBeVisible({ timeout: 5_000 });
@@ -55,9 +56,9 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     await expect(promptOption).toBeVisible();
     await expect(promptOption).toHaveAttribute("aria-selected", "true");
 
-    await textarea.press("Enter");
+    await editor.press("Enter");
 
-    await expect(textarea).toHaveValue(PROMPT_CONTENT);
+    await expectTaskDescription(editor, `@${PROMPT_NAME}`);
     await expect(menu).not.toBeVisible();
   });
 
@@ -72,12 +73,12 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
     // No preceding whitespace before @ — the trigger is invalid.
-    await textarea.pressSequentially("foo@bar");
+    await editor.pressSequentially("foo@bar");
 
-    await expect(textarea).toHaveValue("foo@bar");
+    await expectTaskDescription(editor, "foo@bar");
     await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
   });
 
@@ -93,13 +94,13 @@ test.describe("Task creation: custom prompt autocomplete", () => {
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await expect(testPage.getByTestId("task-description-input")).toHaveValue("");
+    await expectTaskDescription(testPage.getByTestId("task-description-input"), "");
 
     // Fill title so the form would be otherwise submittable.
     await testPage.getByTestId("task-title-input").fill("autocomplete-enter-test");
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@e2e-bu");
+    const editor = testPage.getByTestId("task-description-input");
+    await editor.click();
+    await editor.pressSequentially("@e2e-bu");
 
     // Wait for the menu AND its option to actually populate before pressing
     // Enter. The autocomplete popup can open a beat before its options hydrate;
@@ -114,10 +115,10 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     const promptOption = testPage.getByRole("option").filter({ hasText: PROMPT_NAME });
     await expect(promptOption).toBeVisible();
     await expect(promptOption).toHaveAttribute("aria-selected", "true");
-    await textarea.press("Enter");
+    await editor.press("Enter");
 
     // Dialog must still be open — Enter selected the menu item, not the form submit.
     await expect(dialog).toBeVisible();
-    await expect(textarea).toHaveValue(PROMPT_CONTENT);
+    await expectTaskDescription(editor, `@${PROMPT_NAME}`);
   });
 });

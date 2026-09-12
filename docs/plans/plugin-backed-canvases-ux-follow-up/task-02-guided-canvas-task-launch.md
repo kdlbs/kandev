@@ -22,6 +22,11 @@ system_design:
 
 # Task 02: Add guided canvas task launch
 
+Subsequent design: [direct canvas creation](../canvas-direct-creation/plan.md)
+replaces the sidebar setup redirect with a shared dialog launcher. This
+completed work order preserves earlier results; the new package owns the
+updated navigation and prompt tests.
+
 ## Summary
 
 Open the standard task creation flow from workspace Canvases settings. Apply

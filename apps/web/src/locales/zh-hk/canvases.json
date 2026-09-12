@@ -5,7 +5,7 @@
   "setUpCanvas": "設定畫布",
   "createCanvas": "建立畫布",
   "createCanvasTaskTitle": "建立畫布",
-  "createCanvasTaskPrompt": "在 Kandev 中為我描述的應用建立一個交互式畫布。如果缺少應用目標，詢問畫布需要展示或執行什麼。編寫應用檔案前，先查找 Kandev 畫布 MCP 工具。如果工具不可呼叫，使用原生工具搜尋查找「kandev canvas」，或檢查用戶端可用的 MCP 目錄。在編寫應用檔案前，先在 Kandev 中建立草稿。呼叫 `create_canvas_kandev` 建立草稿並擷取源目錄。無需路徑參數呼叫一次 `read_canvas_authoring_skill_kandev`。在返回的目錄中構建，並使用已授權的 Kandev 實時數據展示領域視圖。呼叫 `publish_canvas_kandev` 並處理驗證錯誤。報告畫布標識，以及版本是已激活、等待權限審核還是發佈失敗。如果發佈失敗，報告錯誤，不要聲稱畫布已發佈。如果工作區存取需要提升權限，說明仍需用戶執行的操作。本地構建成功不會在 Kandev 中發佈畫布。如果工具仍不可用，報告限制，不要聲稱工作區檔案就是 Kandev 畫布。",
+  "createCanvasTaskPrompt": "建立一個新的 Kandev 畫布，並顯示列出現有任務的協調視圖。",
   "loadingCanvas": "正在載入畫布",
   "loadingCanvasDescription": "正在載入畫布元數據。",
   "pendingFirstRelease": "等待首個版本",
