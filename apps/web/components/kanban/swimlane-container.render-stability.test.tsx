@@ -116,6 +116,9 @@ function renderSwimlanes(
         },
         kanbanMulti: {
           isLoading: false,
+          orderRevisionByStepId: {},
+          pendingReorderBandKeys: {},
+          withheldReorderByBandKey: {},
           snapshots: {
             [WORKFLOW_A]: snapshot(WORKFLOW_A, "task-a"),
             [WORKFLOW_B]: snapshot(WORKFLOW_B, "task-b"),

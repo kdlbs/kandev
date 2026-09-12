@@ -263,6 +263,9 @@ describe("workflow step handlers", () => {
           },
         },
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
       },
     } as AppState);
     const handlers = registerWorkflowsHandlers(store);
