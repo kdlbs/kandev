@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -124,10 +125,16 @@ func TestContributionHistoryReflogObservationUsesTwoHundredEntryBound(t *testing
 
 	localHead := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 	argsFile := filepath.Join(t.TempDir(), "git-args")
-	installContributionHistoryGitShim(t, contributionHistoryGitShimBound)
-	t.Setenv(contributionHistoryGitShimArgsFileEnv, argsFile)
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.contributionHistoryCommandOverride = contributionHistoryGitCommandOverride(t, repoDir,
+		func(args []string) (string, error) {
+			if err := os.WriteFile(argsFile, []byte(strings.Join(args, "\x1f")), 0o600); err != nil {
+				return "", err
+			}
+			return "", errors.New("synthetic reflog failure")
+		})
 
-	result, err := NewGitOperator(repoDir, newTestLogger(t), nil).ExplainContributionHistory(
+	result, err := operator.ExplainContributionHistory(
 		context.Background(), "main", localHead, localHead)
 	if err != nil {
 		t.Fatalf("ExplainContributionHistory returned error: %v", err)
@@ -147,10 +154,13 @@ func TestContributionHistoryReflogOverflowFallsBackToBoundedNeutral(t *testing.T
 	defer cleanup()
 
 	head := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
-	installContributionHistoryGitShim(t, contributionHistoryGitShimOverflow)
-	t.Setenv(contributionHistoryGitShimHeadEnv, head)
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.contributionHistoryCommandOverride = contributionHistoryGitCommandOverride(t, repoDir,
+		func(args []string) (string, error) {
+			return strings.Repeat(fmt.Sprintf("%s\x1fnoise\n", head), contributionHistoryReflogLimit+1), nil
+		})
 
-	result, err := NewGitOperator(repoDir, newTestLogger(t), nil).ExplainContributionHistory(
+	result, err := operator.ExplainContributionHistory(
 		context.Background(), "main", head, head)
 	if err != nil {
 		t.Fatalf("ExplainContributionHistory returned error: %v", err)
@@ -186,7 +196,7 @@ func TestContributionHistoryRunningCommandStopsAtObservationDeadline(t *testing.
 	defer cleanup()
 
 	head := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
-	installContributionHistoryGitShim(t, contributionHistoryGitShimTimeout)
+	installContributionHistoryGitTimeoutShim(t)
 
 	started := time.Now()
 	result, err := NewGitOperator(repoDir, newTestLogger(t), nil).ExplainContributionHistory(
@@ -200,7 +210,29 @@ func TestContributionHistoryRunningCommandStopsAtObservationDeadline(t *testing.
 	assertContributionHistoryNeutral(t, result, contributionHistoryReasonUnavailable)
 }
 
-func installContributionHistoryGitShim(t *testing.T, mode string) {
+func contributionHistoryGitCommandOverride(
+	t *testing.T,
+	repoDir string,
+	reflogOverride func([]string) (string, error),
+) func(context.Context, ...string) (string, error) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("exec.LookPath(git) returned error: %v", err)
+	}
+	return func(ctx context.Context, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "reflog" && args[1] == "show" {
+			return reflogOverride(args)
+		}
+		cmd := exec.CommandContext(ctx, realGit, args...)
+		cmd.Dir = repoDir
+		cmd.Env = filterTestGitEnv(os.Environ())
+		output, err := cmd.CombinedOutput()
+		return string(output), err
+	}
+}
+
+func installContributionHistoryGitTimeoutShim(t *testing.T) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
 	if err != nil {
@@ -229,7 +261,7 @@ func installContributionHistoryGitShim(t *testing.T, mode string) {
 		}
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv(contributionHistoryGitShimModeEnv, mode)
+	t.Setenv(contributionHistoryGitShimModeEnv, contributionHistoryGitShimTimeout)
 	t.Setenv(contributionHistoryGitShimRealGitEnv, realGit)
 }
 

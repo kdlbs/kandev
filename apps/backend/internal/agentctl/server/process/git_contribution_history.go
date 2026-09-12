@@ -435,6 +435,9 @@ func (g *GitOperator) contributionHistoryCommand(ctx context.Context, args ...st
 	if err := validateGitCommandArgs(args); err != nil {
 		return "", err
 	}
+	if g.contributionHistoryCommandOverride != nil {
+		return g.contributionHistoryCommandOverride(ctx, args...)
+	}
 	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = g.workDir
 	cmd.Env = filterGitEnv(g.environmentValues())
