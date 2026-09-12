@@ -4,6 +4,8 @@ import {
   parseTasksListGroup,
   parseTasksListSort,
 } from "@/lib/tasks/tasks-list-options";
+import { DEFAULT_KANBAN_SORT, parseKanbanSort } from "@/lib/kanban/kanban-sort";
+import { parseKanbanPriorityFilterTokens } from "@/lib/kanban/priority-filter-tokens";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { fromApiThreadDraft, fromApiThreadView } from "@/lib/state/slices/ui/thread-view-wire";
@@ -101,6 +103,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     quickChatTabOrderByWorkspace: {},
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort: DEFAULT_KANBAN_SORT,
+    kanbanPriorityFilterTokens: [],
     loaded: false,
   };
 }
@@ -377,6 +381,12 @@ export function buildCoreFields(
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     workflowIdsWithAutoHideEmptySteps:
       s.workflow_ids_with_auto_hide_empty_steps ?? current.workflowIdsWithAutoHideEmptySteps,
+    kanbanSort: mapDefined(s.kanban_sort, current.kanbanSort, parseKanbanSort),
+    kanbanPriorityFilterTokens: mapDefined(
+      s.kanban_priority_filter_tokens,
+      current.kanbanPriorityFilterTokens,
+      parseKanbanPriorityFilterTokens,
+    ),
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
   };

@@ -197,6 +197,127 @@ func TestWorkflowIDsWithAutoHideEmptyStepsContract(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsRequestExposesKanbanSort verifies the patch request exposes the kanban sort field.
+func TestUpdateUserSettingsRequestExposesKanbanSort(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanSort")
+	if !ok || field.Tag.Get("json") != "kanban_sort,omitempty" {
+		t.Fatalf("KanbanSort patch field = %+v, want JSON kanban_sort field", field)
+	}
+}
+
+// TestUpdateUserSettingsRequestExposesKanbanPriorityFilterTokens verifies the patch request exposes the kanban priority filter tokens field.
+func TestUpdateUserSettingsRequestExposesKanbanPriorityFilterTokens(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanPriorityFilterTokens")
+	if !ok || field.Tag.Get("json") != "kanban_priority_filter_tokens,omitempty" {
+		t.Fatalf("KanbanPriorityFilterTokens patch field = %+v, want JSON kanban_priority_filter_tokens field", field)
+	}
+}
+
+// TestFromUserSettingsMapsKanbanSortAndPriorityFilterTokens verifies the DTO carries both new fields unchanged.
+func TestFromUserSettingsMapsKanbanSortAndPriorityFilterTokens(t *testing.T) {
+	settings := FromUserSettings(&models.UserSettings{
+		KanbanSort:                 "priority_desc",
+		KanbanPriorityFilterTokens: []string{"critical", "high"},
+	})
+	if settings.KanbanSort != "priority_desc" {
+		t.Fatalf("KanbanSort = %q, want priority_desc", settings.KanbanSort)
+	}
+	if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"critical", "high"}) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want [critical high]", settings.KanbanPriorityFilterTokens)
+	}
+}
+
+// TestUserSettingsDTOKanbanPriorityFilterTokensAlwaysSerializesEvenWhenEmpty verifies an empty
+// selection serializes as [] instead of being omitted, matching kanban_hidden_step_ids's {} case:
+// the client merge treats a missing key as "field not sent, preserve current value", so an
+// omitted key here would make clearing the filter unobservable.
+func TestUserSettingsDTOKanbanPriorityFilterTokensAlwaysSerializesEvenWhenEmpty(t *testing.T) {
+	settings := FromUserSettings(&models.UserSettings{KanbanPriorityFilterTokens: []string{}})
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+	value, present := decoded["kanban_priority_filter_tokens"]
+	if !present {
+		t.Fatal("kanban_priority_filter_tokens key is absent from the serialized response, want present as []")
+	}
+	if string(value) != "[]" {
+		t.Fatalf("kanban_priority_filter_tokens = %s, want []", value)
+	}
+}
+
+// TestKanbanSortAndPriorityFilterTokensRequestDecode verifies decoding distinguishes an omitted
+// field from an explicit empty value for both new fields (AC-004.8).
+func TestKanbanSortAndPriorityFilterTokensRequestDecode(t *testing.T) {
+	t.Run("omitted kanban_sort stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanSort != nil {
+			t.Fatalf("KanbanSort = %#v, want nil", req.KanbanSort)
+		}
+	})
+
+	t.Run("explicit null kanban_sort decodes to nil, indistinguishable from omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_sort":null}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanSort != nil {
+			t.Fatalf("KanbanSort = %#v, want nil", req.KanbanSort)
+		}
+	})
+
+	t.Run("wrong JSON type for kanban_sort fails decode", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_sort":5}`), &req); err == nil {
+			t.Fatal("decode request: want error for a numeric kanban_sort, got nil")
+		}
+	})
+
+	t.Run("omitted kanban_priority_filter_tokens stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanPriorityFilterTokens != nil {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want nil", req.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("explicit empty list is retained, not treated as omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_priority_filter_tokens":[]}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanPriorityFilterTokens == nil || len(*req.KanbanPriorityFilterTokens) != 0 {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want non-nil empty slice", req.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("explicit null kanban_priority_filter_tokens decodes to nil, indistinguishable from omitted", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_priority_filter_tokens":null}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.KanbanPriorityFilterTokens != nil {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want nil", req.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("wrong JSON type for kanban_priority_filter_tokens fails decode", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"kanban_priority_filter_tokens":"critical"}`), &req); err == nil {
+			t.Fatal("decode request: want error for a bare-string kanban_priority_filter_tokens, got nil")
+		}
+	})
+}
+
 // TestTasksListShowDetailsDTO verifies the DTO mapping and the nil-versus-explicit-false patch semantics.
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {

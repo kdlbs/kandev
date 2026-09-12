@@ -5,65 +5,140 @@ import { useTaskActions, type TaskActionOptions } from "@/hooks/use-task-actions
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
-import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
+import { sortIdsByDisplayOrder, type DisplayOrderTask } from "@/lib/kanban/task-order";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { getEffectiveView } from "@/lib/kanban/view-registry";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
+import { taskMatchesPriorityFilter } from "@/lib/kanban/priority-filter-tokens";
+import { selectWorkflowSwimlanes, type WorkflowLike } from "@/lib/kanban/workflow-swimlanes";
+import type { AppState } from "@/lib/state/store";
+import type { TaskPriority } from "@/lib/types/http";
+
+/**
+ * Builds a step-id → displayed-index lookup spanning every known workflow's
+ * currently displayed step order (position order, minus hidden steps),
+ * matching what the pipeline view renders. Indices accumulate across
+ * workflows in the same order `selectWorkflowSwimlanes` renders them, so a
+ * step in a later swimlane never ties with one in an earlier swimlane. Used
+ * only when the active view is pipeline; a step id absent from every
+ * workflow (unknown to the caller) sorts last.
+ *
+ * @internal Exported for testing.
+ */
+export function buildPipelineStepIndexOf(
+  workflows: WorkflowLike[],
+  snapshots: Record<string, { steps: Array<{ id: string; position: number }> }>,
+  hiddenWorkflowStepIds: Record<string, string[]>,
+): (stepId: string | undefined) => number {
+  const indexByStepId = new Map<string, number>();
+  let offset = 0;
+  for (const workflow of selectWorkflowSwimlanes(null, workflows, snapshots)) {
+    const snapshot = snapshots[workflow.id];
+    if (!snapshot) continue;
+    const hidden = new Set(hiddenWorkflowStepIds[workflow.id] ?? []);
+    const displaySteps = sortWorkflowStepsByPosition(snapshot.steps).filter(
+      (step) => !hidden.has(step.id),
+    );
+    displaySteps.forEach((step, index) => indexByStepId.set(step.id, offset + index));
+    offset += displaySteps.length;
+  }
+  return (stepId) => (stepId !== undefined ? (indexByStepId.get(stepId) ?? Infinity) : Infinity);
+}
+
+function buildTaskById(state: AppState): Map<string, DisplayOrderTask> {
+  const taskById = new Map<string, DisplayOrderTask>();
+  for (const snap of Object.values(state.kanbanMulti.snapshots)) {
+    for (const t of snap.tasks) taskById.set(t.id, t);
+  }
+  for (const t of state.kanban.tasks) if (!taskById.has(t.id)) taskById.set(t.id, t);
+  return taskById;
+}
+
+/**
+ * Excludes an id whose known task is outside the active priority filter,
+ * matching what the board is currently displaying. An id whose task isn't
+ * found in any snapshot is kept — its visibility can't be determined here,
+ * so this only narrows a set, never widens one.
+ *
+ * @internal Exported for testing.
+ */
+export function filterIdsByPriorityFilter(
+  ids: string[],
+  taskById: Map<string, DisplayOrderTask>,
+  priorityFilterTokens: TaskPriority[],
+): string[] {
+  if (priorityFilterTokens.length === 0) return ids;
+  return ids.filter((id) => {
+    const task = taskById.get(id);
+    return !task || taskMatchesPriorityFilter(task.priority, priorityFilterTokens);
+  });
+}
+
+type AppStoreApi = ReturnType<typeof useAppStoreApi>;
+
+function removeTasksFromStoreImpl(store: AppStoreApi, ids: Set<string>) {
+  const state = store.getState();
+  // Remove from single-workflow view
+  const currentKanban = state.kanban;
+  state.hydrate({
+    kanban: {
+      ...currentKanban,
+      tasks: currentKanban.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
+    },
+  });
+  // Remove from multi-workflow snapshots
+  for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+    const affected = snapshot.tasks.some((t: KanbanState["tasks"][number]) => ids.has(t.id));
+    if (affected) {
+      state.setWorkflowSnapshot(wfId, {
+        ...snapshot,
+        tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
+      });
+    }
+  }
+}
+
+function applyMoveInStoreImpl(store: AppStoreApi, succeededIds: Set<string>, targetStepId: string) {
+  const state = store.getState();
+  // Update single-workflow view
+  const currentKanban = state.kanban;
+  state.hydrate({
+    kanban: {
+      ...currentKanban,
+      tasks: currentKanban.tasks.map((t: KanbanState["tasks"][number]) =>
+        succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
+      ),
+    },
+  });
+  // Update multi-workflow snapshots
+  for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+    const affected = snapshot.tasks.filter((t: KanbanState["tasks"][number]) =>
+      succeededIds.has(t.id),
+    );
+    if (affected.length > 0) {
+      state.setWorkflowSnapshot(wfId, {
+        ...snapshot,
+        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
+          succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
+        ),
+      });
+    }
+  }
+}
 
 /** @internal Exported for reuse by the sidebar multi-select hook. */
 export function useTaskMultiSelectStore() {
   const store = useAppStoreApi();
+  const { isMobile } = useResponsiveBreakpoint();
 
   const removeTasksFromStore = useCallback(
-    (ids: Set<string>) => {
-      const state = store.getState();
-      // Remove from single-workflow view
-      const currentKanban = state.kanban;
-      state.hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
-        },
-      });
-      // Remove from multi-workflow snapshots
-      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-        const affected = snapshot.tasks.some((t: KanbanState["tasks"][number]) => ids.has(t.id));
-        if (affected) {
-          state.setWorkflowSnapshot(wfId, {
-            ...snapshot,
-            tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
-          });
-        }
-      }
-    },
+    (ids: Set<string>) => removeTasksFromStoreImpl(store, ids),
     [store],
   );
 
   const applyMoveInStore = useCallback(
-    (succeededIds: Set<string>, targetStepId: string) => {
-      const state = store.getState();
-      // Update single-workflow view
-      const currentKanban = state.kanban;
-      state.hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((t: KanbanState["tasks"][number]) =>
-            succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
-          ),
-        },
-      });
-      // Update multi-workflow snapshots
-      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-        const affected = snapshot.tasks.filter((t: KanbanState["tasks"][number]) =>
-          succeededIds.has(t.id),
-        );
-        if (affected.length > 0) {
-          state.setWorkflowSnapshot(wfId, {
-            ...snapshot,
-            tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-              succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
-            ),
-          });
-        }
-      }
-    },
+    (succeededIds: Set<string>, targetStepId: string) =>
+      applyMoveInStoreImpl(store, succeededIds, targetStepId),
     [store],
   );
 
@@ -80,23 +155,109 @@ export function useTaskMultiSelectStore() {
     [store],
   );
 
-  // Sort ids into the board's visible (created-desc) order. A backward range
-  // selection leaves `selectedIds` in anchor-first Set order, which would land
-  // scrambled when the move assigns sequential positions.
+  // Sort ids into the board's currently-displayed order (derived from the
+  // active board sort token and the active view), not a fixed created-desc
+  // order. A backward range selection leaves `selectedIds` in anchor-first
+  // Set order, which would land scrambled when the move assigns sequential
+  // positions.
   const sortByDisplayOrder = useCallback(
     (ids: string[]): string[] => {
       const state = store.getState();
-      const taskById = new Map<string, { createdAt?: string }>();
-      for (const snap of Object.values(state.kanbanMulti.snapshots)) {
-        for (const t of snap.tasks) taskById.set(t.id, t);
-      }
-      for (const t of state.kanban.tasks) if (!taskById.has(t.id)) taskById.set(t.id, t);
-      return sortIdsByCreatedDesc(ids, taskById);
+      const taskById = buildTaskById(state);
+
+      const sortToken = state.userSettings.kanbanSort ?? "created_desc";
+      const isPipelineView =
+        getEffectiveView(state.userSettings.kanbanViewMode ?? "", isMobile).id === "graph2";
+      const stepIndexOf = isPipelineView
+        ? buildPipelineStepIndexOf(
+            state.workflows.items,
+            state.kanbanMulti.snapshots,
+            state.userSettings.hiddenWorkflowStepIds ?? {},
+          )
+        : undefined;
+
+      return sortIdsByDisplayOrder(ids, taskById, { sortToken, isPipelineView, stepIndexOf });
+    },
+    [store, isMobile],
+  );
+
+  // Narrows `ids` to the ones the priority filter currently admits, so a
+  // bulk action never acts on a task the person can't see.
+  const eligibleSelectedIds = useCallback(
+    (ids: string[]): string[] => {
+      const state = store.getState();
+      const taskById = buildTaskById(state);
+      return filterIdsByPriorityFilter(
+        ids,
+        taskById,
+        state.userSettings.kanbanPriorityFilterTokens ?? [],
+      );
     },
     [store],
   );
 
-  return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder };
+  return {
+    removeTasksFromStore,
+    applyMoveInStore,
+    getWorkflowIdForTask,
+    sortByDisplayOrder,
+    eligibleSelectedIds,
+  };
+}
+
+type RunBulkActionOptions = {
+  action: "delete" | "archive";
+  ids: string[];
+  eligibleSelectedIds: (ids: string[]) => string[];
+  per: (id: string, opts?: TaskActionOptions) => Promise<void>;
+  runTaskRemovalBatch: ReturnType<typeof useTaskRemoval>["runTaskRemovalBatch"];
+  removeTasksFromStore: (ids: Set<string>) => void;
+  setSelectedIds: (ids: Set<string>) => void;
+  setIsMultiSelectEnabled: (v: boolean) => void;
+  setBusy: (v: boolean) => void;
+  opts?: TaskActionOptions;
+};
+
+/**
+ * A task the priority filter hides is excluded before dispatch and stays
+ * selected — hiding it doesn't clear the rest of the selection and it
+ * doesn't count toward success or failure.
+ */
+async function runBulkAction({
+  action,
+  ids,
+  eligibleSelectedIds,
+  per,
+  runTaskRemovalBatch,
+  removeTasksFromStore,
+  setSelectedIds,
+  setIsMultiSelectEnabled,
+  setBusy,
+  opts,
+}: RunBulkActionOptions): Promise<void> {
+  if (ids.length === 0) return;
+  const idList = eligibleSelectedIds(ids);
+  const hidden = ids.filter((id) => !idList.includes(id));
+  if (idList.length === 0) {
+    setSelectedIds(new Set(hidden));
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await runTaskRemovalBatch(
+      action,
+      idList.map((id) => ({ taskId: id, mutate: () => per(id, opts) })),
+      { cascade: opts?.cascade },
+    );
+    if (result.skipped) return;
+    const succeeded = new Set(result.succeededTaskIds);
+    removeTasksFromStore(succeeded);
+    const failed = new Set([...result.failedTaskIds, ...hidden]);
+    setSelectedIds(failed);
+    if (failed.size === 0) setIsMultiSelectEnabled(false);
+  } finally {
+    setBusy(false);
+  }
 }
 
 type BulkMoveParams = {
@@ -106,8 +267,15 @@ type BulkMoveParams = {
   applyMoveInStore: (ids: Set<string>, stepId: string) => void;
   getWorkflowIdForTask: (id: string) => string | null;
   sortByDisplayOrder: (ids: string[]) => string[];
+  eligibleSelectedIds: (ids: string[]) => string[];
 };
 
+/**
+ * A task the priority filter hides is excluded before ordering, so it is
+ * neither moved nor consumes a position index. The remainder moves in board
+ * order so a backward range selection isn't reordered when sequential
+ * positions are assigned below.
+ */
 async function runBulkMove(
   {
     workflowId,
@@ -116,10 +284,11 @@ async function runBulkMove(
     applyMoveInStore,
     getWorkflowIdForTask,
     sortByDisplayOrder,
+    eligibleSelectedIds,
   }: BulkMoveParams,
   targetStepId: string,
 ): Promise<void> {
-  const idList = sortByDisplayOrder([...(selectedIdsRef.current ?? [])]);
+  const idList = sortByDisplayOrder(eligibleSelectedIds([...(selectedIdsRef.current ?? [])]));
   if (idList.length === 0) return;
   const results = await Promise.allSettled(
     idList.map((id, i) => {
@@ -151,6 +320,7 @@ function useBulkOperations({
   applyMoveInStore,
   getWorkflowIdForTask,
   sortByDisplayOrder,
+  eligibleSelectedIds,
 }: {
   workflowId: string | null;
   selectedIdsRef: RefObject<Set<string>>;
@@ -166,35 +336,29 @@ function useBulkOperations({
   applyMoveInStore: (ids: Set<string>, stepId: string) => void;
   getWorkflowIdForTask: (id: string) => string | null;
   sortByDisplayOrder: (ids: string[]) => string[];
+  eligibleSelectedIds: (ids: string[]) => string[];
 }) {
   const runBulk = useCallback(
-    async (
+    (
       action: "delete" | "archive",
       per: (id: string, opts?: TaskActionOptions) => Promise<void>,
       setBusy: (v: boolean) => void,
       opts?: TaskActionOptions,
-    ) => {
-      const ids = selectedIdsRef.current;
-      if (!ids || ids.size === 0) return;
-      setBusy(true);
-      try {
-        const idList = [...ids];
-        const result = await runTaskRemovalBatch(
-          action,
-          idList.map((id) => ({ taskId: id, mutate: () => per(id, opts) })),
-          { cascade: opts?.cascade },
-        );
-        if (result.skipped) return;
-        const succeeded = new Set(result.succeededTaskIds);
-        removeTasksFromStore(succeeded);
-        const failed = new Set(result.failedTaskIds);
-        setSelectedIds(failed);
-        if (failed.size === 0) setIsMultiSelectEnabled(false);
-      } finally {
-        setBusy(false);
-      }
-    },
+    ) =>
+      runBulkAction({
+        action,
+        ids: [...(selectedIdsRef.current ?? [])],
+        eligibleSelectedIds,
+        per,
+        runTaskRemovalBatch,
+        removeTasksFromStore,
+        setSelectedIds,
+        setIsMultiSelectEnabled,
+        setBusy,
+        opts,
+      }),
     [
+      eligibleSelectedIds,
       removeTasksFromStore,
       runTaskRemovalBatch,
       selectedIdsRef,
@@ -223,6 +387,7 @@ function useBulkOperations({
           applyMoveInStore,
           getWorkflowIdForTask,
           sortByDisplayOrder,
+          eligibleSelectedIds,
         },
         targetStepId,
       ),
@@ -232,6 +397,7 @@ function useBulkOperations({
       applyMoveInStore,
       getWorkflowIdForTask,
       sortByDisplayOrder,
+      eligibleSelectedIds,
       selectedIdsRef,
     ],
   );
@@ -379,8 +545,13 @@ export function useTaskMultiSelect(workflowId: string | null) {
   const store = useAppStoreApi();
   const notifySuccess = useTaskRemovalSuccessNotifier();
   const { runTaskRemovalBatch } = useTaskRemoval({ store, notifySuccess });
-  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder } =
-    useTaskMultiSelectStore();
+  const {
+    removeTasksFromStore,
+    applyMoveInStore,
+    getWorkflowIdForTask,
+    sortByDisplayOrder,
+    eligibleSelectedIds,
+  } = useTaskMultiSelectStore();
 
   const toggleSelect = useCallback(
     (taskId: string) => dispatch({ type: "toggle_select", taskId }),
@@ -427,6 +598,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
     applyMoveInStore,
     getWorkflowIdForTask,
     sortByDisplayOrder,
+    eligibleSelectedIds,
   });
 
   return {

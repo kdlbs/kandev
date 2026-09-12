@@ -5325,6 +5325,36 @@
           "authority": "user.self",
           "change_timing": "future_views",
           "settings_href": "/settings/preferences"
+        },
+        {
+          "key": "user_settings.kanban_sort",
+          "field_path": "kanban_sort",
+          "label": "kanban board sort",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
+          "key": "user_settings.kanban_priority_filter_tokens",
+          "field_path": "kanban_priority_filter_tokens",
+          "label": "kanban priority filter",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "array",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
         }
       ],
       "operations": [
@@ -6135,6 +6165,8 @@
       "jira_saved_views",
       "jira_task_presets",
       "kanban_hidden_step_ids",
+      "kanban_priority_filter_tokens",
+      "kanban_sort",
       "kanban_view_mode",
       "keyboard_shortcuts",
       "last_seen_display",

@@ -115,5 +115,9 @@
   "noWorkflowsAvailableYet": "Ńō ŵōŕķƒĺōŵś àvàĩĺàƀĺē ŷēţ.",
   "pullToRefreshPull": "Ƥũĺĺ ţō ŕēƒŕēśĥ",
   "pullToRefreshRefreshing": "Ŕēƒŕēśĥĩńĝ ţàśķś",
-  "pullToRefreshRelease": "Ŕēĺēàśē ţō ŕēƒŕēśĥ"
+  "pullToRefreshRelease": "Ŕēĺēàśē ţō ŕēƒŕēśĥ",
+  "boardSort": "Ɓōàŕď śōŕţ",
+  "boardSortCreatedDesc": "Ńēŵēśţ ƒĩŕśţ",
+  "boardSortPriorityDesc": "Ƥŕĩōŕĩţŷ",
+  "priorityFilter": "Ƥŕĩōŕĩţŷ ƒĩĺţēŕ"
 }
