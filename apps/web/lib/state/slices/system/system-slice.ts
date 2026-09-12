@@ -6,6 +6,7 @@ export const defaultSystemState: SystemSliceState = {
     info: null,
     diskUsage: null,
     database: null,
+    retention: null,
     backups: { items: [], loaded: false },
     updates: null,
     jobs: {},
@@ -43,6 +44,10 @@ export const createSystemSlice: StateCreator<
   setSystemDatabase: (stats) =>
     set((draft) => {
       draft.system.database = stats;
+    }),
+  setSystemRetention: (status) =>
+    set((draft) => {
+      draft.system.retention = status;
     }),
   setSystemBackups: (items) =>
     set((draft) => {

@@ -120,8 +120,17 @@ func TestSchedulerTick_AgentCompletedKeepsCheckoutWhenFinishRunFails(t *testing.
 	// the tasks table, and every other runs column, writable — a targeted
 	// fault instead of a global read-only pragma, so this test actually
 	// distinguishes "release before finish" from "finish before release"
-	// rather than failing both writes identically.
-	svc.ExecSQL(t, "ALTER TABLE runs DROP COLUMN finished_at")
+	// rather than failing both writes identically. A trigger rather than
+	// DROP COLUMN: idx_runs_retention is an expression index over
+	// COALESCE(finished_at, ...), and SQLite refuses to drop a column an
+	// index still references.
+	svc.ExecSQL(t, `
+		CREATE TRIGGER block_finish_order_test
+		BEFORE UPDATE OF finished_at ON runs
+		WHEN NEW.finished_at IS NOT NULL
+		BEGIN
+			SELECT RAISE(FAIL, 'finished_at update blocked for test');
+		END`)
 
 	event := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
 		"task_id":          "task-finish-order-1",

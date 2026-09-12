@@ -535,6 +535,78 @@ export interface StorageAdoptionResponse extends StorageSettingsResponse {
   capabilities: StorageCapabilities;
 }
 
+// --- Office run history retention ---------------------------------------
+
+export interface RetentionTableSettings {
+  window_days: number;
+  floor_per_owner: number;
+  warn_rows: number;
+}
+
+export interface RetentionRunEventsSettings {
+  warn_rows: number;
+}
+
+export interface RetentionSettings {
+  enabled: boolean;
+  sweep_interval_hours: number;
+  batch_limit: number;
+  routine_runs: RetentionTableSettings;
+  runs: RetentionTableSettings;
+  run_events: RetentionRunEventsSettings;
+}
+
+export interface RetentionTableSweepResult {
+  deleted: number;
+  backlog: boolean;
+  error: string;
+}
+
+export interface RetentionSweptTableResult extends RetentionTableSweepResult {
+  previewed: boolean;
+  would_delete: number;
+}
+
+export interface RetentionLastSweep {
+  started_at: string;
+  finished_at: string;
+  office_routine_runs: RetentionSweptTableResult;
+  runs: RetentionSweptTableResult;
+  run_events: RetentionTableSweepResult;
+  route_attempts: RetentionTableSweepResult;
+  run_skills: RetentionTableSweepResult;
+}
+
+export type RetentionCensusState = "not_computed" | "fresh" | "stale";
+
+export interface RetentionUnknownStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface RetentionTableCensus {
+  state: RetentionCensusState;
+  retained_count: number;
+  as_of: string;
+  unknown_statuses?: RetentionUnknownStatusCount[];
+  top_routine_id?: string;
+  top_routine_share?: number;
+}
+
+export interface RetentionRetainedCounts {
+  office_routine_runs: RetentionTableCensus;
+  runs: RetentionTableCensus;
+  run_events: RetentionTableCensus;
+}
+
+export interface RetentionStatus {
+  settings: RetentionSettings;
+  last_sweep: RetentionLastSweep | null;
+  skip_count: number;
+  last_skip_at?: string;
+  retained_counts: RetentionRetainedCounts;
+}
+
 export interface RestartCapability {
   supported: boolean;
   mode: "manual" | "supervisor" | string;
