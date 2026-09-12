@@ -298,3 +298,81 @@ func TestListPendingInteractionsReturnsWholeBundleWhenPartiallyAnswered(t *testi
 		}
 	}
 }
+
+// TestListPendingInteractionsSkipsLifecycleOnlyTurn pins AC-2: a session
+// whose newest turn is lifecycle_only (carrying only a non-question message)
+// must still report the unanswered clarification bundle sitting on the
+// previous turn, agreeing with both the pending-action projection
+// (GetPendingActionsBySessionIDs) and the clarification bundle query
+// (ListUnresolvedClarificationBundles). Before this fix,
+// buildPendingInteractionQuery ranked current_turn by raw
+// started_at/created_at/id with no lifecycle exclusion, so the newer
+// lifecycle-only turn won current-turn resolution and the bundle on the
+// previous turn was never joined into pending_bundles — a false negative.
+func TestListPendingInteractionsSkipsLifecycleOnlyTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 12, 9, 0, 0, 0, time.UTC)
+
+	seedPendingActionSession(t, repo, "task-lifecycle", "session-lifecycle")
+	createPendingActionTurn(t, repo, "task-lifecycle", "session-lifecycle", "turn-question", base, base)
+	createClarificationBundleMessage(t, repo, "clar-q1", "task-lifecycle", "session-lifecycle", "turn-question", "pending-lifecycle", "q1", base)
+	createClarificationBundleMessage(t, repo, "clar-q2", "task-lifecycle", "session-lifecycle", "turn-question", "pending-lifecycle", "q2", base.Add(time.Second))
+
+	lifecycleCompletedAt := base.Add(time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-lifecycle",
+		TaskSessionID: "session-lifecycle",
+		TaskID:        "task-lifecycle",
+		StartedAt:     base.Add(time.Minute),
+		CreatedAt:     base.Add(time.Minute),
+		CompletedAt:   &lifecycleCompletedAt,
+		Metadata:      map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	}); err != nil {
+		t.Fatalf("CreateTurn(turn-lifecycle): %v", err)
+	}
+	createPendingActionMessage(t, repo, "lifecycle-note", "task-lifecycle", "session-lifecycle", "turn-lifecycle",
+		models.MessageTypeMessage, "<missing>", base.Add(time.Minute))
+
+	got, err := repo.ListPendingInteractions(ctx, models.PendingInteractionFilter{SessionIDs: []string{"session-lifecycle"}})
+	if err != nil {
+		t.Fatalf("ListPendingInteractions: %v", err)
+	}
+	ids := interactionMessageIDs(got)
+	if len(ids) != 2 {
+		t.Fatalf("ids = %v, want both questions of the bundle stranded behind the lifecycle-only turn", ids)
+	}
+	for _, want := range []string{"clar-q1", "clar-q2"} {
+		found := false
+		for _, id := range ids {
+			if id == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("ids = %v, missing %q", ids, want)
+		}
+	}
+
+	actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{"session-lifecycle"})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if _, ok := actions["session-lifecycle"]; !ok {
+		t.Fatal("pending-action projection disagrees with the interaction list: session not reported pending")
+	}
+
+	bundles, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	foundBundle := false
+	for _, bundle := range bundles.Bundles {
+		if bundle.SessionID == "session-lifecycle" {
+			foundBundle = true
+		}
+	}
+	if !foundBundle {
+		t.Fatal("bundle query disagrees with the interaction list: session not reported pending")
+	}
+}

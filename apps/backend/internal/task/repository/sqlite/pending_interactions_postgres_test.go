@@ -105,3 +105,82 @@ func TestPostgresPendingInteractionsMatchSQLiteAuthority(t *testing.T) {
 		}
 	}
 }
+
+// TestPostgresListPendingInteractionsSkipsLifecycleOnlyTurn mirrors
+// TestListPendingInteractionsSkipsLifecycleOnlyTurn on PostgreSQL. The
+// current-turn CTE's predicate and ordering (currentTurnAuthority) are built
+// from dialect.JSONExtract, which emits different SQL per driver
+// (json_extract on SQLite, ::jsonb->> on Postgres), so the lifecycle_only
+// exclusion needs its own coverage on this dialect rather than trusting the
+// SQLite run. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresListPendingInteractionsSkipsLifecycleOnlyTurn(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 12, 9, 0, 0, 0, time.UTC)
+
+	seedPendingActionSession(t, repo, "task-lifecycle-pg", "session-lifecycle-pg")
+	createPendingActionTurn(t, repo, "task-lifecycle-pg", "session-lifecycle-pg", "turn-question-pg", base, base)
+	createClarificationBundleMessage(t, repo, "clar-q1-pg", "task-lifecycle-pg", "session-lifecycle-pg", "turn-question-pg", "pending-lifecycle-pg", "q1", base)
+	createClarificationBundleMessage(t, repo, "clar-q2-pg", "task-lifecycle-pg", "session-lifecycle-pg", "turn-question-pg", "pending-lifecycle-pg", "q2", base.Add(time.Second))
+
+	lifecycleCompletedAt := base.Add(time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-lifecycle-pg",
+		TaskSessionID: "session-lifecycle-pg",
+		TaskID:        "task-lifecycle-pg",
+		StartedAt:     base.Add(time.Minute),
+		CreatedAt:     base.Add(time.Minute),
+		CompletedAt:   &lifecycleCompletedAt,
+		Metadata:      map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	}); err != nil {
+		t.Fatalf("CreateTurn(turn-lifecycle-pg): %v", err)
+	}
+	createPendingActionMessage(t, repo, "lifecycle-note-pg", "task-lifecycle-pg", "session-lifecycle-pg", "turn-lifecycle-pg",
+		models.MessageTypeMessage, "<missing>", base.Add(time.Minute))
+
+	got, err := repo.ListPendingInteractions(ctx, models.PendingInteractionFilter{SessionIDs: []string{"session-lifecycle-pg"}})
+	if err != nil {
+		t.Fatalf("ListPendingInteractions: %v", err)
+	}
+	ids := interactionMessageIDs(got)
+	if len(ids) != 2 {
+		t.Fatalf("ids = %v, want both questions of the bundle stranded behind the lifecycle-only turn", ids)
+	}
+	for _, want := range []string{"clar-q1-pg", "clar-q2-pg"} {
+		found := false
+		for _, id := range ids {
+			if id == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("ids = %v, missing %q", ids, want)
+		}
+	}
+
+	actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{"session-lifecycle-pg"})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if _, ok := actions["session-lifecycle-pg"]; !ok {
+		t.Fatal("pending-action projection disagrees with the interaction list: session not reported pending")
+	}
+
+	bundles, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	foundBundle := false
+	for _, bundle := range bundles.Bundles {
+		if bundle.SessionID == "session-lifecycle-pg" {
+			foundBundle = true
+		}
+	}
+	if !foundBundle {
+		t.Fatal("bundle query disagrees with the interaction list: session not reported pending")
+	}
+}

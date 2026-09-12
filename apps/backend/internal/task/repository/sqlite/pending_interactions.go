@@ -62,11 +62,13 @@ func buildPendingInteractionQuery(
 	pendingIDExpr := dialect.JSONExtract(driverName, "m.metadata", "pending_id")
 	scopedSessions, args := pendingInteractionSessionScope(filter)
 	kindConditions, kindArgs := pendingInteractionKindClauses(filter.Kinds)
+	predicate, orderBy := currentTurnAuthority(driverName, "turn_row")
 
 	query := fmt.Sprintf(
 		pendingInteractionQueryTemplate,
 		scopedSessions,
-		turnAuthorityPredicate(driverName, "turn_row"),
+		orderBy,
+		predicate,
 		nonTerminalSessionPredicate("turn_row"),
 		pendingIDExpr,
 		models.MessageTypeClarificationRequest,
@@ -90,10 +92,11 @@ func buildPendingInteractionQuery(
 }
 
 // pendingInteractionQueryTemplate is the format string behind
-// buildPendingInteractionQuery. current_turn duplicates the ranking in
-// pendingActionsBySessionQuery on purpose: both must agree, and a shared
-// builder would have to thread the scoping subquery's bind arguments through
-// the projection's placeholder list. The pinning test
+// buildPendingInteractionQuery. current_turn resolves its turn through
+// currentTurnAuthority, the same predicate and ordering every other
+// current-turn resolution site in this package uses, so this query and the
+// compact pending-action projection (GetPendingActionsBySessionIDs) always
+// agree on which turn is current. The pinning test
 // (TestListPendingInteractionsAgreesWithPendingActionProjection) fails if the
 // two ever disagree on a session.
 const pendingInteractionQueryTemplate = `
@@ -105,7 +108,7 @@ const pendingInteractionQueryTemplate = `
 				       id AS turn_id,
 				       ROW_NUMBER() OVER (
 				         PARTITION BY task_session_id
-				         ORDER BY started_at DESC, created_at DESC, id DESC
+				         ORDER BY %s
 				       ) AS rn
 				FROM task_session_turns turn_row
 				WHERE turn_row.task_session_id IN (SELECT id FROM scoped_sessions)
