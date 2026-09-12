@@ -211,12 +211,11 @@ export function Graph2StepNode({
         />
       )}
 
-      {/* No onClick: activation is the row's single decision, and an unhandled
-          click bubbles to it unchanged, same as the title. */}
       <button
         type="button"
         title={step.title}
         onClick={() => onOpenTask?.(task)}
+        onContextMenu={(e) => e.stopPropagation()}
         className={cn(
           NODE_CLASS,
           "cursor-pointer transition-colors bg-background hover:bg-accent/30",

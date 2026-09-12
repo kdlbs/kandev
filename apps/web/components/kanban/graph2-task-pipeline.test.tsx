@@ -578,6 +578,16 @@ describe("Graph2TaskPipeline — right-click on an interactive control does not 
     expect(queryContextMenuContent()).toBeNull();
   });
 
+  it("does not open the row context menu when right-clicking the current-step pill", () => {
+    // The pill's own onClick opens the task via onOpenTask, so it is an
+    // interactive control in its own right, not a proxy for the row's click.
+    renderPipelineWithWorkflowSnapshot(makeTask("step-2"), STEPS);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: IN_PROGRESS_TITLE }));
+
+    expect(queryContextMenuContent()).toBeNull();
+  });
+
   it("does not open the row context menu when right-clicking the title's own hover-card trigger", () => {
     const task: Task = { ...makeTask("step-2"), parentTaskId: "parent-1" };
     renderPipelineWithWorkflowSnapshot(task, STEPS);
