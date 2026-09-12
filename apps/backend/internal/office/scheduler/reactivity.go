@@ -469,12 +469,12 @@ func (ss *SchedulerService) resolveWaveIdentity(
 // workflow-authored payload the engine would attach to a run targeting the
 // same recipient cascade wakes — so a cascade wake that never touches the
 // engine still carries it. The step id is returned even when no matching
-// action payload is found, since AC-002.10's staleness-guard equivalence
-// needs it regardless of whether the step also authors a payload. Any
-// failure to resolve the step itself — no getter wired, no step bound,
-// lookup error — returns ("", nil) and logs the omission at debug: the
-// wake itself is unconditional, an optional field is not worth skipping it
-// for.
+// action payload is found, since the staleness-guard equivalence between
+// producers needs it regardless of whether the step also authors a
+// payload. Any failure to resolve the step itself — no getter wired, no
+// step bound, lookup error — returns ("", nil) and logs the omission at
+// debug: the wake itself is unconditional, an optional field is not worth
+// skipping it for.
 //
 // Cascade always wakes the parent's assignee, so a queue_run action only
 // collides with it when its resolved Target is the implicit-default or
@@ -485,10 +485,10 @@ func (ss *SchedulerService) resolveWaveIdentity(
 // (engine.ResolveFanOutSeats). A step authoring more than one queue_run(
 // _for_each_participant) action on this trigger — one to
 // "workspace.ceo_agent", say, one implicit-primary — must not have its
-// non-colliding action's payload attached here: AC-002.10 only requires
-// parity between producers waking the *same* target, and the first
-// non-empty payload regardless of target would silently carry the wrong
-// recipient's content.
+// non-colliding action's payload attached here: parity is only required
+// between producers waking the *same* target, and the first non-empty
+// payload regardless of target would silently carry the wrong recipient's
+// content.
 //
 // Each action must also be reasoned task_children_completed, mirroring
 // QueueRunCallback.Execute's and QueueRunForEachParticipantCallback.
@@ -535,9 +535,16 @@ func (ss *SchedulerService) resolveWaveActionPayload(
 // task_children_completed-reasoned queue_run targeting the implicit-default
 // or explicit "primary" — the target cascade's fixed-recipient wake collides
 // with. See resolveWaveActionPayload for why non-colliding targets and
-// other reasons are excluded.
+// other reasons are excluded. A collision is decided by reason and target
+// alone, never by whether the action happens to author a payload: the
+// engine dispatches this same action first (author order) regardless of
+// its payload's length, so stopping here — even with a nil/empty payload —
+// is what keeps cascade's selection aligned with which action actually
+// wins the engine-routed producers' wave-unique insertion. Skipping past
+// an empty-payload match to a later, non-empty one would let cascade
+// attach content the engine path would never have selected.
 func matchQueueRunActionPayload(action engine.Action) (map[string]any, bool) {
-	if action.QueueRun == nil || len(action.QueueRun.Payload) == 0 {
+	if action.QueueRun == nil {
 		return nil, false
 	}
 	if action.QueueRun.Reason != RunReasonTaskChildrenCompleted {
@@ -558,12 +565,15 @@ func matchQueueRunActionPayload(action engine.Action) (map[string]any, bool) {
 // collides with. Any resolution failure (no participant store wired, no
 // workflow id, seat lookup error) reports no match rather than blocking the
 // wake: see resolveWaveActionPayload's doc comment on the wake being
-// unconditional.
+// unconditional. As with matchQueueRunActionPayload, a collision never
+// depends on the action's payload being non-empty — only on reason, role,
+// and resolved seat membership — so cascade stops at the same action the
+// engine would dispatch first, regardless of what that action authors.
 func (ss *SchedulerService) matchFanOutActionPayload(
 	ctx context.Context, action engine.Action, stepID, parentID, parentAssignee string,
 ) (map[string]any, bool) {
 	cfg := action.QueueRunForEachParticipant
-	if cfg == nil || len(cfg.Payload) == 0 || cfg.Role == "" {
+	if cfg == nil || cfg.Role == "" {
 		return nil, false
 	}
 	reason := cfg.Reason

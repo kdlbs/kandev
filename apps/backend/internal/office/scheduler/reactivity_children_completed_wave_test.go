@@ -323,6 +323,67 @@ func TestCascadeChildrenCompleted_PayloadParity_IgnoresNonPrimaryTargetedAction(
 	}
 }
 
+// TestCascadeChildrenCompleted_PayloadParity_EmptyPayloadActionStillMatches
+// proves a collision is decided by reason and target alone, never by
+// whether the matched action happens to author a payload. A step with two
+// implicit-primary, task_children_completed-reasoned queue_run actions —
+// the first with no payload, the second with one — is exactly the
+// ordering the engine's own step.Events[trigger] loop would dispatch
+// first: the first action wins that race (whichever insert lands first
+// under the wave-key unique index), so cascade selecting the *second*
+// action's payload here would attach content the engine path would never
+// actually have delivered for this wave.
+func TestCascadeChildrenCompleted_PayloadParity_EmptyPayloadActionStillMatches(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	setupChildrenCompletedParent(t, ss, "parent-1", "agent-1")
+	ctx := context.Background()
+
+	if _, err := ss.repo.ExecRaw(ctx,
+		`UPDATE tasks SET workflow_step_id = 'step-x' WHERE id = 'parent-1'`); err != nil {
+		t.Fatalf("bind parent step: %v", err)
+	}
+	ss.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-x": {
+			ID: "step-x",
+			Events: wfmodels.StepEvents{
+				OnChildrenCompleted: []wfmodels.GenericAction{
+					{
+						Type: wfmodels.GenericActionQueueRun,
+						Config: map[string]any{
+							"reason": RunReasonTaskChildrenCompleted,
+						},
+					},
+					{
+						Type: wfmodels.GenericActionQueueRun,
+						Config: map[string]any{
+							"reason":  RunReasonTaskChildrenCompleted,
+							"payload": map[string]any{"escalate_to": "lead-agent"},
+						},
+					},
+				},
+			},
+		},
+	}})
+
+	insertChildTask(t, ss, "child-1", "parent-1", "COMPLETED")
+
+	var payload string
+	queue := func(_ string, c RunContext) {
+		encoded, err := encodeRunContext(c)
+		if err != nil {
+			t.Fatalf("encode run context: %v", err)
+		}
+		payload = encoded
+	}
+	ss.cascadeChildrenCompleted(ctx, &TaskSnapshot{ID: "child-1", WorkspaceID: "ws-1", ParentID: "parent-1"}, queue)
+
+	if strings.Contains(payload, "lead-agent") {
+		t.Fatalf("payload = %s, must not contain the second action's payload: the first, empty-payload action already matched and the engine would dispatch it first", payload)
+	}
+}
+
 // TestCascadeChildrenCompleted_PayloadParity_StepLookupFails_StillQueues
 // covers the omission path: a step-lookup failure must not block the wake
 // itself (AC-...-004.2 — the wake is unconditional), it just queues

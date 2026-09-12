@@ -50,6 +50,55 @@ func TestQueueRunCtx_WaveCarryingRequest_DedupesPastIdempotencyWindow(t *testing
 	}
 }
 
+// TestQueueRunCtx_IdempotencyIndexRace_ClassifiedAsDedupe proves queueRun's
+// direct-insert path treats a losing idx_run_idempotency violation the same
+// as a losing idx_run_wake_wave violation: a no-op dedupe, not an error.
+// Two concurrent cascade calls for the same parent compute the identical
+// idempotency key deterministically from the child id set, so on Postgres
+// the loser's CreateRun can report either unique index depending on
+// constraint-check order — mirroring runs/service.insertRun's own two-way
+// classification (idempotency_key OR wake_wave_key) keeps this call site
+// from logging a spurious "enqueue run" error for what is actually the
+// expected duplicate-wake outcome. The wave key is deliberately varied
+// between the two requests so only the idempotency index, never the
+// wake-wave index, can be the one that fires.
+func TestQueueRunCtx_IdempotencyIndexRace_ClassifiedAsDedupe(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	ctx := context.Background()
+
+	first := RunContext{
+		Reason:         RunReasonTaskChildrenCompleted,
+		TaskID:         "parent-1",
+		IdempotencyKey: "task_children_completed:parent-1:agent-1:shared-key",
+		WaveKey:        "task_children_completed:parent-1:wave-a",
+		WaveString:     "parent-1|child-1,child-2",
+	}
+	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
+	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
+		t.Fatalf("after first queue: runs = %d, want 1", got)
+	}
+
+	// Age the row past the windowed CheckIdempotencyKey lookup so the
+	// second call's pre-check passes and it actually reaches CreateRun,
+	// which is where the unbounded idx_run_idempotency constraint (not the
+	// windowed check) is what has to classify the loss.
+	ageRunsRequestedAt(t, ss, 25*time.Hour)
+
+	second := first
+	second.WaveKey = "task_children_completed:parent-1:wave-b"
+	second.WaveString = "parent-1|child-1,child-2,child-3"
+	if err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
+		t.Fatalf("queue racing (idempotency index): %v", err)
+	}
+	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
+		t.Fatalf("after idempotency-index collision: runs = %d, want 1 (idempotency key must dedupe)", got)
+	}
+}
+
 // TestQueueRunCtx_WaveCarryingRequest_NotCoalesced is the office/scheduler
 // twin of runs/service's TestQueueRun_WakeCarryingRequest_NotCoalesced:
 // AC-OFFICE-WAKE-WAVE-IDENTITY-002.14 requires a wave-carrying request

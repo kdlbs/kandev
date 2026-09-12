@@ -308,7 +308,12 @@ func (ss *SchedulerService) QueueRun(
 // into — and (b) classifies CreateRun's idx_run_wake_wave violation as an
 // already-delivered wake rather than an error: this call site inserts
 // directly (not through runs/service), so runs/service's own
-// classification doesn't cover it.
+// classification doesn't cover it. A concurrent duplicate of this same
+// request can just as well lose the race on idx_run_idempotency instead
+// of idx_run_wake_wave — both keys identify the identical operation for
+// the identical row, so either violation means the wake is already
+// recorded and neither is an error, mirroring runs/service.insertRun's
+// own two-way classification.
 func (ss *SchedulerService) queueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
@@ -363,6 +368,11 @@ func (ss *SchedulerService) queueRun(
 			shared.ParentWakeDedupedTotal.Add(1)
 			ss.logger.Debug("run skipped (wave already woken)",
 				zap.String("wave_key", waveKey))
+			return nil
+		}
+		if idempotencyKey != "" && runssqlite.IsIdempotencyKeyUniqueViolation(err) {
+			ss.logger.Debug("run skipped (idempotency index race)",
+				zap.String("key", idempotencyKey))
 			return nil
 		}
 		return fmt.Errorf("enqueue run: %w", err)
