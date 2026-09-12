@@ -281,7 +281,7 @@ function PillPopoverContent({
                     action.onSelect();
                     setOpen(false);
                   }}
-                  className={`${controlSizingClassName("icon")} inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer`}
+                  className={`${controlSizingClassName("icon")} min-h-11 min-w-11 inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer`}
                 >
                   {action.icon}
                 </button>

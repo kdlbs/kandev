@@ -48,7 +48,7 @@ export function BranchRefreshButton({
           onMouseEnter={() => setOpen(true)}
           onMouseLeave={() => setOpen(false)}
           disabled={refreshing}
-          className={`inline-flex ${touchTarget ? controlSizingClassName("icon") : "h-6 w-6"} items-center justify-center rounded-md hover:bg-muted/40 ${
+          className={`inline-flex ${touchTarget ? `${controlSizingClassName("icon")} min-h-11 min-w-11` : "h-6 w-6"} items-center justify-center rounded-md hover:bg-muted/40 ${
             hasError
               ? "text-amber-500 hover:text-amber-600"
               : "text-muted-foreground hover:text-foreground"
