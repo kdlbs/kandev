@@ -35,7 +35,6 @@
   "layout": "Disposição",
   "layoutColumns": "Colunas",
   "layoutGrid": "Grelha",
-  "layoutCurrent": "Disposição: {{layout}}",
   "layoutColumnsDescription": "Conversas à altura total para ler e responder.",
   "layoutGridDescription": "Duas filas de conversas para acompanhar mais trabalho.",
   "autoHideComposer": "Ocultar editor automaticamente",

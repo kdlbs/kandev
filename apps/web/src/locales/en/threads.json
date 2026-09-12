@@ -13,7 +13,6 @@
   "layout": "Layout",
   "layoutColumns": "Columns",
   "layoutGrid": "Grid",
-  "layoutCurrent": "Layout: {{layout}}",
   "layoutColumnsDescription": "Full-height chats for reading and replying.",
   "layoutGridDescription": "Two rows of chats for monitoring more conversations.",
   "autoHideComposer": "Auto-hide composer",

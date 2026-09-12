@@ -35,7 +35,6 @@
   "layout": "佈局",
   "layoutColumns": "分列",
   "layoutGrid": "網格",
-  "layoutCurrent": "佈局：{{layout}}",
   "layoutColumnsDescription": "以完整高度顯示聊天，方便閲讀和回覆。",
   "layoutGridDescription": "以兩行顯示聊天，方便同時關注更多對話。",
   "autoHideComposer": "自動隱藏訊息編輯器",
