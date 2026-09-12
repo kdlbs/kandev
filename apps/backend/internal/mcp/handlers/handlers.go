@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -140,6 +141,11 @@ type conditionalSessionStateUpdater interface {
 // TaskRepository interface for updating task state.
 type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+	// GetTaskHandoffsRaw and SetTaskHandoffsIfUnchanged back
+	// handoff_task_kandev's AC-27 key-scoped compare-and-set append to a
+	// source task's `handoffs` metadata array.
+	GetTaskHandoffsRaw(ctx context.Context, taskID string) (string, error)
+	SetTaskHandoffsIfUnchanged(ctx context.Context, taskID, expectedHandoffsJSON, newHandoffsJSON string) (stored bool, currentHandoffsJSON string, err error)
 }
 
 // RemoteContributionService resolves provider URLs before task creation and
@@ -289,6 +295,11 @@ type Handlers struct {
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
+
+	// Office dashboard service (optional, set via SetDashboardService).
+	// Backs handoff_task_kandev's AC-19/AC-19a activity logging
+	// (logHandoffActivity in handoff_task_handlers.go).
+	dashboardSvc *dashboard.DashboardService
 
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
@@ -486,6 +497,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 
 func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
+	d.RegisterFunc(ws.ActionMCPHandoffTask, h.handleHandoffTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)

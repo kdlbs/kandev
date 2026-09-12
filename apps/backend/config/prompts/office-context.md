@@ -17,8 +17,8 @@ Available tools:
 - get_task_document_kandev: Read one document on an accessible related task. Required: task_id, document_key.
 - write_task_document_kandev: Create or replace a document on the current task or an ancestor. Required: task_id, document_key, content. Optional: title, type.
 - step_complete_kandev: Signal that every requirement for the current workflow step is satisfied when the step requires an explicit signal. Required: summary.
-{step_complete_instruction}
+{handoff_tool_instruction}{step_complete_instruction}
 
-Office state changes are performed through `$KANDEV_CLI kandev ...`, subject to this agent's runtime permissions. Use the injected Office skills for exact commands and do not search for additional Kandev MCP tools. Workspace administration is outside this run.
+Office state changes are performed through `$KANDEV_CLI kandev ...`, subject to this agent's runtime permissions. Use the injected Office skills for exact commands and do not search for additional Kandev MCP tools beyond those listed above. Workspace administration is outside this run.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or exchange task documents. Use `$KANDEV_CLI` for authorized Office mutations.
