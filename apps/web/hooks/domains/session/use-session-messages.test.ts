@@ -347,7 +347,7 @@ describe("cached session entry history readiness", () => {
     mockWebSocketClient.request.mockReturnValue(response.promise);
     mockState.messages.bySession["sess-1"] = [makeMessage({ id: "cached" })];
 
-    const { result, unmount } = renderHook(() => useSessionMessages("sess-1"));
+    const { result, rerender, unmount } = renderHook(() => useSessionMessages("sess-1"));
 
     expect(result.current.historyRefreshPending).toBe(true);
 
@@ -356,6 +356,15 @@ describe("cached session entry history readiness", () => {
       await readiness.promise;
     });
     expect(result.current.historyRefreshPending).toBe(true);
+
+    // A live row can arrive while the cached refresh is still in flight.
+    // That changes the message count and reruns the entry effect before the
+    // refresh response settles.
+    mockState.messages.bySession["sess-1"] = [
+      makeMessage({ id: "cached" }),
+      makeMessage({ id: "live" }),
+    ];
+    rerender();
 
     await act(async () => {
       response.resolve({ messages: [], has_more: false });

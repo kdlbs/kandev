@@ -190,3 +190,6 @@ Review remediation (complete):
 - The loading spinner is hidden from the live status subtree so screen readers receive one
   progress announcement. The status-retry E2E records the launch count before and after Retry
   and verifies that status recovery stays mutation-free.
+- Follow-up CI validation confirmed that cached history refreshes release their pending state after
+  a live message rerender, so divider placement remains correct on desktop and phone. The exact
+  unread-divider regressions passed with 5 desktop and 3 mobile tests.

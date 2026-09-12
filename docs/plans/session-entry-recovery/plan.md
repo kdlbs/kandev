@@ -165,6 +165,10 @@ Review remediation validation:
   manual history refreshes, A-to-B and A-to-B-to-A deferred races, stale loading finalization,
   and the single live status retry path. Typecheck, zero-warning ESLint, and formatting checks
   passed.
+- Follow-up CI remediation passed the deferred cached-refresh rerender regression, the desktop
+  unread-divider suite (5 tests), and the mobile unread-divider suite (3 tests). Cached refresh
+  completion now remains valid across same-session message rerenders and is still invalidated by
+  navigation or unmount.
 
 ## Risks
 

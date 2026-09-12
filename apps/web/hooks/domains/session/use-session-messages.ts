@@ -773,7 +773,8 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
   useEffect(() => {
     let active = true;
     const generation = sessionFetchGenerationRef.current;
-    const isActive = () => active && sessionFetchGenerationRef.current === generation;
+    const isCurrentGeneration = () => sessionFetchGenerationRef.current === generation;
+    const isActive = () => active && isCurrentGeneration();
     const deactivate = () => {
       active = false;
     };
@@ -803,14 +804,14 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
         ...fetchRefs,
         setIsWaitingForInitialMessages: () => {},
         fetchAndStoreMessages,
-        isActive,
-        canFinalizeLoading: isActive,
+        isActive: isCurrentGeneration,
+        canFinalizeLoading: isCurrentGeneration,
         hydrationRef,
         hydrationKey,
       })
         .catch(() => {})
         .finally(() => {
-          if (isActive() && cachedRefreshGenerationRef.current === refreshGeneration) {
+          if (isCurrentGeneration() && cachedRefreshGenerationRef.current === refreshGeneration) {
             setIsCachedHistoryRefreshPending(false);
           }
         });

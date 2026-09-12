@@ -129,3 +129,7 @@ Review remediation (complete):
   payloads after a timeout, generation-fenced terminal and manual history fetches, settled
   request-cache refreshes, and local loading cleanup for stale fetches. Typecheck, zero-warning
   ESLint, and formatting checks passed.
+- Follow-up CI remediation keeps cached-entry refresh finalization on the session/connection
+  generation. A live message that rerenders the entry while its refresh is pending can no longer
+  strand the loading flag or suppress initial divider placement. The deferred regression passed,
+  as did the desktop unread-divider suite (5 tests) and mobile unread-divider suite (3 tests).
