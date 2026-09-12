@@ -32,12 +32,14 @@ Keep manual cleanup available and preserve the ownership and quarantine checks.
 - Add the disabled-by-default nested setting and provider settings injection.
 - Reconcile ownership per run, reload candidate state, and apply saved retention.
 - Reuse explicit cleanup for scheduled/full runs after policy checks.
+- Revalidate filesystem identity for every mutation and support a verified staged-copy fallback when
+  the quarantine destination is on another filesystem.
 - Add localized policy controls and accurate quarantine result wording.
 - TDD coverage for policy selection, lifecycle protection, recovery, and API compatibility.
 
 ## Out of scope
 
-Shared-file cleanup, legacy adoption, configurable age, and cross-filesystem fallback.
+Shared-file cleanup, legacy adoption, and configurable age.
 
 ## Acceptance
 
@@ -93,8 +95,8 @@ Task 01. Preserve its informational source and broad read-only boundary.
 
 ## Risks
 
-A snapshot can become stale before mutation.
-Saved quarantine retention currently needs explicit wiring into this provider.
+A settings or filesystem snapshot can become stale before mutation; the provider revalidates both
+the captured run settings boundary and the artifact identity before each mutation.
 The compatibility result field must not cause the UI to describe moved bytes as freed space.
 
 ## Parallelism
@@ -110,8 +112,9 @@ Existing `tempartifacts` tests and storage settings patch tests.
 ## Results
 
 Implemented. Added the disabled-by-default saved policy, scheduled/full-run opt-in, explicit
-cleanup bypass, saved quarantine retention, fresh lifecycle and ownership revalidation before
-rename, localized policy controls, and moved-versus-freed result wording. Backend and focused
+cleanup bypass, captured-run settings and retention, fresh lifecycle and ownership revalidation
+before mutation, filesystem identity protection, a verified staged-copy fallback for cross-device
+quarantine, localized policy controls, and moved-versus-freed result wording. Backend and focused
 frontend tests passed. Review remediation now reconciles registry owner liveness before every
 scheduled candidate selection; the owner-death and repeated scheduled-cleanup regression passes
 without restarting the service.

@@ -135,15 +135,19 @@ temporary-storage passages below where its implemented policy differs.
   it is neither counted as owned nor modified.
 - **GIVEN** a stale registered artifact and no current activity blocker, **WHEN** the user confirms
   **Clean stale artifacts**, **THEN** the request uses `resources: ["temporary_artifacts"]`, the root
-  moves by same-filesystem rename into quarantine, and the result appears in Quarantine.
+  moves into quarantine by validated same-filesystem rename or the safe cross-filesystem staging
+  path, and the result appears in Quarantine.
 - **GIVEN** the temporary-artifact policy is disabled, **WHEN** the user selects unscoped **Run now**
   or scheduled maintenance, **THEN** a stale registered temporary artifact remains in place.
 - **GIVEN** the temporary-artifact policy is enabled, **WHEN** unscoped **Run now** or scheduled
   maintenance runs, **THEN** an eligible stale registered artifact uses the same validated
   quarantine path as explicit cleanup.
-- **GIVEN** a registered artifact has a missing/mismatched marker, a symlinked root, a path escape,
-  or a cross-device quarantine destination, **WHEN** analysis or cleanup runs, **THEN** Kandev
-  reports the safety warning and leaves the original path unchanged.
+- **GIVEN** a registered artifact has a missing/mismatched marker, a symlinked root, or a path escape,
+  **WHEN** analysis or cleanup runs, **THEN** Kandev reports the safety warning and leaves the
+  original path unchanged.
+- **GIVEN** a registered artifact has a cross-device quarantine destination, **WHEN** cleanup runs,
+  **THEN** Kandev stages and verifies a copy under quarantine, publishes it atomically, and removes
+  the original only after source identity revalidation; any failure leaves the original unchanged.
 - **GIVEN** a quarantined temporary artifact's original path is free, **WHEN** the user selects
   **Restore**, **THEN** Kandev restores it through the existing quarantine flow before retention
   expiry; unrelated quarantine entries are not purged by the resource-specific run.

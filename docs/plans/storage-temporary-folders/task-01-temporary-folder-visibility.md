@@ -112,4 +112,4 @@ overview source/progress/cache wiring, localized resource rendering, and desktop
 Focused backend and frontend tests, typecheck, and i18n validation passed. Review remediation added
 real-scanner coverage for empty and nested regular directories, preserved sampled bytes from an
 interrupted tolerant partition, and verified refreshed injected mount tables for new nested mounts
-and same-path replacement. The changed backend packages pass 1,110 tests across 9 packages.
+and same-path replacement. The changed backend packages pass 1,139 tests across 9 packages.

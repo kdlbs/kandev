@@ -524,16 +524,25 @@ export function TemporaryArtifactsSection({
         description={t("system:storageTemporaryArtifactsPolicySummary")}
         help={t("system:storageTemporaryArtifactsPolicyHelp")}
         control={
-          <Switch
-            checked={enabled}
-            disabled={pending}
-            onCheckedChange={(nextEnabled) =>
-              onChange({ ...settings, temporary_artifacts: { enabled: nextEnabled } })
-            }
-            aria-label={t("system:storageCleanStaleTemporaryArtifacts")}
-            data-testid="storage-temporary-artifacts-enabled"
-            data-settings-dirty={enabled !== savedEnabled}
-          />
+          <div
+            className="flex items-center justify-center [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:cursor-pointer"
+            data-testid="storage-temporary-artifacts-enabled-target"
+            onClick={(event) => {
+              if (event.target !== event.currentTarget) return;
+              onChange({ ...settings, temporary_artifacts: { enabled: !enabled } });
+            }}
+          >
+            <Switch
+              checked={enabled}
+              disabled={pending}
+              onCheckedChange={(nextEnabled) =>
+                onChange({ ...settings, temporary_artifacts: { enabled: nextEnabled } })
+              }
+              aria-label={t("system:storageCleanStaleTemporaryArtifacts")}
+              data-testid="storage-temporary-artifacts-enabled"
+              data-settings-dirty={enabled !== savedEnabled}
+            />
+          </div>
         }
       />
       <div className="space-y-1 pt-3 text-xs text-muted-foreground">

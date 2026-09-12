@@ -60,7 +60,12 @@ test.describe("Mobile system temporary folders", () => {
     });
 
     await testPage.goto("/settings/system/storage");
-    await testPage.getByTestId("storage-temporary-artifacts-enabled").tap();
+    const toggleTarget = testPage.getByTestId("storage-temporary-artifacts-enabled-target");
+    const toggleBox = await toggleTarget.boundingBox();
+    expect(toggleBox).not.toBeNull();
+    expect(toggleBox!.width).toBeGreaterThanOrEqual(44);
+    expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+    await toggleTarget.tap({ position: { x: 2, y: 2 } });
     await testPage.getByRole("button", { name: "Save changes" }).tap();
     await expect(testPage.getByText("Storage policy saved")).toBeVisible();
     await testPage.reload();

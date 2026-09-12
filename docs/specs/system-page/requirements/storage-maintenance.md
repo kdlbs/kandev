@@ -104,7 +104,7 @@ The existing application size-unit convention remains unchanged.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.3:** Explicit temporary-artifact cleanup shall remain available with the option disabled. Other resource-specific actions shall not clean temporary artifacts.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.4:** Cleanup shall require verified ownership, an inactive lifecycle, and at least 24 hours since closure or abandonment. Uncertain ownership or liveness shall protect the artifact.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.5:** Cleanup shall revalidate eligibility at mutation time. Busy overrides shall never bypass ownership, liveness, age, or path checks.
-- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.6:** Eligible artifacts shall enter recoverable quarantine. Cross-filesystem moves shall leave the original intact and report a failure without a copy/delete fallback.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.6:** Eligible artifacts shall enter recoverable quarantine. A same-filesystem move shall use rename; a cross-filesystem move shall use a staged, verified copy under quarantine, publish it atomically, and remove the original only after source identity is revalidated. Copy, publication, or identity failures shall leave the original intact and report a failure.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.7:** Results shall distinguish quarantined bytes from freed space. Existing retention, restore, cancellation, and run-history behavior shall remain available.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.8:** Desktop and phone users shall inspect cleanup scope, save the option, run explicit cleanup, and inspect its result. Existing mutation restrictions shall apply.
 

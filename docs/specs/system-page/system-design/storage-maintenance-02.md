@@ -351,8 +351,10 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
 - A temporary-artifact registry read, marker read, lease/heartbeat check, or ownership/path
   validation failure keeps that root in place and records a skipped warning. There is no fallback to
   prefix, mtime, or process-name classification.
-- A temporary-artifact rename failure, including a cross-device rename, leaves the original root
-  untouched. The provider never copies and then deletes a root as a quarantine fallback.
+- A temporary-artifact rename failure leaves the original root untouched. For a cross-device rename,
+  the provider copies only verified directories and regular files into a temporary quarantine sibling,
+  syncs and atomically publishes that copy, then removes the original only after another identity
+  validation. Copy, publication, or validation failures preserve the original root.
 - A backend crash after a temporary-artifact rename but before the lifecycle or quarantine state
   update is reconciled from the durable row, matching marker, and trash path. An unmatched path is
   retained rather than guessed into a quarantine entry.

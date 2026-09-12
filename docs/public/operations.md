@@ -307,8 +307,10 @@ directory under the host temporary root. Each current artifact is registered in 
 and carries an owner-only marker in its exact directory. Active artifacts and artifacts created
 within the last 24 hours are protected. The **Clean stale Kandev temporary artifacts** policy is off
 by default. When enabled, scheduled maintenance and a full **Run now** may move eligible, registered
-artifacts into Kandev quarantine on the same filesystem. An explicit **Clean stale artifacts** action
-is available even when the policy is off. Quarantine entries can be restored during the configured
+artifacts into Kandev quarantine. Kandev uses a same-filesystem rename when possible. If the
+quarantine is on another filesystem, it stages and verifies a copy before publishing it and removes
+the original only after revalidating its identity. An explicit **Clean stale artifacts** action is
+available even when the policy is off. Quarantine entries can be restored during the configured
 retention period; this action does not permanently delete them or immediately free disk space.
 The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
 caches, preview/CI/dev-harness directories, temporary data belonging to another Kandev

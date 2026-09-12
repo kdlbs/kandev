@@ -282,8 +282,10 @@ Decision: [ADR-2026-08-08-owned-temp-artifact-cleanup](../../../decisions/2026-0
   as ownership.
 - Explicit cleanup atomically renames an eligible root on the same filesystem into
   `<KANDEV_HOME_DIR>/trash/temporary-artifacts/` and records a `temporary_artifact` quarantine entry.
-  A cross-device rename has no copy/delete fallback. Restore is allowed while the original path is
-  free; permanent deletion follows the existing quarantine retention and path-safety rules.
+  When the destination is on another filesystem, Kandev stages and verifies a copy under quarantine,
+  publishes it atomically, and removes the original only after revalidating its identity. Restore is
+  allowed while the original path is free; permanent deletion follows the existing quarantine
+  retention and path-safety rules.
 - Existing unmarked `/tmp/kandev-agent/*` directories and arbitrary shared temp files remain host
   policy data even when their names resemble a registered prefix.
 

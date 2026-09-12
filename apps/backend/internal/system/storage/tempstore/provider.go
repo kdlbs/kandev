@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/system/storage/filescan"
@@ -36,6 +37,13 @@ type RootCandidate struct {
 
 type MountReader interface {
 	Identity(string) (string, error)
+}
+
+// MountSnapshotter can provide one mount table for a traversal boundary. A
+// snapshot avoids reparsing the host mount table for every file while the
+// guard still refreshes it when entering a directory and before a partition.
+type MountSnapshotter interface {
+	Snapshot() (MountReader, error)
 }
 
 type Scanner interface {
@@ -261,7 +269,9 @@ func (p *Provider) planRoots(candidates []RootCandidate) []rootPlan {
 			plans = append(plans, unavailablePlan(requested, candidate.Optional, err))
 			continue
 		}
-		guard := mountGuard{path: canonical, identity: identity, mounts: p.mounts, windows: p.goos == windowsGOOS}
+		guard := &mountGuard{
+			path: canonical, identity: identity, mounts: p.mounts, windows: p.goos == windowsGOOS,
+		}
 		measurement := RootMeasurement{
 			RequestedPath: requested, Path: canonical, Status: StatusMeasured,
 		}
@@ -369,13 +379,35 @@ func containsIndex(indices []int, target int) bool {
 }
 
 type mountGuard struct {
+	mu       sync.Mutex
 	path     string
 	identity string
 	mounts   MountReader
 	windows  bool
+	snapshot MountReader
 }
 
-func (g mountGuard) validate() error {
+func (g *mountGuard) refreshSnapshotLocked() error {
+	snapshotter, ok := g.mounts.(MountSnapshotter)
+	if !ok {
+		g.snapshot = nil
+		return nil
+	}
+	snapshot, err := snapshotter.Snapshot()
+	if err != nil {
+		return fmt.Errorf("refresh temporary mount table: %w", err)
+	}
+	if snapshot == nil {
+		return errors.New("temporary mount snapshot is empty")
+	}
+	g.snapshot = snapshot
+	return nil
+}
+
+func (g *mountGuard) validate() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	canonical, err := filepath.EvalSymlinks(g.path)
 	if err != nil {
 		return fmt.Errorf("temporary root changed: %w", err)
@@ -384,7 +416,14 @@ func (g mountGuard) validate() error {
 	if err != nil || !samePath(canonical, g.path, g.windows) {
 		return fmt.Errorf("temporary root was replaced: %s", g.path)
 	}
-	identity, err := g.mounts.Identity(g.path)
+	if err := g.refreshSnapshotLocked(); err != nil {
+		return err
+	}
+	mounts := g.snapshot
+	if mounts == nil {
+		mounts = g.mounts
+	}
+	identity, err := mounts.Identity(g.path)
 	if err != nil {
 		return fmt.Errorf("inspect temporary root mount: %w", err)
 	}
@@ -394,8 +433,20 @@ func (g mountGuard) validate() error {
 	return nil
 }
 
-func (g mountGuard) shouldSkip(path string, entry fs.DirEntry) (bool, error) {
-	rootIdentity, err := g.mounts.Identity(g.path)
+func (g *mountGuard) shouldSkip(path string, entry fs.DirEntry) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.snapshot == nil || (entry != nil && entry.IsDir()) {
+		if err := g.refreshSnapshotLocked(); err != nil {
+			return false, err
+		}
+	}
+	mounts := g.snapshot
+	if mounts == nil {
+		mounts = g.mounts
+	}
+	rootIdentity, err := mounts.Identity(g.path)
 	if err != nil {
 		return false, fmt.Errorf("inspect temporary root mount %s: %w", g.path, err)
 	}
@@ -405,7 +456,7 @@ func (g mountGuard) shouldSkip(path string, entry fs.DirEntry) (bool, error) {
 	if entry != nil && entry.Type()&os.ModeSymlink != 0 {
 		return false, nil
 	}
-	identity, err := g.mounts.Identity(path)
+	identity, err := mounts.Identity(path)
 	if err != nil {
 		return false, fmt.Errorf("inspect temporary path mount %s: %w", path, err)
 	}

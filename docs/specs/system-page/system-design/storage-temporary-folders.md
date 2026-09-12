@@ -53,7 +53,9 @@ Reject root replacement after resolution. Never traverse a nested symlink target
 Skip nested mounts, including bind mounts, using platform mount identity.
 Device identity alone cannot identify same-device bind mounts.
 When mount identity cannot be established, mark the affected root unavailable.
-The Linux reader uses the process mount table. Other supported platforms use their native mount information.
+The Linux reader uses fresh process mount-table snapshots. It refreshes at directory and partition
+boundaries, reuses the boundary snapshot for file entries, and revalidates the root mount identity
+before each partition. Other supported platforms use their native mount information.
 Keep these platform readers behind injected interfaces for deterministic tests.
 
 Apply a 60-second deadline to this source, within the existing overview deadline.
@@ -109,7 +111,8 @@ Explicit cleanup bypasses only this option. It retains every activity and safety
 The existing global schedule, idle gate, admission control, cancellation, and runner serialization apply.
 Policy changes take effect on subsequent runs without restart.
 
-Read current quarantine retention from the same run settings snapshot.
+The runner passes the captured maintenance settings snapshot to the provider. Use that snapshot for
+the cleanup option and quarantine retention for the whole run.
 Do not retain the provider constructor's default when the operator saved another retention value.
 Keep the fixed 24-hour stale interval. Do not add an age editor in this package.
 
@@ -122,8 +125,14 @@ Serialize lifecycle transitions with mutation through the existing maintenance/o
 When a producer can still mutate a candidate, protect it rather than infer inactivity from file age.
 The startup-only reconciliation is insufficient for newly abandoned owners during a long service run.
 
-Keep same-filesystem rename into `<KANDEV_HOME_DIR>/trash/temporary-artifacts/`.
-`EXDEV` remains an explicit failure with the original intact. No recursive-copy fallback is permitted.
+Keep same-filesystem rename into `<KANDEV_HOME_DIR>/trash/temporary-artifacts/`. When the source
+and quarantine are on different filesystems, stage a copy under the quarantine parent, copy only
+real directories and regular files, sync the copied data, revalidate the source identity, and
+atomically publish the staging directory. Remove the original only after publication and another
+identity check. Any copy, publication, or identity failure leaves the original intact and records a
+failed quarantine intent.
+Bind the validated filesystem identity to each rename or deletion so a replacement path cannot be
+accepted because it has the same marker.
 Retain restart reconciliation, failed-intent retry, restore, and permanent deletion behavior.
 The new schedule cannot bypass registry validation through `Run anyway`.
 

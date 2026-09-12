@@ -21,16 +21,17 @@ Keep explicit cleanup available independently of that option.
 Preserve matching registry markers, inactive lifecycle, the 24-hour stale interval, and recoverable quarantine.
 Keep unregistered files and legacy roots outside cleanup authority.
 
-This decision amends only the manual-only restriction in
+This decision amends the manual-only and cross-device quarantine restrictions in
 [the owned-artifact decision](2026-08-08-owned-temp-artifact-cleanup.md). That decision remains
-the authority for artifact ownership, lifecycle checks, and quarantine safety.
+the authority for artifact ownership, lifecycle checks, and the other quarantine safety rules.
 
 ## Consequences
 
 Operators gain broader visibility and recurring cleanup of verified artifacts.
 The general temporary footprint is informational and cannot be added to classified totals.
 Large shared caches can remain visible without becoming removable through Kandev.
-Cross-filesystem quarantine still fails without removing the source.
+Cross-filesystem quarantine uses a verified staged copy and removes the source only after identity
+revalidation. Copy or validation failures preserve the source and leave a failed intent for retry.
 Quarantine moves bytes but frees no space until permanent deletion.
 
 ## Alternatives Considered

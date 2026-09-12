@@ -55,6 +55,27 @@ func TestMountReaderDetectsReplacementAtExistingMountpoint(t *testing.T) {
 	}
 }
 
+func TestMountReaderSnapshotReusesOneLoadedTable(t *testing.T) {
+	reads := 0
+	reader := mountReader{readMountInfo: func() ([]byte, error) {
+		reads++
+		return []byte(mountInfoLine("100", "1", "0:1", "/", "/tmp")), nil
+	}}
+
+	snapshot, err := reader.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	for _, path := range []string{"/tmp/one", "/tmp/two"} {
+		if _, err := snapshot.Identity(path); err != nil {
+			t.Fatalf("snapshot identity %s: %v", path, err)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("mount table reads = %d, want one snapshot read", reads)
+	}
+}
+
 func sequenceMountTables(t *testing.T, tables [][]byte) func() ([]byte, error) {
 	t.Helper()
 	index := 0

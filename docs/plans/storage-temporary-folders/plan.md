@@ -28,12 +28,13 @@ All work stays sequential in the primary session.
 - Effective service temp folder and distinct Unix `/tmp`, measured without mutation.
 - Informational footprint, partial states, cached progress, and wrapped path details.
 - Off-by-default saved cleanup option for existing registered artifact kinds.
-- Fresh ownership checks, saved retention, quarantine result wording, and desktop/phone access.
+- Fresh ownership and filesystem identity checks, saved retention, safe cross-filesystem quarantine,
+  quarantine result wording, and desktop/phone access.
 
 ### Out of scope
 
 - General shared-temp cleanup, arbitrary paths, shell commands, legacy adoption, and new producers.
-- Cross-filesystem copy/delete, direct deletion before retention, and changing agent temp variables.
+- Direct deletion before retention and changing agent temp variables.
 - Host-wide reconciliation, hard-link deduplication, and physical-block accounting.
 
 ## Technical approach
@@ -135,7 +136,7 @@ The test names below record implementation evidence for the completed package.
 | 003.5, .6 | `TestAnalyzeTemporaryPartialResults`, `TestAnalyzeTemporaryCancellation`, scanner empty/nested-root and interrupted-partition tests, overview progress/cache tests |
 | 003.3, .4, .8 | `storage-totals.test.ts` informational exclusion and `storage-overview-card.test.tsx` state/path cases |
 | 004.1, .2, .3 | settings roundtrip tests and `TestProviderCleanupPolicyMatrix` |
-| 004.4, .5, .6 | `TestCleanupRevalidatesArtifact`, owner-death per-run reconciliation, uncertain-owner, replacement, age, and EXDEV cases |
+| 004.4, .5, .6 | `TestCleanupRevalidatesArtifact`, owner-death per-run reconciliation, uncertain-owner, replacement, age, and EXDEV staged-copy cases |
 | 004.7, .8 | retention/recovery tests, run-history wording, policy persistence, and phone flows |
 
 Task 01 and Task 02 add TDD tests for their changed logic.
@@ -174,7 +175,7 @@ Implementation and rendered verification completed on 2026-09-12:
 
 - Backend storage and backend-app tests passed for the temporary-folder scanner, overview wiring,
   saved cleanup policy, lifecycle revalidation, owner-death reconciliation, and quarantine result
-  contract: 1,110 tests across 9 packages.
+  contract: 1,139 tests across 9 packages.
 - Focused web tests passed for overview rendering, totals, policy settings, maintenance settings,
   and run history. Web typecheck and i18n checks passed.
 - Chromium temporary-storage E2E passed: 3 tests. Mobile Chromium temporary-storage E2E passed:
@@ -190,4 +191,5 @@ Implementation and rendered verification completed on 2026-09-12:
 - Mount identity differs by platform; unsupported discovery must fail closed.
 - A partial informational measurement must not silently become zero or alter classified totals.
 - Cleanup cannot reclaim unregistered caches, even when those dominate the broad footprint.
-- Cross-filesystem quarantine remains unsupported.
+- Cross-filesystem quarantine stages a verified copy and temporarily needs space in both locations;
+  failures preserve the source and leave a retryable failed intent.

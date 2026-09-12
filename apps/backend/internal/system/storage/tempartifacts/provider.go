@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ type ProviderConfig struct {
 	Retention  time.Duration
 	Now        func() time.Time
 	NewID      func() string
+	Rename     func(string, string) error
 	Scanner    *filescan.Limiter
 	OnProgress func(filescan.Progress)
 	Settings   SettingsReader
@@ -50,6 +52,7 @@ type Provider struct {
 	retention  time.Duration
 	now        func() time.Time
 	newID      func() string
+	rename     func(string, string) error
 	scanner    *filescan.Limiter
 	onProgress func(filescan.Progress)
 	settings   SettingsReader
@@ -101,6 +104,10 @@ func NewProvider(config ProviderConfig) *Provider {
 	if newID == nil {
 		newID = uuid.NewString
 	}
+	rename := config.Rename
+	if rename == nil {
+		rename = os.Rename
+	}
 	trashDir := config.TrashDir
 	if trashDir == "" {
 		trashDir = filepath.Join(config.HomeDir, "trash")
@@ -109,7 +116,8 @@ func NewProvider(config ProviderConfig) *Provider {
 		registry: config.Registry, store: config.Store, homeDir: filepath.Clean(config.HomeDir),
 		trashDir:  filepath.Clean(trashDir),
 		retention: retention, now: now, newID: newID,
-		scanner: config.Scanner, onProgress: config.OnProgress, settings: config.Settings,
+		rename: rename, scanner: config.Scanner, onProgress: config.OnProgress,
+		settings: config.Settings,
 	}
 }
 
@@ -322,6 +330,13 @@ func (p *Provider) Cleanup(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return p.CleanupWithSettings(ctx, settings)
+}
+
+func (p *Provider) CleanupWithSettings(
+	ctx context.Context,
+	settings storage.StorageMaintenanceSettings,
+) (map[string]any, error) {
 	if !settings.TemporaryArtifacts.Enabled {
 		return toMap(CleanupResult{Skipped: true, Reason: "disabled"}), nil
 	}
@@ -331,6 +346,16 @@ func (p *Provider) Cleanup(ctx context.Context) (map[string]any, error) {
 
 func (p *Provider) CleanupExplicit(ctx context.Context) (map[string]any, error) {
 	result, err := p.cleanupExplicit(ctx)
+	return toMap(result), err
+}
+
+func (p *Provider) CleanupExplicitWithSettings(
+	ctx context.Context,
+	settings storage.StorageMaintenanceSettings,
+) (map[string]any, error) {
+	result, err := p.cleanupExplicitWithRetention(
+		ctx, retentionFromSettings(settings, p.retention),
+	)
 	return toMap(result), err
 }
 
@@ -428,11 +453,11 @@ func (p *Provider) quarantine(
 	retention time.Duration,
 	cutoff time.Time,
 ) error {
-	current, err := p.revalidate(ctx, artifact, cutoff)
+	validated, err := p.revalidate(ctx, artifact, cutoff)
 	if err != nil {
 		return err
 	}
-	artifact = current
+	artifact = validated.artifact
 	id := p.newID()
 	if id == "" {
 		return errors.New("temporary artifact quarantine id must not be empty")
@@ -459,14 +484,18 @@ func (p *Provider) quarantine(
 	if err := p.store.CreateQuarantineEntry(ctx, entry); err != nil {
 		return fmt.Errorf("persist temporary artifact quarantine intent: %w", err)
 	}
-	current, err = p.revalidate(ctx, artifact, cutoff)
+	current, err := p.revalidate(ctx, artifact, cutoff)
 	if err != nil {
-		_, _ = p.store.TransitionQuarantineEntry(ctx, entry.ID, storage.QuarantineStateFailed, err.Error())
+		p.markQuarantineFailed(ctx, entry, artifact, err)
 		return err
 	}
-	if err := os.Rename(current.Path, quarantinePath); err != nil {
-		_, _ = p.store.TransitionQuarantineEntry(ctx, entry.ID, storage.QuarantineStateFailed, err.Error())
-		_ = p.registry.MarkFailed(ctx, artifact.ID, err.Error())
+	if !sameFile(validated.info, current.info) {
+		err := fmt.Errorf("temporary artifact %s changed on disk during quarantine", artifact.Path)
+		p.markQuarantineFailed(ctx, entry, artifact, err)
+		return err
+	}
+	if err := p.moveToQuarantine(current.artifact, quarantinePath, current.info); err != nil {
+		p.markQuarantineFailed(ctx, entry, artifact, err)
 		return fmt.Errorf("quarantine temporary artifact: %w", err)
 	}
 	if err := p.registry.MarkQuarantined(ctx, artifact.ID); err != nil {
@@ -476,14 +505,266 @@ func (p *Provider) quarantine(
 	return nil
 }
 
+func (p *Provider) markQuarantineFailed(
+	ctx context.Context,
+	entry *storage.QuarantineEntry,
+	artifact storage.TemporaryArtifact,
+	err error,
+) {
+	if entry == nil {
+		return
+	}
+	if entry.State != storage.QuarantineStateFailed {
+		_, _ = p.store.TransitionQuarantineEntry(ctx, entry.ID, storage.QuarantineStateFailed, err.Error())
+	}
+	if artifact.State != storage.TemporaryArtifactStateFailed {
+		_ = p.registry.MarkFailed(ctx, artifact.ID, err.Error())
+	}
+}
+
+func (p *Provider) moveToQuarantine(
+	artifact storage.TemporaryArtifact,
+	quarantinePath string,
+	validatedInfo os.FileInfo,
+) error {
+	if err := p.validateArtifactIdentity(artifact, validatedInfo); err != nil {
+		return err
+	}
+	renameErr := p.rename(artifact.Path, quarantinePath)
+	if renameErr == nil {
+		if err := p.validateMovedArtifact(quarantinePath, validatedInfo, artifact); err != nil {
+			return err
+		}
+		return nil
+	}
+	if !isCrossDeviceError(renameErr) {
+		return renameErr
+	}
+	return p.copyToQuarantine(artifact, quarantinePath, validatedInfo)
+}
+
+func (p *Provider) copyToQuarantine(
+	artifact storage.TemporaryArtifact,
+	quarantinePath string,
+	validatedInfo os.FileInfo,
+) error {
+	temporaryPath, err := os.MkdirTemp(filepath.Dir(quarantinePath), "."+filepath.Base(quarantinePath)+".tmp-")
+	if err != nil {
+		return fmt.Errorf("create cross-device quarantine staging directory: %w", err)
+	}
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(temporaryPath)
+		}
+	}()
+	if err := copyOwnedDirectory(artifact.Path, temporaryPath); err != nil {
+		return fmt.Errorf("copy temporary artifact for quarantine: %w", err)
+	}
+	if err := syncDirectory(temporaryPath); err != nil {
+		return fmt.Errorf("sync temporary artifact quarantine: %w", err)
+	}
+	if err := p.validateArtifactIdentity(artifact, validatedInfo); err != nil {
+		return err
+	}
+	if err := p.rename(temporaryPath, quarantinePath); err != nil {
+		return fmt.Errorf("publish cross-device quarantine: %w", err)
+	}
+	published = true
+	if err := syncDirectory(filepath.Dir(quarantinePath)); err != nil {
+		return fmt.Errorf("sync published temporary artifact quarantine: %w", err)
+	}
+	if err := p.validateMovedArtifact(quarantinePath, nil, artifact); err != nil {
+		return err
+	}
+	if err := p.validateArtifactIdentity(artifact, validatedInfo); err != nil {
+		if cleanupErr := p.removePublishedArtifact(quarantinePath, artifact); cleanupErr != nil {
+			return errors.Join(err, cleanupErr)
+		}
+		return err
+	}
+	if err := p.removeValidatedArtifact(artifact.Path, validatedInfo, artifact); err != nil {
+		return fmt.Errorf("remove original temporary artifact after quarantine copy: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) validateArtifactIdentity(
+	artifact storage.TemporaryArtifact,
+	validatedInfo os.FileInfo,
+) error {
+	info, err := os.Lstat(artifact.Path)
+	if err != nil {
+		return fmt.Errorf("inspect temporary artifact %s before quarantine: %w", artifact.Path, err)
+	}
+	if !sameFile(info, validatedInfo) {
+		return fmt.Errorf("temporary artifact %s changed on disk during quarantine", artifact.Path)
+	}
+	if err := p.registry.Validate(artifact); err != nil {
+		return fmt.Errorf("validate temporary artifact %s before quarantine: %w", artifact.Path, err)
+	}
+	return nil
+}
+
+func (p *Provider) validateMovedArtifact(
+	path string,
+	validatedInfo os.FileInfo,
+	artifact storage.TemporaryArtifact,
+) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect quarantined temporary artifact: %w", err)
+	}
+	if validatedInfo != nil && !sameFile(info, validatedInfo) {
+		return errors.New("quarantine destination does not retain the validated artifact identity")
+	}
+	if err := p.registry.ValidateMarker(path, artifact); err != nil {
+		return fmt.Errorf("validate quarantined temporary artifact: %w", err)
+	}
+	return nil
+}
+
+func sameFile(left, right os.FileInfo) bool {
+	return left != nil && right != nil && os.SameFile(left, right)
+}
+
+func copyOwnedDirectory(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("temporary artifact contains symlink %s", path)
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		target := filepath.Join(destination, relative)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
+				return err
+			}
+			return os.Chmod(target, info.Mode().Perm())
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("temporary artifact contains unsupported entry %s", path)
+		}
+		return copyOwnedFile(path, target, info.Mode().Perm())
+	})
+}
+
+func copyOwnedFile(source, destination string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		return err
+	}
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = input.Close() }()
+	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	copyErr := error(nil)
+	if _, copyErr = io.Copy(output, input); copyErr == nil {
+		copyErr = output.Sync()
+	}
+	closeErr := output.Close()
+	if copyErr != nil {
+		_ = os.Remove(destination)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(destination)
+		return closeErr
+	}
+	return nil
+}
+
+func (p *Provider) removePublishedArtifact(path string, artifact storage.TemporaryArtifact) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if err := validatePublishedMarker(path, artifact); err != nil {
+		return err
+	}
+	return p.removeValidatedArtifact(path, info, artifact)
+}
+
+func (p *Provider) removeValidatedArtifact(
+	path string,
+	validatedInfo os.FileInfo,
+	artifact storage.TemporaryArtifact,
+) error {
+	if err := p.validatePathIdentity(path, validatedInfo, artifact); err != nil {
+		return err
+	}
+	tombstone, err := os.MkdirTemp(filepath.Dir(path), "."+filepath.Base(path)+".delete-")
+	if err != nil {
+		return fmt.Errorf("create deletion staging directory: %w", err)
+	}
+	if err := os.Remove(tombstone); err != nil {
+		return fmt.Errorf("prepare deletion staging path: %w", err)
+	}
+	if err := p.rename(path, tombstone); err != nil {
+		return fmt.Errorf("move validated path to deletion staging: %w", err)
+	}
+	movedInfo, err := os.Lstat(tombstone)
+	if err != nil {
+		return fmt.Errorf("inspect deletion staging path: %w", err)
+	}
+	if !sameFile(movedInfo, validatedInfo) {
+		return errors.New("deletion staging path does not retain the validated artifact identity")
+	}
+	if err := p.registry.ValidateMarker(tombstone, artifact); err != nil {
+		return fmt.Errorf("validate deletion staging path: %w", err)
+	}
+	if err := os.RemoveAll(tombstone); err != nil {
+		return fmt.Errorf("remove deletion staging path: %w", err)
+	}
+	return nil
+}
+
+func validatePublishedMarker(path string, artifact storage.TemporaryArtifact) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("quarantine destination is not a real directory")
+	}
+	return validateMarkerFile(path, artifact)
+}
+
+func validateMarkerFile(root string, artifact storage.TemporaryArtifact) error {
+	marker, err := readMarker(filepath.Join(root, MarkerName))
+	if err != nil {
+		return err
+	}
+	if marker.ID != artifact.ID || marker.Kind != artifact.Kind || marker.Token != artifact.MarkerToken {
+		return errors.New("temporary artifact marker does not match the registry")
+	}
+	return nil
+}
+
 func (p *Provider) revalidate(
 	ctx context.Context,
 	expected storage.TemporaryArtifact,
 	cutoff time.Time,
-) (storage.TemporaryArtifact, error) {
+) (validatedArtifact, error) {
 	current, err := p.registry.Get(ctx, expected.ID)
 	if err != nil {
-		return storage.TemporaryArtifact{}, fmt.Errorf("reload temporary artifact %s: %w", expected.ID, err)
+		return validatedArtifact{}, fmt.Errorf("reload temporary artifact %s: %w", expected.ID, err)
 	}
 	if current.ID != expected.ID ||
 		current.Kind != expected.Kind ||
@@ -493,25 +774,34 @@ func (p *Provider) revalidate(
 		!current.CreatedAt.Equal(expected.CreatedAt) ||
 		!sameTime(current.LastHeartbeatAt, expected.LastHeartbeatAt) ||
 		!sameTime(current.ClosedAt, expected.ClosedAt) {
-		return storage.TemporaryArtifact{}, fmt.Errorf(
+		return validatedArtifact{}, fmt.Errorf(
 			"temporary artifact %s changed since candidate selection", expected.ID,
 		)
 	}
 	if current.State != storage.TemporaryArtifactStateClosed &&
 		current.State != storage.TemporaryArtifactStateAbandoned {
-		return storage.TemporaryArtifact{}, fmt.Errorf(
+		return validatedArtifact{}, fmt.Errorf(
 			"skip temporary artifact %s: lifecycle state is %s", current.Path, current.State,
 		)
 	}
 	if artifactAge(current).After(cutoff) {
-		return storage.TemporaryArtifact{}, fmt.Errorf(
+		return validatedArtifact{}, fmt.Errorf(
 			"skip temporary artifact %s: lifecycle age is below the cleanup threshold", current.Path,
 		)
 	}
 	if err := p.registry.Validate(current); err != nil {
-		return storage.TemporaryArtifact{}, fmt.Errorf("validate temporary artifact %s: %w", current.Path, err)
+		return validatedArtifact{}, fmt.Errorf("validate temporary artifact %s: %w", current.Path, err)
 	}
-	return current, nil
+	info, err := os.Lstat(current.Path)
+	if err != nil {
+		return validatedArtifact{}, fmt.Errorf("inspect temporary artifact %s: %w", current.Path, err)
+	}
+	return validatedArtifact{artifact: current, info: info}, nil
+}
+
+type validatedArtifact struct {
+	artifact storage.TemporaryArtifact
+	info     os.FileInfo
 }
 
 func sameTime(left, right *time.Time) bool {
@@ -581,7 +871,16 @@ func (p *Provider) permanentDelete(
 	if err := p.registry.ValidateMarker(entry.QuarantinePath, artifact); err != nil {
 		return entry, err
 	}
-	if err := os.RemoveAll(entry.QuarantinePath); err != nil {
+	validatedInfo, err := os.Lstat(entry.QuarantinePath)
+	if err != nil {
+		return entry, fmt.Errorf("inspect temporary artifact quarantine: %w", err)
+	}
+	if err := p.validateQuarantineIdentity(entry, artifact, validatedInfo); err != nil {
+		p.markQuarantineFailed(ctx, &entry, artifact, err)
+		return entry, err
+	}
+	if err := p.removeValidatedArtifact(entry.QuarantinePath, validatedInfo, artifact); err != nil {
+		p.markQuarantineFailed(ctx, &entry, artifact, err)
 		return entry, fmt.Errorf("delete temporary artifact quarantine: %w", err)
 	}
 	deleted, err := p.store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateDeleted, "")
@@ -592,6 +891,35 @@ func (p *Provider) permanentDelete(
 		return deleted, fmt.Errorf("persist temporary artifact lifecycle deletion: %w", err)
 	}
 	return deleted, nil
+}
+
+func (p *Provider) validateQuarantineIdentity(
+	entry storage.QuarantineEntry,
+	artifact storage.TemporaryArtifact,
+	validatedInfo os.FileInfo,
+) error {
+	if err := p.validatePathIdentity(entry.QuarantinePath, validatedInfo, artifact); err != nil {
+		return fmt.Errorf("validate temporary artifact quarantine before deletion: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) validatePathIdentity(
+	path string,
+	validatedInfo os.FileInfo,
+	artifact storage.TemporaryArtifact,
+) error {
+	currentInfo, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect validated path %s: %w", path, err)
+	}
+	if !sameFile(validatedInfo, currentInfo) {
+		return fmt.Errorf("validated path changed on disk: %s", path)
+	}
+	if err := p.registry.ValidateMarker(path, artifact); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (p *Provider) loadQuarantineArtifact(

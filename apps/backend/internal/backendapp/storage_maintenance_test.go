@@ -81,6 +81,10 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 		dockerSummary["image_layer_bytes"] != int64(128) {
 		t.Fatalf("docker summary = %#v", summary.Docker)
 	}
+	systemTemporary, ok := summary.SystemTemporary.(tempstore.Analysis)
+	if !ok || systemTemporary.Status != tempstore.StatusNotApplicable || systemTemporary.Roots == nil {
+		t.Fatalf("unavailable system temporary summary = %#v, want an empty roots array", summary.SystemTemporary)
+	}
 
 	overview.quarantine = failingQuarantineSummarizer{err: errors.New("quarantine unavailable")}
 	degraded, err := overview.Summary(context.Background())

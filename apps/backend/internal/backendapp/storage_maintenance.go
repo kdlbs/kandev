@@ -453,11 +453,12 @@ func (o *storageOverview) summary(
 			)
 		}()
 	} else {
-		reporter.start(storagepkg.StorageSourceSystemTemporary)
-		reporter.complete(storagepkg.StorageSourceSystemTemporary, tempstore.Analysis{
+		systemTempSummary = tempstore.Analysis{
 			Status: tempstore.StatusNotApplicable, IncludedInTotal: false,
-			Reason: "system temporary provider unavailable",
-		}, nil)
+			Roots: []tempstore.RootMeasurement{}, Reason: "system temporary provider unavailable",
+		}
+		reporter.start(storagepkg.StorageSourceSystemTemporary)
+		reporter.complete(storagepkg.StorageSourceSystemTemporary, systemTempSummary, nil)
 	}
 	measurements.Wait()
 	if err := ctx.Err(); err != nil {

@@ -30,6 +30,30 @@ func (r *mountReader) Identity(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return identityForPath(canonical, mounts)
+}
+
+func (r *mountReader) Snapshot() (MountReader, error) {
+	mounts, err := r.load()
+	if err != nil {
+		return nil, err
+	}
+	return mountTable{mounts: mounts}, nil
+}
+
+type mountTable struct {
+	mounts []mountEntry
+}
+
+func (t mountTable) Identity(path string) (string, error) {
+	canonical, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	return identityForPath(canonical, t.mounts)
+}
+
+func identityForPath(canonical string, mounts []mountEntry) (string, error) {
 	best := ""
 	bestIdentity := ""
 	for _, mount := range mounts {
@@ -39,7 +63,7 @@ func (r *mountReader) Identity(path string) (string, error) {
 		}
 	}
 	if best == "" || bestIdentity == "" {
-		return "", fmt.Errorf("mount identity is unavailable for %s", path)
+		return "", fmt.Errorf("mount identity is unavailable for %s", canonical)
 	}
 	return bestIdentity, nil
 }
