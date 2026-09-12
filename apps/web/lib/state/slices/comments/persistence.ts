@@ -40,20 +40,33 @@ function isLegacyPlanComment(value: unknown): value is PlanComment {
   );
 }
 
-function rawSessionComments(sessionId: string): unknown[] {
-  const stored = getSessionStorage(`${STORAGE_PREFIX}${sessionId}`, [] as Comment[]) as unknown;
-  return Array.isArray(stored) ? stored : [];
+function rawSessionComments(sessionId: string): unknown[] | null {
+  try {
+    const raw = window.sessionStorage.getItem(`${STORAGE_PREFIX}${sessionId}`);
+    const stored: unknown = raw === null ? [] : JSON.parse(raw);
+    return Array.isArray(stored) ? stored : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Discover only valid pending legacy plan rows for known sessions. */
 export function listLegacyPlanComments(sessionIds: string[]): LegacyPlanCommentRecord[] {
-  const result: LegacyPlanCommentRecord[] = [];
+  return readLegacyPlanComments(sessionIds).records;
+}
+
+/** An unavailable scan cannot prove that previously identified drafts disappeared. */
+export function readLegacyPlanComments(sessionIds: string[]) {
+  const records: LegacyPlanCommentRecord[] = [];
+  let available = true;
   for (const sessionId of sessionIds) {
-    for (const value of rawSessionComments(sessionId)) {
-      if (isLegacyPlanComment(value)) result.push({ sessionId, comment: value });
+    const values = rawSessionComments(sessionId);
+    if (values === null) available = false;
+    for (const value of values ?? []) {
+      if (isLegacyPlanComment(value)) records.push({ sessionId, comment: value });
     }
   }
-  return result;
+  return { records, available };
 }
 
 function sameLegacyPlanComment(value: unknown, expected: PlanComment): boolean {
@@ -76,12 +89,21 @@ export function removeAcknowledgedLegacyPlanComment(
   expected: PlanComment,
 ): boolean {
   const values = rawSessionComments(sessionId);
+  if (values === null) return false;
   const index = values.findIndex((value) => sameLegacyPlanComment(value, expected));
-  if (index < 0) return false;
-  values.splice(index, 1);
-  if (values.length === 0) removeSessionStorage(`${STORAGE_PREFIX}${sessionId}`);
-  else setSessionStorage(`${STORAGE_PREFIX}${sessionId}`, values as Comment[]);
-  return true;
+  if (index < 0) return !values.some((value) => isRecord(value) && value.id === expected.id);
+  try {
+    values.splice(index, 1);
+    if (values.length === 0) window.sessionStorage.removeItem(`${STORAGE_PREFIX}${sessionId}`);
+    else window.sessionStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, JSON.stringify(values));
+    // Readback confirms cleanup; a completed write alone cannot acknowledge the draft's removal.
+    const remaining = rawSessionComments(sessionId);
+    return (
+      remaining !== null && !remaining.some((value) => isRecord(value) && value.id === expected.id)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export const COMMENTS_STORAGE_PREFIX = STORAGE_PREFIX;

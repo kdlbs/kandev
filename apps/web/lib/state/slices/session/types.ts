@@ -129,9 +129,16 @@ export type ComparePair = [string | null, string | null];
 export type PlanCommentMigrationStatus =
   | "idle"
   | "running"
+  | "retrying"
   | "complete"
   | "waiting_for_plan"
   | "failed";
+
+export type PlanCommentMigrationState = {
+  status: PlanCommentMigrationStatus;
+  pendingCount: number;
+  failure: "transient" | "conflict" | "rejected" | null;
+};
 
 export type TaskPlansState = {
   byTaskId: Record<string, TaskPlan | null>;
@@ -142,7 +149,7 @@ export type TaskPlansState = {
   commentsLoadingByTaskId: Record<string, boolean>;
   commentsLoadedByTaskId: Record<string, boolean>;
   commentsErrorByTaskId: Record<string, string | undefined>;
-  commentsMigrationStatusByTaskId: Record<string, PlanCommentMigrationStatus | undefined>;
+  commentsMigrationByTaskId: Record<string, PlanCommentMigrationState | undefined>;
   revisionsByTaskId: Record<string, TaskPlanRevision[]>;
   revisionsLoadingByTaskId: Record<string, boolean>;
   revisionsLoadedByTaskId: Record<string, boolean>;
@@ -402,7 +409,7 @@ export type SessionSliceActions = {
   setTaskPlanComments: (taskId: string, snapshot: TaskPlanCommentSnapshot) => void;
   setTaskPlanCommentsLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanCommentsError: (taskId: string, error?: string) => void;
-  setTaskPlanCommentMigrationStatus: (taskId: string, status: PlanCommentMigrationStatus) => void;
+  setTaskPlanCommentMigrationState: (taskId: string, state: PlanCommentMigrationState) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
   // Revision actions

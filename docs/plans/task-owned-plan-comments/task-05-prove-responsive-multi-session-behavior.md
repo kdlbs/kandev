@@ -102,6 +102,11 @@ Tasks 03 and 04.
 
 ## Results
 
+The [Plan comment recovery package](../plan-comment-recovery/plan.md#e2e-tests)
+adds empty-task failure and automatic recovery scenarios to these same desktop
+and phone suites. Their passing results are recorded in that package; the
+results below certify the original routing and migration scenarios only.
+
 - Added focused desktop and Pixel 5 Playwright scenarios using real backend
   transcripts to distinguish selected-session Send from primary-session Run.
 - Desktop proves shared comments across tabs and reload plus task-wide

@@ -518,9 +518,9 @@ export type AppState = KanbanSlice & {
   setTaskPlanComments: (taskId: string, snapshot: TaskPlanCommentSnapshot) => void;
   setTaskPlanCommentsLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanCommentsError: (taskId: string, error?: string) => void;
-  setTaskPlanCommentMigrationStatus: (
+  setTaskPlanCommentMigrationState: (
     taskId: string,
-    status: import("./slices/session/types").PlanCommentMigrationStatus,
+    state: import("./slices/session/types").PlanCommentMigrationState,
   ) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;

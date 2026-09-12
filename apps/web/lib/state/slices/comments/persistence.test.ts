@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiffComment, PlanComment } from "./types";
 import {
   COMMENTS_STORAGE_PREFIX,
@@ -46,6 +46,21 @@ function stored(): unknown[] {
 
 describe("legacy plan comment persistence", () => {
   beforeEach(() => window.sessionStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("does not acknowledge a row when browser storage refuses cleanup", () => {
+    const comment = planComment("plan-1");
+    window.sessionStorage.setItem(
+      `${COMMENTS_STORAGE_PREFIX}${SESSION_ID}`,
+      JSON.stringify([comment]),
+    );
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("Storage unavailable", "SecurityError");
+    });
+
+    expect(removeAcknowledgedLegacyPlanComment(SESSION_ID, comment)).toBe(false);
+    expect(stored()).toEqual([comment]);
+  });
 
   it("lists only readable pending plan rows for the requested sessions", () => {
     window.sessionStorage.setItem(

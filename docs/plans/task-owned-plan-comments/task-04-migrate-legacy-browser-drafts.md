@@ -91,6 +91,11 @@ Task 03.
 
 ## Results
 
+Historical implementation results follow. The
+[Plan comment recovery work order](../plan-comment-recovery/task-01-recover-plan-comment-context.md)
+records the implemented quiet retries and narrowed migration gate; the results
+below predate that correction.
+
 - Added per-task migration that scans all known session payloads and uploads
   legacy plan comments with their original UUIDs.
 - Cleanup rereads storage and removes only acknowledged plan IDs, preserving

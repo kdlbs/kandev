@@ -2099,8 +2099,7 @@
   "planCommentNotReadyToRun": "Este comentário do plano ainda está a ser guardado. Tente executar novamente.",
   "planCommentsChangedRetry": "Os comentários do plano foram alterados. Reveja-os e envie novamente.",
   "primarySessionChangedRetry": "A sessão principal foi alterada. Tente executar novamente.",
-  "restoringSavedPlanComments": "A restaurar comentários do plano guardados...",
   "planCommentMigrationFailed": "Não foi possível restaurar alguns comentários do plano guardados.",
   "planCommentMigrationNeedsPlan": "Crie ou restaure um plano para recuperar os comentários guardados.",
-  "planCommentMigrationPending": "Os comentários do plano guardados ainda estão a ser restaurados. Tente novamente antes de enviar."
+  "planCommentMigrationPending": "Os comentários do plano guardados ainda estão a ser restaurados. Em caso de falha de ligação, tentamos novamente de forma automática; a sua mensagem é mantida."
 }

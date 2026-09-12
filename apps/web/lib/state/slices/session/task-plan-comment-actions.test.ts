@@ -56,27 +56,43 @@ describe("task plan comment state", () => {
     const store = createAppStore();
     store.getState().setTaskPlan(TASK_ID, plan());
     store.getState().setTaskPlanComments(TASK_ID, snapshot(2));
-    store.getState().setTaskPlanCommentMigrationStatus(TASK_ID, "complete");
+    store.getState().setTaskPlanCommentMigrationState(TASK_ID, {
+      status: "complete",
+      pendingCount: 0,
+      failure: null,
+    });
     store.getState().setTaskPlanComments(TASK_ID, snapshot(99, "old-plan"));
     expect(store.getState().taskPlans.commentsByTaskId[TASK_ID]).toEqual(snapshot(2));
 
     store.getState().setTaskPlan(TASK_ID, plan("plan-2"));
     expect(store.getState().taskPlans.commentsByTaskId[TASK_ID]).toBeUndefined();
     expect(store.getState().taskPlans.commentsLoadedByTaskId[TASK_ID]).toBe(false);
-    expect(store.getState().taskPlans.commentsMigrationStatusByTaskId[TASK_ID]).toBe("idle");
+    expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK_ID]).toEqual({
+      status: "idle",
+      pendingCount: 0,
+      failure: null,
+    });
   });
 
   it("clears the task snapshot when the plan is deleted", () => {
     const store = createAppStore();
     store.getState().setTaskPlan(TASK_ID, plan());
     store.getState().setTaskPlanComments(TASK_ID, snapshot(1));
-    store.getState().setTaskPlanCommentMigrationStatus(TASK_ID, "complete");
+    store.getState().setTaskPlanCommentMigrationState(TASK_ID, {
+      status: "complete",
+      pendingCount: 0,
+      failure: null,
+    });
 
     store.getState().setTaskPlan(TASK_ID, null);
 
     expect(store.getState().taskPlans.commentsByTaskId[TASK_ID]).toBeUndefined();
     expect(store.getState().taskPlans.commentsLoadedByTaskId[TASK_ID]).toBe(true);
-    expect(store.getState().taskPlans.commentsMigrationStatusByTaskId[TASK_ID]).toBe("idle");
+    expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK_ID]).toEqual({
+      status: "idle",
+      pendingCount: 0,
+      failure: null,
+    });
   });
 
   it("keeps comment load state when the same plan is refreshed", () => {
