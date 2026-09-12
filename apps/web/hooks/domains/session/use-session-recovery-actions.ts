@@ -155,16 +155,17 @@ export function useSessionRecoveryActions({
         ...createInitialRecoveryState(),
         recoveryNotice: t("task:resumeFailedWorkspaceReadOnly"),
       });
-    } catch (cause) {
-      if (!isCurrentOperation(operation)) return;
-      const guard = sessionRecoveryGuardDetails(cause);
-      setState((current) => ({
-        ...current,
-        restoreError: guardOrFallbackError(cause, guard, t, t("task:failedToRestoreWorkspace")),
-        guardDetails: guard ?? current.guardDetails,
-        recoveryNotice: null,
-        manualRecoveryFailure: { operation: "restore_workspace" },
-      }));
+	} catch (cause) {
+		if (!isCurrentOperation(operation)) return;
+		const guard = sessionRecoveryGuardDetails(cause);
+		const restoreError = guardOrFallbackError(cause, guard, t, t("task:failedToRestoreWorkspace"));
+		setState((current) => ({
+			...current,
+			restoreError,
+			guardDetails: guard ?? current.guardDetails,
+			recoveryNotice: null,
+			manualRecoveryFailure: { operation: "restore_workspace" },
+		}));
     } finally {
       if (isCurrentOperation(operation)) setState((current) => ({ ...current, busyAction: null }));
     }
