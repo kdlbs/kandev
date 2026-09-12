@@ -31,15 +31,24 @@ function makeStore(overrides: {
   pendingReorderBandKeys?: Record<string, true>;
 }) {
   const tasks = overrides.tasks ?? [makeTask("a", 0), makeTask("b", 1), makeTask("c", 2)];
+  // Independently cloned per side: a handler that mutates only kanban.tasks
+  // (or only the snapshot) must not make a synchronization assertion pass
+  // by accident because both sides happen to share one array/objects.
+  const snapshotTasks = tasks.map((task) => ({ ...task }));
   let state = {
-    kanban: { workflowId: WORKFLOW_ID, steps: [], tasks },
+    kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: tasks.map((task) => ({ ...task })) },
     kanbanMulti: {
       isLoading: false,
       orderRevisionByStepId: overrides.orderRevisionByStepId ?? {},
       pendingReorderBandKeys: overrides.pendingReorderBandKeys ?? {},
       withheldReorderByBandKey: {},
       snapshots: {
-        [WORKFLOW_ID]: { workflowId: WORKFLOW_ID, workflowName: "WF1", steps: [], tasks },
+        [WORKFLOW_ID]: {
+          workflowId: WORKFLOW_ID,
+          workflowName: "WF1",
+          steps: [],
+          tasks: snapshotTasks,
+        },
       },
     },
   } as unknown as AppState;
