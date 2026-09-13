@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: PodTemplate
+template:
+  spec:
+    automountServiceAccountToken: false
+    securityContext:
+      fsGroup: 1000
+    containers:
+      - name: kandev-agent
+        # Replace with the immutable digest of your verified full worker build.
+        image: FULL_WORKER_IMAGE_REQUIRED
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests: {cpu: 250m, memory: 512Mi}
+          limits: {cpu: '2', memory: 4Gi}
+        env:
+          - {name: DOCKER_HOST, value: 'unix:///run/docker/docker.sock'}
+        volumeMounts:
+          - {name: docker-socket, mountPath: /run/docker}
+      - name: docker-engine
+        image: docker.io/library/docker:29.1.5-dind@sha256:0ff14e6a992f2fdb7bef46123cd7fe61a58df0494e8df8bb6f9a5dac7486e1cb
+        # Bypass the image entrypoint, which otherwise enables TCP listeners.
+        command: [/bin/sh]
+        args:
+          - -ceu
+          - |
+            mtu=$(cat /sys/class/net/eth0/mtu)
+            test "$mtu" -ge 576
+            exec dockerd --host=unix:///run/docker/docker.sock --group=1000 --mtu="$mtu" --default-network-opt=bridge=com.docker.network.driver.mtu="$mtu" --storage-driver=overlay2
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          privileged: true
+        resources:
+          requests: {cpu: 250m, memory: 512Mi}
+          limits: {cpu: '2', memory: 3Gi}
+        volumeMounts:
+          - {name: kandev-workspace, mountPath: /workspace, readOnly: false}
+          - {name: docker-socket, mountPath: /run/docker}
+          - {name: docker-data, mountPath: /var/lib/docker}
+    volumes:
+      - name: docker-socket
+        emptyDir: {medium: Memory, sizeLimit: 16Mi}
+      - name: docker-data
+        emptyDir: {sizeLimit: 12Gi}

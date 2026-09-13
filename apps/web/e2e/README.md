@@ -774,3 +774,25 @@ Record results as `{ "workers": 2, "wall_seconds": 0, "max_rss_kb": 0,
 "retries": 0, "backend_errors": 0 }`. Compare at least three repetitions
 with the same build, duration-aware manifest, and profile before considering a
 default change.
+
+### Full worker Docker lifecycle acceptance
+
+`tests/kubernetes/kubernetes-docker-workloads.spec.ts` is an explicit opt-in
+`containers` suite. First build and verify the [full worker recipe](../../../k8s/worker-images/full/README.md)
+on an isolated host with adequate disk/I/O capacity, then pass the exact printed
+local `IMAGE_ID` as `KANDEV_E2E_FULL_WORKER_IMAGE`:
+
+```bash
+KANDEV_E2E_FULL_WORKER_IMAGE=sha256:<verified-local-image-id> \
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --shards 1 --project containers tests/kubernetes/kubernetes-docker-workloads.spec.ts
+```
+
+The fixture creates a never-started container to add the mock transport, loads
+that exact derived image into its disposable Kind cluster, and caps the test
+node at two CPUs/eight GiB before starting Docker workloads. Existing Kind
+provisioning still requires an isolated bounded test host. No credentials are
+needed. The tests cover real source/browser/Compose results through the terminal,
+finite preparation failure, retained/replaced workspaces, independent daemons,
+Pod cgroup ancestry and exact cleanup including an untouched existing claim.
+The cgroup case fails if nested work escapes the Pod budget. Missing image input
+skips the suite; skips and test discovery do not count as execution acceptance.

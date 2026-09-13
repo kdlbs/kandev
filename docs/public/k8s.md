@@ -215,7 +215,21 @@ Kandev owns generated resource names, namespace, `restartPolicy: Always`, Linux 
 | `kandev-auth` | `/run/kandev` | Memory-backed auth environment and runtime home |
 | `kandev-workspace` | `/workspace` | Selected `emptyDir`, managed PVC, or existing claim |
 
-The template cannot set the main container's command, args, or working directory; use reserved volume names or mount paths; use container port 8765 or the `kandev-agentctl` port name; or define `HOME`, `AGENTCTL_*`, or `KANDEV_*` environment keys. It also cannot set Pod name/namespace/UID, owner references, finalizers, restart policy, node name, OS, or Linux OS/architecture selectors. Kandev defaults `automountServiceAccountToken: false` only when the template leaves it unset.
+The template cannot set the main container's command, args, or working directory; use reserved volume names or mount paths except the explicit companion workspace grant below; use container port 8765 or the `kandev-agentctl` port name; or define `HOME`, `AGENTCTL_*`, or `KANDEV_*` environment keys. It also cannot set Pod name/namespace/UID, owner references, finalizers, restart policy, node name, OS, or Linux OS/architecture selectors. Kandev defaults `automountServiceAccountToken: false` only when the template leaves it unset.
+
+An ordinary non-main container may explicitly mount `kandev-workspace` once at
+exactly `/workspace`, with `readOnly: true` or `false`. Kandev still defines the
+volume from the profile's storage policy. Do not define that volume in the
+template. Subpaths, subpath expressions, propagation, recursive mount options,
+redirected paths, devices and overlapping mounts are rejected. Init and ephemeral
+containers cannot receive this grant. Runtime and auth mounts remain private to
+the main container.
+
+Admission must preserve each grant on the same named container exactly once;
+added, removed, transferred or changed grants fail before bootstrap. Replacement
+Pods use the recorded launch template and claim identity, even after profile edits.
+A writable companion can change repository contents. This grant does not provide
+a security boundary against a privileged container.
 
 Every Kandev-created Pod and managed PVC has this complete custom identity:
 
@@ -295,6 +309,21 @@ The examples use UID 1000, writable `/workspace` paths for npm and Python
 artifacts, no service-account token automount, dropped capabilities, and no
 privilege escalation. Review resource requests, Pod Security admission, storage
 ownership, registry access, and repository tool requirements before use.
+
+### Opt in to a full worker with Docker
+
+The [full worker recipe](../../k8s/worker-images/full/README.md) adds pinned
+source/browser tooling and an explicit per-Pod privileged Docker daemon. It
+requires the companion workspace-grant implementation. Existing presets do not
+change. The main agent remains non-root and connects over a Pod-local Unix
+socket; Docker data is disposable. Use the supplied complete prepare script
+so daemon readiness precedes clone/setup/agent installation and caches are
+created only after clone.
+
+Ordinary Stop retains companion compute. Only `/workspace` is shared for nested
+bind mounts; agent-only HOME/temp paths and full Docker-executor parity are not
+covered. Review the recipe's recorded test evidence and runtime limitations
+before use. No production deployment or universal cgroup compatibility is implied.
 
 ### Choose workspace storage
 

@@ -33,6 +33,9 @@ func ValidateAdmittedPod(admitted, desired *corev1.Pod, mainContainer string) er
 		admittedMain.WorkingDir != desiredMain.WorkingDir {
 		return errors.New("admitted Pod mutated the main-container bootstrap")
 	}
+	if err := validateAdmittedWorkspaceGrants(admitted, desired, mainContainer); err != nil {
+		return err
+	}
 	if err := validateAdmittedContainers(admitted, desiredMain, mainContainer); err != nil {
 		return err
 	}
@@ -292,6 +295,13 @@ func validateAdmittedContainers(
 ) error {
 	for index := range admitted.Spec.Containers {
 		container := &admitted.Spec.Containers[index]
+		if container.Name != mainContainer {
+			checked, _, err := companionWithoutWorkspaceGrant(container)
+			if err != nil {
+				return err
+			}
+			container = checked
+		}
 		if err := validateAdmittedContainer(container, desiredMain, container.Name == mainContainer); err != nil {
 			return err
 		}
