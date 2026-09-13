@@ -126,7 +126,7 @@ implementation; a guard in only the submit helper is incomplete.
 
 ## Results
 
-Implementation and verification complete on 2026-09-13. Backend user/settings catalog and boot projection tests passed. The broad frontend run passed 315 tests across 25 files; subsequent focused runs passed the final dialog (11 tests), Azure launcher, and user-settings fixture changes. TypeScript, changed-file ESLint, Prettier, localization checks and ratchet, settings catalog consistency, native builds, and the web build passed. Desktop browser verification passed, including saved false after reload, retained listing/task URLs, opener focus, manual opening, background agent execution, and re-enabled navigation. Phone browser verification also passed, including the native Create only control, creation from the task switcher, saved preference, 44px touch target, no horizontal overflow, opener focus, background agent execution, and re-enabled navigation. Public documentation validation passed (62 tests, 46 pages). All acceptance criteria are covered; there is no unresolved UI mismatch. Changes remain uncommitted.
+Implementation and verification complete on 2026-09-13. Backend user/settings catalog and boot projection tests passed. The broad frontend run passed 315 tests across 25 files; subsequent focused runs passed the final dialog (11 tests), Azure launcher, and user-settings fixture changes. TypeScript, changed-file ESLint, Prettier, localization checks and ratchet, settings catalog consistency, native builds, and the web build passed. Desktop browser verification passed, including saved false after reload, retained listing/task URLs, opener focus, manual opening, background agent execution, and re-enabled navigation. Phone browser verification also passed, including the native Create only control, creation from the task switcher, saved preference, 44px touch target, no horizontal overflow, opener focus, background agent execution, and re-enabled navigation. Public documentation validation passed (62 tests, 46 pages). All acceptance criteria are covered; there is no unresolved UI mismatch.
 
 Native builds replace the original full `make build-backend` command: the full target also cross-compiles remote helpers for Linux ARM and macOS, which these browser scenarios do not exercise. The full target was stopped after native agentctl built. Go checks use `GOCACHE=/tmp/kandev-auto-focus-go-cache` because the default cache is read-only in this environment.
 
@@ -157,3 +157,13 @@ document, plan mode, and context files remain unchanged, with no navigation.
 `pnpm --dir apps/web exec vitest run task-create-dialog-helpers.test.ts`
 passed all 28 tests. This is regression coverage for the existing contract;
 no production behavior changed for this suggestion.
+
+
+CodeRabbit aggregate review: restored exact GitHub/GitLab navigation assertions
+(12 focused launcher tests passed), removed transient repository-state wording,
+and aligned documentation and browser navigation with the canonical
+Settings > Task Behavior page. The existing Playwright fixture already inherits
+the configured mobile context; explicit viewport, touch-point, and coarse-pointer
+assertions now verify that invariant. The phone E2E scenario passed, as did
+specification and public documentation validation. Desktop route verification
+also passed. Remote checks remain pending for this final review update.

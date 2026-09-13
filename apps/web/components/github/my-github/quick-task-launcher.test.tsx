@@ -292,6 +292,7 @@ describe("QuickTaskLauncher issue linking", () => {
         expect(mocks.upsertTaskIssue).toHaveBeenCalledWith(WORKSPACE_ID, link);
       });
       expect(mocks.push).toHaveBeenCalledTimes(autoFocus ? 1 : 0);
+      if (autoFocus) expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
     },
   );
 

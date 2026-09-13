@@ -80,7 +80,7 @@ Turn this off to stay on your current view. Tasks and agents still start as
 requested.” Localize via `t()` in English, Portuguese, and Chinese catalogs;
 generate Traditional Chinese with `pnpm run i18n:zh-hant`.
 
-Desktop and phone share the inline card on `/settings/general/task-actions`.
+Desktop and phone share the inline card on `/settings/preferences/task-behavior`.
 The closest settings exemplar is the existing auto-start preference; the phone
 task navigation exemplar is `session-task-switcher-sheet.tsx`, which uses an
 inset drawer. Keep the settings page's existing scroll owner and shared

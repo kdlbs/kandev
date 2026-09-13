@@ -6,7 +6,7 @@ import { SessionPage } from "../../pages/session-page";
 import { waitForHttp } from "../../helpers/causal-waits";
 
 async function saveFocusPreference(page: Page, enabled: boolean, mobile: boolean) {
-  await page.goto("/settings/general/task-actions");
+  await page.goto("/settings/preferences/task-behavior");
   const card = page.getByTestId("creation-auto-focus-card");
   const toggle = card.getByRole("switch", { name: "Auto-focus new tasks" });
   await expect(toggle).toBeChecked({ checked: !enabled });

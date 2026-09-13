@@ -27,7 +27,7 @@ to keep their current working context.
 
 #### Acceptance criteria
 
-- **AC-TASKS-CREATION-AUTO-FOCUS-001.1:** Settings > General > Task Actions shall offer a per-user “Auto-focus new tasks” switch, enabled for new users and existing users without a saved value. With it enabled, each entry point shall preserve its current navigation and selection behavior.
+- **AC-TASKS-CREATION-AUTO-FOCUS-001.1:** Settings > Task Behavior shall offer a per-user “Auto-focus new tasks” switch, enabled for new users and existing users without a saved value. With it enabled, each entry point shall preserve its current navigation and selection behavior.
 - **AC-TASKS-CREATION-AUTO-FOCUS-001.2:** After the user saves the switch as disabled, successful task creation shall leave the current route, selected task/session, preview, and active layout unchanged. This includes ordinary creation, creation with an agent, passthrough agents, and planning tasks. With no task selected, none shall be selected automatically.
 - **AC-TASKS-CREATION-AUTO-FOCUS-001.3:** Disabling auto-focus shall preserve task creation, requested agent or plan execution, task-list updates, successful dialog dismissal, and manual opening of the created task. It shall not change existing creation errors, retries, or cancellation behavior.
 - **AC-TASKS-CREATION-AUTO-FOCUS-001.4:** Saving either switch value shall persist it across reloads through the user's settings. Unsaved edits and discarded edits shall not alter creation behavior. A failed save shall retain the previously effective value and expose the existing settings error/retry flow.

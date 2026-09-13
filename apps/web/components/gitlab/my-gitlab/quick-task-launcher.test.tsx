@@ -149,6 +149,7 @@ describe("GitLab QuickTaskLauncher", () => {
       WORKSPACE_ID,
     );
     expect(pushMock).toHaveBeenCalledTimes(autoFocus ? 1 : 0);
+    if (autoFocus) expect(pushMock).toHaveBeenCalledWith("/t/task-1");
   });
 });
 

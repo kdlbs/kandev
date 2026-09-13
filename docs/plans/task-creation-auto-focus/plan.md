@@ -38,7 +38,7 @@ behavior as the default; this package proposes those routine UI/storage details.
 
 ## ASCII UI preview
 
-UI-01: Settings > General > Task Actions, saved default. Desktop and phone use
+UI-01: Settings > Task Behavior, saved default. Desktop and phone use
 the same inline card composition:
 
 ```text
@@ -116,7 +116,7 @@ retained current view, manual opening, requested background agent execution,
 re-enabled auto-focus, keyboard focus return, and phone touch/overflow checks.
 Public documentation validation passed (62 tests, 46 pages). Specification
 catalog/lint and whitespace validation passed. Exact commands and build scope
-are recorded in the completed work order. Changes remain uncommitted.
+are recorded in the completed work order.
 
 ## Risks
 

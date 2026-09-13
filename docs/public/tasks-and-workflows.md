@@ -23,7 +23,7 @@ The task carries the outcome through the workflow. The repository and session pr
 
 ## Keep your view when creating tasks
 
-In **Settings > General > Task Actions**, turn off **Auto-focus new tasks**
+In **Settings > Task Behavior**, turn off **Auto-focus new tasks**
 and select **Save changes** to create tasks without leaving your current view.
 The setting is on by default and is saved with your user preferences across
 reloads. It works on desktop and mobile.
