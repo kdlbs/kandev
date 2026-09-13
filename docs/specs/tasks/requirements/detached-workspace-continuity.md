@@ -54,6 +54,16 @@ former parent is archived, deleted, retried, or recovered after restart.
   after detachment, the detached task shall recover the same workspace binding,
   current steward, and ownership generation.
 
+- **AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.6:** When a task is archived and
+  a workspace group it belongs to names a canonical task environment that is
+  positively absent, the system shall complete the archive without performing a
+  stewardship transfer, and shall not treat that absence as authority to delete
+  any workspace, worktree, or environment resource.
+- **AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.7:** When the canonical task
+  environment named by a workspace group cannot be resolved for any reason other
+  than positive absence, the system shall fail the archive without changing
+  workspace-group or environment ownership.
+
 ### REQ-TASKS-DETACHED-WORKSPACE-CONTINUITY-002: Canonical subtask workspace attachment
 
 **Intent:** Ensure every task-creation surface establishes the same durable

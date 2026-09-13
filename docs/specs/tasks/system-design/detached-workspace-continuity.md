@@ -124,6 +124,17 @@ when the resource is already positively known absent. An owner or generation
 mismatch makes the destructive portion a safe no-op and records that the
 snapshot was superseded.
 
+Stewardship transfer on archive resolves the group's canonical environment
+before it decides whether a transfer is needed. A positively absent environment,
+signalled by the repository's typed not-found sentinel, means there is no
+ownership to move: the transfer is skipped, no generation is incremented, and
+the archive proceeds. Any other resolution failure is an uncertain signal and
+fails the archive, so ownership is never abandoned on a transient error. Skipping
+a transfer is not evidence that the group's physical resources are gone; it
+leaves the group reference intact for later reconciliation rather than
+authorizing teardown, per
+[ADR-0009](../../../decisions/0009-fail-closed-gc-semantics.md).
+
 Every environment-owner transfer uses a guarded repository method. It checks
 the expected owner and generation, verifies that the source owner has no active
 cleanup barrier, and increments the generation in the same transaction as the
