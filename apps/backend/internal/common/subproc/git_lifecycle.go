@@ -171,11 +171,12 @@ type managedGitProcess struct {
 	lifecycle gitLifecycleHandle
 	pipes     []io.Closer
 
-	finished   chan struct{}
-	cancelDone chan struct{}
-	closeOnce  sync.Once
-	waitOnce   sync.Once
-	cancelOnce sync.Once
+	finished    chan struct{}
+	cancelDone  chan struct{}
+	closeOnce   sync.Once
+	waitOnce    sync.Once
+	cancelOnce  sync.Once
+	releaseOnce sync.Once
 
 	mu         sync.Mutex
 	waitErr    error
@@ -233,10 +234,12 @@ func (p *managedGitProcess) watchCancellation(ctx context.Context) {
 
 func (p *managedGitProcess) cancelOwnedProcess() {
 	p.cancelOnce.Do(func() {
+		cancelErr := cancelGitLifecycle(p.lifecycle)
 		p.mu.Lock()
-		p.cancelErr = cancelGitLifecycle(p.lifecycle)
+		p.cancelErr = errors.Join(p.cancelErr, cancelErr)
 		p.mu.Unlock()
 		p.closePipes()
+		p.releaseLifecycle()
 	})
 }
 
@@ -250,21 +253,32 @@ func (p *managedGitProcess) wait() error {
 		// The cancellation watcher may still be finishing a platform cleanup
 		// operation. Waiting here keeps the returned error and admission release
 		// ordered after owned cleanup, including when the process exits by signal.
+		cleanupComplete := false
 		select {
 		case <-p.cancelDone:
+			cleanupComplete = true
 		case <-time.After(gitCleanupLimit):
 			p.mu.Lock()
 			p.cancelErr = errors.Join(p.cancelErr, errors.New("Git cancellation cleanup timed out"))
 			p.mu.Unlock()
 		}
 		p.closePipes()
-		p.mu.Lock()
-		p.releaseErr = releaseGitLifecycle(p.lifecycle)
-		p.mu.Unlock()
+		if cleanupComplete {
+			p.releaseLifecycle()
+		}
 	})
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return errors.Join(p.waitErr, p.cancelErr, p.closeErr, p.releaseErr)
+}
+
+func (p *managedGitProcess) releaseLifecycle() {
+	p.releaseOnce.Do(func() {
+		releaseErr := releaseGitLifecycle(p.lifecycle)
+		p.mu.Lock()
+		p.releaseErr = errors.Join(p.releaseErr, releaseErr)
+		p.mu.Unlock()
+	})
 }
 
 func (p *managedGitProcess) closePipes() {

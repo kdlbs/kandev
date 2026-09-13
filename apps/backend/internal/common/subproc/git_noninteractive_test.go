@@ -155,13 +155,16 @@ func TestPrepareGitCommandPreservesNilAndDuplicateEnvironment(t *testing.T) {
 
 func TestGitSSHCommandPreservation(t *testing.T) {
 	tests := map[string]string{
-		"ssh -i /selected/key -oBatchMode=no": "ssh -oBatchMode=yes -i /selected/key -oBatchMode=no",
-		`'path with spaces/ssh' -i key`:       `'path with spaces/ssh' -oBatchMode=yes -i key`,
-		"ssh -oBatchMode=yes -i key":          "ssh -oBatchMode=yes -i key",
-		"env FOO=bar ssh -i key":              "ssh -oBatchMode=yes",
-		"FOO=bar ssh -i key":                  "ssh -oBatchMode=yes",
-		"exec ssh -i key":                     "ssh -oBatchMode=yes",
-		"plink -i key":                        "ssh -oBatchMode=yes",
+		"ssh -i /selected/key -oBatchMode=no":                               "ssh -oBatchMode=yes -i /selected/key -oBatchMode=no",
+		`'path with spaces/ssh' -i key`:                                     `'path with spaces/ssh' -oBatchMode=yes -i key`,
+		"ssh -oBatchMode=yes -i key":                                        "ssh -oBatchMode=yes -i key",
+		"ssh -o BatchMode=yes -i key":                                       "ssh -oBatchMode=yes -i key",
+		"ssh '-oBatchMode=yes' -i key":                                      "ssh -oBatchMode=yes -i key",
+		"ssh -o ProxyCommand='ssh -oBatchMode=yes bastion -W %h:%p' -i key": "ssh -oBatchMode=yes -o ProxyCommand='ssh -oBatchMode=yes bastion -W %h:%p' -i key",
+		"env FOO=bar ssh -i key":                                            "ssh -oBatchMode=yes",
+		"FOO=bar ssh -i key":                                                "ssh -oBatchMode=yes",
+		"exec ssh -i key":                                                   "ssh -oBatchMode=yes",
+		"plink -i key":                                                      "ssh -oBatchMode=yes",
 	}
 	for command, want := range tests {
 		if got := ForceGitSSHBatchMode(command); got != want {

@@ -128,6 +128,40 @@ printf quick
 	}
 }
 
+func TestGitDescendantPipeCleanupAfterParentExit(t *testing.T) {
+	fakeDir, env := writeGitLifecycleFixture(t, `#!/bin/sh
+if [ "$1" = descendant ]; then
+  (trap '' TERM INT; while :; do sleep 1; done) &
+  printf '%s\n' "$!" > "$GIT_TEST_CHILD_PID"
+  printf started > "$GIT_TEST_STARTED"
+  printf parent-exited
+  exit 0
+fi
+printf quick
+`)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, runErr, execErr := RunGitOutputAfterAcquire(
+		context.Background(), GitLifecycle, time.Second,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := NewGitCommand(execCtx, "descendant")
+			cmd.Env = append([]string(nil), env...)
+			return cmd
+		},
+	)
+	if execErr != nil {
+		t.Fatalf("normal-exit Git execution context = %v", execErr)
+	}
+	if !errors.Is(runErr, exec.ErrWaitDelay) {
+		t.Fatalf("normal-exit Git run error = %v, want exec.ErrWaitDelay from inherited pipe", runErr)
+	}
+	if !strings.Contains(string(output), "parent-exited") {
+		t.Fatalf("normal-exit Git output = %q, want parent output", output)
+	}
+	childPID := readTestPID(t, filepath.Join(fakeDir, "child_pid"))
+	waitForPIDExit(t, childPID, time.Second)
+}
+
 func TestGitLifecycleStartFailureReleasesSlot(t *testing.T) {
 	restore := Git().SetCapForTest(1)
 	defer restore()

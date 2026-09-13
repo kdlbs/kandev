@@ -50,7 +50,12 @@ func cancelGitLifecycle(lifecycle gitLifecycleHandle) error {
 	return nil
 }
 
-func releaseGitLifecycle(gitLifecycleHandle) error { return nil }
+func releaseGitLifecycle(lifecycle gitLifecycleHandle) error {
+	// A Git leader can exit while a helper or hook still owns an inherited
+	// output pipe. Terminate the owned process group on every terminal path so
+	// normal exit cannot leave descendants behind until the next cancellation.
+	return cancelGitLifecycle(lifecycle)
+}
 
 func abortStartedGit(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {

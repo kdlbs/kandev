@@ -102,7 +102,6 @@ func RunGitClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) error {
 		return err
 	}
 	defer release()
-	PrepareGitCommand(cmd)
 	return runManagedGit(ctx, cmd)
 }
 
@@ -113,7 +112,6 @@ func RunGitCombinedOutputClass(ctx context.Context, class GitWorkClass, cmd *exe
 		return nil, err
 	}
 	defer release()
-	PrepareGitCommand(cmd)
 	return runManagedGitCombinedOutput(ctx, cmd)
 }
 
@@ -126,7 +124,6 @@ func RunGitOutputClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) (
 		return nil, err
 	}
 	defer release()
-	PrepareGitCommand(cmd)
 	return runManagedGitOutput(ctx, cmd)
 }
 
@@ -147,7 +144,6 @@ func RunGitCombinedAfterAcquire(
 	execCtx, cancel := withGitExecTimeout(ctx, execTimeout)
 	defer cancel()
 	cmd := build(execCtx)
-	PrepareGitCommand(cmd)
 	out, runErr := runManagedGitCombinedOutput(execCtx, cmd)
 	return out, runErr, execCtx.Err()
 }
@@ -185,7 +181,6 @@ func RunGitOutputAfterAcquireWithExecutionContext(
 	execCtx, cancel := withGitExecTimeout(execBaseCtx, execTimeout)
 	defer cancel()
 	cmd := build(execCtx)
-	PrepareGitCommand(cmd)
 	out, runErr := runManagedGitOutput(execCtx, cmd)
 	return out, runErr, execCtx.Err()
 }
@@ -205,7 +200,6 @@ func RunGitAfterAcquire(
 	execCtx, cancel := withGitExecTimeout(ctx, execTimeout)
 	defer cancel()
 	cmd := build(execCtx)
-	PrepareGitCommand(cmd)
 	runErr := runManagedGit(execCtx, cmd)
 	return runErr, execCtx.Err()
 }
@@ -302,9 +296,10 @@ func withExecTimeout(ctx context.Context, execTimeout time.Duration) (context.Co
 	return context.WithTimeout(ctx, execTimeout)
 }
 
-// withGitExecTimeout preserves a caller's explicit Git budget, including an
-// already-expired zero budget used by required probes. Git network callers
-// choose their own positive default before invoking an AfterAcquire helper.
+// withGitExecTimeout preserves a caller's explicit Git budget. A non-positive
+// budget intentionally creates an already-expired context so required probes
+// fail closed; network callers must choose a positive budget before invoking
+// an AfterAcquire helper.
 func withGitExecTimeout(ctx context.Context, execTimeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, execTimeout)
 }

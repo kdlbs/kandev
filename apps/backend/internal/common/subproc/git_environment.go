@@ -153,11 +153,173 @@ func ForceGitSSHBatchMode(command string) string {
 }
 
 func removeBatchModeYes(command string, commandEnd int) string {
-	suffix := command[commandEnd:]
-	for _, option := range []string{" -oBatchMode=yes", " -o BatchMode=yes"} {
-		suffix = strings.ReplaceAll(suffix, option, "")
+	words, ok := parseShellWords(command, commandEnd)
+	if !ok {
+		return command
 	}
-	return command[:commandEnd] + suffix
+
+	removals := make([]shellRange, 0, len(words))
+	for index := 0; index < len(words); index++ {
+		word := words[index]
+		end := word.end
+		remove := false
+		switch word.value {
+		case "-oBatchMode=yes":
+			// Match the decoded value so shell quoting around the option is
+			// removed together with the option itself.
+			remove = true
+		case "-o":
+			if index+1 < len(words) && words[index+1].value == "BatchMode=yes" {
+				end = words[index+1].end
+				index++
+				remove = true
+			}
+		}
+		if !remove {
+			continue
+		}
+
+		start := word.start
+		for start > commandEnd && isShellSpace(command[start-1]) {
+			start--
+		}
+		removals = append(removals, shellRange{start: start, end: end})
+	}
+
+	if len(removals) == 0 {
+		return command
+	}
+	var result strings.Builder
+	result.Grow(len(command))
+	cursor := 0
+	for _, removal := range removals {
+		if removal.start < cursor {
+			continue
+		}
+		result.WriteString(command[cursor:removal.start])
+		cursor = removal.end
+	}
+	result.WriteString(command[cursor:])
+	return result.String()
+}
+
+type shellRange struct {
+	start int
+	end   int
+}
+
+type shellWord struct {
+	start int
+	end   int
+	value string
+}
+
+func parseShellWords(command string, offset int) ([]shellWord, bool) {
+	words := make([]shellWord, 0)
+	for offset < len(command) {
+		for offset < len(command) && isShellSpace(command[offset]) {
+			offset++
+		}
+		if offset == len(command) {
+			break
+		}
+
+		word, next, ok := parseShellWord(command, offset)
+		if !ok {
+			return nil, false
+		}
+		words = append(words, word)
+		offset = next
+	}
+	return words, true
+}
+
+func parseShellWord(command string, start int) (shellWord, int, bool) {
+	offset := start
+	var value strings.Builder
+	for offset < len(command) && !isShellSpace(command[offset]) {
+		next, ok := parseShellWordPart(command, offset, &value)
+		if !ok {
+			return shellWord{}, 0, false
+		}
+		offset = next
+	}
+	return shellWord{start: start, end: offset, value: value.String()}, offset, true
+}
+
+func parseShellWordPart(command string, offset int, value *strings.Builder) (int, bool) {
+	switch command[offset] {
+	case '\'':
+		return parseSingleQuotedShellWordPart(command, offset, value)
+	case '"':
+		return parseDoubleQuotedShellWordPart(command, offset, value)
+	case '\\':
+		return parseEscapedShellWordPart(command, offset, value)
+	default:
+		value.WriteByte(command[offset])
+		return offset + 1, true
+	}
+}
+
+func parseSingleQuotedShellWordPart(command string, offset int, value *strings.Builder) (int, bool) {
+	offset++
+	for offset < len(command) && command[offset] != '\'' {
+		value.WriteByte(command[offset])
+		offset++
+	}
+	if offset == len(command) {
+		return 0, false
+	}
+	return offset + 1, true
+}
+
+func parseDoubleQuotedShellWordPart(command string, offset int, value *strings.Builder) (int, bool) {
+	offset++
+	for offset < len(command) {
+		if command[offset] == '"' {
+			return offset + 1, true
+		}
+		if command[offset] == '\\' {
+			next, ok := parseDoubleQuotedEscape(command, offset, value)
+			if !ok {
+				return 0, false
+			}
+			offset = next
+			continue
+		}
+		value.WriteByte(command[offset])
+		offset++
+	}
+	return 0, false
+}
+
+func parseDoubleQuotedEscape(command string, offset int, value *strings.Builder) (int, bool) {
+	if offset+1 >= len(command) {
+		return 0, false
+	}
+	if command[offset+1] != '\n' {
+		value.WriteByte(command[offset+1])
+	}
+	return offset + 2, true
+}
+
+func parseEscapedShellWordPart(command string, offset int, value *strings.Builder) (int, bool) {
+	if offset+1 >= len(command) {
+		return 0, false
+	}
+	if command[offset+1] != '\n' {
+		value.WriteByte(command[offset+1])
+	}
+	return offset + 2, true
+}
+
+func isShellSpace(character byte) bool {
+	switch character {
+	case ' ', '\t', '\n', '\r':
+		return true
+	default:
+		return false
+	}
 }
 
 func shellWordValue(word string) (string, bool) {
