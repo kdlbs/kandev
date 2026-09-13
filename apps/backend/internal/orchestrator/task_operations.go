@@ -1104,10 +1104,17 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 
 // StartTaskWithEnvAndSkills starts a task with launch-scoped environment and
 // skills selected by the Office run rather than by the durable profile.
+//
+// Its only production caller is the Office scheduler's task starter
+// (backendapp's newOfficeTaskStarter), which always passes autoStart=false —
+// the user kicked off the task; Office only chose the agent and skills. AC-13d
+// requires that traffic be classified automatic regardless, so the origin is
+// forced here rather than trusted from autoStart.
 func (s *Service) StartTaskWithEnvAndSkills(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string) (*executor.TaskExecution, error) {
 	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{
 		Env:                  env,
 		AdditionalSkillSlugs: append([]string(nil), additionalSkillSlugs...),
+		Origin:               launchOriginAutomatic,
 	})
 }
 
@@ -1138,6 +1145,12 @@ type startTaskOptions struct {
 	// WorkflowEntryID pins source bindings and explicit route retries to the
 	// immutable step-entry ledger row that initiated an automatic launch.
 	WorkflowEntryID int64
+	// Origin overrides the automatic/manual classification the session ceiling
+	// would otherwise derive from autoStart (AC-13a). It exists for callers
+	// AC-13d names, whose autoStart=false does not mean a human asked for this
+	// process to start now: an Office scheduler launch only chose a provider.
+	// Zero value means "derive from autoStart".
+	Origin launchOrigin
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1162,6 +1175,10 @@ func (s *Service) StartTaskWithRoute(
 			Env:                  launch.Env,
 			AdditionalSkillSlugs: append([]string(nil), launch.AdditionalSkillSlugs...),
 			Route:                &route,
+			// AC-13d: a routed Office launch always passes autoStart=false
+			// (the user kicked off the task; Office only chose the provider),
+			// which is not the ceiling's manual/automatic question.
+			Origin: launchOriginAutomatic,
 		})
 }
 
@@ -1268,6 +1285,20 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Bool("plan_mode", planMode),
 		zap.Bool("auto_start", autoStart),
 		zap.Int("attachments", len(attachments)))
+
+	origin := opts.Origin
+	if origin == "" {
+		origin = originFromAutoStart(autoStart)
+	}
+	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin,
+		seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts))
+	if err != nil {
+		return nil, err
+	}
+	if deferred {
+		return nil, nil
+	}
+	defer seam1Res.releaseIfNotRebound()
 
 	// Reserve any pending "start it later" intent for the whole of this start,
 	// taken before the session is prepared rather than just before the launch:
@@ -1444,6 +1475,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, fmt.Errorf("explicit workflow start session became terminal before promotion")
 		}
 	}
+	seam1Res.rebindToSession(sessionID)
+
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
 	// selected profile and before the first prompt, preserving the original

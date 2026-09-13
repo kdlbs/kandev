@@ -161,6 +161,13 @@ func (c *sessionCeilingController) reserveLocked(sessionID string) string {
 // returning. The population read and the reservation write share one critical
 // section, so two launches arriving together cannot both see the same free slot.
 func (c *sessionCeilingController) admit(ctx context.Context, req admissionRequest) admissionDecision {
+	if c == nil {
+		// A Service constructed without going through NewService (most
+		// commonly a test fixture built for narrow coverage of unrelated
+		// logic) has no ceiling resolved at all. Treat that the same as an
+		// explicitly unlimited ceiling rather than panicking on every launch.
+		return admissionDecision{admitted: true}
+	}
 	origin := req.origin
 	if origin != launchOriginManual && origin != launchOriginAutomatic {
 		origin = launchOriginAutomatic

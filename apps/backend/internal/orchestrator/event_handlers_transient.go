@@ -31,13 +31,15 @@ const recoveryCancelRetryButtonTestID = "recovery-cancel-retry-button"
 // keys are built in more than one place in this package (recovery + retry
 // status messages), which otherwise trips goconst on new code.
 const (
-	metaKeyVariant        = "variant"
-	metaKeySessionID      = "session_id"
-	metaKeyTaskID         = "task_id"
-	metaKeyAgentID        = "agent_id"
-	metaKeyNewState       = "new_state"
-	metaKeyAgentProfileID = "agent_profile_id"
-	metaKeyUpdatedAt      = "updated_at"
+	metaKeyVariant         = "variant"
+	metaKeySessionID       = "session_id"
+	metaKeyTaskID          = "task_id"
+	metaKeyAgentID         = "agent_id"
+	metaKeyNewState        = "new_state"
+	metaKeyAgentProfileID  = "agent_profile_id"
+	metaKeyUpdatedAt       = "updated_at"
+	metaKeyExecutorProfile = "executor_profile_id"
+	metaKeyWorkflowStepID  = "workflow_step_id"
 )
 
 // metaVariantWarning is the status-message variant that drives the frontend's
