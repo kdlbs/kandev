@@ -32,8 +32,8 @@ func requiredPersistenceMiddleware(health *requiredstores.Health) gin.HandlerFun
 }
 
 func persistencePathExcluded(path string) bool {
-	if path == "/health" || path == "/ready" || path == persistenceDiagnosticsPath {
+	if path == healthRoutePath || path == readyRoutePath || path == persistenceDiagnosticsPath {
 		return true
 	}
-	return !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/mcp") && path != "/ws"
+	return !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/mcp") && path != websocketRoutePath
 }

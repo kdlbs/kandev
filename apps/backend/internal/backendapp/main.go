@@ -97,6 +97,7 @@ import (
 	officelabels "github.com/kandev/kandev/internal/office/labels"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officeonboarding "github.com/kandev/kandev/internal/office/onboarding"
+	officepause "github.com/kandev/kandev/internal/office/pause"
 	officeprojects "github.com/kandev/kandev/internal/office/projects"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
@@ -1230,7 +1231,7 @@ func startGatewayAndServe(
 	}
 
 	log.Info("API configured",
-		zap.String("websocket", "/ws"),
+		zap.String("websocket", websocketRoutePath),
 		zap.String("health", "/health"),
 		zap.String("http", "/api/v1"),
 	)
@@ -1835,7 +1836,7 @@ type engineStepEntryDispatcherAdapter struct {
 // ActionRunCodeReview once SetReviewRunner has been called. This mirrors
 // switchWorkflowDispatcher's existing lazy read of svc.workflowEngine
 // (workflow_callbacks.go).
-func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
+func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string, markerEntryID int64) {
 	eng := a.engineProvider.WorkflowEngine()
 	if eng == nil {
 		a.log.Warn("step entry dispatch skipped: workflow engine not initialised",
@@ -1845,7 +1846,7 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 			zap.String("entry_id", entryID))
 		return
 	}
-	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID, markerEntryID)
 	for _, result := range results {
 		fields := []zap.Field{
 			zap.String("task_id", taskID),
@@ -2292,6 +2293,19 @@ func buildOfficeFeatureServices(
 	gitMgr := configloader.NewGitManager(cfgLoader.BasePath(), cfgLoader, log)
 	configSyncSvc := initOfficeConfigSyncService(repo, services.GitHub, services.GitLab, log)
 
+	// Workspace kill switch: one pause gate wired into every launch/gate
+	// site (routine dispatch, both QueueRun paths, run processing, and
+	// the wakeup dispatcher). services.Office satisfies TaskCanceller
+	// (it already delegates to the orchestrator via SetTaskCanceller);
+	// services.Task satisfies WorkspaceChecker.
+	pauseSvc := officepause.NewService(repo, services.Office, services.Task, log)
+	routineSvc.SetPauseGate(pauseSvc)
+	routineWakeupDispatcher.SetPauseGate(pauseSvc)
+	schedulerSvc.SetPauseGate(pauseSvc)
+	if services.Office != nil {
+		services.Office.SetPauseGate(pauseSvc)
+	}
+
 	return &office.Services{
 		Agents:       agentSvc,
 		Skills:       skillSvc,
@@ -2309,6 +2323,7 @@ func buildOfficeFeatureServices(
 		Scheduler:    schedulerSvc,
 		TreeControls: services.Office,
 		Workspaces:   services.Office,
+		Pause:        pauseSvc,
 		Repo:         repo,
 		GitManager:   gitMgr,
 		KandevHome:   homeDir,

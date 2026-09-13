@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
@@ -1709,6 +1710,18 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, false)
+}
+
+// ConfigureWithEnvironment sets the agent command and replaces the complete
+// effective indexed Git configuration block supplied by env. Ordinary
+// instance variables that are absent from env remain available to the agent.
+// This must be called before Start() if the instance was created without a command.
+func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, true)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -1734,6 +1747,13 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		}
 	}
 
+	// Compose the environment before changing any other configuration so a
+	// malformed indexed Git block leaves the instance fully unchanged.
+	mergedEnv, err := composeConfiguredAgentEnvironment(m.cfg.AgentEnv, env, replaceEnv)
+	if err != nil {
+		return fmt.Errorf("compose configured agent environment: %w", err)
+	}
+
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
@@ -1751,12 +1771,11 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		m.cfg.ContinueArgs = continueArgs
 	}
 
-	// Merge additional env vars
-	if len(env) > 0 {
-		for k, v := range env {
-			m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
-		}
+	m.cfg.AgentEnv = mergedEnv
+	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
+		m.adapterCfg.OneShotConfig.Env = append([]string(nil), m.cfg.AgentEnv...)
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 
 	m.logger.Info("agent configured",
 		zap.String("command", command),
@@ -1766,6 +1785,76 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		zap.Int("env_count", len(env)))
 
 	return nil
+}
+
+func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
+	base := environmentMapFromSlice(current)
+	removeObsoleteManagedCredentialEnvironment(base)
+	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
+	}
+	if replaceIndexed {
+		// A complete environment owns the entire indexed block, including an
+		// empty block. Remove the previous block unconditionally so a logout or
+		// policy change cannot retain stale generated entries.
+		filtered, err = gitconfigenv.Filter(filtered, func(int, []gitconfigenv.Entry) bool { return false })
+		if err != nil {
+			return nil, fmt.Errorf("replace indexed Git configuration: %w", err)
+		}
+	}
+	if len(filtered) == 0 && len(overlay) == 0 {
+		return nil, nil
+	}
+	merged, err := gitconfigenv.Merge(filtered, overlay)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(merged))
+	for key := range merged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, key+"="+merged[key])
+	}
+	return result, nil
+}
+
+func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
+	for _, key := range []string{
+		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialHelperPathEnv,
+		githubauth.CredentialCLIShimDirEnv,
+		githubauth.CredentialCLIBashEnvEnv,
+		githubauth.CredentialParentBashEnv,
+		githubauth.CredentialLeaseEnv,
+		githubauth.CredentialReissueCapabilityEnv,
+		githubauth.CredentialTaskIDEnv,
+		githubauth.CredentialSessionIDEnv,
+		githubauth.CredentialRepositoryEnv,
+		githubauth.CredentialOwnerEnv,
+		githubauth.CredentialRepoEnv,
+		githubauth.CredentialHostEnv,
+		githubauth.CredentialScopesEnv,
+	} {
+		delete(env, key)
+	}
+}
+
+func environmentMapFromSlice(env []string) map[string]string {
+	result := make(map[string]string, len(env))
+	for _, entry := range env {
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 {
+			continue
+		}
+		result[entry[:eq]] = entry[eq+1:]
+	}
+	return result
 }
 
 // createAdapter creates the appropriate protocol adapter based on configuration.

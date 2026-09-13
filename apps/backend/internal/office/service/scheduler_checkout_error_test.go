@@ -35,7 +35,7 @@ func TestSchedulerTick_CheckoutErrorRetriesInsteadOfFalseFinish(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-checkout-db-error-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

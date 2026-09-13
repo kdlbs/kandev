@@ -6,9 +6,11 @@ import {
   getTaskDeletePreflight,
   listTasksByWorkspace,
   moveTask,
+  reorderStepTasks,
   updateTask,
   updateTaskPortForwarding,
 } from "./kanban-api";
+import { ApiError } from "../client";
 
 const fetchSpy = vi.fn<typeof fetch>();
 const API_BASE_URL = "http://api.test";
@@ -100,6 +102,91 @@ describe("updateTask", () => {
       method: "PATCH",
       body: JSON.stringify({ priority: "critical" }),
     });
+  });
+});
+
+describe("reorderStepTasks", () => {
+  it("PUTs the band and ordered ids to the hyphenated collection route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          workflow_step_id: "step-1",
+          revision: 1,
+          tasks: [
+            { id: "task-b", position: 0 },
+            { id: "task-a", position: 1 },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await reorderStepTasks(
+      "step-1",
+      { band: "admitted", ordered_task_ids: ["task-b", "task-a"] },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/workflow-steps/step-1/tasks/reorder`);
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(
+      JSON.stringify({ band: "admitted", ordered_task_ids: ["task-b", "task-a"] }),
+    );
+    expect(result.revision).toBe(1);
+    expect(result.tasks).toEqual([
+      { id: "task-b", position: 0 },
+      { id: "task-a", position: 1 },
+    ]);
+  });
+
+  it("surfaces a step_changed conflict as an ApiError carrying the authoritative order", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "step_changed",
+          workflow_step_id: "step-1",
+          revision: 3,
+          tasks: [{ id: "task-a", position: 0 }],
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      reorderStepTasks(
+        "step-1",
+        { band: "admitted", ordered_task_ids: ["task-a"] },
+        { baseUrl: API_BASE_URL },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      body: { code: "step_changed", revision: 3 },
+    });
+  });
+
+  it("surfaces an invalid_reorder rejection with no task list", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "invalid_reorder" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await reorderStepTasks(
+        "step-1",
+        { band: "admitted", ordered_task_ids: [] },
+        { baseUrl: API_BASE_URL },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(400);
+    expect((caught as ApiError).body).toEqual({ code: "invalid_reorder" });
   });
 });
 

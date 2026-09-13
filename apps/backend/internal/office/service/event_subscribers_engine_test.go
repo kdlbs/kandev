@@ -322,7 +322,7 @@ func queueTaskAssignedRunForAgentFailedTests(
 ) *models.Run {
 	t.Helper()
 	ctx := context.Background()
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, agentID, service.RunReasonTaskAssigned, `{"task_id":"`+taskID+`"}`, "",
 	); err != nil {
 		t.Fatalf("queue run: %v", err)
@@ -565,7 +565,7 @@ func TestEngineDispatcher_PathBEscalation_DoesNotFireAgentErrorTrigger(t *testin
 	}
 	createTestAgent(t, svc, "ws-1", "worker-pathb")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-pathb", service.RunReasonTaskAssigned, `{"task_id":"t1"}`, "",
 	); err != nil {
 		t.Fatalf("queue: %v", err)

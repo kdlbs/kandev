@@ -12,6 +12,22 @@ export type DelayedResumeFixture = {
   delayedProfileId: string;
 };
 
+/** Create a mock-agent profile whose saved ACP session load fails on resume. */
+export async function createFailOnResumeProfile(
+  apiClient: ApiClient,
+  name: string,
+): Promise<{ id: string }> {
+  const { agents } = await apiClient.listAgents();
+  const mockAgent = agents.find((agent) => agent.name === "mock-agent");
+  if (!mockAgent) throw new Error("mock-agent not found while creating failed-resume profile");
+
+  return apiClient.createAgentProfile(mockAgent.id, name, {
+    model: "mock-fast",
+    cli_passthrough: false,
+    cli_flags: [{ description: "fail on ACP resume", flag: "--fail-on-resume", enabled: true }],
+  });
+}
+
 type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {

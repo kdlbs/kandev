@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { SessionRecoveryFailure } from "@/hooks/domains/session/use-session-resumption";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 // EnsureSessionErrorInfo wraps a parsed ensure error so UI can offer a targeted action for the missing-agent-profile case.
 export type EnsureSessionErrorInfo = {
@@ -56,6 +57,21 @@ type RecoveryAction = {
   disabled?: boolean;
 };
 
+export function getSessionRecoveryRetry(source: {
+  recoveryFailure: SessionRecoveryFailure | null;
+  resumeSession: () => Promise<boolean>;
+  retrySessionStatus: () => Promise<void>;
+}): () => void {
+  if (source.recoveryFailure?.outcome === "status_unavailable") {
+    return () => {
+      void source.retrySessionStatus();
+    };
+  }
+  return () => {
+    void source.resumeSession();
+  };
+}
+
 type BannerProps = {
   error: Error | null;
   onRetry: () => void;
@@ -70,6 +86,7 @@ type BannerProps = {
 
 function RecoveryFailureDetails({ failure }: { failure: SessionRecoveryFailure }) {
   const { t } = useTranslation();
+  if (failure.outcome === "status_unavailable") return null;
   return (
     <details className="mt-2 min-w-0 text-xs" data-testid="session-recovery-details">
       <summary
@@ -91,6 +108,53 @@ function RecoveryFailureDetails({ failure }: { failure: SessionRecoveryFailure }
         ) : null}
       </dl>
     </details>
+  );
+}
+
+function SessionStatusUnavailableNotice({
+  failure,
+  onRetry,
+  retryDisabled,
+}: {
+  failure: Extract<SessionRecoveryFailure, { outcome: "status_unavailable" }>;
+  onRetry: () => void;
+  retryDisabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  return (
+    <div className="px-3 pt-2" data-testid="session-status-unavailable">
+      <Alert>
+        <IconInfoCircle />
+        <AlertTitle>{t("task:sessionStatusUnavailable")}</AlertTitle>
+        <AlertDescription>
+          <span>{t("task:sessionStatusUnavailableDetail")}</span>
+          <details className="mt-2 min-w-0 text-xs" data-testid="session-status-details">
+            <summary
+              className={cn(
+                "block max-w-full cursor-pointer select-none rounded-sm py-1 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                isFinePointer ? "min-h-7" : "min-h-11 py-3",
+              )}
+              data-testid="session-status-details-summary"
+            >
+              {t("task:details")}
+            </summary>
+            <p className="mt-2 break-words text-muted-foreground">{failure.statusError}</p>
+          </details>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn("mt-2 cursor-pointer px-2 text-xs", !isFinePointer && "min-h-11")}
+            onClick={onRetry}
+            disabled={retryDisabled}
+            data-testid="session-status-retry"
+          >
+            <IconRefresh className="size-3" aria-hidden="true" />
+            {t("task:retry")}
+          </Button>
+        </AlertDescription>
+      </Alert>
+    </div>
   );
 }
 
@@ -215,8 +279,16 @@ export function SessionRecoveryFeedback({
 }) {
   const readOnlyRecovery =
     recoveryFailure?.outcome === "workspace_read_only" ? recoveryFailure : null;
+  const statusFailure = recoveryFailure?.outcome === "status_unavailable" ? recoveryFailure : null;
   return (
     <>
+      {statusFailure ? (
+        <SessionStatusUnavailableNotice
+          failure={statusFailure}
+          onRetry={onRetry}
+          retryDisabled={retryDisabled}
+        />
+      ) : null}
       <EnsureSessionErrorBanner
         error={error ? new Error(error) : null}
         onRetry={onRetry}

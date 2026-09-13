@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefObject } from "react";
 import { useTaskActions, type TaskActionOptions } from "@/hooks/use-task-actions";
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
+import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
 import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
@@ -99,43 +100,6 @@ export function useTaskMultiSelectStore() {
   return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder };
 }
 
-type BulkMoveParams = {
-  workflowId: string | null;
-  selectedIdsRef: RefObject<Set<string>>;
-  moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
-  applyMoveInStore: (ids: Set<string>, stepId: string) => void;
-  getWorkflowIdForTask: (id: string) => string | null;
-  sortByDisplayOrder: (ids: string[]) => string[];
-};
-
-async function runBulkMove(
-  {
-    workflowId,
-    selectedIdsRef,
-    moveTaskById,
-    applyMoveInStore,
-    getWorkflowIdForTask,
-    sortByDisplayOrder,
-  }: BulkMoveParams,
-  targetStepId: string,
-): Promise<void> {
-  const idList = sortByDisplayOrder([...(selectedIdsRef.current ?? [])]);
-  if (idList.length === 0) return;
-  const results = await Promise.allSettled(
-    idList.map((id, i) => {
-      const wfId = getWorkflowIdForTask(id) ?? workflowId;
-      if (!wfId) return Promise.reject(new Error("no workflow"));
-      return moveTaskById(id, {
-        workflow_id: wfId,
-        workflow_step_id: targetStepId,
-        position: i,
-      });
-    }),
-  );
-  const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-  applyMoveInStore(succeeded, targetStepId);
-}
-
 function useBulkOperations({
   workflowId,
   selectedIdsRef,
@@ -143,14 +107,12 @@ function useBulkOperations({
   setIsDeleting,
   setIsArchiving,
   setIsMultiSelectEnabled,
-  moveTaskById,
   deleteTaskById,
   archiveTaskById,
   runTaskRemovalBatch,
   removeTasksFromStore,
   applyMoveInStore,
-  getWorkflowIdForTask,
-  sortByDisplayOrder,
+  moveTasks,
 }: {
   workflowId: string | null;
   selectedIdsRef: RefObject<Set<string>>;
@@ -158,14 +120,12 @@ function useBulkOperations({
   setIsDeleting: (v: boolean) => void;
   setIsArchiving: (v: boolean) => void;
   setIsMultiSelectEnabled: (v: boolean) => void;
-  moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
   deleteTaskById: ReturnType<typeof useTaskActions>["deleteTaskById"];
   archiveTaskById: ReturnType<typeof useTaskActions>["archiveTaskById"];
   runTaskRemovalBatch: ReturnType<typeof useTaskRemoval>["runTaskRemovalBatch"];
   removeTasksFromStore: (ids: Set<string>) => void;
   applyMoveInStore: (ids: Set<string>, stepId: string) => void;
-  getWorkflowIdForTask: (id: string) => string | null;
-  sortByDisplayOrder: (ids: string[]) => string[];
+  moveTasks: ReturnType<typeof useTaskWorkflowMove>;
 }) {
   const runBulk = useCallback(
     async (
@@ -214,26 +174,23 @@ function useBulkOperations({
   );
 
   const bulkMove = useCallback(
-    (targetStepId: string) =>
-      runBulkMove(
-        {
-          workflowId,
-          selectedIdsRef,
-          moveTaskById,
-          applyMoveInStore,
-          getWorkflowIdForTask,
-          sortByDisplayOrder,
-        },
-        targetStepId,
-      ),
-    [
-      workflowId,
-      moveTaskById,
-      applyMoveInStore,
-      getWorkflowIdForTask,
-      sortByDisplayOrder,
-      selectedIdsRef,
-    ],
+    async (targetStepId: string) => {
+      const idList = [...(selectedIdsRef.current ?? [])];
+      if (idList.length === 0 || !workflowId) return;
+      // Routed through the batch endpoint (mirrors use-sidebar-multi-select's
+      // bulkMove) rather than fanning out one moveTaskById call per task: a
+      // concurrent Promise.allSettled fan-out raced each task's arrival
+      // position against the others', so the resulting order depended on
+      // response timing rather than the selection (REQ-TASKS-KANBAN-TASK-REORDERING-001.29).
+      // The server re-derives submission order from each task's current step.
+      try {
+        await moveTasks(idList, workflowId, targetStepId, "step");
+        applyMoveInStore(new Set(idList), targetStepId);
+      } catch {
+        // useTaskWorkflowMove already shows the failure toast.
+      }
+    },
+    [workflowId, moveTasks, applyMoveInStore, selectedIdsRef],
   );
 
   return { bulkDelete, bulkArchive, bulkMove };
@@ -375,12 +332,12 @@ export function useTaskMultiSelect(workflowId: string | null) {
     dispatch({ type: "reset" });
   }, [workflowId]);
 
-  const { moveTaskById, deleteTaskById, archiveTaskById } = useTaskActions();
+  const { deleteTaskById, archiveTaskById } = useTaskActions();
   const store = useAppStoreApi();
   const notifySuccess = useTaskRemovalSuccessNotifier();
   const { runTaskRemovalBatch } = useTaskRemoval({ store, notifySuccess });
-  const { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask, sortByDisplayOrder } =
-    useTaskMultiSelectStore();
+  const { removeTasksFromStore, applyMoveInStore } = useTaskMultiSelectStore();
+  const moveTasks = useTaskWorkflowMove();
 
   const toggleSelect = useCallback(
     (taskId: string) => dispatch({ type: "toggle_select", taskId }),
@@ -419,14 +376,12 @@ export function useTaskMultiSelect(workflowId: string | null) {
     setIsDeleting,
     setIsArchiving,
     setIsMultiSelectEnabled,
-    moveTaskById,
     deleteTaskById,
     archiveTaskById,
     runTaskRemovalBatch,
     removeTasksFromStore,
     applyMoveInStore,
-    getWorkflowIdForTask,
-    sortByDisplayOrder,
+    moveTasks,
   });
 
   return {

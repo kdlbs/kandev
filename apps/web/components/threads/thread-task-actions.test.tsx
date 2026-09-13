@@ -18,6 +18,9 @@ it("opens task A's actions from its named overflow without navigating", async ()
         },
         kanbanMulti: {
           isLoading: false,
+          orderRevisionByStepId: {},
+          pendingReorderBandKeys: {},
+          withheldReorderByBandKey: {},
           snapshots: {
             workflow: {
               workflowId: "workflow",

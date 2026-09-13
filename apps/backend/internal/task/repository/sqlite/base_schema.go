@@ -290,6 +290,7 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
 			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
+			order_revision INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`); err != nil {

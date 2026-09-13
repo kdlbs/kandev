@@ -30,6 +30,9 @@ import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip"
 import { AgentGoalChip } from "./agent-goal-chip";
 import { shouldShowProceed } from "./types";
 import { getAgentGoal } from "@/lib/agent-goal";
+import { useComposerDisclosureContext } from "./composer-disclosure";
+import { cn } from "@/lib/utils";
+import type { AppState } from "@/lib/state/app-state-types";
 
 type TodoDisplayItem = {
   text: string;
@@ -76,6 +79,15 @@ function readACPMetadata(metadata: Record<string, unknown> | null | undefined): 
   const acp = metadata?.acp;
   if (!acp || typeof acp !== "object" || Array.isArray(acp)) return undefined;
   return (acp as Record<string, unknown>).meta;
+}
+
+function getActiveAgentGoal(
+  state: AppState,
+  sessionId: string | null,
+): ReturnType<typeof getAgentGoal> {
+  if (!sessionId) return null;
+  const goal = getAgentGoal(readACPMetadata(state.taskSessions.items[sessionId]?.metadata));
+  return goal?.status === "active" ? goal : null;
 }
 
 function getRightControlVisibility({
@@ -128,6 +140,27 @@ export type ChatStatusBarProps = {
   onScrollToStart?: () => void;
 };
 
+export function ComposerCIStatus({
+  taskId,
+  sessionId,
+  standalone = false,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  standalone?: boolean;
+}) {
+  return (
+    <div
+      className={cn("flex flex-wrap items-center gap-1.5 empty:hidden", standalone && "px-2 py-1")}
+    >
+      <PRStatusChip taskId={taskId} />
+      <MRStatusChip taskId={taskId} />
+      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
+      <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
+    </div>
+  );
+}
+
 export function ChatStatusBar({
   todoItems,
   taskId,
@@ -145,6 +178,7 @@ export function ChatStatusBar({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarProps) {
+  const separateCI = useComposerDisclosureContext()?.enabled;
   const showTodos = todoItems.length > 0;
   const showProceed = shouldShowProceed(nextStepName, isAgentBusy, hasPendingClarification);
   const autopilot = useTaskAutopilot(taskId);
@@ -154,11 +188,7 @@ export function ChatStatusBar({
   // Asked here rather than inside the button so the cluster still renders when
   // the Threads jump is the only right-hand control this session qualifies for.
   const showThreadsLink = useIsDeckThread(taskId, sessionId);
-  const sessionACPMetadata = useAppStore((state) =>
-    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
-  );
-  const sessionGoal = getAgentGoal(sessionACPMetadata);
-  const activeGoal = sessionGoal?.status === "active" ? sessionGoal : null;
+  const activeGoal = useAppStore((state) => getActiveAgentGoal(state, sessionId));
   const { canShare, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
@@ -189,10 +219,7 @@ export function ChatStatusBar({
       {showTodos && <TodoIndicator todos={todoItems} />}
       {autopilot && <AutopilotChatChip />}
       <TaskDependencyChip taskId={taskId} />
-      <PRStatusChip taskId={taskId} />
-      <MRStatusChip taskId={taskId} />
-      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
-      <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
+      {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
       {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch

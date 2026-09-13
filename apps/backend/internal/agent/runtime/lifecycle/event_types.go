@@ -11,6 +11,7 @@ import (
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
 	AgentExecutionID   string                 `json:"agent_execution_id"`
+	AttemptID          string                 `json:"attempt_id,omitempty"`
 	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
@@ -73,6 +74,7 @@ type AgentctlEventPayload struct {
 	SessionID         string `json:"session_id"`
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
 	AgentExecutionID  string `json:"agent_execution_id"`
+	AttemptID         string `json:"attempt_id,omitempty"`
 	ErrorMessage      string `json:"error_message,omitempty"`
 	FailureCode       string `json:"failure_code,omitempty"`
 	FailureDetails    string `json:"failure_details,omitempty"`
@@ -98,6 +100,7 @@ type ACPSessionCreatedPayload struct {
 	SessionID        string `json:"session_id"`
 	AgentProfileID   string `json:"agent_profile_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
+	AttemptID        string `json:"attempt_id,omitempty"`
 	ACPSessionID     string `json:"acp_session_id"`
 }
 
@@ -268,6 +271,7 @@ type AgentStreamEventPayload struct {
 	Timestamp      string                `json:"timestamp"`
 	AgentID        string                `json:"agent_id"`                   // Historical: execution.ID. Prefer ExecutionID.
 	ExecutionID    string                `json:"execution_id"`               // Lifecycle execution ID; stable across the payload's lifetime.
+	AttemptID      string                `json:"attempt_id,omitempty"`       // Immutable recovery attempt that owns this callback.
 	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
 	TaskID         string                `json:"task_id"`
 	SessionID      string                `json:"session_id"` // Task session ID

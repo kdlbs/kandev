@@ -50,7 +50,7 @@ func createChildrenCompletedAgent(t *testing.T, repo *officesqlite.Repository, i
 func newChildrenCompletedQueue(t *testing.T, ss *SchedulerService) func(string, RunContext) {
 	t.Helper()
 	return func(agentID string, c RunContext) {
-		if err := ss.QueueRunCtx(context.Background(), agentID, c); err != nil {
+		if _, err := ss.QueueRunCtx(context.Background(), agentID, c); err != nil {
 			t.Fatalf("QueueRunCtx: %v", err)
 		}
 	}

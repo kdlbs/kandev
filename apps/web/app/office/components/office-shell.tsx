@@ -12,6 +12,7 @@ import {
   useOfficeTopbarChrome,
 } from "@/app/office/components/office-topbar-context";
 import { usePathname } from "@/lib/routing/client-router";
+import { WorkspacePauseBanner } from "@/app/office/components/workspace-pause-banner";
 // Route -> catalog key, not route -> title. The map is module scope, so a `t()`
 // here would resolve once at import and freeze at the boot locale; the keys are
 // resolved at render below. The route paths are URLs, not copy.
@@ -133,6 +134,12 @@ function OfficeShellChrome({ children, routePath }: OfficeShellProps) {
       // different surfaces is a coin flip for the user.
       navOmitDestinations={["tasks"]}
     >
+      {/* Persistent across every /office/** navigation, per
+          AC-OFFICE-KILL-SWITCH-006.4 and -006.12 — the shell wraps every
+          Office route, so mounting here (rather than per-page) is what
+          keeps the indicator and pause control present regardless of which
+          page the operator is on. */}
+      <WorkspacePauseBanner />
       {/* `data-office-route` stamps the RESOLVED route onto the outlet, and is
           the render anchor the pseudo-coverage oracle waits on for every
           `office — …` screen (e2e/tests/i18n/pseudo-coverage.spec.ts).
