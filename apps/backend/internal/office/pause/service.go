@@ -62,6 +62,7 @@ type Repository interface {
 	ReleaseWorkspacePauseWithActivity(ctx context.Context, id, workspaceID, releasedBy, releasedByKind, releasedReason string) (bool, error)
 	CreateActivityEntry(ctx context.Context, entry *models.ActivityEntry) error
 	ListInflightRunsForWorkspace(ctx context.Context, workspaceID string) ([]models.InflightRun, error)
+	ListLiveOfficeTaskIDsForWorkspace(ctx context.Context, workspaceID string) ([]string, error)
 	ListLiveRoutineTaskIDsForWorkspace(ctx context.Context, workspaceID string) ([]string, error)
 	CancelRunsForWorkspace(ctx context.Context, runIDs []string, reason string) (int64, error)
 	ReleaseCheckoutsForWorkspace(ctx context.Context, runIDs []string) error

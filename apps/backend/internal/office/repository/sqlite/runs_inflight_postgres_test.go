@@ -135,6 +135,66 @@ func TestPostgresListInflightRunsForWorkspace(t *testing.T) {
 	}
 }
 
+// TestPostgresListLiveOfficeTaskIDsForWorkspace is the PostgreSQL twin of
+// TestListLiveOfficeTaskIDsForWorkspace_ReturnsActiveSessions. The repeat
+// pause sweep joins task_sessions to Office agent profiles, so this keeps the
+// workspace boundary and active-state predicate covered on both SQL dialects.
+// Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresListLiveOfficeTaskIDsForWorkspace(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	ctx := context.Background()
+
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init office repo: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)
+	`, "pg-live-agent-type", "test-agent", now, now); err != nil {
+		t.Fatalf("seed agents catalog row: %v", err)
+	}
+	seedPostgresAgentProfile(t, ctx, repo, "pg-live-agent-1", "pg-live-agent-type", "pg-live-ws-1", now)
+	seedPostgresAgentProfile(t, ctx, repo, "pg-live-agent-2", "pg-live-agent-type", "pg-live-ws-2", now)
+
+	for _, session := range []struct {
+		id, taskID, profileID, state string
+	}{
+		{"pg-session-created", "pg-task-created", "pg-live-agent-1", "CREATED"},
+		{"pg-session-running", "pg-task-running", "pg-live-agent-1", "RUNNING"},
+		{"pg-session-waiting", "pg-task-waiting", "pg-live-agent-1", "WAITING_FOR_INPUT"},
+		{"pg-session-completed", "pg-task-completed", "pg-live-agent-1", "COMPLETED"},
+		{"pg-session-other-ws", "pg-task-other", "pg-live-agent-2", "RUNNING"},
+	} {
+		if _, err := repo.ExecRaw(ctx, `
+			INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, session.id, session.taskID, session.profileID, session.state, now, now); err != nil {
+			t.Fatalf("seed session %s: %v", session.id, err)
+		}
+	}
+
+	ids, err := repo.ListLiveOfficeTaskIDsForWorkspace(ctx, "pg-live-ws-1")
+	if err != nil {
+		t.Fatalf("list live Office task ids: %v", err)
+	}
+	got := map[string]bool{}
+	for _, id := range ids {
+		got[id] = true
+	}
+	if !got["pg-task-created"] || !got["pg-task-running"] || !got["pg-task-waiting"] ||
+		got["pg-task-completed"] || got["pg-task-other"] {
+		t.Fatalf("live task ids = %v, want active tasks from pg-live-ws-1 only", got)
+	}
+}
+
 // seedPostgresAgentProfile inserts a minimal agent_profiles row against a
 // real Postgres connection, scoped to workspaceID so
 // ListInflightRunsForWorkspace's agent_profiles join can resolve it.

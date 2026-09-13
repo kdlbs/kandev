@@ -80,6 +80,18 @@ func (s *Service) runHaltSweep(ctx context.Context, workspaceID string) SweepRes
 		}
 	}
 
+	liveOfficeTaskIDs, err := s.repo.ListLiveOfficeTaskIDsForWorkspace(ctx, workspaceID)
+	if err != nil {
+		s.logger.Warn("halt sweep: list live Office task sessions failed",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
+		result.Failures++
+	}
+	for _, taskID := range liveOfficeTaskIDs {
+		if taskID != "" {
+			taskIDSet[taskID] = struct{}{}
+		}
+	}
+
 	s.cancelTaskExecutions(ctx, taskIDSet, &result)
 	return result
 }

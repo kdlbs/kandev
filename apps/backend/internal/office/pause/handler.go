@@ -2,6 +2,7 @@ package pause
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -93,7 +94,7 @@ func (h *Handler) postPause(c *gin.Context) {
 	}
 	workspaceID := c.Param("wsId")
 	var body pauseRequestBody
-	if !h.bindPauseRequestBody(c, &body) {
+	if !h.bindPauseRequestBody(c, &body, false) {
 		return
 	}
 
@@ -117,7 +118,7 @@ func (h *Handler) postResume(c *gin.Context) {
 	}
 	workspaceID := c.Param("wsId")
 	var body pauseRequestBody
-	if !h.bindPauseRequestBody(c, &body) {
+	if !h.bindPauseRequestBody(c, &body, true) {
 		return
 	}
 
@@ -133,11 +134,10 @@ func (h *Handler) postResume(c *gin.Context) {
 }
 
 // bindPauseRequestBody decodes the request body into body, bounded by
-// maxPauseRequestBodyBytes. Reports false (and has already written the
-// response) only when the body exceeded the limit; any other bind error
-// (malformed JSON, empty body) is ignored here exactly as before — Reason
-// validation happens downstream in the service layer.
-func (h *Handler) bindPauseRequestBody(c *gin.Context, body *pauseRequestBody) bool {
+// maxPauseRequestBodyBytes. Resume accepts an empty body because its reason
+// is optional. Every other decode error is a client error and must stop the
+// mutation before the service sees it.
+func (h *Handler) bindPauseRequestBody(c *gin.Context, body *pauseRequestBody, allowEmpty bool) bool {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPauseRequestBodyBytes)
 	if err := c.ShouldBindJSON(body); err != nil {
 		var maxBytesErr *http.MaxBytesError
@@ -145,6 +145,11 @@ func (h *Handler) bindPauseRequestBody(c *gin.Context, body *pauseRequestBody) b
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{fieldError: "request body too large"})
 			return false
 		}
+		if allowEmpty && errors.Is(err, io.EOF) {
+			return true
+		}
+		c.JSON(http.StatusBadRequest, gin.H{fieldError: "invalid request body"})
+		return false
 	}
 	return true
 }

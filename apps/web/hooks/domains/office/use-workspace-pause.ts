@@ -8,19 +8,24 @@ import {
   postWorkspacePause,
   postWorkspaceResume,
   type WorkspacePauseResponse,
+  type WorkspacePauseSweep,
 } from "@/lib/api/domains/office-pause-api";
 import type { WorkspacePauseRecord, WorkspacePauseStatus } from "@/lib/state/slices/office/types";
 import { t } from "@/lib/i18n";
 
-export type WorkspacePauseActionResult = { ok: true } | { ok: false; error?: string };
+export type WorkspacePauseActionResult =
+  | { ok: true; sweep?: WorkspacePauseSweep }
+  | { ok: false; error?: string };
 
 export type UseWorkspacePauseResult = {
   record: WorkspacePauseRecord | null;
   status: WorkspacePauseStatus;
   isPaused: boolean;
   isMutating: boolean;
+  sweep: WorkspacePauseSweep | null;
   refresh: () => Promise<void>;
   pause: (reason: string) => Promise<WorkspacePauseActionResult>;
+  retryPause: () => Promise<WorkspacePauseActionResult>;
   resume: (reason?: string) => Promise<WorkspacePauseActionResult>;
 };
 
@@ -42,6 +47,7 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
   const resetPauseState = useAppStore((s) => s.resetPauseState);
   const applyPauseResponse = useAppStore((s) => s.applyPauseResponse);
   const [isMutating, setIsMutating] = useState(false);
+  const [sweep, setSweep] = useState<WorkspacePauseSweep | null>(null);
 
   const read = useCallback(async () => {
     if (!workspaceId) return;
@@ -67,6 +73,7 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
   useEffect(() => {
     if (!workspaceId) return;
     resetPauseState();
+    setSweep(null);
     void read();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, resetPauseState]);
@@ -82,19 +89,30 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
   }, [connectionStatus, read]);
 
   const mutate = useCallback(
-    async (action: MutateAction, reason: string): Promise<WorkspacePauseActionResult> => {
+    async (
+      action: MutateAction,
+      reason: string,
+      updateSweep: boolean,
+    ): Promise<WorkspacePauseActionResult> => {
       if (!workspaceId) return { ok: false, error: t("office:pauseUnavailable") };
       const tag = beginPauseRequest();
       setIsMutating(true);
       try {
         const res = await action(workspaceId, reason);
         const activeWorkspaceId = storeApi.getState().workspaces.activeId;
-        applyPauseResponse(tag, res.workspaceId, activeWorkspaceId, {
+        const applied = applyPauseResponse(tag, res.workspaceId, activeWorkspaceId, {
           kind: "mutate-success",
           paused: res.paused,
           record: res.record,
         });
-        return { ok: true };
+        if (applied) {
+          if (updateSweep) {
+            setSweep(res.sweep ?? null);
+          } else {
+            setSweep(null);
+          }
+        }
+        return res.sweep ? { ok: true, sweep: res.sweep } : { ok: true };
       } catch (err) {
         const activeWorkspaceId = storeApi.getState().workspaces.activeId;
         // Whether the guard applies this outcome to the shared store is a
@@ -113,9 +131,16 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
     [workspaceId, beginPauseRequest, applyPauseResponse, storeApi],
   );
 
-  const pause = useCallback((reason: string) => mutate(postWorkspacePause, reason), [mutate]);
+  const pause = useCallback((reason: string) => mutate(postWorkspacePause, reason, true), [mutate]);
+  const retryPause = useCallback(() => {
+    const reason = storeApi.getState().office.pause.record?.reason;
+    if (!reason) {
+      return Promise.resolve({ ok: false, error: t("office:pauseUnavailable") } as const);
+    }
+    return mutate(postWorkspacePause, reason, true);
+  }, [mutate, storeApi]);
   const resume = useCallback(
-    (reason: string = "") => mutate(postWorkspaceResume, reason),
+    (reason: string = "") => mutate(postWorkspaceResume, reason, false),
     [mutate],
   );
 
@@ -124,8 +149,10 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
     status,
     isPaused: record !== null,
     isMutating,
+    sweep,
     refresh: read,
     pause,
+    retryPause,
     resume,
   };
 }

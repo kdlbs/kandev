@@ -239,6 +239,29 @@ func (r *Repository) ListInflightRunsForWorkspace(ctx context.Context, workspace
 	return runs, nil
 }
 
+// ListLiveOfficeTaskIDsForWorkspace returns task ids with active sessions
+// owned by an Office agent in the workspace. This source remains discoverable
+// after the halt sweep marks its run row cancelled, so a failed stop can be
+// retried without selecting ordinary Kanban sessions.
+func (r *Repository) ListLiveOfficeTaskIDsForWorkspace(ctx context.Context, workspaceID string) ([]string, error) {
+	var ids []string
+	err := r.ro.SelectContext(ctx, &ids, r.ro.Rebind(`
+		SELECT DISTINCT ts.task_id
+		FROM task_sessions ts
+		JOIN agent_profiles ap ON ap.id = ts.agent_profile_id
+		WHERE ap.workspace_id = ?
+		  AND ts.task_id != ''
+		  AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+	`), workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, nil
+}
+
 // ListLiveRoutineTaskIDsForWorkspace returns the distinct linked task ids
 // of the workspace's routine runs whose task has not reached a terminal
 // state (completed, failed, cancelled). Routine-run status is deliberately

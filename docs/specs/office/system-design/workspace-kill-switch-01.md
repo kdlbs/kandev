@@ -160,6 +160,9 @@ history — no counter, no read-then-write.
   it would select every heavy task the workspace has ever run. The task's own
   state is the only honest liveness signal. Unordered set; an empty result is not
   an error.
+- `ListLiveOfficeTaskIDsForWorkspace(ctx, workspaceID) ([]string, error)` —
+  active non-empty task ids from Office profiles in the workspace, retained for
+  repeat stops after run cancellation and excluding ordinary Kanban sessions.
 - `CancelRunsForWorkspace(ctx, runIDs, reason) (int, error)` — delegates to the
   runs repository's `CancelRunsWhere` over those ids.
 - `ReleaseCheckoutsForWorkspace(ctx, runIDs) error` — clears
@@ -446,20 +449,21 @@ skipped, so the new value is classified correctly the day it is written.
    run ids held, both skipped outright on an empty snapshot rather than issuing an
    `IN ()` predicate; (d) request cancellation of in-flight task executions, through
    `TaskCanceller` with `force`, for the distinct non-empty task ids from (a)
-   **united with every id from `ListLiveRoutineTaskIDsForWorkspace`**. Both
-   sources are Office-owned, which is what keeps the sweep off ordinary kanban
-   tasks in the same workspace as `## Out of scope` forbids. The second source is
-   required because a **heavy** routine materialises a real task whose agent the
-   workflow engine starts through `auto_start_agent`: it has no Office `runs` row,
-   so (a) alone cannot see it, and -003.3 covers it because a heavy routine's task
-   is an Office task. `CancelTaskExecution` is a by-task-id stop, so the union may
-   safely overlap and may safely name an idle task — but it is a no-op only in
-   *effect*: for a task with no live session `StopByTaskID` returns
+   **united with every id from `ListLiveRoutineTaskIDsForWorkspace` and
+   `ListLiveOfficeTaskIDsForWorkspace`**. Office-owned sources exclude ordinary
+   Kanban tasks. The routine source is required because a
+   **heavy** routine materialises a real task whose agent the workflow engine
+   starts through `auto_start_agent`: it has no Office `runs` row. The session
+   source is required because the first source is cancelled before execution
+   stopping; it keeps a live Office task discoverable for a repeat pause even
+   after its run row is terminal. `CancelTaskExecution` is a by-task-id stop, so
+   the union may safely overlap and may safely name an idle task — but it is a
+   no-op only in *effect*: for a task with no live session `StopByTaskID` returns
    `ErrExecutionNotFound`, not `nil`. Idle tasks are expected members of this
    union, so that sentinel is **not** a failed cancellation; it increments
    `executions_not_running` instead, for the reason given under [Failure and
    recovery](workspace-kill-switch-02.md#failure-and-recovery).
-   The three counts partition the deduplicated union and sum to its size:
+   The counts partition the union and sum to its size:
    `executions_cancelled` for a nil return, `executions_not_running` for that
    sentinel, `failures` for every other error. So `executions_cancelled` is what
    was actually stopped, over the whole union rather than the (a) subset.

@@ -32,6 +32,13 @@ let snapshot: {
   connection: { status: "connected" },
 };
 
+const failedSweep = {
+  runsCancelled: 0,
+  executionsCancelled: 0,
+  executionsNotRunning: 0,
+  failures: 1,
+};
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (sel: (state: unknown) => unknown) =>
     sel({ ...snapshot, beginPauseRequest, resetPauseState, applyPauseResponse }),
@@ -120,6 +127,7 @@ describe("useWorkspacePause: mutations", () => {
       workspaceId: "ws-1",
       paused: true,
       record: { id: "p1", reason: "r", createdBy: "u", createdByKind: "user", createdAt: "t" },
+      sweep: failedSweep,
     });
     const { result } = renderHook(() => useWorkspacePause("ws-1"));
     await waitFor(() => expect(mocks.getWorkspacePause).toHaveBeenCalledTimes(1));
@@ -130,13 +138,49 @@ describe("useWorkspacePause: mutations", () => {
     });
 
     expect(mocks.postWorkspacePause).toHaveBeenCalledWith("ws-1", "incident");
-    expect(outcome).toEqual({ ok: true });
+    expect(outcome).toEqual({ ok: true, sweep: failedSweep });
     expect(applyPauseResponse).toHaveBeenCalledWith(
       expect.any(Number),
       "ws-1",
       "ws-1",
       expect.objectContaining({ kind: "mutate-success", paused: true }),
     );
+  });
+
+  it("retryPause repeats the pause request while retaining the active reason", async () => {
+    const record = {
+      id: "p1",
+      reason: "incident",
+      createdBy: "u",
+      createdByKind: "user" as const,
+      createdAt: "t",
+    };
+    snapshot = {
+      ...snapshot,
+      office: {
+        pause: {
+          status: "known",
+          record,
+        },
+      },
+    };
+    mocks.postWorkspacePause.mockResolvedValue({
+      workspaceId: "ws-1",
+      paused: true,
+      record,
+      sweep: {
+        runsCancelled: 0,
+        executionsCancelled: 1,
+        executionsNotRunning: 0,
+        failures: 0,
+      },
+    });
+    const { result } = renderHook(() => useWorkspacePause("ws-1"));
+    await waitFor(() => expect(mocks.getWorkspacePause).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await result.current.retryPause();
+    });
+    expect(mocks.postWorkspacePause).toHaveBeenCalledWith("ws-1", "incident");
   });
 
   it("resume() defaults to an empty reason", async () => {
