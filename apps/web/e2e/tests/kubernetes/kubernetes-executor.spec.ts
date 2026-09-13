@@ -259,6 +259,10 @@ test("launches through kubeconfig with Pod exec and a loopback-only agentctl for
 test("launches from a real in-cluster service account", async ({ cluster }) => {
   test.setTimeout(300_000);
   const backend = await cluster.startInClusterBackend();
+  expect(
+    (await fetch(`${backend.baseUrl}/ready`)).status,
+    "the in-cluster fixture must provide an application-ready backend",
+  ).toBe(200);
   const apiClient = new ApiClient(backend.baseUrl);
   const seed = await seedKubernetesBackend(apiClient, cluster, {
     label: "in-cluster",

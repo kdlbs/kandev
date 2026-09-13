@@ -71,6 +71,7 @@ type ACPSessionEventData struct {
 	TaskID           string `json:"task_id"`
 	SessionID        string `json:"session_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
+	AttemptID        string `json:"attempt_id,omitempty"`
 	ACPSessionID     string `json:"acp_session_id"`
 }
 

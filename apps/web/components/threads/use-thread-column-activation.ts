@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { nearestTaskId } from "./thread-viewport-geometry";
 import { useMobileThreadPosition } from "./use-mobile-thread-position";
@@ -29,6 +29,34 @@ function addAdjacent(ids: Set<string>, orderedIds: readonly string[], id: string
   if (index < 0) return;
   if (index > 0) ids.add(orderedIds[index - 1]);
   if (index < orderedIds.length - 1) ids.add(orderedIds[index + 1]);
+}
+
+function columnIdForElement(elements: ReadonlyMap<string, HTMLElement>, target: Element) {
+  for (const [id, element] of elements) {
+    if (element === target) return id;
+  }
+  return null;
+}
+
+function measureVisibility(
+  board: HTMLElement,
+  elements: ReadonlyMap<string, HTMLElement>,
+  visibility: Map<string, VisibilityEntry>,
+): boolean {
+  const root = board.getBoundingClientRect();
+  if (root.width <= 0 || root.height <= 0) return false;
+  for (const [id, element] of elements) {
+    const rect = element.getBoundingClientRect();
+    visibility.set(id, {
+      element,
+      isIntersecting:
+        rect.right > root.left &&
+        rect.left < root.right &&
+        rect.bottom > root.top &&
+        rect.top < root.bottom,
+    });
+  }
+  return true;
 }
 
 function resolveVisibleIds(
@@ -83,6 +111,7 @@ function buildActivationSets({
 export function useThreadColumnActivation(
   orderedIds: readonly string[],
   focusedTaskId?: string | null,
+  layoutKey = "columns",
 ): ThreadColumnActivation {
   const { isMobile } = useResponsiveBreakpoint();
   const boardRef = useRef<HTMLDivElement>(null);
@@ -118,21 +147,24 @@ export function useThreadColumnActivation(
     [updateVisibleIds],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const board = boardRef.current;
     observerRef.current?.disconnect();
     observerRef.current = null;
     visibilityRef.current.clear();
-    setVisibleIds(new Set());
-    setObserverReady(false);
-    if (!board || typeof IntersectionObserver === "undefined") return;
+    if (!board || typeof IntersectionObserver === "undefined") {
+      setVisibleIds(new Set());
+      setObserverReady(false);
+      return;
+    }
+    setObserverReady(measureVisibility(board, elementsRef.current, visibilityRef.current));
+    updateVisibleIds();
 
     const observer = new IntersectionObserver(
       (entries) => {
+        if (observerRef.current !== observer) return;
         for (const entry of entries) {
-          const taskId = [...elementsRef.current.entries()].find(
-            ([, element]) => element === entry.target,
-          )?.[0];
+          const taskId = columnIdForElement(elementsRef.current, entry.target);
           if (!taskId) continue;
           visibilityRef.current.set(taskId, {
             element: entry.target,
@@ -152,13 +184,11 @@ export function useThreadColumnActivation(
       if (observerRef.current === observer) observerRef.current = null;
     };
     // Callback refs reconcile membership without dropping surviving visibility.
-    // Only an empty/nonempty transition replaces the board's DOM element.
-  }, [hasColumns, updateVisibleIds]);
+    // Reflow or board replacement rebuilds observation from measured geometry.
+  }, [hasColumns, layoutKey, isMobile, updateVisibleIds]);
 
-  const fallbackTaskId = useMemo(() => {
-    if (focusedTaskId && orderedIds.includes(focusedTaskId)) return focusedTaskId;
-    return orderedIds[0] ?? null;
-  }, [focusedTaskId, idsKey]);
+  const fallbackTaskId =
+    focusedTaskId && orderedIds.includes(focusedTaskId) ? focusedTaskId : (orderedIds[0] ?? null);
 
   const mobileTaskId = useMobileThreadPosition({
     enabled: isMobile,

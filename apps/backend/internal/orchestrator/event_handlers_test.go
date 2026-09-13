@@ -626,6 +626,10 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 	return m.IsAgentRunningForSession(ctx, sessionID)
 }
 
+func (*mockAgentManager) BindResumeAttempt(context.Context, string, string) error {
+	return nil
+}
+
 func (m *mockAgentManager) OwnsPromptGeneration(_ string, executionID string, generation uint64) bool {
 	return executionID == m.currentPromptExecutionID && generation == m.currentPromptGeneration.Load()
 }

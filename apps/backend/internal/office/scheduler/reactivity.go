@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -127,6 +129,22 @@ func (ss *SchedulerService) ApplyTaskMutation(
 		seen[key] = struct{}{}
 		outcome, err := ss.QueueRunCtx(ctx, agentID, c)
 		if err != nil {
+			if errors.Is(err, shared.ErrWorkspacePaused) {
+				// A confirmed operator pause is not a reactivity failure —
+				// the paused workspace already logged its own pause event.
+				ss.logger.Debug("reactivity run skipped (workspace paused)",
+					zap.String("agent", agentID),
+					zap.String("reason", c.Reason))
+				return
+			}
+			if errors.Is(err, shared.ErrPauseGateUnavailable) {
+				// A transient gate-read failure, not a reactivity failure —
+				// the gate site that returned it already logged a Warn.
+				ss.logger.Warn("reactivity run skipped (pause gate unavailable)",
+					zap.String("agent", agentID),
+					zap.String("reason", c.Reason))
+				return
+			}
 			ss.logger.Error("reactivity run failed",
 				zap.String("agent", agentID),
 				zap.String("reason", c.Reason),

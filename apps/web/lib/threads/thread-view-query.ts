@@ -420,6 +420,8 @@ function cloneViewWithDraft(
     })),
     sort: { ...draft.sort },
     maxColumns: draft.maxColumns,
+    layout: draft.layout,
+    autoHideComposer: draft.autoHideComposer,
   };
 }
 

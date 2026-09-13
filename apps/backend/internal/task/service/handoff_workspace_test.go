@@ -532,6 +532,10 @@ func (r *phase4TaskRepo) UpdateTask(context.Context, *models.Task) error {
 	r.panicNotUsed("UpdateTask")
 	return nil
 }
+func (r *phase4TaskRepo) UpdateTaskWithExplicitPosition(context.Context, *models.Task) error {
+	r.panicNotUsed("UpdateTaskWithExplicitPosition")
+	return nil
+}
 func (r *phase4TaskRepo) DeleteTask(context.Context, string) error {
 	r.panicNotUsed("DeleteTask")
 	return nil
@@ -671,6 +675,10 @@ func (r *phase4TaskRepo) SettleTaskExternalID(context.Context, string, string, t
 }
 func (r *phase4TaskRepo) ReleaseTaskExternalID(context.Context, string, string) (*models.Task, error) {
 	r.panicNotUsed("ReleaseTaskExternalID")
+	return nil, nil
+}
+func (r *phase4TaskRepo) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
+	r.panicNotUsed("SwitchTaskRunner")
 	return nil, nil
 }
 

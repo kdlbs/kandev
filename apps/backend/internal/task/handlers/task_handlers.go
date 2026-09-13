@@ -224,6 +224,11 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
 	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)
 
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the
+	// only request surface for a reorder, mirroring the hyphenated
+	// collection-reorder precedent PUT /api/v1/workspaces/:id/workflows/reorder.
+	api.PUT("/workflow-steps/:id/tasks/reorder", h.httpReorderStepTasks)
+
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
 
@@ -246,6 +251,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
+	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)

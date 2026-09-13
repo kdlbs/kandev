@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
+updated: 2026-09-12
 owners:
   - Kandev
 ---
@@ -45,6 +46,24 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.5:** Reload, reconnect, and reversed event order shall converge on the current failure. A stale attempt or unrelated historical error shall neither replace nor be hidden by that failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.6:** Desktop and phone shall expose the same recovery choices and details. Phone actions shall have at least 44-pixel touch targets, with no horizontal page overflow or extra details scroller.
 
+
+## Proposed recovery attempt amendment
+
+The following requirement is draft. The existing requirements remain active.
+Implementation belongs to the [resume cancellation package](../../../plans/resume-cancellation/plan.md).
+
+### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007: Isolated recovery attempts
+
+**Intent:** Preserve conversation continuity and make cancellation final for the affected attempt.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.1:** If loading a saved conversation times out or returns an inconclusive internal error, recovery shall fail without creating a replacement conversation. A later retry shall use the same saved identity.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.2:** After cancellation completes, the cancelled startup attempt shall never send its prompt, replace conversation identity, or restore a working state. Late startup results shall not affect a later attempt.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.3:** A retry after completed cancellation shall run independently of the cancelled prompt. Each admitted retry shall dispatch at most once. Cancellation shall preserve unrelated queued messages and their Auto-run policy.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.4:** A browser disconnect shall not cancel an accepted recovery attempt. Explicit cancellation shall interrupt startup waits and end with success or a visible bounded failure.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.5:** A failed resume before prompt dispatch shall show the existing recovery card with the resume cause. It shall not claim that the agent is busy with a complex task. Reload shall preserve the applicable recovery action and failure details.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.6:** On desktop and phone, users shall be able to cancel startup and retry after cancellation settles. Existing recovery actions, touch targets, keyboard access, and transcript scrolling shall remain available.
 
 ## Out of scope
 

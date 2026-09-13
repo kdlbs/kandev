@@ -23,6 +23,8 @@ var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrStepChanged = repoerrors.ErrStepChanged
+var ErrInvalidReorder = repoerrors.ErrInvalidReorder
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -55,7 +57,17 @@ type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
+	// UpdateTask writes the full task row, preserving whatever position is
+	// currently persisted regardless of what task.Position holds — a
+	// pre-transaction read is not authoritative once a concurrent reorder or
+	// arrival may have moved the row (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/
+	// .31). Use UpdateTaskWithExplicitPosition for the one caller that must
+	// write a literal position.
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// UpdateTaskWithExplicitPosition is UpdateTask's counterpart that writes
+	// task.Position as given, for the generic task-update API's explicit
+	// position field (predates REQ-TASKS-KANBAN-TASK-REORDERING-001).
+	UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
@@ -163,6 +175,22 @@ type TaskRepository interface {
 	// and bumps updated_at. Returns the task as it exists immediately after
 	// the update, or nil if no task held the identity.
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
+
+	// SwitchTaskRunner re-evaluates the ten ordered mutability conditions
+	// inside a single task-row-locked transaction, confirms the
+	// compatibility gate's pre-transaction repository snapshot
+	// (req.ResolvedRepositoryID / ResolvedRepositoryUpdatedAt) is still
+	// current, and — only when every check passes — writes
+	// req.ExecutorProfileID as the task's sole metadata change. It never
+	// evaluates the compatibility gate itself; that runs before this call,
+	// outside any transaction.
+	//
+	// Returns *repoerrors.ErrRunnerMutabilityConflict when the mutability
+	// gate fails, repoerrors.ErrRunnerCompatibilityConflict when the
+	// compatibility gate fails, and repoerrors.ErrRunnerEvaluationUnavailable
+	// for a failed read, a stale compatibility snapshot, a failed lock, a
+	// failed write, or a failed commit.
+	SwitchTaskRunner(ctx context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error)
 }
 
 // TaskPriorityRepository updates a task's priority without replacing the
@@ -562,6 +590,11 @@ type ExecutorRepository interface {
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	// GetExecutorRunningExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any executors_running row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -602,6 +635,11 @@ type TaskEnvironmentRepository interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	// GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any task_environments row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	DeleteTaskEnvironment(ctx context.Context, id string) error
 	DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error

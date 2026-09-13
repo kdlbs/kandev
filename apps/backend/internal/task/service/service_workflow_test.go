@@ -695,12 +695,16 @@ func TestService_MoveTaskAllowsSameStepReorderWhenStepAlreadyOverLimit(t *testin
 	createMoveTask(t, ctx, repo, "task-moving", "wf-source", "step-full", nil)
 	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
 
+	// A same-step move is not an arrival (REQ-TASKS-KANBAN-TASK-REORDERING-001.28):
+	// the caller-supplied position (5) is ignored and the task keeps the
+	// position it already held. Reordering within a step is now the
+	// dedicated ReorderStepTasks endpoint's job, not MoveTask's.
 	moved, err := svc.MoveTask(ctx, "task-moving", "wf-source", "step-full", 5)
 	if err != nil {
 		t.Fatalf("same-step reorder should be exempt from WIP limit: %v", err)
 	}
-	if moved.Task.Position != 5 {
-		t.Fatalf("position = %d, want 5", moved.Task.Position)
+	if moved.Task.Position != 0 {
+		t.Fatalf("position = %d, want 0 (unchanged, caller-supplied position ignored)", moved.Task.Position)
 	}
 }
 
@@ -1088,6 +1092,175 @@ func TestService_BulkMoveSelectedTasksSkipsCurrentTargetAndAppendsInOrder(t *tes
 	}
 }
 
+// TestService_BulkMoveSelectedTasksReordersBySourceStepRegardlessOfSubmissionOrder
+// pins AC-TASKS-KANBAN-TASK-REORDERING-001.29: the final order is derived
+// from each task's source step ordinal (ties on source step id), not from
+// the order the caller happened to list the ids in. step-source has ordinal
+// 0 and step-review-target has ordinal 1 (both in wf-source, wired by
+// seedMoveSteps), so a task from step-source must land before both
+// step-review-target tasks even though it is submitted in the middle.
+func TestService_BulkMoveSelectedTasksReordersBySourceStepRegardlessOfSubmissionOrder(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "late-1", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "late-2", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "early-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveSelectedTasks(
+		ctx,
+		[]string{"late-1", "early-1", "late-2"},
+		"wf-target",
+		"step-target",
+	)
+	if err != nil {
+		t.Fatalf("BulkMoveSelectedTasks: %v", err)
+	}
+	if result.MovedCount != 3 {
+		t.Fatalf("MovedCount = %d, want 3", result.MovedCount)
+	}
+
+	want := map[string]int{"early-1": 0, "late-1": 1, "late-2": 2}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (step-source ordinal 0 before step-review-target ordinal 1)",
+				id, task.Position, wantPosition)
+		}
+	}
+}
+
+// TestService_BulkMoveSelectedTasksOrdersAdmittedBeforeQueuedWithinSourceStep
+// pins AC-TASKS-KANBAN-TASK-REORDERING-001.29's second clause for the
+// caller-selected path: within one source step, the admitted band goes
+// before the queued band, in step order, regardless of selection order.
+func TestService_BulkMoveSelectedTasksOrdersAdmittedBeforeQueuedWithinSourceStep(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+
+	createMoveTask(t, ctx, repo, "sel-queued-1", "wf-source", "step-source", nil)
+	must(t, repo.UpdateTask(ctx, mustGetTask(t, ctx, repo, "sel-queued-1", func(task *models.Task) {
+		task.WIPAdmitted = false
+		task.QueuedForStepID = "step-source"
+	})))
+	createMoveTask(t, ctx, repo, "sel-admitted-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveSelectedTasks(
+		ctx,
+		// Submitted queued-before-admitted: the final order must not follow
+		// this submission order, only the band precedence.
+		[]string{"sel-queued-1", "sel-admitted-1"},
+		"wf-target",
+		"step-target",
+	)
+	if err != nil {
+		t.Fatalf("BulkMoveSelectedTasks: %v", err)
+	}
+	if result.MovedCount != 2 {
+		t.Fatalf("MovedCount = %d, want 2", result.MovedCount)
+	}
+
+	want := map[string]int{"sel-admitted-1": 0, "sel-queued-1": 1}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (admitted band before queued band)", id, task.Position, wantPosition)
+		}
+	}
+}
+
+// TestService_BulkMoveTasksOrdersBySourceStepOrdinal is BulkMoveTasks' sibling
+// of TestService_BulkMoveSelectedTasksReordersBySourceStepRegardlessOfSubmissionOrder:
+// the admin whole-workflow migration path (no explicit task_ids) must also
+// derive AC.29's submission order from source step ordinal, not the
+// repository's raw created_at listing order.
+func TestService_BulkMoveTasksOrdersBySourceStepOrdinal(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "late-1", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "late-2", "wf-source", "step-review-target", nil)
+	createMoveTask(t, ctx, repo, "early-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveTasks(ctx, "wf-source", "", "wf-target", "step-target")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+	if result.MovedCount != 3 {
+		t.Fatalf("MovedCount = %d, want 3", result.MovedCount)
+	}
+
+	want := map[string]int{"early-1": 0, "late-1": 1, "late-2": 2}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (step-source ordinal 0 before step-review-target ordinal 1)",
+				id, task.Position, wantPosition)
+		}
+	}
+}
+
+// TestService_BulkMoveTasksOrdersAdmittedBeforeQueuedWithinSourceStep covers
+// AC.29's second clause for the same admin path: within one source step, the
+// admitted band goes before the queued band, in step order.
+func TestService_BulkMoveTasksOrdersAdmittedBeforeQueuedWithinSourceStep(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+
+	createMoveTask(t, ctx, repo, "queued-1", "wf-source", "step-source", nil)
+	must(t, repo.UpdateTask(ctx, mustGetTask(t, ctx, repo, "queued-1", func(task *models.Task) {
+		task.WIPAdmitted = false
+		task.QueuedForStepID = "step-source"
+	})))
+	createMoveTask(t, ctx, repo, "admitted-1", "wf-source", "step-source", nil)
+
+	result, err := svc.BulkMoveTasks(ctx, "wf-source", "step-source", "wf-target", "step-target")
+	if err != nil {
+		t.Fatalf("BulkMoveTasks: %v", err)
+	}
+	if result.MovedCount != 2 {
+		t.Fatalf("MovedCount = %d, want 2", result.MovedCount)
+	}
+
+	want := map[string]int{"admitted-1": 0, "queued-1": 1}
+	for id, wantPosition := range want {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.Position != wantPosition {
+			t.Fatalf("%s position = %d, want %d (admitted band before queued band)", id, task.Position, wantPosition)
+		}
+	}
+}
+
+func mustGetTask(t *testing.T, ctx context.Context, repo interface {
+	GetTask(context.Context, string) (*models.Task, error)
+}, id string, mutate func(*models.Task)) *models.Task {
+	t.Helper()
+	task, err := repo.GetTask(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTask(%s): %v", id, err)
+	}
+	mutate(task)
+	return task
+}
+
 func seedMoveWorkflows(t *testing.T, ctx context.Context, repo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error
@@ -1130,7 +1303,7 @@ func createMoveTask(t *testing.T, ctx context.Context, repo interface {
 
 func setMoveTaskOrder(t *testing.T, ctx context.Context, repo interface {
 	GetTask(context.Context, string) (*models.Task, error)
-	UpdateTask(context.Context, *models.Task) error
+	UpdateTaskWithExplicitPosition(context.Context, *models.Task) error
 }, id string, position int, priority string) {
 	t.Helper()
 	task, err := repo.GetTask(ctx, id)
@@ -1139,8 +1312,8 @@ func setMoveTaskOrder(t *testing.T, ctx context.Context, repo interface {
 	}
 	task.Position = position
 	task.Priority = priority
-	if err := repo.UpdateTask(ctx, task); err != nil {
-		t.Fatalf("UpdateTask(%s): %v", id, err)
+	if err := repo.UpdateTaskWithExplicitPosition(ctx, task); err != nil {
+		t.Fatalf("UpdateTaskWithExplicitPosition(%s): %v", id, err)
 	}
 }
 

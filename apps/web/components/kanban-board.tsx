@@ -553,6 +553,9 @@ function KanbanBoardDialogs({
                 state: editingTask.state as BackendTask["state"],
                 repositoryId: editingTask.repositoryId,
                 repositories: editingTask.repositories,
+                primaryExecutorProfileId: editingTask.primaryExecutorProfileId ?? undefined,
+                runnerEditable: editingTask.runnerEditable,
+                runnerIneligibleReason: editingTask.runnerIneligibleReason,
               }
             : null
         }
