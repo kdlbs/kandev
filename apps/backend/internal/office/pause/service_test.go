@@ -31,13 +31,16 @@ type fakeRepo struct {
 	activityEntries []*models.ActivityEntry
 	activityErr     error
 
-	inflightRuns    []models.InflightRun
-	inflightErr     error
-	liveRoutineIDs  []string
-	liveRoutineErr  error
-	cancelRunsCount int64
-	cancelRunsErr   error
-	releaseCkoutErr error
+	inflightRuns      []models.InflightRun
+	inflightErr       error
+	inflightSequences [][]models.InflightRun
+	liveOfficeIDs     []string
+	liveOfficeErr     error
+	liveRoutineIDs    []string
+	liveRoutineErr    error
+	cancelRunsCount   int64
+	cancelRunsErr     error
+	releaseCkoutErr   error
 }
 
 // GetActiveWorkspacePause pops the next scripted (record, error) pair off
@@ -75,7 +78,16 @@ func (f *fakeRepo) CreateActivityEntry(_ context.Context, entry *models.Activity
 }
 
 func (f *fakeRepo) ListInflightRunsForWorkspace(context.Context, string) ([]models.InflightRun, error) {
+	if len(f.inflightSequences) > 0 {
+		runs := f.inflightSequences[0]
+		f.inflightSequences = f.inflightSequences[1:]
+		return runs, f.inflightErr
+	}
 	return f.inflightRuns, f.inflightErr
+}
+
+func (f *fakeRepo) ListLiveOfficeTaskIDsForWorkspace(context.Context, string) ([]string, error) {
+	return f.liveOfficeIDs, f.liveOfficeErr
 }
 
 func (f *fakeRepo) ListLiveRoutineTaskIDsForWorkspace(context.Context, string) ([]string, error) {
@@ -127,6 +139,13 @@ func (r *ctxAwareRepo) ListLiveRoutineTaskIDsForWorkspace(ctx context.Context, w
 	return r.fakeRepo.ListLiveRoutineTaskIDsForWorkspace(ctx, workspaceID)
 }
 
+func (r *ctxAwareRepo) ListLiveOfficeTaskIDsForWorkspace(ctx context.Context, workspaceID string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.fakeRepo.ListLiveOfficeTaskIDsForWorkspace(ctx, workspaceID)
+}
+
 // ctxAwareCanceller wraps fakeCanceller and surfaces the context's own
 // error, the same way ctxAwareRepo does for the repository methods.
 type ctxAwareCanceller struct {
@@ -142,12 +161,18 @@ func (c *ctxAwareCanceller) CancelTaskExecution(ctx context.Context, taskID, rea
 
 // fakeCanceller is a script-driven double for pause.TaskCanceller.
 type fakeCanceller struct {
-	results map[string]error
-	calls   []string
+	results         map[string]error
+	resultSequences map[string][]error
+	calls           []string
 }
 
 func (f *fakeCanceller) CancelTaskExecution(_ context.Context, taskID string, _ string, _ bool) error {
 	f.calls = append(f.calls, taskID)
+	if sequence := f.resultSequences[taskID]; len(sequence) > 0 {
+		err := sequence[0]
+		f.resultSequences[taskID] = sequence[1:]
+		return err
+	}
 	return f.results[taskID]
 }
 
@@ -323,6 +348,43 @@ func TestPause_RepeatPauseStillResweepsInFlightWork(t *testing.T) {
 	}
 	if len(canceller.calls) != 2 {
 		t.Fatalf("canceller calls = %v, want 2 — the resweep must not be skipped on a repeat pause", canceller.calls)
+	}
+}
+
+// TestPause_RepeatPauseRetriesTaskFoundThroughLiveOfficeSessions proves a
+// failed stop remains discoverable after its run row becomes cancelled. The
+// second sweep cannot use the queued/claimed run query, so it must use the
+// active Office session source.
+func TestPause_RepeatPauseRetriesTaskFoundThroughLiveOfficeSessions(t *testing.T) {
+	existing := &models.WorkspacePause{ID: "pause-1", WorkspaceID: "ws-1", Reason: "first"}
+	repo := &fakeRepo{
+		createErr:         []error{officesqlite.ErrWorkspaceAlreadyPaused, officesqlite.ErrWorkspaceAlreadyPaused},
+		activeReads:       []*models.WorkspacePause{existing, existing},
+		inflightSequences: [][]models.InflightRun{{{RunID: "run-1", TaskID: "task-1"}}, nil},
+		cancelRunsCount:   1,
+		liveOfficeIDs:     []string{"task-1"},
+	}
+	canceller := &fakeCanceller{
+		resultSequences: map[string][]error{"task-1": {errors.New("stop failed"), nil}},
+	}
+	svc := newTestService(repo, canceller, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+
+	first, err := svc.Pause(context.Background(), "ws-1", "retry one", "user-1", "user")
+	if err != nil {
+		t.Fatalf("first Pause: %v", err)
+	}
+	if first.Sweep.Failures != 1 {
+		t.Fatalf("first sweep failures = %d, want 1", first.Sweep.Failures)
+	}
+	second, err := svc.Pause(context.Background(), "ws-1", "retry two", "user-1", "user")
+	if err != nil {
+		t.Fatalf("second Pause: %v", err)
+	}
+	if second.Sweep.ExecutionsCancelled != 1 || second.Sweep.Failures != 0 {
+		t.Fatalf("second sweep = %+v, want one cancelled execution and no failures", second.Sweep)
+	}
+	if len(canceller.calls) != 2 || canceller.calls[0] != "task-1" || canceller.calls[1] != "task-1" {
+		t.Fatalf("canceller calls = %v, want two retries for task-1", canceller.calls)
 	}
 }
 

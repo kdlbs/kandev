@@ -349,6 +349,50 @@ func TestListInflightRunsForWorkspace_ReturnsQueuedAndClaimed(t *testing.T) {
 	}
 }
 
+// TestListLiveOfficeTaskIDsForWorkspace_ReturnsActiveSessions proves the
+// repeat-sweep source survives a cancelled run row while remaining scoped to
+// Office agent profiles and active session states.
+func TestListLiveOfficeTaskIDsForWorkspace_ReturnsActiveSessions(t *testing.T) {
+	repo := newPauseTestRepo(t)
+	ctx := context.Background()
+
+	mustExec(t, repo, `
+		CREATE TABLE IF NOT EXISTS task_sessions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			agent_profile_id TEXT,
+			state TEXT NOT NULL,
+			started_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		)
+	`)
+	mustExec(t, repo, `
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES ('agent-1', 'a', 'Agent', 'Agent', 'ws-1', 'engineer', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+		       ('agent-2', 'a', 'Agent', 'Agent', 'ws-2', 'engineer', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	mustExec(t, repo, `
+		INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at)
+		VALUES
+			('session-running', 'task-running', 'agent-1', 'RUNNING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('session-created', 'task-created', 'agent-1', 'CREATED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('session-finished', 'task-finished', 'agent-1', 'COMPLETED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('session-other-ws', 'task-other', 'agent-2', 'RUNNING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+
+	ids, err := repo.ListLiveOfficeTaskIDsForWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list live Office task ids: %v", err)
+	}
+	got := map[string]bool{}
+	for _, id := range ids {
+		got[id] = true
+	}
+	if !got["task-running"] || !got["task-created"] || got["task-finished"] || got["task-other"] {
+		t.Fatalf("live task ids = %v, want running and created tasks from ws-1 only", got)
+	}
+}
+
 // TestCancelRunsForWorkspace_CancelsGivenRuns proves the halt sweep's run
 // cancellation only touches the run ids it was given and reports how many
 // actually transitioned.

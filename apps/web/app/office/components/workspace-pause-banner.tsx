@@ -44,11 +44,17 @@ function PausedBanner({
   stale,
   onRefresh,
   onResume,
+  sweep,
+  onRetryPause,
+  isMutating,
 }: {
   record: WorkspacePauseRecord;
   stale: boolean;
   onRefresh: () => Promise<void>;
   onResume: UseWorkspacePauseResult["resume"];
+  sweep: UseWorkspacePauseResult["sweep"];
+  onRetryPause: UseWorkspacePauseResult["retryPause"];
+  isMutating: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -69,6 +75,24 @@ function PausedBanner({
             time: new Date(record.createdAt).toLocaleString(),
           })}
         </p>
+        {sweep && sweep.failures > 0 && (
+          <div
+            className="mt-2 flex flex-wrap items-center gap-2 text-destructive"
+            data-testid="office-pause-partial-failure"
+          >
+            <span>{t("office:pauseWorkspacePartialFailure", { count: sweep.failures })}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="min-h-11 cursor-pointer px-2 sm:min-h-0"
+              disabled={isMutating}
+              data-testid="office-pause-retry-button"
+              onClick={() => void onRetryPause()}
+            >
+              {t("office:retryPauseSweep")}
+            </Button>
+          </div>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <RefreshPauseStateButton onRefresh={onRefresh} testId="office-pause-refresh-paused" />
@@ -130,7 +154,8 @@ function RunningControlBar({
  */
 export function WorkspacePauseBanner() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const { record, status, refresh, pause, resume } = useWorkspacePause(activeWorkspaceId);
+  const { record, status, refresh, pause, retryPause, resume, sweep, isMutating } =
+    useWorkspacePause(activeWorkspaceId);
 
   if (!activeWorkspaceId) return null;
 
@@ -141,6 +166,9 @@ export function WorkspacePauseBanner() {
         stale={status === "unknown"}
         onRefresh={refresh}
         onResume={resume}
+        sweep={sweep}
+        onRetryPause={retryPause}
+        isMutating={isMutating}
       />
     );
   }

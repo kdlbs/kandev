@@ -26,20 +26,45 @@ export type WorkspacePauseResponse = {
   workspaceId: string;
   paused: boolean;
   record: WorkspacePauseRecord | null;
+  sweep?: WorkspacePauseSweep;
+};
+
+export type WorkspacePauseSweep = {
+  runsCancelled: number;
+  executionsCancelled: number;
+  executionsNotRunning: number;
+  failures: number;
 };
 
 type RawWorkspacePauseResponse = {
   workspace_id: string;
   paused: boolean;
   pause: RawWorkspacePause | null;
+  sweep?: RawWorkspacePauseSweep;
+};
+
+type RawWorkspacePauseSweep = {
+  runs_cancelled: number;
+  executions_cancelled: number;
+  executions_not_running: number;
+  failures: number;
 };
 
 function normalizePauseResponse(raw: RawWorkspacePauseResponse): WorkspacePauseResponse {
-  return {
+  const response: WorkspacePauseResponse = {
     workspaceId: raw.workspace_id,
     paused: raw.paused,
     record: normalizePauseRecord(raw.pause),
   };
+  if (raw.sweep) {
+    response.sweep = {
+      runsCancelled: raw.sweep.runs_cancelled,
+      executionsCancelled: raw.sweep.executions_cancelled,
+      executionsNotRunning: raw.sweep.executions_not_running,
+      failures: raw.sweep.failures,
+    };
+  }
+  return response;
 }
 
 export function getWorkspacePause(

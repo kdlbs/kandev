@@ -58,7 +58,12 @@ launches for every workspace. That is the correct trade for a stop control, and
 not a new exposure: the same failure already prevents claiming runs at all.
 
 The halt sweep is best-effort by design (-003.7). The pause record, not the
-sweep, is what makes the workspace stopped.
+sweep, is what makes the workspace stopped. A pause response reports partial
+failures with `sweep.failures`; the frontend keeps the workspace paused, shows
+the count, and lets the operator issue the same pause request again. A retry
+uses the existing pause reason and therefore discovers active Office sessions
+through `ListLiveOfficeTaskIDsForWorkspace`, including sessions whose run rows
+were cancelled by the first sweep.
 
 **A cancellation that found nothing to cancel is not a failed cancellation.**
 `CancelTaskExecution` delegates to `StopByTaskID`, which returns
@@ -148,6 +153,13 @@ not in this table is a defect in the table, not a decision for the call site.
 | `GET` failure | status `unknown`; the record is **not** cleared, so a pause already read stays on screen |
 | `POST` pause or resume success | apply under **both** conditions of the `GET` rule, the `workspace_id` match and the tag; then status `known` |
 | `POST` pause or resume failure | status and record unchanged; surface the failure (-006.6) |
+
+The pause response also carries its sweep outcome. When `sweep.failures` is
+non-zero, the paused banner shows a localized warning and a retry action. The
+retry keeps the pause record and its reason, disables itself while the request
+is active, and clears the warning only after a later response reports no
+failures. Resume clears the sweep outcome because the workspace is no longer in
+the paused state.
 
 Four consequences, each a rule a builder would otherwise have to invent:
 
@@ -315,9 +327,16 @@ Backend, in `*_test.go` beside each source:
   at zero, so a healthy pause of a quiet workspace reports no failures. Assert the
   two counts separately — a test asserting only `failures == 0` passes with the
   sentinel silently discarded, which is the outcome this design rejected;
-- halt sweep, **heavy path**: a live routine task with no `runs` row has its
-  execution cancelled, a finished one is not in the set, and a task both sources
-  name is cancelled once;
+- halt sweep, **Office task path**: a live routine task with no `runs` row and a
+  live session task with a cancelled run are both discovered, a finished task is
+  not in the set, and a task named by multiple sources is cancelled once;
+- halt sweep, **repeat after a failed stop**: the first sweep records a
+  cancellation failure, a second pause finds the still-live Office session
+  after its run row is cancelled, and a successful retry clears the failure;
+- pause/resume authorization: a workspace viewer can read the pause state but
+  receives `403` for both mutations, while the owner can reach both routes;
+- malformed pause and resume JSON returns `400`; an empty resume body remains
+  accepted;
 - resume effectiveness: a run queued after resume launches, while the same wake
   for a *budget-paused* agent launches nothing (-005.2 and -005.5);
 - a wake reason named nowhere in this spec is gated too, asserting the chokepoint

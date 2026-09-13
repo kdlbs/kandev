@@ -67,7 +67,17 @@ describe("office-pause-api", () => {
 
   it("postWorkspacePause POSTs the reason to the pause path", async () => {
     fetchSpy.mockResolvedValueOnce(
-      mockResponse({ workspace_id: WORKSPACE_ID, paused: true, pause: rawPause() }),
+      mockResponse({
+        workspace_id: WORKSPACE_ID,
+        paused: true,
+        pause: rawPause(),
+        sweep: {
+          runs_cancelled: 1,
+          executions_cancelled: 2,
+          executions_not_running: 0,
+          failures: 1,
+        },
+      }),
     );
     const res = await postWorkspacePause(WORKSPACE_ID, "incident");
     const url = String(fetchSpy.mock.calls[0]![0]);
@@ -76,6 +86,12 @@ describe("office-pause-api", () => {
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ reason: "incident" });
     expect(res.paused).toBe(true);
+    expect(res.sweep).toEqual({
+      runsCancelled: 1,
+      executionsCancelled: 2,
+      executionsNotRunning: 0,
+      failures: 1,
+    });
   });
 
   it("postWorkspaceResume POSTs to the resume path and normalizes the cleared record", async () => {

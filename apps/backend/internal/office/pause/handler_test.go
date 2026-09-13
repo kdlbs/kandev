@@ -168,6 +168,37 @@ func TestPostPause_MissingReasonReturns400(t *testing.T) {
 	}
 }
 
+func TestPostPause_MalformedJSONReturns400(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-1/pause", `{"reason":`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostResume_MalformedJSONReturns400(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-1/resume", `{"reason":`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPostResume_EmptyBodyRemainsOptional(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newTestService(repo, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}})
+	r := newPauseTestRouter(t, svc, false)
+
+	rec := doRequest(r, http.MethodPost, "/api/v1/office/workspaces/ws-1/resume", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestPostPause_Success proves the happy path response shape, including
 // the sweep object AC-003.7/AC-004.6 require.
 func TestPostPause_Success(t *testing.T) {
